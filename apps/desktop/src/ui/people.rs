@@ -167,6 +167,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette) -> El {
 
 /// The members button in a room's header: up to three faces and the count.
 pub fn members_button(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
+    let count = account.member_count(room);
     let mut faces = row().center_y();
     if let Some(members) = account.members.get(&room.room_id) {
         for (index, person) in members.people.iter().take(3).map(|member| &member.person).enumerate() {
@@ -189,9 +190,9 @@ pub fn members_button(s: &State, account: &AccountData, room: &RoomSummary, p: &
         .hover(p.hover.alpha(p.hover.a * 2.0))
         .role("button")
         .cursor(rune::Cursor::Pointer)
-        .label(tf!("members.count", count = room.member_count))
+        .label(tf!("members.count", count = count))
         .child(faces)
-        .child(text(room.member_count.to_string()).font(font::BODY_STRONG).color(p.text))
+        .child(text(count.to_string()).font(font::BODY_STRONG).color(p.text))
         .on_press(State::toggle_members)
 }
 

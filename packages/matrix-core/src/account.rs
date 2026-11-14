@@ -130,6 +130,28 @@ async fn build_client(homeserver_url: &str, store_dir: &Path, passphrase: &str) 
 }
 
 impl Account {
+    #[cfg(test)]
+    pub(crate) async fn for_test(homeserver: &str) -> Self {
+        let client = Client::builder()
+            .homeserver_url(homeserver)
+            .server_versions([matrix_sdk::ruma::api::MatrixVersion::V1_12])
+            .build()
+            .await
+            .expect("test client");
+        let session: matrix_sdk::authentication::matrix::MatrixSession = serde_json::from_value(serde_json::json!({
+            "user_id": "@a:example.org", "device_id": "TEST", "access_token": "test-token"
+        }))
+        .expect("test session");
+        client.restore_session(session).await.expect("restore test session");
+        client.event_cache().subscribe().expect("subscribe test cache");
+        Self {
+            id: AccountId::new("@a:example.org"),
+            client,
+            session_changes: Arc::new(Mutex::new(None)),
+            rtc: Arc::new(Mutex::new(None)),
+        }
+    }
+
     /// Signs in with a password and saves the session.
     pub(crate) async fn login_password(
         layout: &StoreLayout,
@@ -378,9 +400,41 @@ impl Account {
         let mut list = RoomList {
             rooms: cache.rooms.values().cloned().collect(),
             spaces: cache.spaces.values().cloned().collect(),
+            invitations: Vec::new(),
         };
+        for room in self.client.invited_rooms() {
+            let inviter = room.invite_details().await.ok().map(|invite| crate::Person {
+                id: invite.inviter_id.to_string(),
+                name: invite
+                    .inviter
+                    .as_ref()
+                    .and_then(|member| member.display_name())
+                    .unwrap_or(invite.inviter_id.as_str())
+                    .to_owned(),
+                avatar: invite
+                    .inviter
+                    .as_ref()
+                    .and_then(|member| member.avatar_url())
+                    .map(ToOwned::to_owned)
+                    .and_then(convert::avatar),
+            });
+            list.invitations.push(crate::Invitation {
+                room_id: room.room_id().to_string(),
+                name: room.display_name().await.map_or_else(|_| room.room_id().to_string(), |name| name.to_string()),
+                topic: room.topic(),
+                avatar: room.avatar_url().and_then(convert::avatar),
+                inviter,
+                space: room.is_space(),
+                kind: if room.is_direct().await.unwrap_or(false) {
+                    crate::RoomKind::Direct
+                } else {
+                    crate::RoomKind::Group
+                },
+            });
+        }
         list.rooms.sort_by_cached_key(|room| room.name.to_lowercase());
         list.spaces.sort_by_cached_key(|space| space.name.to_lowercase());
+        list.invitations.sort_by_cached_key(|invite| invite.name.to_lowercase());
         list
     }
 
@@ -424,6 +478,40 @@ impl Account {
             Some(root) => TimelineFocus::Thread { root_event_id: matrix_sdk::ruma::EventId::parse(root)? },
         };
         Ok(self.joined_room(&key.room_id)?.timeline_builder().with_focus(focus).build().await?)
+    }
+
+    /// Fetches a cold thread's first replies immediately, independently of the SDK's wait
+    /// for a sync pagination token. The SDK remains authoritative as it catches up.
+    pub(crate) async fn thread_first_page(&self, key: &TimelineKey) -> Result<Vec<crate::TimelineEntry>, Error> {
+        use matrix_sdk::room::{IncludeRelations, RelationsOptions};
+        let Some(root) = &key.thread else { return Ok(Vec::new()) };
+        let root = matrix_sdk::ruma::EventId::parse(root)?;
+        let room = self.joined_room(&key.room_id)?;
+        let options = RelationsOptions {
+            limit: Some(crate::HISTORY_PAGE.into()),
+            include_relations: IncludeRelations::RelationsOfType(
+                matrix_sdk::ruma::events::relation::RelationType::Thread,
+            ),
+            ..Default::default()
+        };
+        let (root_event, replies) =
+            tokio::join!(room.load_or_fetch_event(&root, None), room.relations(root.clone(), options));
+        let replies = replies?;
+        let complete = replies.next_batch_token.is_none();
+        let mut events = replies.chunk;
+        // Relations default to backwards topological order. Sender clocks need not agree.
+        events.reverse();
+        if let (true, Ok(root)) = (complete, root_event) {
+            events.insert(0, root);
+        }
+        let messages = convert::messages(&room, &events).await;
+        Ok(messages
+            .into_iter()
+            .map(|message| crate::TimelineEntry {
+                id: format!("first-{}", message.event_id),
+                kind: crate::EntryKind::Message(Box::new(message)),
+            })
+            .collect())
     }
 
     /// The account's user.

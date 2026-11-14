@@ -196,7 +196,7 @@ pub enum Command {
         /// Which timeline.
         key: TimelineKey,
     },
-    /// Mark an open timeline read up to its newest event with a read receipt, which the server
+    /// Mark an open timeline read up to a displayed event with a read receipt, which the server
     /// counts unread messages from in every session. Does nothing when it is closed or already
     /// read.
     MarkRead {
@@ -204,6 +204,11 @@ pub enum Command {
         account: AccountId,
         /// Which timeline.
         key: TimelineKey,
+        /// The displayed event; `None` uses the newest event before the first viewport report.
+        event_id: Option<String>,
+        /// Also advance the cross-device fully-read marker after the unread boundary has
+        /// been seen. Thread reads never advance the room-wide marker.
+        fully_read: bool,
     },
     /// Tell a room whether the user is typing in it. Repeating `true` while typing is cheap: the
     /// SDK sends again only once the last notice is about to expire.
@@ -365,6 +370,22 @@ pub enum Command {
     },
     /// Suggest people to start a chat with; answered by [`Event::PeopleFound`].
     SuggestPeople(AccountId),
+    /// List every public room under a space, ranked by member count.
+    ListPublicRooms {
+        /// Whose homeserver.
+        account: AccountId,
+        /// The space whose hierarchy to browse.
+        space: String,
+    },
+    /// Join a public room or accept an invitation; refreshes the room list before finishing.
+    JoinRoom {
+        /// The joining account.
+        account: AccountId,
+        /// The room or space.
+        room_id: String,
+        /// Servers advertised by the space.
+        via: Vec<String>,
+    },
     /// Invite someone to a room; an updated [`Event::Members`] follows.
     Invite {
         /// Whose room.
@@ -578,6 +599,18 @@ pub enum Event {
         /// The changes.
         diffs: Vec<TimelineDiff>,
     },
+    /// The room's cross-device read boundary, even when its event is outside loaded history.
+    ReadBoundary {
+        /// Whose room.
+        account: AccountId,
+        /// The room's ID.
+        room_id: String,
+        /// The fully-read event, falling back to the existing receipt on first open.
+        /// `None` means the server has neither boundary.
+        event_id: Option<String>,
+        /// Whether that event is in this subscription's applied history.
+        loaded: bool,
+    },
     /// Who is typing in a room whose timeline is open, the user excepted; empty when nobody is.
     /// Threads share their room's.
     Typing {
@@ -638,6 +671,8 @@ pub enum Event {
     },
     /// A room's joined members.
     Members {
+        /// The command that requested this snapshot, if any.
+        request: Option<RequestId>,
         /// Whose room.
         account: AccountId,
         /// The room.
@@ -645,12 +680,26 @@ pub enum Event {
         /// The members, and whether the user may invite.
         members: crate::Members,
     },
+    /// Sync changed membership or power levels; cached member snapshots must be refreshed.
+    MembersInvalidated {
+        /// Whose room.
+        account: AccountId,
+        /// The room's ID.
+        room_id: String,
+    },
     /// People found for [`Command::SearchPeople`].
     PeopleFound {
         /// The search it answers.
         request: RequestId,
         /// Who matched.
         people: Vec<crate::Person>,
+    },
+    /// Public rooms in a space, for [`Command::ListPublicRooms`].
+    PublicRooms {
+        /// The command this answers.
+        request: RequestId,
+        /// All public rooms, most members first.
+        rooms: Vec<crate::PublicRoom>,
     },
     /// The direct chat for [`Command::OpenDirectChat`].
     DirectChat {
@@ -896,7 +945,7 @@ enum Outcome {
     /// that signed in is answered.
     LoggedIn(Account, Box<AccountSummary>),
     LoggedOut(AccountId),
-    TimelineOpened(OpenTimeline),
+    TimelineOpened(Box<OpenTimeline>),
 }
 
 /// A timeline built and subscribed to, not yet shown: its first entries and its changes.
@@ -909,7 +958,12 @@ struct OpenTimeline {
     /// How many messages it holds.
     loaded: usize,
     me: matrix_sdk::ruma::OwnedUserId,
+    first_page: Option<FirstPage>,
+    read_boundary: Option<String>,
+    items: eyeball_im::Vector<Arc<matrix_sdk_ui::timeline::TimelineItem>>,
 }
+
+type FirstPage = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<crate::TimelineEntry>, Error>> + Send>>;
 
 type TimelineChanges = std::pin::Pin<
     Box<
@@ -982,7 +1036,7 @@ struct Running {
     account: Account,
     background: Vec<AbortHandle>,
     flows: crate::security::Flows,
-    timelines: HashMap<TimelineKey, (Arc<matrix_sdk_ui::timeline::Timeline>, AbortHandle)>,
+    timelines: HashMap<TimelineKey, (Arc<matrix_sdk_ui::timeline::Timeline>, TimelineWatch)>,
     /// Timelines closed lately, oldest first, kept built so opening them again is instant.
     warm: Vec<(TimelineKey, Arc<matrix_sdk_ui::timeline::Timeline>)>,
     /// Timelines being opened, by the request opening each. Closing one forgets it, so an open
@@ -1040,7 +1094,7 @@ impl Drop for AbortOnDrop {
 
 impl Drop for Running {
     fn drop(&mut self) {
-        for task in self.background.iter().chain(self.timelines.values().map(|(_, forward)| forward)) {
+        for task in self.background.iter().chain(self.timelines.values().map(|(_, following)| &following.forward)) {
             task.abort();
         }
         for handler in self.call_handlers.drain(..) {
@@ -1520,25 +1574,29 @@ impl State {
                     let fetch_keys = key.thread.is_none() && running.keys_fetched.insert(key.room_id.clone());
                     (running.take_warm(&key), fetch_keys)
                 });
-                Box::pin(
-                    async move { Ok(Outcome::TimelineOpened(open_timeline(account?, key, warm, fetch_keys).await?)) },
-                )
+                Box::pin(async move {
+                    Ok(Outcome::TimelineOpened(Box::new(open_timeline(account?, key, warm, fetch_keys).await?)))
+                })
             }
-            Command::MarkRead { account, key } => {
+            Command::MarkRead { account, key, event_id, fully_read } => {
                 let timeline = self.open_timeline(&account, &key);
                 Box::pin(async move {
                     if let Ok(timeline) = timeline {
-                        use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
-                        timeline.mark_as_read(ReceiptType::Read).await?;
+                        mark_timeline_read(&timeline, event_id.as_deref(), fully_read && key.thread.is_none()).await?;
                     }
                     Ok(Outcome::Done)
                 })
             }
             Command::LoadOlder { account: id, key } => {
-                let timeline = self.open_timeline(&id, &key);
+                let history = self
+                    .accounts
+                    .get(&id)
+                    .and_then(|running| running.timelines.get(&key))
+                    .map(|(timeline, following)| (Arc::clone(timeline), following.catchup.clone()))
+                    .ok_or_else(|| Error::TimelineClosed(key.room_id.clone()));
                 Box::pin(async move {
-                    let reached_start = timeline?.paginate_backwards(crate::HISTORY_PAGE).await?;
-                    sink.emit(Event::HistoryLoaded { account: id, key, reached_start });
+                    let (timeline, catchup) = history?;
+                    load_history(timeline, catchup, crate::HISTORY_PAGE, sink, id, key).await?;
                     Ok(Outcome::Done)
                 })
             }
@@ -1712,7 +1770,7 @@ impl State {
                 let account = self.account(&id);
                 Box::pin(async move {
                     let members = account?.members(&room_id, all).await?;
-                    sink.emit(Event::Members { account: id, room_id, members });
+                    sink.emit(Event::Members { request: Some(request), account: id, room_id, members });
                     Ok(Outcome::Done)
                 })
             }
@@ -1738,7 +1796,7 @@ impl State {
                     let account = account?;
                     account.moderate(&room_id, &user_id, action).await?;
                     let members = account.members(&room_id, true).await?;
-                    sink.emit(Event::Members { account: id, room_id, members });
+                    sink.emit(Event::Members { request: Some(request), account: id, room_id, members });
                     Ok(Outcome::Done)
                 })
             }
@@ -1758,13 +1816,29 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            Command::ListPublicRooms { account, space } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    let rooms = account?.public_rooms(&space).await?;
+                    sink.emit(Event::PublicRooms { request, rooms });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::JoinRoom { account: id, room_id, via } => {
+                let (account, feed) = (self.account(&id), self.feed(&id));
+                Box::pin(async move {
+                    account?.join_room(&room_id, &via).await?;
+                    feed?.refresh(None).await;
+                    Ok(Outcome::Done)
+                })
+            }
             Command::Invite { account: id, room_id, user_id } => {
                 let account = self.account(&id);
                 Box::pin(async move {
                     let account = account?;
                     account.invite(&room_id, &user_id).await?;
                     let members = account.members(&room_id, false).await?;
-                    sink.emit(Event::Members { account: id, room_id, members });
+                    sink.emit(Event::Members { request: Some(request), account: id, room_id, members });
                     Ok(Outcome::Done)
                 })
             }
@@ -2079,7 +2153,7 @@ impl State {
                     if wanted {
                         running.opening.remove(&open.key);
                         let (key, timeline) = (open.key.clone(), Arc::clone(&open.timeline));
-                        let forward = start_timeline(open, &self.sink);
+                        let forward = start_timeline(*open, &self.sink);
                         if let Some((_, old)) = running.timelines.insert(key, (timeline, forward)) {
                             old.abort();
                         }
@@ -2234,6 +2308,12 @@ async fn sync_until_error(
             async move {
                 for (room_id, update) in &response.rooms.joined {
                     let Some(room) = account.client().get_room(room_id) else { continue };
+                    if members_changed(update) {
+                        sink.emit(Event::MembersInvalidated {
+                            account: account.id().clone(),
+                            room_id: room_id.to_string(),
+                        });
+                    }
                     want_members(&room);
                     if let Some(message) = convert::messages(&room, &update.timeline.events).await.pop() {
                         sink.emit(Event::LatestMessage {
@@ -2276,6 +2356,16 @@ async fn sync_until_error(
         .await
 }
 
+fn members_changed(update: &matrix_sdk_base::sync::JoinedRoomUpdate) -> bool {
+    let relevant = |kind: Option<String>| matches!(kind.as_deref(), Some("m.room.member" | "m.room.power_levels"));
+    let state = match &update.state {
+        matrix_sdk_base::sync::State::Before(events) | matrix_sdk_base::sync::State::After(events) => events,
+    };
+    state.iter().any(|event| relevant(event.get_field("type").ok().flatten()))
+        || matches!(update.state, matrix_sdk_base::sync::State::Before(_))
+            && update.timeline.events.iter().any(|event| relevant(event.raw().get_field("type").ok().flatten()))
+}
+
 /// One sync loop's room list and what it last reported. The sync, the unread listener and the
 /// member fetch all re-read rooms through it, one at a time, so the list reported last is
 /// always the newest.
@@ -2298,6 +2388,30 @@ impl RoomFeed {
             self.sink.emit(Event::RoomsUpdated { account: self.account.id().clone(), list });
         }
     }
+}
+
+async fn mark_timeline_read(
+    timeline: &matrix_sdk_ui::timeline::Timeline,
+    event_id: Option<&str>,
+    fully_read: bool,
+) -> Result<(), Error> {
+    use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
+    if fully_read {
+        let event_id = match event_id {
+            Some(id) => Some(matrix_sdk::ruma::EventId::parse(id)?),
+            None => timeline.latest_event_id().await,
+        };
+        if let Some(event_id) = event_id {
+            let receipts =
+                matrix_sdk::room::Receipts::new().fully_read_marker(event_id.clone()).public_read_receipt(event_id);
+            timeline.send_multiple_receipts(receipts).await?;
+        }
+    } else if let Some(event_id) = event_id {
+        timeline.send_single_receipt(ReceiptType::Read, matrix_sdk::ruma::EventId::parse(event_id)?).await?;
+    } else {
+        timeline.mark_as_read(ReceiptType::Read).await?;
+    }
+    Ok(())
 }
 
 /// Builds a timeline (or takes a warm one) and subscribes to it. Nothing reaches the app yet:
@@ -2324,17 +2438,90 @@ async fn open_timeline(
         None => Arc::new(account.timeline(&key).await?),
     };
     let (items, changes) = timeline.subscribe().await;
+    let read_boundary = if key.thread.is_none() {
+        match timeline.room().fully_read_event_id() {
+            Some(id) => Some(id.to_string()),
+            None => timeline.latest_user_read_receipt(&me).await.map(|(id, _)| id.to_string()),
+        }
+    } else {
+        None
+    };
     let loaded = crate::timeline::message_count(&items);
-    let reset = crate::timeline::diff(eyeball_im::VectorDiff::Reset { values: items }, &me);
-    Ok(OpenTimeline { account: account.id().clone(), key, timeline, reset, changes: Box::pin(changes), loaded, me })
+    let reset = crate::timeline::diff(eyeball_im::VectorDiff::Reset { values: items.clone() }, &me);
+    let first_page: Option<FirstPage> = if key.thread.is_some() && loaded <= 1 {
+        let (account, key) = (account.clone(), key.clone());
+        Some(Box::pin(async move { account.thread_first_page(&key).await }))
+    } else {
+        None
+    };
+    Ok(OpenTimeline {
+        account: account.id().clone(),
+        key,
+        timeline,
+        reset,
+        changes: Box::pin(changes),
+        loaded,
+        me,
+        first_page,
+        read_boundary,
+        items,
+    })
 }
 
-/// Shows an opened timeline: reports its current entries, fills it to a page of messages when
-/// it holds fewer, and forwards every later change until the returned handle aborts.
-fn start_timeline(open: OpenTimeline, sink: &Arc<dyn EventSink>) -> AbortHandle {
+/// A followed timeline's forwarding task and its SDK catch-up progress.
+struct TimelineWatch {
+    forward: AbortHandle,
+    catchup: tokio::sync::watch::Receiver<crate::timeline_bootstrap::Progress>,
+}
+
+impl TimelineWatch {
+    fn abort(&self) {
+        self.forward.abort();
+    }
+}
+
+/// Shows cached entries, fills history beside them and forwards later subscription changes.
+fn start_timeline(open: OpenTimeline, sink: &Arc<dyn EventSink>) -> TimelineWatch {
     use futures_util::StreamExt;
 
-    let OpenTimeline { account: id, key, timeline, reset, mut changes, loaded, me } = open;
+    let OpenTimeline {
+        account: id,
+        key,
+        timeline,
+        reset,
+        mut changes,
+        loaded,
+        me,
+        mut first_page,
+        read_boundary,
+        mut items,
+    } = open;
+    let mut bootstrap = first_page
+        .as_ref()
+        .and(key.thread.as_deref())
+        .map(|root| crate::timeline_bootstrap::Bootstrap::new(&reset, root));
+    let (catchup, catching_up) = tokio::sync::watch::channel(
+        bootstrap
+            .as_ref()
+            .map_or(crate::timeline_bootstrap::Progress::Complete, crate::timeline_bootstrap::Bootstrap::progress),
+    );
+    let boundary_loaded = |items: &eyeball_im::Vector<Arc<matrix_sdk_ui::timeline::TimelineItem>>,
+                           read_boundary: &Option<String>| {
+        read_boundary.as_ref().is_none_or(|id| {
+            items.iter().any(|item| {
+                item.as_event().and_then(|event| event.event_id()).is_some_and(|event| event.as_str() == id)
+            })
+        })
+    };
+    let mut read_boundary_loaded = boundary_loaded(&items, &read_boundary);
+    if key.thread.is_none() {
+        sink.emit(Event::ReadBoundary {
+            account: id.clone(),
+            room_id: key.room_id.clone(),
+            event_id: read_boundary.clone(),
+            loaded: read_boundary_loaded,
+        });
+    }
     sink.emit(Event::TimelineChanged { account: id.clone(), key: key.clone(), diffs: vec![reset] });
     let forward = {
         let (sink, id, key) = (Arc::clone(sink), id.clone(), key.clone());
@@ -2350,10 +2537,38 @@ fn start_timeline(open: OpenTimeline, sink: &Arc<dyn EventSink>) -> AbortHandle 
             };
             loop {
                 tokio::select! {
+                    biased;
                     batch = changes.next() => {
                         let Some(batch) = batch else { break };
+                        if key.thread.is_none() {
+                            for diff in &batch {
+                                diff.clone().apply(&mut items);
+                            }
+                            let loaded = boundary_loaded(&items, &read_boundary);
+                            if loaded != read_boundary_loaded {
+                                read_boundary_loaded = loaded;
+                                sink.emit(Event::ReadBoundary { account: id.clone(), room_id: key.room_id.clone(), event_id: read_boundary.clone(), loaded });
+                            }
+                        }
                         let diffs = batch.into_iter().map(|diff| crate::timeline::diff(diff, &me)).collect();
+                        let diffs = match &mut bootstrap { Some(bootstrap) => bootstrap.update(diffs), None => diffs };
+                        if let Some(bootstrap) = &bootstrap {
+                            catchup.send_replace(bootstrap.progress());
+                        }
                         sink.emit(Event::TimelineChanged { account: id.clone(), key: key.clone(), diffs });
+                    }
+                    page = async { match &mut first_page { Some(page) => page.await, None => std::future::pending().await } } => {
+                        first_page = None;
+                        if let Ok(entries) = page {
+                            if let Some(diff) = bootstrap.as_mut().and_then(|bootstrap| bootstrap.show(entries)) {
+                                sink.emit(Event::TimelineChanged { account: id.clone(), key: key.clone(), diffs: vec![diff] });
+                            }
+                        } else if let Some(bootstrap) = &mut bootstrap {
+                            bootstrap.cancel();
+                        }
+                        if let Some(bootstrap) = &bootstrap {
+                            catchup.send_replace(bootstrap.progress());
+                        }
                     }
                     users = next_typing(&mut typing) => {
                         let Some(room) = &room else { continue };
@@ -2373,16 +2588,52 @@ fn start_timeline(open: OpenTimeline, sink: &Arc<dyn EventSink>) -> AbortHandle 
     if loaded < usize::from(crate::HISTORY_PAGE) {
         let needed = crate::HISTORY_PAGE.saturating_sub(u16::try_from(loaded).unwrap_or(u16::MAX));
         let sink = Arc::clone(sink);
+        let progress = catching_up.clone();
         tokio::spawn(async move {
-            match timeline.paginate_backwards(needed).await {
-                Ok(reached_start) => sink.emit(Event::HistoryLoaded { account: id, key, reached_start }),
-                Err(error) => sink.emit(Event::HistoryFailed { account: id, key, error: error.to_string() }),
+            if let Err(error) =
+                load_history(timeline, progress, needed, Arc::clone(&sink), id.clone(), key.clone()).await
+            {
+                sink.emit(Event::HistoryFailed { account: id, key, error: error.to_string() });
             }
         });
     } else {
         sink.emit(Event::HistoryLoaded { account: id, key, reached_start: false });
     }
-    forward
+    TimelineWatch { forward, catchup: catching_up }
+}
+
+/// Both first loads and explicit retries fill any outstanding bootstrap coverage.
+async fn load_history(
+    timeline: Arc<matrix_sdk_ui::timeline::Timeline>,
+    mut catching_up: tokio::sync::watch::Receiver<crate::timeline_bootstrap::Progress>,
+    mut count: u16,
+    sink: Arc<dyn EventSink>,
+    account: AccountId,
+    key: TimelineKey,
+) -> Result<(), Error> {
+    use crate::timeline_bootstrap::Progress;
+    loop {
+        let reached_start = timeline.paginate_backwards(count).await?;
+        sink.emit(Event::HistoryLoaded { account: account.clone(), key: key.clone(), reached_start });
+        // The early root is a display anchor, not proof of SDK pagination coverage.
+        loop {
+            if catching_up.has_changed().is_err() || reached_start {
+                return Ok(());
+            }
+            let progress = *catching_up.borrow_and_update();
+            match progress {
+                Progress::Complete => return Ok(()),
+                Progress::CatchingUp => break,
+                Progress::Waiting => {
+                    if catching_up.changed().await.is_err() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        count = crate::HISTORY_PAGE;
+        tokio::task::yield_now().await;
+    }
 }
 
 /// The next list of people typing; never ready without a subscription, or once it closed. A
@@ -2505,6 +2756,244 @@ mod tests {
 
     use super::*;
     use crate::secrets::MemorySecrets;
+
+    async fn next_thread_reply(received: &mut tokio::sync::mpsc::UnboundedReceiver<Event>) -> bool {
+        while let Some(event) = received.recv().await {
+            if let Event::TimelineChanged { diffs, .. } = event {
+                for diff in diffs {
+                    let entries = match diff {
+                        crate::TimelineDiff::Reset(entries) | crate::TimelineDiff::Append(entries) => entries,
+                        crate::TimelineDiff::PushBack(entry)
+                        | crate::TimelineDiff::PushFront(entry)
+                        | crate::TimelineDiff::Insert { entry, .. }
+                        | crate::TimelineDiff::Set { entry, .. } => vec![entry],
+                        _ => Vec::new(),
+                    };
+                    if entries.iter().any(|entry| matches!(&entry.kind, crate::EntryKind::Message(message) if message.event_id == "$reply")) { return true; }
+                }
+            }
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn a_cold_thread_should_show_replies_before_the_sdk_token_wait() {
+        let server = crate::test_server::Server::new(crate::test_server::thread_response);
+        let account = Account::for_test(&server.url()).await;
+        account
+            .client()
+            .sync_once(matrix_sdk::config::SyncSettings::default().timeout(Duration::ZERO))
+            .await
+            .expect("sync room");
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let sink: Arc<dyn EventSink> = Arc::new(move |event| {
+            let _ = events.send(event);
+        });
+        let mut baseline =
+            open_timeline(account.clone(), TimelineKey::thread("!room:example.org", "$root"), None, false)
+                .await
+                .expect("cold SDK thread");
+        baseline.first_page = None;
+        let baseline = start_timeline(baseline, &sink);
+        let still_waiting = tokio::time::timeout(Duration::from_millis(100), next_thread_reply(&mut received)).await;
+        baseline.abort();
+        assert!(still_waiting.is_err(), "the SDK alone should still be waiting for its pagination token");
+        let started = std::time::Instant::now();
+        let open = open_timeline(account, TimelineKey::thread("!room:example.org", "$root"), None, false)
+            .await
+            .expect("open thread");
+        let forward = start_timeline(open, &sink);
+        let found = tokio::time::timeout(Duration::from_millis(500), next_thread_reply(&mut received)).await;
+        forward.abort();
+        assert!(
+            found == Ok(true) && started.elapsed() < Duration::from_millis(500),
+            "cold thread elapsed: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_immediate_thread_page_should_keep_topological_order_with_skewed_clocks() {
+        let server = crate::test_server::Server::new(|request| {
+            if request.contains("/relations/") {
+                let reply = |id: &str, time: u64| serde_json::json!({"type":"m.room.message", "room_id":"!room:example.org", "event_id":id, "sender":"@b:example.org", "origin_server_ts":time, "content":{"msgtype":"m.text", "body":id, "m.relates_to":{"rel_type":"m.thread", "event_id":"$root"}}});
+                return serde_json::json!({"chunk":[reply("$second", 2), reply("$first", 30)]});
+            }
+            crate::test_server::thread_response(request)
+        });
+        let account = Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
+        let entries =
+            account.thread_first_page(&TimelineKey::thread("!room:example.org", "$root")).await.expect("first page");
+        let ids: Vec<&str> = entries
+            .iter()
+            .filter_map(|entry| match &entry.kind {
+                crate::EntryKind::Message(message) => Some(message.event_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, ["$root", "$first", "$second"]);
+    }
+
+    async fn assert_sdk_catches_up(fail_first_page: bool) {
+        use serde_json::json;
+        let (requests, received_requests) = std::sync::mpsc::channel();
+        let fail_once = std::sync::atomic::AtomicBool::new(fail_first_page);
+        let server = crate::test_server::Server::new(move |request| {
+            if request.contains("/relations/") {
+                requests.send(request.to_owned()).expect("capture relations");
+                let reply = |id: &str, time: u64| json!({"type":"m.room.message", "room_id":"!room:example.org", "event_id":id, "sender":"@b:example.org", "origin_server_ts":time, "content":{"msgtype":"m.text", "body":id, "m.relates_to":{"rel_type":"m.thread", "event_id":"$root"}}});
+                if request.contains("from=older") {
+                    let reaction = json!({"type":"m.reaction", "room_id":"!room:example.org", "event_id":"$reaction", "sender":"@b:example.org", "origin_server_ts":4, "content":{"m.relates_to":{"rel_type":"m.annotation", "event_id":"$old", "key":"like"}}});
+                    return json!({"chunk":[reaction, reply("$old", 2)]});
+                }
+                if request.contains("recurse=true") {
+                    if fail_once.swap(false, Ordering::Relaxed) {
+                        return json!({"invalid":"simulated failed page"});
+                    }
+                    return json!({"chunk":[reply("$new", 3)], "next_batch":"older"});
+                }
+                return json!({"chunk":[reply("$new", 3), reply("$old", 2)]});
+            }
+            crate::test_server::thread_response(request)
+        });
+        let account = Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
+        let open = open_timeline(account, TimelineKey::thread("!room:example.org", "$root"), None, false)
+            .await
+            .expect("open thread");
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let sink: Arc<dyn EventSink> = Arc::new(move |event| {
+            let _ = events.send(event);
+        });
+        let (timeline, account, key) = (Arc::clone(&open.timeline), open.account.clone(), open.key.clone());
+        let forward = start_timeline(open, &sink);
+        let mut retried = false;
+        let caught_up = tokio::time::timeout(Duration::from_secs(8), async {
+            while let Some(event) = received.recv().await {
+                if let Event::HistoryFailed { .. } = &event {
+                    assert!(fail_first_page && !retried, "unexpected page failure: {event:?}");
+                    retried = true;
+                    load_history(Arc::clone(&timeline), forward.catchup.clone(), crate::HISTORY_PAGE, Arc::clone(&sink), account.clone(), key.clone()).await.expect("retry history");
+                }
+                if let Event::TimelineChanged { diffs, .. } = event {
+                    for diff in diffs {
+                        let entries = match diff {
+                            TimelineDiff::Reset(entries) | TimelineDiff::Append(entries) => entries,
+                            TimelineDiff::PushFront(entry) | TimelineDiff::PushBack(entry) | TimelineDiff::Insert { entry, .. } | TimelineDiff::Set { entry, .. } => vec![entry],
+                            _ => Vec::new(),
+                        };
+                        if entries.iter().any(|entry| matches!(&entry.kind, crate::EntryKind::Message(message) if message.event_id == "$old" && !message.reactions.is_empty())) { return true; }
+                    }
+                }
+            }
+            false
+        }).await;
+        forward.abort();
+        let requests: Vec<_> = received_requests.try_iter().collect();
+        assert!(
+            requests.iter().any(|request| request.contains("from=older")),
+            "SDK must catch up beyond the first recursive page: {requests:?}"
+        );
+        assert_eq!(caught_up, Ok(true), "the early old reply must receive SDK reactions");
+        assert_eq!(retried, fail_first_page);
+    }
+
+    #[tokio::test]
+    async fn sdk_catchup_should_fetch_more_recursive_pages_even_when_the_early_page_has_the_root() {
+        assert_sdk_catches_up(false).await;
+    }
+
+    #[tokio::test]
+    async fn retrying_a_failed_sdk_page_should_resume_the_remaining_thread_catchup() {
+        assert_sdk_catches_up(true).await;
+    }
+
+    #[tokio::test]
+    async fn opening_a_room_should_report_a_read_boundary_outside_loaded_history() {
+        let server = crate::test_server::Server::new(|request| {
+            let mut response = crate::test_server::thread_response(request);
+            if request.contains("/sync?") {
+                response["rooms"]["join"]["!room:example.org"]["account_data"] =
+                    serde_json::json!({"events":[{"type":"m.fully_read", "content":{"event_id":"$unloaded"}}]});
+            }
+            response
+        });
+        let account = Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
+        let open =
+            open_timeline(account, TimelineKey::room("!room:example.org"), None, false).await.expect("open room");
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let sink: Arc<dyn EventSink> = Arc::new(move |event| {
+            let _ = events.send(event);
+        });
+        let forward = start_timeline(open, &sink);
+        assert!(
+            matches!(received.recv().await, Some(Event::ReadBoundary { event_id: Some(id), loaded: false, .. }) if id == "$unloaded")
+        );
+        forward.abort();
+    }
+
+    #[tokio::test]
+    async fn member_state_changes_should_invalidate_snapshots_without_a_count_change() {
+        let server = crate::test_server::Server::new(crate::test_server::thread_response);
+        let account = Account::for_test(&server.url()).await;
+        let mut response =
+            account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
+        let update = response.rooms.joined.values_mut().next().expect("joined room");
+        assert!(members_changed(update));
+        update.state = matrix_sdk_base::sync::State::Before(Vec::new());
+        assert!(!members_changed(update), "ordinary messages must not invalidate the member list");
+    }
+
+    #[tokio::test]
+    async fn marking_a_room_fully_read_should_send_both_cross_device_and_public_markers() {
+        let (requests, received) = std::sync::mpsc::channel();
+        let server = crate::test_server::Server::new(move |request| {
+            if request.contains("/read_markers") {
+                requests.send(request.to_owned()).expect("capture read markers");
+            }
+            crate::test_server::thread_response(request)
+        });
+        let account = Account::for_test(&server.url()).await;
+        account
+            .client()
+            .sync_once(matrix_sdk::config::SyncSettings::default().timeout(Duration::ZERO))
+            .await
+            .expect("sync room");
+        let timeline = account.timeline(&TimelineKey::room("!room:example.org")).await.expect("timeline");
+        mark_timeline_read(&timeline, None, true).await.expect("mark fully read");
+        let request = received.recv_timeout(Duration::from_secs(1)).expect("read markers request");
+        let body: serde_json::Value =
+            serde_json::from_str(request.split_once("\r\n\r\n").expect("request body").1).expect("read markers JSON");
+        assert_eq!(body, serde_json::json!({"m.fully_read":"$root","m.read":"$root"}));
+    }
+
+    #[tokio::test]
+    async fn viewport_receipts_should_not_advance_to_a_newer_unseen_message() {
+        let (requests, received) = std::sync::mpsc::channel();
+        let server = crate::test_server::Server::new(move |request| {
+            if request.contains("/read_markers") {
+                requests.send(request.to_owned()).expect("capture markers");
+            }
+            let mut response = crate::test_server::thread_response(request);
+            if request.contains("/sync?") {
+                response["rooms"]["join"]["!room:example.org"]["timeline"]["events"].as_array_mut().expect("events").push(
+                    serde_json::json!({"type":"m.room.message", "event_id":"$unseen", "sender":"@b:example.org", "origin_server_ts":3, "content":{"msgtype":"m.text", "body":"Below the viewport"}})
+                );
+            }
+            response
+        });
+        let account = Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
+        let timeline = account.timeline(&TimelineKey::room("!room:example.org")).await.expect("timeline");
+        assert_eq!(timeline.latest_event_id().await.as_deref().map(|id| id.as_str()), Some("$unseen"));
+        mark_timeline_read(&timeline, Some("$root"), true).await.expect("mark viewport read");
+        let request = received.recv_timeout(Duration::from_secs(1)).expect("markers request");
+        let body: serde_json::Value =
+            serde_json::from_str(request.split_once("\r\n\r\n").expect("HTTP body").1).expect("JSON body");
+        assert_eq!(body, serde_json::json!({"m.fully_read":"$root","m.read":"$root"}));
+    }
 
     fn start() -> (EngineHandle, std_mpsc::Receiver<Event>) {
         let (events, received) = std_mpsc::channel();

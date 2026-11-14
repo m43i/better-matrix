@@ -36,12 +36,9 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette) -> El {
     // The room's call shows its stage in place of the timeline, until the user asks for the chat.
     main = match s.call_here().filter(|call| !call.chat) {
         Some(call) => main.child(super::call::stage(s, account, call, p)),
-        None => main.child(timeline(&cx, account.timeline(&key), "timeline", &s.near_top, p)).child(composer(
-            s,
-            ComposerTarget::Room,
-            &tf!("composer.placeholder", room = inline_name(room)),
-            p,
-        )),
+        None => main
+            .child(timeline(&cx, account.timeline(&key), "timeline", &s.near_top, Some(&s.at_bottom), p))
+            .child(composer(s, ComposerTarget::Room, &tf!("composer.placeholder", room = inline_name(room)), p)),
     };
     let main = main
         .on_drop_files(|s: &mut State, files, _| s.attach_files_to(ComposerTarget::Room, files))

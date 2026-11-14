@@ -50,7 +50,7 @@ fn room(room_id: &str) -> RoomSummary {
 
 fn with_rooms(s: &mut State, id: &AccountId, rooms: &[&str], spaces: Vec<SpaceSummary>) {
     apply(s, Event::AccountAdded(account(id.as_str())));
-    let list = RoomList { rooms: rooms.iter().map(|r| room(r)).collect(), spaces };
+    let list = RoomList { rooms: rooms.iter().map(|r| room(r)).collect(), spaces, invitations: Vec::new() };
     apply(s, Event::RoomsUpdated { account: id.clone(), list });
 }
 
@@ -376,7 +376,13 @@ fn deleting_a_chat_should_leave_and_forget_it() {
     let id = AccountId::new("@a:example.org");
     apply(&mut s, Event::AccountAdded(account(id.as_str())));
     let chat = RoomSummary { kind: RoomKind::Direct, ..room("!dm:x") };
-    apply(&mut s, Event::RoomsUpdated { account: id, list: RoomList { rooms: vec![chat], spaces: Vec::new() } });
+    apply(
+        &mut s,
+        Event::RoomsUpdated {
+            account: id,
+            list: RoomList { rooms: vec![chat], spaces: Vec::new(), invitations: Vec::new() },
+        },
+    );
     s.ask_to_leave("!dm:x");
     s.confirm();
     assert!(matches!(commands.try_next(), Some((_, Command::LeaveRoom { forget: true, .. }))));
@@ -400,7 +406,10 @@ fn a_left_open_room_should_give_way_to_the_overview() {
     s.select_room("!one:x");
     apply(
         &mut s,
-        Event::RoomsUpdated { account: id, list: RoomList { rooms: vec![room("!two:x")], spaces: Vec::new() } },
+        Event::RoomsUpdated {
+            account: id,
+            list: RoomList { rooms: vec![room("!two:x")], spaces: Vec::new(), invitations: Vec::new() },
+        },
     );
     assert_eq!(s.active_room_id(), None);
 }
@@ -1325,6 +1334,14 @@ fn coming_back_to_the_window_should_mark_the_open_room_read() {
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
     s.select_room("!one:x");
     s.focus_changed(false);
+    apply(
+        &mut s,
+        Event::TimelineChanged {
+            account: AccountId::new("@a:example.org"),
+            key: TimelineKey::room("!one:x"),
+            diffs: Vec::new(),
+        },
+    );
     drain(&mut commands);
     s.focus_changed(true);
     assert!(all_commands(&mut commands).iter().any(|c| matches!(c, Command::MarkRead { .. })));
@@ -1421,7 +1438,10 @@ fn opening_a_room_should_list_only_the_members_already_known() {
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
     drain(&mut commands);
     s.select_room("!one:x");
-    assert!(all_commands(&mut commands).iter().any(|c| matches!(c, Command::ListMembers { all: false, .. })));
+    assert_eq!(
+        all_commands(&mut commands).iter().filter(|c| matches!(c, Command::ListMembers { all: false, .. })).count(),
+        1
+    );
 }
 
 #[test]
@@ -1449,9 +1469,484 @@ fn a_partial_member_list_should_not_replace_a_complete_one() {
     let all =
         matrix_core::Members { people: vec![person("@a:x"), person("@b:x")], complete: true, ..Default::default() };
     let known = matrix_core::Members { people: vec![person("@a:x")], complete: false, ..Default::default() };
-    apply(&mut s, Event::Members { account: id.clone(), room_id: "!one:x".into(), members: all });
-    apply(&mut s, Event::Members { account: id.clone(), room_id: "!one:x".into(), members: known });
+    apply(&mut s, Event::Members { request: None, account: id.clone(), room_id: "!one:x".into(), members: all });
+    apply(&mut s, Event::Members { request: None, account: id.clone(), room_id: "!one:x".into(), members: known });
     assert_eq!(s.accounts.get(&id).unwrap().members["!one:x"].people.len(), 2);
+}
+
+#[test]
+fn switching_rooms_should_close_the_previous_side_panel() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x", "!two:x"], Vec::new());
+    s.select_room("!one:x");
+    s.show_side(SidePanel::Info);
+    s.select_room("!two:x");
+    assert_eq!(s.side, None);
+}
+
+#[test]
+fn an_invitation_should_remain_available_after_closing_its_preview() {
+    let (mut s, _) = state();
+    crate::demo::invitation(&mut s);
+    s.close_modal();
+    assert_eq!(s.active_account().unwrap().invitations.len(), 1);
+}
+
+#[test]
+fn accepting_an_invitation_should_join_with_its_receiving_account() {
+    let (mut s, mut commands) = state();
+    crate::demo::invitation(&mut s);
+    drain(&mut commands);
+    let id = AccountId::new(crate::demo::ADA);
+    s.respond_to_invitation(&id, "!design:example.org", true);
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(command,
+        Command::JoinRoom { account, room_id, .. } if account == &id && room_id == "!design:example.org")));
+}
+
+#[test]
+fn declining_an_invitation_should_leave_without_forgetting_the_room() {
+    let (mut s, mut commands) = state();
+    crate::demo::invitation(&mut s);
+    drain(&mut commands);
+    let id = AccountId::new(crate::demo::ADA);
+    s.respond_to_invitation(&id, "!design:example.org", false);
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(command,
+        Command::LeaveRoom { account, room_id, forget: false } if account == &id && room_id == "!design:example.org")));
+}
+
+#[test]
+fn a_failed_invitation_response_should_leave_the_invitation_available_to_retry() {
+    let (mut s, mut commands) = state();
+    crate::demo::invitation(&mut s);
+    drain(&mut commands);
+    let id = AccountId::new(crate::demo::ADA);
+    s.respond_to_invitation(&id, "!design:example.org", true);
+    let (request, _) = commands.try_next().unwrap();
+    apply(&mut s, Event::Finished { request, result: Err("offline".into()) });
+    assert!(!s.membership_pending(&id, "!design:example.org") && s.active_account().unwrap().invitations.len() == 1);
+}
+
+#[test]
+fn opening_a_space_should_request_its_public_rooms_once() {
+    let (mut s, mut commands) = state();
+    crate::demo::seed(&mut s);
+    drain(&mut commands);
+    s.select_scope(Scope::Space(crate::demo::WORK_SPACE.into()));
+    s.show_overview();
+    assert_eq!(
+        all_commands(&mut commands).iter().filter(|command| matches!(command, Command::ListPublicRooms { .. })).count(),
+        1
+    );
+}
+
+#[test]
+fn leaving_the_selected_space_should_return_to_the_home_overview() {
+    let (mut s, _) = state();
+    crate::demo::seed(&mut s);
+    let id = AccountId::new(crate::demo::ADA);
+    s.select_scope(Scope::Space(crate::demo::WORK_SPACE.into()));
+    s.select_room(crate::demo::DEMO_THREAD.0);
+    let rooms = s.accounts.get(&id).unwrap().rooms.clone();
+    apply(&mut s, Event::RoomsUpdated { account: id, list: RoomList { rooms, ..Default::default() } });
+    assert_eq!((s.active_scope(), s.active_room_id()), (Scope::Home, None));
+}
+
+#[test]
+fn reaching_the_new_marker_should_advance_the_cross_device_read_marker() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    let key = TimelineKey::room("!one:x");
+    let entries = vec![
+        matrix_core::TimelineEntry { id: "new".into(), kind: matrix_core::EntryKind::ReadMarker },
+        matrix_core::TimelineEntry {
+            id: "message".into(),
+            kind: matrix_core::EntryKind::Message(Box::new(Message {
+                event_id: "$message".into(),
+                ..Default::default()
+            })),
+        },
+    ];
+    apply(
+        &mut s,
+        Event::TimelineChanged {
+            account: id.clone(),
+            key: key.clone(),
+            diffs: vec![matrix_core::TimelineDiff::Reset(entries)],
+        },
+    );
+    let before = drain(&mut commands);
+    assert!(before.iter().any(|(_, command)| matches!(command, Command::MarkRead { fully_read: false, .. })));
+    for (request, command) in before {
+        if matches!(command, Command::MarkRead { .. }) {
+            apply(&mut s, Event::Finished { request, result: Ok(()) });
+        }
+    }
+    s.read_marker_reached(&id, &key, "new");
+    assert!(
+        all_commands(&mut commands).iter().any(|command| matches!(command, Command::MarkRead { fully_read: true, .. }))
+    );
+}
+
+#[test]
+fn an_unloaded_read_boundary_should_not_be_treated_as_a_read_room() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    drain(&mut commands);
+    apply(
+        &mut s,
+        Event::ReadBoundary {
+            account: id.clone(),
+            room_id: "!one:x".into(),
+            event_id: Some("$old".into()),
+            loaded: false,
+        },
+    );
+    apply(
+        &mut s,
+        Event::TimelineChanged {
+            account: id,
+            key: TimelineKey::room("!one:x"),
+            diffs: vec![matrix_core::TimelineDiff::Reset(vec![matrix_core::TimelineEntry {
+                id: "latest".into(),
+                kind: matrix_core::EntryKind::Message(Box::new(Message {
+                    event_id: "$latest".into(),
+                    ..Default::default()
+                })),
+            }])],
+        },
+    );
+    let reads = all_commands(&mut commands);
+    assert!(reads.iter().any(|command| matches!(command, Command::MarkRead { fully_read: false, .. })));
+    assert!(!reads.iter().any(|command| matches!(command, Command::MarkRead { fully_read: true, .. })));
+}
+
+#[test]
+fn a_loaded_boundary_without_unread_messages_should_allow_cross_device_reads() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    drain(&mut commands);
+    apply(
+        &mut s,
+        Event::ReadBoundary {
+            account: id.clone(),
+            room_id: "!one:x".into(),
+            event_id: Some("$latest".into()),
+            loaded: true,
+        },
+    );
+    apply(
+        &mut s,
+        Event::TimelineChanged {
+            account: id,
+            key: TimelineKey::room("!one:x"),
+            diffs: vec![matrix_core::TimelineDiff::Reset(vec![matrix_core::TimelineEntry {
+                id: "latest".into(),
+                kind: matrix_core::EntryKind::Message(Box::new(Message {
+                    event_id: "$latest".into(),
+                    ..Default::default()
+                })),
+            }])],
+        },
+    );
+    assert!(
+        all_commands(&mut commands).iter().any(|command| matches!(command, Command::MarkRead { fully_read: true, .. }))
+    );
+}
+
+#[test]
+fn reading_older_history_should_target_the_last_viewport_message_instead_of_new_arrivals() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    apply(&mut s, Event::TimelineChanged { account: id.clone(), key: TimelineKey::room("!one:x"), diffs: Vec::new() });
+    for (request, command) in drain(&mut commands) {
+        if matches!(command, Command::MarkRead { .. }) {
+            apply(&mut s, Event::Finished { request, result: Ok(()) });
+        }
+    }
+    s.read_position_shown(&id, &TimelineKey::room("!one:x"), "$visible".into());
+    let mut reads = all_commands(&mut commands);
+    reads.extend(s.receipts.due(std::time::Instant::now() + std::time::Duration::from_secs(1)));
+    assert!(reads.iter().any(
+        |command| matches!(command, Command::MarkRead { event_id: Some(event_id), .. } if event_id == "$visible")
+    ));
+}
+
+#[test]
+fn membership_changes_should_refresh_complete_lists_and_ignore_older_requests() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    let old_request =
+        drain(&mut commands).into_iter().find(|(_, command)| matches!(command, Command::ListMembers { .. })).unwrap().0;
+    apply(
+        &mut s,
+        Event::Members {
+            request: None,
+            account: id.clone(),
+            room_id: "!one:x".into(),
+            members: matrix_core::Members { complete: true, ..Default::default() },
+        },
+    );
+    apply(&mut s, Event::MembersInvalidated { account: id.clone(), room_id: "!one:x".into() });
+    assert!(s.accounts.get(&id).unwrap().members.contains_key("!one:x"));
+    assert!(!s.accounts.members_fresh(&id, "!one:x"));
+    let refresh = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::ListMembers { all: true, .. }))
+        .unwrap()
+        .0;
+    apply(
+        &mut s,
+        Event::Members {
+            request: Some(old_request),
+            account: id.clone(),
+            room_id: "!one:x".into(),
+            members: matrix_core::Members { complete: true, ..Default::default() },
+        },
+    );
+    assert!(!s.accounts.members_fresh(&id, "!one:x"), "the older snapshot must stay invalid");
+    apply(
+        &mut s,
+        Event::Members {
+            request: Some(refresh),
+            account: id.clone(),
+            room_id: "!one:x".into(),
+            members: matrix_core::Members { complete: true, ..Default::default() },
+        },
+    );
+    assert!(s.accounts.get(&id).unwrap().members["!one:x"].complete);
+    assert!(s.accounts.members_fresh(&id, "!one:x"));
+}
+
+#[test]
+fn viewport_progress_should_not_invalidate_the_timeline_row_plan() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    let key = TimelineKey::room("!one:x");
+    let before = s.accounts.get(&id).unwrap().timeline(&key).unwrap().revision;
+    s.read_position_shown(&id, &key, "$visible".into());
+    assert_eq!(before, s.accounts.get(&id).unwrap().timeline(&key).unwrap().revision);
+}
+
+#[test]
+fn clearing_viewport_marker_metadata_should_keep_the_current_row_plan_valid() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    let key = TimelineKey::room("!one:x");
+    s.focus_changed(false);
+    s.read_marker_visible(&id, &key, Some("marker".into()));
+    let revision = s.accounts.get(&id).unwrap().timeline(&key).unwrap().revision;
+    assert!(!s.read_marker_visible(&id, &key, None));
+    assert_eq!(revision, s.accounts.get(&id).unwrap().timeline(&key).unwrap().revision);
+}
+
+#[test]
+fn membership_changes_in_a_cached_background_room_should_wait_until_it_is_opened() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x", "!two:x"], Vec::new());
+    s.select_room("!one:x");
+    apply(
+        &mut s,
+        Event::Members {
+            request: None,
+            account: id.clone(),
+            room_id: "!one:x".into(),
+            members: matrix_core::Members { complete: true, ..Default::default() },
+        },
+    );
+    s.select_room("!two:x");
+    drain(&mut commands);
+    apply(&mut s, Event::MembersInvalidated { account: id.clone(), room_id: "!one:x".into() });
+    assert!(!s.accounts.members_fresh(&id, "!one:x"));
+    assert!(all_commands(&mut commands).iter().all(|command| !matches!(command, Command::ListMembers { .. })));
+    s.select_room("!one:x");
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|command| matches!(command, Command::ListMembers { room_id, .. } if room_id == "!one:x"))
+    );
+}
+
+#[test]
+fn returning_to_an_account_should_refresh_its_restored_rooms_stale_members() {
+    let (mut s, mut commands) = state();
+    let a = AccountId::new("@a:example.org");
+    let b = AccountId::new("@b:example.org");
+    with_rooms(&mut s, &a, &["!one:x"], Vec::new());
+    with_rooms(&mut s, &b, &["!two:x"], Vec::new());
+    s.select_account(&a);
+    s.select_room("!one:x");
+    apply(
+        &mut s,
+        Event::Members {
+            request: None,
+            account: a.clone(),
+            room_id: "!one:x".into(),
+            members: matrix_core::Members { complete: true, ..Default::default() },
+        },
+    );
+    s.select_account(&b);
+    s.select_room("!two:x");
+    apply(&mut s, Event::MembersInvalidated { account: a.clone(), room_id: "!one:x".into() });
+    drain(&mut commands);
+    s.select_account(&a);
+    assert_eq!(s.active_room_id(), Some("!one:x"));
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(command, Command::ListMembers { account, room_id, all: true } if account == &a && room_id == "!one:x")));
+}
+
+#[test]
+fn returning_to_an_account_should_retry_a_cancelled_initial_member_request() {
+    let (mut s, mut commands) = state();
+    let a = AccountId::new("@a:example.org");
+    let b = AccountId::new("@b:example.org");
+    with_rooms(&mut s, &a, &["!one:x"], Vec::new());
+    with_rooms(&mut s, &b, &["!two:x"], Vec::new());
+    s.select_account(&a);
+    s.select_room("!one:x");
+    s.select_account(&b);
+    s.select_room("!two:x");
+    apply(&mut s, Event::MembersInvalidated { account: a.clone(), room_id: "!one:x".into() });
+    drain(&mut commands);
+    s.select_account(&a);
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(command, Command::ListMembers { account, room_id, all: false } if account == &a && room_id == "!one:x")));
+}
+
+#[test]
+fn accepting_an_invitation_outside_the_current_space_should_open_it_from_home() {
+    let (mut s, _) = state();
+    crate::demo::invitation(&mut s);
+    let id = AccountId::new(crate::demo::ADA);
+    let scope = Scope::Space(crate::demo::WORK_SPACE.into());
+    s.select_scope(scope.clone());
+    let data = s.accounts.get(&id).unwrap();
+    let (mut rooms, mut spaces, invitations) = (data.rooms.clone(), data.spaces.clone(), data.invitations.clone());
+    for space in &mut spaces {
+        space.children.retain(|child| child != "!design:example.org");
+    }
+    rooms.push(room("!design:example.org"));
+    s.accounts.set_room_list(&id, RoomList { rooms, spaces, invitations });
+    s.show_invitation("!design:example.org");
+    s.membership_finished(&id, "!design:example.org", room_discovery::MembershipAction::JoinRoom, &scope);
+    assert_eq!((s.active_scope(), s.active_room_id()), (Scope::Home, Some("!design:example.org")));
+}
+
+#[test]
+fn opening_a_room_in_another_joined_space_should_select_a_sidebar_that_lists_it() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    let space = SpaceSummary {
+        room_id: "!space:x".into(),
+        name: "Space".into(),
+        avatar: None,
+        can_add_rooms: false,
+        can_rename: false,
+        children: vec!["!one:x".into()],
+        members: Vec::new(),
+    };
+    with_rooms(&mut s, &id, &["!one:x"], vec![space]);
+    s.open_room(&id, "!one:x");
+    assert_eq!(s.active_scope(), Scope::Space("!space:x".into()));
+    assert!(
+        s.active_account().unwrap().rooms_in(&s.active_scope(), RoomKind::Group).any(|room| room.room_id == "!one:x")
+    );
+}
+
+#[test]
+fn warm_viewport_rows_should_wait_for_the_sdk_subscription_before_sending_receipts() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    drain(&mut commands);
+    let key = TimelineKey::room("!one:x");
+    s.read_position_shown(&id, &key, "$visible".into());
+    assert!(all_commands(&mut commands).is_empty());
+    apply(&mut s, Event::TimelineChanged { account: id, key, diffs: Vec::new() });
+    assert!(all_commands(&mut commands).iter().any(
+        |command| matches!(command, Command::MarkRead { event_id: Some(event_id), .. } if event_id == "$visible")
+    ));
+}
+
+#[test]
+fn a_changed_sync_member_count_should_invalidate_a_complete_snapshot() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    apply(
+        &mut s,
+        Event::Members {
+            request: None,
+            account: id.clone(),
+            room_id: "!one:x".into(),
+            members: matrix_core::Members { complete: true, ..Default::default() },
+        },
+    );
+    let mut joined = room("!one:x");
+    joined.member_count = 3;
+    apply(
+        &mut s,
+        Event::RoomsUpdated { account: id.clone(), list: RoomList { rooms: vec![joined], ..Default::default() } },
+    );
+    let data = s.accounts.get(&id).unwrap();
+    assert_eq!(data.member_count(&data.rooms[0]), 3);
+    assert!(
+        all_commands(&mut commands).iter().any(|command| matches!(command, Command::ListMembers { all: true, .. }))
+    );
+}
+
+#[test]
+fn removing_the_open_room_should_close_its_thread_and_show_the_overview() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    s.open_thread("$root");
+    apply(&mut s, Event::RoomsUpdated { account: id, list: RoomList::default() });
+    assert!(s.active_room_id().is_none() && s.active_thread().is_none());
+}
+
+#[test]
+fn public_rooms_should_be_ranked_by_member_count() {
+    let (mut s, mut commands) = state();
+    crate::demo::seed(&mut s);
+    drain(&mut commands);
+    let id = AccountId::new(crate::demo::ADA);
+    s.select_scope(Scope::Space(crate::demo::WORK_SPACE.into()));
+    let request = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::ListPublicRooms { .. }))
+        .unwrap()
+        .0;
+    let rooms = [("!small:x", 3), ("!large:x", 80)]
+        .into_iter()
+        .map(|(id, count)| matrix_core::PublicRoom {
+            room_id: id.into(),
+            name: id.into(),
+            topic: None,
+            avatar: None,
+            member_count: count,
+            via: Vec::new(),
+        })
+        .collect();
+    apply(&mut s, Event::PublicRooms { request, rooms });
+    let Directory::Ready(rooms) = &s.directories[&(id, crate::demo::WORK_SPACE.into())] else { panic!("rooms ready") };
+    assert_eq!(rooms.iter().map(|room| room.room_id.as_str()).collect::<Vec<_>>(), ["!large:x", "!small:x"]);
 }
 
 #[test]
@@ -1700,7 +2195,7 @@ fn a_quiet_chat_should_keep_its_place_from_the_stored_activity_after_a_restart()
     let old = RoomSummary { kind: RoomKind::Direct, activity_ms: Some(1_000), ..room("!old:x") };
     let recent = RoomSummary { kind: RoomKind::Direct, activity_ms: Some(9_000), ..room("!recent:x") };
     apply(&mut s, Event::AccountAdded(account(id.as_str())));
-    let list = RoomList { rooms: vec![old, recent], spaces: Vec::new() };
+    let list = RoomList { rooms: vec![old, recent], spaces: Vec::new(), invitations: Vec::new() };
     apply(&mut s, Event::RoomsUpdated { account: id.clone(), list });
     let data = s.accounts.get(&id).unwrap();
     let sections = super::sections(data, &matrix_core::SidebarLayout::default(), &Scope::Home);
@@ -1727,7 +2222,7 @@ fn a_room_with_a_misdated_message_should_not_stay_at_the_top() {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
     let future = RoomSummary { kind: RoomKind::Direct, activity_ms: Some(now + 365 * 86_400_000), ..room("!future:x") };
     let recent = RoomSummary { kind: RoomKind::Direct, activity_ms: Some(now - 60_000), ..room("!recent:x") };
-    let list = RoomList { rooms: vec![future, recent], spaces: Vec::new() };
+    let list = RoomList { rooms: vec![future, recent], spaces: Vec::new(), invitations: Vec::new() };
     apply(&mut s, Event::RoomsUpdated { account: id.clone(), list });
     let data = s.accounts.get(&id).unwrap();
     let sections = super::sections(data, &matrix_core::SidebarLayout::default(), &Scope::Home);
@@ -1759,7 +2254,10 @@ fn a_misdated_message_this_session_should_count_from_when_it_came() {
     let chats = ["!fast:x", "!older:x"].map(|r| RoomSummary { kind: RoomKind::Direct, ..room(r) });
     apply(
         &mut s,
-        Event::RoomsUpdated { account: id.clone(), list: RoomList { rooms: chats.to_vec(), spaces: Vec::new() } },
+        Event::RoomsUpdated {
+            account: id.clone(),
+            list: RoomList { rooms: chats.to_vec(), spaces: Vec::new(), invitations: Vec::new() },
+        },
     );
     latest_at(&mut s, &id, "!older:x", now_ms() - 60_000);
     // A server whose clock runs an hour fast: its message came just now, so it's first, but
@@ -1779,7 +2277,10 @@ fn a_stored_time_ahead_of_the_clock_should_count_once_it_has_passed() {
     let chat = RoomSummary { kind: RoomKind::Direct, activity_ms: Some(later), ..room("!later:x") };
     apply(
         &mut s,
-        Event::RoomsUpdated { account: id.clone(), list: RoomList { rooms: vec![chat.clone()], spaces: Vec::new() } },
+        Event::RoomsUpdated {
+            account: id.clone(),
+            list: RoomList { rooms: vec![chat.clone()], spaces: Vec::new(), invitations: Vec::new() },
+        },
     );
     let data = s.accounts.get(&id).unwrap();
     assert_eq!(data.activity(&chat, now_ms()), 0);
@@ -1795,7 +2296,10 @@ fn a_time_within_clock_drift_should_count_as_it_is() {
     let now = RoomSummary { kind: RoomKind::Direct, activity_ms: Some(now_ms()), ..room("!now:x") };
     apply(
         &mut s,
-        Event::RoomsUpdated { account: id.clone(), list: RoomList { rooms: vec![now, ahead], spaces: Vec::new() } },
+        Event::RoomsUpdated {
+            account: id.clone(),
+            list: RoomList { rooms: vec![now, ahead], spaces: Vec::new(), invitations: Vec::new() },
+        },
     );
     assert_eq!(direct_order(&s, &id), ["!ahead:x", "!now:x"]);
 }
@@ -2086,7 +2590,7 @@ fn opening_the_threads_panel_should_list_the_rooms_threads() {
 }
 
 #[test]
-fn the_files_panel_should_follow_the_room_shown() {
+fn switching_rooms_should_close_the_files_panel() {
     let (mut s, mut commands) = state();
     let id = AccountId::new("@a:example.org");
     with_rooms(&mut s, &id, &["!one:x", "!two:x"], Vec::new());
@@ -2094,9 +2598,9 @@ fn the_files_panel_should_follow_the_room_shown() {
     s.show_side(SidePanel::Files);
     drain(&mut commands);
     s.select_room("!two:x");
-    assert_eq!(s.side, Some(SidePanel::Files));
+    assert_eq!(s.side, None);
     assert!(
-        all_commands(&mut commands)
+        !all_commands(&mut commands)
             .iter()
             .any(|c| matches!(c, Command::ListFiles { room_id, .. } if room_id == "!two:x"))
     );
@@ -2156,7 +2660,7 @@ fn raising_someone_to_ones_own_level_should_ask_first() {
     let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
     s.select_room("!one:x");
     let members = matrix_core::Members { own_level: 50, can_set_roles: true, ..matrix_core::Members::default() };
-    apply(&mut s, Event::Members { account: id, room_id: "!one:x".into(), members });
+    apply(&mut s, Event::Members { request: None, account: id, room_id: "!one:x".into(), members });
     drain(&mut commands);
     s.moderate("@b:x", matrix_core::Moderation::Role(matrix_core::MemberRole::Moderator));
     assert!(matches!(s.modal, Some(Modal::Confirm(Confirm::Moderate { .. }))));
@@ -2173,7 +2677,10 @@ fn calling_someone_should_use_the_chat_with_them_alone_not_a_group_chat() {
     let alone = RoomSummary { kind: RoomKind::Direct, dm_users: vec!["@b:x".into()], ..room("!bob:x") };
     apply(
         &mut s,
-        Event::RoomsUpdated { account: id, list: RoomList { rooms: vec![group, alone], spaces: Vec::new() } },
+        Event::RoomsUpdated {
+            account: id,
+            list: RoomList { rooms: vec![group, alone], spaces: Vec::new(), invitations: Vec::new() },
+        },
     );
     drain(&mut commands);
     s.call_person("@b:x", false);
@@ -2196,7 +2703,13 @@ fn calling_someone_should_skip_a_chat_a_third_person_joined() {
         active_member_count: 3,
         ..room("!bob-and-bot:x")
     };
-    apply(&mut s, Event::RoomsUpdated { account: id, list: RoomList { rooms: vec![crowded], spaces: Vec::new() } });
+    apply(
+        &mut s,
+        Event::RoomsUpdated {
+            account: id,
+            list: RoomList { rooms: vec![crowded], spaces: Vec::new(), invitations: Vec::new() },
+        },
+    );
     drain(&mut commands);
     s.call_person("@b:x", false);
     assert!(

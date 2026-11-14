@@ -51,7 +51,7 @@ pub fn thread_panel(s: &State, account: &AccountData, room: &RoomSummary, root: 
         .border_sides([0.0, 0.0, 0.0, 1.0], p.divider)
         .children(water)
         .child(header)
-        .child(timeline(&cx, account.timeline(&key), "thread-timeline", &s.thread_near_top, p))
+        .child(timeline(&cx, account.timeline(&key), "thread-timeline", &s.thread_near_top, None, p))
         .child(composer(s, ComposerTarget::Thread, t!("thread.placeholder"), p))
         .on_drop_files(|s: &mut State, files, _| s.attach_files_to(ComposerTarget::Thread, files))
 }

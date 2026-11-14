@@ -18,7 +18,9 @@ mod media;
 mod poll;
 mod preview;
 mod profile;
+mod receipts;
 mod retry;
+mod room_discovery;
 mod search;
 mod sections;
 mod settings;
@@ -47,8 +49,9 @@ pub use media::MediaCache;
 pub use poll::{MAX_ANSWERS, PollForm};
 pub use preview::{DocumentStatus, Opens, Preview, PreviewContent, render_document};
 pub use profile::{ContactStep, ProfileForm};
+pub use room_discovery::Directory;
 pub use search::{PeopleSearch, SEARCH_PAUSE, matches};
-pub use sections::{DIRECT, ROOMS, SectionView, is_builtin, ordered_spaces, sections};
+pub use sections::{DIRECT, INVITATIONS, ROOMS, SectionView, is_builtin, ordered_spaces, sections};
 pub use settings::{Appearance, Settings, SettingsSection, Zoom};
 pub use sign_in::{SignInForm, SignInStep};
 pub use water::WATER_HEIGHT;
@@ -245,6 +248,14 @@ pub enum EmojiFor {
 /// variants.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Modal {
+    Invitation {
+        account: AccountId,
+        room_id: String,
+    },
+    PublicRooms {
+        account: AccountId,
+        space: String,
+    },
     Settings(SettingsSection),
     /// Writing a poll (`State::poll_form`).
     Poll,
@@ -388,6 +399,16 @@ const MEMBER_PICTURES: usize = 60;
 /// Why a command was sent, so its [`Event::Finished`] lands in the right place.
 #[derive(Debug, Clone, PartialEq)]
 enum Purpose {
+    Directory {
+        account: AccountId,
+        space: String,
+    },
+    Membership {
+        account: AccountId,
+        room_id: String,
+        action: room_discovery::MembershipAction,
+        scope: Scope,
+    },
     /// Starting, answering or steering a call.
     Call,
     /// Watching or unwatching one of a call's videos.
@@ -427,7 +448,11 @@ enum Purpose {
     /// Saving a file the user chose to download.
     Save,
     /// Reading a room's members.
-    Members,
+    Members {
+        account: AccountId,
+        room_id: String,
+        all: bool,
+    },
     /// Reading a room's threads or files for its side panel.
     SidePanel(AccountId, String, SidePanel),
     /// A user-directory search; failures leave the results as they were.
@@ -493,6 +518,7 @@ pub struct Nav {
 
 #[derive(Debug)]
 pub struct State {
+    pub directories: HashMap<(AccountId, String), room_discovery::Directory>,
     pub accounts: Accounts,
     pub nav: Nav,
     pub sign_in: SignInForm,
@@ -531,6 +557,7 @@ pub struct State {
     pub reduced_motion: std::cell::Cell<bool>,
     /// What the shown room was last told about the user's typing.
     typing: typing::Typing,
+    receipts: receipts::Receipts,
     /// Land the next commit without animation: a room or thread was opened.
     settle_next: bool,
     /// A room being dragged in the sidebar, and the section it is over.
@@ -584,10 +611,14 @@ pub struct State {
     /// Set by a timeline's scroll handler when its view nears the oldest loaded message;
     /// [`State::poll`] then loads more. Shared because scroll handlers can't change state.
     pub near_top: Arc<AtomicBool>,
+    /// Whether the main timeline is at the bottom, as the scroll handler last reported.
+    pub at_bottom: Arc<AtomicBool>,
     /// The same for the thread panel.
     pub thread_near_top: Arc<AtomicBool>,
     /// The timelines the engine is following: the room on screen and its open thread.
     open_timelines: Vec<(AccountId, TimelineKey)>,
+    /// Subscriptions that have delivered their first snapshot; warm UI rows can precede it.
+    timelines_ready: HashSet<(AccountId, TimelineKey)>,
     engine: EngineHandle,
     shell: Shell,
     pending: HashMap<RequestId, Purpose>,
@@ -598,6 +629,7 @@ impl State {
     pub fn new(engine: EngineHandle, shell: Shell, settings: Settings) -> Self {
         settings.language.apply();
         let mut state = Self {
+            directories: HashMap::new(),
             accounts: Accounts::default(),
             nav: Nav::default(),
             sign_in: SignInForm::default(),
@@ -613,6 +645,7 @@ impl State {
             layout_unsaved: HashSet::new(),
             clock_shown: None,
             typing: typing::Typing::default(),
+            receipts: receipts::Receipts::default(),
             suspended: Vec::new(),
             backdrop: backdrop::Backdrop::default(),
             reduced_motion: std::cell::Cell::new(false),
@@ -646,8 +679,10 @@ impl State {
             notice_shown: None,
             scratch: TextEdit::new(""),
             near_top: Arc::new(AtomicBool::new(false)),
+            at_bottom: Arc::new(AtomicBool::new(false)),
             thread_near_top: Arc::new(AtomicBool::new(false)),
             open_timelines: Vec::new(),
+            timelines_ready: HashSet::new(),
             engine,
             shell,
             pending: HashMap::new(),
@@ -741,7 +776,14 @@ impl State {
     // ----- engine --------------------------------------------------------------------------
 
     fn dispatch(&mut self, command: Command, purpose: Purpose) -> RequestId {
+        let reading = match &command {
+            Command::MarkRead { account, key, .. } => Some((account.clone(), key.clone())),
+            _ => None,
+        };
         let request = self.engine.send(command);
+        if let Some((account, key)) = reading {
+            self.receipts.sent(&account, &key, request);
+        }
         self.pending.insert(request, purpose);
         request
     }
@@ -829,6 +871,7 @@ impl State {
                 self.request_avatars();
             }
             Event::AccountRemoved(id) => {
+                self.directories.retain(|(account, _), _| *account != id);
                 // A suspended account stays listed in `suspended`: removing it is what suspending
                 // does here.
                 self.accounts.remove(&id);
@@ -845,7 +888,30 @@ impl State {
                 self.pending.retain(|_, purpose| !matches!(purpose, Purpose::Edit(edit) if edit.target.account == id));
             }
             Event::RoomsUpdated { account, list } => {
+                let changed_counts: Vec<String> = list
+                    .rooms
+                    .iter()
+                    .filter(|room| {
+                        self.accounts
+                            .get(&account)
+                            .and_then(|data| data.room(&room.room_id))
+                            .is_some_and(|previous| previous.member_count != room.member_count)
+                    })
+                    .map(|room| room.room_id.clone())
+                    .collect();
                 self.accounts.set_room_list(&account, list);
+                for room_id in changed_counts {
+                    self.invalidate_members(&account, &room_id);
+                }
+                let scope_gone = matches!(self.nav.scopes.get(&account), Some(Scope::Space(id))
+                    if self.accounts.get(&account).is_none_or(|data| data.space(id).is_none()));
+                if scope_gone {
+                    self.nav.scopes.remove(&account);
+                    self.nav.threads.remove(&account);
+                }
+                self.directories.retain(|(owner, space), _| {
+                    owner != &account || self.accounts.get(owner).is_some_and(|data| data.space(space).is_some())
+                });
                 self.request_avatars();
                 // The open room is gone (left, deleted, kicked): back to the overview.
                 let gone = self
@@ -853,31 +919,81 @@ impl State {
                     .rooms
                     .get(&account)
                     .is_some_and(|id| self.accounts.get(&account).is_none_or(|a| a.room(id).is_none()));
-                if gone {
+                if gone || scope_gone {
                     self.nav.rooms.remove(&account);
+                    self.nav.threads.remove(&account);
                     self.sync_timeline();
+                }
+            }
+            Event::PublicRooms { request, mut rooms } => {
+                if let Some(Purpose::Directory { account, space }) = self.pending.get(&request)
+                    && self.accounts.get(account).is_some_and(|data| data.space(space).is_some())
+                {
+                    rooms.sort_by(|a, b| {
+                        b.member_count
+                            .cmp(&a.member_count)
+                            .then_with(|| a.name.cmp(&b.name))
+                            .then_with(|| a.room_id.cmp(&b.room_id))
+                    });
+                    rooms.dedup_by(|a, b| a.room_id == b.room_id);
+                    self.directories.insert((account.clone(), space.clone()), room_discovery::Directory::Ready(rooms));
                 }
             }
             Event::LatestMessage { account, room_id, message } => {
                 self.accounts.set_latest(&account, &room_id, *message);
+            }
+            Event::ReadBoundary { account, room_id, event_id, loaded } => {
+                if let Some(timeline) = self.accounts.timeline_mut(&account, &TimelineKey::room(room_id)) {
+                    timeline.set_read_boundary(event_id, loaded);
+                }
             }
             // Changes still in flight when a timeline closed are dropped: opening it again
             // starts from a fresh copy.
             Event::TimelineChanged { account, key, .. }
                 if !self.open_timelines.contains(&(account.clone(), key.clone())) => {}
             Event::TimelineChanged { account, key, diffs } => {
+                self.timelines_ready.insert((account.clone(), key.clone()));
+                let old_end = self
+                    .accounts
+                    .get(&account)
+                    .and_then(|data| data.timeline(&key))
+                    .map_or(0, |timeline| timeline.entries.len().saturating_sub(1));
+                let incoming_while_away = !self.window_focused && diffs.iter().any(|diff| {
+                    let other = |entry: &matrix_core::TimelineEntry| matches!(&entry.kind, matrix_core::EntryKind::Message(message) if message.sender_id != account.as_str() && !message.pending);
+                    match diff {
+                        matrix_core::TimelineDiff::PushBack(entry) => other(entry),
+                        matrix_core::TimelineDiff::Append(entries) => entries.iter().any(other),
+                        matrix_core::TimelineDiff::Insert { index, entry } if *index >= old_end => other(entry),
+                        _ => false,
+                    }
+                });
+                let following_live = self.window_focused
+                    && key.thread.is_none()
+                    && self.at_bottom.load(Ordering::Relaxed)
+                    && !diffs.iter().any(|diff| matches!(diff, matrix_core::TimelineDiff::Reset(_)))
+                    && self
+                        .accounts
+                        .get(&account)
+                        .and_then(|data| data.timeline(&key))
+                        .is_some_and(RoomTimeline::may_mark_fully_read);
                 // A timeline's first content lands as it is, rather than easing in row by row.
                 if diffs.iter().any(|diff| matches!(diff, matrix_core::TimelineDiff::Reset(_))) {
                     tx.settle();
                 }
                 if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
                     timeline.apply(diffs);
+                    if incoming_while_away {
+                        timeline.show_read_marker();
+                    }
+                    if following_live {
+                        timeline.see_current_read_marker();
+                    }
                     if let Some(root) = &key.thread {
                         timeline.note_thread_root(root);
                     }
                 }
                 if self.window_focused {
-                    self.dispatch(Command::MarkRead { account, key }, Purpose::Read);
+                    self.mark_timeline_read(account, key);
                 }
                 self.request_timeline_media();
                 self.request_gifs();
@@ -921,9 +1037,13 @@ impl State {
                     self.accounts.set_sidebar(&account, layout);
                 }
             }
-            Event::Members { account, room_id, members } => {
+            Event::Members { request, .. } if request.is_some_and(|request| !self.pending.contains_key(&request)) => {}
+            Event::Members { account, room_id, members, .. } => {
                 self.accounts.set_members(&account, room_id, members);
                 self.request_avatars();
+            }
+            Event::MembersInvalidated { account, room_id } => {
+                self.invalidate_members(&account, &room_id);
             }
             Event::PeopleFound { request, people } => {
                 self.search.found(request, people.clone());
@@ -1247,9 +1367,13 @@ impl State {
     }
 
     fn finish(&mut self, request: RequestId, result: Result<(), String>) {
+        self.receipts.finished(request, result.is_ok(), std::time::Instant::now());
         let Some(purpose) = self.pending.remove(&request) else { return };
         let Err(error) = result else {
             match &purpose {
+                Purpose::Membership { account, room_id, action, scope } => {
+                    self.membership_finished(account, room_id, *action, scope)
+                }
                 Purpose::Recover if matches!(self.modal, Some(Modal::RecoveryKeyEntry { .. })) => self.modal = None,
                 Purpose::Guarded { account, action: Guarded::ResetIdentity } if self.resetting_identity() => {
                     self.modal = Some(Modal::ResetIdentity { account: account.clone(), step: ResetStep::Done });
@@ -1286,6 +1410,12 @@ impl State {
             return;
         };
         match purpose {
+            Purpose::Directory { account, space } => {
+                if self.accounts.get(&account).is_some_and(|data| data.space(&space).is_some()) {
+                    self.directories.insert((account, space), room_discovery::Directory::Failed(error));
+                }
+            }
+            Purpose::Membership { .. } => self.notice = Some(tf!("notice.membership", error = error)),
             Purpose::Discover | Purpose::SignIn => self.sign_in.fail(request, error),
             Purpose::Cancel => {}
             Purpose::Media { media, .. } => {
@@ -1367,7 +1497,7 @@ impl State {
                 self.link_previews.failed(key, std::time::Instant::now());
                 self.schedule_retry();
             }
-            Purpose::Members | Purpose::People | Purpose::Read | Purpose::Typing | Purpose::CallVideo => {}
+            Purpose::Members { .. } | Purpose::People | Purpose::Read | Purpose::Typing | Purpose::CallVideo => {}
             Purpose::Call => self.notice = Some(tf!("call.failed", error = error)),
             Purpose::Layout(account) => {
                 self.notice = Some(tf!("notice.layout", error = error));
@@ -1406,6 +1536,11 @@ impl State {
                 shown.push((account.clone(), TimelineKey::thread(room_id, root)));
             }
         }
+        if self.open_timelines.first() != shown.first() {
+            self.side = None;
+            self.side_loaded = None;
+            self.member_search = TextEdit::default();
+        }
         // A memo recording for a timeline no longer shown would go on unseen, the microphone
         // open: closing the thread, another room and the overview all drop it. An edit of a
         // message there is set aside, its draft back, and returns when the timeline does.
@@ -1425,10 +1560,13 @@ impl State {
         for (account, key) in gone {
             if key.thread.is_none() {
                 self.near_top.store(false, Ordering::Relaxed);
+                self.at_bottom.store(false, Ordering::Relaxed);
             } else {
                 self.thread_near_top.store(false, Ordering::Relaxed);
             }
             self.accounts.timeline_closed(&account, &key);
+            self.timelines_ready.remove(&(account.clone(), key.clone()));
+            self.receipts.forget(&account, &key);
             self.on_screen.remove(&(account.clone(), key.clone()));
             self.engine.send(Command::CloseTimeline { account, key });
         }
@@ -1444,6 +1582,16 @@ impl State {
             }
             let purpose = Purpose::Timeline { account: account.clone(), key: key.clone() };
             self.dispatch(Command::OpenTimeline { account: account.clone(), key: key.clone() }, purpose);
+            if key.thread.is_none() {
+                let complete = self
+                    .accounts
+                    .get(&account)
+                    .and_then(|data| data.members.get(&key.room_id))
+                    .map(|members| members.complete);
+                if complete.is_none() || !self.accounts.members_fresh(&account, &key.room_id) {
+                    self.load_members(account.clone(), key.room_id.clone(), complete.unwrap_or(false));
+                }
+            }
             self.open_timelines.push((account, key));
         }
         self.request_gifs();
@@ -1481,7 +1629,14 @@ impl State {
         }
         for (account, key) in self.open_timelines.clone() {
             self.accounts.mark_read(&account, &key.room_id);
-            self.dispatch(Command::MarkRead { account, key }, Purpose::Read);
+            let marker = self
+                .accounts
+                .get(&account)
+                .and_then(|data| data.timeline(&key))
+                .and_then(|timeline| timeline.visible_read_marker.clone());
+            if !marker.is_some_and(|id| self.read_marker_reached(&account, &key, &id)) {
+                self.mark_timeline_read(account, key);
+            }
         }
     }
 
@@ -1493,6 +1648,12 @@ impl State {
             tx.settle();
         }
         let now = std::time::Instant::now();
+        for command in self.receipts.due(now) {
+            self.dispatch(command, Purpose::Read);
+        }
+        if let Some(wait) = self.receipts.wait(now) {
+            tx.wake_after(wait);
+        }
         // Images decoded since the last frame count at their exact size from now on.
         changed |= self.media.measure();
         self.retry_due(now, tx);
@@ -1651,6 +1812,53 @@ impl State {
         self.fetch_linked(now);
     }
 
+    /// The "New" marker itself entered the viewport, without the media prefetch margin.
+    pub fn read_marker_reached(&mut self, account: &AccountId, key: &TimelineKey, id: &str) -> bool {
+        if !self.window_focused {
+            return false;
+        }
+        if !self.accounts.dismiss_read_marker(account, key, id) {
+            return false;
+        }
+        self.mark_timeline_read(account.clone(), key.clone());
+        true
+    }
+
+    pub fn read_marker_visible(&mut self, account: &AccountId, key: &TimelineKey, marker: Option<String>) -> bool {
+        self.accounts.set_visible_read_marker(account, key, marker.clone());
+        marker.is_some_and(|id| self.read_marker_reached(account, key, &id))
+    }
+
+    fn mark_timeline_read(&mut self, account: AccountId, key: TimelineKey) {
+        if !self.timelines_ready.contains(&(account.clone(), key.clone())) {
+            return;
+        }
+        let event_id = self
+            .accounts
+            .get(&account)
+            .and_then(|data| data.timeline(&key))
+            .and_then(|timeline| timeline.read_up_to.clone());
+        let fully_read = key.thread.is_none()
+            && self
+                .accounts
+                .get(&account)
+                .and_then(|data| data.timeline(&key))
+                .is_some_and(RoomTimeline::may_mark_fully_read);
+        if let Some(command) = self.receipts.update(account, key, event_id, fully_read, std::time::Instant::now()) {
+            self.dispatch(command, Purpose::Read);
+        }
+    }
+
+    pub fn read_position_shown(&mut self, account: &AccountId, key: &TimelineKey, event_id: String) -> bool {
+        if !self.accounts.set_read_position(account, key, event_id) {
+            return false;
+        }
+        if self.window_focused {
+            self.mark_timeline_read(account.clone(), key.clone());
+        }
+        true
+    }
+
     /// The entries of the open timelines on screen, with their account.
     fn entries_on_screen(&self) -> impl Iterator<Item = (&AccountId, &accounts::Entry)> {
         self.open_timelines.iter().flat_map(move |open| {
@@ -1805,6 +2013,7 @@ impl State {
             let id = &account.summary.id;
             let rooms = account.rooms.iter().filter_map(|room| room.avatar.clone());
             let spaces = account.spaces.iter().filter_map(|space| space.avatar.clone());
+            let invitations = account.invitations.iter().filter_map(|invite| invite.avatar.clone());
             // The header shows three faces; the open list, those near its top. A room of
             // thousands doesn't ask for thousands of pictures.
             let shown = if self.side == Some(SidePanel::Members) { MEMBER_PICTURES } else { 3 };
@@ -1819,8 +2028,15 @@ impl State {
             let found = [&self.search, &self.invite_search, &self.chat_search]
                 .into_iter()
                 .flat_map(|search| search.people.iter().filter_map(|person| person.avatar.clone()));
-            wanted
-                .extend(rooms.chain(spaces).chain(members).chain(typing).chain(found).map(|media| (id.clone(), media)));
+            wanted.extend(
+                rooms
+                    .chain(spaces)
+                    .chain(invitations)
+                    .chain(members)
+                    .chain(typing)
+                    .chain(found)
+                    .map(|media| (id.clone(), media)),
+            );
         }
         // The faces of the call and of whoever rings, from any account.
         if let Some(call) = &self.call {
@@ -1970,6 +2186,12 @@ impl State {
 
     pub fn toggle_section(&mut self, id: &str) {
         self.change_layout(|layout, scope| sections::toggle_collapsed(layout, scope, id));
+    }
+
+    pub fn section_collapsed(&self, id: &str) -> bool {
+        self.active_account()
+            .and_then(|account| account.sidebar.scopes.get(&sections::scope_key(&self.active_scope())))
+            .is_some_and(|scope| scope.collapsed.iter().any(|section| section == id))
     }
 
     /// Asks for a new section's name.
@@ -2303,6 +2525,7 @@ impl State {
             self.request_avatars();
         }
         self.popover = None;
+        self.discover_scope();
     }
 
     /// Shows a scope's overview: no room selected until the user picks one.
@@ -2311,6 +2534,7 @@ impl State {
         self.nav.scopes.insert(account.clone(), scope);
         self.nav.rooms.remove(&account);
         self.sync_timeline();
+        self.discover_scope();
     }
 
     /// Back to the current scope's overview.
@@ -2319,6 +2543,46 @@ impl State {
             self.nav.rooms.remove(account);
         }
         self.sync_timeline();
+        self.discover_scope();
+    }
+
+    fn invalidate_members(&mut self, account: &AccountId, room_id: &str) {
+        let cached = self.accounts.invalidate_members(account, room_id);
+        let mut refresh = cached.is_some();
+        let mut all = cached.unwrap_or(false);
+        let mut retired = Vec::new();
+        self.pending.retain(|request, purpose| {
+            if let Purpose::Members { account: owner, room_id: room, all: requested_all } = purpose
+                && owner == account
+                && room == room_id
+            {
+                refresh = true;
+                all |= *requested_all;
+                retired.push(*request);
+                return false;
+            }
+            true
+        });
+        for request in retired {
+            self.engine.send(Command::Cancel(request));
+        }
+        let visible = self.nav.account.as_ref() == Some(account) && self.active_room_id() == Some(room_id)
+            || matches!(&self.modal, Some(Modal::Invite { account: owner, room_id: room, .. }) if owner == account && room == room_id);
+        if refresh && visible {
+            self.load_members(account.clone(), room_id.to_owned(), all);
+        }
+    }
+
+    fn load_members(&mut self, account: AccountId, room_id: String, all: bool) {
+        if self.pending.values().any(|purpose| {
+            matches!(purpose,
+            Purpose::Members { account: owner, room_id: room, all: requested_all }
+            if owner == &account && room == &room_id && (*requested_all || !all))
+        }) {
+            return;
+        }
+        let purpose = Purpose::Members { account: account.clone(), room_id: room_id.clone(), all };
+        self.dispatch(Command::ListMembers { account, room_id, all }, purpose);
     }
 
     pub fn select_room(&mut self, room_id: &str) {
@@ -2337,22 +2601,27 @@ impl State {
         // everyone.
         let all = self.side == Some(SidePanel::Members);
         self.member_search = TextEdit::default();
-        self.dispatch(Command::ListMembers { account, room_id: room_id.to_owned(), all }, Purpose::Members);
+        self.load_members(account, room_id.to_owned(), all);
     }
 
-    /// Shows a room of any account, as a notification click does. Switches to Home when the
-    /// current scope doesn't list it.
+    /// Shows a room of any account in a scope whose sidebar lists it.
     pub fn open_room(&mut self, account: &AccountId, room_id: &str) {
-        self.select_account(account);
-        let listed = self.accounts.get(account).is_some_and(|data| {
-            let scope = self.active_scope();
+        let Some(data) = self.accounts.get(account) else { return };
+        let current = self.nav.scopes.get(account).cloned().unwrap_or(Scope::Home);
+        let lists = |scope: &Scope| {
             [matrix_core::RoomKind::Group, matrix_core::RoomKind::Direct]
                 .into_iter()
-                .any(|kind| data.rooms_in(&scope, kind).any(|room| room.room_id == room_id))
-        });
-        if !listed {
-            self.nav.scopes.insert(account.clone(), Scope::Home);
-        }
+                .any(|kind| data.rooms_in(scope, kind).any(|room| room.room_id == room_id))
+        };
+        let scope = if lists(&current) {
+            current
+        } else if lists(&Scope::Home) {
+            Scope::Home
+        } else {
+            data.spaces.iter().map(|space| Scope::Space(space.room_id.clone())).find(lists).unwrap_or(Scope::Home)
+        };
+        self.select_account(account);
+        self.nav.scopes.insert(account.clone(), scope);
         self.select_room(room_id);
     }
 
@@ -2482,8 +2751,8 @@ impl State {
             .get(&account)
             .and_then(|data| data.members.get(&room_id))
             .is_some_and(|members| members.complete);
-        if !complete {
-            self.dispatch(Command::ListMembers { account, room_id, all: true }, Purpose::Members);
+        if !complete || !self.accounts.members_fresh(&account, &room_id) {
+            self.load_members(account, room_id, true);
         }
     }
 
@@ -3070,6 +3339,17 @@ impl State {
     /// Opens a message's thread beside the room; a message without one starts it.
     pub fn open_thread(&mut self, root_event_id: &str) {
         let Some(account) = self.nav.account.clone() else { return };
+        if self
+            .active_room_id()
+            .and_then(|room| self.accounts.get(&account)?.timeline(&TimelineKey::room(room)))
+            .is_some_and(|timeline| {
+                timeline.messages().any(|message| {
+                    message.event_id == root_event_id && matches!(message.content, MessageContent::Call(_))
+                })
+            })
+        {
+            return;
+        }
         if self.nav.threads.get(&account).map(String::as_str) != Some(root_event_id) {
             // A memo recording in the thread being left goes with it, its file removed; an edit
             // there is set aside, to come back with its thread.
@@ -3103,6 +3383,9 @@ impl State {
 
     /// Starts a reply to `message` in the given composer.
     pub fn start_reply(&mut self, target: ComposerTarget, message: &Message, tx: &mut Tx) {
+        if matches!(message.content, MessageContent::Call(_)) {
+            return;
+        }
         let excerpt: String = match &message.content {
             MessageContent::Call(card) => call_title(card).to_owned(),
             content => content.plain().chars().take(140).collect(),
@@ -3248,6 +3531,13 @@ impl State {
     pub fn react(&mut self, key: TimelineKey, event_id: &str, emoji: &str) {
         self.popover = None;
         let Some(account) = self.nav.account.clone() else { return };
+        if self.accounts.get(&account).and_then(|data| data.timeline(&key)).is_some_and(|timeline| {
+            timeline
+                .messages()
+                .any(|message| message.event_id == event_id && matches!(message.content, MessageContent::Call(_)))
+        }) {
+            return;
+        }
         let command = Command::React { account, key, event_id: event_id.to_owned(), emoji: emoji.to_owned() };
         self.dispatch(command, Purpose::React);
     }

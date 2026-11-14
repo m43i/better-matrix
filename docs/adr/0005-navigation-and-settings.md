@@ -24,7 +24,24 @@ Date: 2026-11-14
     first) and recent conversations.
   - The app opens on it; choosing a scope, the sidebar header's name, and leaving a room land
     on it. Rooms never open by themselves.
+  - Home also lists the active account's invitations, including rooms outside spaces. A
+    space's Overview suggests up to five unjoined public rooms, most members first; More opens
+    the complete public-room list for that space, with Join on each room (see 0008).
+  - When the selected space disappears from the joined list, navigation returns to Home's
+    Overview. A removed room or deleted direct chat leaves its timeline for the current
+    Overview. Side panels close when the displayed account or room changes.
+    Each account may restore its previously opened thread when returning to that account,
+    consistent with remembering its selected conversation; ordinary room changes clear it.
+  - Invitations, directory joins and notifications share `open_room`: keep the current scope
+    when it lists the room, otherwise choose Home or a joined space that lists it. A joined
+    room opens with a corresponding sidebar entry, including invitations accepted from another
+    space.
 - **Sections:** separate for Home and for each space.
+  - Invitations is a fixed built-in section before all reorderable sections. It appears only
+    when invitations are pending, collapses through the shared sidebar layout, and keeps its
+    counter while collapsed. Room invites use the same `#` prefix as other rooms.
+    All scopes show the account's invitations, including those outside spaces; collapse state
+    is remembered separately in Home and each space, like the other built-in sections.
   - Built-in Rooms and Direct messages collapse but can't be removed; latest first. "Latest" is the
     newest of the room's latest event as the store keeps it across restarts
     (`RoomSummary::activity_ms`, from the SDK's latest events, which the engine asks for every

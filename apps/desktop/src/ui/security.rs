@@ -27,7 +27,12 @@ pub fn dialog_for(modal: &Modal, p: &Palette) -> Option<El> {
         Modal::RenameSession { edit, .. } => rename_session(edit, p),
         Modal::SectionName { section, edit } => section_name(section.is_some(), edit, p),
         Modal::RoomForm { form, name, topic } => room_form(form, name, topic, p),
-        Modal::Settings(_) | Modal::Confirm(_) | Modal::Invite { .. } | Modal::Poll => return None,
+        Modal::Settings(_)
+        | Modal::Confirm(_)
+        | Modal::Invite { .. }
+        | Modal::Invitation { .. }
+        | Modal::PublicRooms { .. }
+        | Modal::Poll => return None,
     })
 }
 

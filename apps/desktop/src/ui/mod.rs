@@ -11,12 +11,14 @@ mod emoji;
 mod icons;
 mod info;
 mod members;
+mod message_text;
 mod overview;
 mod people;
 mod poll;
 mod preview;
 mod rail;
 mod room;
+mod room_discovery;
 mod room_menu;
 mod security;
 mod settings;
@@ -112,6 +114,8 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         Some(Modal::Invite { room_id, invited, .. }) => {
             account.map(|account| people::invite_dialog(s, account, room_id, invited, &p))
         }
+        Some(Modal::Invitation { account, room_id }) => room_discovery::invitation(s, account, room_id, &p),
+        Some(Modal::PublicRooms { account, space }) => Some(room_discovery::public_rooms(s, account, space, &p)),
         Some(other) => security::dialog_for(other, &p),
         None => None,
     };

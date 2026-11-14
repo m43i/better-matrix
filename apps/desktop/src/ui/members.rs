@@ -108,7 +108,8 @@ pub fn panel(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
                 .on_press(State::open_invite),
         );
     }
-    let count = text(tf!("members.count", count = room.member_count))
+    let count = text(tf!("members.count", count = account.member_count(room)))
+        .key("member-count")
         .font(font::SECTION)
         .color(p.text_muted)
         .px(16.0)

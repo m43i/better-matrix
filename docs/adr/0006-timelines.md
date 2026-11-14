@@ -54,6 +54,22 @@ see who is typing there.
     subscribes. Open and close races are in [0002](0002-engine-and-desktop-state.md).
   - A thread opens with its root copied from the room's timeline (`Accounts::seed_thread`); the
     engine's first update replaces the copy.
+  - Cold threads also request their first replies directly through `Room::relations`, in
+    parallel with SDK pagination. This removes the SDK's three-second wait for an initial
+    pagination token from the time to first replies, including when nothing is cached.
+    `timeline_bootstrap` merges that page with subscription changes by event ID, retains row
+    keys and live replies, and hands back to ordinary diffs once the SDK has supplied every
+    early event. Completing a network page is not a subscription barrier or evidence that
+    unmatched replies were deleted: SDK pages also include reactions and edits. A reply already
+    supplied by the SDK is never restored from its early copy if later removed, including
+    additions/removals in one batch or before the direct response arrives. Both the direct
+    page and its merge preserve server order, using shared event IDs rather than sender clocks.
+    SDK pagination continues independently of the displayed early root until the subscription
+    catches up or SDK history ends, since a recursive page may cover fewer thread replies.
+    Initial loading and explicit retries use the same catch-up path.
+    The SDK remains authoritative for edits, reactions, deletion and later history. Closing aborts the
+    immediate fetch with the forwarding task. This costs one extra relations request on a cold
+    thread (and a root request if it is absent from the event cache).
   - The room list reads push-rule settings once per list and encryption state from the cache,
     and `RoomsUpdated` goes out only when the list changed.
 - **Sending:** `Command::Send { key, reply_to, .. }` goes through the open timeline, which sets
@@ -87,6 +103,10 @@ see who is typing there.
     composer. A message with replies shows "3 replies · last from …".
   - The hover toolbar fades in through the row's hover group, so hovering never rebuilds the
     view.
+  - Room events and call cards are informational rows: no message toolbar, reactions, replies
+    or thread actions. A call card keeps its call-specific controls.
+  - Posted formatted messages use selectable read-only text, with inline links, rather than
+    text fields. Links show the pointer; surrounding text keeps the text cursor.
 - **Polls** (MSC3381, unstable events as clients send them): `MessageContent::Poll` from the
   SDK's poll results, with each answer's votes, the user's picks, the voters and whether it
   ended. A card shows the question and answers; a press votes (`Command::VotePoll`; in a
@@ -155,8 +175,34 @@ see who is typing there.
     commit that left the timeline alone.
 - **Read receipts:** the desktop sends `Command::MarkRead` when an open timeline changes while
   the window is focused, and for each open timeline when focus returns.
+  - Room reads send both the public `m.read` receipt and the private, cross-device
+    `m.fully_read` marker in one request. While a "New" boundary remains unseen, only the
+    receipt advances; reaching the boundary advances the fully-read marker too. Thread reads
+    use their threaded receipt and never advance the room-wide fully-read marker.
+    Once reported, receipts target the actual viewport's last message, excluding the media
+    prefetch margin, rather than new arrivals below a user reading older history.
+    Scrolling receipts are coalesced at 500 ms per open timeline, with the first fully-read
+    acknowledgement sent as soon as the preceding request finishes. Only one receipt request
+    per timeline is in flight, including across quick close/reopen; failures retry the latest
+    position after two seconds. Warm rows wait for the SDK subscription's first snapshot before
+    sending. Viewport progress and visible-marker metadata do not change the row-plan revision;
+    dismissing the marker does.
+    `ReadBoundary` reports the existing fully-read event (or receipt fallback) independently of
+    the rendered marker. Until its event enters applied subscription history or the user reaches
+    its marker, an omitted marker remains unresolved and cannot authorize a fully-read update.
   - The engine re-reads rooms on the SDK's room-info updates (receipts, unread markers), so
     badges follow the counts the SDK works out after sync.
+  - The "New" marker is dismissed when its own row enters the viewport, including on open,
+    without the media prefetch margin. It fades over a 2.5-second exit spring. The desktop
+    remembers the first unread entry at that boundary across diffs and warm reopens, while
+    keeping the engine's diff indices intact. A new boundary can show a new marker.
+    As in [Element Web](https://github.com/element-hq/element-web/blob/75eaab6ca5ac7ab4bac91a6097c8e77bb469455d/apps/web/src/components/structures/TimelinePanel.tsx),
+    the visible indicator is separate from the advancing receipt: once reached it stays hidden
+    while reading, including when receipts advance during an upscroll. New boundaries while
+    already caught up, focused and at the bottom are acknowledged before rendering. New messages
+    received while unfocused can restore the indicator. An unfocused viewport does not dismiss
+    it; returning focus acknowledges a marker actually visible there. The app keeps its slow
+    fade and viewport-triggered dismissal rather than Element's configurable activity timers.
 - **Typing, received:** the task that forwards an open room timeline's changes also watches its
   typing, so closing stops both. It sends `Event::Typing` as `Person`s from the store.
   - Threads share their room's typing; Matrix has none per thread.

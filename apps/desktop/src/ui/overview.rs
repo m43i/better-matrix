@@ -75,8 +75,14 @@ pub fn overview(s: &State, account: &AccountData, p: &Palette) -> El {
             list.child(room_card(room, account.last_message(&room.room_id), true, &s.media, p))
         })
     };
+    if scope == Scope::Home {
+        body = body.children(super::room_discovery::home_invitations(s, account, p));
+    }
     body = body.child(section(t!("overview.unread"), unread, p));
 
+    if let Scope::Space(space) = &scope {
+        body = body.child(super::room_discovery::suggestions(s, account, space, p));
+    }
     if !data.recent.is_empty() {
         let recent = data.recent.iter().fold(col().w_full().gap(6.0), |list, (room, message)| {
             list.child(room_card(room, Some(message), false, &s.media, p))

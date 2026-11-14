@@ -128,9 +128,28 @@ impl Entry {
 }
 
 /// A room's timeline as its subscription built it, and where loading older history stands.
+#[derive(Debug, Default, PartialEq, Eq)]
+enum ReadBoundary {
+    #[default]
+    Unknown,
+    Absent,
+    Unresolved(String),
+    Loaded(String),
+}
+
 #[derive(Debug, Default)]
 pub struct RoomTimeline {
     pub entries: Vec<Entry>,
+    read_boundary: ReadBoundary,
+    /// The first entry after a "New" marker the user has already reached. Kept across diffs
+    /// and reopening a warm timeline; a marker at a new boundary is shown again.
+    seen_read_marker: Option<String>,
+    /// Once caught up, advancing receipts stays invisible until a later inactive period.
+    read_marker_hidden: bool,
+    /// The actual viewport's marker, without the media prefetch margin.
+    pub visible_read_marker: Option<String>,
+    /// The last actual viewport message, excluding the media prefetch margin.
+    pub read_up_to: Option<String>,
     /// A page of older history is on its way.
     pub loading: bool,
     /// Nothing older exists, or this user may not see it.
@@ -158,13 +177,87 @@ fn next_revision() -> u64 {
 }
 
 impl RoomTimeline {
+    pub fn set_read_boundary(&mut self, event_id: Option<String>, loaded: bool) {
+        let previous = match &self.read_boundary {
+            ReadBoundary::Unresolved(id) | ReadBoundary::Loaded(id) => Some(id.as_str()),
+            _ => None,
+        };
+        if previous != event_id.as_deref() {
+            self.seen_read_marker = None;
+        }
+        self.read_boundary = match event_id {
+            None => ReadBoundary::Absent,
+            Some(id) if loaded => ReadBoundary::Loaded(id),
+            Some(id) => ReadBoundary::Unresolved(id),
+        };
+    }
+
+    /// An omitted SDK marker can mean its event is still outside loaded history.
+    pub fn may_mark_fully_read(&self) -> bool {
+        !self.has_unseen_read_marker()
+            && (self.seen_read_marker.is_some()
+                || match &self.read_boundary {
+                    ReadBoundary::Unknown | ReadBoundary::Unresolved(_) => false,
+                    ReadBoundary::Absent | ReadBoundary::Loaded(_) => true,
+                })
+    }
+
+    fn read_marker_boundary(&self, id: &str) -> Option<&str> {
+        let at = self.entries.iter().position(|entry| entry.id == id && matches!(entry.kind, EntryView::ReadMarker))?;
+        Some(
+            self.entries[at + 1..]
+                .iter()
+                .find(|entry| matches!(entry.kind, EntryView::Message(_) | EntryView::RoomEvent(_)))
+                .unwrap_or(&self.entries[at])
+                .id
+                .as_str(),
+        )
+    }
+
+    pub fn read_marker_seen(&self, id: &str) -> bool {
+        self.read_marker_hidden
+            || self.read_marker_boundary(id).is_some_and(|boundary| self.seen_read_marker.as_deref() == Some(boundary))
+    }
+
+    pub fn has_unseen_read_marker(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| matches!(entry.kind, EntryView::ReadMarker) && !self.read_marker_seen(&entry.id))
+    }
+
+    /// Dismisses only the boundary actually reported by the view, retaining the engine's
+    /// entries so subsequent diffs keep their indices.
+    pub fn see_read_marker(&mut self, id: &str) -> bool {
+        let Some(boundary) = self.read_marker_boundary(id).map(ToOwned::to_owned) else { return false };
+        self.seen_read_marker = Some(boundary);
+        self.read_marker_hidden = true;
+        true
+    }
+
+    pub fn show_read_marker(&mut self) {
+        self.read_marker_hidden = false;
+        self.seen_read_marker = None;
+    }
+
+    /// New boundaries need no indicator while the focused user is already following live.
+    pub fn see_current_read_marker(&mut self) {
+        let id =
+            self.entries.iter().find(|entry| matches!(entry.kind, EntryView::ReadMarker)).map(|entry| entry.id.clone());
+        if let Some(id) = id {
+            self.see_read_marker(&id);
+        }
+    }
+
     /// Applies the engine's diffs, in order. Indices outside the list are ignored rather than
     /// trusted: a stray diff can't crash the app.
     pub fn apply(&mut self, diffs: Vec<TimelineDiff>) {
         let entries = &mut self.entries;
         for diff in diffs {
             match diff {
-                TimelineDiff::Reset(all) => *entries = all.into_iter().map(Entry::from).collect(),
+                TimelineDiff::Reset(all) => {
+                    self.reached_start = false;
+                    *entries = all.into_iter().map(Entry::from).collect();
+                }
                 TimelineDiff::Append(more) => entries.extend(more.into_iter().map(Entry::from)),
                 TimelineDiff::Clear => entries.clear(),
                 TimelineDiff::PushFront(entry) => entries.insert(0, entry.into()),
@@ -307,6 +400,7 @@ const KEPT_TIMELINES: usize = 8;
 #[derive(Debug)]
 pub struct AccountData {
     pub summary: AccountSummary,
+    pub invitations: Vec<matrix_core::Invitation>,
     pub rooms: Vec<RoomSummary>,
     pub spaces: Vec<SpaceSummary>,
     timelines: HashMap<TimelineKey, RoomTimeline>,
@@ -327,6 +421,8 @@ pub struct AccountData {
     pub contacts: Option<matrix_core::Contacts>,
     /// Rooms' members, by room ID, once listed.
     pub members: HashMap<String, matrix_core::Members>,
+    /// Snapshots kept visible while a newer membership list is fetched.
+    stale_members: HashSet<String>,
     /// Rooms' threads, by room ID, once listed for the info panel.
     pub threads: HashMap<String, Vec<matrix_core::ThreadInfo>>,
     /// The files shared in rooms, by room ID, once listed for the info panel.
@@ -340,9 +436,23 @@ pub struct AccountData {
 }
 
 impl AccountData {
+    /// A complete member list is authoritative; a partial list is only a lower bound on
+    /// the count from sync (which some homeservers omit or leave stale).
+    pub fn member_count(&self, room: &RoomSummary) -> u64 {
+        match self.members.get(&room.room_id) {
+            Some(members) if members.complete && !self.stale_members.contains(&room.room_id) => {
+                members.people.len() as u64
+            }
+            Some(_) if self.stale_members.contains(&room.room_id) && room.member_count > 0 => room.member_count,
+            Some(members) => room.member_count.max(members.people.len() as u64),
+            None => room.member_count,
+        }
+    }
+
     fn new(summary: AccountSummary) -> Self {
         Self {
             summary,
+            invitations: Vec::new(),
             rooms: Vec::new(),
             spaces: Vec::new(),
             timelines: HashMap::new(),
@@ -353,6 +463,7 @@ impl AccountData {
             sessions: None,
             contacts: None,
             members: HashMap::new(),
+            stale_members: HashSet::new(),
             threads: HashMap::new(),
             files: HashMap::new(),
             typing: HashMap::new(),
@@ -406,7 +517,10 @@ impl AccountData {
 
     /// Whether any room in the scope has unread messages, for the rail's dots.
     pub fn has_unread(&self, scope: &Scope) -> bool {
-        [RoomKind::Group, RoomKind::Direct].into_iter().any(|kind| self.rooms_in(scope, kind).any(wants_attention))
+        (*scope == Scope::Home && !self.invitations.is_empty())
+            || [RoomKind::Group, RoomKind::Direct]
+                .into_iter()
+                .any(|kind| self.rooms_in(scope, kind).any(wants_attention))
     }
 
     pub fn timeline(&self, key: &TimelineKey) -> Option<&RoomTimeline> {
@@ -512,6 +626,12 @@ pub struct Accounts {
 }
 
 impl Accounts {
+    pub fn forget_invitation(&mut self, account: &AccountId, room_id: &str) {
+        if let Some(data) = self.get_mut(account) {
+            data.invitations.retain(|invite| invite.room_id != room_id);
+        }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &AccountData> {
         self.list.iter()
     }
@@ -544,6 +664,7 @@ impl Accounts {
         if let Some(account) = self.get_mut(id) {
             account.rooms = list.rooms;
             account.spaces = list.spaces;
+            account.invitations = list.invitations;
         }
     }
 
@@ -579,10 +700,57 @@ impl Accounts {
     /// Keeps a room's members; a partial list never replaces a complete one.
     pub fn set_members(&mut self, id: &AccountId, room_id: String, members: matrix_core::Members) {
         let Some(account) = self.get_mut(id) else { return };
+        let stale = account.stale_members.remove(&room_id);
         let had_all = account.members.get(&room_id).is_some_and(|known| known.complete);
-        if members.complete || !had_all {
+        if members.complete || !had_all || stale {
             account.members.insert(room_id, members);
         }
+    }
+
+    pub fn invalidate_members(&mut self, id: &AccountId, room_id: &str) -> Option<bool> {
+        let account = self.get_mut(id)?;
+        let complete = account.members.get(room_id)?.complete;
+        account.stale_members.insert(room_id.to_owned());
+        Some(complete)
+    }
+
+    pub fn members_fresh(&self, id: &AccountId, room_id: &str) -> bool {
+        self.get(id).is_some_and(|account| !account.stale_members.contains(room_id))
+    }
+
+    /// Viewport metadata doesn't change the row plan or its virtual-list version.
+    pub fn set_read_position(&mut self, id: &AccountId, key: &TimelineKey, event_id: String) -> bool {
+        let Some(timeline) = self.get_mut(id).and_then(|account| account.timelines.get_mut(key)) else { return false };
+        if timeline.read_up_to.as_deref() == Some(event_id.as_str()) {
+            return false;
+        }
+        let position = |id: &str| {
+            timeline.entries.iter().position(|entry| entry.message().is_some_and(|message| message.event_id == id))
+        };
+        if let Some(previous) = timeline.read_up_to.as_deref().and_then(position)
+            && let Some(next) = position(&event_id)
+            && next < previous
+        {
+            return false;
+        }
+        timeline.read_up_to = Some(event_id);
+        true
+    }
+
+    /// This is viewport bookkeeping; only dismissal changes the row plan.
+    pub fn set_visible_read_marker(&mut self, id: &AccountId, key: &TimelineKey, marker: Option<String>) {
+        if let Some(timeline) = self.get_mut(id).and_then(|account| account.timelines.get_mut(key)) {
+            timeline.visible_read_marker = marker;
+        }
+    }
+
+    pub fn dismiss_read_marker(&mut self, id: &AccountId, key: &TimelineKey, marker: &str) -> bool {
+        let Some(timeline) = self.get_mut(id).and_then(|account| account.timelines.get_mut(key)) else { return false };
+        if timeline.read_marker_seen(marker) || !timeline.see_read_marker(marker) {
+            return false;
+        }
+        timeline.revision = next_revision();
+        true
     }
 
     pub fn set_threads(&mut self, id: &AccountId, room_id: String, threads: Vec<matrix_core::ThreadInfo>) {
@@ -651,6 +819,12 @@ impl Accounts {
     pub fn timeline_opened(&mut self, id: &AccountId, key: &TimelineKey) {
         if let Some(account) = self.get_mut(id) {
             account.closed.retain(|closed| closed != key);
+            if let Some(timeline) = account.timelines.get_mut(key) {
+                timeline.read_marker_hidden = false;
+                timeline.visible_read_marker = None;
+                timeline.read_up_to = None;
+                timeline.revision = next_revision();
+            }
         }
     }
 
@@ -896,7 +1070,10 @@ mod tests {
         let id = AccountId::new("@a:example.org");
         accounts.upsert(summary(id.as_str()));
         let own = RoomSummary { custom_notifications: true, ..room("!own") };
-        accounts.set_room_list(&id, RoomList { rooms: vec![room("!follows"), own], spaces: Vec::new() });
+        accounts.set_room_list(
+            &id,
+            RoomList { rooms: vec![room("!follows"), own], spaces: Vec::new(), invitations: Vec::new() },
+        );
         accounts.set_default_notifications(&id, NotificationMode::Mute);
         let modes: Vec<_> = accounts.get(&id).unwrap().rooms.iter().map(|r| r.notifications).collect();
         assert_eq!(modes, [NotificationMode::Mute, NotificationMode::AllMessages]);

@@ -65,6 +65,7 @@ fn link_row(glyph: &'static rune::Icon, title: &str, detail: Option<String>, key
 
 /// The room's overview.
 pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
+    let count = s.active_account().map_or(room.member_count, |account| account.member_count(room));
     let topic = room.topic.clone().unwrap_or_else(|| t!("room.no_topic").to_owned());
     let head = col()
         .w_full()
@@ -98,10 +99,10 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .w_full()
         .child(head)
         .child(divider(p))
-        .child(
-            link_row(&icons::USER, t!("members.title"), Some(room.member_count.to_string()), "info-members", p)
-                .on_press(|s: &mut State| s.show_side(SidePanel::Members)),
-        )
+        .children((room.kind == RoomKind::Group || count > 2).then(|| {
+            link_row(&icons::USER, t!("members.title"), Some(count.to_string()), "info-members", p)
+                .on_press(|s: &mut State| s.show_side(SidePanel::Members))
+        }))
         .child(
             link_row(&icons::THREAD, t!("info.threads"), None, "info-threads", p)
                 .on_press(|s: &mut State| s.show_side(SidePanel::Threads)),

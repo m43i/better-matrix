@@ -257,6 +257,44 @@ pub struct RoomList {
     pub rooms: Vec<RoomSummary>,
     /// Joined spaces, sorted by name.
     pub spaces: Vec<SpaceSummary>,
+    /// Rooms and spaces waiting for this account to accept or decline.
+    pub invitations: Vec<Invitation>,
+}
+
+/// An invitation received by an account, from the room's stripped state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Invitation {
+    /// The invited room or space.
+    pub room_id: String,
+    /// Its display name.
+    pub name: String,
+    /// Its topic, when shared with invitees.
+    pub topic: Option<String>,
+    /// Its picture.
+    pub avatar: Option<MediaRef>,
+    /// Who invited this account, when known.
+    pub inviter: Option<Person>,
+    /// Whether accepting opens a space's Overview.
+    pub space: bool,
+    /// A group room or direct chat, for its navigation label.
+    pub kind: RoomKind,
+}
+
+/// A public room discovered in a space hierarchy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PublicRoom {
+    /// Its Matrix room ID.
+    pub room_id: String,
+    /// Its name or alias.
+    pub name: String,
+    /// Its topic, when set.
+    pub topic: Option<String>,
+    /// Its picture.
+    pub avatar: Option<MediaRef>,
+    /// Joined members, used to rank suggestions.
+    pub member_count: u64,
+    /// Servers advertised by its parent space to help a federated join.
+    pub via: Vec<String>,
 }
 
 /// One message in a room timeline.

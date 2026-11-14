@@ -11,7 +11,7 @@ use matrix_core::{
     AccountId, Attachment, AttachmentKind, CallCard, HistoryVisibility, Message, MessageContent, Person, Quote,
     RoomChange, RoomEvent, RoomSummary, ThreadSummary, TimelineKey,
 };
-use rune::{Color, El, ScrollSpec, SurfaceFit, col, el, icon, row, row as row_el, text, text_input};
+use rune::{Color, El, ScrollSpec, SurfaceFit, col, el, icon, row, row as row_el, text};
 
 use super::components::{ButtonKind, button, clock_time, local_ms, media_avatar};
 use super::icons;
@@ -299,6 +299,7 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
                 rows.push((row_key(cx.key, &entry.id), Row::Message { entry: at, continues, latest_call: false }));
                 previous = Some(message);
             }
+            EntryView::ReadMarker if timeline.is_some_and(|t| t.read_marker_seen(&entry.id)) => {}
             EntryView::DateDivider(_) | EntryView::ReadMarker => {
                 rows.push((cx.key(&entry.id), Row::Divider(at)));
                 if matches!(entry.kind, EntryView::DateDivider(_)) {
@@ -373,7 +374,11 @@ fn build_row(cx: &Context<'_>, timeline: &RoomTimeline, key: &str, row: &Row, p:
             Some(EntryView::DateDivider(at)) => {
                 rule_with_label(key, &date_label(local_ms(*at), local_ms(now_ms())), p.text_muted, p)
             }
-            _ => rule_with_label(key, t!("timeline.new"), p.mention, p),
+            _ => rule_with_label(key, t!("timeline.new"), p.mention, p).transition(
+                rune::Transition::opacity()
+                    .springs(rune::SpringPair::new(rune::Spring::NONE, rune::Spring::new(2.5, 0.0)))
+                    .hold_layout(),
+            ),
         },
     }
 }
@@ -385,6 +390,7 @@ pub fn timeline(
     timeline: Option<&RoomTimeline>,
     view_key: &str,
     near_top: &Arc<AtomicBool>,
+    at_bottom: Option<&Arc<AtomicBool>>,
     p: &Palette,
 ) -> El {
     // Only the rows near the viewport are built, laid out and drawn: a room of thousands of
@@ -413,6 +419,31 @@ pub fn timeline(
         )
         // What shows loads (pictures, previews, GIFs), with a margin to scroll into.
         .on_visible_rows(move |s: &mut State, rows| {
+            let mut changed = false;
+            if let Some(timeline) = s
+                .accounts
+                .get(&seen_account)
+                .and_then(|data| data.timeline(&seen_key))
+                .filter(|timeline| timeline.revision == revision)
+            {
+                let marker = shown.get(rows.clone()).unwrap_or_default().iter().find_map(|(_, row)| {
+                    let Row::Divider(entry) = row else { return None };
+                    timeline
+                        .entries
+                        .get(*entry)
+                        .filter(|entry| matches!(entry.kind, EntryView::ReadMarker))
+                        .map(|entry| entry.id.clone())
+                });
+                let last_message = shown.get(rows.clone()).unwrap_or_default().iter().rev().find_map(|(_, row)| {
+                    let Row::Message { entry, .. } = row else { return None };
+                    let item = timeline.entries.get(*entry)?.message()?;
+                    (!item.pending && !item.event_id.starts_with("local:")).then(|| item.event_id.clone())
+                });
+                if let Some(event_id) = last_message {
+                    changed |= s.read_position_shown(&seen_account, &seen_key, event_id);
+                }
+                changed |= s.read_marker_visible(&seen_account, &seen_key, marker);
+            }
             let near = rows.start.saturating_sub(SHOWN_MARGIN)..(rows.end + SHOWN_MARGIN).min(shown.len());
             let entries = shown.get(near).unwrap_or_default().iter().filter_map(|(_, row)| row.entries());
             let (start, end) =
@@ -420,13 +451,14 @@ pub fn timeline(
             if start < end {
                 s.rows_shown(&seen_account, &seen_key, start..end);
             }
-            false
+            changed
         });
     // The keys change only with the plan, so Rune need not ask for them again until then.
     if revision != 0 {
         list = list.virtual_rows_version(revision);
     }
     let flag = Arc::clone(near_top);
+    let bottom = at_bottom.map(Arc::clone);
     // Short timelines sit at the bottom, by the composer, as in chat apps: the frame takes the
     // space and pushes the viewport down; the viewport is as tall as its content, up to all of it.
     let viewport = col()
@@ -439,6 +471,9 @@ pub fn timeline(
         .scroll_anchor()
         // Within a screen of the oldest loaded message: ask for the page before it.
         .on_scroll_offset(move |at| {
+            if let Some(bottom) = &bottom {
+                bottom.store(at.max[1] - at.offset[1] <= 1.0, Ordering::Relaxed);
+            }
             if at.offset[1] < at.viewport[1] {
                 flag.store(true, Ordering::Relaxed);
             }
@@ -550,6 +585,7 @@ fn message_row(
     p: &Palette,
 ) -> El {
     let message = &item.message;
+    let interactive = !matches!(message.content, MessageContent::Call(_));
     let mut body = col().w_full().gap(4.0);
     if let Some(quote) = &message.reply_to {
         body = body.child(quote_block(quote, p));
@@ -570,10 +606,10 @@ fn message_row(
     {
         body = body.child(link_card(&cx.key(&format!("link-{}", message.event_id)), url, card, cx.media, p));
     }
-    if !message.reactions.is_empty() {
+    if interactive && !message.reactions.is_empty() {
         body = body.child(reactions(cx, message, p));
     }
-    if let (Some(thread), false) = (&message.thread, cx.in_thread()) {
+    if let (true, Some(thread), false) = (interactive, &message.thread, cx.in_thread()) {
         body = body.child(thread_link(&message.event_id, thread, cx.media, p));
     }
 
@@ -616,10 +652,12 @@ fn message_row(
         .gap(10.0)
         .items_start()
         .opacity(if message.pending { 0.6 } else { 1.0 })
-        .hover(p.hover)
         .child(gutter)
         .child(content);
-    if !message.pending {
+    if interactive {
+        row = row.hover(p.hover);
+    }
+    if interactive && !message.pending {
         row = row.child(toolbar(cx, message, p));
         if !cx.in_thread() {
             let root = message.event_id.clone();
@@ -909,14 +947,7 @@ fn call_card(cx: &Context<'_>, event_id: &str, card: &CallCard, latest_call: boo
 /// even inside a row that opens its thread.
 fn text_body(event_id: &str, plain: &str, rich: Option<&rune::TextEdit>, p: &Palette) -> El {
     match rich {
-        Some(rich) => text_input(rich, font::BODY)
-            .key(format!("rich-{event_id}"))
-            .color(p.text)
-            .w_full()
-            .focusable(false)
-            .cursor(rune::Cursor::Text)
-            .on_press(|_: &mut State| {})
-            .on_link(|s: &mut State, url: &str, tx: &mut rune::Tx| s.open_link(url, tx)),
+        Some(rich) => super::message_text::formatted(&format!("rich-{event_id}"), rich, p),
         // Its own handler keeps the clicks: a double-click takes a word, a triple-click the
         // paragraph, rather than opening the thread.
         None => text(plain.to_owned())

@@ -62,6 +62,18 @@ Date: 2026-11-14
 - **Members:**
   - The room header shows the name, up to three faces and the member count (opening the member
     list), and an info button.
+  - A complete loaded member list supplies the displayed count; a partial list is a lower
+    bound on the sync summary's count. The header, member list and Info use the same rule.
+    Sync membership/power-level changes and changed summary counts invalidate cached snapshots
+    and refresh those already requested. Stale rows stay visible during refresh so search and
+    scroll position survive; fresh nonzero sync counts take precedence while a list is stale.
+    Responses from requests invalidated in the meantime are ignored, including when a join and
+    leave leave the total count unchanged.
+    Superseded requests are cancelled. Only a room currently shown (or in its invite dialog)
+    refreshes immediately; background snapshots stay stale until the room is opened again.
+    Restoring an account's conversation also refreshes missing or stale member data. Equivalent
+    requests already in flight are reused, including the room-selection path.
+    One-to-one direct chats omit the People link from Info; group conversations keep it.
   - Opening a room lists only members the store knows (`Command::ListMembers`, `all: false`).
     The member list and invite dialog fetch everyone unless `Members::complete`.
   - The member list (`ui::members`): a search, the count, then everyone (`RoomMember`) with a
@@ -84,6 +96,20 @@ Date: 2026-11-14
     `Command::ModerateMember(Moderation)`, which waits (up to 10 s) for sync to bring the change
     into the store, then lists the members again.
 - **Inviting:** a dialog searches people, a typed user ID among them (`Command::Invite`).
+- **Received invitations:** `RoomList::invitations` carries invited rooms and spaces, their
+  stripped name/topic/picture, inviter and receiving account. The fixed Invitations section
+  and Home cards open a preview with Accept and Decline. Accept uses `Command::JoinRoom`;
+  Decline leaves without forgetting the room. Buttons wait for completion and failures keep
+  the invite available to retry. Joining refreshes the room feed before navigation, and late
+  completion does not move another account or room.
+- **Public rooms in a space:** `Command::ListPublicRooms` reads all pages of the space hierarchy,
+  including nested spaces, retains only public rooms and ranks by joined-member count. The
+  space itself, subspaces and invite-only rooms are excluded; the UI also omits joined rooms.
+  Results and errors stay with their account and space; failures offer retry. The full list is
+  virtualized. Joins use the `via` servers advertised in space-child links for federation,
+  preserving advertised order and dropping duplicates,
+  falling back to the space's server, the room's server, or this account's server if neither ID
+  names one. A repeated pagination token is reported as a server pagination error.
 - **Direct chats:** `Command::OpenDirectChat` opens the existing chat or starts one.
 - **Making rooms** (`Command::CreateRoom`, `CreateSpace`, `RenameRoom`):
   - Rooms are private and encrypted. One made in a space is linked both ways.

@@ -73,6 +73,7 @@ pub fn sidebar(s: &State, account: &AccountData, p: &Palette) -> El {
 
     let open = s.active_room_id();
     let mut list = col().w_full().px(8.0).py(12.0).gap(12.0);
+    list = list.children(super::room_discovery::invitations(s, account, p));
     if account.rooms.is_empty() {
         list = list.child(text(t!("sidebar.syncing")).font(font::NAV).color(p.sidebar_text_muted).px(12.0));
     }

@@ -10,6 +10,8 @@ use super::accounts::AccountData;
 
 /// The built-in sections' IDs: they can be collapsed, never removed.
 pub const ROOMS: &str = "rooms";
+/// Invitations keep this collapse key, but always precede the reorderable sections.
+pub const INVITATIONS: &str = "invitations";
 pub const DIRECT: &str = "direct";
 
 /// Where a scope's layout is kept: `home`, or the space's room ID.
@@ -154,7 +156,7 @@ pub fn move_room(layout: &mut SidebarLayout, scope: &Scope, room_id: &str, to: &
 
 /// Whether a section is one of the built-in ones.
 pub fn is_builtin(id: &str) -> bool {
-    id == ROOMS || id == DIRECT
+    id == ROOMS || id == DIRECT || id == INVITATIONS
 }
 
 #[cfg(test)]

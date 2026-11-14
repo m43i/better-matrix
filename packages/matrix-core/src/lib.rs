@@ -29,7 +29,10 @@ mod convert;
 mod history;
 mod polls;
 mod session;
+#[cfg(test)]
+mod test_server;
 mod timeline;
+mod timeline_bootstrap;
 
 pub mod links;
 
@@ -43,10 +46,10 @@ pub use engine::{
     Command, DetachedCommands, Engine, EngineConfig, EngineHandle, EngineStopped, Event, EventSink, RequestId,
 };
 pub use model::{
-    AccountId, AccountSummary, Attachment, AttachmentKind, CallCard, EntryKind, HistoryVisibility, LoginMethods,
-    MediaRef, MediaSize, Message, MessageContent, Notification, NotificationMode, Outgoing, Password, Person, Poll,
-    PollAnswer, Quote, Reaction, RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary,
-    ThreadSummary, TimelineDiff, TimelineEntry, TimelineKey, Upload,
+    AccountId, AccountSummary, Attachment, AttachmentKind, CallCard, EntryKind, HistoryVisibility, Invitation,
+    LoginMethods, MediaRef, MediaSize, Message, MessageContent, Notification, NotificationMode, Outgoing, Password,
+    Person, Poll, PollAnswer, PublicRoom, Quote, Reaction, RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary,
+    SignInMethod, SpaceSummary, ThreadSummary, TimelineDiff, TimelineEntry, TimelineKey, Upload,
 };
 
 /// How many messages a timeline page holds: what a room shows when it opens, and what each
@@ -115,6 +118,12 @@ pub enum Error {
     /// Saving or reading local data failed.
     #[error("could not save local data: {0}")]
     Storage(std::io::Error),
+    /// A paginated server response repeated its continuation token.
+    #[error("the server repeated a pagination token for {resource}")]
+    RepeatedPaginationToken {
+        /// The resource being paginated.
+        resource: String,
+    },
     /// The secret store failed.
     #[error("could not use the secret store: {0}")]
     Secret(#[from] SecretError),

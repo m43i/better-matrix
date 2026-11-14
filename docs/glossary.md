@@ -38,6 +38,15 @@ needs one, add it here.
 : The main pane when no room is open: the scope's greeting or size, its unread rooms and recent
   conversations.
 
+**Invitations**
+: The fixed, collapsible section at the top of the sidebar for rooms and spaces the account
+  was invited to. Its counter stays while collapsed. Home also lists invitations; each opens
+  a preview with Accept and Decline.
+
+**Public rooms**
+: Rooms anyone may join, discovered through a space's hierarchy. Its Overview suggests the
+  unjoined ones with the most members; More shows the full list.
+
 **Sidebar**
 : The column listing the rooms and direct chats of the current scope.
 

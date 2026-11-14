@@ -18,6 +18,48 @@ pub const WORK_SPACE: &str = "!engines:example.org";
 const GRACE: &str = "@grace:example.org";
 const ALAN: &str = "@alan:example.org";
 pub const ADA: &str = "@ada:example.org";
+
+/// A received invitation, for checking its sidebar entry and preview.
+pub fn invitation(s: &mut State) {
+    seed(s);
+    let account = AccountId::new(ADA);
+    apply(s, Event::SidebarLayout { account: account.clone(), layout: matrix_core::SidebarLayout::default() });
+    let Some(data) = s.accounts.get(&account) else { return };
+    let list = RoomList {
+        rooms: data.rooms.iter().filter(|room| room.room_id != "!design:example.org").cloned().collect(),
+        spaces: data.spaces.clone(),
+        invitations: vec![matrix_core::Invitation {
+            room_id: "!design:example.org".into(),
+            name: "Design".into(),
+            topic: Some("A place to share ideas, review designs, and build Better Matrix together.".into()),
+            avatar: None,
+            inviter: Some(Person { id: GRACE.into(), name: "Grace Hopper".into(), avatar: None }),
+            space: false,
+            kind: RoomKind::Group,
+        }],
+    };
+    apply(s, Event::RoomsUpdated { account, list });
+    s.show_invitation("!design:example.org");
+}
+
+/// A space with public rooms to discover and join.
+pub fn discovery(s: &mut State) {
+    seed(s);
+    s.select_scope(crate::state::Scope::Space(WORK_SPACE.into()));
+    let rooms =
+        [("announcements", 250), ("design", 120), ("help", 80), ("desktop", 60), ("testing", 40), ("off-topic", 20)]
+            .into_iter()
+            .map(|(name, member_count)| matrix_core::PublicRoom {
+                room_id: format!("!public-{name}:example.org"),
+                name: name.into(),
+                topic: Some("Meet the community and share what you are working on.".into()),
+                avatar: None,
+                member_count,
+                via: vec!["example.org".into()],
+            })
+            .collect();
+    s.directories.insert((AccountId::new(ADA), WORK_SPACE.into()), crate::state::Directory::Ready(rooms));
+}
 /// A link with a preview card in the demo.
 const RELEASE_NOTES: &str = "https://bettermatrix.example.org/blog/0.2";
 const KAI: &str = "@kai:example.org";
@@ -71,7 +113,7 @@ pub fn seed(s: &mut State) {
         can_ban: true,
         can_set_roles: true,
     };
-    apply(s, Event::Members { account: AccountId::new(ADA), room_id: DEMO_THREAD.0.into(), members });
+    apply(s, Event::Members { request: None, account: AccountId::new(ADA), room_id: DEMO_THREAD.0.into(), members });
     let verified = Security { session_verified: true, recovery: RecoveryStatus::Enabled };
     apply(s, Event::SecurityChanged { account: AccountId::new(ADA), security: verified });
     let fresh = Security { session_verified: false, recovery: RecoveryStatus::Enabled };
@@ -315,7 +357,11 @@ fn add_account(s: &mut State, user_id: &str, name: &str, server: &str, sign_in: 
             sign_in,
         }),
     );
-    let list = RoomList { rooms: fixture.rooms.iter().map(|(room, _)| room.clone()).collect(), spaces: fixture.spaces };
+    let list = RoomList {
+        rooms: fixture.rooms.iter().map(|(room, _)| room.clone()).collect(),
+        spaces: fixture.spaces,
+        invitations: Vec::new(),
+    };
     apply(s, Event::RoomsUpdated { account: account.clone(), list });
     for (room, messages) in fixture.rooms {
         if let Some(last) = messages.last() {
@@ -418,7 +464,13 @@ fn call_card(video: Option<bool>) -> MessageContent {
 }
 
 fn dm(id: &str, with: &str, name: &str, unread: u64) -> RoomSummary {
-    RoomSummary { kind: RoomKind::Direct, dm_users: vec![with.into()], ..room(id, name, None, unread, unread) }
+    RoomSummary {
+        kind: RoomKind::Direct,
+        dm_users: vec![with.into()],
+        member_count: 2,
+        active_member_count: 2,
+        ..room(id, name, None, unread, unread)
+    }
 }
 
 fn space(id: &str, name: &str, children: &[&str], members: &[&str]) -> SpaceSummary {
@@ -618,7 +670,13 @@ pub fn stress(s: &mut State) {
     let mut rooms: Vec<RoomSummary> =
         (0..400).map(|n| room(&format!("!stress-{n}:example.org"), &format!("room {n}"), None, n % 7, 0)).collect();
     rooms.push(room("!big:example.org", "big", Some("Thousands of messages"), 0, 0));
-    apply(s, Event::RoomsUpdated { account: account.clone(), list: RoomList { rooms, spaces: Vec::new() } });
+    apply(
+        s,
+        Event::RoomsUpdated {
+            account: account.clone(),
+            list: RoomList { rooms, spaces: Vec::new(), invitations: Vec::new() },
+        },
+    );
     let start = 1_763_000_000_000u64;
     let messages: Vec<Message> = (0..2000)
         .map(|n| Message {

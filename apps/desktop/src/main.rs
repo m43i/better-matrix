@@ -29,6 +29,21 @@ fn spec() -> AppSpec<State> {
         min_size: Some((720.0, 480.0)),
         scenes: &[
             ("demo", demo::seed),
+            ("demo-invitation", demo::invitation),
+            ("demo-discovery", demo::discovery),
+            ("demo-public-rooms", |s| {
+                demo::discovery(s);
+                s.browse_public_rooms();
+            }),
+            ("demo-invitations-home", |s| {
+                demo::invitation(s);
+                s.close_modal();
+            }),
+            ("demo-invitations-collapsed", |s| {
+                demo::invitation(s);
+                s.close_modal();
+                s.toggle_section(state::INVITATIONS);
+            }),
             ("demo-light", |s| {
                 demo::seed(s);
                 s.settings.appearance = Appearance::Light;
@@ -491,6 +506,273 @@ mod tests {
         rt
     }
 
+    fn unread_timeline(s: &mut State, messages: usize) {
+        demo::seed(s);
+        s.select_room(demo::DEMO_THREAD.0);
+        let mut entries =
+            vec![matrix_core::TimelineEntry { id: "new-marker".into(), kind: matrix_core::EntryKind::ReadMarker }];
+        entries.extend((0..messages).map(|i| matrix_core::TimelineEntry {
+            id: format!("unread-{i}"),
+            kind: matrix_core::EntryKind::Message(Box::new(matrix_core::Message {
+                event_id: format!("$unread-{i}"),
+                sender_id: "@grace:example.org".into(),
+                sender_name: "Grace".into(),
+                content: matrix_core::MessageContent::Text { body: "A new message".into(), html: None },
+                ..Default::default()
+            })),
+        }));
+        s.apply(
+            matrix_core::Event::TimelineChanged {
+                account: matrix_core::AccountId::new(demo::ADA),
+                key: matrix_core::TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![matrix_core::TimelineDiff::Reset(entries)],
+            },
+            &mut rune::Tx::default(),
+        );
+    }
+
+    #[test]
+    fn a_new_marker_visible_on_open_should_fade_away() {
+        let mut rt = runtime(|s| unread_timeline(s, 2));
+        assert!(rt.presented("new-marker").is_some());
+        for _ in 0..240 {
+            rt.frame(1.0 / 60.0);
+        }
+        assert!(rt.presented("new-marker").is_none());
+    }
+
+    #[test]
+    fn a_new_marker_should_fade_slowly_after_it_is_seen() {
+        let mut rt = runtime(|s| unread_timeline(s, 2));
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        let (_, opacity) = rt.presented("new-marker").expect("the marker is still fading");
+        assert!(opacity > 0.1 && opacity < 1.0, "opacity: {opacity}");
+    }
+
+    #[test]
+    fn scrolling_up_to_the_new_marker_should_dismiss_it() {
+        let mut rt = runtime(|s| unread_timeline(s, 80));
+        for _ in 0..240 {
+            rt.frame(1.0 / 60.0);
+        }
+        rt.update(|_, tx| tx.scroll_to_instant("timeline", 0.0, 0.0));
+        for _ in 0..240 {
+            rt.frame(1.0 / 60.0);
+        }
+        assert!(rt.presented("new-marker").is_none());
+    }
+
+    #[test]
+    fn a_new_marker_outside_the_viewport_should_wait_to_be_seen() {
+        let mut rt = runtime(|s| unread_timeline(s, 80));
+        for _ in 0..240 {
+            rt.frame(1.0 / 60.0);
+        }
+        let account = matrix_core::AccountId::new(demo::ADA);
+        let key = matrix_core::TimelineKey::room(demo::DEMO_THREAD.0);
+        let timeline = rt.state.accounts.get(&account).and_then(|data| data.timeline(&key)).expect("the timeline");
+        assert!(!timeline.read_marker_seen("new-marker"));
+    }
+
+    fn incoming_boundary(s: &mut State, tx: &mut rune::Tx) {
+        use matrix_core::{EntryKind, Event, Message, TimelineDiff, TimelineEntry};
+        s.apply(
+            Event::TimelineChanged {
+                account: matrix_core::AccountId::new(demo::ADA),
+                key: matrix_core::TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![
+                    TimelineDiff::Remove { index: 0 },
+                    TimelineDiff::PushBack(TimelineEntry { id: "incoming-marker".into(), kind: EntryKind::ReadMarker }),
+                    TimelineDiff::PushBack(TimelineEntry {
+                        id: "incoming".into(),
+                        kind: EntryKind::Message(Box::new(Message {
+                            event_id: "$incoming".into(),
+                            sender_id: "@grace:example.org".into(),
+                            sender_name: "Grace".into(),
+                            ..Default::default()
+                        })),
+                    }),
+                ],
+            },
+            tx,
+        );
+    }
+
+    #[test]
+    fn following_live_at_the_bottom_should_not_flash_another_new_marker() {
+        let mut rt = runtime(|s| unread_timeline(s, 2));
+        for _ in 0..240 {
+            rt.frame(1.0 / 60.0);
+        }
+        assert!(rt.state.at_bottom.load(std::sync::atomic::Ordering::Relaxed));
+        rt.update(incoming_boundary);
+        rt.frame(1.0 / 60.0);
+        assert!(rt.presented("incoming-marker").is_none(), "a live boundary should never be mounted");
+    }
+
+    #[test]
+    fn an_acknowledged_line_should_stay_hidden_when_receipts_advance_while_scrolled_up() {
+        let mut rt = runtime(|s| unread_timeline(s, 2));
+        for _ in 0..240 {
+            rt.frame(1.0 / 60.0);
+        }
+        rt.state.at_bottom.store(false, std::sync::atomic::Ordering::Relaxed);
+        rt.update(incoming_boundary);
+        let account = matrix_core::AccountId::new(demo::ADA);
+        let key = matrix_core::TimelineKey::room(demo::DEMO_THREAD.0);
+        assert!(rt.state.accounts.get(&account).unwrap().timeline(&key).unwrap().read_marker_seen("incoming-marker"));
+        rt.frame(1.0 / 60.0);
+        assert!(rt.presented("incoming-marker").is_none());
+    }
+
+    #[test]
+    fn an_incoming_marker_while_unfocused_should_wait_until_focus_returns() {
+        let mut rt = runtime(|s| unread_timeline(s, 2));
+        for _ in 0..240 {
+            rt.frame(1.0 / 60.0);
+        }
+        rt.update(|s, _| s.focus_changed(false));
+        rt.update(incoming_boundary);
+        for _ in 0..240 {
+            rt.frame(1.0 / 60.0);
+        }
+        let (_, opacity) = rt.presented("incoming-marker").expect("unread while away");
+        assert_eq!(opacity, 1.0);
+        rt.update(|s, _| s.focus_changed(true));
+        for _ in 0..240 {
+            rt.frame(1.0 / 60.0);
+        }
+        assert!(rt.presented("incoming-marker").is_none());
+    }
+
+    #[test]
+    fn loaded_members_should_correct_a_stale_zero_in_the_room_header() {
+        let rt = runtime(|s| {
+            demo::seed(s);
+            s.select_room(demo::DEMO_THREAD.0);
+            let id = matrix_core::AccountId::new(demo::ADA);
+            let data = s.accounts.get(&id).expect("account");
+            let (mut rooms, spaces) = (data.rooms.clone(), data.spaces.clone());
+            for room in &mut rooms {
+                room.member_count = 0;
+            }
+            s.accounts.set_room_list(&id, matrix_core::RoomList { rooms, spaces, ..Default::default() });
+        });
+        let button =
+            rt.elements().into_iter().find(|e| e.key.as_deref() == Some("room-members")).expect("members button");
+        assert_eq!(button.label.as_deref(), Some("4 members"));
+    }
+
+    #[test]
+    fn refreshing_members_should_keep_the_list_and_search_visible() {
+        let mut rt = runtime(|s| {
+            demo::seed(s);
+            s.select_room(demo::DEMO_THREAD.0);
+            s.show_side(state::SidePanel::Members);
+            s.member_search = rune::TextEdit::new("Grace");
+        });
+        assert!(rt.find("member-@grace:example.org").is_some());
+        rt.update(|s, tx| {
+            s.apply(
+                matrix_core::Event::MembersInvalidated {
+                    account: matrix_core::AccountId::new(demo::ADA),
+                    room_id: demo::DEMO_THREAD.0.into(),
+                },
+                tx,
+            )
+        });
+        rt.frame(1.0 / 60.0);
+        assert!(rt.find("member-@grace:example.org").is_some());
+        assert_eq!(rt.state.member_search.text, "Grace");
+        assert!(!rt.elements().iter().any(|element| element.text.as_deref() == Some("Loading members…")));
+    }
+
+    #[test]
+    fn a_direct_chats_info_should_omit_the_people_link() {
+        let rt = runtime(|s| {
+            demo::seed(s);
+            s.select_room("!dm-grace:example.org");
+            s.show_side(state::SidePanel::Info);
+        });
+        assert!(rt.find("info-members").is_none());
+    }
+
+    #[test]
+    fn an_invitation_preview_should_offer_accept_and_decline() {
+        let rt = runtime(demo::invitation);
+        assert!(rt.find("invitation-accept").is_some() && rt.find("invitation-decline").is_some());
+    }
+
+    #[test]
+    fn collapsing_invitations_should_keep_the_counter_and_hide_its_rooms() {
+        let mut rt = runtime(|s| {
+            demo::invitation(s);
+            s.close_modal();
+        });
+        press(&mut rt, "section-header-invitations");
+        let header = rt
+            .elements()
+            .into_iter()
+            .find(|element| element.key.as_deref() == Some("section-header-invitations"))
+            .expect("invitation section");
+        assert!(
+            header.label.as_deref() == Some("Invitations (1)") && rt.find("invitation-!design:example.org").is_none()
+        );
+    }
+
+    #[test]
+    fn the_home_overview_should_show_invitations_outside_spaces() {
+        let rt = runtime(|s| {
+            demo::invitation(s);
+            s.close_modal();
+        });
+        assert!(rt.find("overview-invitation-!design:example.org").is_some());
+    }
+
+    #[test]
+    fn invitation_names_should_align_with_normal_room_names() {
+        let rt = runtime(|s| {
+            demo::invitation(s);
+            s.close_modal();
+        });
+        let elements = rt.elements();
+        let invite = elements
+            .iter()
+            .find(|element| element.key.as_deref() == Some("invitation-!design:example.org"))
+            .expect("invite");
+        let room = elements
+            .iter()
+            .find(|element| element.key.as_deref() == Some("room-!lab:example.org"))
+            .expect("normal room");
+        let invite_name = elements
+            .iter()
+            .find(|element| element.text.as_deref() == Some("Design") && element.path.starts_with(&invite.path))
+            .expect("invitation name");
+        let room_name = elements
+            .iter()
+            .find(|element| element.text.as_deref() == Some("lab") && element.path.starts_with(&room.path))
+            .expect("room name");
+        assert_eq!((invite_name.rect[0], invite.rect[3]), (room_name.rect[0], room.rect[3]));
+    }
+
+    #[test]
+    fn a_spaces_more_button_should_open_all_public_rooms() {
+        let mut rt = runtime(demo::discovery);
+        press(&mut rt, "public-rooms-more");
+        assert!(rt.find("public-rooms").is_some());
+    }
+
+    #[test]
+    fn a_call_card_should_have_no_message_actions() {
+        let rt = runtime(|s| {
+            demo::seed(s);
+            s.select_room("!dm-kai:example.org");
+        });
+        assert!(rt.find("actions-$demo-@kai:example.org-0").is_none());
+    }
+
     #[test]
     fn a_dialog_in_a_short_window_should_keep_its_buttons_in_view() {
         let mut s = State::detached();
@@ -542,7 +824,7 @@ mod tests {
             for room in rooms.iter_mut().filter(|room| room.room_id == "!dm-kai:example.org") {
                 room.call.via = None;
             }
-            s.accounts.set_room_list(&account, matrix_core::RoomList { rooms, spaces });
+            s.accounts.set_room_list(&account, matrix_core::RoomList { rooms, spaces, invitations: Vec::new() });
         });
         assert!(rt.find("call-card-join-$demo-@kai:example.org-0").is_none());
     }
@@ -578,21 +860,32 @@ mod tests {
         let rt = runtime(|s| {
             demo::seed(s);
             s.select_room("!dm-grace:example.org");
+            let account = matrix_core::AccountId::new(demo::ADA);
+            let key = matrix_core::TimelineKey::room("!dm-grace:example.org");
+            s.accounts.timeline_mut(&account, &key).expect("timeline").apply(vec![
+                matrix_core::TimelineDiff::PushBack(matrix_core::TimelineEntry {
+                    id: "own-text".into(),
+                    kind: matrix_core::EntryKind::Message(Box::new(matrix_core::Message {
+                        event_id: "$own-text".into(),
+                        sender_id: demo::ADA.into(),
+                        sender_name: "Ada".into(),
+                        content: matrix_core::MessageContent::Text { body: "Hello".into(), html: None },
+                        ..Default::default()
+                    })),
+                }),
+            ]);
         });
-        assert!(rt.find("more-$demo-@ada:example.org-0").is_some());
+        assert!(rt.find("more-$own-text").is_some());
         assert!(rt.find("more-$demo-@grace:example.org-1").is_none());
     }
 
     #[test]
-    fn the_more_menu_of_a_call_card_should_offer_delete_but_not_edit() {
+    fn the_users_own_call_card_should_offer_no_more_menu() {
         let rt = runtime(|s| {
             demo::seed(s);
             s.select_room("!dm-grace:example.org");
-            let key = matrix_core::TimelineKey::room("!dm-grace:example.org");
-            s.toggle_popover(Popover::MessageMenu { key, event_id: "$demo-@ada:example.org-0".into() });
         });
-        assert!(rt.find("message-delete").is_some());
-        assert!(rt.find("message-edit").is_none());
+        assert!(rt.find("more-$demo-@ada:example.org-0").is_none());
     }
 
     #[test]
