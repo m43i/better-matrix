@@ -558,7 +558,7 @@ pub struct State {
     /// What the shown room was last told about the user's typing.
     typing: typing::Typing,
     receipts: receipts::Receipts,
-    /// Land the next commit without animation: a room or thread was opened.
+    /// Land the next commit without animation: a room was opened.
     settle_next: bool,
     /// A room being dragged in the sidebar, and the section it is over.
     pub dragging: Option<SidebarDrag>,
@@ -978,7 +978,12 @@ impl State {
                         .is_some_and(RoomTimeline::may_mark_fully_read);
                 // A timeline's first content lands as it is, rather than easing in row by row.
                 if diffs.iter().any(|diff| matches!(diff, matrix_core::TimelineDiff::Reset(_))) {
-                    tx.settle();
+                    if key.thread.is_none() {
+                        tx.settle();
+                    } else {
+                        // A thread snapshot must not repin the room's sticky viewport.
+                        tx.instant();
+                    }
                 }
                 if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
                     timeline.apply(diffs);

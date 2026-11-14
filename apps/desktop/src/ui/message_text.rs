@@ -88,7 +88,7 @@ fn inline(key: &str, edit: &TextEdit, range: std::ops::Range<usize>, block: Bloc
         .font(font::BODY)
         .color(p.text)
         .self_start()
-        .min_w(0.0)
+        .shrink()
         .min_h(22.0)
         .wrap()
         .strikes(strikes)
@@ -150,5 +150,26 @@ mod tests {
         );
         assert_eq!(words.iter().filter(|word| **word == "•").count(), 2);
         assert!(words.contains(&"1.") && words.contains(&"2.") && !words.contains(&"3."));
+    }
+
+    fn long_blocks(_: &State, _: &mut rune::Cx<State>) -> El {
+        let words = "word ".repeat(60);
+        let edit = TextEdit::from_html(&format!(
+            "<ul><li>{words}</li></ul><ol><li>{words}</li></ol><blockquote>{words}</blockquote><pre><code>{words}</code></pre>"
+        ));
+        formatted("message", &edit, &super::super::theme::palette(true))
+    }
+
+    #[test]
+    fn long_lists_quotes_and_code_should_wrap_within_the_message() {
+        let mut rt = Runtime::new(State::detached(), long_blocks, (300.0, 1100.0), Env::new(true, 1.0));
+        rt.frame(0.0);
+        let blocks: Vec<_> =
+            rt.elements().into_iter().filter(|e| e.text.as_ref().is_some_and(|text| text.len() > 50)).collect();
+        assert_eq!(blocks.len(), 4);
+        for block in blocks {
+            assert!(block.rect[0] + block.rect[2] <= 300.5, "overflow: {:?}", block.rect);
+            assert!(block.rect[3] > 22.0, "the block must wrap");
+        }
     }
 }

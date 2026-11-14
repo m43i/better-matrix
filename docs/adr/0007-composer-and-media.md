@@ -17,7 +17,7 @@ screenshots, voice memos, and images and PDFs that open large.
     strike, code, links, lists, quotes, code blocks.
   - Formatted text is sent as `to_html()` with the plain body; unformatted text goes plain.
   - Received HTML is parsed once on arrival with `TextEdit::from_html` (a sanitising parser)
-    and shown in a non-focusable text input. Every bare web address in a message, plain or
+    and shown as selectable read-only text. Every bare web address in a message, plain or
     formatted, becomes a link mark there too (`links::link_ranges`), except inside code and
     where the sender already linked the words; plain text without links stays plain selectable
     text. Pressing a link opens it in the browser (`on_link`, `State::open_link`).
@@ -25,6 +25,10 @@ screenshots, voice memos, and images and PDFs that open large.
     the selection (`Composer::paste_link`, one undo step); text typed after it is plain.
   - `Format` lists every toolbar action; the toolbar renders the list.
 - **Composer layout:**
+  - Room and thread editors grow up to eight lines, then scroll inside their own viewport,
+    keeping the caret visible while typing or pasting. Padding and the bottom bar stay outside
+    that viewport so the controls remain visible; clicking its padding focuses the editor.
+    The editor shrinks again when text is removed.
   - The field comes first. A bottom bar holds attach, emoji, `Aa`, voice memo and poll, with send at
     the right. The formatting toolbar shows only while `Aa` is on.
   - Both bars `preserve_focus_on_press` and their buttons don't take focus, so formatting and

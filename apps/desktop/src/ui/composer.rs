@@ -4,13 +4,17 @@
 //! bars leave the field focused, so formatting and emoji go where the caret is. Keys carry the
 //! composer's prefix, so both can be on screen at once.
 
-use rune::{Color, El, Key, col, el, icon, row, text, text_input};
+use rune::{Color, El, Key, auto_grow, col, el, icon, row, text, text_input};
 
 use super::components::icon_button;
 use super::icons;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf};
 use crate::state::{ComposerTarget, EmojiFor, Format, Popover, State, composer_field};
+
+const EDITOR_LINES: usize = 8;
+const EDITOR_TOP: f32 = 14.0;
+const EDITOR_BOTTOM: f32 = 8.0;
 
 /// A key unique to this composer.
 fn key(target: ComposerTarget, name: &str) -> String {
@@ -28,10 +32,6 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
         .color(p.text)
         .w_full()
         .min_h(24.0)
-        .max_h(240.0)
-        .px(16.0)
-        .pt(14.0)
-        .pb(8.0)
         .on_edit(move |s: &mut State| &mut s.composer_mut(target).edit)
         .on_submit(move |s: &mut State, tx| s.send_message(target, tx))
         // A pasted image or file joins the draft as an attachment; text pastes as usual.
@@ -57,6 +57,15 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
                 _ => false,
             }
         });
+    let input = col()
+        .key(key(target, "composer-editor"))
+        .w_full()
+        .px(16.0)
+        .pt(EDITOR_TOP)
+        .pb(EDITOR_BOTTOM)
+        .cursor(rune::Cursor::Text)
+        .on_press_tx(move |_: &mut State, tx| tx.focus(composer_field(target), false))
+        .child(auto_grow(input, 1, EDITOR_LINES).key(key(target, "composer-scroll")));
 
     let mut frame = col()
         .key(key(target, "composer-frame"))

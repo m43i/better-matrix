@@ -699,6 +699,110 @@ mod tests {
         let after = rt.presented(anchor.key.as_deref().unwrap()).expect("the same reading anchor").0;
         assert!((anchor.rect[1] - after[1]).abs() < 1.0, "anchor moved: {:?} -> {after:?}", anchor.rect);
         assert_eq!(rt.scroll_at_bottom("timeline"), Some(false));
+        let root = rt.state.active_thread().expect("the opened thread").to_owned();
+        let account = matrix_core::AccountId::new(demo::ADA);
+        let key = matrix_core::TimelineKey::thread("!big:example.org", &root);
+        let root = rt
+            .state
+            .accounts
+            .get(&account)
+            .and_then(|data| data.timeline(&key))
+            .and_then(|timeline| timeline.messages().next())
+            .expect("the seeded root")
+            .clone();
+        // The real engine sends a first snapshot, then may replace it during SDK catch-up.
+        for snapshot in ["sdk-first", "sdk-catchup"] {
+            rt.update(|s, tx| {
+                s.apply(
+                    matrix_core::Event::TimelineChanged {
+                        account: account.clone(),
+                        key: key.clone(),
+                        diffs: vec![matrix_core::TimelineDiff::Reset(vec![matrix_core::TimelineEntry {
+                            id: snapshot.into(),
+                            kind: matrix_core::EntryKind::Message(Box::new(root.clone())),
+                        }])],
+                    },
+                    tx,
+                )
+            });
+            for _ in 0..120 {
+                rt.frame(1.0 / 60.0);
+            }
+            assert_eq!(rt.scroll_at_bottom("timeline"), Some(false), "after {snapshot}");
+            let after = rt.presented(anchor.key.as_deref().unwrap()).expect("the same reading anchor").0;
+            assert!((anchor.rect[1] - after[1]).abs() < 1.0, "anchor moved after {snapshot}");
+        }
+    }
+
+    #[test]
+    fn long_drafts_should_scroll_inside_capped_room_and_thread_composers() {
+        for (target, field, scroll) in [
+            (state::ComposerTarget::Room, "composer", "composer-scroll"),
+            (state::ComposerTarget::Thread, "thread-composer", "thread-composer-scroll"),
+        ] {
+            let mut rt = runtime(|s| {
+                demo::seed(s);
+                s.select_room(demo::DEMO_THREAD.0);
+            });
+            if target == state::ComposerTarget::Thread {
+                rt.update(|s, _| s.open_thread(demo::DEMO_THREAD.1));
+            }
+            rt.settle_all();
+            rt.frame(1.0 / 60.0);
+            rt.paste("Another line\n".repeat(40));
+            rt.settle_all();
+            rt.frame(1.0 / 60.0);
+            assert!(rt.state.composer(target).edit.text.lines().count() >= 40);
+            let viewport = rt.presented(scroll).expect("the editor scroll viewport").0;
+            assert!(viewport[3] <= 176.5, "the editor stops at eight lines: {viewport:?}");
+            let input = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(field)).unwrap();
+            let caret = input.caret.expect("the last line's caret");
+            assert!(
+                caret[1] >= viewport[1] - 1.0 && caret[1] + caret[3] <= viewport[1] + viewport[3] + 1.0,
+                "the newest line stays visible: {caret:?}, viewport {viewport:?}"
+            );
+            let (x, y) = rt.find(scroll).unwrap();
+            rt.wheel(x, y, 120.0);
+            for _ in 0..60 {
+                rt.frame(1.0 / 60.0);
+            }
+            let moved = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(field)).unwrap();
+            assert!(moved.scrolled[1] < input.scrolled[1], "scrolling reaches earlier draft lines");
+            assert_eq!(rt.scroll_at_bottom("timeline"), Some(true), "the chat must not scroll");
+            rt.update(|s, _| {
+                let edit = &mut s.composer_mut(target).edit;
+                edit.set_selection(0, edit.text.len());
+                edit.insert("Short draft");
+            });
+            rt.settle_all();
+            rt.frame(1.0 / 60.0);
+            let short = rt.presented(scroll).unwrap().0;
+            assert!(short[3] < viewport[3], "removing lines shrinks the editor again");
+        }
+    }
+
+    #[test]
+    fn clicking_composer_padding_should_focus_its_editor() {
+        let mut rt = runtime(|s| {
+            demo::seed(s);
+            s.select_room(demo::DEMO_THREAD.0);
+            s.open_thread(demo::DEMO_THREAD.1);
+        });
+        rt.settle_all();
+        rt.frame(1.0 / 60.0);
+        for (target, scroll) in [
+            (state::ComposerTarget::Room, "composer-scroll"),
+            (state::ComposerTarget::Thread, "thread-composer-scroll"),
+        ] {
+            let viewport = rt.presented(scroll).unwrap().0;
+            let (x, y) = (viewport[0] - 8.0, viewport[1] + viewport[3] / 2.0);
+            rt.pointer_down(x, y);
+            rt.pointer_up(x, y);
+            rt.frame(1.0 / 60.0);
+            rt.paste("Typed after clicking padding");
+            rt.frame(1.0 / 60.0);
+            assert_eq!(rt.state.composer(target).edit.text, "Typed after clicking padding");
+        }
     }
 
     #[test]
