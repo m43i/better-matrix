@@ -73,7 +73,9 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette) -> El {
 /// The event whose reaction picker is open in this timeline, for keeping its toolbar shown.
 pub fn picking<'a>(s: &'a State, key: &TimelineKey) -> Option<&'a str> {
     match &s.popover {
-        Some(Popover::Emoji(EmojiFor::Reaction { key: open, event_id })) if open == key => Some(event_id),
+        Some(
+            Popover::Emoji(EmojiFor::Reaction { key: open, event_id }) | Popover::MessageMenu { key: open, event_id },
+        ) if open == key => Some(event_id),
         _ => None,
     }
 }

@@ -81,6 +81,7 @@ icons! {
     KEY = "key": r#"<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8M17 5l3 3M14.5 7.5l2 2"/>"#;
     SHIELD = "shield": r#"<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>"#;
     LAPTOP = "laptop": r#"<rect x="4" y="4" width="16" height="11" rx="2"/><path d="M2 20h20"/>"#;
+    MORE = "more": r#"<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>"#;
     PENCIL = "pencil": r#"<path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>"#;
     GLOBE = "globe": r#"<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/>"#;
 }

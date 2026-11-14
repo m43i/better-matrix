@@ -76,6 +76,11 @@ pub enum Popover {
     },
     /// The emoji picker, for a reaction or for a composer.
     Emoji(EmojiFor),
+    /// More that can be done with one of the user's messages: edit it, delete it.
+    MessageMenu {
+        key: TimelineKey,
+        event_id: String,
+    },
     /// What can be done with a member, from the member list: start a chat, call, invite to
     /// another room, and with the rights, kick, ban or change their role.
     MemberMenu {
@@ -3080,6 +3085,7 @@ impl State {
     /// Starts editing one of the user's text messages in a composer.
     pub fn start_edit(&mut self, target: ComposerTarget, message: &Message, tx: &mut Tx) {
         let MessageContent::Text { body, html } = &message.content else { return };
+        self.popover = None;
         self.composer_mut(target).start_edit(&message.event_id, body, html.as_deref());
         tx.focus(composer_field(target), false);
     }

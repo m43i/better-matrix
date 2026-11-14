@@ -553,6 +553,28 @@ mod tests {
     }
 
     #[test]
+    fn only_the_users_own_messages_should_have_a_more_menu() {
+        let rt = runtime(|s| {
+            demo::seed(s);
+            s.select_room("!dm-grace:example.org");
+        });
+        assert!(rt.find("more-$demo-@ada:example.org-0").is_some());
+        assert!(rt.find("more-$demo-@grace:example.org-1").is_none());
+    }
+
+    #[test]
+    fn the_more_menu_of_a_call_card_should_offer_delete_but_not_edit() {
+        let rt = runtime(|s| {
+            demo::seed(s);
+            s.select_room("!dm-grace:example.org");
+            let key = matrix_core::TimelineKey::room("!dm-grace:example.org");
+            s.toggle_popover(Popover::MessageMenu { key, event_id: "$demo-@ada:example.org-0".into() });
+        });
+        assert!(rt.find("message-delete").is_some());
+        assert!(rt.find("message-edit").is_none());
+    }
+
+    #[test]
     fn without_accounts_the_window_should_show_sign_in() {
         let rt = runtime(|_| {});
         assert!(rt.find("sign-in-card").is_some());

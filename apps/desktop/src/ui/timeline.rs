@@ -666,24 +666,46 @@ fn toolbar(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
             button(&icons::THREAD, t!("actions.thread"), "thread").on_press(move |s: &mut State| s.open_thread(&root)),
         );
     }
-    // The user's own messages: text can be edited, and anything not deleted yet deleted.
-    if message.sender_id == cx.account.as_str() {
-        if matches!(message.content, MessageContent::Text { .. }) {
-            let edited = message.clone();
-            bar = bar.child(
-                button(&icons::PENCIL, t!("actions.edit"), "edit")
-                    .on_press_tx(move |s: &mut State, tx| s.start_edit(target, &edited, tx)),
-            );
-        }
-        if !matches!(message.content, MessageContent::Redacted) {
-            let (key, deleted) = (cx.key.clone(), event_id.clone());
-            bar = bar.child(
-                button(&icons::TRASH, t!("actions.delete"), "delete")
-                    .on_press(move |s: &mut State| s.delete_message(key.clone(), &deleted)),
-            );
-        }
+    // The user's own messages: more, in a menu (edit, delete).
+    if message.sender_id == cx.account.as_str() && !matches!(message.content, MessageContent::Redacted) {
+        let (key, id) = (cx.key.clone(), event_id.clone());
+        bar = bar.child(button(&icons::MORE, t!("actions.more"), "more").on_press(move |s: &mut State| {
+            s.toggle_popover(Popover::MessageMenu { key: key.clone(), event_id: id.clone() });
+        }));
     }
     bar
+}
+
+/// The menu of one of the user's messages, under its toolbar's ⋮: edit (text only) and delete.
+pub fn message_menu(s: &State, key: &TimelineKey, event_id: &str, p: &Palette) -> Vec<El> {
+    use super::components::{Tone, menu_action, popover_panel};
+    let message = s.nav.account.as_ref().and_then(|account| s.accounts.get(account)).and_then(|data| {
+        data.timeline(key)?.entries.iter().find_map(|entry| match &entry.kind {
+            EntryView::Message(item) if item.message.event_id == event_id => Some(item.message.clone()),
+            _ => None,
+        })
+    });
+    let Some(message) = message else { return Vec::new() };
+    let (target, thread) = match key.thread {
+        None => (ComposerTarget::Room, ""),
+        Some(_) => (ComposerTarget::Thread, "thread-"),
+    };
+    let mut panel = popover_panel(p).key("message-menu").w(200.0);
+    if matches!(message.content, MessageContent::Text { .. }) {
+        panel = panel.child(
+            menu_action(&icons::PENCIL, t!("actions.edit"), Tone::Normal, p)
+                .key("message-edit")
+                .on_press_tx(move |s: &mut State, tx| s.start_edit(target, &message, tx)),
+        );
+    }
+    let (key, deleted) = (key.clone(), event_id.to_owned());
+    panel = panel.child(
+        menu_action(&icons::TRASH, t!("actions.delete"), Tone::Danger, p)
+            .key("message-delete")
+            .on_press(move |s: &mut State| s.delete_message(key.clone(), &deleted)),
+    );
+    let anchor = format!("{thread}more-{event_id}");
+    vec![rune::col().child(panel).anchored(anchor, rune::Side::Bottom, rune::Align::End, 4.0)]
 }
 
 /// The message a reply answers: who wrote it and an excerpt, behind a bar.

@@ -60,8 +60,9 @@ see who is typing there.
   reply and thread relations and shows a pending message at once. The room's send queue
   persists it, retries offline and resumes after a restart.
 - **Editing and deleting:** the user's own text messages can be edited (`Command::Edit`, through
-  the timeline's `edit`) and any of their messages deleted (`Command::Redact`), from the hover
-  toolbar; deleting asks first (`Confirm::DeleteMessage`). Up in an empty composer edits the
+  the timeline's `edit`) and any of their messages deleted (`Command::Redact`), from the menu
+  under the hover toolbar's ⋮ (`Popover::MessageMenu`), which only the user's own messages
+  have; deleting asks first (`Confirm::DeleteMessage`). Up in an empty composer edits the
   user's newest text message there; the composer then holds the message (`Composer::editing`)
   under an "Editing your message" bar, Escape stops, and sending changes the message. An
   emptied edit isn't sent.

@@ -80,6 +80,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         (Some(Popover::MemberMenu { user_id, submenu }), Some(account)) => {
             members::menu(s, account, user_id, *submenu, &p)
         }
+        (Some(Popover::MessageMenu { key, event_id }), _) => timeline::message_menu(s, key, event_id, &p),
         (Some(Popover::Emoji(chosen_for)), _) => {
             let anchor = match chosen_for {
                 EmojiFor::Reaction { key, event_id } => match key.thread {
