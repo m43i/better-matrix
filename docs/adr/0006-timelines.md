@@ -34,6 +34,8 @@ see who is typing there.
   - Opening loads a page if the timeline holds fewer. Scrolling within a screen of the oldest
     loaded message loads the page before it (`Command::LoadOlder`, `Event::HistoryLoaded`).
   - The viewport holds the reading position as older messages arrive above it.
+    Opening a thread keeps that anchor through the room's narrower layout; it does not settle
+    the whole window, which would move sticky timelines back to their bottom.
   - Gaps from time offline fill in place through the same pagination.
 - **Start of history:** the server enforces history visibility; paging back returns only what
   the user may read.
@@ -107,6 +109,9 @@ see who is typing there.
     or thread actions. A call card keeps its call-specific controls.
   - Posted formatted messages use selectable read-only text, with inline links, rather than
     text fields. Links show the pointer; surrounding text keeps the text cursor.
+    Plain and formatted text boxes fit their content instead of filling the row: message text
+    keeps selection, while empty row space shows the pointer and opens the thread. Links and
+    media keep their own actions.
 - **Polls** (MSC3381, unstable events as clients send them): `MessageContent::Poll` from the
   SDK's poll results, with each answer's votes, the user's picks, the voters and whether it
   ended. A card shows the question and answers; a press votes (`Command::VotePoll`; in a

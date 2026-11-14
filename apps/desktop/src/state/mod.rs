@@ -3368,7 +3368,7 @@ impl State {
         self.nav.threads.insert(account, root_event_id.to_owned());
         // The thread takes the side panel's place beside the room.
         self.side = None;
-        self.settle_next = true;
+        // Keep the room's reading anchor: a window-wide settle would snap it to the bottom.
         self.composer.edit.focused = false;
         self.thread_composer.edit.focused = true;
         self.sync_timeline();

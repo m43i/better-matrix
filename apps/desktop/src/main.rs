@@ -532,6 +532,176 @@ mod tests {
     }
 
     #[test]
+    fn empty_space_beside_message_text_should_open_its_thread() {
+        let mut rt = runtime(|s| {
+            posted_message(s, matrix_core::MessageContent::Text { body: "A new message".into(), html: None })
+        });
+        rt.settle_all();
+        rt.frame(1.0 / 60.0);
+        let words = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("A new message")).unwrap();
+        let room = rt.presented("room").unwrap().0;
+        let (x, y) = (room[0] + room[2] - 40.0, words.rect[1] + words.rect[3] / 2.0);
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.cursor(), rune::Cursor::Pointer, "blank space beside the text");
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+        assert!(rt.state.active_thread().is_some());
+    }
+
+    fn posted_message(s: &mut State, content: matrix_core::MessageContent) {
+        demo::seed(s);
+        s.select_room(demo::DEMO_THREAD.0);
+        s.apply(
+            matrix_core::Event::TimelineChanged {
+                account: matrix_core::AccountId::new(demo::ADA),
+                key: matrix_core::TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![matrix_core::TimelineDiff::Reset(vec![matrix_core::TimelineEntry {
+                    id: "hit-test".into(),
+                    kind: matrix_core::EntryKind::Message(Box::new(matrix_core::Message {
+                        event_id: "$hit-test".into(),
+                        sender_id: "@grace:example.org".into(),
+                        sender_name: "Grace".into(),
+                        content,
+                        ..Default::default()
+                    })),
+                }])],
+            },
+            &mut rune::Tx::default(),
+        );
+    }
+
+    #[test]
+    fn empty_space_beside_formatted_message_text_should_open_its_thread() {
+        let mut rt = runtime(|s| {
+            posted_message(
+                s,
+                matrix_core::MessageContent::Text {
+                    body: "A new message".into(),
+                    html: Some("A <strong>new message</strong>".into()),
+                },
+            )
+        });
+        rt.settle_all();
+        rt.frame(1.0 / 60.0);
+        let words = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("A new message")).unwrap();
+        let room = rt.presented("room").unwrap().0;
+        let (x, y) = (room[0] + room[2] - 40.0, words.rect[1] + words.rect[3] / 2.0);
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.cursor(), rune::Cursor::Pointer);
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.state.active_thread(), Some("$hit-test"));
+    }
+
+    #[test]
+    fn selecting_message_text_should_keep_the_text_cursor_without_opening_a_thread() {
+        let mut rt = runtime(|s| {
+            posted_message(s, matrix_core::MessageContent::Text { body: "A new message".into(), html: None })
+        });
+        rt.settle_all();
+        rt.frame(1.0 / 60.0);
+        let words = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("A new message")).unwrap();
+        let (x, y) = (words.rect[0] + 1.0, words.rect[1] + words.rect[3] / 2.0);
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.cursor(), rune::Cursor::Text);
+        rt.pointer_down(x, y);
+        rt.frame(1.0 / 60.0);
+        rt.pointer_move(x + 70.0, y);
+        rt.frame(1.0 / 60.0);
+        rt.pointer_up(x + 70.0, y);
+        rt.frame(1.0 / 60.0);
+        assert!(rt.selected_text().is_some_and(|selected| !selected.is_empty()));
+        assert!(rt.state.active_thread().is_none());
+    }
+
+    #[test]
+    fn clicking_a_message_link_should_open_the_link_instead_of_a_thread() {
+        let mut rt = runtime(|s| {
+            posted_message(
+                s,
+                matrix_core::MessageContent::Text {
+                    body: "A link".into(),
+                    html: Some("A <a href='https://matrix.org'>link</a>".into()),
+                },
+            )
+        });
+        let (x, y) = rt.find("https://matrix.org").expect("the message link");
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.cursor(), rune::Cursor::Pointer);
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.take_url_requests(), ["https://matrix.org"]);
+        assert!(rt.state.active_thread().is_none());
+    }
+
+    #[test]
+    fn clicking_message_media_should_keep_its_preview_action() {
+        use matrix_core::{Attachment, AttachmentKind, MediaRef, MessageContent};
+        for (name, kind, key) in [
+            ("photo.png", AttachmentKind::Image, "image-photo.png"),
+            ("notes.pdf", AttachmentKind::File, "file-notes.pdf"),
+        ] {
+            let mut rt = runtime(|_| {});
+            rt.update(|s, _| {
+                posted_message(
+                    s,
+                    MessageContent::Attachment(Attachment {
+                        kind,
+                        name: name.into(),
+                        size: None,
+                        media: Some(MediaRef::opaque(name)),
+                        thumbnail: None,
+                        dimensions: Some((100, 100)),
+                    }),
+                )
+            });
+            rt.frame(1.0 / 60.0);
+            press(&mut rt, key);
+            assert!(rt.state.preview.is_some(), "{name} should open its preview");
+            assert!(rt.state.active_thread().is_none());
+        }
+    }
+
+    #[test]
+    fn opening_a_thread_should_keep_the_rooms_reading_position() {
+        let mut rt = runtime(demo::stress);
+        rt.poll = Some(|s, _, tx| s.poll(tx));
+        rt.settle_all();
+        rt.update(|_, tx| tx.scroll_to_instant("timeline", 0.0, 20_000.0));
+        for _ in 0..120 {
+            rt.frame(1.0 / 60.0);
+        }
+        assert_eq!(rt.scroll_at_bottom("timeline"), Some(false));
+        let viewport = rt.presented("timeline").unwrap().0;
+        let anchor = rt
+            .elements()
+            .into_iter()
+            .find(|e| {
+                e.key.as_deref().is_some_and(|key| key.starts_with("msg-"))
+                    && e.rect[1] + e.rect[3] > viewport[1]
+                    && e.rect[1] < viewport[1] + viewport[3]
+            })
+            .expect("a visible message");
+        let (x, y) = (anchor.rect[0] + 5.0, anchor.rect[1].max(viewport[1]) + 5.0);
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        for _ in 0..120 {
+            rt.frame(1.0 / 60.0);
+        }
+        assert!(rt.state.active_thread().is_some());
+        let after = rt.presented(anchor.key.as_deref().unwrap()).expect("the same reading anchor").0;
+        assert!((anchor.rect[1] - after[1]).abs() < 1.0, "anchor moved: {:?} -> {after:?}", anchor.rect);
+        assert_eq!(rt.scroll_at_bottom("timeline"), Some(false));
+    }
+
+    #[test]
     fn a_new_marker_visible_on_open_should_fade_away() {
         let mut rt = runtime(|s| unread_timeline(s, 2));
         assert!(rt.presented("new-marker").is_some());

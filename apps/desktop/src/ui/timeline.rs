@@ -953,7 +953,7 @@ fn text_body(event_id: &str, plain: &str, rich: Option<&rune::TextEdit>, p: &Pal
         None => text(plain.to_owned())
             .font(font::BODY)
             .color(p.text)
-            .w_full()
+            .self_start()
             .wrap()
             .selectable(true)
             .cursor(rune::Cursor::Text)
