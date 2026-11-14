@@ -10,7 +10,7 @@
 [![Release](https://img.shields.io/github/v/release/m43i/better-matrix?include_prereleases)](https://github.com/m43i/better-matrix/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-![Better Matrix](docs/desktop.png)
+![Better Matrix: signing in, a chat and a video call](docs/desktop.png)
 
 </div>
 
