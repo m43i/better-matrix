@@ -132,6 +132,11 @@ fn spec() -> AppSpec<State> {
                 ];
                 s.accounts.set_typing(&matrix_core::AccountId::new(demo::ADA), demo::DEMO_THREAD.0.into(), people);
             }),
+            ("demo-edit", |s| {
+                demo::seed(s);
+                s.select_room(demo::DEMO_THREAD.0);
+                s.composer.start_edit("$demo-edit", "Friday works for me, let's tag it then.", None);
+            }),
             ("demo-thread", |s| {
                 demo::seed(s);
                 s.select_room(demo::DEMO_THREAD.0);

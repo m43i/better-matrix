@@ -38,11 +38,24 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
         .on_input_paste(move |s: &mut State, content, _| s.paste_into_composer(target, content))
         .on_input_key(move |s: &mut State, key, tx| {
             s.composer_mut(target).before_key(key);
-            let send = key.key == Key::Enter && !key.mods.shift && s.composer(target).enter_sends();
-            if send {
-                s.send_message(target, tx);
+            let c = s.composer(target);
+            match key.key {
+                Key::Enter if !key.mods.shift && c.enter_sends() => {
+                    s.send_message(target, tx);
+                    true
+                }
+                // Up in an empty field edits the user's last message, as in other chat apps.
+                Key::Up if c.is_empty() && c.editing.is_none() => s.edit_last(target, tx),
+                Key::Escape if c.editing.is_some() => {
+                    s.cancel_edit(target);
+                    true
+                }
+                Key::Escape if c.reply_to.is_some() => {
+                    s.cancel_reply(target);
+                    true
+                }
+                _ => false,
             }
-            send
         });
 
     let mut frame = col()
@@ -53,6 +66,9 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
         .fill(p.surface);
     if let Some(reply) = &c.reply_to {
         frame = frame.child(reply_bar(target, &reply.sender_name, &reply.excerpt, p));
+    }
+    if c.editing.is_some() {
+        frame = frame.child(edit_bar(target, p));
     }
     if c.formatting {
         frame = frame.child(toolbar(s, target, p));
@@ -151,6 +167,24 @@ fn reply_bar(target: ComposerTarget, sender: &str, excerpt: &str, p: &Palette) -
             icon_button(&icons::CLOSE, t!("composer.reply_cancel"), false, p.text_muted, p)
                 .key(key(target, "reply-cancel"))
                 .on_press(move |s: &mut State| s.cancel_reply(target)),
+        )
+}
+
+/// "Editing your message", and a way out (as Escape).
+fn edit_bar(target: ComposerTarget, p: &Palette) -> El {
+    row()
+        .key(key(target, "edit-bar"))
+        .w_full()
+        .px(12.0)
+        .pt(8.0)
+        .gap(10.0)
+        .center_y()
+        .child(icon(&icons::PENCIL, 16.0).color(p.accent))
+        .child(text(t!("composer.editing")).font(font::META).color(p.text).grow(1.0))
+        .child(
+            icon_button(&icons::CLOSE, t!("composer.edit_cancel"), false, p.text_muted, p)
+                .key(key(target, "edit-cancel"))
+                .on_press(move |s: &mut State| s.cancel_edit(target)),
         )
 }
 

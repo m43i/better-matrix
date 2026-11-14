@@ -26,6 +26,11 @@ fn wording(confirm: &Confirm) -> (String, String, &'static str) {
         Confirm::Moderate { name, action: Moderation::Role(_), .. } => {
             (tf!("confirm.promote_title", name = name), t!("confirm.promote_body").to_owned(), t!("confirm.promote"))
         }
+        Confirm::DeleteMessage { .. } => (
+            t!("confirm.delete_message_title").to_owned(),
+            t!("confirm.delete_message_body").to_owned(),
+            t!("actions.delete"),
+        ),
         // The question can be long: it goes in the body, which scrolls.
         Confirm::EndPoll { question, .. } => {
             (t!("confirm.end_poll_title").to_owned(), tf!("confirm.end_poll_body", question = question), t!("poll.end"))

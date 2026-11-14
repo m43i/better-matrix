@@ -1163,6 +1163,14 @@ fn pasting_text_should_be_left_to_the_editor() {
     assert!(s.composer.attachments.is_empty());
 }
 
+#[test]
+fn pasting_a_web_address_should_make_it_a_link() {
+    let (mut s, _) = state();
+    let content = rune::clipboard::ClipboardContent::new("https://github.com/m43i/better-matrix\n");
+    assert!(s.paste_into_composer(ComposerTarget::Room, &content));
+    assert!(s.composer.edit.to_html().contains("<a href=\"https://github.com/m43i/better-matrix\">"));
+}
+
 // ----- composer, people and audio ---------------------------------------------------------------
 
 #[test]
@@ -2271,4 +2279,65 @@ fn opening_the_emoji_picker_should_clear_its_search() {
     s.emoji_search.insert("old");
     s.toggle_popover(Popover::Emoji(EmojiFor::Composer(ComposerTarget::Room)));
     assert!(s.emoji_search.text.is_empty() && s.emoji_search.focused);
+}
+
+// ----- editing and deleting ---------------------------------------------------------------------
+
+/// A room with the user's message `$mine` ("helo") and someone else's after it.
+fn with_own_message(s: &mut State) -> AccountId {
+    let id = AccountId::new("@a:example.org");
+    with_rooms(s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    let message = |event_id: &str, sender_id: &str, body: &str| matrix_core::TimelineEntry {
+        id: event_id.into(),
+        kind: matrix_core::EntryKind::Message(Box::new(Message {
+            event_id: event_id.into(),
+            sender_id: sender_id.into(),
+            content: MessageContent::Text { body: body.into(), html: None },
+            ..Message::default()
+        })),
+    };
+    let entries = vec![message("$mine", "@a:example.org", "helo"), message("$theirs", "@b:example.org", "hi")];
+    let diffs = vec![matrix_core::TimelineDiff::Reset(entries)];
+    apply(s, Event::TimelineChanged { account: id.clone(), key: TimelineKey::room("!one:x"), diffs });
+    id
+}
+
+#[test]
+fn up_in_an_empty_composer_should_edit_the_users_last_message() {
+    let (mut s, _) = state();
+    with_own_message(&mut s);
+    assert!(s.edit_last(ComposerTarget::Room, &mut Tx::default()));
+    assert_eq!((s.composer.editing.as_deref(), s.composer.edit.text.as_str()), (Some("$mine"), "helo"));
+}
+
+#[test]
+fn sending_an_edit_should_change_the_message_instead_of_sending_a_new_one() {
+    let (mut s, mut commands) = state();
+    with_own_message(&mut s);
+    s.edit_last(ComposerTarget::Room, &mut Tx::default());
+    s.composer.edit.insert("!");
+    drain(&mut commands);
+    s.send_message(ComposerTarget::Room, &mut Tx::default());
+    let sent = all_commands(&mut commands);
+    assert!(
+        sent.iter()
+            .any(|c| matches!(c, Command::Edit { event_id, body, .. } if event_id == "$mine" && body == "helo!"))
+    );
+    assert!(!sent.iter().any(|c| matches!(c, Command::Send { .. })));
+}
+
+#[test]
+fn deleting_a_message_should_ask_first_then_delete_it() {
+    let (mut s, mut commands) = state();
+    with_own_message(&mut s);
+    drain(&mut commands);
+    s.delete_message(TimelineKey::room("!one:x"), "$mine");
+    assert!(all_commands(&mut commands).is_empty());
+    s.confirm();
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::Redact { event_id, .. } if event_id == "$mine"))
+    );
 }

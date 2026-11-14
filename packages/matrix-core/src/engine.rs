@@ -80,6 +80,28 @@ pub enum Command {
         /// The emoji.
         emoji: String,
     },
+    /// Change the text of a message the account sent.
+    Edit {
+        /// The account that sent it.
+        account: AccountId,
+        /// The timeline showing the message; it must be open.
+        key: TimelineKey,
+        /// The message's event ID.
+        event_id: String,
+        /// The new text.
+        body: String,
+        /// Its formatting as Matrix HTML, if any.
+        html: Option<String>,
+    },
+    /// Delete a message the account sent, for everyone.
+    Redact {
+        /// The account that sent it.
+        account: AccountId,
+        /// The timeline showing the message; it must be open.
+        key: TimelineKey,
+        /// The message's event ID.
+        event_id: String,
+    },
     /// Vote in a poll: `answers` replace the account's earlier vote; none takes it back.
     VotePoll {
         /// The voting account.
@@ -1526,6 +1548,33 @@ impl State {
                     let event_id = matrix_sdk::ruma::EventId::parse(&event_id)?;
                     let item = matrix_sdk_ui::timeline::TimelineEventItemId::EventId(event_id);
                     timeline?.toggle_reaction(&item, &emoji).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::Edit { account, key, event_id, body, html } => {
+                let timeline = self.open_timeline(&account, &key);
+                Box::pin(async move {
+                    use matrix_sdk::ruma::events::room::message::{
+                        MessageType, RoomMessageEventContentWithoutRelation as Content,
+                    };
+                    let item = matrix_sdk_ui::timeline::TimelineEventItemId::EventId(matrix_sdk::ruma::EventId::parse(
+                        &event_id,
+                    )?);
+                    let content = Content::new(match html {
+                        Some(html) => MessageType::text_html(body, html),
+                        None => MessageType::text_plain(body),
+                    });
+                    timeline?.edit(&item, matrix_sdk::room::edit::EditedContent::RoomMessage(content)).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::Redact { account, key, event_id } => {
+                let timeline = self.open_timeline(&account, &key);
+                Box::pin(async move {
+                    let item = matrix_sdk_ui::timeline::TimelineEventItemId::EventId(matrix_sdk::ruma::EventId::parse(
+                        &event_id,
+                    )?);
+                    timeline?.redact(&item, None).await?;
                     Ok(Outcome::Done)
                 })
             }

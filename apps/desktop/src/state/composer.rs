@@ -113,6 +113,9 @@ pub struct Composer {
     pub link: Option<TextEdit>,
     /// The message this draft answers, when replying.
     pub reply_to: Option<ReplyTarget>,
+    /// The user's own message being edited: its event ID. The field holds its text, and sending
+    /// changes it rather than sending a new message.
+    pub editing: Option<String>,
 }
 
 impl Default for Composer {
@@ -125,6 +128,7 @@ impl Default for Composer {
             voice: None,
             link: None,
             reply_to: None,
+            editing: None,
         }
     }
 }
@@ -167,6 +171,61 @@ impl Composer {
         {
             self.edit.set_link(Some(&url));
         }
+    }
+
+    /// Pastes a web address as a link: over a selection, the selection links to it; else the
+    /// address goes in as a link, and what is typed after it stays plain. One undo step.
+    pub fn paste_link(&mut self, url: &str) {
+        self.edit.undo_group(|edit| {
+            let (start, end) = (edit.anchor.min(edit.focus), edit.anchor.max(edit.focus));
+            let end = if start == end {
+                edit.insert(url);
+                start + url.len()
+            } else {
+                end
+            };
+            edit.set_selection(start, end);
+            edit.set_link(Some(url));
+            edit.set_selection(end, end);
+            // An empty selection arms the style typed next: without the link.
+            edit.set_link(None);
+        });
+    }
+
+    /// Starts editing the user's message `event_id`: the field takes its text and formatting,
+    /// in place of the draft.
+    pub fn start_edit(&mut self, event_id: &str, body: &str, html: Option<&str>) {
+        let mut edit = new_edit();
+        match html {
+            Some(html) => {
+                let _ = edit.paste_html(html, body);
+            }
+            None => edit.insert(body),
+        }
+        edit.clear_history();
+        edit.focused = true;
+        self.edit = edit;
+        self.editing = Some(event_id.to_owned());
+        self.reply_to = None;
+        self.link = None;
+    }
+
+    /// Stops editing, leaving an empty field.
+    pub fn cancel_edit(&mut self) {
+        if self.editing.take().is_some() {
+            self.edit = new_edit();
+            self.link = None;
+        }
+    }
+
+    /// The edit to send, if one is under way: the message's event ID, its new text and its
+    /// formatting. Leaves an empty field. An emptied message isn't sent: it stays as it was.
+    pub fn take_edit(&mut self) -> Option<(String, String, Option<String>)> {
+        let event_id = self.editing.take()?;
+        let (body, html) = (self.edit.text.trim().to_owned(), self.html());
+        self.edit = new_edit();
+        self.link = None;
+        (!body.is_empty()).then_some((event_id, body, html))
     }
 
     /// Before a key reaches the field: typing straight on from a freshly formatted selection
@@ -226,14 +285,19 @@ impl Composer {
         matches!(self.edit.active_block(), Block::Paragraph | Block::Quote)
     }
 
+    /// The draft as Matrix HTML: only when it carries formatting.
+    fn html(&self) -> Option<String> {
+        let formatted = !self.edit.marks().is_empty() || self.edit.blocks().iter().any(|b| *b != Block::Paragraph);
+        formatted.then(|| self.edit.to_html())
+    }
+
     /// Everything to send, text first, and a fresh composer. HTML is sent only when the text
     /// carries formatting. The reply target, if any, goes with the first message.
     pub fn take_outgoing(&mut self) -> (Option<ReplyTarget>, Vec<Outgoing>) {
         let mut outgoing = Vec::new();
         let body = self.edit.text.trim().to_owned();
         if !body.is_empty() {
-            let formatted = !self.edit.marks().is_empty() || self.edit.blocks().iter().any(|b| *b != Block::Paragraph);
-            outgoing.push(Outgoing::Text { body, html: formatted.then(|| self.edit.to_html()) });
+            outgoing.push(Outgoing::Text { body, html: self.html() });
         }
         outgoing.extend(self.attachments.drain(..).map(Outgoing::File));
         self.edit = new_edit();
@@ -344,6 +408,55 @@ mod tests {
         let mut c = composer("item");
         c.format(Format::BulletList);
         assert!(!c.enter_sends());
+    }
+
+    #[test]
+    fn a_pasted_address_should_go_in_as_a_link() {
+        let mut c = composer("see ");
+        c.paste_link("https://matrix.org");
+        assert_eq!(c.edit.to_html(), "<p>see <a href=\"https://matrix.org\">https://matrix.org</a></p>");
+    }
+
+    #[test]
+    fn typing_after_a_pasted_link_should_be_plain() {
+        let mut c = Composer::default();
+        c.paste_link("https://matrix.org");
+        c.edit.insert(" now");
+        assert_eq!(c.edit.to_html(), "<p><a href=\"https://matrix.org\">https://matrix.org</a> now</p>");
+    }
+
+    #[test]
+    fn an_address_pasted_over_a_selection_should_link_it() {
+        let mut c = composer("the blog");
+        c.edit.set_selection(4, 8);
+        c.paste_link("https://matrix.org/blog");
+        assert_eq!(c.edit.to_html(), "<p>the <a href=\"https://matrix.org/blog\">blog</a></p>");
+    }
+
+    #[test]
+    fn editing_should_put_the_message_in_the_field_and_send_it_back_changed() {
+        let mut c = Composer::default();
+        c.start_edit("$1", "helo", None);
+        c.edit.insert("!");
+        assert_eq!(c.take_edit(), Some(("$1".to_owned(), "helo!".to_owned(), None)));
+        assert!(c.editing.is_none() && c.is_empty());
+    }
+
+    #[test]
+    fn editing_a_formatted_message_should_keep_its_formatting() {
+        let mut c = Composer::default();
+        c.start_edit("$1", "loud", Some("<strong>loud</strong>"));
+        let Some((_, _, Some(html))) = c.take_edit() else { panic!("expected formatted text") };
+        assert!(html.contains("<strong>loud</strong>"), "{html}");
+    }
+
+    #[test]
+    fn an_emptied_edit_should_not_be_sent() {
+        let mut c = Composer::default();
+        c.start_edit("$1", "x", None);
+        c.edit.set_selection(0, 1);
+        c.edit.insert("");
+        assert_eq!(c.take_edit(), None);
     }
 
     #[test]

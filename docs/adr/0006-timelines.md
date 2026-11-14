@@ -59,6 +59,12 @@ see who is typing there.
 - **Sending:** `Command::Send { key, reply_to, .. }` goes through the open timeline, which sets
   reply and thread relations and shows a pending message at once. The room's send queue
   persists it, retries offline and resumes after a restart.
+- **Editing and deleting:** the user's own text messages can be edited (`Command::Edit`, through
+  the timeline's `edit`) and any of their messages deleted (`Command::Redact`), from the hover
+  toolbar; deleting asks first (`Confirm::DeleteMessage`). Up in an empty composer edits the
+  user's newest text message there; the composer then holds the message (`Composer::editing`)
+  under an "Editing your message" bar, Escape stops, and sending changes the message. An
+  emptied edit isn't sent.
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
     reaction's count and whether the user is among them. The picker offers quick reactions,

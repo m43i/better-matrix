@@ -260,20 +260,44 @@ impl TimelineItem {
             MessageContent::Text { body, html } => {
                 let gif = matrix_core::links::find_gif_link(body).map(|url| {
                     let plain = matrix_core::links::without_link(body, url);
-                    let rest = (!plain.is_empty()).then(|| Body {
-                        rich: html
-                            .as_deref()
-                            .map(|html| TextEdit::from_html(&matrix_core::links::html_without_link(html, url))),
-                        plain,
-                    });
+                    let html = html.as_deref().map(|html| matrix_core::links::html_without_link(html, url));
+                    let rest = (!plain.is_empty()).then(|| Body { rich: rich_body(&plain, html.as_deref()), plain });
                     GifLink { url: url.to_owned(), rest }
                 });
-                (html.as_deref().map(TextEdit::from_html), gif)
+                (rich_body(body, html.as_deref()), gif)
             }
             _ => (None, None),
         };
         Self { message, rich, gif, link }
     }
+}
+
+/// A text body as the timeline shows it: the sender's formatting, with every bare web address
+/// made a link (but not inside code). `None` for plain text without links, which shows as plain
+/// selectable text.
+fn rich_body(plain: &str, html: Option<&str>) -> Option<TextEdit> {
+    use rune::{Mark, MarkRange};
+    let mut edit = match html {
+        Some(html) => TextEdit::from_html(html),
+        None if matrix_core::links::link_ranges(plain).next().is_some() => {
+            TextEdit::from_parts(plain, Vec::new(), Vec::new())
+        }
+        None => return None,
+    };
+    let taken = |range: &std::ops::Range<usize>| {
+        edit.marks().iter().any(|mark| {
+            matches!(mark.mark, Mark::Link(_) | Mark::Code) && mark.start < range.end && range.start < mark.end
+        })
+    };
+    let links: Vec<MarkRange> = matrix_core::links::link_ranges(&edit.text)
+        .filter(|range| !taken(range))
+        .map(|range| MarkRange::new(range.clone(), Mark::Link(edit.text[range].to_owned())))
+        .collect();
+    if !links.is_empty() {
+        let marks = edit.marks().iter().cloned().chain(links).collect();
+        edit.set_marks(marks);
+    }
+    Some(edit)
 }
 
 /// How many timelines off screen keep their entries, per account.
@@ -678,6 +702,46 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn links(edit: &TextEdit) -> Vec<(&str, String)> {
+        edit.marks()
+            .iter()
+            .filter_map(|mark| match &mark.mark {
+                rune::Mark::Link(url) => Some((&edit.text[mark.range()], url.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_web_address_in_plain_text_should_show_as_a_link() {
+        let edit = rich_body("see https://matrix.org/blog.", None).unwrap_or_default();
+        assert_eq!(links(&edit), [("https://matrix.org/blog", "https://matrix.org/blog".to_owned())]);
+    }
+
+    #[test]
+    fn plain_text_without_links_should_stay_plain() {
+        assert!(rich_body("hello there", None).is_none());
+    }
+
+    #[test]
+    fn a_link_the_sender_made_should_keep_its_address() {
+        let edit = rich_body("", Some(r#"<a href="https://a.example">https://b.example</a> and https://c.example"#))
+            .unwrap_or_default();
+        assert_eq!(
+            links(&edit),
+            [
+                ("https://b.example", "https://a.example".to_owned()),
+                ("https://c.example", "https://c.example".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn an_address_in_code_should_stay_code() {
+        let edit = rich_body("", Some("<code>https://a.example</code>")).unwrap_or_default();
+        assert!(links(&edit).is_empty());
+    }
 
     fn summary(user_id: &str) -> AccountSummary {
         AccountSummary {

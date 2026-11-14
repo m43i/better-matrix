@@ -33,8 +33,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use matrix_core::{
     AccountId, AccountPage, CallEnd, Command, ContactDetail, ContactKind, EngineHandle, Event, Homeserver, MediaRef,
-    MediaSize, MediaToggle, Message, NotificationMode, Password, PendingContact, RequestId, SignInInput, TimelineKey,
-    VerificationStep,
+    MediaSize, MediaToggle, Message, MessageContent, NotificationMode, Password, PendingContact, RequestId,
+    SignInInput, TimelineKey, VerificationStep,
 };
 use rune::{TextEdit, Tx};
 
@@ -331,6 +331,12 @@ pub enum Confirm {
         name: String,
         action: matrix_core::Moderation,
     },
+    /// Delete one of the user's messages, for everyone.
+    DeleteMessage {
+        account: AccountId,
+        key: TimelineKey,
+        event_id: String,
+    },
     /// End a poll: nobody can vote after, and it can't be opened again.
     EndPoll {
         account: AccountId,
@@ -384,6 +390,8 @@ enum Purpose {
     Discover,
     SignIn,
     Send,
+    /// Editing or deleting one of the user's messages.
+    Edit,
     Logout,
     Media {
         media: MediaRef,
@@ -1270,6 +1278,7 @@ impl State {
                 self.schedule_retry();
             }
             Purpose::Send => self.notice = Some(tf!("notice.not_sent", error = error)),
+            Purpose::Edit => self.notice = Some(tf!("notice.not_changed", error = error)),
             Purpose::Logout => self.notice = Some(tf!("notice.sign_out", error = error)),
             Purpose::NotificationMode => self.notice = Some(tf!("notice.notification_setting", error = error)),
             Purpose::Leave => self.notice = Some(tf!("notice.leave", error = error)),
@@ -2493,6 +2502,9 @@ impl State {
             Confirm::EndPoll { account, key, poll_id, .. } => {
                 (Command::EndPoll { account, key, poll_id }, Purpose::Poll)
             }
+            Confirm::DeleteMessage { account, key, event_id } => {
+                (Command::Redact { account, key, event_id }, Purpose::Edit)
+            }
         };
         self.dispatch(command, purpose);
     }
@@ -3065,6 +3077,44 @@ impl State {
         self.composer_mut(target).reply_to = None;
     }
 
+    /// Starts editing one of the user's text messages in a composer.
+    pub fn start_edit(&mut self, target: ComposerTarget, message: &Message, tx: &mut Tx) {
+        let MessageContent::Text { body, html } = &message.content else { return };
+        self.composer_mut(target).start_edit(&message.event_id, body, html.as_deref());
+        tx.focus(composer_field(target), false);
+    }
+
+    /// Edits the user's newest text message in a composer's timeline: the Up arrow in an empty
+    /// field. False when there is none to edit.
+    pub fn edit_last(&mut self, target: ComposerTarget, tx: &mut Tx) -> bool {
+        let (Some(account), Some(key)) = (self.nav.account.clone(), self.composer_key(target)) else { return false };
+        let Some(timeline) = self.accounts.get(&account).and_then(|data| data.timeline(&key)) else { return false };
+        let last = timeline.entries.iter().rev().find_map(|entry| match &entry.kind {
+            EntryView::Message(item)
+                if item.message.sender_id == account.as_str()
+                    && !item.message.pending
+                    && matches!(item.message.content, MessageContent::Text { .. }) =>
+            {
+                Some(item.message.clone())
+            }
+            _ => None,
+        });
+        let Some(message) = last else { return false };
+        self.start_edit(target, &message, tx);
+        true
+    }
+
+    pub fn cancel_edit(&mut self, target: ComposerTarget) {
+        self.composer_mut(target).cancel_edit();
+    }
+
+    /// Asks before deleting one of the user's messages.
+    pub fn delete_message(&mut self, key: TimelineKey, event_id: &str) {
+        let Some(account) = self.nav.account.clone() else { return };
+        self.popover = None;
+        self.modal = Some(Modal::Confirm(Confirm::DeleteMessage { account, key, event_id: event_id.to_owned() }));
+    }
+
     /// An emoji picked in the picker: a reaction, or text for a draft.
     pub fn choose_emoji(&mut self, chosen_for: EmojiFor, emoji: &str) {
         match chosen_for {
@@ -3124,6 +3174,13 @@ impl State {
     // ----- composing -----------------------------------------------------------------------
 
     pub fn send_message(&mut self, target: ComposerTarget, tx: &mut Tx) {
+        if self.composer(target).editing.is_some() {
+            let (Some(account), Some(key)) = (self.nav.account.clone(), self.composer_key(target)) else { return };
+            if let Some((event_id, body, html)) = self.composer_mut(target).take_edit() {
+                self.dispatch(Command::Edit { account, key, event_id, body, html }, Purpose::Edit);
+            }
+            return;
+        }
         let (reply_to, messages) = self.composer_mut(target).take_outgoing();
         self.send_from(target, reply_to, messages, tx);
     }
@@ -3238,8 +3295,8 @@ impl State {
         }
     }
 
-    /// A paste into a composer: an image or files become attachments (true), anything else is
-    /// left to the editor to paste as text (false).
+    /// A paste into a composer: an image or files become attachments, and a lone web address a
+    /// link (true); anything else is left to the editor to paste (false).
     pub fn paste_into_composer(&mut self, target: ComposerTarget, content: &rune::clipboard::ClipboardContent) -> bool {
         if let Some(image) = content.image() {
             self.composer_mut(target).attach_pasted_image(image.png());
@@ -3247,6 +3304,10 @@ impl State {
         }
         if !content.files().is_empty() {
             self.composer_mut(target).attach(content.files().iter().cloned());
+            return true;
+        }
+        if matrix_core::links::is_link(content.text()) {
+            self.composer_mut(target).paste_link(content.text().trim());
             return true;
         }
         false

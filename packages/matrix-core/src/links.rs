@@ -65,7 +65,33 @@ pub fn gif_source(link: &str) -> Option<GifSource> {
 
 /// The links in a message's text, in order, without the punctuation around them.
 fn links(text: &str) -> impl Iterator<Item = &str> {
-    text.split_whitespace().map(unwrap_link).filter(|word| word.starts_with("https://") || word.starts_with("http://"))
+    link_ranges(text).map(move |range| &text[range])
+}
+
+/// Where the links in `text` are, as byte ranges, in order: web addresses (`http://`,
+/// `https://`) without the punctuation around them.
+///
+/// ```
+/// use matrix_core::links::link_ranges;
+/// let text = "see (https://matrix.org/blog), then https://example.org.";
+/// let found: Vec<&str> = link_ranges(text).map(|range| &text[range]).collect();
+/// assert_eq!(found, ["https://matrix.org/blog", "https://example.org"]);
+/// ```
+pub fn link_ranges(text: &str) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
+    text.split_whitespace().filter_map(move |word| {
+        let link = unwrap_link(word);
+        let rest = link.strip_prefix("https://").or_else(|| link.strip_prefix("http://"));
+        let is_link = rest.is_some_and(|rest| !rest.is_empty());
+        // Both are slices of `text`: where they start is how far into it they are.
+        let start = link.as_ptr() as usize - text.as_ptr() as usize;
+        is_link.then(|| start..start + link.len())
+    })
+}
+
+/// Whether `text` is one web address and nothing else: what a paste makes a link.
+pub fn is_link(text: &str) -> bool {
+    let text = text.trim();
+    link_ranges(text).next().is_some_and(|range| range == (0..text.len()))
 }
 
 /// A word without the punctuation around it. A closing parenthesis stays when the link opened
@@ -279,6 +305,25 @@ pub(crate) fn http_client() -> Result<reqwest::Client, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn links_should_be_found_by_where_they_are_after_other_letters() {
+        let text = "Grüße: https://a.example/ü und mehr";
+        let found: Vec<&str> = link_ranges(text).map(|range| &text[range]).collect();
+        assert_eq!(found, ["https://a.example/ü"]);
+    }
+
+    #[test]
+    fn a_scheme_alone_should_not_be_a_link() {
+        assert_eq!(link_ranges("https:// http://").count(), 0);
+    }
+
+    #[test]
+    fn only_a_lone_address_should_count_as_a_link_to_paste() {
+        assert!(is_link("  https://matrix.org/blog \n"));
+        assert!(!is_link("see https://matrix.org"));
+        assert!(!is_link("matrix.org"));
+    }
 
     #[test]
     fn a_refused_preview_should_get_no_card_and_a_failed_one_should_be_tried_again() {

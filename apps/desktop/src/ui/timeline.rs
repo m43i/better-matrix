@@ -666,6 +666,23 @@ fn toolbar(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
             button(&icons::THREAD, t!("actions.thread"), "thread").on_press(move |s: &mut State| s.open_thread(&root)),
         );
     }
+    // The user's own messages: text can be edited, and anything not deleted yet deleted.
+    if message.sender_id == cx.account.as_str() {
+        if matches!(message.content, MessageContent::Text { .. }) {
+            let edited = message.clone();
+            bar = bar.child(
+                button(&icons::PENCIL, t!("actions.edit"), "edit")
+                    .on_press_tx(move |s: &mut State, tx| s.start_edit(target, &edited, tx)),
+            );
+        }
+        if !matches!(message.content, MessageContent::Redacted) {
+            let (key, deleted) = (cx.key.clone(), event_id.clone());
+            bar = bar.child(
+                button(&icons::TRASH, t!("actions.delete"), "delete")
+                    .on_press(move |s: &mut State| s.delete_message(key.clone(), &deleted)),
+            );
+        }
+    }
     bar
 }
 
@@ -857,7 +874,8 @@ fn text_body(event_id: &str, plain: &str, rich: Option<&rune::TextEdit>, p: &Pal
             .w_full()
             .focusable(false)
             .cursor(rune::Cursor::Text)
-            .on_press(|_: &mut State| {}),
+            .on_press(|_: &mut State| {})
+            .on_link(|s: &mut State, url: &str, tx: &mut rune::Tx| s.open_link(url, tx)),
         // Its own handler keeps the clicks: a double-click takes a word, a triple-click the
         // paragraph, rather than opening the thread.
         None => text(plain.to_owned())
