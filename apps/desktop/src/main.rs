@@ -37,6 +37,10 @@ fn spec() -> AppSpec<State> {
                 demo::seed(s);
                 s.select_room("!dm-grace:example.org");
             }),
+            ("demo-call-card", |s| {
+                demo::seed(s);
+                s.select_room("!dm-kai:example.org");
+            }),
             ("demo-space", |s| {
                 demo::seed(s);
                 s.select_scope(Scope::Space(demo::WORK_SPACE.into()));
@@ -501,6 +505,41 @@ mod tests {
         rt.frame(0.1);
         let (_, ok) = rt.find("confirm-ok").unwrap_or((0.0, f32::MAX));
         assert!(ok < 380.0);
+    }
+
+    #[test]
+    fn a_call_under_way_should_offer_to_join_from_its_card() {
+        let rt = runtime(|s| {
+            demo::seed(s);
+            s.select_room("!dm-kai:example.org");
+        });
+        assert!(rt.find("call-card-join-$demo-@kai:example.org-0").is_some());
+    }
+
+    #[test]
+    fn only_the_newest_call_card_should_offer_to_join() {
+        let rt = runtime(|s| {
+            demo::seed(s);
+            s.select_room("!dm-kai:example.org");
+            let card = matrix_core::Message {
+                event_id: "$newer".into(),
+                sender_id: "@kai:example.org".into(),
+                sender_name: "Kai".into(),
+                content: matrix_core::MessageContent::Call(matrix_core::CallCard::default()),
+                ..matrix_core::Message::default()
+            };
+            let entry = matrix_core::TimelineEntry {
+                id: "$newer".into(),
+                kind: matrix_core::EntryKind::Message(Box::new(card)),
+            };
+            let (account, key) =
+                (matrix_core::AccountId::new(demo::ADA), matrix_core::TimelineKey::room("!dm-kai:example.org"));
+            if let Some(timeline) = s.accounts.timeline_mut(&account, &key) {
+                timeline.apply(vec![matrix_core::TimelineDiff::PushBack(entry)]);
+            }
+        });
+        assert!(rt.find("call-card-join-$newer").is_some());
+        assert!(rt.find("call-card-join-$demo-@kai:example.org-0").is_none());
     }
 
     #[test]

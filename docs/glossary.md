@@ -105,6 +105,10 @@ needs one, add it here.
 : The card below a message for the first link in it (not a GIF): the page's site, title,
   description and image, as the homeserver describes it; a setting turns it off.
 
+**Call card**
+: A call's message in the timeline: video or voice, and whether it ended, was declined, or is
+  under way (the newest card only), with Join while it is.
+
 **History page**
 : The 30 messages loaded when a room opens with fewer, and each time the user scrolls near the
   top (`HISTORY_PAGE`).

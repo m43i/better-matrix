@@ -14,8 +14,8 @@ use matrix_sdk_ui::timeline::{
 
 use crate::convert;
 use crate::model::{
-    EntryKind, Message, MessageContent, Person, Quote, Reaction, RoomChange, RoomEvent, ThreadSummary, TimelineDiff,
-    TimelineEntry,
+    CallCard, EntryKind, Message, MessageContent, Person, Quote, Reaction, RoomChange, RoomEvent, ThreadSummary,
+    TimelineDiff, TimelineEntry,
 };
 
 pub(crate) fn entry(item: &Arc<TimelineItem>, me: &UserId) -> TimelineEntry {
@@ -74,7 +74,40 @@ fn poll_view(results: &matrix_sdk_ui::timeline::PollResult, me: &UserId) -> crat
     }
 }
 
+/// The event's own content as JSON, for what the SDK doesn't parse.
+fn raw_content(event: &EventTimelineItem) -> serde_json::Value {
+    event
+        .original_json()
+        .and_then(|raw| raw.get_field::<serde_json::Value>("content").ok().flatten())
+        .unwrap_or_default()
+}
+
+/// A call's card: the stable ring the SDK parses, the unstable one Element Call sends (which the
+/// timeline's filter lets through as a custom event), or a one-to-one invite.
+fn call_card(event: &EventTimelineItem) -> Option<CallCard> {
+    match event.content() {
+        TimelineItemContent::RtcNotification { call_intent, declined_by, .. } => Some(CallCard {
+            video: call_intent.as_ref().map(|intent| intent.as_str() == "video"),
+            declined_by: declined_by.iter().map(ToString::to_string).collect(),
+        }),
+        TimelineItemContent::MsgLike(MsgLikeContent { kind: MsgLikeKind::Other(other), .. })
+            if other.event_type().to_string() == crate::calls::RING_EVENT =>
+        {
+            let video = raw_content(event)["m.call.intent"].as_str().map(|intent| intent == "video");
+            Some(CallCard { video, ..CallCard::default() })
+        }
+        TimelineItemContent::CallInvite => {
+            let video = raw_content(event)["offer"]["sdp"].as_str().map(crate::calls::has_video);
+            Some(CallCard { video, ..CallCard::default() })
+        }
+        _ => None,
+    }
+}
+
 fn message(event: &EventTimelineItem, me: &UserId) -> Option<Message> {
+    if let Some(card) = call_card(event) {
+        return Some(Message { content: MessageContent::Call(card), ..base_message(event) });
+    }
     let TimelineItemContent::MsgLike(MsgLikeContent { kind, reactions, in_reply_to, thread_summary, .. }) =
         event.content()
     else {
@@ -82,6 +115,7 @@ fn message(event: &EventTimelineItem, me: &UserId) -> Option<Message> {
     };
     let (content, edited) = match kind {
         MsgLikeKind::Message(message) => (convert::content(message.msgtype()), message.is_edited()),
+        MsgLikeKind::Sticker(sticker) => (convert::sticker(sticker.content()), false),
         MsgLikeKind::Redacted => (MessageContent::Redacted, false),
         MsgLikeKind::UnableToDecrypt(_) => (MessageContent::Undecryptable, false),
         MsgLikeKind::Poll(poll) => (MessageContent::Poll(poll_view(&poll.results(), me)), false),
@@ -124,7 +158,12 @@ fn message(event: &EventTimelineItem, me: &UserId) -> Option<Message> {
             latest_at: latest.map(|event| u64::from(event.timestamp.0)),
         }
     });
-    Some(Message {
+    Some(Message { content, edited, reactions, reply_to, thread, ..base_message(event) })
+}
+
+/// What every message has: who sent it and when. Empty content, no reactions, no reply.
+fn base_message(event: &EventTimelineItem) -> Message {
+    Message {
         event_id: event.event_id().map_or_else(|| format!("local:{:?}", event.identifier()), ToString::to_string),
         sender_id: event.sender().to_string(),
         sender_name: name(event.sender(), event.sender_profile()),
@@ -132,14 +171,14 @@ fn message(event: &EventTimelineItem, me: &UserId) -> Option<Message> {
             TimelineDetails::Ready(profile) => profile.avatar_url.clone().and_then(convert::avatar),
             _ => None,
         },
-        content,
-        edited,
+        content: MessageContent::Redacted,
+        edited: false,
         pending: event.is_local_echo(),
         timestamp_ms: u64::from(event.timestamp().0),
-        reactions,
-        reply_to,
-        thread,
-    })
+        reactions: Vec::new(),
+        reply_to: None,
+        thread: None,
+    }
 }
 
 pub(crate) fn diff(diff: VectorDiff<Arc<TimelineItem>>, me: &UserId) -> TimelineDiff {
@@ -225,8 +264,23 @@ fn room_event(event: &EventTimelineItem) -> Option<RoomEvent> {
             Other::RoomJoinRules(_) => RoomChange::JoinRules,
             Other::RoomPowerLevels(_) => RoomChange::Permissions,
             Other::RoomPinnedEvents(_) => RoomChange::PinnedMessages,
+            Other::RoomTombstone(_) => RoomChange::Upgraded,
+            Other::RoomCanonicalAlias(_) => RoomChange::Addresses,
+            Other::RoomGuestAccess(_) => RoomChange::GuestAccess,
+            Other::RoomServerAcl(_) => RoomChange::ServerAccess,
+            Other::SpaceChild(_) => RoomChange::SpaceRooms,
+            Other::SpaceParent(_) => RoomChange::Spaces,
+            Other::RoomThirdPartyInvite(Change::Original { content, .. }) => {
+                RoomChange::InvitedByContact(content.display_name.clone())
+            }
+            Other::PolicyRuleRoom(_) | Other::PolicyRuleServer(_) | Other::PolicyRuleUser(_) => {
+                RoomChange::ModerationRules
+            }
             _ => return None,
         },
+        TimelineItemContent::MsgLike(MsgLikeContent { kind: MsgLikeKind::LiveLocation(_), .. }) => {
+            RoomChange::LiveLocation
+        }
         _ => return None,
     };
     Some(RoomEvent { sender: sender(event), change })

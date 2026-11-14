@@ -234,6 +234,20 @@ pub(crate) fn room_notification_mode(mode: NotificationMode) -> RoomNotification
     }
 }
 
+/// A sticker: an image like any other.
+pub(crate) fn sticker(sticker: &matrix_sdk::ruma::events::sticker::StickerEventContent) -> MessageContent {
+    let info = &sticker.info;
+    let dimensions = || Some((u32::try_from(info.width?).ok()?, u32::try_from(info.height?).ok()?));
+    MessageContent::Attachment(Attachment {
+        kind: AttachmentKind::Image,
+        name: sticker.body.clone(),
+        size: info.size.map(u64::from),
+        media: MediaRef::of(&MediaSource::from(sticker.source.clone())),
+        thumbnail: None,
+        dimensions: dimensions(),
+    })
+}
+
 pub(crate) fn content(msgtype: &MessageType) -> MessageContent {
     let text = |body: &str, formatted: &Option<FormattedBody>| MessageContent::Text {
         body: body.to_owned(),
@@ -278,4 +292,30 @@ pub(crate) fn content(msgtype: &MessageType) -> MessageContent {
         other => return MessageContent::Text { body: other.body().to_owned(), html: None },
     };
     MessageContent::Attachment(attachment)
+}
+
+#[cfg(test)]
+mod tests {
+    use matrix_sdk::ruma::events::room::ImageInfo;
+    use matrix_sdk::ruma::events::sticker::StickerEventContent;
+    use matrix_sdk::ruma::{OwnedMxcUri, uint};
+
+    use super::*;
+
+    #[test]
+    fn a_sticker_should_show_as_an_image_named_by_its_description() {
+        let mut info = ImageInfo::new();
+        info.width = Some(uint!(128));
+        info.height = Some(uint!(96));
+        let url = OwnedMxcUri::from("mxc://example.org/sticker");
+        let MessageContent::Attachment(attachment) =
+            sticker(&StickerEventContent::new("A waving cat".into(), info, url))
+        else {
+            panic!("a sticker should be an attachment");
+        };
+        assert_eq!(
+            (attachment.kind, attachment.name.as_str(), attachment.dimensions, attachment.media.is_some()),
+            (AttachmentKind::Image, "A waving cat", Some((128, 96)), true)
+        );
+    }
 }

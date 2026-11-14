@@ -59,7 +59,7 @@ pub fn header_buttons(s: &State, room: &RoomSummary, p: &Palette) -> Vec<El> {
 }
 
 /// A rounded button with an icon and a label, filled with `color`.
-fn pill(glyph: &'static rune::Icon, label: &str, color: Color, p: &Palette) -> El {
+pub fn pill(glyph: &'static rune::Icon, label: &str, color: Color, p: &Palette) -> El {
     row()
         .h(32.0)
         .px(12.0)

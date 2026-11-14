@@ -20,7 +20,7 @@ use crate::model::{AccountId, Person};
 
 pub(crate) use direct::{has_video, reject};
 pub(crate) use media::list_devices;
-pub(crate) use signals::{DirectEvent, Signal, listen};
+pub(crate) use signals::{DirectEvent, RING_EVENT, Signal, listen};
 pub use support::via;
 pub(crate) use task::{CallHandle, Control, Invite, Leaving, RingHeard, Start, hear_ringing, person, start};
 

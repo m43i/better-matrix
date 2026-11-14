@@ -123,7 +123,11 @@ fn room_card(
         text(room.name.clone()).font(if unread { font::BODY_STRONG } else { font::BODY }).color(p.text).truncate(),
     );
     if let Some(message) = last {
-        let preview = tf!("overview.preview", sender = message.sender_name, body = message.content.plain());
+        let body = match &message.content {
+            matrix_core::MessageContent::Call(card) => super::timeline::call_title(card),
+            content => content.plain(),
+        };
+        let preview = tf!("overview.preview", sender = message.sender_name, body = body);
         titles = titles.child(text(preview).font(font::META).color(p.text_muted).truncate());
     }
     let mut card = row()

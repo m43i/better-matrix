@@ -413,6 +413,10 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
     }
 }
 
+fn call_card(video: Option<bool>) -> MessageContent {
+    MessageContent::Call(matrix_core::CallCard { video, declined_by: Vec::new() })
+}
+
 fn dm(id: &str, with: &str, name: &str, unread: u64) -> RoomSummary {
     RoomSummary { kind: RoomKind::Direct, dm_users: vec![with.into()], ..room(id, name, None, unread, unread) }
 }
@@ -546,8 +550,9 @@ fn work() -> Fixture {
             (
                 dm("!dm-grace:example.org", GRACE, "Grace Hopper", 2),
                 messages(vec![
-                    (GRACE, "Grace Hopper", text("Do you have a minute to look at the sync loop?"), 0),
-                    (GRACE, "Grace Hopper", text("It drops the room list after a reconnect."), 1),
+                    (ADA, "Ada Lovelace", call_card(Some(true)), 0),
+                    (GRACE, "Grace Hopper", text("Do you have a minute to look at the sync loop?"), 1),
+                    (GRACE, "Grace Hopper", text("It drops the room list after a reconnect."), 2),
                 ]),
             ),
             (
@@ -557,7 +562,17 @@ fn work() -> Fixture {
                 },
                 Vec::new(),
             ),
-            (dm("!dm-kai:example.org", KAI, "Kai", 1), Vec::new()),
+            // Kai is calling: the card shows the call under way, with the way in.
+            (
+                RoomSummary {
+                    call: matrix_core::RoomCall {
+                        via: Some(matrix_core::CallVia::Rtc),
+                        participants: vec![KAI.into()],
+                    },
+                    ..dm("!dm-kai:example.org", KAI, "Kai", 1)
+                },
+                messages(vec![(KAI, "Kai", call_card(Some(false)), 0)]),
+            ),
         ],
         spaces: vec![
             space(

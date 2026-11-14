@@ -78,11 +78,22 @@ see who is typing there.
   written in a dialog from the composer's poll button (`PollForm`: a question, two to twenty
   answers, disclosed or not) and sent as `Outgoing::Poll` with a plain-text fallback listing the
   answers.
+- **Call cards:** a call started in the room is a message with `MessageContent::Call` (a
+  `CallCard`: video, voice or unsaid, and who declined): MatrixRTC's ring as the SDK parses it
+  (`m.rtc.notification`), the unstable ring Element Call sends (which the timeline's event filter
+  lets through beside the SDK's own, its intent read from the raw event), and one-to-one invites
+  (video when the offer sends video). Whether a call is under way is the room's
+  (`RoomSummary::call`), not the card's: the newest card in the timeline shows it, with the
+  number in the call and Join (or that the user is in it); older cards read as ended or
+  declined. Call memberships stay hidden.
+- **Stickers** show as images (`convert::sticker`).
 - **Room events:** `EntryKind::RoomEvent` holds the sender (a `Person`) and a `RoomChange`,
   converted from matrix-sdk-ui's membership, profile and state items.
   - Kinds: created; joined, left; invited, invite withdrawn or declined; removed, banned,
     unbanned; asked to join; display name, profile picture; room name, topic, picture;
-    encryption, history visibility, join rules, permissions, pinned messages.
+    encryption, history visibility, join rules, permissions, pinned messages; upgraded,
+    addresses, guest access, server access, a space's rooms, a room's spaces, an invite by
+    email or phone, moderation rules (policy lists); live location shared.
   - The model carries what changed, never words; the desktop words it. Events that changed
     nothing worth saying stay hidden.
   - They read as small muted lines with round 18 pt pictures.

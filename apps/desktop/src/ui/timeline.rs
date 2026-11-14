@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use matrix_core::{
-    AccountId, Attachment, AttachmentKind, HistoryVisibility, Message, MessageContent, Person, Quote, RoomChange,
-    RoomEvent, RoomSummary, ThreadSummary, TimelineKey,
+    AccountId, Attachment, AttachmentKind, CallCard, HistoryVisibility, Message, MessageContent, Person, Quote,
+    RoomChange, RoomEvent, RoomSummary, ThreadSummary, TimelineKey,
 };
 use rune::{Color, El, ScrollSpec, SurfaceFit, col, el, icon, row, row as row_el, text, text_input};
 
@@ -149,6 +149,15 @@ fn room_event_text(event: &RoomEvent) -> String {
         RoomChange::JoinRules => tf!("event.join_rules", name = name),
         RoomChange::Permissions => tf!("event.permissions", name = name),
         RoomChange::PinnedMessages => tf!("event.pinned", name = name),
+        RoomChange::Upgraded => tf!("event.upgraded", name = name),
+        RoomChange::Addresses => tf!("event.addresses", name = name),
+        RoomChange::GuestAccess => tf!("event.guest_access", name = name),
+        RoomChange::ServerAccess => tf!("event.server_access", name = name),
+        RoomChange::SpaceRooms => tf!("event.space_rooms", name = name),
+        RoomChange::Spaces => tf!("event.spaces", name = name),
+        RoomChange::InvitedByContact(target) => tf!("event.invited", name = name, target = target),
+        RoomChange::ModerationRules => tf!("event.moderation_rules", name = name),
+        RoomChange::LiveLocation => tf!("event.live_location", name = name),
     }
 }
 
@@ -169,10 +178,12 @@ enum Row {
     Start,
     HistoryFailed(String),
     Loading,
-    /// A message, continuing the one before (same sender, close in time) or not.
+    /// A message, continuing the one before (same sender, close in time) or not. `latest_call`:
+    /// the newest call card, the one that shows whether the room's call is under way.
     Message {
         entry: usize,
         continues: bool,
+        latest_call: bool,
     },
     /// Room events from `start` to `end` (entries), shown as one line.
     Events {
@@ -264,7 +275,7 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
                         && message.timestamp_ms.saturating_sub(prev.timestamp_ms) < GROUP_WINDOW_MS
                         && message.reply_to.is_none()
                 });
-                rows.push((row_key(cx.key, &entry.id), Row::Message { entry: at, continues }));
+                rows.push((row_key(cx.key, &entry.id), Row::Message { entry: at, continues, latest_call: false }));
                 previous = Some(message);
             }
             EntryView::DateDivider(_) | EntryView::ReadMarker => {
@@ -279,6 +290,12 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
             }
             EntryView::Start | EntryView::Other => {}
         }
+    }
+    let is_call = |entry: usize| matches!(&entries[entry].kind, EntryView::Message(item) if matches!(item.message.content, MessageContent::Call(_)));
+    if let Some((_, Row::Message { latest_call, .. })) =
+        rows.iter_mut().rev().find(|(_, row)| matches!(row, Row::Message { entry, .. } if is_call(*entry)))
+    {
+        *latest_call = true;
     }
     rows
 }
@@ -328,8 +345,8 @@ fn build_row(cx: &Context<'_>, timeline: &RoomTimeline, key: &str, row: &Row, p:
             .h(40.0)
             .center()
             .child(text(t!("timeline.loading")).font(font::META).color(p.text_muted)),
-        Row::Message { entry, continues } => match entries.get(*entry).map(|e| &e.kind) {
-            Some(EntryView::Message(item)) => message_row(cx, key, item, *continues, p),
+        Row::Message { entry, continues, latest_call } => match entries.get(*entry).map(|e| &e.kind) {
+            Some(EntryView::Message(item)) => message_row(cx, key, item, *continues, *latest_call, p),
             _ => el().key(key.to_owned()),
         },
         Row::Events { start: from, end } => {
@@ -514,7 +531,14 @@ fn civil_date(days: i64) -> (i64, u32, u32) {
 /// One message: avatar and name (unless it continues the sender's run), the quoted message it
 /// answers, its content, a linked GIF, reactions and thread; the toolbar shows on hover.
 /// Clicking a room message opens its thread.
-fn message_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool, p: &Palette) -> El {
+fn message_row(
+    cx: &Context<'_>,
+    key: &str,
+    item: &TimelineItem,
+    continues: bool,
+    latest_call: bool,
+    p: &Palette,
+) -> El {
     let message = &item.message;
     let mut body = col().w_full().gap(4.0);
     if let Some(quote) = &message.reply_to {
@@ -528,7 +552,7 @@ fn message_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool
             }
             body = body.child(linked_gif(&gif.url, cx.gifs, p));
         }
-        None => body = body.child(message_body(item, cx, p)),
+        None => body = body.child(message_body(item, cx, latest_call, p)),
     }
     // A link's card, below the text, once the homeserver described the page.
     if let Some((url, card)) =
@@ -741,7 +765,7 @@ fn linked_gif(url: &str, gifs: &GifCache, p: &Palette) -> El {
     }
 }
 
-fn message_body(item: &TimelineItem, cx: &Context<'_>, p: &Palette) -> El {
+fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Palette) -> El {
     let media = cx.media;
     match (&item.message.content, &item.rich) {
         (MessageContent::Text { body, .. }, rich) => text_body(&item.message.event_id, body, rich.as_ref(), p),
@@ -760,7 +784,67 @@ fn message_body(item: &TimelineItem, cx: &Context<'_>, p: &Palette) -> El {
             let own = item.message.sender_id == cx.account.as_str();
             super::poll::card(poll, &item.message.event_id, own, cx.key, p)
         }
+        (MessageContent::Call(card), _) => call_card(cx, &item.message.event_id, card, latest_call, p),
     }
+}
+
+/// The name of a kind of call: video, voice, or just a call when the caller didn't say.
+pub fn call_title(card: &CallCard) -> &'static str {
+    match card.video {
+        Some(true) => t!("call.card.video"),
+        Some(false) => t!("call.card.voice"),
+        None => t!("call.card.call"),
+    }
+}
+
+/// A call's card: what kind it is and how it stands. The newest card in the room shows whether
+/// the room's call is under way, with the way in; older ones have ended.
+fn call_card(cx: &Context<'_>, event_id: &str, card: &CallCard, latest_call: bool, p: &Palette) -> El {
+    let people = &cx.room.call.participants;
+    let ongoing = latest_call && !people.is_empty();
+    let status = if ongoing {
+        format!("{} · {}", t!("call.card.ongoing"), tf!("call.people", count = people.len()))
+    } else if card.declined_by.is_empty() {
+        t!("call.card.ended").to_owned()
+    } else {
+        t!("call.card.declined").to_owned()
+    };
+    let glyph = if card.video == Some(true) { &icons::VIDEO } else { &icons::CALL };
+    let tile = el()
+        .size(40.0, 40.0)
+        .radius(10.0)
+        .center()
+        .fill(if ongoing { p.success } else { p.hover })
+        .child(icon(glyph, 20.0).color(if ongoing { p.on_accent } else { p.text_muted }));
+    let words = col()
+        .grow(1.0)
+        .min_w(0.0)
+        .gap(2.0)
+        .child(text(call_title(card)).font(font::BODY_STRONG).color(p.text).truncate())
+        .child(text(status).font(font::META).color(p.text_muted).truncate());
+    let mut entry = row()
+        .key(cx.key(&format!("call-card-{event_id}")))
+        .max_w(460.0)
+        .mt(2.0)
+        .padding(12.0)
+        .gap(12.0)
+        .center_y()
+        .radius(10.0)
+        .fill(p.surface)
+        .border(1.0, if ongoing { p.success.alpha(0.6) } else { p.divider })
+        .child(tile)
+        .child(words);
+    if ongoing {
+        entry = entry.child(if people.iter().any(|person| person == cx.account.as_str()) {
+            text(t!("call.card.joined")).font(font::META).color(p.text_muted)
+        } else {
+            let video = card.video == Some(true);
+            super::call::pill(&icons::CALL, t!("call.join"), p.success, p)
+                .key(cx.key(&format!("call-card-join-{event_id}")))
+                .on_press(move |s: &mut State| s.start_call(video))
+        });
+    }
+    entry
 }
 
 /// Message text, formatted when the sender formatted it. It selects, so it shows the text cursor

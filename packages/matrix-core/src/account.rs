@@ -423,7 +423,13 @@ impl Account {
             None => TimelineFocus::Live { hide_threaded_events: true },
             Some(root) => TimelineFocus::Thread { root_event_id: matrix_sdk::ruma::EventId::parse(root)? },
         };
-        Ok(self.joined_room(&key.room_id)?.timeline_builder().with_focus(focus).build().await?)
+        // The SDK's filter, and the unstable ring Element Call sends, which it doesn't know: it
+        // shows as a call's card.
+        let filter = |event: &matrix_sdk::ruma::events::AnySyncTimelineEvent, rules: &_| {
+            matrix_sdk_ui::timeline::default_event_filter(event, rules)
+                || event.event_type().to_string() == crate::calls::RING_EVENT
+        };
+        Ok(self.joined_room(&key.room_id)?.timeline_builder().with_focus(focus).event_filter(filter).build().await?)
     }
 
     /// The account's user.

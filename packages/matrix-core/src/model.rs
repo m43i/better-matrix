@@ -351,6 +351,24 @@ pub enum RoomChange {
     Permissions,
     /// The sender pinned or unpinned messages.
     PinnedMessages,
+    /// The sender upgraded the room: it goes on in a new one.
+    Upgraded,
+    /// The sender changed the room's addresses.
+    Addresses,
+    /// The sender changed whether guests may join.
+    GuestAccess,
+    /// The sender changed which servers may take part.
+    ServerAccess,
+    /// The sender added or removed rooms of this space.
+    SpaceRooms,
+    /// The sender changed which spaces the room belongs to.
+    Spaces,
+    /// The sender invited someone by email or phone, named as the invite shows them.
+    InvitedByContact(String),
+    /// The sender changed the room's moderation rules (a policy list).
+    ModerationRules,
+    /// The sender started sharing their live location.
+    LiveLocation,
 }
 
 impl RoomChange {
@@ -433,6 +451,18 @@ pub enum MessageContent {
     Undecryptable,
     /// A poll (MSC3381) with its votes so far.
     Poll(Poll),
+    /// A call started in the room: MatrixRTC's ring, or a one-to-one invite.
+    Call(CallCard),
+}
+
+/// A call's card in the timeline. Whether the call is still under way is the room's
+/// ([`RoomSummary::call`]), not the card's.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CallCard {
+    /// Video or voice, when the caller said.
+    pub video: Option<bool>,
+    /// Who declined it, by user ID.
+    pub declined_by: Vec<String>,
 }
 
 /// A poll and where its votes stand.
@@ -478,7 +508,7 @@ impl MessageContent {
             Self::Text { body, .. } => body,
             Self::Attachment(attachment) => &attachment.name,
             Self::Poll(poll) => &poll.question,
-            Self::Redacted | Self::Undecryptable => "",
+            Self::Redacted | Self::Undecryptable | Self::Call(_) => "",
         }
     }
 }

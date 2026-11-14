@@ -43,10 +43,10 @@ pub use engine::{
     Command, DetachedCommands, Engine, EngineConfig, EngineHandle, EngineStopped, Event, EventSink, RequestId,
 };
 pub use model::{
-    AccountId, AccountSummary, Attachment, AttachmentKind, EntryKind, HistoryVisibility, LoginMethods, MediaRef,
-    MediaSize, Message, MessageContent, Notification, NotificationMode, Outgoing, Password, Person, Poll, PollAnswer,
-    Quote, Reaction, RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary, ThreadSummary,
-    TimelineDiff, TimelineEntry, TimelineKey, Upload,
+    AccountId, AccountSummary, Attachment, AttachmentKind, CallCard, EntryKind, HistoryVisibility, LoginMethods,
+    MediaRef, MediaSize, Message, MessageContent, Notification, NotificationMode, Outgoing, Password, Person, Poll,
+    PollAnswer, Quote, Reaction, RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary,
+    ThreadSummary, TimelineDiff, TimelineEntry, TimelineKey, Upload,
 };
 
 /// How many messages a timeline page holds: what a room shows when it opens, and what each
