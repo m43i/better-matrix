@@ -32,6 +32,8 @@ cpal = "0.18"
 # Every emoji with its name and shortcodes, for the picker's search.
 emojis = "0.9"
 opuscule = "0.2"
+# Logs to stderr, only when RUST_LOG asks for them.
+tracing-subscriber.workspace = true
 symphonia = { version = "0.5.5", default-features = false, features = ["ogg", "vorbis", "mkv", "wav", "pcm", "mp3", "aac", "isomp4", "flac"] }
 
 [dev-dependencies]

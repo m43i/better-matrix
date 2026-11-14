@@ -31,6 +31,12 @@ rune-notify = { git = "https://github.com/anomalyco/rune", rev = "384c2991e58241
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# Diagnostics: the engine logs through `tracing`; the app prints them when RUST_LOG is set.
+tracing = "0.1"
+# Only to pick the TLS crypto provider: the SDK and LiveKit pull in both, and rustls then
+# refuses to guess (ADR 0009).
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "env-filter", "tracing-log", "std"] }
 tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "sync"] }
 # Calls: LiveKit's client over Google's libwebrtc (downloaded prebuilt at build time).
 # glib-main-loop: Wayland screen sharing through the desktop portal and PipeWire.

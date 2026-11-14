@@ -182,8 +182,9 @@ pub(crate) async fn grant(
                 return serde_json::from_slice::<Grant>(&bytes).map_err(|error| CallError::Service(error.to_string()));
             }
             Ok(response) => failure = format!("{path}: {}", response.status()),
-            Err(error) => failure = error.to_string(),
+            Err(error) => failure = format!("{path}: {error}"),
         }
+        tracing::debug!(%service, "call: no grant from {failure}");
     }
     Err(CallError::Service(failure))
 }

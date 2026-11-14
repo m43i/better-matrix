@@ -20,7 +20,9 @@ Date: 2026-11-14
 
 - **Media engine:** `livekit` (default features off; `tokio`, rustls, `glib-main-loop` for
   Wayland screen sharing) in `matrix-core`. Its build downloads a prebuilt libwebrtc. Cameras
-  come from `nokhwa`. No other part of the app touches either: the desktop sees calls only as
+  come from `nokhwa`. LiveKit's TLS and the SDK's ask rustls for different crypto providers, so
+  `Engine::start` installs one (aws-lc-rs, the SDK's) before anything connects; without it rustls
+  won't choose and the first call's connection panics. No other part of the app touches either: the desktop sees calls only as
   `Command`s and `Event`s, and video only through a `VideoSink` it hands the engine.
 - **One call at a time,** across accounts, run by one engine task (`calls::task`). Starting another
   hangs up the first and waits (up to 10 s) for it to leave before setting up, so the two never hold
@@ -47,7 +49,12 @@ Date: 2026-11-14
   when nothing changed. Its end is reported as soon as its loop ends, before leaving, so the
   app closes the call at once; leaving then takes at most a few seconds (each request 5 s, not
   retried: offline, the delayed leave goes out on its own). Timers that fall behind (a slow
-  publish) catch up with one tick; candidates that failed to send wait a second.
+  publish) catch up with one tick; candidates that failed to send wait a second. Each step of
+  joining (the token, the connection, publishing the microphone, the camera, the membership,
+  the ring) has a time limit, so a stall ends the call naming the step
+  (`CallError::Stalled`) rather than leaving it connecting; a panic in the call task ends the
+  call with an error too. The steps log through `tracing`, which the desktop prints when
+  `RUST_LOG` is set (`RUST_LOG=matrix_core=debug,livekit=debug`).
 - **Which standard:** MatrixRTC where the account's homeserver names a LiveKit transport
   (`Client::rtc_transports`, cached per account) and the user may send call memberships in the
   room (power level for `org.matrix.msc3401.call.member`). Otherwise the one-to-one standard in

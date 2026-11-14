@@ -127,7 +127,8 @@ bun run build          # debug build; build:release for release
 bun run install:linux  # install a release build for this user (Linux)
 ```
 
-The first build downloads a prebuilt libwebrtc for calls.
+The first build downloads a prebuilt libwebrtc for calls. To see the engine's logs, set `RUST_LOG`
+(`RUST_LOG=matrix_core=debug,livekit=info cargo run -p better-matrix-desktop`).
 
 Architecture decisions are in [docs/adr](docs/adr/README.md), terms in
 [docs/glossary.md](docs/glossary.md), and working conventions in [AGENTS.md](AGENTS.md).

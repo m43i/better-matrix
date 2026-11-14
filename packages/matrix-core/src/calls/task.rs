@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::FutureExt;
 use livekit::PlatformAudio;
 use livekit::prelude::{LocalAudioTrack, LocalVideoTrack};
 use livekit::webrtc::peer_connection::PeerConnectionState;
@@ -196,23 +197,45 @@ pub(crate) fn start(
             let controls = Controls { receiver, held: std::collections::VecDeque::new() };
             let ended = std::sync::atomic::AtomicBool::new(false);
             let call = Call { generation, sink: &*sink, account: &id, room_id: &room_id, ended: &ended };
-            let result = match (room_of(&account, &room_id), start) {
-                (Err(error), _) => Err(error),
-                (Ok(room), Start::New { video }) => match decide(&account, &room).await {
-                    Some(CallVia::Rtc) => session::run(&account, &room, video, devices, controls, call, http).await,
-                    Some(CallVia::Direct) => {
-                        run_direct(&account, &room, video, devices, call_id, None, controls, call).await
+            let run = async {
+                match (room_of(&account, &room_id), start) {
+                    (Err(error), _) => Err(error),
+                    (Ok(room), Start::New { video }) => match decide(&account, &room).await {
+                        Some(CallVia::Rtc) => session::run(&account, &room, video, devices, controls, call, http).await,
+                        Some(CallVia::Direct) => {
+                            run_direct(&account, &room, video, devices, call_id, None, controls, call).await
+                        }
+                        None => Err(CallError::Unavailable),
+                    },
+                    (Ok(room), Start::Rtc { video }) => {
+                        session::run(&account, &room, video, devices, controls, call, http).await
                     }
-                    None => Err(CallError::Unavailable),
-                },
-                (Ok(room), Start::Rtc { video }) => {
-                    session::run(&account, &room, video, devices, controls, call, http).await
-                }
-                (Ok(room), Start::Answer { video, invite }) => {
-                    run_direct(&account, &room, video, devices, invite.call_id.clone(), Some(invite), controls, call)
+                    (Ok(room), Start::Answer { video, invite }) => {
+                        run_direct(
+                            &account,
+                            &room,
+                            video,
+                            devices,
+                            invite.call_id.clone(),
+                            Some(invite),
+                            controls,
+                            call,
+                        )
                         .await
+                    }
                 }
             };
+            // A panic deep in the media stack ends the call with an error rather than leaving it
+            // connecting forever.
+            let result = std::panic::AssertUnwindSafe(run).catch_unwind().await.unwrap_or_else(|panic| {
+                let reason = panic
+                    .downcast_ref::<&str>()
+                    .map(|text| (*text).to_owned())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_default();
+                tracing::error!("call: the call task panicked: {reason}");
+                Err(CallError::Media(format!("the call stopped unexpectedly: {reason}")))
+            });
             call.end(&result);
         })
     };

@@ -923,6 +923,10 @@ impl Engine {
     /// Starts an engine on its own thread with its own Tokio runtime. Saved accounts are
     /// restored right away and reported with [`Event::AccountAdded`].
     pub fn start(config: EngineConfig, sink: impl EventSink) -> Result<EngineHandle, Error> {
+        // Both of rustls' crypto providers are built in (the SDK asks for one, LiveKit for the
+        // other), so it can't choose for itself: without this, a call's connection panics. An
+        // error means one is installed already.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().thread_name("matrix-engine").build()?;
         let (commands, receiver) = mpsc::unbounded_channel();
         let (signals, signal_receiver) = mpsc::unbounded_channel();

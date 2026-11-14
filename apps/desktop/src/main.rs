@@ -417,6 +417,11 @@ fn main() {
     if rune::is_headless() {
         return app.run();
     }
+    // The engine's and its libraries' logs go to stderr when `RUST_LOG` names what to show
+    // (`RUST_LOG=matrix_core=debug,livekit=info`).
+    if let Ok(filter) = tracing_subscriber::EnvFilter::try_from_default_env() {
+        let _ = tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::stderr).try_init();
+    }
     let Some(dirs) = rune::dirs::AppDirs::new(APP_ID) else {
         eprintln!("better-matrix: no home folder to keep data in; running without an engine");
         return app.run();

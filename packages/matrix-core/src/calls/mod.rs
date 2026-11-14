@@ -238,6 +238,9 @@ pub enum CallError {
     /// The media engine failed.
     #[error("the call's media failed: {0}")]
     Media(String),
+    /// A step of joining didn't finish in time.
+    #[error("joining the call stalled while {0}")]
+    Stalled(&'static str),
     /// No call is under way, or none rings in that room.
     #[error("there is no such call")]
     NoCall,

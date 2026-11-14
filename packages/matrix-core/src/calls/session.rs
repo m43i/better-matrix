@@ -58,6 +58,8 @@ const RETRY_EVERY: Duration = Duration::from_secs(5);
 const RENEW_EVERY: Duration = Duration::from_secs(60 * 60);
 /// How long a LiveKit connection may take.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long any other step of joining may take.
+const STEP_LIMIT: Duration = Duration::from_secs(20);
 
 /// A device in the call, as keys are sent: its user and device ID.
 type Device = (String, String);
@@ -207,7 +209,8 @@ struct Context {
 impl Context {
     /// Connects to `service`, forwarding its events tagged with it.
     async fn connect(self, service: String) -> Result<Link, CallError> {
-        let grant = rtc::grant(&self.http, &self.room, &service, self.user_id.clone(), &self.device_id).await?;
+        let grant = rtc::grant(&self.http, &self.room, &service, self.user_id.clone(), &self.device_id);
+        let grant = step("asking the call service for a token", STEP_LIMIT, grant).await?;
         let mut options = RoomOptions::default();
         // The app asks for no particular size, so every video comes whole.
         options.adaptive_stream = false;
@@ -216,11 +219,9 @@ impl Context {
             options.encryption =
                 Some(E2eeOptions { encryption_type: EncryptionType::Gcm, key_provider: self.key_provider.clone() });
         }
-        let (live, mut events) =
-            tokio::time::timeout(CONNECT_TIMEOUT, LiveRoom::connect(&grant.url, &grant.jwt, options))
-                .await
-                .map_err(|_| CallError::Service(format!("{service} didn't answer")))?
-                .map_err(media_error)?;
+        tracing::debug!(%service, sfu = %grant.url, "call: connecting");
+        let connect = async { LiveRoom::connect(&grant.url, &grant.jwt, options).await.map_err(media_error) };
+        let (live, mut events) = step("connecting to the call service", CONNECT_TIMEOUT, connect).await?;
         let sender = self.events.clone();
         let forward = tokio::spawn(async move {
             while let Some(event) = events.recv().await {
@@ -278,15 +279,17 @@ async fn set_up(
     media::use_audio_devices(audio, devices);
     let microphone = LocalAudioTrack::create_audio_track("microphone", audio.rtc_source());
     let options = TrackPublishOptions { source: TrackSource::Microphone, ..TrackPublishOptions::default() };
-    primary
-        .local_participant()
-        .publish_track(LocalTrack::Audio(microphone.clone()), options)
-        .await
-        .map_err(media_error)?;
+    let participant = primary.local_participant();
+    let publish =
+        async { participant.publish_track(LocalTrack::Audio(microphone.clone()), options).await.map_err(media_error) };
+    step("sending the microphone", STEP_LIMIT, publish).await?;
     session.microphone = Some(microphone);
     if cx.video {
         // A camera that won't start leaves a voice call, and says why.
-        match share(primary, media::open_camera(sinks, devices.camera.clone()).await, TrackSource::Camera).await {
+        let camera = async {
+            share(primary, media::open_camera(sinks, devices.camera.clone()).await, TrackSource::Camera).await
+        };
+        match step("starting the camera", STEP_LIMIT, camera).await {
             Ok(shared) => session.camera = Some(shared),
             Err(error) => call.failed(&error),
         }
@@ -294,11 +297,32 @@ async fn set_up(
     }
     let (members, _) = cx.members().await;
     session.joined = true;
-    session.delay_id = rtc::join(&cx.room, cx.user_id.clone(), &cx.device_id, cx.membership(None)).await?;
+    let join = rtc::join(&cx.room, cx.user_id.clone(), &cx.device_id, cx.membership(None));
+    session.delay_id = step("joining the room's call", STEP_LIMIT, join).await?;
     if members.is_empty() && cx.room.is_direct().await.unwrap_or(false) {
-        rtc::ring(&cx.room, cx.video).await;
+        // Unrung, the call still runs: the other person sees it in the room.
+        let _ = tokio::time::timeout(STEP_LIMIT, rtc::ring(&cx.room, cx.video)).await;
     }
+    tracing::info!(members = members.len(), "call: joined");
     Ok(Setup { key, members })
+}
+
+/// One step of joining, logged and bounded: a step that stalls fails the call and names itself,
+/// rather than leaving it connecting.
+async fn step<T>(
+    name: &'static str,
+    limit: Duration,
+    work: impl std::future::Future<Output = Result<T, CallError>>,
+) -> Result<T, CallError> {
+    let started = Instant::now();
+    tracing::debug!("call: {name}");
+    let result = tokio::time::timeout(limit, work).await.unwrap_or(Err(CallError::Stalled(name)));
+    let ms = started.elapsed().as_millis();
+    match &result {
+        Ok(_) => tracing::debug!(ms, "call: {name}: done"),
+        Err(error) => tracing::warn!(ms, %error, "call: {name}: failed"),
+    }
+    result
 }
 
 /// What the work beside the loop reports.
@@ -663,6 +687,7 @@ impl<'a, 'c> Live<'a, 'c> {
     }
 
     fn live_event(&mut self, session: &mut Session, info: &mut CallInfo, service: &str, event: RoomEvent) -> Flow {
+        tracing::trace!(%service, ?event, "call: livekit");
         let own = service == self.cx.own;
         match event {
             RoomEvent::ParticipantConnected(participant) => self.arrived(participant.identity().as_str(), service),
@@ -1021,6 +1046,18 @@ async fn send_key(room: &Room, key: &OwnKey, devices: &HashSet<Device>) -> HashS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_step_that_stalls_should_fail_naming_itself() {
+        let stalled = step("joining", Duration::from_millis(5), std::future::pending::<Result<(), CallError>>());
+        assert!(matches!(stalled.await, Err(CallError::Stalled("joining"))));
+    }
+
+    #[tokio::test]
+    async fn a_step_that_finishes_should_give_its_result() {
+        let done = step("joining", Duration::from_secs(1), async { Ok::<_, CallError>(7) });
+        assert!(matches!(done.await, Ok(7)));
+    }
 
     fn video(owner: &str, service: &str, sid: &str) -> RemoteVideo {
         let task = tokio::runtime::Builder::new_current_thread()
