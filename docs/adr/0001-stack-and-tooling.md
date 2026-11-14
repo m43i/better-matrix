@@ -39,6 +39,13 @@ Date: 2026-11-14
     `cargo-xwin` (clang-cl, lld-link).
   - Windows release builds use the GUI subsystem: no console window.
 - **CI and releases** (`.github/`), kept to as little compute as gives confidence:
+  - Hosted runners are pinned to current stable images: Ubuntu 26.04 for CI and release
+    orchestration, macOS 26 arm64 and Windows Server 2025 for their release builds. Linux
+    release builds keep Ubuntu 22.04 deliberately, preserving the glibc 2.35 baseline below.
+  - Actions use current stable major versions: checkout v7, upload-artifact v7,
+    download-artifact v8, rust-cache v2 and setup-bun v2. Their own manifests select Node 24;
+    installing Node 26 on the runner would not change that action runtime. Repository scripts
+    run with the Bun version in `package.json`, without a separate Node installation.
   - CI (`ci.yml`) lints and tests in one Linux job on every pull request and every commit to
     `main`. A newer push cancels a pull request's older run. Only `main` writes the Rust cache;
     pull requests read it. Linux builds use clang 21 from LLVM's packages (libwebrtc's libc++

@@ -34,7 +34,7 @@ jobs:
   prepare:
     name: Set the version
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     outputs:
@@ -53,7 +53,7 @@ jobs:
             echo "::error::\"$VERSION\" isn't a version like 1.2.0 or 1.2.0-rc.1"
             exit 1
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 2
@@ -100,7 +100,7 @@ jobs:
     name: Check version and earlier tests
     needs: prepare
     if: ${{ !cancelled() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       actions: read
@@ -116,7 +116,7 @@ jobs:
       # The commit whose CI counts: before the version change, when the run made one.
       TESTED_SHA: ${{ needs.prepare.outputs.base || github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.SHA }}
           sparse-checkout: Cargo.toml
@@ -162,15 +162,15 @@ jobs:
           # Linux builds on Ubuntu 22.04: the packages need its glibc (2.35) or newer.
           - { name: linux-x86_64, os: ubuntu-22.04, arch: x86_64 }
           - { name: linux-aarch64, os: ubuntu-22.04-arm, arch: aarch64 }
-          - { name: macos-arm64, os: macos-15 }
-          - { name: windows-x86_64, os: windows-2022 }
+          - { name: macos-arm64, os: macos-26 }
+          - { name: windows-x86_64, os: windows-2025 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
       # libwebrtc links ScreenCaptureKit, which macOS has from 12.3.
       MACOSX_DEPLOYMENT_TARGET: "12.3"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.verify.outputs.sha }}
       - if: runner.os == 'Linux'
@@ -194,7 +194,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: packaging/windows/package.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           path: dist/out/*
@@ -207,15 +207,15 @@ jobs:
     name: Publish
     needs: [verify, build]
     if: ${{ !cancelled() && needs.verify.result == 'success' && needs.build.result == 'success' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.verify.outputs.sha }}
           sparse-checkout: packaging/arch
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: assets
           merge-multiple: true
