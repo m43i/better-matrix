@@ -13,7 +13,7 @@ name = "better-matrix-cargo"
 [workspace.package]
 edition = "2024"
 license = "MIT"
-version = "0.0.3"
+version = "0.0.4"
 
 [workspace.dependencies]
 matrix-core = { path = "packages/matrix-core" }
