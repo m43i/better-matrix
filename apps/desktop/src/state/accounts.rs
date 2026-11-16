@@ -143,16 +143,24 @@ enum ReadBoundary {
 /// The divider keeps its row until its opacity has finished fading.
 #[derive(Debug)]
 enum ReadMarkerFade {
-    Pending(String),
-    Running { id: String, until: f64 },
+    Pending(ReadMarker),
+    Running { marker: ReadMarker, until: f64 },
 }
 
 impl ReadMarkerFade {
-    fn id(&self) -> &str {
+    fn marker(&self) -> &ReadMarker {
         match self {
-            Self::Pending(id) | Self::Running { id, .. } => id,
+            Self::Pending(marker) | Self::Running { marker, .. } => marker,
         }
     }
+}
+
+/// A visible divider's boundary, independent of the SDK's advancing read marker.
+#[derive(Debug)]
+struct ReadMarker {
+    id: String,
+    previous: Option<String>,
+    next: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -196,12 +204,26 @@ fn next_revision() -> u64 {
 }
 
 impl RoomTimeline {
-    pub fn read_marker_fading(&self, id: &str) -> bool {
-        self.read_marker_fade.as_ref().is_some_and(|fade| fade.id() == id)
+    /// The fading divider and its insertion point in the current entries.
+    pub fn fading_read_marker(&self) -> Option<(&str, usize)> {
+        let marker = self.read_marker_fade.as_ref()?.marker();
+        let index = marker
+            .next
+            .as_ref()
+            .and_then(|id| self.entries.iter().position(|entry| &entry.id == id))
+            .or_else(|| {
+                marker
+                    .previous
+                    .as_ref()
+                    .and_then(|id| self.entries.iter().position(|entry| &entry.id == id))
+                    .map(|at| at + 1)
+            })
+            .unwrap_or(self.entries.len());
+        Some((&marker.id, index))
     }
 
     pub fn read_marker_opacity(&self, id: &str) -> f32 {
-        if matches!(&self.read_marker_fade, Some(ReadMarkerFade::Running { id: fading, .. }) if fading == id) {
+        if matches!(&self.read_marker_fade, Some(ReadMarkerFade::Running { marker, .. }) if marker.id == id) {
             0.0
         } else {
             1.0
@@ -211,23 +233,23 @@ impl RoomTimeline {
     fn poll_read_marker(&mut self, tx: &mut Tx, reduced_motion: bool) -> bool {
         let Some(fade) = self.read_marker_fade.take() else { return false };
         let mut started = false;
-        let (id, until) = match fade {
-            ReadMarkerFade::Pending(id) => {
+        let (marker, until) = match fade {
+            ReadMarkerFade::Pending(marker) => {
                 // Viewport reports are not input. Explicitly animate this acknowledgement,
                 // including when the marker was visible on the room's first frame.
                 tx.animated();
                 self.revision = next_revision();
                 started = true;
                 let duration = if reduced_motion { 0.15 } else { f64::from(READ_MARKER_FADE) };
-                (id, tx.clock() + duration)
+                (marker, tx.clock() + duration)
             }
-            ReadMarkerFade::Running { id, until } => (id, until),
+            ReadMarkerFade::Running { marker, until } => (marker, until),
         };
-        if tx.clock() >= until || !self.read_marker_seen(&id) {
+        if tx.clock() >= until {
             self.revision = next_revision();
             return true;
         }
-        self.read_marker_fade = Some(ReadMarkerFade::Running { id, until });
+        self.read_marker_fade = Some(ReadMarkerFade::Running { marker, until });
         tx.wake_at(until);
         started
     }
@@ -815,7 +837,13 @@ impl Accounts {
         if timeline.read_marker_seen(marker) || !timeline.see_read_marker(marker) {
             return false;
         }
-        timeline.read_marker_fade = Some(ReadMarkerFade::Pending(marker.to_owned()));
+        let Some(at) = timeline.entries.iter().position(|entry| entry.id == marker) else { return false };
+        let marker = ReadMarker {
+            id: marker.to_owned(),
+            previous: at.checked_sub(1).and_then(|at| timeline.entries.get(at)).map(|entry| entry.id.clone()),
+            next: timeline.entries.get(at + 1).map(|entry| entry.id.clone()),
+        };
+        timeline.read_marker_fade = Some(ReadMarkerFade::Pending(marker));
         timeline.revision = next_revision();
         true
     }

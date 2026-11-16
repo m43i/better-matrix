@@ -115,6 +115,84 @@ fn reduced_motion_should_close_the_new_markers_space_after_the_short_fade() {
     assert!(rt.presented("new-marker").is_none(), "reduced motion should not reserve the row for 2.5 seconds");
 }
 
+#[test]
+fn a_receipt_removing_the_new_marker_should_keep_its_fade_between_messages() {
+    let mut rt = fading_timeline();
+    rt.update(|s, tx| marker_changed(s, tx, vec![TimelineDiff::Remove { index: 1 }]));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+        assert_marker_between_messages(&rt);
+        assert!(rt.presented("new-marker").unwrap().1 > 0.01, "the receipt must not cut the fade short");
+    }
+}
+
+#[test]
+fn a_receipt_moving_the_new_marker_should_keep_its_original_boundary() {
+    let mut rt = fading_timeline();
+    rt.update(|s, tx| {
+        marker_changed(
+            s,
+            tx,
+            vec![
+                TimelineDiff::Remove { index: 1 },
+                TimelineDiff::PushBack(TimelineEntry { id: "new-marker".into(), kind: EntryKind::ReadMarker }),
+            ],
+        );
+    });
+    rt.frame(1.0 / 60.0);
+    assert_marker_between_messages(&rt);
+}
+
+#[test]
+fn calling_a_member_in_an_existing_chat_should_land_the_chat_at_once() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.toggle_side(crate::state::SidePanel::Members);
+        s.toggle_member_menu("@grace:example.org");
+    });
+    let viewport = rt.presented("timeline").unwrap().0;
+    let previous = rt
+        .elements()
+        .into_iter()
+        .find_map(|e| {
+            (e.rect[1] + e.rect[3] > viewport[1] && e.rect[1] < viewport[1] + viewport[3])
+                .then(|| e.key.filter(|key| key.starts_with("msg-")))
+                .flatten()
+        })
+        .expect("a visible message in the previous chat");
+    press(&mut rt, "member-menu-call");
+    assert_eq!(rt.state.active_room_id(), Some("!dm-grace:example.org"));
+    assert!(rt.presented(&previous).is_none(), "the previous chat's messages must not linger");
+}
+
+fn marker_changed(s: &mut State, tx: &mut rune::Tx, diffs: Vec<TimelineDiff>) {
+    s.apply(
+        Event::TimelineChanged {
+            account: AccountId::new(demo::ADA),
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            diffs,
+        },
+        tx,
+    );
+}
+
+fn fading_timeline() -> Runtime<State> {
+    let mut rt = runtime(unread_timeline);
+    rt.update(|s, _| s.focus_changed(true));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    rt
+}
+
+fn assert_marker_between_messages(rt: &Runtime<State>) {
+    let (marker, _) = rt.presented("new-marker").expect("the divider should still be fading");
+    let before = rt.presented("msg-before").unwrap().0;
+    let after = rt.presented("msg-after").unwrap().0;
+    assert!(before[1] + before[3] <= marker[1] + 1.0, "{before:?} overlaps {marker:?}");
+    assert!(marker[1] + marker[3] <= after[1] + 1.0, "{marker:?} overlaps {after:?}");
+}
+
 fn unread_timeline(s: &mut State) {
     s.select_room(demo::DEMO_THREAD.0);
     s.focus_changed(false);

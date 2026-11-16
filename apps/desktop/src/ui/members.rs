@@ -226,7 +226,7 @@ pub fn menu(s: &State, account: &AccountData, user_id: &str, submenu: Option<Mem
             panel = panel.child(
                 menu_action(glyph, label, Tone::Normal, p)
                     .key(key)
-                    .on_press(move |s: &mut State| s.call_person(&id, video)),
+                    .on_press_tx(crate::state::navigate(move |s| s.call_person(&id, video))),
             );
         }
     }

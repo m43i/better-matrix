@@ -202,7 +202,9 @@ see who is typing there.
     badges follow the counts the SDK works out after sync.
   - The "New" marker is dismissed when its own row enters the viewport, including on open,
     without the media prefetch margin. It fades over a 2.5-second opacity spring, keeping its
-    row's full height until the fade ends, then removing the row. A small fade state machine
+    row's full height until the fade ends, then removing the row. The fading row retains its
+    acknowledged neighbours independently of the SDK marker, so advancing receipts can move or
+    remove that marker without moving the visible divider. A small fade state machine
     uses Rune's logical clock and a scheduled wake (150 ms under reduced motion). Removing the
     row at the start of an exit fade would let the virtual list close its space after 150 ms,
     while the divider still draws over the messages. The desktop

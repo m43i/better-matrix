@@ -212,6 +212,7 @@ enum Row {
         end: usize,
     },
     Divider(usize),
+    ReadMarker(String),
 }
 
 /// Rows either side of the viewport whose media loads before they scroll into view.
@@ -223,7 +224,7 @@ impl Row {
         match *self {
             Row::Message { entry, .. } | Row::Divider(entry) => Some(entry..entry + 1),
             Row::Events { start, end } => Some(start..end),
-            Row::Start | Row::HistoryFailed(_) | Row::Loading => None,
+            Row::Start | Row::HistoryFailed(_) | Row::Loading | Row::ReadMarker(_) => None,
         }
     }
 }
@@ -268,15 +269,22 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
         rows.push((cx.key("timeline-loading"), Row::Loading));
     }
     let mut previous: Option<&Message> = None;
+    let fading = timeline.and_then(RoomTimeline::fading_read_marker);
     let mut index = 0;
     while let Some(entry) = entries.get(index) {
         let at = index;
+        if let Some((id, boundary)) = fading
+            && boundary == at
+        {
+            rows.push((cx.key(id), Row::ReadMarker(id.to_owned())));
+        }
         index += 1;
         match &entry.kind {
             EntryView::RoomEvent(event) => {
                 // Joins (or leaves) in a row read as one line; hidden entries between them
                 // don't break the run.
                 while event.change.groups()
+                    && fading.is_none_or(|(_, boundary)| boundary != index)
                     && let Some(next) = entries.get(index)
                 {
                     match &next.kind {
@@ -299,13 +307,11 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
                 rows.push((row_key(cx.key, &entry.id), Row::Message { entry: at, continues, latest_call: false }));
                 previous = Some(message);
             }
-            EntryView::ReadMarker
-                if timeline.is_some_and(|t| t.read_marker_seen(&entry.id) && !t.read_marker_fading(&entry.id)) => {}
-            EntryView::DateDivider(_) | EntryView::ReadMarker => {
+            EntryView::ReadMarker if timeline.is_some_and(|t| t.read_marker_seen(&entry.id)) => {}
+            EntryView::ReadMarker => rows.push((cx.key(&entry.id), Row::ReadMarker(entry.id.clone()))),
+            EntryView::DateDivider(_) => {
                 rows.push((cx.key(&entry.id), Row::Divider(at)));
-                if matches!(entry.kind, EntryView::DateDivider(_)) {
-                    previous = None;
-                }
+                previous = None;
             }
             EntryView::Start if !cx.in_thread() => {
                 rows.push((entry.id.clone(), Row::Start));
@@ -313,6 +319,11 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
             }
             EntryView::Start | EntryView::Other => {}
         }
+    }
+    if let Some((id, boundary)) = fading
+        && boundary == entries.len()
+    {
+        rows.push((cx.key(id), Row::ReadMarker(id.to_owned())));
     }
     let is_call = |entry: usize| matches!(&entries[entry].kind, EntryView::Message(item) if matches!(item.message.content, MessageContent::Call(_)));
     if let Some((_, Row::Message { latest_call, .. })) =
@@ -375,10 +386,11 @@ fn build_row(cx: &Context<'_>, timeline: &RoomTimeline, key: &str, row: &Row, p:
             Some(EntryView::DateDivider(at)) => {
                 rule_with_label(key, &date_label(local_ms(*at), local_ms(now_ms())), p.text_muted, p)
             }
-            _ => rule_with_label(key, t!("timeline.new"), p.mention, p)
-                .opacity(entries.get(*entry).map_or(1.0, |entry| timeline.read_marker_opacity(&entry.id)))
-                .opacity_motion(rune::Spring::new(crate::state::READ_MARKER_FADE, 0.0)),
+            _ => el().key(key.to_owned()),
         },
+        Row::ReadMarker(id) => rule_with_label(key, t!("timeline.new"), p.mention, p)
+            .opacity(timeline.read_marker_opacity(id))
+            .opacity_motion(rune::Spring::new(crate::state::READ_MARKER_FADE, 0.0)),
     }
 }
 
@@ -426,12 +438,8 @@ pub fn timeline(
                 .filter(|timeline| timeline.revision == revision)
             {
                 let marker = shown.get(rows.clone()).unwrap_or_default().iter().find_map(|(_, row)| {
-                    let Row::Divider(entry) = row else { return None };
-                    timeline
-                        .entries
-                        .get(*entry)
-                        .filter(|entry| matches!(entry.kind, EntryView::ReadMarker))
-                        .map(|entry| entry.id.clone())
+                    let Row::ReadMarker(id) = row else { return None };
+                    Some(id.clone())
                 });
                 let last_message = shown.get(rows.clone()).unwrap_or_default().iter().rev().find_map(|(_, row)| {
                     let Row::Message { entry, .. } = row else { return None };
