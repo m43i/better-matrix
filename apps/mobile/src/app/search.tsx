@@ -20,7 +20,10 @@ import { RoomRow } from '../ui/shell/RoomRow';
 import { useNow } from '../ui/shell/useNow';
 import { usePalette } from '../ui/theme';
 
-type Item = { kind: 'room'; room: RoomSummary } | { kind: 'space'; id: string; name: string; avatar: string | null } | { kind: 'chat' };
+type Item =
+  | { kind: 'room'; room: RoomSummary }
+  | { kind: 'space'; id: string; name: string; avatar: string | null }
+  | { kind: 'chat' };
 
 /** Closes the search, then opens `href` from where it was opened. */
 function leaveFor(href: Href): void {
@@ -34,26 +37,53 @@ export default function SearchScreen() {
   const account = useStore(activeAccount);
   const [term, setTerm] = useState('');
   const now = useNow();
-  const results = useMemo(() => (account ? jumpTo(account, term, now) : null), [account, term, now]);
+
+  const results = useMemo(
+    () => (account ? jumpTo(account, term, now) : null),
+    [account, term, now],
+  );
+
   const typed = term.trim().length > 0;
+
   const sections = useMemo(() => {
     if (!results) return [];
     const out: Array<{ key: string; title: string | null; data: Item[] }> = [];
+
     if (typed) {
-      out.push({ key: 'rooms', title: t('search.rooms'), data: results.rooms.map((room) => ({ kind: 'room', room })) });
-      out.push({ key: 'direct', title: t('search.direct'), data: results.direct.map((room) => ({ kind: 'room', room })) });
+      out.push({
+        key: 'rooms',
+        title: t('search.rooms'),
+        data: results.rooms.map((room) => ({ kind: 'room', room })),
+      });
+      out.push({
+        key: 'direct',
+        title: t('search.direct'),
+        data: results.direct.map((room) => ({ kind: 'room', room })),
+      });
       out.push({
         key: 'spaces',
         title: t('search.spaces'),
-        data: results.spaces.map((s) => ({ kind: 'space', id: s.room_id, name: s.name, avatar: s.avatar })),
+        data: results.spaces.map((s) => ({
+          kind: 'space',
+          id: s.room_id,
+          name: s.name,
+          avatar: s.avatar,
+        })),
       });
     } else {
       const recent = [...results.rooms, ...results.direct];
-      out.push({ key: 'recent', title: t('overview.recent'), data: recent.map((room) => ({ kind: 'room', room })) });
+      out.push({
+        key: 'recent',
+        title: t('overview.recent'),
+        data: recent.map((room) => ({ kind: 'room', room })),
+      });
     }
+
     out.push({ key: 'chat', title: null, data: [{ kind: 'chat' }] });
+
     return out.filter((s) => s.data.length > 0);
   }, [results, typed]);
+
   if (!account) return null;
   const id = account.summary.id;
   const found = !typed || sections.some((s) => s.key !== 'chat');
@@ -65,7 +95,17 @@ export default function SearchScreen() {
           title: t('mobile.shell.jump_title'),
           headerShown: true,
           // A modal on iOS closes by a swipe or this; Android's back closes it.
-          headerRight: Platform.OS === 'ios' ? () => <Text style={[font.body, { color: palette.accent }]} onPress={() => router.back()}>{t('common.close')}</Text> : undefined,
+          headerRight:
+            Platform.OS === 'ios'
+              ? () => (
+                  <Text
+                    style={[font.body, { color: palette.accent }]}
+                    onPress={() => router.back()}
+                  >
+                    {t('common.close')}
+                  </Text>
+                )
+              : undefined,
         }}
       />
       <Stack.SearchBar
@@ -85,11 +125,21 @@ export default function SearchScreen() {
         keyboardDismissMode="on-drag"
         sections={sections}
         stickySectionHeadersEnabled={false}
-        keyExtractor={(item, index) => (item.kind === 'room' ? item.room.room_id : item.kind === 'space' ? item.id : `chat-${index}`)}
-        ListHeaderComponent={found ? undefined : <EmptyState icon="search" title={t('search.nothing')} />}
+        keyExtractor={(item, index) =>
+          item.kind === 'room'
+            ? item.room.room_id
+            : item.kind === 'space'
+              ? item.id
+              : `chat-${index}`
+        }
+        ListHeaderComponent={
+          found ? undefined : <EmptyState icon="search" title={t('search.nothing')} />
+        }
         renderSectionHeader={({ section }) =>
           section.title ? (
-            <Text style={[font.section, styles.title, { color: palette.textMuted }]}>{section.title.toUpperCase()}</Text>
+            <Text style={[font.section, styles.title, { color: palette.textMuted }]}>
+              {section.title.toUpperCase()}
+            </Text>
           ) : null
         }
         renderItem={({ item }) => {
@@ -104,12 +154,21 @@ export default function SearchScreen() {
               />
             );
           }
+
           if (item.kind === 'space') {
             return (
               <ListRow
                 testID={`search-space-${item.id}`}
                 title={item.name}
-                leading={<Avatar account={id} id={item.id} name={item.name} media={item.avatar} size={40} />}
+                leading={
+                  <Avatar
+                    account={id}
+                    id={item.id}
+                    name={item.name}
+                    media={item.avatar}
+                    size={40}
+                  />
+                }
                 onPress={() => {
                   setScope(store, id, { space: item.id });
                   router.back();
@@ -118,8 +177,14 @@ export default function SearchScreen() {
               />
             );
           }
+
           return (
-            <ListRow testID="search-new-chat" icon="compose" title={t('create.chat')} onPress={() => leaveFor(routes.newChat())} />
+            <ListRow
+              testID="search-new-chat"
+              icon="compose"
+              title={t('create.chat')}
+              onPress={() => leaveFor(routes.newChat())}
+            />
           );
         }}
       />

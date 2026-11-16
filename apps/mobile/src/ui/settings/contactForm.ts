@@ -33,9 +33,13 @@ export function contactForm(form: ContactForm, event: ContactEvent): ContactForm
     case 'request':
       return form.step.type === 'entering' ? { step: { type: 'requesting' }, error: null } : form;
     case 'sent':
-      return form.step.type === 'requesting' ? { step: { type: 'sent', pending: event.pending, busy: false }, error: null } : form;
+      return form.step.type === 'requesting'
+        ? { step: { type: 'sent', pending: event.pending, busy: false }, error: null }
+        : form;
     case 'confirm':
-      return form.step.type === 'sent' && !form.step.busy ? { step: { ...form.step, busy: true }, error: null } : form;
+      return form.step.type === 'sent' && !form.step.busy
+        ? { step: { ...form.step, busy: true }, error: null }
+        : form;
     case 'idle':
       return form.step.type === 'sent' ? { ...form, step: { ...form.step, busy: false } } : form;
     case 'failed':

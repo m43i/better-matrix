@@ -21,9 +21,14 @@ const VOICE = 120;
 export function CompactCall({ account, roomId }: { account: AccountId; roomId: string }) {
   const info = useStore((s) => {
     const current = s.call.current;
-    return current && current.account === account && current.room_id === roomId && s.call.view.chat ? current : null;
+
+    return current && current.account === account && current.room_id === roomId && s.call.view.chat
+      ? current
+      : null;
   });
+
   if (!info) return null;
+
   return <Compact info={info} />;
 }
 
@@ -37,8 +42,12 @@ function Compact({ info }: { info: CallInfo }) {
   // A 16:9 surface across the phone, kept short enough to leave the chat its room.
   const height = video ? Math.min(Math.max(((width - 24) * 9) / 16, 150), 220) : VOICE;
   const expand = useOpenStage();
+
   return (
-    <View testID="call-compact" style={[styles.compact, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
+    <View
+      testID="call-compact"
+      style={[styles.compact, { backgroundColor: palette.surface, borderColor: palette.divider }]}
+    >
       <View style={{ height }}>
         <CallTiles
           info={info}
@@ -63,7 +72,13 @@ function Compact({ info }: { info: CallInfo }) {
 }
 
 const styles = StyleSheet.create({
-  compact: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+  compact: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 8,
+    gap: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   controls: { flex: 1, alignItems: 'flex-end' },
 });

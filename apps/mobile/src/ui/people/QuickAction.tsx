@@ -25,6 +25,7 @@ export function QuickAction({
 }) {
   const palette = usePalette();
   const color = danger ? palette.danger : active ? palette.accent : palette.text;
+
   return (
     <Pressable
       testID={testID}
@@ -33,9 +34,20 @@ export function QuickAction({
       accessibilityLabel={label}
       accessibilityState={{ expanded: active }}
       android_ripple={{ color: palette.hover, borderless: true, radius: 36 }}
-      style={({ pressed }) => [styles.action, { opacity: pressed && Platform.OS === 'ios' ? 0.6 : 1 }]}
+      style={({ pressed }) => [
+        styles.action,
+        { opacity: pressed && Platform.OS === 'ios' ? 0.6 : 1 },
+      ]}
     >
-      <View style={[styles.circle, { backgroundColor: palette.surface, borderColor: active ? palette.accent : palette.divider }]}>
+      <View
+        style={[
+          styles.circle,
+          {
+            backgroundColor: palette.surface,
+            borderColor: active ? palette.accent : palette.divider,
+          },
+        ]}
+      >
         <Icon name={icon} size={22} color={color} />
       </View>
       <Text style={[font.meta, { color }]} numberOfLines={1}>

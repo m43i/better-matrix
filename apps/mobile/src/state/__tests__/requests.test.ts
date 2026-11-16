@@ -26,6 +26,8 @@ describe('Requests', () => {
   it('should leave other requests events alone', () => {
     const requests = new Requests();
     void requests.track(1);
-    expect(requests.hear({ type: 'OpenUrl', data: { request: 2, url: 'https://example.org' } })).toBe(false);
+    expect(
+      requests.hear({ type: 'OpenUrl', data: { request: 2, url: 'https://example.org' } }),
+    ).toBe(false);
   });
 });

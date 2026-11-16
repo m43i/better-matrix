@@ -33,6 +33,7 @@ import linksDe from './mobile/links.de.json';
 import linksFr from './mobile/links.fr.json';
 
 export type Locale = 'en' | 'de' | 'fr';
+
 /** The app's language: the system's, or one catalog. */
 export type Language = 'system' | Locale;
 
@@ -47,9 +48,38 @@ type Catalog = Record<string, string>;
 /** Every catalog, by locale: the desktop's, then the mobile's over it. */
 // One mobile catalog per area of the app (src/i18n/mobile/<area>.<locale>.json), so work on
 // one area never edits another's file.
-const mobileEn = { ...shellEn, ...conversationEn, ...composerEn, ...accountsEn, ...peopleEn, ...callsEn, ...linksEn, ...pushEn };
-const mobileDe = { ...shellDe, ...conversationDe, ...composerDe, ...accountsDe, ...peopleDe, ...callsDe, ...linksDe, ...pushDe };
-const mobileFr = { ...shellFr, ...conversationFr, ...composerFr, ...accountsFr, ...peopleFr, ...callsFr, ...linksFr, ...pushFr };
+const mobileEn = {
+  ...shellEn,
+  ...conversationEn,
+  ...composerEn,
+  ...accountsEn,
+  ...peopleEn,
+  ...callsEn,
+  ...linksEn,
+  ...pushEn,
+};
+
+const mobileDe = {
+  ...shellDe,
+  ...conversationDe,
+  ...composerDe,
+  ...accountsDe,
+  ...peopleDe,
+  ...callsDe,
+  ...linksDe,
+  ...pushDe,
+};
+
+const mobileFr = {
+  ...shellFr,
+  ...conversationFr,
+  ...composerFr,
+  ...accountsFr,
+  ...peopleFr,
+  ...callsFr,
+  ...linksFr,
+  ...pushFr,
+};
 
 export const catalogs: Record<Locale, Catalog> = {
   en: { ...desktopEn, ...mobileEn },
@@ -68,10 +98,13 @@ let current: Locale = 'en';
 /** The locale `language` resolves to on this device. */
 export function resolve(language: Language): Locale {
   if (language !== 'system') return language;
+
   for (const locale of getLocales()) {
-    const code = locale.languageCode as Locale | null;
-    if (code && code in catalogs) return code;
+    const code = locale.languageCode;
+
+    if (code === 'en' || code === 'de' || code === 'fr') return code;
   }
+
   return 'en';
 }
 
@@ -88,7 +121,9 @@ export function locale(): Locale {
 /** The message for `key`, with `{{name}}` placeholders filled. English fills any gap. */
 export function t(key: Key, params?: Record<string, string | number>): string {
   const message = catalogs[current][key] ?? catalogs.en[key] ?? key;
+
   if (!params) return message;
+
   return message.replace(/\{\{(\w+)\}\}/g, (whole, name: string) =>
     name in params ? format(params[name]!) : whole,
   );
@@ -97,6 +132,8 @@ export function t(key: Key, params?: Record<string, string | number>): string {
 /** The plural form of `key` for `count` (`key.one` or `key.other`), with `{{count}}` filled. */
 export function tp(key: string, count: number, params?: Record<string, string | number>): string {
   const form = pluralForm(current, count);
+
+  // SAFETY: plural catalog keys are checked together in the catalog tests; callers supply their base.
   return t(`${key}.${form}` as Key, { count, ...params });
 }
 
@@ -107,9 +144,10 @@ export function tp(key: string, count: number, params?: Record<string, string | 
  */
 export function pluralForm(locale: Locale, count: number): 'one' | 'other' {
   if (locale === 'fr') return count >= 0 && count < 2 ? 'one' : 'other';
+
   return count === 1 ? 'one' : 'other';
 }
 
 function format(value: string | number): string {
-  return typeof value === 'number' ? value.toLocaleString(current) : value;
+  return value.toLocaleString(current);
 }

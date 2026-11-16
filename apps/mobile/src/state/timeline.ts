@@ -18,8 +18,12 @@ export function threadKey(roomId: string, root: string): TimelineKey {
 }
 
 /** `entries` after `diffs`, as a new array; `entries` is left as it was. */
-export function applyDiffs(entries: readonly TimelineEntry[], diffs: readonly TimelineDiff[]): TimelineEntry[] {
+export function applyDiffs(
+  entries: readonly TimelineEntry[],
+  diffs: readonly TimelineDiff[],
+): TimelineEntry[] {
   let next = entries.slice();
+
   for (const diff of diffs) {
     switch (diff.type) {
       case 'Reset':
@@ -57,5 +61,6 @@ export function applyDiffs(entries: readonly TimelineEntry[], diffs: readonly Ti
         break;
     }
   }
+
   return next;
 }

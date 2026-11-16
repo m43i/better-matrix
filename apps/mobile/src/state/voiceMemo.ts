@@ -28,11 +28,19 @@ export type VoiceEffect = 'start' | 'send' | 'discard' | null;
 
 export const VOICE_IDLE: VoiceMemo = { phase: 'idle' };
 
-export function voiceStep(state: VoiceMemo, event: VoiceEvent): { next: VoiceMemo; effect: VoiceEffect } {
+export interface VoiceTransition {
+  next: VoiceMemo;
+  effect: VoiceEffect;
+}
+
+export function voiceStep(state: VoiceMemo, event: VoiceEvent): VoiceTransition {
   const stay = { next: state, effect: null };
+
   switch (state.phase) {
     case 'idle':
-      return event.type === 'press' ? { next: { phase: 'starting', held: event.held, released: false }, effect: 'start' } : stay;
+      return event.type === 'press'
+        ? { next: { phase: 'starting', held: event.held, released: false }, effect: 'start' }
+        : stay;
     case 'starting':
       switch (event.type) {
         case 'release':
@@ -41,7 +49,10 @@ export function voiceStep(state: VoiceMemo, event: VoiceEvent): { next: VoiceMem
           // A hold that ended before the microphone opened wasn't meant as a memo.
           return state.released
             ? { next: { phase: 'stopping', send: false }, effect: 'discard' }
-            : { next: { phase: 'recording', held: state.held, startedAt: event.now }, effect: null };
+            : {
+                next: { phase: 'recording', held: state.held, startedAt: event.now },
+                effect: null,
+              };
         case 'failed':
           return { next: VOICE_IDLE, effect: null };
         case 'discard':
@@ -49,10 +60,12 @@ export function voiceStep(state: VoiceMemo, event: VoiceEvent): { next: VoiceMem
         default:
           return stay;
       }
+
     case 'recording':
       switch (event.type) {
         case 'release':
           if (!state.held) return stay;
+
           return event.now - state.startedAt < SHORTEST_HOLD_MS
             ? { next: { phase: 'stopping', send: false }, effect: 'discard' }
             : { next: { phase: 'stopping', send: true }, effect: 'send' };
@@ -65,7 +78,10 @@ export function voiceStep(state: VoiceMemo, event: VoiceEvent): { next: VoiceMem
         default:
           return stay;
       }
+
     case 'stopping':
-      return event.type === 'stopped' || event.type === 'failed' ? { next: VOICE_IDLE, effect: null } : stay;
+      return event.type === 'stopped' || event.type === 'failed'
+        ? { next: VOICE_IDLE, effect: null }
+        : stay;
   }
 }

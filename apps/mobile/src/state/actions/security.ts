@@ -25,7 +25,11 @@ export type Guarded =
   | { type: 'AddContact'; pending: PendingContact };
 
 /** The command for a guarded action, with the password once the server asked for it. */
-export function guardedCommand(account: AccountId, action: Guarded, password: string | null): Command {
+export function guardedCommand(
+  account: AccountId,
+  action: Guarded,
+  password: string | null,
+): Command {
   switch (action.type) {
     case 'EndSession':
       return { type: 'EndSession', data: { account, device_id: action.deviceId, password } };
@@ -54,26 +58,39 @@ export interface GuardHooks {
  * done and `false` when the user gave up; rejects with `CommandFailed` when the server refused
  * for another reason (or the request was cancelled).
  */
-export async function runGuarded(store: Store, account: AccountId, action: Guarded, hooks: GuardHooks): Promise<boolean> {
+export async function runGuarded(
+  store: Store,
+  account: AccountId,
+  action: Guarded,
+  hooks: GuardHooks,
+): Promise<boolean> {
   let password: string | null = null;
+
   for (;;) {
     let needed = false;
+
     const run = store.run(guardedCommand(account, action, password), (event) => {
       if (event.type === 'PasswordNeeded') needed = true;
       else if (event.type === 'OpenUrl') hooks.openUrl?.(event.data.url);
     });
+
     hooks.onRequest?.(run.request);
     let refused: string | null;
+
     try {
       await run;
+
       return true;
     } catch (error) {
       // Asked for the password, the request ends with an error that isn't shown. Refused with
       // one, the error says why (a wrong password) and the user may try again.
-      if (!(error instanceof CommandFailed) || error.cancelled || (!needed && password === null)) throw error;
+      if (!(error instanceof CommandFailed) || error.cancelled || (!needed && password === null))
+        throw error;
       refused = password === null ? null : error.message;
     }
+
     const next = await hooks.askPassword(refused);
+
     if (next === null) return false;
     password = next;
   }
@@ -84,6 +101,7 @@ export async function runGuarded(store: Store, account: AccountId, action: Guard
 /** The account on screen, when its session is known to be unverified: the banner offers to verify it. */
 export function unverifiedAccount(state: State): AccountId | null {
   const account = activeAccount(state);
+
   return account?.security && !account.security.session_verified ? account.summary.id : null;
 }
 
@@ -97,7 +115,12 @@ export function acceptVerification(store: Store, account: AccountId, flowId: str
 }
 
 /** Says whether the emoji match the other session's. */
-export function confirmVerification(store: Store, account: AccountId, flowId: string, matches: boolean): void {
+export function confirmVerification(
+  store: Store,
+  account: AccountId,
+  flowId: string,
+  matches: boolean,
+): void {
   store.send({ type: 'ConfirmVerification', data: { account, flow_id: flowId, matches } });
 }
 
@@ -122,12 +145,16 @@ export function followedVerification(
   known: readonly string[],
 ): Verification | undefined {
   return verifications.find(
-    (v) => v.account === account && (flowId !== null ? v.flowId === flowId : !known.includes(v.flowId)),
+    (v) =>
+      v.account === account && (flowId !== null ? v.flowId === flowId : !known.includes(v.flowId)),
   );
 }
 
 /** Verification requests from the user's other sessions that `seen` doesn't hold yet. */
-export function newIncoming(verifications: Verification[], seen: ReadonlySet<string>): Verification[] {
+export function newIncoming(
+  verifications: Verification[],
+  seen: ReadonlySet<string>,
+): Verification[] {
   return verifications.filter((v) => v.step.type === 'Incoming' && !seen.has(verificationKey(v)));
 }
 
@@ -137,13 +164,22 @@ export function verificationKey(v: { account: AccountId; flowId: string }): stri
 }
 
 /** What the sheet can do at a step. */
-export type VerificationAction = 'accept' | 'decline' | 'cancel' | 'match' | 'mismatch' | 'done' | 'close';
+export type VerificationAction =
+  | 'accept'
+  | 'decline'
+  | 'cancel'
+  | 'match'
+  | 'mismatch'
+  | 'done'
+  | 'close';
 
-/** How the verification sheet shows a step: `null` is the request on its way to a first step. */
-export function verificationView(step: VerificationStep | null): {
+export interface VerificationView {
   title: 'verify.title' | 'verify.incoming_title' | 'verify.done_title';
   actions: VerificationAction[];
-} {
+}
+
+/** How the verification sheet shows a step: `null` is the request on its way to a first step. */
+export function verificationView(step: VerificationStep | null): VerificationView {
   switch (step?.type) {
     case 'Incoming':
       return { title: 'verify.incoming_title', actions: ['decline', 'accept'] };
@@ -173,7 +209,10 @@ export function recover(store: Store, account: AccountId, key: string): Promise<
  */
 export function setUpRecovery(store: Store, account: AccountId, reset: boolean): Promise<void> {
   forgetRecoveryKey(store);
-  return store.run(reset ? { type: 'ResetRecoveryKey', data: account } : { type: 'SetUpRecovery', data: account });
+
+  return store.run(
+    reset ? { type: 'ResetRecoveryKey', data: account } : { type: 'SetUpRecovery', data: account },
+  );
 }
 
 /** Forgets the recovery key shown once. */
@@ -205,28 +244,44 @@ export type ResetStep =
 export async function resetIdentity(
   store: Store,
   account: AccountId,
-  hooks: Pick<GuardHooks, 'askPassword'> & { openUrl: (url: string) => void; onStep: (step: ResetStep) => void },
+  hooks: Pick<GuardHooks, 'askPassword'> & {
+    openUrl: (url: string) => void;
+    onStep: (step: ResetStep) => void;
+  },
 ): Promise<ResetStep> {
   let step: ResetStep = { type: 'resetting', request: null, url: null };
+
   const move = (next: ResetStep) => {
     step = next;
     hooks.onStep(next);
   };
+
   move(step);
+
   try {
-    const done = await runGuarded(store, account, { type: 'ResetIdentity' }, {
-      askPassword: hooks.askPassword,
-      onRequest: (request) => move({ type: 'resetting', request, url: null }),
-      openUrl: (url) => {
-        if (step.type === 'resetting') move({ ...step, url });
-        hooks.openUrl(url);
+    const done = await runGuarded(
+      store,
+      account,
+      { type: 'ResetIdentity' },
+      {
+        askPassword: hooks.askPassword,
+        onRequest: (request) => move({ type: 'resetting', request, url: null }),
+        openUrl: (url) => {
+          if (step.type === 'resetting') move({ ...step, url });
+          hooks.openUrl(url);
+        },
       },
-    });
+    );
+
     move(done ? { type: 'done' } : { type: 'warning', error: null });
   } catch (error) {
     const cancelled = error instanceof CommandFailed && error.cancelled;
-    move({ type: 'warning', error: cancelled ? null : error instanceof Error ? error.message : String(error) });
+    move({
+      type: 'warning',
+      error: cancelled ? null : error instanceof Error ? error.message : String(error),
+    });
   }
+
   return step;
 }
 
@@ -237,9 +292,16 @@ export function listSessions(store: Store, account: AccountId): void {
   store.send({ type: 'ListSessions', data: account });
 }
 
-export function renameSession(store: Store, account: AccountId, deviceId: string, name: string): void {
+export function renameSession(
+  store: Store,
+  account: AccountId,
+  deviceId: string,
+  name: string,
+): void {
   const trimmed = name.trim();
-  if (trimmed) store.send({ type: 'RenameSession', data: { account, device_id: deviceId, name: trimmed } });
+
+  if (trimmed)
+    store.send({ type: 'RenameSession', data: { account, device_id: deviceId, name: trimmed } });
 }
 
 /**
@@ -256,7 +318,9 @@ export async function endSession(
   try {
     await runGuarded(store, account, { type: 'EndSession', deviceId }, hooks);
   } catch (error) {
-    if (error instanceof CommandFailed && !error.cancelled) store.update((s) => addNotice(s, error.message, account));
+    if (error instanceof CommandFailed && !error.cancelled)
+      store.update((s) => addNotice(s, error.message, account));
   }
+
   listSessions(store, account);
 }

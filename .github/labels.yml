@@ -3,27 +3,31 @@
 # `gh label create <name> --color <color> --description <description> --force`.
 
 # What a change is, for the release notes.
-- { name: feature, color: "0e8a16", description: "A new capability" }
-- { name: enhancement, color: "a2eeef", description: "Makes something that exists better" }
-- { name: bug, color: "d73a4a", description: "Something isn't working" }
-- { name: performance, color: "fbca04", description: "Faster, lighter or smoother" }
-- { name: security, color: "b60205", description: "Security or privacy" }
-- { name: accessibility, color: "f143ab", description: "Barrier affecting people with disabilities" }
-- { name: i18n, color: "5319e7", description: "Translations and languages" }
-- { name: documentation, color: "0075ca", description: "README, ADRs and other docs" }
-- { name: breaking, color: "e11d21", description: "Changes what users or packagers rely on" }
-- { name: dependencies, color: "0366d6", description: "Dependency updates" }
-- { name: ci, color: "ededed", description: "Build, CI, packaging and release tooling" }
-- { name: skip-changelog, color: "cfd3d7", description: "Left out of the release notes" }
+- { name: feature, color: '0e8a16', description: 'A new capability' }
+- { name: enhancement, color: 'a2eeef', description: 'Makes something that exists better' }
+- { name: bug, color: 'd73a4a', description: "Something isn't working" }
+- { name: performance, color: 'fbca04', description: 'Faster, lighter or smoother' }
+- { name: security, color: 'b60205', description: 'Security or privacy' }
+- {
+    name: accessibility,
+    color: 'f143ab',
+    description: 'Barrier affecting people with disabilities',
+  }
+- { name: i18n, color: '5319e7', description: 'Translations and languages' }
+- { name: documentation, color: '0075ca', description: 'README, ADRs and other docs' }
+- { name: breaking, color: 'e11d21', description: 'Changes what users or packagers rely on' }
+- { name: dependencies, color: '0366d6', description: 'Dependency updates' }
+- { name: ci, color: 'ededed', description: 'Build, CI, packaging and release tooling' }
+- { name: skip-changelog, color: 'cfd3d7', description: 'Left out of the release notes' }
 
 # Where a problem shows.
-- { name: "platform: linux", color: "c5def5", description: "Only on Linux" }
-- { name: "platform: macos", color: "c5def5", description: "Only on macOS" }
-- { name: "platform: windows", color: "c5def5", description: "Only on Windows" }
+- { name: 'platform: linux', color: 'c5def5', description: 'Only on Linux' }
+- { name: 'platform: macos', color: 'c5def5', description: 'Only on macOS' }
+- { name: 'platform: windows', color: 'c5def5', description: 'Only on Windows' }
 
 # Triage.
-- { name: needs-triage, color: "fef2c0", description: "Not looked at yet" }
-- { name: good first issue, color: "7057ff", description: "Good for newcomers" }
-- { name: help wanted, color: "008672", description: "Extra attention is needed" }
-- { name: duplicate, color: "cfd3d7", description: "This issue or pull request already exists" }
-- { name: wontfix, color: "ffffff", description: "This will not be worked on" }
+- { name: needs-triage, color: 'fef2c0', description: 'Not looked at yet' }
+- { name: good first issue, color: '7057ff', description: 'Good for newcomers' }
+- { name: help wanted, color: '008672', description: 'Extra attention is needed' }
+- { name: duplicate, color: 'cfd3d7', description: 'This issue or pull request already exists' }
+- { name: wontfix, color: 'ffffff', description: 'This will not be worked on' }

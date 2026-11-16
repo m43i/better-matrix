@@ -5,7 +5,7 @@ Date: 2026-11-14
 
 ## Context
 
-- Several apps (desktop now, mobile later) share Matrix code; the desktop runs on Linux, macOS
+- The desktop and mobile apps share Matrix code; the desktop runs on Linux, macOS
   and Windows and should share Rust with the Matrix layer without a JavaScript bridge.
 - The goal is every Matrix feature, calls included; writing encryption, sync and storage from
   scratch is years of work and a security risk.
@@ -16,11 +16,27 @@ Date: 2026-11-14
 
 - **Monorepo:**
   - `apps/*` hold apps, `packages/*` shared modules.
-  - Bun runs scripts and packages; Turborepo orchestrates tasks.
+  - Bun runs scripts and packages; Turborepo orchestrates tasks. Root `dev:desktop` starts the
+    desktop (`dev` remains an alias); `prebuild` forwards to the mobile app's Expo prebuild.
+    Root `dev:ios` and `dev:android` build their Rust bridge before running the mobile app on
+    that platform. Additional flags go to the platform's Expo command.
   - Rust crates form one Cargo workspace, members listed explicitly so non-Rust packages fit in
     `packages/`.
   - Turborepo discovers it (`experimentalCargoWorkspaces`) as `better-matrix-cargo` and maps
     `build`, `dev`, `test`, `check`, `lint`, `format` to Cargo.
+- **JavaScript/TypeScript quality:** root `.oxlintrc.json` enables Oxlint's correctness rules,
+  React checks, and every generic anti-slop rule from `tools/oxlint/anti-slop` (including native
+  `oxc/no-accumulating-spread`). Oxlint and `@oxlint/plugins` are pinned to the same version.
+  The vendored plugin's `UPSTREAM.md` records its source commit and pristine hashes; its nested
+  Stylistic license and provenance stay with it. Effect rules remain opt-in until a workspace
+  directly uses Effect. `bun run lint:js` checks owned source; `bun run lint:fix` applies safe
+  autofixes. Warnings fail the check.
+- **Formatting:** root `.oxfmtrc.json` configures Oxfmt with single quotes and a 100-column
+  width. `bun run format` and `bun run format:check` cover Oxfmt and rustfmt; the existing CI
+  `bun run lint` invokes both linters, typechecks, the format check, and the third-party check.
+  Both Oxc tools exclude generated bindings, native prebuild output, installed agent assets,
+  and vendored lint rules. Agent instructions are consolidated in root `AGENTS.md`, and all
+  workspace skills live under root `.agents/skills/`.
 - **Rune for the desktop UI:**
   - [Rune](https://github.com/anomalyco/rune), a GPU-rendered Rust UI framework; views are
     plain functions of state.
@@ -45,8 +61,8 @@ Date: 2026-11-14
   - Actions use current stable major versions: checkout v7, upload-artifact v7,
     download-artifact v8, rust-cache v2, setup-bun v2 and setup-node v6. Their own manifests
     select Node 24; the Node 26 CI installs doesn't change that action runtime. Repository
-    scripts run with the Bun version in `package.json`; only Jest (the mobile app's and
-    matrix-native's tests, under `jest-expo`) needs Node, 26 in CI.
+    scripts run with the Bun version in `package.json`; Oxlint's TypeScript plugins and Jest
+    (the mobile app's and matrix-native's tests, under `jest-expo`) run on Node 26 in CI.
   - CI (`ci.yml`) lints and tests in one Linux job on every pull request and every commit to
     `main`, the mobile app's TypeScript (typecheck and Jest, [0010](0010-mobile.md)) included;
     releases build the desktop app only, until the phones ship. A newer push cancels a pull request's older run. Only `main` writes the Rust cache;

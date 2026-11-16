@@ -9,7 +9,9 @@ export function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), MINUTE_MS);
+
     return () => clearInterval(timer);
   }, []);
+
   return now;
 }

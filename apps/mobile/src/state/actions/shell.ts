@@ -1,7 +1,11 @@
 // The shell's actions: the room list's sections (saved to the account as its `SidebarLayout`,
 // as the desktop saves them), a room's notification mode, marking read and leaving.
 
-import type { AccountId, NotificationMode, SidebarLayout } from '@better-matrix/matrix-native/types';
+import type {
+  AccountId,
+  NotificationMode,
+  SidebarLayout,
+} from '@better-matrix/matrix-native/types';
 
 import { t } from '../../i18n';
 import { addNotice, updateAccount } from '../reducer';
@@ -17,10 +21,12 @@ const saving = new WeakMap<Store, { inFlight: Set<AccountId>; unsaved: Set<Accou
 
 function savesOf(store: Store) {
   let saves = saving.get(store);
+
   if (!saves) {
     saves = { inFlight: new Set(), unsaved: new Set() };
     saving.set(store, saves);
   }
+
   return saves;
 }
 
@@ -30,22 +36,27 @@ function savesOf(store: Store) {
  */
 function saveLayout(store: Store, account: AccountId): void {
   const saves = savesOf(store);
+
   if (saves.inFlight.has(account)) {
     saves.unsaved.add(account);
+
     return;
   }
+
   const layout = store.getState().accounts.find((a) => a.summary.id === account)?.sidebar;
+
   if (!layout) return;
   saves.inFlight.add(account);
   store
     .run({ type: 'SetSidebarLayout', data: { account, layout } })
-    .catch((error: unknown) => {
-      if (error instanceof CommandFailed && error.cancelled) return;
-      const message = error instanceof Error ? error.message : String(error);
+    .catch((cause: unknown) => {
+      if (cause instanceof CommandFailed && cause.cancelled) return;
+      const message = cause instanceof Error ? cause.message : String(cause);
       store.update((s) => addNotice(s, t('notice.layout', { error: message }), account));
     })
     .finally(() => {
       saves.inFlight.delete(account);
+
       if (saves.unsaved.delete(account)) saveLayout(store, account);
     });
 }
@@ -61,14 +72,19 @@ export function changeLayout(
   now: number = Date.now(),
 ): boolean {
   const data = store.getState().accounts.find((a) => a.summary.id === account);
+
   if (!data) return false;
+
   if (!data.sidebarLoaded) {
     store.update((s) => addNotice(s, t('notice.layout_loading'), account));
+
     return false;
   }
+
   const layout = sections.stamped(change(data.sidebar), data.sidebar, now);
   store.update((s) => updateAccount(s, account, (a) => ({ ...a, sidebar: layout })));
   saveLayout(store, account);
+
   return true;
 }
 
@@ -78,15 +94,28 @@ export function toggleSection(store: Store, account: AccountId, scope: Scope, id
 }
 
 /** Adds a section, first in the scope; with `roomId`, moves that room into it. */
-export function addSection(store: Store, account: AccountId, scope: Scope, name: string, roomId?: string): void {
+export function addSection(
+  store: Store,
+  account: AccountId,
+  scope: Scope,
+  name: string,
+  roomId?: string,
+) {
   if (!name.trim()) return;
   changeLayout(store, account, (l) => {
     const added = sections.addSection(l, scope, name);
+
     return roomId ? sections.moveRoom(added.layout, scope, roomId, added.id) : added.layout;
   });
 }
 
-export function renameSection(store: Store, account: AccountId, scope: Scope, id: string, name: string): void {
+export function renameSection(
+  store: Store,
+  account: AccountId,
+  scope: Scope,
+  id: string,
+  name: string,
+): void {
   if (!name.trim()) return;
   changeLayout(store, account, (l) => sections.renameSection(l, scope, id, name));
 }
@@ -100,7 +129,13 @@ export function deleteSection(store: Store, account: AccountId, scope: Scope, id
  * Moves a room to the end of one of the user's sections, or out of them with a built-in
  * section's ID (the phone's form of the desktop's drag and drop).
  */
-export function moveRoomToSection(store: Store, account: AccountId, scope: Scope, roomId: string, section: string): void {
+export function moveRoomToSection(
+  store: Store,
+  account: AccountId,
+  scope: Scope,
+  roomId: string,
+  section: string,
+): void {
   changeLayout(store, account, (l) => sections.moveRoom(l, scope, roomId, section));
 }
 
@@ -108,13 +143,22 @@ export function moveRoomToSection(store: Store, account: AccountId, scope: Scope
  * Sets when a room notifies (`null` follows the account's default), shown at once and confirmed
  * by the next room list.
  */
-export function setNotificationMode(store: Store, account: AccountId, roomId: string, mode: NotificationMode | null): void {
+export function setNotificationMode(
+  store: Store,
+  account: AccountId,
+  roomId: string,
+  mode: NotificationMode | null,
+): void {
   store.update((s) =>
     updateAccount(s, account, (a) => ({
       ...a,
       rooms: a.rooms.map((room) =>
         room.room_id === roomId
-          ? { ...room, notifications: mode ?? a.summary.default_notifications, custom_notifications: mode !== null }
+          ? {
+              ...room,
+              notifications: mode ?? a.summary.default_notifications,
+              custom_notifications: mode !== null,
+            }
           : room,
       ),
     })),
@@ -126,9 +170,14 @@ export function setNotificationMode(store: Store, account: AccountId, roomId: st
  * Marks a room read up to its newest message, from the room list: the engine marks through an
  * open timeline, so the room's opens for it (unless a screen shows it already) and closes after.
  */
-export async function markRoomRead(store: Store, account: AccountId, roomId: string): Promise<void> {
+export async function markRoomRead(
+  store: Store,
+  account: AccountId,
+  roomId: string,
+): Promise<void> {
   const key = roomKey(roomId);
   retainTimeline(store, account, key);
+
   try {
     if (!(await untilOpened(store, account, key))) return;
     await store.run({ type: 'MarkRead', data: { account, key, event_id: null, fully_read: true } });

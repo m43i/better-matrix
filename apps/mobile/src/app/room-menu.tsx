@@ -48,19 +48,28 @@ export default function RoomMenuScreen() {
   const section = param(params.section);
   const account = useStore((s) => accountOf(s, accountId));
   const palette = usePalette();
-  const [page, setPage] = useState<Page>(roomId || section ? { kind: 'menu' } : { kind: 'name', section: null, roomId: null });
+
+  const [page, setPage] = useState<Page>(
+    roomId || section ? { kind: 'menu' } : { kind: 'name', section: null, roomId: null },
+  );
 
   let body;
+
   if (!account) {
     body = <EmptyState title={t('sidebar.empty')} />;
   } else if (page.kind === 'name') {
     body = <SectionName account={account} page={page} />;
   } else if (roomId) {
     const room = account.rooms.find((r) => r.room_id === roomId);
-    body = room ? <RoomPages account={account} room={room} page={page} setPage={setPage} /> : <EmptyState title={t('sidebar.empty')} />;
+    body = room ? (
+      <RoomPages account={account} room={room} page={page} setPage={setPage} />
+    ) : (
+      <EmptyState title={t('sidebar.empty')} />
+    );
   } else if (section) {
     body = <SectionPage account={account} id={section} setPage={setPage} />;
   }
+
   return (
     // A plain view: the sheet fits its content (`fitToContents`), which a scroll view hides.
     <View style={[styles.content, { backgroundColor: palette.bg }]}>{body}</View>
@@ -68,10 +77,34 @@ export default function RoomMenuScreen() {
 }
 
 /** The modes a room can notify in, as the desktop's room menu lists them. */
-const MODES: Array<{ mode: NotificationMode; id: string; title: () => string; hint: () => string; icon: IconName }> = [
-  { mode: 'AllMessages', id: 'all', title: () => t('notify.all'), hint: () => t('notify.all_hint'), icon: 'bell' },
-  { mode: 'MentionsOnly', id: 'mentions', title: () => t('notify.mentions'), hint: () => t('notify.mentions_hint'), icon: 'at' },
-  { mode: 'Mute', id: 'mute', title: () => t('notify.mute'), hint: () => t('notify.mute_hint'), icon: 'bellOff' },
+const MODES: Array<{
+  mode: NotificationMode;
+  id: string;
+  title: () => string;
+  hint: () => string;
+  icon: IconName;
+}> = [
+  {
+    mode: 'AllMessages',
+    id: 'all',
+    title: () => t('notify.all'),
+    hint: () => t('notify.all_hint'),
+    icon: 'bell',
+  },
+  {
+    mode: 'MentionsOnly',
+    id: 'mentions',
+    title: () => t('notify.mentions'),
+    hint: () => t('notify.mentions_hint'),
+    icon: 'at',
+  },
+  {
+    mode: 'Mute',
+    id: 'mute',
+    title: () => t('notify.mute'),
+    hint: () => t('notify.mute_hint'),
+    icon: 'bellOff',
+  },
 ];
 
 function modeLabel(mode: NotificationMode): string {
@@ -101,7 +134,13 @@ function RoomPages({
 
   const header = (
     <View style={styles.header}>
-      <Avatar account={id} id={room.dm_users[0] ?? room.room_id} name={room.name} media={room.avatar} size={36} />
+      <Avatar
+        account={id}
+        id={room.dm_users[0] ?? room.room_id}
+        name={room.name}
+        media={room.avatar}
+        size={36}
+      />
       <Text style={[font.header, styles.grow, { color: palette.text }]} numberOfLines={1}>
         {room.name}
       </Text>
@@ -134,7 +173,9 @@ function RoomPages({
             testID="notify-default"
             icon="settings"
             title={t('notify.default')}
-            subtitle={t('notify.default_hint', { mode: modeLabel(account.summary.default_notifications) })}
+            subtitle={t('notify.default_hint', {
+              mode: modeLabel(account.summary.default_notifications),
+            })}
             selected={!room.custom_notifications}
             chevron={false}
             onPress={() => {
@@ -181,8 +222,17 @@ function RoomPages({
 
   const confirmLeave = () => {
     const [title, body, action] = direct
-      ? [t('confirm.delete_title', { name: room.name }), t('confirm.delete_body', { name: room.name }), t('confirm.delete')]
-      : [t('confirm.leave_title', { room: room.name }), t('confirm.leave_body'), t('confirm.leave')];
+      ? [
+          t('confirm.delete_title', { name: room.name }),
+          t('confirm.delete_body', { name: room.name }),
+          t('confirm.delete'),
+        ]
+      : [
+          t('confirm.leave_title', { room: room.name }),
+          t('confirm.leave_body'),
+          t('confirm.leave'),
+        ];
+
     Alert.alert(title, body, [
       { text: t('common.cancel'), style: 'cancel' },
       {
@@ -266,18 +316,30 @@ function RoomPages({
 /** The built-in sections and the unread group are named by the app, the user's by the user. */
 function sectionTitle(account: AccountData, scope: Scope, id: string): string {
   if (id === ROOMS) return t('sidebar.rooms');
+
   if (id === DIRECT) return t('sidebar.direct');
+
   if (id === 'unread') return t('overview.unread');
+
   return account.sidebar.scopes[scopeKey(scope)]?.sections.find((s) => s.id === id)?.name ?? '';
 }
 
-function SectionPage({ account, id, setPage }: { account: AccountData; id: string; setPage: (page: Page) => void }) {
+function SectionPage({
+  account,
+  id,
+  setPage,
+}: {
+  account: AccountData;
+  id: string;
+  setPage: (page: Page) => void;
+}) {
   const store = useAppStore();
   const palette = usePalette();
   const accountId: AccountId = account.summary.id;
   const scope = account.scope;
   const collapsed = account.sidebar.scopes[scopeKey(scope)]?.collapsed.includes(id) ?? false;
   const own = !isBuiltin(id) && id !== 'unread';
+
   return (
     <>
       <View style={styles.header}>
@@ -324,21 +386,35 @@ function SectionPage({ account, id, setPage }: { account: AccountData; id: strin
   );
 }
 
-function SectionName({ account, page }: { account: AccountData; page: Extract<Page, { kind: 'name' }> }) {
+function SectionName({
+  account,
+  page,
+}: {
+  account: AccountData;
+  page: Extract<Page, { kind: 'name' }>;
+}) {
   const store = useAppStore();
   const palette = usePalette();
   const accountId = account.summary.id;
   const scope = account.scope;
-  const [name, setName] = useState(() => (page.section ? sectionTitle(account, scope, page.section) : ''));
+
+  const [name, setName] = useState(() =>
+    page.section ? sectionTitle(account, scope, page.section) : '',
+  );
+
   const submit = () => {
     if (!name.trim()) return;
+
     if (page.section) renameSection(store, accountId, scope, page.section, name);
     else addSection(store, accountId, scope, name, page.roomId ?? undefined);
     router.back();
   };
+
   return (
     <View style={styles.form}>
-      <Text style={[font.header, { color: palette.text }]}>{page.section ? t('sections.rename_title') : t('sections.new_title')}</Text>
+      <Text style={[font.header, { color: palette.text }]}>
+        {page.section ? t('sections.rename_title') : t('sections.new_title')}
+      </Text>
       <TextField
         testID="section-name"
         autoFocus
@@ -360,7 +436,13 @@ function SectionName({ account, page }: { account: AccountData; page: Extract<Pa
 
 const styles = StyleSheet.create({
   content: { paddingBottom: 32 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 20 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
   grow: { flex: 1 },
   form: { padding: 20, gap: 16 },
 });

@@ -2,7 +2,13 @@
 // native stack; actions open as native sheets (iOS form sheets, Android bottom sheets), and the
 // call and attachment preview cover the screen. Signed out, only sign-in is reachable.
 
-import { DarkTheme, DefaultTheme, type NativeStackNavigationOptions, Stack, ThemeProvider } from 'expo-router';
+import {
+  DarkTheme,
+  DefaultTheme,
+  type NativeStackNavigationOptions,
+  Stack,
+  ThemeProvider,
+} from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
@@ -36,7 +42,10 @@ const sheet: NativeStackNavigationOptions = {
 };
 
 /** Sheets that fit their content (menus). */
-const fittedSheet: NativeStackNavigationOptions = { ...sheet, sheetAllowedDetents: 'fitToContents' };
+const fittedSheet: NativeStackNavigationOptions = {
+  ...sheet,
+  sheetAllowedDetents: 'fitToContents',
+};
 
 function Routes({ scene }: { scene: SceneName | null }) {
   const palette = usePalette();
@@ -49,6 +58,7 @@ function Routes({ scene }: { scene: SceneName | null }) {
     if (ready) void SplashScreen.hideAsync();
   }, [ready]);
   const base = palette.dark ? DarkTheme : DefaultTheme;
+
   const theme = {
     ...base,
     colors: {
@@ -61,7 +71,9 @@ function Routes({ scene }: { scene: SceneName | null }) {
       notification: palette.mention,
     },
   };
+
   if (!ready) return null;
+
   return (
     <ThemeProvider value={theme}>
       <StatusBar style={palette.dark ? 'light' : 'dark'} />
@@ -98,12 +110,22 @@ function Routes({ scene }: { scene: SceneName | null }) {
           <Stack.Screen name="settings" options={{ headerShown: false }} />
           <Stack.Screen name="verify" options={{ ...sheet, sheetAllowedDetents: [0.75, 1] }} />
           <Stack.Screen name="recovery" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="preview" options={{ presentation: 'fullScreenModal', headerShown: false, animation: 'fade' }} />
-          <Stack.Screen name="call" options={{ presentation: 'fullScreenModal', headerShown: false }} />
+          <Stack.Screen
+            name="preview"
+            options={{ presentation: 'fullScreenModal', headerShown: false, animation: 'fade' }}
+          />
+          <Stack.Screen
+            name="call"
+            options={{ presentation: 'fullScreenModal', headerShown: false }}
+          />
         </Stack.Protected>
         <Stack.Screen
           name="sign-in"
-          options={{ headerShown: false, presentation: signedIn ? 'modal' : 'card', animation: signedIn ? 'default' : 'none' }}
+          options={{
+            headerShown: false,
+            presentation: signedIn ? 'modal' : 'card',
+            animation: signedIn ? 'default' : 'none',
+          }}
         />
       </Stack>
       <Rings />
@@ -125,7 +147,10 @@ interface App {
 
 function launch(): App {
   const scene = __DEV__ ? demoScene(Linking.getLinkingURL()) : null;
-  return scene ? { store: bootDemo(scene), scene, generation: 0 } : { store: boot(), scene: null, generation: 0 };
+
+  return scene
+    ? { store: bootDemo(scene), scene, generation: 0 }
+    : { store: boot(), scene: null, generation: 0 };
 }
 
 export default function RootLayout() {
@@ -133,12 +158,21 @@ export default function RootLayout() {
   // Dev builds switch scenes while running: `adb shell am start -d bettermatrix://demo/<scene>`.
   useEffect(() => {
     if (!__DEV__) return;
+
     const subscription = Linking.addEventListener('url', ({ url }) => {
       const scene = demoScene(url);
-      if (scene) setApp((current) => ({ store: bootDemo(scene), scene, generation: current.generation + 1 }));
+
+      if (scene)
+        setApp((current) => ({
+          store: bootDemo(scene),
+          scene,
+          generation: current.generation + 1,
+        }));
     });
+
     return () => subscription.remove();
   }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardProvider>

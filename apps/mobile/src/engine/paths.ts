@@ -5,6 +5,7 @@
 // own process) can open the accounts' stores too (ADR 0010); builds before push kept it in the
 // app's documents, and launch moves it once. Android keeps it in the app's documents.
 
+import { z } from 'zod';
 import Constants from 'expo-constants';
 import { Directory, File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
@@ -18,15 +19,20 @@ export function pathOf(uri: string): string {
 
 /** The App Group the app and its Notification Service Extension share (iOS), from the app config. */
 export function appGroup(): string | null {
-  const push = (Constants.expoConfig?.extra as { push?: { appGroup?: unknown } } | undefined)?.push;
-  return typeof push?.appGroup === 'string' && push.appGroup ? push.appGroup : null;
+  const parsed = z
+    .object({ push: z.object({ appGroup: z.string().min(1) }) })
+    .safeParse(Constants.expoConfig?.extra);
+
+  return parsed.success ? parsed.data.push.appGroup : null;
 }
 
 /** The shared container of the App Group, when this is iOS and the build has one. */
 function groupContainer(): Directory | null {
   if (Platform.OS !== 'ios') return null;
   const group = appGroup();
+
   if (!group) return null;
+
   try {
     return Paths.appleSharedContainers[group] ?? null;
   } catch {
@@ -42,6 +48,7 @@ export function dataDirectory(): Directory {
   const documents = new Directory(Paths.document, 'matrix');
   const container = groupContainer();
   const data = container ? new Directory(container, 'matrix') : documents;
+
   if (container && !data.exists && documents.exists) {
     try {
       // The engine isn't running yet, so nothing has the stores open. The account list's store
@@ -52,11 +59,13 @@ export function dataDirectory(): Directory {
       return ensure(documents);
     }
   }
+
   return ensure(data);
 }
 
 function ensure(directory: Directory): Directory {
   directory.create({ intermediates: true, idempotent: true });
+
   return directory;
 }
 
@@ -66,6 +75,7 @@ const settingsFile = () => new File(Paths.document, 'settings.json');
 export function readSettings(): Settings {
   try {
     const file = settingsFile();
+
     return parseSettings(file.exists ? file.textSync() : null);
   } catch {
     return parseSettings(null);

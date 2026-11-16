@@ -22,6 +22,7 @@ export function boot(): Store {
   const data = dataDirectory();
   const cache = new Directory(Paths.cache, 'matrix');
   cache.create({ intermediates: true, idempotent: true });
+
   const engine = startNativeEngine(
     {
       dataDir: pathOf(data.uri),
@@ -32,6 +33,7 @@ export function boot(): Store {
     },
     secureStore,
   );
+
   const store = new Store(engine, settings);
   installNotifications(store);
   installAccountEffects(store);
@@ -39,10 +41,13 @@ export function boot(): Store {
   let saved = settings;
   store.subscribe(() => {
     const next = store.getState().settings;
+
     if (next === saved) return;
+
     if (next.language !== saved.language) setLanguage(next.language);
     saved = next;
     saveSettings(next);
   });
+
   return store;
 }

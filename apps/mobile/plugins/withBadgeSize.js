@@ -6,7 +6,9 @@
 // resources. The dot stays Material's own.
 
 const fs = require('node:fs');
+
 const path = require('node:path');
+
 const { withDangerousMod } = require('expo/config-plugins');
 
 const DOT = '10dp';
@@ -26,6 +28,7 @@ module.exports = function withBadgeSize(config) {
 </resources>
 `,
       );
+
       return config;
     },
   ]);

@@ -13,8 +13,13 @@ export function Conversation({ children, composer }: { children: ReactNode; comp
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardState((s) => s.isVisible);
+
   return (
-    <KeyboardAvoidingView behavior="padding" automaticOffset style={[styles.screen, { backgroundColor: palette.bg }]}>
+    <KeyboardAvoidingView
+      behavior="padding"
+      automaticOffset
+      style={[styles.screen, { backgroundColor: palette.bg }]}
+    >
       {children}
       {composer}
       <View style={{ height: keyboard ? 0 : insets.bottom }} />

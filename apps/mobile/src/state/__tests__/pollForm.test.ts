@@ -27,7 +27,9 @@ describe('the poll form', () => {
   });
 
   it('should send the trimmed question and written answers', () => {
-    expect(pollOutgoing({ question: ' Lunch? ', answers: ['Pizza ', '', 'Soup'], disclosed: false })).toEqual({
+    expect(
+      pollOutgoing({ question: ' Lunch? ', answers: ['Pizza ', '', 'Soup'], disclosed: false }),
+    ).toEqual({
       type: 'Poll',
       data: { question: 'Lunch?', answers: ['Pizza', 'Soup'], disclosed: false },
     });

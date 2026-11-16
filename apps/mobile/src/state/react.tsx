@@ -1,6 +1,13 @@
 // React bindings: one store per app, read through selectors.
 
-import { createContext, type ReactNode, useCallback, useContext, useRef, useSyncExternalStore } from 'react';
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useRef,
+  useSyncExternalStore,
+} from 'react';
 
 import type { Store } from './store';
 import type { State } from './types';
@@ -14,7 +21,9 @@ export function StoreProvider({ store, children }: { store: Store; children: Rea
 /** The app's store, for actions. */
 export function useAppStore(): Store {
   const store = useContext(StoreContext);
+
   if (!store) throw new Error('useAppStore needs a StoreProvider');
+
   return store;
 }
 
@@ -38,7 +47,9 @@ export function selectFrom<S, T>(
 ): Selected<S, T> {
   if (last && last.state === state && last.selector === selector) return last;
   const value = selector(state);
+
   if (last && equal(last.value, value)) return { state, selector, value: last.value };
+
   return { state, selector, value };
 }
 
@@ -46,22 +57,32 @@ export function selectFrom<S, T>(
  * A slice of the state; the view redraws when it changes. `equal` decides "changed" (by
  * reference unless given), so selectors that build new arrays or objects should pass `shallow`.
  */
-export function useStore<T>(selector: (state: State) => T, equal: (a: T, b: T) => boolean = Object.is): T {
+export function useStore<T>(
+  selector: (state: State) => T,
+  equal: (a: T, b: T) => boolean = Object.is,
+): T {
   const store = useAppStore();
   const last = useRef<Selected<State, T> | null>(null);
+
   const select = useCallback(() => {
     last.current = selectFrom(last.current, store.getState(), selector, equal);
+
     return last.current.value;
   }, [store, selector, equal]);
+
   return useSyncExternalStore(store.subscribe, select, select);
 }
 
 /** Equal when both are arrays or objects with the same items or fields by reference. */
-export function shallow<T>(a: T, b: T): boolean {
+export function shallow<T extends object>(a: T | undefined, b: T | undefined): boolean {
   if (Object.is(a, b)) return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  if (ka.length !== kb.length) return false;
-  return ka.every((k) => Object.is((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+
+  if (!a || !b) return false;
+  const entries = new Map(Object.entries(a));
+  const other = Object.entries(b);
+
+  return (
+    entries.size === other.length &&
+    other.every(([key, value]) => entries.has(key) && Object.is(entries.get(key), value))
+  );
 }

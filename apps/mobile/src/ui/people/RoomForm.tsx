@@ -25,6 +25,7 @@ export function HeaderButton({
   testID: string;
 }) {
   const palette = usePalette();
+
   return (
     <Pressable
       testID={testID}
@@ -33,7 +34,10 @@ export function HeaderButton({
       hitSlop={10}
       accessibilityRole="button"
       accessibilityState={{ disabled }}
-      style={({ pressed }) => ({ opacity: disabled ? 0.4 : pressed && Platform.OS === 'ios' ? 0.6 : 1, paddingHorizontal: 4 })}
+      style={({ pressed }) => ({
+        opacity: disabled ? 0.4 : pressed && Platform.OS === 'ios' ? 0.6 : 1,
+        paddingHorizontal: 4,
+      })}
     >
       <Text style={[strong ? font.bodyStrong : font.body, { color: palette.accent }]}>{title}</Text>
     </Pressable>
@@ -59,17 +63,30 @@ export function RoomForm({
 }) {
   const router = useRouter();
   const palette = usePalette();
+
   return (
     <>
       <Stack.Screen
         options={{
           title,
-          headerLeft: () => <HeaderButton title={t('common.cancel')} onPress={() => router.back()} testID={`${testID}-cancel`} />,
+          headerLeft: () => (
+            <HeaderButton
+              title={t('common.cancel')}
+              onPress={() => router.back()}
+              testID={`${testID}-cancel`}
+            />
+          ),
           headerRight: () =>
             busy ? (
               <ActivityIndicator color={palette.accent} />
             ) : (
-              <HeaderButton title={confirm} onPress={onSubmit} disabled={!valid} strong testID={`${testID}-submit`} />
+              <HeaderButton
+                title={confirm}
+                onPress={onSubmit}
+                disabled={!valid}
+                strong
+                testID={`${testID}-submit`}
+              />
             ),
         }}
       />

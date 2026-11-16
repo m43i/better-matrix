@@ -30,9 +30,9 @@ export default function RecoveryScreen() {
     setSubmitting(true);
     recover(store, account, key).then(
       () => router.back(),
-      (e: unknown) => {
+      (cause: unknown) => {
         setSubmitting(false);
-        setError(e instanceof Error ? e.message : String(e));
+        setError(cause instanceof Error ? cause.message : String(cause));
       },
     );
   };
@@ -44,7 +44,12 @@ export default function RecoveryScreen() {
           title: t('recovery.enter_title'),
           headerShown: true,
           headerLeft: () => (
-            <Button testID="recovery-cancel" title={t('common.cancel')} kind="plain" onPress={() => router.back()} />
+            <Button
+              testID="recovery-cancel"
+              title={t('common.cancel')}
+              kind="plain"
+              onPress={() => router.back()}
+            />
           ),
         }}
       />
@@ -56,7 +61,9 @@ export default function RecoveryScreen() {
       >
         <View style={styles.heading}>
           <Icon name="key" size={36} color={palette.accent} />
-          <Text style={[font.body, { color: palette.textMuted, textAlign: 'center' }]}>{t('recovery.enter_hint')}</Text>
+          <Text style={[font.body, { color: palette.textMuted, textAlign: 'center' }]}>
+            {t('recovery.enter_hint')}
+          </Text>
         </View>
         <TextField
           testID="recovery-key"

@@ -7,6 +7,7 @@ Date: 2026-11-14
 
 A timeline shows a room's messages and room events, or one thread's. People react, reply and
 see who is typing there.
+
 - After time away, sync resumes with the newest messages and a gap before them, which appending
   sync events can't fill in the right place.
 - Messages written offline must not be lost.
@@ -41,7 +42,7 @@ see who is typing there.
 - **Start of history:** the server enforces history visibility; paging back returns only what
   the user may read.
   - At the start, the timeline shows where visible history begins. Rooms whose history
-    visibility is *joined* or *invited* say earlier messages are hidden by the room's settings.
+    visibility is _joined_ or _invited_ say earlier messages are hidden by the room's settings.
   - A thread starts at its root: once the root is in, `reached_start` is set. Its pagination
     may never report the start itself.
 - **Failed pages:** a failure stops automatic loading, so a flaky server isn't asked in a loop.

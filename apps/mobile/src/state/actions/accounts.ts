@@ -37,14 +37,18 @@ export function parseSignInInput(input: string): SignInInput | null {
   const trimmed = input.trim();
   let server = trimmed;
   let username: string | null = null;
+
   if (trimmed.startsWith('@')) {
     const colon = trimmed.indexOf(':');
+
     if (colon >= 0) {
       server = trimmed.slice(colon + 1);
       username = trimmed.slice(1, colon) || null;
     }
   }
+
   server = server.replace(/\/+$/, '');
+
   return server ? { server, username } : null;
 }
 
@@ -65,7 +69,13 @@ export type SignInStep =
   /** Step 1: resolving it. */
   | { type: 'discovering'; request: RequestId; server: string }
   /** Step 2 on an OAuth server: the user finishes in the browser. `request` is null after a failure. */
-  | { type: 'browser'; server: Homeserver; request: RequestId | null; url: string | null; error: string | null }
+  | {
+      type: 'browser';
+      server: Homeserver;
+      request: RequestId | null;
+      url: string | null;
+      error: string | null;
+    }
   /** Step 2 on a password server. `submitting` is the login in flight. */
   | { type: 'password'; server: Homeserver; submitting: RequestId | null; error: string | null }
   /** Signed in: the account was added. */
@@ -102,9 +112,13 @@ export function failStep(step: SignInStep, request: RequestId, message: string |
 }
 
 /** Step 2 for a discovered server: the browser for OAuth, else the password form, else an error. */
-export function stepFor(server: Homeserver): 'browser' | 'password' | { type: 'server'; error: string } {
+export function stepFor(
+  server: Homeserver,
+): 'browser' | 'password' | { type: 'server'; error: string } {
   if (server.methods.oauth) return 'browser';
+
   if (server.methods.password) return 'password';
+
   return { type: 'server', error: t('sign_in.no_method', { server: serverName(server) }) };
 }
 
@@ -124,7 +138,11 @@ export interface SignInSnapshot {
  * `SignInForm`. Views read `snapshot()` and redraw on `subscribe`.
  */
 export class SignInFlow {
-  private state: SignInSnapshot = { step: { type: 'server', error: null }, username: '', resume: null };
+  private state: SignInSnapshot = {
+    step: { type: 'server', error: null },
+    username: '',
+    resume: null,
+  };
   private readonly listeners = new Set<() => void>();
   /** The accounts signed in before the login, to find the one it added. */
   private before: AccountId[] = [];
@@ -138,6 +156,7 @@ export class SignInFlow {
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
+
     return () => {
       this.listeners.delete(listener);
     };
@@ -145,6 +164,7 @@ export class SignInFlow {
 
   private set(change: Partial<SignInSnapshot>): void {
     this.state = { ...this.state, ...change };
+
     for (const listener of this.listeners) listener();
   }
 
@@ -156,56 +176,78 @@ export class SignInFlow {
   submitServer(text: string): void {
     if (pendingRequest(this.state.step) !== null) return;
     const input = parseSignInInput(text);
+
     if (!input) {
       this.setStep({ type: 'server', error: t('sign_in.enter_server') });
+
       return;
     }
+
     // Signing in as an account signed out softly takes back its data, however it started.
     const typed = text.trim().toLowerCase();
-    const resume = this.store.getState().ended.find((e) => e.kept && e.account.toLowerCase() === typed)?.account ?? null;
+
+    const resume =
+      this.store.getState().ended.find((e) => e.kept && e.account.toLowerCase() === typed)
+        ?.account ?? null;
+
     const run = this.store.run({ type: 'Discover', data: { server: input.server } }, (event) => {
-      if (event.type === 'HomeserverDiscovered') this.discovered(event.data.request, event.data.homeserver);
+      if (event.type === 'HomeserverDiscovered')
+        this.discovered(event.data.request, event.data.homeserver);
     });
+
     this.set({ username: input.username ?? this.state.username, resume });
     this.setStep({ type: 'discovering', request: run.request, server: input.server });
-    run.catch((error: unknown) => this.failed(run.request, error));
+    run.catch((cause: unknown) => this.failed(run.request, cause));
   }
 
   private discovered(request: RequestId, server: Homeserver): void {
     const step = this.state.step;
+
     if (step.type !== 'discovering' || step.request !== request) return;
     const next = stepFor(server);
+
     if (next === 'browser') this.startBrowser(server);
-    else if (next === 'password') this.setStep({ type: 'password', server, submitting: null, error: null });
+    else if (next === 'password')
+      this.setStep({ type: 'password', server, submitting: null, error: null });
     else this.setStep(next);
   }
 
   private startBrowser(server: Homeserver): void {
     this.before = this.store.getState().accounts.map((a) => a.summary.id);
-    const command: Command = { type: 'LoginOAuth', data: { homeserver: server.url, resume: this.state.resume } };
+
+    const command: Command = {
+      type: 'LoginOAuth',
+      data: { homeserver: server.url, resume: this.state.resume },
+    };
+
     const run = this.store.run(command, (event) => {
       if (event.type !== 'OpenUrl') return;
       const step = this.state.step;
+
       if (step.type !== 'browser' || step.request !== run.request) return;
       this.setStep({ ...step, url: event.data.url });
       void this.openBrowser(run.request, event.data.url);
     });
+
     this.setStep({ type: 'browser', server, request: run.request, url: null, error: null });
     run.then(
       () => this.finished(run.request),
-      (error: unknown) => this.failed(run.request, error),
+      (cause: unknown) => this.failed(run.request, cause),
     );
   }
 
   /** Opens the sign-in page; its answer finishes the login, closing it without one cancels it. */
   private async openBrowser(request: RequestId, url: string): Promise<void> {
     let back: string | null = null;
+
     try {
       back = await this.browser(url, OAUTH_REDIRECT);
     } catch (error) {
       this.store.update((s) => addNotice(s, t('notice.browser', { error: String(error) })));
     }
+
     if (pendingRequest(this.state.step) !== request) return;
+
     if (back !== null) {
       this.store.send({ type: 'FinishOAuth', data: { request, url: back } }, { quiet: true });
     } else {
@@ -216,6 +258,7 @@ export class SignInFlow {
   /** Opens the sign-in page again, for a browser the user closed by mistake. */
   reopenBrowser(): void {
     const step = this.state.step;
+
     if (step.type === 'browser' && step.request !== null && step.url !== null) {
       void this.openBrowser(step.request, step.url);
     }
@@ -224,6 +267,7 @@ export class SignInFlow {
   /** Starts the browser sign-in again, after a failure or from the password form. */
   retryBrowser(): void {
     const step = this.state.step;
+
     if ((step.type !== 'browser' && step.type !== 'password') || !step.server.methods.oauth) return;
     this.cancelPending();
     this.startBrowser(step.server);
@@ -232,7 +276,9 @@ export class SignInFlow {
   /** Switches step 2 to the password form, on a server that offers both. */
   usePassword(): void {
     const step = this.state.step;
-    if ((step.type !== 'browser' && step.type !== 'password') || !step.server.methods.password) return;
+
+    if ((step.type !== 'browser' && step.type !== 'password') || !step.server.methods.password)
+      return;
     this.cancelPending();
     this.setStep({ type: 'password', server: step.server, submitting: null, error: null });
   }
@@ -246,27 +292,34 @@ export class SignInFlow {
   /** Signs in with a password. */
   submitPassword(username: string, password: string): void {
     const step = this.state.step;
+
     if (step.type !== 'password' || step.submitting !== null) return;
     const user = username.trim();
+
     if (!user || !password) {
       this.setStep({ ...step, error: t('sign_in.fill_in') });
+
       return;
     }
+
     this.before = this.store.getState().accounts.map((a) => a.summary.id);
+
     const run = this.store.run({
       type: 'Login',
       data: { homeserver: step.server.url, username: user, password, resume: this.state.resume },
     });
+
     this.set({ username: user, step: { ...step, submitting: run.request, error: null } });
     run.then(
       () => this.finished(run.request),
-      (error: unknown) => this.failed(run.request, error),
+      (cause: unknown) => this.failed(run.request, cause),
     );
   }
 
   /** Stops whatever the sign-in waits on, leaving the step as it is (leaving the screen). */
   cancelPending(): void {
     const request = pendingRequest(this.state.step);
+
     if (request !== null) {
       this.store.send({ type: 'Cancel', data: request }, { quiet: true });
       this.setStep(failStep(this.state.step, request, null));
@@ -278,13 +331,16 @@ export class SignInFlow {
     if (pendingRequest(this.state.step) !== request) return;
     const accounts = this.store.getState().accounts.map((a) => a.summary.id);
     const added = accounts.find((id) => !this.before.includes(id)) ?? this.state.resume;
+
     if (added !== null && accounts.includes(added)) setActive(this.store, added);
     this.setStep({ type: 'done', account: added });
   }
 
-  private failed(request: RequestId, error: unknown): void {
+  private failed(request: RequestId, cause: unknown): void {
     // A cancelled request says nothing: the user did it, or another step replaced it.
-    const message = error instanceof CommandFailed ? (error.cancelled ? null : error.message) : String(error);
+    const message =
+      cause instanceof CommandFailed ? (cause.cancelled ? null : cause.message) : String(cause);
+
     this.setStep(failStep(this.state.step, request, message));
   }
 }
@@ -297,10 +353,13 @@ export class SignInFlow {
  */
 export function signOut(store: Store, account: AccountId): void {
   const pusher = store.getState().pushers[account];
+
   if (!pusher) {
     store.send({ type: 'Logout', data: account });
+
     return;
   }
+
   store
     .run({ type: 'RemovePusher', data: { account, app_id: PUSH_APP_ID, push_key: pusher.token } })
     .catch(() => undefined)
@@ -313,8 +372,10 @@ export function signOut(store: Store, account: AccountId): void {
  */
 export function removeEnded(store: Store, account: AccountId): void {
   const ended = store.getState().ended.find((e) => e.account === account);
+
   if (!ended) return;
   store.update((s): State => ({ ...s, ended: s.ended.filter((e) => e.account !== account) }));
+
   if (ended.kept) store.send({ type: 'Logout', data: account });
 }
 
@@ -327,35 +388,49 @@ export function installAccountEffects(store: Store): () => void {
   // Every refused request reports the ended session again: only the first counts.
   const stopped = new Set<AccountId>();
   const lastSecurity = new Map<AccountId, Security>();
+
   return store.addEffect((event: EngineEvent) => {
     switch (event.type) {
       case 'AccountAdded':
         stopped.delete(event.data.id);
+
         return;
       case 'AccountRemoved':
         lastSecurity.delete(event.data);
+
         return;
       case 'SessionEnded': {
         const { account, kept } = event.data;
+
         if (stopped.has(account)) return;
         stopped.add(account);
+
         if (!kept) store.send({ type: 'Logout', data: account });
         // One suspended in an earlier run is stopped already.
         else if (store.getState().accounts.some((a) => a.summary.id === account)) {
           store.send({ type: 'Suspend', data: account });
         }
+
         return;
       }
+
       case 'SecurityChanged': {
         // Newly verified, or the backup key just arrived: the backup can now fill in the keys of
         // messages that couldn't be decrypted.
         const { account, security } = event.data;
         const before = lastSecurity.get(account);
         lastSecurity.set(account, security);
-        const changed = before?.session_verified !== security.session_verified || before.recovery !== security.recovery;
-        if (security.session_verified && changed) store.send({ type: 'FetchRoomKeys', data: account }, { quiet: true });
+
+        const changed =
+          before?.session_verified !== security.session_verified ||
+          before.recovery !== security.recovery;
+
+        if (security.session_verified && changed)
+          store.send({ type: 'FetchRoomKeys', data: account }, { quiet: true });
+
         return;
       }
+
       default:
         return;
     }
@@ -370,7 +445,11 @@ export function fetchRoomKeys(store: Store, account: AccountId): void {
 // ----- settings and profile -----------------------------------------------------------------
 
 /** When the account's rooms notify unless they set their own mode. */
-export function setDefaultNotificationMode(store: Store, account: AccountId, mode: NotificationMode): void {
+export function setDefaultNotificationMode(
+  store: Store,
+  account: AccountId,
+  mode: NotificationMode,
+): void {
   store.send({ type: 'SetDefaultNotificationMode', data: { account, mode } });
 }
 
@@ -382,6 +461,7 @@ export function editableName(account: AccountId, displayName: string): string {
 /** Whether `name` would change the saved display name. */
 export function nameChanged(saved: string, name: string): boolean {
   const trimmed = name.trim();
+
   return trimmed !== '' && trimmed !== saved;
 }
 
@@ -409,21 +489,38 @@ export async function requestContactCode(
   country: string,
 ): Promise<PendingContact> {
   let pending: PendingContact | null = null;
-  const run = store.run({ type: 'RequestContactCode', data: { account, kind, address: address.trim(), country } }, (event) => {
-    if (event.type === 'ContactCodeSent') pending = event.data.pending;
-  });
+
+  const run = store.run(
+    { type: 'RequestContactCode', data: { account, kind, address: address.trim(), country } },
+    (event) => {
+      if (event.type === 'ContactCodeSent') pending = event.data.pending;
+    },
+  );
+
   await run;
+
   if (pending === null) throw new CommandFailed(t('mobile.accounts.no_code'), run.request);
+
   return pending;
 }
 
 /** Sends the code texted to a new phone number. */
-export function confirmContactCode(store: Store, account: AccountId, pending: PendingContact, code: string): Promise<void> {
+export function confirmContactCode(
+  store: Store,
+  account: AccountId,
+  pending: PendingContact,
+  code: string,
+): Promise<void> {
   return store.run({ type: 'ConfirmContactCode', data: { account, pending, code: code.trim() } });
 }
 
 /** Links a confirmed contact detail; the server usually asks for the password first. */
-export function addContact(store: Store, account: AccountId, pending: PendingContact, hooks: GuardHooks): Promise<boolean> {
+export function addContact(
+  store: Store,
+  account: AccountId,
+  pending: PendingContact,
+  hooks: GuardHooks,
+): Promise<boolean> {
   return runGuarded(store, account, { type: 'AddContact', pending }, hooks);
 }
 
@@ -438,7 +535,11 @@ export function contactLabel(contact: ContactDetail): string {
 }
 
 /** Opens the homeserver's account page (OAuth accounts) with `open`. */
-export async function openAccountPage(store: Store, account: AccountId, open: (url: string) => void): Promise<void> {
+export async function openAccountPage(
+  store: Store,
+  account: AccountId,
+  open: (url: string) => void,
+): Promise<void> {
   await store.run({ type: 'OpenAccountPage', data: { account, page: 'Profile' } }, (event) => {
     if (event.type === 'OpenUrl') open(event.data.url);
   });

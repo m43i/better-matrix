@@ -24,6 +24,7 @@ export default function ActivityScreen() {
   const store = useAppStore();
   // Everything listed here counts as seen, also what arrives while it is open.
   useEffect(() => markActivitySeen(store), [store, activity]);
+
   return (
     <>
       <Stack.Screen options={{ title: t('mobile.tabs.activity') }} />
@@ -35,7 +36,13 @@ export default function ActivityScreen() {
         keyExtractor={(row) => `${row.notification.account}|${row.notification.event_id}`}
         renderItem={({ item }) => <Row row={item} active={active} />}
         contentContainerStyle={rows.length === 0 ? styles.fill : undefined}
-        ListEmptyComponent={<EmptyState icon="bell" title={t('overview.caught_up')} body={t('mobile.shell.activity_empty')} />}
+        ListEmptyComponent={
+          <EmptyState
+            icon="bell"
+            title={t('overview.caught_up')}
+            body={t('mobile.shell.activity_empty')}
+          />
+        }
       />
     </>
   );
@@ -46,8 +53,13 @@ function Row({ row, active }: { row: ActivityRow; active: string | null }) {
   const palette = usePalette();
   const { notification: n, room } = row;
   const direct = room?.kind === 'Direct';
+
   // In a direct chat the room is named after the sender: say it once.
-  const body = direct && n.sender_name === n.room_name ? n.body : t('overview.preview', { sender: n.sender_name, body: n.body });
+  const body =
+    direct && n.sender_name === n.room_name
+      ? n.body
+      : t('overview.preview', { sender: n.sender_name, body: n.body });
+
   return (
     <Touchable
       testID={`activity-${n.event_id}`}
@@ -64,7 +76,6 @@ function Row({ row, active }: { row: ActivityRow; active: string | null }) {
         name={n.room_name}
         media={room?.avatar}
         size={40}
-       
       />
       <View style={styles.text}>
         <View style={styles.line}>
@@ -87,7 +98,13 @@ function Row({ row, active }: { row: ActivityRow; active: string | null }) {
 
 const styles = StyleSheet.create({
   fill: { flexGrow: 1 },
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 16, paddingVertical: 10 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
   text: { flex: 1, gap: 2 },
   line: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   grow: { flex: 1 },

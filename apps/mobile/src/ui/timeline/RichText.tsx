@@ -13,7 +13,13 @@ import { openLink, openMention } from './open';
 
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
-export const RichText = memo(function RichText({ blocks, muted = false }: { blocks: Block[]; muted?: boolean }) {
+export const RichText = memo(function RichText({
+  blocks,
+  muted = false,
+}: {
+  blocks: Block[];
+  muted?: boolean;
+}) {
   return (
     <View style={styles.blocks}>
       {blocks.map((block, index) => (
@@ -26,6 +32,7 @@ export const RichText = memo(function RichText({ blocks, muted = false }: { bloc
 function BlockView({ block, muted }: { block: Block; muted: boolean }) {
   const palette = usePalette();
   const color = muted ? palette.textMuted : palette.text;
+
   switch (block.type) {
     case 'paragraph':
       return (
@@ -35,7 +42,13 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
       );
     case 'heading':
       return (
-        <Text style={[font.body, styles.heading, { color, fontSize: block.level === 1 ? 20 : block.level === 2 ? 18 : 16 }]}>
+        <Text
+          style={[
+            font.body,
+            styles.heading,
+            { color, fontSize: block.level === 1 ? 20 : block.level === 2 ? 18 : 16 },
+          ]}
+        >
           <Inlines inlines={block.inlines} />
         </Text>
       );
@@ -43,7 +56,10 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
       return (
         <ScrollView
           horizontal
-          style={[styles.codeBlock, { backgroundColor: palette.surface, borderColor: palette.divider }]}
+          style={[
+            styles.codeBlock,
+            { backgroundColor: palette.surface, borderColor: palette.divider },
+          ]}
           contentContainerStyle={styles.codeContent}
         >
           <Text style={[styles.mono, { color: palette.text }]}>{block.text}</Text>
@@ -79,7 +95,11 @@ function Inlines({ inlines }: { inlines: Inline[] }) {
   return (
     <>
       {inlines.map((inline, index) =>
-        inline.type === 'text' ? <Run key={index} text={inline.text} marks={inline.marks} /> : <Pill key={index} inline={inline} />,
+        inline.type === 'text' ? (
+          <Run key={index} text={inline.text} marks={inline.marks} />
+        ) : (
+          <Pill key={index} inline={inline} />
+        ),
       )}
     </>
   );
@@ -89,9 +109,17 @@ function Run({ text, marks }: { text: string; marks: Marks }) {
   const palette = usePalette();
   const store = useAppStore();
   const { account } = useTimelineContext();
-  const decoration = [marks.underline || marks.link ? 'underline' : '', marks.strike ? 'line-through' : '']
-    .filter(Boolean)
-    .join(' ') as TextStyle['textDecorationLine'];
+
+  const underline = marks.underline || marks.link;
+
+  const decoration = underline
+    ? marks.strike
+      ? 'underline line-through'
+      : 'underline'
+    : marks.strike
+      ? 'line-through'
+      : undefined;
+
   const style: TextStyle = {
     fontWeight: marks.bold ? '700' : undefined,
     fontStyle: marks.italic ? 'italic' : undefined,
@@ -99,7 +127,9 @@ function Run({ text, marks }: { text: string; marks: Marks }) {
     color: marks.link ? palette.accent : undefined,
     ...(marks.code ? { fontFamily: MONO, fontSize: 14, backgroundColor: palette.surface } : null),
   };
+
   const link = marks.link;
+
   if (link) {
     return (
       <Text style={style} onPress={() => openLink(store, link, account)} accessibilityRole="link">
@@ -107,6 +137,7 @@ function Run({ text, marks }: { text: string; marks: Marks }) {
       </Text>
     );
   }
+
   return <Text style={style}>{text}</Text>;
 }
 
@@ -116,7 +147,10 @@ function Pill({ inline }: { inline: Extract<Inline, { type: 'mention' }> }) {
   const store = useAppStore();
   const { account, timelineKey } = useTimelineContext();
   const me = inline.kind === 'user' && inline.id === account;
-  const label = inline.kind === 'user' && !inline.label.startsWith('@') ? `@${inline.label}` : inline.label;
+
+  const label =
+    inline.kind === 'user' && !inline.label.startsWith('@') ? `@${inline.label}` : inline.label;
+
   return (
     <Text
       accessibilityRole="link"

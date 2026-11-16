@@ -18,12 +18,22 @@ import { usePalette } from '../theme';
 /** The account a settings page shows: its `account` param, else the one on screen. */
 export function useSettingsAccount(): AccountData | undefined {
   const { account } = useLocalSearchParams<{ account?: AccountId }>();
+
   return useStore((s) => (account ? accountOf(s, account) : activeAccount(s)));
 }
 
 /** A settings page: its native header title, then sections that scroll clear of the keyboard. */
-export function SettingsPage({ title, children, testID }: { title: string; children: ReactNode; testID?: string }) {
+export function SettingsPage({
+  title,
+  children,
+  testID,
+}: {
+  title: string;
+  children: ReactNode;
+  testID?: string;
+}) {
   const palette = usePalette();
+
   return (
     <>
       <Stack.Screen options={{ title }} />
@@ -55,9 +65,16 @@ export function NoAccount({ title }: { title: string }) {
 export function AccountHeading({ account }: { account: AccountData }) {
   const palette = usePalette();
   const { summary } = account;
+
   return (
     <View style={styles.heading}>
-      <Avatar account={summary.id} id={summary.id} name={summary.display_name} media={summary.avatar} size={44} />
+      <Avatar
+        account={summary.id}
+        id={summary.id}
+        name={summary.display_name}
+        media={summary.avatar}
+        size={44}
+      />
       <View style={styles.headingText}>
         <Text style={[font.bodyStrong, { color: palette.text }]} numberOfLines={1}>
           {summary.display_name}
@@ -71,8 +88,19 @@ export function AccountHeading({ account }: { account: AccountData }) {
 }
 
 /** A line of status: an icon in the status's colour and what it says. */
-export function StatusLine({ icon, color, text, testID }: { icon: IconName; color: string; text: string; testID?: string }) {
+export function StatusLine({
+  icon,
+  color,
+  text,
+  testID,
+}: {
+  icon: IconName;
+  color: string;
+  text: string;
+  testID?: string;
+}) {
   const palette = usePalette();
+
   return (
     <View style={styles.status} testID={testID}>
       <Icon name={icon} size={22} color={color} />
@@ -83,7 +111,19 @@ export function StatusLine({ icon, color, text, testID }: { icon: IconName; colo
 
 const styles = StyleSheet.create({
   page: { paddingBottom: 48 },
-  heading: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 20 },
+  heading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
   headingText: { flex: 1, gap: 2 },
-  status: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+  status: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
 });

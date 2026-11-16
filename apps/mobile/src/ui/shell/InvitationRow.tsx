@@ -16,9 +16,16 @@ import { usePalette } from '../theme';
 /** As large as the room rows' leading picture. */
 const AVATAR = 22;
 
-export const InvitationRow = memo(function InvitationRow({ account, invitation }: { account: AccountId; invitation: Invitation }) {
+export const InvitationRow = memo(function InvitationRow({
+  account,
+  invitation,
+}: {
+  account: AccountId;
+  invitation: Invitation;
+}) {
   const palette = usePalette();
   const room = !invitation.space && invitation.kind === 'Group';
+
   return (
     <Touchable
       testID={`invitation-${invitation.room_id}`}
@@ -31,7 +38,13 @@ export const InvitationRow = memo(function InvitationRow({ account, invitation }
         {room ? (
           <Text style={[font.nav, styles.hash, { color: palette.textMuted }]}>#</Text>
         ) : (
-          <Avatar account={account} id={invitation.room_id} name={invitation.name} media={invitation.avatar} size={AVATAR} />
+          <Avatar
+            account={account}
+            id={invitation.room_id}
+            name={invitation.name}
+            media={invitation.avatar}
+            size={AVATAR}
+          />
         )}
       </View>
       <Text style={[font.navStrong, styles.name, { color: palette.text }]} numberOfLines={1}>
@@ -42,7 +55,14 @@ export const InvitationRow = memo(function InvitationRow({ account, invitation }
 });
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 9, minHeight: 42 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    minHeight: 42,
+  },
   leading: { width: AVATAR, alignItems: 'center' },
   hash: { fontSize: 18, lineHeight: 22 },
   name: { flex: 1 },

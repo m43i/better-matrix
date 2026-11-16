@@ -17,7 +17,9 @@ type Kind = PendingAttachment['kind'];
 
 function kindOf(mime: string | null | undefined, fallback: Kind = 'file'): Kind {
   if (mime?.startsWith('image/')) return 'image';
+
   if (mime?.startsWith('video/')) return 'video';
+
   return fallback;
 }
 
@@ -25,15 +27,22 @@ function kindOf(mime: string | null | undefined, fallback: Kind = 'file'): Kind 
 let copies = 0;
 
 /** `uri` as an attachment named `name` (with the extension on disk). */
-async function attachment(uri: string, given: string | null | undefined, kind: Kind): Promise<PendingAttachment> {
+async function attachment(
+  uri: string,
+  given: string | null | undefined,
+  kind: Kind,
+): Promise<PendingAttachment> {
   const original = pathFromUri(uri);
   const name = uploadName(original, given);
+
   if (name === fileName(original)) return { path: original, name, kind, uri };
+
   try {
     const folder = new Directory(Paths.cache, 'uploads', `${Date.now()}-${copies++}`);
     folder.create({ intermediates: true, idempotent: true });
     const copy = new File(folder, name);
     await new File(uri).copy(copy);
+
     return { path: pathFromUri(copy.uri), name, kind, uri: copy.uri };
   } catch {
     // The picker's own copy still sends, under its own name.
@@ -43,7 +52,13 @@ async function attachment(uri: string, given: string | null | undefined, kind: K
 
 function fromAssets(assets: ImagePicker.ImagePickerAsset[]): Promise<PendingAttachment[]> {
   return Promise.all(
-    assets.map((asset) => attachment(asset.uri, asset.fileName, asset.type === 'video' ? 'video' : kindOf(asset.mimeType, 'image'))),
+    assets.map((asset) =>
+      attachment(
+        asset.uri,
+        asset.fileName,
+        asset.type === 'video' ? 'video' : kindOf(asset.mimeType, 'image'),
+      ),
+    ),
   );
 }
 
@@ -56,20 +71,34 @@ export async function pickFromLibrary(): Promise<PendingAttachment[]> {
     selectionLimit: 0,
     quality: 1,
   });
+
   return result.canceled ? [] : fromAssets(result.assets);
 }
 
 /** A photo or video taken now; `DENIED` when the camera isn't allowed. */
 export async function takeWithCamera(): Promise<PendingAttachment[] | typeof DENIED> {
   const permission = await ImagePicker.requestCameraPermissionsAsync();
+
   if (!permission.granted) return DENIED;
-  const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images', 'videos'], quality: 1 });
+
+  const result = await ImagePicker.launchCameraAsync({
+    mediaTypes: ['images', 'videos'],
+    quality: 1,
+  });
+
   return result.canceled ? [] : fromAssets(result.assets);
 }
 
 /** Any files, several at once. */
 export async function pickFiles(): Promise<PendingAttachment[]> {
-  const result = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
+  const result = await DocumentPicker.getDocumentAsync({
+    multiple: true,
+    copyToCacheDirectory: true,
+  });
+
   if (result.canceled) return [];
-  return Promise.all(result.assets.map((asset) => attachment(asset.uri, asset.name, kindOf(asset.mimeType))));
+
+  return Promise.all(
+    result.assets.map((asset) => attachment(asset.uri, asset.name, kindOf(asset.mimeType))),
+  );
 }

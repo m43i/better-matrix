@@ -11,6 +11,7 @@ import { useAppStore } from '../../state/react';
 export function useOpenStage(): () => void {
   const store = useAppStore();
   const router = useRouter();
+
   return useCallback(() => {
     showCallChat(store, false);
     router.push(routes.call());

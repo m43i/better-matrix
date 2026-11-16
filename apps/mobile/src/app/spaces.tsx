@@ -29,12 +29,22 @@ interface ScopeEntry {
 
 function scopeEntries(s: State): ScopeEntry[] {
   const a = activeAccount(s);
+
   if (!a) return [];
-  const home: ScopeEntry = { space: null, name: t('common.home'), avatar: null, selected: a.scope === 'home', unread: hasUnread(a, 'home') };
+
+  const home: ScopeEntry = {
+    space: null,
+    name: t('common.home'),
+    avatar: null,
+    selected: a.scope === 'home',
+    unread: hasUnread(a, 'home'),
+  };
+
   return [
     home,
     ...orderedSpaces(a.spaces, a.sidebar).map((space): ScopeEntry => {
       const scope: Scope = { space: space.room_id };
+
       return {
         space: space.room_id,
         name: space.name,
@@ -56,7 +66,9 @@ export default function SpacesScreen() {
   const palette = usePalette();
   const scopes = useStore(scopeEntries, sameEntries);
   const active = useStore((s) => s.active);
+
   if (!active) return null;
+
   return (
     <ScrollView style={{ backgroundColor: palette.bg }} contentContainerStyle={styles.content}>
       <ListSection title={t('mobile.shell.spaces')}>
@@ -69,7 +81,13 @@ export default function SpacesScreen() {
               leading={
                 <WithDot on={!entry.selected && entry.unread} size={32}>
                   {entry.space ? (
-                    <Avatar account={active} id={entry.space} name={entry.name} media={entry.avatar} size={32} />
+                    <Avatar
+                      account={active}
+                      id={entry.space}
+                      name={entry.name}
+                      media={entry.avatar}
+                      size={32}
+                    />
                   ) : (
                     <View style={[styles.home, { backgroundColor: palette.hover }]}>
                       <Icon name="home" size={18} color={palette.text} />

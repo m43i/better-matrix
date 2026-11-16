@@ -10,10 +10,12 @@ export function useShown(): RefObject<boolean> {
   useFocusEffect(
     useCallback(() => {
       shown.current = true;
+
       return () => {
         shown.current = false;
       };
     }, []),
   );
+
   return shown;
 }

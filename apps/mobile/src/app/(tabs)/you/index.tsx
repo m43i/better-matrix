@@ -30,7 +30,11 @@ export default function YouScreen() {
       t('mobile.accounts.sign_out_hint'),
       [
         { text: t('common.cancel'), style: 'cancel' },
-        { text: t('sessions.sign_out'), style: 'destructive', onPress: () => signOut(store, active.id) },
+        {
+          text: t('sessions.sign_out'),
+          style: 'destructive',
+          onPress: () => signOut(store, active.id),
+        },
       ],
     );
   };
@@ -45,7 +49,13 @@ export default function YouScreen() {
       >
         {active ? (
           <View style={styles.header} testID="you-header">
-            <Avatar account={active.id} id={active.id} name={active.display_name} media={active.avatar} size={72} />
+            <Avatar
+              account={active.id}
+              id={active.id}
+              name={active.display_name}
+              media={active.avatar}
+              size={72}
+            />
             <View style={styles.headerText}>
               <Text style={[font.title, { color: palette.text, fontSize: 24 }]} numberOfLines={1}>
                 {active.display_name}
@@ -62,7 +72,15 @@ export default function YouScreen() {
             <View key={summary.id}>
               <ListRow
                 testID={`switch-${summary.id}`}
-                leading={<Avatar account={summary.id} id={summary.id} name={summary.display_name} media={summary.avatar} size={32} />}
+                leading={
+                  <Avatar
+                    account={summary.id}
+                    id={summary.id}
+                    name={summary.display_name}
+                    media={summary.avatar}
+                    size={32}
+                  />
+                }
                 title={summary.display_name}
                 subtitle={summary.id}
                 selected={summary.id === active?.id}
@@ -82,15 +100,27 @@ export default function YouScreen() {
                 onPress={() =>
                   Alert.alert(t('session_ended.title', { account }), t('session_ended.kept_hint'), [
                     { text: t('common.cancel'), style: 'cancel' },
-                    { text: t('session_ended.remove'), style: 'destructive', onPress: () => removeEnded(store, account) },
-                    { text: t('session_ended.sign_in'), onPress: () => router.push(routes.signIn(account)) },
+                    {
+                      text: t('session_ended.remove'),
+                      style: 'destructive',
+                      onPress: () => removeEnded(store, account),
+                    },
+                    {
+                      text: t('session_ended.sign_in'),
+                      onPress: () => router.push(routes.signIn(account)),
+                    },
                   ])
                 }
               />
               <Divider inset={52} />
             </View>
           ))}
-          <ListRow testID="add-account" icon="userAdd" title={t('accounts.add')} onPress={() => router.push(routes.signIn())} />
+          <ListRow
+            testID="add-account"
+            icon="userAdd"
+            title={t('accounts.add')}
+            onPress={() => router.push(routes.signIn())}
+          />
         </ListSection>
 
         <SettingsRows />
@@ -113,6 +143,12 @@ export default function YouScreen() {
 
 const styles = StyleSheet.create({
   content: { paddingBottom: 40 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingHorizontal: 20, paddingTop: 16 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
   headerText: { flex: 1, gap: 2 },
 });

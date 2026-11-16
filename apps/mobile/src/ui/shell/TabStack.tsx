@@ -7,6 +7,7 @@ import { usePalette } from '../theme';
 
 export function TabStack() {
   const palette = usePalette();
+
   return (
     <Stack
       screenOptions={{

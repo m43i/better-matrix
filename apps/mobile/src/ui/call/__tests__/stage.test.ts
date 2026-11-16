@@ -20,7 +20,14 @@ import {
 const ME = '@ada:example.org';
 
 function person(key: string, change: Partial<CallParticipant> = {}): CallParticipant {
-  return { key, person: { id: `@${key}:x`, name: key, avatar: null }, muted: false, camera: null, screen: null, ...change };
+  return {
+    key,
+    person: { id: `@${key}:x`, name: key, avatar: null },
+    muted: false,
+    camera: null,
+    screen: null,
+    ...change,
+  };
 }
 
 function info(change: Partial<CallInfo> = {}): CallInfo {
@@ -72,10 +79,13 @@ describe('showsVideo', () => {
 });
 
 describe('tiles', () => {
-  const tilesOf = (call: CallInfo) => callTiles(call, initialCallView()).map((tile) => describeTile(call, tile.key));
+  const tilesOf = (call: CallInfo) =>
+    callTiles(call, initialCallView()).map((tile) => describeTile(call, tile.key));
 
   it('should put everyone else first and the user last', () => {
-    expect(tilesOf(info({ participants: [person('a'), person('b')] })).map((tile) => tile.name)).toEqual(['a', 'b', 'You']);
+    expect(
+      tilesOf(info({ participants: [person('a'), person('b')] })).map((tile) => tile.name),
+    ).toEqual(['a', 'b', 'You']);
   });
 
   it('should mark the user muted when their microphone is off', () => {
@@ -92,21 +102,35 @@ describe('tiles', () => {
   });
 
   it('should mirror only the users own camera', () => {
-    expect(tilesOf(info({ camera: 7 })).filter((tile) => tile.own).map((tile) => tile.video)).toEqual([7]);
+    expect(
+      tilesOf(info({ camera: 7 }))
+        .filter((tile) => tile.own)
+        .map((tile) => tile.video),
+    ).toEqual([7]);
   });
 
   it('should name a shared screen after whose it is', () => {
-    expect(tilesOf(info({ participants: [person('grace', { screen: 5 })] }))[0]?.name).toBe("grace's screen");
+    expect(tilesOf(info({ participants: [person('grace', { screen: 5 })] }))[0]?.name).toBe(
+      "grace's screen",
+    );
   });
 });
 
 describe('controls', () => {
   it('should offer to unmute a muted microphone', () => {
-    expect(controls(info({ microphone: false }), true).microphone).toEqual({ shown: true, on: false, label: 'Unmute' });
+    expect(controls(info({ microphone: false }), true).microphone).toEqual({
+      shown: true,
+      on: false,
+      label: 'Unmute',
+    });
   });
 
   it('should offer to turn a filming camera off', () => {
-    expect(controls(info({ camera: 4 }), true).camera).toEqual({ shown: true, on: true, label: 'Turn camera off' });
+    expect(controls(info({ camera: 4 }), true).camera).toEqual({
+      shown: true,
+      on: true,
+      label: 'Turn camera off',
+    });
   });
 
   it('should hide the camera of a one-to-one voice call, which carries none', () => {
@@ -129,7 +153,11 @@ describe('headerCall', () => {
   });
 
   it('should offer to join a call under way with how many are in it', () => {
-    const room = { ...roomSummary('!r'), call: { via: 'Rtc' as const, participants: ['@a:x', '@b:x'] } };
+    const room = {
+      ...roomSummary('!r'),
+      call: { via: 'Rtc' as const, participants: ['@a:x', '@b:x'] },
+    };
+
     expect(headerCall(room, null, ME)).toEqual({ kind: 'join', count: 2 });
   });
 
@@ -154,11 +182,20 @@ describe('notices', () => {
 
   it('should tell a stopped share from a stopped camera', () => {
     expect(stoppedNotice({ type: 'Screen', data: false })).toBe('Screen sharing stopped.');
-    expect(stoppedNotice({ type: 'Camera', data: false })).toBe('Your camera stopped, so the call no longer shows it.');
+    expect(stoppedNotice({ type: 'Camera', data: false })).toBe(
+      'Your camera stopped, so the call no longer shows it.',
+    );
   });
 
   it('should label a ring that calls with video', () => {
-    const ring: IncomingCall = { account: ME, room_id: '!r', caller: { id: '@g:x', name: 'Grace', avatar: null }, video: true, via: 'Rtc' };
+    const ring: IncomingCall = {
+      account: ME,
+      room_id: '!r',
+      caller: { id: '@g:x', name: 'Grace', avatar: null },
+      video: true,
+      via: 'Rtc',
+    };
+
     expect(ringLabel(ring)).toBe('Incoming video call');
   });
 });

@@ -12,6 +12,7 @@ import { usePalette } from '../theme';
 
 export function ScopeTitle({ title, unread }: { title: string; unread: boolean }) {
   const palette = usePalette();
+
   return (
     <Pressable
       testID="scope-title"

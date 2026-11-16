@@ -23,26 +23,45 @@ export function CallCardView({ card, latest }: { card: Card; latest: boolean }) 
   const { account, timelineKey } = useTimelineContext();
   const roomId = timelineKey.room_id;
   const room = useStore((s) => roomOf(s, account, roomId));
+
   const callHere = useStore((s): CallVia | null => {
     const current = s.call.current;
-    return current && current.account === account && current.room_id === roomId ? current.via : null;
+
+    return current && current.account === account && current.room_id === roomId
+      ? current.via
+      : null;
   });
-  const ringing = useStore((s) => s.call.rings.some((r) => r.account === account && r.room_id === roomId));
+
+  const ringing = useStore((s) =>
+    s.call.rings.some((r) => r.account === account && r.room_id === roomId),
+  );
+
   if (!room) return null;
   const status = callStatus(card, room, { latest, callHere, ringing });
+
   const join = () => {
     joinCall(store, account, roomId, card.video === true);
     router.push(routes.call());
   };
+
   return (
     <View
       style={[
         styles.card,
-        { backgroundColor: palette.surface, borderColor: status.ongoing ? `${palette.success}99` : palette.divider },
+        {
+          backgroundColor: palette.surface,
+          borderColor: status.ongoing ? `${palette.success}99` : palette.divider,
+        },
       ]}
     >
-      <View style={[styles.tile, { backgroundColor: status.ongoing ? palette.success : palette.hover }]}>
-        <Icon name={card.video === true ? 'video' : 'call'} size={20} color={status.ongoing ? palette.onAccent : palette.textMuted} />
+      <View
+        style={[styles.tile, { backgroundColor: status.ongoing ? palette.success : palette.hover }]}
+      >
+        <Icon
+          name={card.video === true ? 'video' : 'call'}
+          size={20}
+          color={status.ongoing ? palette.onAccent : palette.textMuted}
+        />
       </View>
       <View style={styles.words}>
         <Text style={[font.bodyStrong, { color: palette.text }]} numberOfLines={1}>
@@ -53,7 +72,9 @@ export function CallCardView({ card, latest }: { card: Card; latest: boolean }) 
         </Text>
       </View>
       {status.joined ? (
-        <Text style={[font.meta, styles.joined, { color: palette.textMuted }]}>{t('call.card.joined')}</Text>
+        <Text style={[font.meta, styles.joined, { color: palette.textMuted }]}>
+          {t('call.card.joined')}
+        </Text>
       ) : status.join ? (
         <Pressable
           onPress={join}
@@ -83,5 +104,12 @@ const styles = StyleSheet.create({
   tile: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   words: { flex: 1, gap: 2 },
   joined: { flexShrink: 1, textAlign: 'right' },
-  join: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 34, borderRadius: 17 },
+  join: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 34,
+    borderRadius: 17,
+  },
 });

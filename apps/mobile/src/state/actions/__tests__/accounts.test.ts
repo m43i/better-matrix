@@ -25,12 +25,20 @@ function setup() {
   const store = new Store(engine);
   const commands = () => sent.map((s) => s.command);
   const last = () => sent[sent.length - 1]!;
+
   const finish = (request: number, error?: string) =>
-    engine.emit({ type: 'Finished', data: { request, result: error === undefined ? { Ok: null } : { Err: error } } });
+    engine.emit({
+      type: 'Finished',
+      data: { request, result: error === undefined ? { Ok: null } : { Err: error } },
+    });
+
   return { engine, sent, store, commands, last, finish };
 }
 
-function homeserver(methods: Homeserver['methods'], server_name: string | null = 'example.org'): Homeserver {
+function homeserver(
+  methods: Homeserver['methods'],
+  server_name: string | null = 'example.org',
+): Homeserver {
   return { server_name, url: 'https://matrix.example.org/', methods };
 }
 
@@ -41,8 +49,12 @@ function discovered(server: Homeserver, back: string | null = null) {
   const flow = new SignInFlow(env.store, browser);
   flow.submitServer('example.org');
   const discover = env.last().request;
-  env.engine.emit({ type: 'HomeserverDiscovered', data: { request: discover, homeserver: server } });
+  env.engine.emit({
+    type: 'HomeserverDiscovered',
+    data: { request: discover, homeserver: server },
+  });
   env.finish(discover);
+
   return { ...env, flow, browser };
 }
 
@@ -56,7 +68,10 @@ describe('parseSignInInput', () => {
   });
 
   it('should take the server and the username from a Matrix ID', () => {
-    expect(parseSignInInput('@alice:example.org')).toEqual({ server: 'example.org', username: 'alice' });
+    expect(parseSignInInput('@alice:example.org')).toEqual({
+      server: 'example.org',
+      username: 'alice',
+    });
   });
 
   it('should name no server for a blank field', () => {
@@ -70,7 +85,9 @@ describe('serverName', () => {
   });
 
   it('should fall back to the host of the URL', () => {
-    expect(serverName(homeserver({ oauth: true, password: false }, null))).toBe('matrix.example.org');
+    expect(serverName(homeserver({ oauth: true, password: false }, null))).toBe(
+      'matrix.example.org',
+    );
   });
 });
 
@@ -112,33 +129,57 @@ describe('SignInFlow', () => {
 
   it('should start the browser sign-in for an OAuth server', () => {
     const { last } = discovered(homeserver({ oauth: true, password: true }));
-    expect(last().command).toEqual({ type: 'LoginOAuth', data: { homeserver: 'https://matrix.example.org/', resume: null } });
+    expect(last().command).toEqual({
+      type: 'LoginOAuth',
+      data: { homeserver: 'https://matrix.example.org/', resume: null },
+    });
   });
 
   it('should say so when a server offers no way to sign in', () => {
     const { flow } = discovered(homeserver({ oauth: false, password: false }));
-    expect(flow.snapshot().step).toEqual({ type: 'server', error: t('sign_in.no_method', { server: 'example.org' }) });
+    expect(flow.snapshot().step).toEqual({
+      type: 'server',
+      error: t('sign_in.no_method', { server: 'example.org' }),
+    });
   });
 
   it('should open the sign-in page in a session returning to the app', () => {
     const { engine, last, browser } = discovered(homeserver({ oauth: true, password: false }));
-    engine.emit({ type: 'OpenUrl', data: { request: last().request, url: 'https://auth.example.org/login' } });
+    engine.emit({
+      type: 'OpenUrl',
+      data: { request: last().request, url: 'https://auth.example.org/login' },
+    });
     expect(browser).toHaveBeenCalledWith('https://auth.example.org/login', OAUTH_REDIRECT);
   });
 
   it('should finish the sign-in with the URL the browser came back with', async () => {
     const back = `${OAUTH_REDIRECT}?code=1&state=2`;
-    const { engine, last, commands } = discovered(homeserver({ oauth: true, password: false }), back);
+
+    const { engine, last, commands } = discovered(
+      homeserver({ oauth: true, password: false }),
+      back,
+    );
+
     const login = last().request;
-    engine.emit({ type: 'OpenUrl', data: { request: login, url: 'https://auth.example.org/login' } });
+    engine.emit({
+      type: 'OpenUrl',
+      data: { request: login, url: 'https://auth.example.org/login' },
+    });
     await flush();
     expect(commands()).toContainEqual({ type: 'FinishOAuth', data: { request: login, url: back } });
   });
 
   it('should cancel the sign-in when the browser is closed without an answer', async () => {
-    const { engine, last, commands } = discovered(homeserver({ oauth: true, password: false }), null);
+    const { engine, last, commands } = discovered(
+      homeserver({ oauth: true, password: false }),
+      null,
+    );
+
     const login = last().request;
-    engine.emit({ type: 'OpenUrl', data: { request: login, url: 'https://auth.example.org/login' } });
+    engine.emit({
+      type: 'OpenUrl',
+      data: { request: login, url: 'https://auth.example.org/login' },
+    });
     await flush();
     expect(commands()).toContainEqual({ type: 'Cancel', data: login });
   });
@@ -155,7 +196,12 @@ describe('SignInFlow', () => {
     flow.submitPassword(' alice ', 'secret');
     expect(last().command).toEqual({
       type: 'Login',
-      data: { homeserver: 'https://matrix.example.org/', username: 'alice', password: 'secret', resume: null },
+      data: {
+        homeserver: 'https://matrix.example.org/',
+        username: 'alice',
+        password: 'secret',
+        resume: null,
+      },
     });
   });
 
@@ -172,11 +218,18 @@ describe('SignInFlow', () => {
     flow.submitPassword('alice', 'wrong');
     finish(last().request, 'Invalid password');
     await flush();
-    expect(flow.snapshot().step).toMatchObject({ type: 'password', submitting: null, error: 'Invalid password' });
+    expect(flow.snapshot().step).toMatchObject({
+      type: 'password',
+      submitting: null,
+      error: 'Invalid password',
+    });
   });
 
   it('should put the added account on screen once signed in', async () => {
-    const { flow, last, finish, engine, store } = discovered(homeserver({ oauth: false, password: true }));
+    const { flow, last, finish, engine, store } = discovered(
+      homeserver({ oauth: false, password: true }),
+    );
+
     engine.emit({ type: 'AccountAdded', data: summary(ADA) });
     flow.submitPassword('grace', 'secret');
     engine.emit({ type: 'AccountAdded', data: summary(GRACE, 'Grace') });
@@ -192,8 +245,14 @@ describe('SignInFlow', () => {
     const flow = new SignInFlow(store, jest.fn());
     flow.submitServer(ADA);
     const discover = last().request;
-    engine.emit({ type: 'HomeserverDiscovered', data: { request: discover, homeserver: homeserver({ oauth: true, password: false }) } });
-    expect(last().command).toEqual({ type: 'LoginOAuth', data: { homeserver: 'https://matrix.example.org/', resume: ADA } });
+    engine.emit({
+      type: 'HomeserverDiscovered',
+      data: { request: discover, homeserver: homeserver({ oauth: true, password: false }) },
+    });
+    expect(last().command).toEqual({
+      type: 'LoginOAuth',
+      data: { homeserver: 'https://matrix.example.org/', resume: ADA },
+    });
   });
 
   it('should cancel the browser sign-in when switching to the password', () => {
@@ -237,6 +296,7 @@ describe('installAccountEffects', () => {
   function withEffects() {
     const env = setup();
     installAccountEffects(env.store);
+
     return env;
   }
 
@@ -268,8 +328,14 @@ describe('installAccountEffects', () => {
 
   it('should fetch room keys once the session is verified', () => {
     const { engine, commands } = withEffects();
-    engine.emit({ type: 'SecurityChanged', data: { account: ADA, security: { session_verified: false, recovery: 'Enabled' } } });
-    engine.emit({ type: 'SecurityChanged', data: { account: ADA, security: { session_verified: true, recovery: 'Enabled' } } });
+    engine.emit({
+      type: 'SecurityChanged',
+      data: { account: ADA, security: { session_verified: false, recovery: 'Enabled' } },
+    });
+    engine.emit({
+      type: 'SecurityChanged',
+      data: { account: ADA, security: { session_verified: true, recovery: 'Enabled' } },
+    });
     expect(commands()).toEqual([{ type: 'FetchRoomKeys', data: ADA }]);
   });
 
@@ -283,7 +349,13 @@ describe('installAccountEffects', () => {
 });
 
 describe('profile', () => {
-  const pending: PendingContact = { kind: 'Email', address: 'ada@example.org', secret: 's', sid: '1', submit_url: null };
+  const pending: PendingContact = {
+    kind: 'Email',
+    address: 'ada@example.org',
+    secret: 's',
+    sid: '1',
+    submit_url: null,
+  };
 
   it('should leave the name field empty for an account without a display name', () => {
     expect(editableName(ADA, ADA)).toBe('');
@@ -319,7 +391,10 @@ describe('profile', () => {
     await flush();
     finish(sent[1]!.request);
     await expect(added).resolves.toBe(true);
-    expect(sent[1]!.command).toEqual<Command>({ type: 'AddContact', data: { account: ADA, pending, password: 'secret' } });
+    expect(sent[1]!.command).toEqual<Command>({
+      type: 'AddContact',
+      data: { account: ADA, pending, password: 'secret' },
+    });
   });
 });
 
@@ -332,10 +407,20 @@ describe('signOut', () => {
 
   it('should remove the pusher of this device before signing out', async () => {
     const { store, commands, sent, finish } = setup();
-    store.update((s) => ({ ...s, pushers: { [ADA]: { token: 'ExponentPushToken[a]', gateway: 'https://g', lang: 'en' } } }));
+    store.update((s) => ({
+      ...s,
+      pushers: { [ADA]: { token: 'ExponentPushToken[a]', gateway: 'https://g', lang: 'en' } },
+    }));
     signOut(store, ADA);
     expect(commands()).toEqual<Command[]>([
-      { type: 'RemovePusher', data: { account: ADA, app_id: 'chat.bettermatrix.mobile', push_key: 'ExponentPushToken[a]' } },
+      {
+        type: 'RemovePusher',
+        data: {
+          account: ADA,
+          app_id: 'chat.bettermatrix.mobile',
+          push_key: 'ExponentPushToken[a]',
+        },
+      },
     ]);
     finish(sent[0]!.request, 'gone already');
     await flush();

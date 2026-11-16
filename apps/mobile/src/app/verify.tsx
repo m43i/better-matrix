@@ -31,6 +31,7 @@ export default function VerifyScreen() {
   const params = useLocalSearchParams<{ account: AccountId; flowId?: string }>();
   const account = params.account;
   const flowId = params.flowId ?? null;
+
   // The account's verifications before this sheet opened: the one it starts is the next.
   const [known] = useState(() =>
     store
@@ -38,14 +39,19 @@ export default function VerifyScreen() {
       .verifications.filter((v) => v.account === account)
       .map((v) => v.flowId),
   );
-  const verification = useStore((s) => followedVerification(s.verifications, account, flowId, known));
+
+  const verification = useStore((s) =>
+    followedVerification(s.verifications, account, flowId, known),
+  );
+
   const step = verification?.step ?? null;
   const view = verificationView(step);
 
   // Opened to verify this session: ask the other sessions, once.
   const request = useRef<number | null>(null);
   useEffect(() => {
-    if (flowId === null && request.current === null) request.current = verifyThisSession(store, account);
+    if (flowId === null && request.current === null)
+      request.current = verifyThisSession(store, account);
   }, [store, account, flowId]);
 
   // Closing the sheet stops what is under way: a request still unanswered, or the verification.
@@ -56,8 +62,10 @@ export default function VerifyScreen() {
   useEffect(
     () => () => {
       const current = latest.current;
+
       if (current) {
-        if (!verificationOver(current.step)) cancelVerification(store, current.account, current.flowId);
+        if (!verificationOver(current.step))
+          cancelVerification(store, current.account, current.flowId);
       } else if (request.current !== null) {
         store.send({ type: 'Cancel', data: request.current }, { quiet: true });
       }
@@ -67,13 +75,16 @@ export default function VerifyScreen() {
 
   const act = (action: VerificationAction) => {
     const flow = latest.current;
+
     switch (action) {
       case 'accept':
         if (flow) acceptVerification(store, flow.account, flow.flowId);
+
         return;
       case 'match':
       case 'mismatch':
         if (flow) confirmVerification(store, flow.account, flow.flowId, action === 'match');
+
         return;
       case 'decline':
       case 'cancel':
@@ -81,6 +92,7 @@ export default function VerifyScreen() {
       case 'close':
         // Leaving stops it (see above).
         router.back();
+
         return;
     }
   };
@@ -104,22 +116,45 @@ export default function VerifyScreen() {
   })();
 
   return (
-    <ScrollView style={{ backgroundColor: palette.bg }} contentContainerStyle={styles.sheet} testID="verify">
+    <ScrollView
+      style={{ backgroundColor: palette.bg }}
+      contentContainerStyle={styles.sheet}
+      testID="verify"
+    >
       <View style={styles.heading}>
         <Icon
-          name={step?.type === 'Done' ? 'verified' : step?.type === 'Cancelled' ? 'alert' : 'shield'}
+          name={
+            step?.type === 'Done' ? 'verified' : step?.type === 'Cancelled' ? 'alert' : 'shield'
+          }
           size={40}
-          color={step?.type === 'Done' ? palette.success : step?.type === 'Cancelled' ? palette.warning : palette.accent}
+          color={
+            step?.type === 'Done'
+              ? palette.success
+              : step?.type === 'Cancelled'
+                ? palette.warning
+                : palette.accent
+          }
         />
-        <Text style={[font.title, { color: palette.text, textAlign: 'center' }]}>{t(view.title)}</Text>
-        <Text testID="verify-message" style={[font.body, { color: palette.textMuted, textAlign: 'center' }]}>
+        <Text style={[font.title, { color: palette.text, textAlign: 'center' }]}>
+          {t(view.title)}
+        </Text>
+        <Text
+          testID="verify-message"
+          style={[font.body, { color: palette.textMuted, textAlign: 'center' }]}
+        >
           {message}
         </Text>
       </View>
       {step?.type === 'Compare' ? <EmojiGrid emojis={step.data} /> : null}
       <View style={styles.buttons}>
         {view.actions.map((action) => (
-          <Button key={action} testID={`verify-${action}`} title={label(action)} kind={kind(action)} onPress={() => act(action)} />
+          <Button
+            key={action}
+            testID={`verify-${action}`}
+            title={label(action)}
+            kind={kind(action)}
+            onPress={() => act(action)}
+          />
         ))}
       </View>
       {step === null || step.type === 'Waiting' ? (
@@ -160,6 +195,7 @@ function kind(action: VerificationAction): ButtonKind {
 /** The seven emoji to compare, each with its name, in a grid. */
 function EmojiGrid({ emojis }: { emojis: SasEmoji[] }) {
   const palette = usePalette();
+
   return (
     <View style={styles.grid} testID="verify-emoji">
       {emojis.map((emoji, index) => (
@@ -167,7 +203,10 @@ function EmojiGrid({ emojis }: { emojis: SasEmoji[] }) {
           <Text style={styles.symbol} allowFontScaling={false}>
             {emoji.symbol}
           </Text>
-          <Text style={[font.meta, { color: palette.textMuted, textAlign: 'center' }]} numberOfLines={2}>
+          <Text
+            style={[font.meta, { color: palette.textMuted, textAlign: 'center' }]}
+            numberOfLines={2}
+          >
             {emoji.description}
           </Text>
         </View>

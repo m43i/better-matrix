@@ -1,4 +1,11 @@
-import { activeBlocks, applyFormat, applyLink, continueBlock, draftOf, outgoingText } from '../format';
+import {
+  activeBlocks,
+  applyFormat,
+  applyLink,
+  continueBlock,
+  draftOf,
+  outgoingText,
+} from '../format';
 
 const caret = (at: number) => ({ start: at, end: at });
 
@@ -12,7 +19,10 @@ describe('outgoingText', () => {
   });
 
   it('should send bold text as strong, as the desktop does', () => {
-    expect(outgoingText('one **two**')).toEqual({ body: 'one two', html: '<p>one <strong>two</strong></p>' });
+    expect(outgoingText('one **two**')).toEqual({
+      body: 'one two',
+      html: '<p>one <strong>two</strong></p>',
+    });
   });
 
   it('should send italic, strike and code', () => {
@@ -24,7 +34,9 @@ describe('outgoingText', () => {
   });
 
   it('should nest marks in the canonical order, one window at a time', () => {
-    expect(outgoingText('**bold _both_**').html).toBe('<p><strong>bold </strong><strong><em>both</em></strong></p>');
+    expect(outgoingText('**bold _both_**').html).toBe(
+      '<p><strong>bold </strong><strong><em>both</em></strong></p>',
+    );
   });
 
   it('should send a link with its address', () => {
@@ -59,7 +71,10 @@ describe('outgoingText', () => {
   });
 
   it('should send a bulleted list without its markers in the body', () => {
-    expect(outgoingText('- one\n- two')).toEqual({ body: 'one\ntwo', html: '<ul><li>one</li><li>two</li></ul>' });
+    expect(outgoingText('- one\n- two')).toEqual({
+      body: 'one\ntwo',
+      html: '<ul><li>one</li><li>two</li></ul>',
+    });
   });
 
   it('should send a numbered list', () => {
@@ -67,7 +82,9 @@ describe('outgoingText', () => {
   });
 
   it('should nest an indented item in the list above', () => {
-    expect(outgoingText('- one\n  - inner\n- two').html).toBe('<ul><li>one</li><ul><li>inner</li></ul><li>two</li></ul>');
+    expect(outgoingText('- one\n  - inner\n- two').html).toBe(
+      '<ul><li>one</li><ul><li>inner</li></ul><li>two</li></ul>',
+    );
   });
 
   it('should switch lists when the kind changes', () => {
@@ -75,7 +92,9 @@ describe('outgoingText', () => {
   });
 
   it('should send each quoted line as a quote', () => {
-    expect(outgoingText('> a\n> b').html).toBe('<blockquote>a</blockquote><blockquote>b</blockquote>');
+    expect(outgoingText('> a\n> b').html).toBe(
+      '<blockquote>a</blockquote><blockquote>b</blockquote>',
+    );
   });
 
   it('should send a fenced code block as one pre without formatting inside', () => {
@@ -90,7 +109,9 @@ describe('outgoingText', () => {
   });
 
   it('should mark directions when a block reads right to left', () => {
-    expect(outgoingText('**שלום**\nhi').html).toBe('<p dir="rtl"><strong>שלום</strong></p><p dir="ltr">hi</p>');
+    expect(outgoingText('**שלום**\nhi').html).toBe(
+      '<p dir="rtl"><strong>שלום</strong></p><p dir="ltr">hi</p>',
+    );
   });
 
   it('should send nothing for an empty draft', () => {
@@ -100,11 +121,17 @@ describe('outgoingText', () => {
 
 describe('applyFormat', () => {
   it('should wrap a selection in bold markers and keep it selected', () => {
-    expect(applyFormat('one two', { start: 4, end: 7 }, 'bold')).toEqual({ text: 'one **two**', selection: { start: 6, end: 9 } });
+    expect(applyFormat('one two', { start: 4, end: 7 }, 'bold')).toEqual({
+      text: 'one **two**',
+      selection: { start: 6, end: 9 },
+    });
   });
 
   it('should unwrap a selection that is bold already', () => {
-    expect(applyFormat('one **two**', { start: 6, end: 9 }, 'bold')).toEqual({ text: 'one two', selection: { start: 4, end: 7 } });
+    expect(applyFormat('one **two**', { start: 6, end: 9 }, 'bold')).toEqual({
+      text: 'one two',
+      selection: { start: 4, end: 7 },
+    });
   });
 
   it('should leave a space selected after a word outside the markers', () => {
@@ -215,19 +242,27 @@ describe('draftOf', () => {
   });
 
   it('should write marks back as markers', () => {
-    expect(draftOf('a b', '<p>a <strong>b</strong> <em>c</em> <s>d</s> <code>e</code></p>')).toBe('a **b** _c_ ~~d~~ `e`');
+    expect(draftOf('a b', '<p>a <strong>b</strong> <em>c</em> <s>d</s> <code>e</code></p>')).toBe(
+      'a **b** _c_ ~~d~~ `e`',
+    );
   });
 
   it('should write a link back with its address', () => {
-    expect(draftOf('x', '<a href="https://a.b/?q=1&amp;r=2">x</a>')).toBe('[x](https://a.b/?q=1&r=2)');
+    expect(draftOf('x', '<a href="https://a.b/?q=1&amp;r=2">x</a>')).toBe(
+      '[x](https://a.b/?q=1&r=2)',
+    );
   });
 
   it('should write lists back as items', () => {
-    expect(draftOf('', '<ul>\n<li>a</li>\n<li>b<ol><li>c</li></ol></li>\n</ul>')).toBe('- a\n- b\n  1. c');
+    expect(draftOf('', '<ul>\n<li>a</li>\n<li>b<ol><li>c</li></ol></li>\n</ul>')).toBe(
+      '- a\n- b\n  1. c',
+    );
   });
 
   it('should write quotes and code blocks back', () => {
-    expect(draftOf('', '<blockquote>q</blockquote><pre><code>x &lt; y\nz</code></pre>')).toBe('> q\n```\nx < y\nz\n```');
+    expect(draftOf('', '<blockquote>q</blockquote><pre><code>x &lt; y\nz</code></pre>')).toBe(
+      '> q\n```\nx < y\nz\n```',
+    );
   });
 
   it('should drop a reply fallback', () => {

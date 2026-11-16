@@ -1,6 +1,14 @@
 import type { Notification, RoomSummary } from '@better-matrix/matrix-native/types';
 
-import { ADA, GRACE, message, roomSummary, spaceSummary, summary, withContent } from '../../test/fixtures';
+import {
+  ADA,
+  GRACE,
+  message,
+  roomSummary,
+  spaceSummary,
+  summary,
+  withContent,
+} from '../../test/fixtures';
 import { activityRows, jumpTo, listTime, messageText, previewLine } from '../lists';
 import { apply, initialState } from '../reducer';
 import type { AccountData, State } from '../types';
@@ -8,11 +16,21 @@ import type { AccountData, State } from '../types';
 const NOW = new Date(2026, 10, 16, 15, 0).getTime();
 
 function signedIn(...ids: string[]): State {
-  return ids.reduce((s, id) => apply(s, { type: 'AccountAdded', data: summary(id, id === ADA ? 'Ada' : 'Grace') }), initialState());
+  return ids.reduce(
+    (s, id) => apply(s, { type: 'AccountAdded', data: summary(id, id === ADA ? 'Ada' : 'Grace') }),
+    initialState(),
+  );
 }
 
-function accountWith(rooms: RoomSummary[], spaces = [spaceSummary('!s', [], [], 'Design')]): AccountData {
-  const state = apply(signedIn(ADA), { type: 'RoomsUpdated', data: { account: ADA, list: { rooms, spaces, invitations: [] } } });
+function accountWith(
+  rooms: RoomSummary[],
+  spaces = [spaceSummary('!s', [], [], 'Design')],
+): AccountData {
+  const state = apply(signedIn(ADA), {
+    type: 'RoomsUpdated',
+    data: { account: ADA, list: { rooms, spaces, invitations: [] } },
+  });
+
   return state.accounts[0]!;
 }
 
@@ -26,7 +44,18 @@ describe('messageText', () => {
   });
 
   it('an attachment should read as its file name', () => {
-    const content = { type: 'Attachment' as const, data: { kind: 'File' as const, name: 'plan.pdf', size: null, media: null, thumbnail: null, dimensions: null } };
+    const content = {
+      type: 'Attachment' as const,
+      data: {
+        kind: 'File' as const,
+        name: 'plan.pdf',
+        size: null,
+        media: null,
+        thumbnail: null,
+        dimensions: null,
+      },
+    };
+
     expect(messageText(withContent('$m', content))).toBe('plan.pdf');
   });
 
@@ -60,7 +89,10 @@ describe('jumpTo', () => {
   ];
 
   it('a name starting with the term should come before one containing it', () => {
-    expect(jumpTo(accountWith(rooms), 'design', NOW).rooms.map((r) => r.room_id)).toEqual(['!design', '!design-chat']);
+    expect(jumpTo(accountWith(rooms), 'design', NOW).rooms.map((r) => r.room_id)).toEqual([
+      '!design',
+      '!design-chat',
+    ]);
   });
 
   it('matching should ignore case and accents', () => {
@@ -77,7 +109,11 @@ describe('jumpTo', () => {
   });
 
   it('without a term the latest conversations should be listed', () => {
-    const account = { ...accountWith(rooms), latest: { '!other': { ...message('$o'), timestamp_ms: NOW - 1 } } };
+    const account = {
+      ...accountWith(rooms),
+      latest: { '!other': { ...message('$o'), timestamp_ms: NOW - 1 } },
+    };
+
     expect(jumpTo(account, ' ', NOW).rooms[0]!.room_id).toBe('!other');
   });
 });
@@ -94,7 +130,11 @@ describe('activityRows', () => {
   });
 
   it('notifications of an account signed out since should be left out', () => {
-    const state = { ...signedIn(ADA), activity: [notification(GRACE, '$1'), notification(ADA, '$2')] };
+    const state = {
+      ...signedIn(ADA),
+      activity: [notification(GRACE, '$1'), notification(ADA, '$2')],
+    };
+
     expect(activityRows(state).map((r) => r.notification.event_id)).toEqual(['$2']);
   });
 });

@@ -16,11 +16,16 @@ import { usePalette } from '../theme';
 export function SecurityBanner() {
   const palette = usePalette();
   const account = useStore(unverifiedAccount);
+
   if (account === null) return null;
+
   return (
     <View
       testID="security-banner"
-      style={[styles.banner, { backgroundColor: `${palette.warning}22`, borderColor: `${palette.warning}66` }]}
+      style={[
+        styles.banner,
+        { backgroundColor: `${palette.warning}22`, borderColor: `${palette.warning}66` },
+      ]}
     >
       <Icon name="lock" size={20} color={palette.warning} />
       <Text style={[font.body, styles.text, { color: palette.text }]}>{t('account.banner')}</Text>

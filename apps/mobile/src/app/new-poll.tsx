@@ -23,7 +23,13 @@ import { font } from '../theme/palette';
 import { Button, IconButton, ListRow, ListSection, TextField } from '../ui/components';
 import { usePalette } from '../ui/theme';
 
-function HeaderButton({ title, onPress, disabled = false, strong = false, testID }: {
+function HeaderButton({
+  title,
+  onPress,
+  disabled = false,
+  strong = false,
+  testID,
+}: {
   title: string;
   onPress: () => void;
   disabled?: boolean;
@@ -31,15 +37,35 @@ function HeaderButton({ title, onPress, disabled = false, strong = false, testID
   testID: string;
 }) {
   const palette = usePalette();
+
   return (
-    <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityState={{ disabled }} hitSlop={8} testID={testID}>
-      <Text style={[strong ? font.bodyStrong : font.body, { color: palette.accent, opacity: disabled ? 0.4 : 1 }]}>{title}</Text>
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      hitSlop={8}
+      testID={testID}
+    >
+      <Text
+        style={[
+          strong ? font.bodyStrong : font.body,
+          { color: palette.accent, opacity: disabled ? 0.4 : 1 },
+        ]}
+      >
+        {title}
+      </Text>
     </Pressable>
   );
 }
 
 export default function NewPollScreen() {
-  const { account, roomId, thread } = useLocalSearchParams<{ account: string; roomId: string; thread?: string }>();
+  const { account, roomId, thread } = useLocalSearchParams<{
+    account: string;
+    roomId: string;
+    thread?: string;
+  }>();
+
   const store = useAppStore();
   const router = useRouter();
   const palette = usePalette();
@@ -55,8 +81,22 @@ export default function NewPollScreen() {
       <Stack.Screen
         options={{
           title: t('poll.title'),
-          headerLeft: () => <HeaderButton title={t('common.cancel')} onPress={() => router.back()} testID="poll-cancel" />,
-          headerRight: () => <HeaderButton title={t('poll.create')} onPress={create} disabled={!ready} strong testID="poll-create" />,
+          headerLeft: () => (
+            <HeaderButton
+              title={t('common.cancel')}
+              onPress={() => router.back()}
+              testID="poll-cancel"
+            />
+          ),
+          headerRight: () => (
+            <HeaderButton
+              title={t('poll.create')}
+              onPress={create}
+              disabled={!ready}
+              strong
+              testID="poll-create"
+            />
+          ),
         }}
       />
       <KeyboardAwareScrollView
@@ -105,16 +145,27 @@ export default function NewPollScreen() {
           ))}
           {canAddAnswer(form) ? (
             <View style={styles.add}>
-              <Button title={t('poll.add_answer')} icon="plus" kind="plain" onPress={() => setForm(addAnswer)} testID="poll-add" />
+              <Button
+                title={t('poll.add_answer')}
+                icon="plus"
+                kind="plain"
+                onPress={() => setForm(addAnswer)}
+                testID="poll-add"
+              />
             </View>
           ) : null}
         </View>
-        <ListSection footer={form.disclosed ? t('poll.disclosed_hint') : t('poll.undisclosed_hint')}>
+        <ListSection
+          footer={form.disclosed ? t('poll.disclosed_hint') : t('poll.undisclosed_hint')}
+        >
           <ListRow
             testID="poll-disclosed"
             icon="eye"
             title={t('poll.disclosed')}
-            toggle={{ value: form.disclosed, onChange: (disclosed) => setForm((f) => ({ ...f, disclosed })) }}
+            toggle={{
+              value: form.disclosed,
+              onChange: (disclosed) => setForm((f) => ({ ...f, disclosed })),
+            }}
           />
         </ListSection>
       </KeyboardAwareScrollView>

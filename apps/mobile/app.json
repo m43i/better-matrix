@@ -5,11 +5,7 @@
     "version": "0.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": [
-      "bettermatrix",
-      "org.example.bettermatrix",
-      "matrix"
-    ],
+    "scheme": ["bettermatrix", "org.example.bettermatrix", "matrix"],
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/icon.png",
@@ -19,10 +15,7 @@
         "NSCameraUsageDescription": "Better Matrix uses the camera for video calls and to send photos.",
         "NSMicrophoneUsageDescription": "Better Matrix uses the microphone for calls and voice messages.",
         "NSPhotoLibraryUsageDescription": "Better Matrix lets you send photos and videos from your library.",
-        "UIBackgroundModes": [
-          "audio",
-          "voip"
-        ]
+        "UIBackgroundModes": ["audio", "voip"]
       }
     },
     "android": {
@@ -54,10 +47,7 @@
               "host": "matrix.to"
             }
           ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
+          "category": ["BROWSABLE", "DEFAULT"]
         }
       ]
     },

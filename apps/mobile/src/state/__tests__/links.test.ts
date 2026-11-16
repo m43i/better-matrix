@@ -1,4 +1,12 @@
-import { findGifLink, findPreviewLink, gifSource, htmlWithoutLink, isLink, links, withoutLink } from '../links';
+import {
+  findGifLink,
+  findPreviewLink,
+  gifSource,
+  htmlWithoutLink,
+  isLink,
+  links,
+  withoutLink,
+} from '../links';
 
 describe('links', () => {
   it('should be found without the punctuation around them', () => {
@@ -30,23 +38,33 @@ describe('links', () => {
 
 describe('gifSource', () => {
   it('should point a Giphy page at its GIF', () => {
-    expect(gifSource('https://giphy.com/gifs/cat-typing-JIX9t2j0ZTN9S')).toEqual({ file: 'https://i.giphy.com/JIX9t2j0ZTN9S.gif' });
+    expect(gifSource('https://giphy.com/gifs/cat-typing-JIX9t2j0ZTN9S')).toEqual({
+      file: 'https://i.giphy.com/JIX9t2j0ZTN9S.gif',
+    });
   });
 
   it('should read a Tenor share link from its page', () => {
-    expect(gifSource('https://tenor.com/view/happy-cat-12345?x=1')).toEqual({ page: 'https://tenor.com/view/happy-cat-12345' });
+    expect(gifSource('https://tenor.com/view/happy-cat-12345?x=1')).toEqual({
+      page: 'https://tenor.com/view/happy-cat-12345',
+    });
   });
 
   it('should point an Imgur page at its GIF', () => {
-    expect(gifSource('https://imgur.com/AbC123')).toEqual({ file: 'https://i.imgur.com/AbC123.gif' });
+    expect(gifSource('https://imgur.com/AbC123')).toEqual({
+      file: 'https://i.imgur.com/AbC123.gif',
+    });
   });
 
   it('should make an Imgur gifv a GIF', () => {
-    expect(gifSource('https://i.imgur.com/AbC123.gifv')).toEqual({ file: 'https://i.imgur.com/AbC123.gif' });
+    expect(gifSource('https://i.imgur.com/AbC123.gifv')).toEqual({
+      file: 'https://i.imgur.com/AbC123.gif',
+    });
   });
 
   it('should fetch a direct GIF link without its query', () => {
-    expect(gifSource('https://media.tenor.com/abc/cat.gif?width=200')).toEqual({ file: 'https://media.tenor.com/abc/cat.gif' });
+    expect(gifSource('https://media.tenor.com/abc/cat.gif?width=200')).toEqual({
+      file: 'https://media.tenor.com/abc/cat.gif',
+    });
   });
 
   it('should not count other links', () => {
@@ -56,11 +74,15 @@ describe('gifSource', () => {
 
 describe('finding a message link', () => {
   it('should find the first GIF link', () => {
-    expect(findGifLink('look (https://giphy.com/gifs/x-abc) and https://imgur.com/q')).toBe('https://giphy.com/gifs/x-abc');
+    expect(findGifLink('look (https://giphy.com/gifs/x-abc) and https://imgur.com/q')).toBe(
+      'https://giphy.com/gifs/x-abc',
+    );
   });
 
   it('should give a card to the first link that is not a GIF', () => {
-    expect(findPreviewLink('https://giphy.com/gifs/cat-JIX9t2j0ZTN9S https://matrix.org/blog')).toBe('https://matrix.org/blog');
+    expect(
+      findPreviewLink('https://giphy.com/gifs/cat-JIX9t2j0ZTN9S https://matrix.org/blog'),
+    ).toBe('https://matrix.org/blog');
   });
 });
 

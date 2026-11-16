@@ -6,7 +6,13 @@ import type { CallInfo } from '@better-matrix/matrix-native/types';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { canRouteAudio, canShowVideo, cameraNames, setSpeaker, useSpeaker } from '../../engine/callMedia';
+import {
+  canRouteAudio,
+  canShowVideo,
+  cameraNames,
+  setSpeaker,
+  useSpeaker,
+} from '../../engine/callMedia';
 import { t } from '../../i18n';
 import { hangUp, switchCamera, toggleCamera, toggleMicrophone } from '../../state/actions/calls';
 import { useAppStore } from '../../state/react';
@@ -16,6 +22,7 @@ import { controls } from './stage';
 
 /** The size of a round control on the full stage, and on the compact one. */
 const CONTROL = 50;
+
 const SMALL = 36;
 
 export function CallControls({
@@ -37,6 +44,7 @@ export function CallControls({
   const { microphone, camera } = controls(info, canShowVideo());
   const [cameras] = useState(cameraNames);
   const size = compact ? SMALL : CONTROL;
+
   return (
     <View style={[styles.controls, compact ? styles.compact : null]} testID="call-controls">
       <Control
@@ -58,7 +66,14 @@ export function CallControls({
         />
       ) : null}
       {!compact && camera.on && cameras.length > 1 ? (
-        <Control testID="call-flip" icon="flipCamera" label={t('mobile.calls.flip_camera')} on size={size} onPress={() => void switchCamera(store)} />
+        <Control
+          testID="call-flip"
+          icon="flipCamera"
+          label={t('mobile.calls.flip_camera')}
+          on
+          size={size}
+          onPress={() => void switchCamera(store)}
+        />
       ) : null}
       {!compact && canRouteAudio() ? (
         <Control
@@ -70,14 +85,35 @@ export function CallControls({
           onPress={() => setSpeaker(!speaker)}
         />
       ) : null}
-      {onChat ? <Control testID="call-chat" icon="chat" label={t('call.show_chat')} on size={size} onPress={onChat} /> : null}
-      {onExpand ? <Control testID="call-back" icon="expand" label={t('call.show_stage')} on size={size} onPress={onExpand} /> : null}
+      {onChat ? (
+        <Control
+          testID="call-chat"
+          icon="chat"
+          label={t('call.show_chat')}
+          on
+          size={size}
+          onPress={onChat}
+        />
+      ) : null}
+      {onExpand ? (
+        <Control
+          testID="call-back"
+          icon="expand"
+          label={t('call.show_stage')}
+          on
+          size={size}
+          onPress={onExpand}
+        />
+      ) : null}
       <Pressable
         testID="call-hang-up"
         accessibilityRole="button"
         accessibilityLabel={t('call.hang_up')}
         onPress={() => void hangUp(store)}
-        style={({ pressed }) => [round(size), { backgroundColor: palette.danger, opacity: pressed ? 0.8 : 1 }]}
+        style={({ pressed }) => [
+          round(size),
+          { backgroundColor: palette.danger, opacity: pressed ? 0.8 : 1 },
+        ]}
       >
         <Icon name="hangUp" size={size * 0.48} color="#ffffff" />
       </Pressable>
@@ -102,6 +138,7 @@ function Control({
   testID: string;
 }) {
   const palette = usePalette();
+
   return (
     <Pressable
       testID={testID}
@@ -111,7 +148,11 @@ function Control({
       onPress={onPress}
       style={({ pressed }) => [
         round(size),
-        { backgroundColor: on ? palette.surface : palette.text, borderColor: palette.divider, opacity: pressed ? 0.8 : 1 },
+        {
+          backgroundColor: on ? palette.surface : palette.text,
+          borderColor: palette.divider,
+          opacity: pressed ? 0.8 : 1,
+        },
       ]}
     >
       <Icon name={icon} size={size * 0.44} color={on ? palette.text : palette.bg} />

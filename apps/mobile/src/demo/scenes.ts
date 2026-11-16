@@ -60,12 +60,22 @@ export const scenes = {
   space: { about: 'A space in scope', setup: general },
   dms: { about: 'The direct messages tab', routes: ['/dms'] },
   activity: { about: 'Notifications, from the bell', routes: [routes.activity()] },
-  'account-menu': { about: 'The account menu, from the avatar in the tab bar', routes: [routes.accountMenu()] },
+  'account-menu': {
+    about: 'The account menu, from the avatar in the tab bar',
+    routes: [routes.accountMenu()],
+  },
   spaces: { about: 'The space picker, from Home’s title', routes: [routes.spaces()] },
   search: { about: 'Jump to a room', routes: [routes.search()] },
-  invitation: { about: 'An invitation to accept or decline', routes: [routes.invitation(ADA, DESIGN_INVITE)] },
+  invitation: {
+    about: 'An invitation to accept or decline',
+    routes: [routes.invitation(ADA, DESIGN_INVITE)],
+  },
   'room-menu': { about: 'A room’s long-press menu', routes: [routes.roomMenu(ADA, GENERAL)] },
-  room: { about: 'The general room: replies, reactions, a poll, a thread, a link card', setup: general, routes: [routes.room(ADA, GENERAL)] },
+  room: {
+    about: 'The general room: replies, reactions, a poll, a thread, a link card',
+    setup: general,
+    routes: [routes.room(ADA, GENERAL)],
+  },
   design: { about: 'A room with an image', setup: general, routes: [routes.room(ADA, DESIGN)] },
   dm: { about: 'A direct chat with a call card', routes: [routes.room(ADA, DM_GRACE)] },
   'call-card': { about: 'A call under way, with Join', routes: [routes.room(ADA, DM_KAI)] },
@@ -104,7 +114,11 @@ export const scenes = {
     about: 'Replying to a message',
     setup: (store) => {
       general(store);
-      const message = store.getState().accounts[0]?.timelines[GENERAL]?.entries.find((e) => e.id === TEST_PLAN);
+
+      const message = store
+        .getState()
+        .accounts[0]?.timelines[GENERAL]?.entries.find((e) => e.id === TEST_PLAN);
+
       if (message?.kind.type === 'Message') {
         const replyTo = message.kind.data;
         updateComposer(store, ADA, roomKey(GENERAL), (c) => ({ ...c, replyTo }));
@@ -118,20 +132,47 @@ export const scenes = {
     events: [{ type: 'Typing', data: { account: ADA, room_id: GENERAL, people: typingPeople() } }],
     routes: [routes.room(ADA, GENERAL)],
   },
-  'poll-form': { about: 'A new poll', routes: [routes.room(ADA, GENERAL), routes.newPoll(ADA, GENERAL)] },
-  'room-info': { about: 'Room details and members', routes: [routes.room(ADA, GENERAL), routes.roomInfo(ADA, GENERAL)] },
-  member: { about: 'Someone in the member list', routes: [routes.roomInfo(ADA, GENERAL), routes.member(ADA, GENERAL, GRACE)] },
+  'poll-form': {
+    about: 'A new poll',
+    routes: [routes.room(ADA, GENERAL), routes.newPoll(ADA, GENERAL)],
+  },
+  'room-info': {
+    about: 'Room details and members',
+    routes: [routes.room(ADA, GENERAL), routes.roomInfo(ADA, GENERAL)],
+  },
+  member: {
+    about: 'Someone in the member list',
+    routes: [routes.roomInfo(ADA, GENERAL), routes.member(ADA, GENERAL, GRACE)],
+  },
   invite: { about: 'Inviting people', routes: [routes.invite(ADA, GENERAL)] },
   'new-chat': { about: 'Starting a direct chat', routes: [routes.newChat()] },
   'new-room': { about: 'Making a room', routes: [routes.newRoom(WORK_SPACE)] },
   'new-space': { about: 'Making a space', routes: [routes.newSpace()] },
   settings: { about: 'Settings', routes: [routes.settings()] },
-  'settings-preferences': { about: 'Language and appearance', routes: [routes.settings(), routes.settingsPreferences()] },
-  'settings-notifications': { about: 'Notification defaults', routes: [routes.settings(), routes.settingsNotifications()] },
-  'settings-profile': { about: 'Profile and contact details', routes: [routes.settings(), routes.settingsProfile(ADA)] },
-  'settings-account': { about: 'Account and security', routes: [routes.settings(), routes.settingsAccount(ADA)] },
-  'settings-sessions': { about: 'Sessions', routes: [routes.settings(), routes.settingsSessions(ADA)] },
-  'settings-info': { about: 'Version and licences', routes: [routes.settings(), routes.settingsInfo()] },
+  'settings-preferences': {
+    about: 'Language and appearance',
+    routes: [routes.settings(), routes.settingsPreferences()],
+  },
+  'settings-notifications': {
+    about: 'Notification defaults',
+    routes: [routes.settings(), routes.settingsNotifications()],
+  },
+  'settings-profile': {
+    about: 'Profile and contact details',
+    routes: [routes.settings(), routes.settingsProfile(ADA)],
+  },
+  'settings-account': {
+    about: 'Account and security',
+    routes: [routes.settings(), routes.settingsAccount(ADA)],
+  },
+  'settings-sessions': {
+    about: 'Sessions',
+    routes: [routes.settings(), routes.settingsSessions(ADA)],
+  },
+  'settings-info': {
+    about: 'Version and licences',
+    routes: [routes.settings(), routes.settingsInfo()],
+  },
   unverified: {
     about: 'An unverified session, with its banner',
     setup: (store) => setActive(store, ADA_HOBBY),
@@ -143,12 +184,30 @@ export const scenes = {
   },
   verify: {
     about: 'Comparing emoji to verify a session',
-    events: [{ type: 'Verification', data: { account: ADA, flow_id: 'demo', step: { type: 'Compare', data: verificationEmojis() } } }],
+    events: [
+      {
+        type: 'Verification',
+        data: {
+          account: ADA,
+          flow_id: 'demo',
+          step: { type: 'Compare', data: verificationEmojis() },
+        },
+      },
+    ],
     routes: [routes.verify(ADA, 'demo')],
   },
   'verify-incoming': {
     about: 'Another session asks to verify',
-    events: [{ type: 'Verification', data: { account: ADA, flow_id: 'demo-in', step: { type: 'Incoming', data: { other_device: 'BMDESKTOP' } } } }],
+    events: [
+      {
+        type: 'Verification',
+        data: {
+          account: ADA,
+          flow_id: 'demo-in',
+          step: { type: 'Incoming', data: { other_device: 'BMDESKTOP' } },
+        },
+      },
+    ],
   },
   recovery: { about: 'Entering the recovery key', routes: [routes.recovery(ADA)] },
   ended: {
@@ -161,7 +220,13 @@ export const scenes = {
     about: 'A voice call',
     events: [
       { type: 'CallUpdated', data: callInfo(false) },
-      { type: 'CallLevels', data: [['grace', 190], ['', 40]] },
+      {
+        type: 'CallLevels',
+        data: [
+          ['grace', 190],
+          ['', 40],
+        ],
+      },
     ],
     routes: [routes.call()],
   },
@@ -170,7 +235,10 @@ export const scenes = {
     events: [{ type: 'CallUpdated', data: callInfo(true) }],
     routes: [routes.call()],
   },
-  'call-bar': { about: 'A call running behind Home', events: [{ type: 'CallUpdated', data: callInfo(false) }] },
+  'call-bar': {
+    about: 'A call running behind Home',
+    events: [{ type: 'CallUpdated', data: callInfo(false) }],
+  },
   'call-gallery': {
     about: 'A video call of six in a gallery',
     events: [{ type: 'CallUpdated', data: callGallery(6) }],
@@ -195,7 +263,13 @@ export const scenes = {
     about: 'Focus on the speaker, the others in the participant strip',
     events: [
       { type: 'CallUpdated', data: callGallery(6) },
-      { type: 'CallLevels', data: [['grace', 190], ['', 40]] },
+      {
+        type: 'CallLevels',
+        data: [
+          ['grace', 190],
+          ['', 40],
+        ],
+      },
     ],
     setup: (store) => setCallLayout(store, { type: 'Focus', pin: null }),
     routes: [routes.call()],
@@ -213,7 +287,13 @@ export const scenes = {
     about: 'The general room’s chat under its voice call’s faces',
     events: [
       { type: 'CallUpdated', data: callInfo(false) },
-      { type: 'CallLevels', data: [['grace', 190], ['', 40]] },
+      {
+        type: 'CallLevels',
+        data: [
+          ['grace', 190],
+          ['', 40],
+        ],
+      },
     ],
     setup: (store) => {
       general(store);
@@ -235,7 +315,11 @@ export const scenes = {
     routes: [routes.link(`https://matrix.to/#/${GRACE}`)],
   },
   de: { about: 'Home in German', settings: { language: 'de' } },
-  'fr-settings': { about: 'Settings in French', settings: { language: 'fr' }, routes: [routes.settings()] },
+  'fr-settings': {
+    about: 'Settings in French',
+    settings: { language: 'fr' },
+    routes: [routes.settings()],
+  },
   'thread-de': {
     about: 'A thread in German',
     settings: { language: 'de' },
@@ -252,7 +336,10 @@ export function isScene(name: string): name is SceneName {
 
 /** The events that set a scene up: the seed (unless signed out), then the scene's own. */
 export function sceneEvents(scene: Scene): EngineEvent[] {
-  return [...(scene.seeded === false ? [{ type: 'Restoring', data: [] } as EngineEvent] : seedEvents()), ...(scene.events ?? [])];
+  return [
+    ...(scene.seeded === false ? [{ type: 'Restoring' as const, data: [] }] : seedEvents()),
+    ...(scene.events ?? []),
+  ];
 }
 
 /** The thread key a scene's thread uses, for tests. */

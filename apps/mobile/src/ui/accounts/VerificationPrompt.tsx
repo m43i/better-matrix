@@ -19,5 +19,6 @@ export function VerificationPrompt() {
       router.push(routes.verify(v.account, v.flowId));
     }
   }, [verifications, seen]);
+
   return null;
 }

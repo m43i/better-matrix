@@ -15,13 +15,21 @@ export default function RenameRoomScreen() {
   const { account, roomId } = useLocalSearchParams<{ account: string; roomId: string }>();
   const store = useAppStore();
   const router = useRouter();
+
   const current = useStore((s) => {
     const data = accountOf(s, account);
-    return data?.rooms.find((r) => r.room_id === roomId)?.name ?? data?.spaces.find((sp) => sp.room_id === roomId)?.name ?? '';
+
+    return (
+      data?.rooms.find((r) => r.room_id === roomId)?.name ??
+      data?.spaces.find((sp) => sp.room_id === roomId)?.name ??
+      ''
+    );
   });
+
   const [name, setName] = useState(current);
   const [busy, setBusy] = useState(false);
   const command = renameCommand(account, roomId, current, name);
+
   const submit = () => {
     if (command === null || busy) return;
     setBusy(true);
@@ -30,8 +38,16 @@ export default function RenameRoomScreen() {
       () => setBusy(false),
     );
   };
+
   return (
-    <RoomForm testID="rename-room" title={t('create.rename_title')} confirm={t('common.save')} valid={command !== null} busy={busy} onSubmit={submit}>
+    <RoomForm
+      testID="rename-room"
+      title={t('create.rename_title')}
+      confirm={t('common.save')}
+      valid={command !== null}
+      busy={busy}
+      onSubmit={submit}
+    >
       <TextField
         testID="rename-room-name"
         label={t('create.name')}

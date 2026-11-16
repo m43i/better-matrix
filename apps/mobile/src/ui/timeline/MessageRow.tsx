@@ -31,7 +31,12 @@ export interface MessageRowProps {
   highlighted: boolean;
 }
 
-export const MessageRow = memo(function MessageRow({ message, continues, latestCall, highlighted }: MessageRowProps) {
+export const MessageRow = memo(function MessageRow({
+  message,
+  continues,
+  latestCall,
+  highlighted,
+}: MessageRowProps) {
   const palette = usePalette();
   const { account, thread, openActions } = useTimelineContext();
   const showGifs = useStore((s) => s.settings.showLinkGifs);
@@ -39,9 +44,14 @@ export const MessageRow = memo(function MessageRow({ message, continues, latestC
   const item = prepare(message);
   const gif = showGifs && item.gif ? item.gif : null;
   const link = showPreviews ? cardLink(item, showGifs) : null;
-  const status = [message.edited ? t('message.edited') : null, message.pending ? t('message.sending') : null]
+
+  const status = [
+    message.edited ? t('message.edited') : null,
+    message.pending ? t('message.sending') : null,
+  ]
     .filter((s): s is string => s !== null)
     .join(' · ');
+
   return (
     <Pressable
       onLongPress={() => openActions(message)}
@@ -56,17 +66,30 @@ export const MessageRow = memo(function MessageRow({ message, continues, latestC
     >
       <View style={styles.gutter}>
         {continues ? null : (
-          <Avatar account={account} id={message.sender_id} name={message.sender_name} media={message.sender_avatar} size={AVATAR} />
+          <Avatar
+            account={account}
+            id={message.sender_id}
+            name={message.sender_name}
+            media={message.sender_avatar}
+            size={AVATAR}
+          />
         )}
       </View>
       <View style={styles.content}>
         {continues ? null : (
           <View style={styles.meta}>
-            <Text style={[font.bodyStrong, styles.name, { color: identityColor(message.sender_id) }]} numberOfLines={1}>
+            <Text
+              style={[font.bodyStrong, styles.name, { color: identityColor(message.sender_id) }]}
+              numberOfLines={1}
+            >
               {message.sender_name}
             </Text>
-            <Text style={[font.meta, { color: palette.textMuted }]}>{clockTime(message.timestamp_ms)}</Text>
-            {status ? <Text style={[font.meta, { color: palette.textMuted }]}>{status}</Text> : null}
+            <Text style={[font.meta, { color: palette.textMuted }]}>
+              {clockTime(message.timestamp_ms)}
+            </Text>
+            {status ? (
+              <Text style={[font.meta, { color: palette.textMuted }]}>{status}</Text>
+            ) : null}
           </View>
         )}
         {message.reply_to ? <QuoteBlock quote={message.reply_to} /> : null}
@@ -79,9 +102,15 @@ export const MessageRow = memo(function MessageRow({ message, continues, latestC
           <Body message={message} latestCall={latestCall} />
         )}
         {link ? <LinkCard key={link} url={link} /> : null}
-        {message.reactions.length > 0 ? <Reactions message={message} reactions={message.reactions} /> : null}
-        {message.thread && thread === null ? <ThreadLink root={message.event_id} thread={message.thread} /> : null}
-        {continues && status ? <Text style={[font.meta, { color: palette.textMuted }]}>{status}</Text> : null}
+        {message.reactions.length > 0 ? (
+          <Reactions message={message} reactions={message.reactions} />
+        ) : null}
+        {message.thread && thread === null ? (
+          <ThreadLink root={message.event_id} thread={message.thread} />
+        ) : null}
+        {continues && status ? (
+          <Text style={[font.meta, { color: palette.textMuted }]}>{status}</Text>
+        ) : null}
       </View>
     </Pressable>
   );
@@ -90,18 +119,29 @@ export const MessageRow = memo(function MessageRow({ message, continues, latestC
 function Body({ message, latestCall }: { message: Message; latestCall: boolean }) {
   const palette = usePalette();
   const content = message.content;
+
   switch (content.type) {
     case 'Text': {
       const blocks = prepare(message).blocks;
+
       return blocks ? <RichText blocks={blocks} /> : null;
     }
+
     case 'Attachment':
       // Keyed by message: a recycled row starts its file's state afresh.
       return <AttachmentView key={message.event_id} message={message} attachment={content.data} />;
     case 'Redacted':
-      return <Text style={[font.body, styles.notice, { color: palette.textMuted }]}>{t('message.deleted')}</Text>;
+      return (
+        <Text style={[font.body, styles.notice, { color: palette.textMuted }]}>
+          {t('message.deleted')}
+        </Text>
+      );
     case 'Undecryptable':
-      return <Text style={[font.body, styles.notice, { color: palette.textMuted }]}>{t('message.undecryptable')}</Text>;
+      return (
+        <Text style={[font.body, styles.notice, { color: palette.textMuted }]}>
+          {t('message.undecryptable')}
+        </Text>
+      );
     case 'Poll':
       return <PollCard message={message} poll={content.data} />;
     case 'Call':
@@ -110,7 +150,13 @@ function Body({ message, latestCall }: { message: Message; latestCall: boolean }
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 16, paddingBottom: 2 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingBottom: 2,
+  },
   gutter: { width: AVATAR },
   content: { flex: 1, minWidth: 0, gap: 2 },
   meta: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },

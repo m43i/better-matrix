@@ -1,7 +1,13 @@
 // The parts around a message's content: the message it answers, its reactions, its thread, a
 // link's card and a linked GIF.
 
-import type { MediaSize, Message, Quote, Reaction, ThreadSummary } from '@better-matrix/matrix-native/types';
+import type {
+  MediaSize,
+  Message,
+  Quote,
+  Reaction,
+  ThreadSummary,
+} from '@better-matrix/matrix-native/types';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { memo, useEffect, useState } from 'react';
@@ -18,6 +24,7 @@ import { font } from '../../theme/palette';
 import { Avatar } from '../Avatar';
 import { Icon } from '../icons';
 import { useMedia } from '../media';
+import { useNow } from '../shell/useNow';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
 import { openLink } from './open';
@@ -26,8 +33,13 @@ import { openLink } from './open';
 export function QuoteBlock({ quote }: { quote: Quote }) {
   const palette = usePalette();
   const { scrollTo } = useTimelineContext();
+
   return (
-    <Pressable onPress={() => scrollTo(quote.event_id)} accessibilityRole="button" style={styles.quote}>
+    <Pressable
+      onPress={() => scrollTo(quote.event_id)}
+      accessibilityRole="button"
+      style={styles.quote}
+    >
       <View style={[styles.quoteBar, { backgroundColor: palette.textMuted }]} />
       <View style={styles.quoteText}>
         {quote.sender_name ? (
@@ -44,10 +56,17 @@ export function QuoteBlock({ quote }: { quote: Quote }) {
 }
 
 /** Reaction chips, outlined when the user's own (pressing one toggles it), and one to add more. */
-export const Reactions = memo(function Reactions({ message, reactions }: { message: Message; reactions: Reaction[] }) {
+export const Reactions = memo(function Reactions({
+  message,
+  reactions,
+}: {
+  message: Message;
+  reactions: Reaction[];
+}) {
   const palette = usePalette();
   const store = useAppStore();
   const { account, timelineKey, thread } = useTimelineContext();
+
   return (
     <View style={styles.chips}>
       {reactions.map((reaction) => (
@@ -66,11 +85,21 @@ export const Reactions = memo(function Reactions({ message, reactions }: { messa
           ]}
         >
           <Text style={font.body}>{reaction.key}</Text>
-          <Text style={[font.meta, { color: reaction.mine ? palette.accent : palette.textMuted }]}>{reaction.count}</Text>
+          <Text style={[font.meta, { color: reaction.mine ? palette.accent : palette.textMuted }]}>
+            {reaction.count}
+          </Text>
         </Pressable>
       ))}
       <Pressable
-        onPress={() => router.push(routes.emoji(account, timelineKey.room_id, thread ? { eventId: message.event_id, thread } : { eventId: message.event_id }))}
+        onPress={() =>
+          router.push(
+            routes.emoji(
+              account,
+              timelineKey.room_id,
+              thread ? { eventId: message.event_id, thread } : { eventId: message.event_id },
+            ),
+          )
+        }
         accessibilityRole="button"
         accessibilityLabel={t('actions.react')}
         style={[styles.chip, { backgroundColor: palette.surface, borderColor: palette.divider }]}
@@ -83,8 +112,10 @@ export const Reactions = memo(function Reactions({ message, reactions }: { messa
 
 /** The latest replier's face, "3 replies" and "Last reply today at 09:51", opening the thread. */
 export function ThreadLink({ root, thread }: { root: string; thread: ThreadSummary }) {
+  const now = useNow();
   const palette = usePalette();
   const { account, timelineKey } = useTimelineContext();
+
   return (
     <Pressable
       onPress={() => router.push(routes.thread(account, timelineKey.room_id, root))}
@@ -93,14 +124,22 @@ export function ThreadLink({ root, thread }: { root: string; thread: ThreadSumma
       style={styles.thread}
     >
       {thread.latest ? (
-        <Avatar account={account} id={thread.latest.id} name={thread.latest.name} media={thread.latest.avatar} size={22} />
+        <Avatar
+          account={account}
+          id={thread.latest.id}
+          name={thread.latest.name}
+          media={thread.latest.avatar}
+          size={22}
+        />
       ) : (
         <Icon name="thread" size={18} color={palette.accent} />
       )}
-      <Text style={[font.bodyStrong, { color: palette.accent }]}>{repliesText(thread.replies)}</Text>
+      <Text style={[font.bodyStrong, { color: palette.accent }]}>
+        {repliesText(thread.replies)}
+      </Text>
       {thread.latest_at !== null ? (
         <Text style={[font.meta, styles.shrink, { color: palette.textMuted }]} numberOfLines={1}>
-          {lastReplyText(thread.latest_at, Date.now())}
+          {lastReplyText(thread.latest_at, now)}
         </Text>
       ) : null}
     </Pressable>
@@ -118,7 +157,9 @@ export function LinkCard({ url }: { url: string }) {
   const preview = useStore((s) => s.linkPreviews[previewKey(account, url)]);
   useEffect(() => fetchLinkPreview(store, account, url), [store, account, url]);
   const image = useMedia(account, preview?.image?.[0] ?? null, CARD_IMAGE);
+
   if (!preview) return null;
+
   return (
     <Pressable
       onPress={() => openLink(store, url, account)}
@@ -165,8 +206,14 @@ export function LinkedGif({ url }: { url: string }) {
   const path = useStore((s) => s.gifs[url]);
   const [aspect, setAspect] = useState(4 / 3);
   useEffect(() => fetchGif(store, url), [store, url]);
+
   return (
-    <Pressable onPress={() => openLink(store, url)} accessibilityRole="imagebutton" accessibilityLabel={url} style={styles.gif}>
+    <Pressable
+      onPress={() => openLink(store, url)}
+      accessibilityRole="imagebutton"
+      accessibilityLabel={url}
+      style={styles.gif}
+    >
       {path ? (
         <Image
           source={{ uri: `file://${path}` }}
@@ -175,12 +222,26 @@ export function LinkedGif({ url }: { url: string }) {
           autoplay
           onLoad={(event) => {
             const { width, height } = event.source;
+
             if (width > 0 && height > 0) setAspect(width / height);
           }}
         />
       ) : (
-        <View style={[styles.gifImage, styles.center, { aspectRatio: aspect, backgroundColor: palette.surface, borderColor: palette.divider, borderWidth: 1 }]}>
-          <Text style={[font.section, { color: palette.textMuted }]}>{t('mobile.conversation.gif')}</Text>
+        <View
+          style={[
+            styles.gifImage,
+            styles.center,
+            {
+              aspectRatio: aspect,
+              backgroundColor: palette.surface,
+              borderColor: palette.divider,
+              borderWidth: 1,
+            },
+          ]}
+        >
+          <Text style={[font.section, { color: palette.textMuted }]}>
+            {t('mobile.conversation.gif')}
+          </Text>
         </View>
       )}
     </Pressable>
@@ -204,7 +265,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  thread: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, paddingVertical: 3, alignSelf: 'flex-start' },
+  thread: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+    paddingVertical: 3,
+    alignSelf: 'flex-start',
+  },
   shrink: { flexShrink: 1 },
   card: {
     marginTop: 4,

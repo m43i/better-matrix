@@ -1,6 +1,8 @@
 // This device's preferences, as the desktop keeps them (apps/desktop/src/state/settings.rs),
 // minus what phones decide themselves (interface size, call devices).
 
+import { z } from 'zod';
+
 import type { Language } from '../i18n';
 
 export type Appearance = 'system' | 'light' | 'dark';
@@ -33,24 +35,25 @@ export const DEFAULT_SETTINGS: Settings = {
   pushOff: [],
 };
 
+const savedSettings = z.object({
+  language: z.enum(['system', 'en', 'de', 'fr']).catch(DEFAULT_SETTINGS.language),
+  appearance: z.enum(['system', 'light', 'dark']).catch(DEFAULT_SETTINGS.appearance),
+  showLinkGifs: z.boolean().catch(DEFAULT_SETTINGS.showLinkGifs),
+  showLinkPreviews: z.boolean().catch(DEFAULT_SETTINGS.showLinkPreviews),
+  ringSound: z.boolean().catch(DEFAULT_SETTINGS.ringSound),
+  lastAccount: z.string().nullable().catch(DEFAULT_SETTINGS.lastAccount),
+  pushEnabled: z.boolean().catch(DEFAULT_SETTINGS.pushEnabled),
+  pushOff: z.array(z.string()).catch(() => []),
+});
+
 /** Settings from saved JSON: unknown or broken fields fall back to their defaults. */
 export function parseSettings(json: string | null): Settings {
   if (!json) return DEFAULT_SETTINGS;
+
   try {
-    const saved = JSON.parse(json) as Partial<Settings>;
-    const pick = <K extends keyof Settings>(key: K, valid: (v: unknown) => boolean): Settings[K] =>
-      valid(saved[key]) ? (saved[key] as Settings[K]) : DEFAULT_SETTINGS[key];
-    const isBool = (v: unknown) => typeof v === 'boolean';
-    return {
-      language: pick('language', (v) => ['system', 'en', 'de', 'fr'].includes(v as string)),
-      appearance: pick('appearance', (v) => ['system', 'light', 'dark'].includes(v as string)),
-      showLinkGifs: pick('showLinkGifs', isBool),
-      showLinkPreviews: pick('showLinkPreviews', isBool),
-      ringSound: pick('ringSound', isBool),
-      lastAccount: pick('lastAccount', (v) => v === null || typeof v === 'string'),
-      pushEnabled: pick('pushEnabled', isBool),
-      pushOff: pick('pushOff', (v) => Array.isArray(v) && v.every((id) => typeof id === 'string')),
-    };
+    const saved = savedSettings.safeParse(JSON.parse(json));
+
+    return saved.success ? saved.data : DEFAULT_SETTINGS;
   } catch {
     return DEFAULT_SETTINGS;
   }

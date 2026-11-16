@@ -12,7 +12,8 @@ export function DemoNavigation({ scene }: { scene: SceneName }) {
   const ready = useRootNavigationState()?.key !== undefined;
   useEffect(() => {
     if (!ready) return;
-    const steps = (scenes[scene] as Scene).routes ?? [];
+    const definition: Scene = scenes[scene];
+    const steps = definition.routes ?? [];
     let cancelled = false;
     void (async () => {
       // Every scene starts from Home, whatever the last one left open.
@@ -22,15 +23,19 @@ export function DemoNavigation({ scene }: { scene: SceneName }) {
       } catch {
         // The tabs are still mounting for the new scene: they start at Home anyway.
       }
+
       for (const href of steps) {
         await new Promise((resolve) => setTimeout(resolve, STEP_MS));
+
         if (cancelled) return;
         router.push(href);
       }
     })();
+
     return () => {
       cancelled = true;
     };
   }, [scene, ready]);
+
   return null;
 }

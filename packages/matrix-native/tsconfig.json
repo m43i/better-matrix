@@ -2,22 +2,15 @@
   "compilerOptions": {
     "rootDir": ".",
     "paths": {
-      "@better-matrix/matrix-native": [
-        "./src/index"
-      ]
+      "@better-matrix/matrix-native": ["./src/index"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
-    "customConditions": [
-      "better-matrix-matrix-native-source",
-      "react-native-strict-api"
-    ],
+    "customConditions": ["better-matrix-matrix-native-source", "react-native-strict-api"],
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",
-    "lib": [
-      "ESNext"
-    ],
+    "lib": ["ESNext"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "noEmit": true,
@@ -31,11 +24,7 @@
     "strict": true,
     "target": "ESNext",
     "verbatimModuleSyntax": true,
-    "types": [
-      "jest"
-    ]
+    "types": ["jest"]
   },
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

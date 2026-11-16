@@ -15,6 +15,7 @@ export default function EmojiScreen() {
     eventId?: string;
     thread?: string;
   }>();
+
   const store = useAppStore();
   const router = useRouter();
   const key = keyOf(roomId, thread);
@@ -26,6 +27,7 @@ export default function EmojiScreen() {
       noteEmoji(store, emoji);
       insertIntoDraft(store, account, key, emoji);
     }
+
     router.back();
   };
 

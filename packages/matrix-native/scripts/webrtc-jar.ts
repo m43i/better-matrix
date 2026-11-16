@@ -8,21 +8,27 @@ import { copyFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const root = join(import.meta.dir, '..', '..', '..');
+
 const target = join(root, 'target');
+
 const out = join(import.meta.dir, '..', 'android', 'libs', 'libwebrtc.jar');
 
 /** Every libwebrtc.jar the Android builds unpacked under `dir`. */
 function find(dir: string, depth = 0): string[] {
   if (depth > 12) return [];
   let entries: string[];
+
   try {
     entries = readdirSync(dir);
   } catch {
     return [];
   }
+
   return entries.flatMap((name) => {
     const path = join(dir, name);
+
     if (name === 'libwebrtc.jar' && dir.includes('android')) return [path];
+
     try {
       return statSync(path).isDirectory() ? find(path, depth + 1) : [];
     } catch {
@@ -32,11 +38,16 @@ function find(dir: string, depth = 0): string[] {
 }
 
 const jars = find(target).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+
 const newest = jars[0];
+
 if (!newest) {
   console.error('webrtc-jar: no libwebrtc.jar under target/; build the engine for Android first.');
   process.exit(1);
 }
+
 mkdirSync(dirname(out), { recursive: true });
+
 copyFileSync(newest, out);
+
 console.log(`webrtc-jar: ${newest} -> ${out}`);

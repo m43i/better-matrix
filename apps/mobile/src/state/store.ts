@@ -43,6 +43,7 @@ export class Store {
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
+
     return () => {
       this.listeners.delete(listener);
     };
@@ -51,8 +52,10 @@ export class Store {
   /** Adds an effect that hears every event after the state took it in. */
   addEffect(effect: Effect): () => void {
     this.effects.push(effect);
+
     return () => {
       const index = this.effects.indexOf(effect);
+
       if (index >= 0) this.effects.splice(index, 1);
     };
   }
@@ -65,7 +68,9 @@ export class Store {
   /** Sends a command without waiting. Unless `quiet`, a failure is shown as a notice. */
   send(command: Command, options: SendOptions = {}): RequestId {
     const request = this.engine.send(command);
+
     if (!options.quiet) this.loud.add(request);
+
     return request;
   }
 
@@ -73,10 +78,13 @@ export class Store {
    * Sends a command and waits until it finished; rejects with `CommandFailed`. `onEvent` hears
    * the events that answer it on the way.
    */
-  run(command: Command, onEvent?: (event: RequestEvent) => void): Promise<void> & { request: RequestId } {
+  run(
+    command: Command,
+    onEvent?: (event: RequestEvent) => void,
+  ): Promise<void> & { request: RequestId } {
     const request = this.engine.send(command);
-    const done = this.requests.track(request, onEvent) as Promise<void> & { request: RequestId };
-    done.request = request;
+    const done = Object.assign(this.requests.track(request, onEvent), { request });
+
     return done;
   }
 
@@ -89,28 +97,40 @@ export class Store {
 
   private hear(event: EngineEvent): void {
     this.requests.hear(event);
+
     if (event.type === 'Finished') {
       const key = this.fetching.get(event.data.request);
       this.fetching.delete(event.data.request);
+
       // A failed fetch may be asked again, the next time a view needs it.
       if (key !== undefined && 'Err' in event.data.result) this.asked.delete(key);
     }
+
     let next = apply(this.state, event);
-    if (event.type === 'Finished' && this.loud.delete(event.data.request) && 'Err' in event.data.result) {
+
+    if (
+      event.type === 'Finished' &&
+      this.loud.delete(event.data.request) &&
+      'Err' in event.data.result
+    ) {
       if (event.data.result.Err !== 'cancelled') next = addNotice(next, event.data.result.Err);
     }
+
     this.set(next);
+
     for (const effect of this.effects) effect(event, this);
   }
 
   private set(next: State): void {
     if (next === this.state) return;
     this.state = next;
+
     // Events come in bursts (a sync, a page of history): views redraw once per burst.
     if (this.notifyQueued) return;
     this.notifyQueued = true;
     queueMicrotask(() => {
       this.notifyQueued = false;
+
       for (const listener of this.listeners) listener();
     });
   }

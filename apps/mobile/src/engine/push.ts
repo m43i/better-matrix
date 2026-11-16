@@ -9,6 +9,7 @@
 // JavaScript (pushTask.ts, headless when the app isn't running); iOS's extension does the same
 // natively with the engine's library.
 
+import { z } from 'zod';
 import { fetchPushWithoutEngine } from '@better-matrix/matrix-native/native';
 import type { AccountId, PushContent, PushTarget } from '@better-matrix/matrix-native/types';
 import * as Device from 'expo-device';
@@ -50,8 +51,19 @@ const registrationsFile = (data: Directory) => new File(data, 'pushers.json');
 function readRegistrations(data: Directory): Record<AccountId, PusherRegistration> {
   try {
     const file = registrationsFile(data);
-    const saved: unknown = file.exists ? JSON.parse(file.textSync()) : {};
-    return typeof saved === 'object' && saved !== null ? (saved as Record<AccountId, PusherRegistration>) : {};
+
+    const parsed = z
+      .record(
+        z.string(),
+        z.object({
+          token: z.string(),
+          gateway: z.string(),
+          lang: z.string(),
+        }),
+      )
+      .safeParse(file.exists ? JSON.parse(file.textSync()) : {});
+
+    return parsed.success ? parsed.data : {};
   } catch {
     return {};
   }
@@ -87,12 +99,16 @@ export function installPush(store: Store, data: Directory): void {
   installBadge(store);
   const config = pushConfig();
   const off = unavailable(config);
+
   if (off) {
     if (__DEV__) console.warn(`push is off in this build (${off}): see docs/push.md`);
+
     return;
   }
+
   const gateway = notifyUrl(config.gateway) ?? '';
   const projectId = config.projectId ?? '';
+
   if (Platform.OS === 'android') {
     Notifications.registerTaskAsync(PUSH_TASK).catch(() => undefined);
   } else {
@@ -102,6 +118,7 @@ export function installPush(store: Store, data: Directory): void {
   let token: string | null = null;
   let queue = Promise.resolve();
   let retry: ReturnType<typeof setTimeout> | null = null;
+
   /**
    * Brings the pushers in step; one pass at a time, in order, again a minute later while a step
    * fails (quietly: the first failure said so).
@@ -118,13 +135,14 @@ export function installPush(store: Store, data: Directory): void {
       })
       .catch(() => undefined);
   };
+
   const fetchToken = tokenFetcher({
     get: () =>
       Notifications.getExpoPushTokenAsync({ projectId }).then(
         (expo) => expo.data,
-        (error: unknown) => {
-          if (__DEV__) console.warn('no push token:', error);
-          throw error;
+        (cause: unknown) => {
+          if (__DEV__) console.warn('no push token:', cause);
+          throw cause;
         },
       ),
     got: (fresh) => {
@@ -135,29 +153,41 @@ export function installPush(store: Store, data: Directory): void {
     // Offline at launch: asked again while an account needs it.
     wanted: () => token === null && store.getState().accounts.length > 0,
   });
+
   // The device's FCM or APNs token changed: Expo's token for it may have too.
   Notifications.addPushTokenListener(() => fetchToken());
 
   let watched = { accounts: '', enabled: true, off: '', language: '' };
   store.subscribe(() => {
     const s = store.getState();
+
     const now = {
       accounts: s.accounts.map((a) => a.summary.id).join('\n'),
       enabled: s.settings.pushEnabled,
       off: s.settings.pushOff.join('\n'),
       language: s.settings.language,
     };
-    if (now.accounts === watched.accounts && now.enabled === watched.enabled && now.off === watched.off && now.language === watched.language) {
+
+    if (
+      now.accounts === watched.accounts &&
+      now.enabled === watched.enabled &&
+      now.off === watched.off &&
+      now.language === watched.language
+    ) {
       return;
     }
+
     const languageChanged = now.language !== watched.language;
     watched = now;
+
     if (languageChanged && Platform.OS === 'ios') writeStrings(data);
     sync();
+
     // The token is asked for once there is an account to push to (the permission prompt
     // comes with the first account, notifications.ts), and again while it is missing.
     if (token === null && now.accounts !== '') fetchToken();
   });
+
   if (Platform.OS === 'ios') writeStrings(data);
 }
 
@@ -177,25 +207,43 @@ const RETRY_PUSHERS_MS = 60_000;
  * failed (`carryOut`): it is tried again later, and pushes a pusher that should be gone still
  * delivers are dropped (`pushAllowed`). A failed registration says so, unless `quiet` (a retry).
  */
-async function syncPushers(store: Store, data: Directory, token: string | null, gateway: string, quiet: boolean): Promise<boolean> {
+async function syncPushers(
+  store: Store,
+  data: Directory,
+  token: string | null,
+  gateway: string,
+  quiet: boolean,
+): Promise<boolean> {
   const state = store.getState();
   const accounts = state.accounts.map((a) => a.summary.id);
   const wanted = wantedAccounts(accounts, state.settings);
   const current: PusherRegistration | null = token ? { token, gateway, lang: locale() } : null;
+
   const save = (change: (pushers: State['pushers']) => State['pushers']) => {
     store.update((s) => ({ ...s, pushers: change(s.pushers) }));
     writeRegistrations(data, store.getState().pushers);
   };
+
   const deviceName = Device.deviceName ?? Device.modelName ?? t('app.name');
   const fallback = { title: t('app.name'), body: t('mobile.push.new_message') };
   const platform = Platform.OS === 'ios' ? 'ios' : 'android';
+
   return carryOut(plan(state.pushers, wanted, current), {
     signedIn: (account) => accounts.includes(account),
     remove: (account, registration) =>
-      store.run({ type: 'RemovePusher', data: { account, app_id: PUSH_APP_ID, push_key: registration.token } }),
+      store.run({
+        type: 'RemovePusher',
+        data: { account, app_id: PUSH_APP_ID, push_key: registration.token },
+      }),
     register: (account) =>
       current
-        ? store.run({ type: 'RegisterPusher', data: { account, pusher: pusherOf(current, platform, deviceName, t('app.name'), fallback) } })
+        ? store.run({
+            type: 'RegisterPusher',
+            data: {
+              account,
+              pusher: pusherOf(current, platform, deviceName, t('app.name'), fallback),
+            },
+          })
         : Promise.resolve(),
     removed: (account) => save(({ [account]: _removed, ...rest }) => rest),
     registered: (account) => current && save((pushers) => ({ ...pushers, [account]: current })),
@@ -212,6 +260,7 @@ function installBadge(store: Store): void {
   let shown = -1;
   store.subscribe(() => {
     const count = badgeCount(store.getState().accounts);
+
     if (count === shown) return;
     shown = count;
     Notifications.setBadgeCountAsync(count).catch(() => undefined);
@@ -226,6 +275,7 @@ function installBadge(store: Store): void {
 function installForegroundMarker(data: Directory): void {
   const marker = new File(data, 'app-active');
   let timer: ReturnType<typeof setInterval> | null = null;
+
   const write = () => {
     try {
       marker.write(String(Date.now()));
@@ -233,34 +283,51 @@ function installForegroundMarker(data: Directory): void {
       // The extension then handles pushes as if in the background, which is safe.
     }
   };
+
   const follow = (state: string) => {
     if (state === 'active') {
       write();
       timer ??= setInterval(write, ACTIVE_EVERY_MS);
+
       return;
     }
+
     if (timer) clearInterval(timer);
     timer = null;
+
     try {
       if (marker.exists) marker.delete();
     } catch {
       // It goes stale within a minute anyway.
     }
   };
+
   follow(AppState.currentState ?? 'active');
   AppState.addEventListener('change', follow);
 }
 
 function hiddenOf(target: PushTarget): PushContent {
-  return { type: 'Hidden', data: { account: target.account, room_id: target.room_id, room_name: null, event_id: target.event_id } };
+  return {
+    type: 'Hidden',
+    data: {
+      account: target.account,
+      room_id: target.room_id,
+      room_name: null,
+      event_id: target.event_id,
+    },
+  };
 }
 
 /** Asks the running engine what a push is about. */
 async function fetchThroughEngine(store: Store, target: PushTarget): Promise<PushContent> {
   let content = hiddenOf(target);
+
   try {
     await store.run(
-      { type: 'FetchNotification', data: { account: target.account, room_id: target.room_id, event_id: target.event_id } },
+      {
+        type: 'FetchNotification',
+        data: { account: target.account, room_id: target.room_id, event_id: target.event_id },
+      },
       (event) => {
         if (event.type === 'PushContent') content = event.data.content;
       },
@@ -268,6 +335,7 @@ async function fetchThroughEngine(store: Store, target: PushTarget): Promise<Pus
   } catch {
     // Not signed in yet (still restoring), or the server failed: something generic shows.
   }
+
   return content;
 }
 
@@ -276,24 +344,31 @@ async function fetchThroughEngine(store: Store, target: PushTarget): Promise<Pus
  * decrypts its event, through the running engine or, with none, from the account's store, and
  * shows it once. In front, the running engine notifies itself and the push is left alone.
  */
-export async function handlePush(payload: unknown): Promise<void> {
-  if (typeof payload === 'object' && payload !== null && 'actionIdentifier' in payload) return;
-  const data = typeof payload === 'object' && payload !== null && 'data' in payload ? (payload as { data: unknown }).data : payload;
-  const target = targetOfPush(data);
+export async function handlePush(payload: Notifications.NotificationTaskPayload): Promise<void> {
+  if ('actionIdentifier' in payload) return;
+  const target = targetOfPush(payload.data);
+
   if (!target) return;
   const store = running;
+
   if (store && AppState.currentState === 'active') return;
   // Headless: nothing booted, so the settings (and the language) come from the saved file.
   const settings = store ? store.getState().settings : readSettings();
+
   if (!pushAllowed(target.account, settings)) return;
   let content: PushContent;
+
   if (store) {
     content = await fetchThroughEngine(store, target);
   } else {
     setLanguage(settings.language);
-    content = await fetchPushWithoutEngine(pathOf(dataDirectory().uri), target, secureStore).catch(() => hiddenOf(target));
+    content = await fetchPushWithoutEngine(pathOf(dataDirectory().uri), target, secureStore).catch(
+      () => hiddenOf(target),
+    );
   }
+
   const shown = pushContentOf(content);
+
   if (!shown || !notified.mark(target.account, target.event_id)) return;
   await presentContent(shown);
 }

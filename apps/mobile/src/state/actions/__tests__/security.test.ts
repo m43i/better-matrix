@@ -23,9 +23,17 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 function setup() {
   const { engine, sent } = detachedEngine();
   const store = new Store(engine);
+
   const finish = (request: number, error?: string) =>
-    engine.emit({ type: 'Finished', data: { request, result: error === undefined ? { Ok: null } : { Err: error } } });
-  const askPassword = jest.fn<Promise<string | null>, [string | null]>(() => Promise.resolve('secret'));
+    engine.emit({
+      type: 'Finished',
+      data: { request, result: error === undefined ? { Ok: null } : { Err: error } },
+    });
+
+  const askPassword = jest.fn<Promise<string | null>, [string | null]>(() =>
+    Promise.resolve('secret'),
+  );
+
   return { engine, sent, store, finish, askPassword };
 }
 
@@ -44,7 +52,10 @@ describe('runGuarded', () => {
     engine.emit({ type: 'PasswordNeeded', data: { request: sent[0]!.request } });
     finish(sent[0]!.request, 'password required');
     await flush();
-    expect(sent[1]!.command).toEqual({ type: 'EndSession', data: { account: ADA, device_id: 'DEV', password: 'secret' } });
+    expect(sent[1]!.command).toEqual({
+      type: 'EndSession',
+      data: { account: ADA, device_id: 'DEV', password: 'secret' },
+    });
   });
 
   it('should ask without an error the first time', async () => {
@@ -69,7 +80,14 @@ describe('runGuarded', () => {
 
   it('should give up when the user cancels the password', async () => {
     const { engine, store, sent, finish } = setup();
-    const done = runGuarded(store, ADA, { type: 'ResetIdentity' }, { askPassword: () => Promise.resolve(null) });
+
+    const done = runGuarded(
+      store,
+      ADA,
+      { type: 'ResetIdentity' },
+      { askPassword: () => Promise.resolve(null) },
+    );
+
     engine.emit({ type: 'PasswordNeeded', data: { request: sent[0]!.request } });
     finish(sent[0]!.request, 'password required');
     await expect(done).resolves.toBe(false);
@@ -86,7 +104,10 @@ describe('runGuarded', () => {
     const { engine, store, sent, askPassword } = setup();
     const openUrl = jest.fn();
     void runGuarded(store, ADA, { type: 'ResetIdentity' }, { askPassword, openUrl });
-    engine.emit({ type: 'OpenUrl', data: { request: sent[0]!.request, url: 'https://account.example.org/reset' } });
+    engine.emit({
+      type: 'OpenUrl',
+      data: { request: sent[0]!.request, url: 'https://account.example.org/reset' },
+    });
     expect(openUrl).toHaveBeenCalledWith('https://account.example.org/reset');
   });
 });
@@ -95,7 +116,13 @@ describe('resetIdentity', () => {
   it('should end done once the reset went through', async () => {
     const { store, sent, finish, askPassword } = setup();
     const steps: ResetStep[] = [];
-    const done = resetIdentity(store, ADA, { askPassword, openUrl: jest.fn(), onStep: (s) => steps.push(s) });
+
+    const done = resetIdentity(store, ADA, {
+      askPassword,
+      openUrl: jest.fn(),
+      onStep: (s) => steps.push(s),
+    });
+
     finish(sent[0]!.request);
     await expect(done).resolves.toEqual({ type: 'done' });
   });
@@ -103,9 +130,20 @@ describe('resetIdentity', () => {
   it('should wait for the approval on the page it opened', () => {
     const { engine, store, sent, askPassword } = setup();
     const steps: ResetStep[] = [];
-    void resetIdentity(store, ADA, { askPassword, openUrl: jest.fn(), onStep: (s) => steps.push(s) });
-    engine.emit({ type: 'OpenUrl', data: { request: sent[0]!.request, url: 'https://account.example.org/reset' } });
-    expect(steps[steps.length - 1]).toEqual({ type: 'resetting', request: sent[0]!.request, url: 'https://account.example.org/reset' });
+    void resetIdentity(store, ADA, {
+      askPassword,
+      openUrl: jest.fn(),
+      onStep: (s) => steps.push(s),
+    });
+    engine.emit({
+      type: 'OpenUrl',
+      data: { request: sent[0]!.request, url: 'https://account.example.org/reset' },
+    });
+    expect(steps[steps.length - 1]).toEqual({
+      type: 'resetting',
+      request: sent[0]!.request,
+      url: 'https://account.example.org/reset',
+    });
   });
 
   it('should go back to the warning with the error when the reset fails', async () => {
@@ -124,7 +162,12 @@ describe('resetIdentity', () => {
 });
 
 describe('verifications', () => {
-  const incoming: Verification = { account: ADA, flowId: 'in', step: { type: 'Incoming', data: { other_device: 'Phone' } } };
+  const incoming: Verification = {
+    account: ADA,
+    flowId: 'in',
+    step: { type: 'Incoming', data: { other_device: 'Phone' } },
+  };
+
   const waiting: Verification = { account: ADA, flowId: 'mine', step: { type: 'Waiting' } };
   const graces: Verification = { account: GRACE, flowId: 'other', step: { type: 'Waiting' } };
 
@@ -161,7 +204,10 @@ describe('verifications', () => {
   });
 
   it('should say the session is verified when done', () => {
-    expect(verificationView({ type: 'Done' })).toEqual({ title: 'verify.done_title', actions: ['done'] });
+    expect(verificationView({ type: 'Done' })).toEqual({
+      title: 'verify.done_title',
+      actions: ['done'],
+    });
   });
 
   it('should only close a stopped verification', () => {
@@ -215,6 +261,9 @@ describe('sessions', () => {
   it('should rename a session with the trimmed name', () => {
     const { store, sent } = setup();
     renameSession(store, ADA, 'DEV', ' Phone ');
-    expect(sent[0]!.command).toEqual({ type: 'RenameSession', data: { account: ADA, device_id: 'DEV', name: 'Phone' } });
+    expect(sent[0]!.command).toEqual({
+      type: 'RenameSession',
+      data: { account: ADA, device_id: 'DEV', name: 'Phone' },
+    });
   });
 });

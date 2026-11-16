@@ -8,6 +8,7 @@ import type { Appearance } from '../../state/settings';
 /** Each language the app offers: the system's first, named with what it resolves to. */
 export function languageChoices(): Array<{ id: Language; label: string }> {
   const system = LOCALES.find((l) => l.id === resolve('system'))?.label ?? 'English';
+
   return [{ id: 'system', label: t('settings.language_system', { language: system }) }, ...LOCALES];
 }
 

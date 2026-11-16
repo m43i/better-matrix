@@ -9,7 +9,13 @@ import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { GestureDetector, usePanGesture, usePinchGesture, useSimultaneousGestures, useTapGesture } from 'react-native-gesture-handler';
+import {
+  GestureDetector,
+  usePanGesture,
+  usePinchGesture,
+  useSimultaneousGestures,
+  useTapGesture,
+} from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -21,10 +27,12 @@ import { roomKey, threadKey } from '../state/timeline';
 import { sentAt } from '../state/timelineText';
 import { font } from '../theme/palette';
 import { Icon, type IconName } from '../ui/icons';
+import { useNow } from '../ui/shell/useNow';
 import { ORIGINAL, PREVIEW_SIZE, useMedia } from '../ui/media';
 import { saveAttachment, shareAttachment } from '../ui/timeline/files';
 
 const MAX_ZOOM = 5;
+
 const DOUBLE_TAP_ZOOM = 2.5;
 
 export default function PreviewScreen() {
@@ -34,17 +42,26 @@ export default function PreviewScreen() {
     eventId: string;
     thread?: string;
   }>();
+
+  const now = useNow();
   const store = useAppStore();
   const insets = useSafeAreaInsets();
-  const key = useMemo(() => (thread ? threadKey(roomId, thread) : roomKey(roomId)), [roomId, thread]);
+
+  const key = useMemo(
+    () => (thread ? threadKey(roomId, thread) : roomKey(roomId)),
+    [roomId, thread],
+  );
+
   const message = useStore((s) => findMessage(timeline(s, account, key).entries, eventId));
   const attachment = message?.content.type === 'Attachment' ? message.content.data : null;
   const [busy, setBusy] = useState(false);
+
   const run = (action: typeof shareAttachment) => {
     if (!attachment) return;
     setBusy(true);
     void action(store, account, attachment).finally(() => setBusy(false));
   };
+
   return (
     <View style={styles.screen} testID="preview">
       <StatusBar style="light" />
@@ -58,7 +75,12 @@ export default function PreviewScreen() {
         <Text style={[font.body, styles.status]}>{t('mobile.conversation.message_missing')}</Text>
       )}
       <View style={[styles.bar, { paddingTop: insets.top + 8 }]}>
-        <BarButton icon="close" label={t('preview.close')} onPress={() => router.back()} testID="preview-close" />
+        <BarButton
+          icon="close"
+          label={t('preview.close')}
+          onPress={() => router.back()}
+          testID="preview-close"
+        />
         <View style={styles.who}>
           {message ? (
             <>
@@ -66,7 +88,7 @@ export default function PreviewScreen() {
                 {message.sender_name}
               </Text>
               <Text style={[font.meta, styles.dim]} numberOfLines={1}>
-                {sentAt(message.timestamp_ms, Date.now())}
+                {sentAt(message.timestamp_ms, now)}
               </Text>
             </>
           ) : null}
@@ -74,9 +96,19 @@ export default function PreviewScreen() {
         {attachment?.media ? (
           <>
             {busy ? <ActivityIndicator color="#ffffff" style={styles.busy} /> : null}
-            <BarButton icon="share" label={t('mobile.conversation.share')} onPress={() => run(shareAttachment)} testID="preview-share" />
+            <BarButton
+              icon="share"
+              label={t('mobile.conversation.share')}
+              onPress={() => run(shareAttachment)}
+              testID="preview-share"
+            />
             {Platform.OS === 'android' ? (
-              <BarButton icon="download" label={t('preview.download')} onPress={() => run(saveAttachment)} testID="preview-download" />
+              <BarButton
+                icon="download"
+                label={t('preview.download')}
+                onPress={() => run(saveAttachment)}
+                testID="preview-download"
+              />
             ) : null}
           </>
         ) : null}
@@ -85,7 +117,17 @@ export default function PreviewScreen() {
   );
 }
 
-function BarButton({ icon, label, onPress, testID }: { icon: IconName; label: string; onPress: () => void; testID: string }) {
+function BarButton({
+  icon,
+  label,
+  onPress,
+  testID,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  testID: string;
+}) {
   return (
     <Pressable
       onPress={onPress}
@@ -106,7 +148,9 @@ function ImageContent({ account, attachment }: { account: string; attachment: At
   const small = useMedia(account, preview?.media ?? null, preview?.size ?? PREVIEW_SIZE);
   const original = useMedia(account, attachment.media, ORIGINAL);
   const uri = original ?? small;
+
   if (!uri) return <ActivityIndicator color="#ffffff" style={StyleSheet.absoluteFill} />;
+
   return <Zoomable uri={uri} label={attachment.name} />;
 }
 
@@ -118,6 +162,7 @@ function Zoomable({ uri, label }: { uri: string; label: string }) {
   const y = useSharedValue(0);
   const savedX = useSharedValue(0);
   const savedY = useSharedValue(0);
+
   const pinch = usePinchGesture({
     onUpdate: (event) => {
       'worklet';
@@ -126,6 +171,7 @@ function Zoomable({ uri, label }: { uri: string; label: string }) {
     onDeactivate: () => {
       'worklet';
       savedScale.value = scale.value;
+
       if (scale.value <= 1) {
         x.value = withTiming(0);
         y.value = withTiming(0);
@@ -134,9 +180,11 @@ function Zoomable({ uri, label }: { uri: string; label: string }) {
       }
     },
   });
+
   const pan = usePanGesture({
     onUpdate: (event) => {
       'worklet';
+
       if (scale.value <= 1) return;
       x.value = savedX.value + event.translationX;
       y.value = savedY.value + event.translationY;
@@ -147,6 +195,7 @@ function Zoomable({ uri, label }: { uri: string; label: string }) {
       savedY.value = y.value;
     },
   });
+
   const doubleTap = useTapGesture({
     numberOfTaps: 2,
     onActivate: () => {
@@ -161,14 +210,23 @@ function Zoomable({ uri, label }: { uri: string; label: string }) {
       savedY.value = 0;
     },
   });
+
   const gesture = useSimultaneousGestures(pinch, pan, doubleTap);
+
   const style = useAnimatedStyle(() => ({
     transform: [{ translateX: x.value }, { translateY: y.value }, { scale: scale.value }],
   }));
+
   return (
     <GestureDetector gesture={gesture}>
       <Animated.View style={[StyleSheet.absoluteFill, style]}>
-        <Image source={{ uri }} style={StyleSheet.absoluteFill} contentFit="contain" accessibilityLabel={label} transition={120} />
+        <Image
+          source={{ uri }}
+          style={StyleSheet.absoluteFill}
+          contentFit="contain"
+          accessibilityLabel={label}
+          transition={120}
+        />
       </Animated.View>
     </GestureDetector>
   );
@@ -177,15 +235,19 @@ function Zoomable({ uri, label }: { uri: string; label: string }) {
 /** A video in the platform's own player, once its file is here. */
 function VideoContent({ account, attachment }: { account: string; attachment: Attachment }) {
   const uri = useMedia(account, attachment.media, ORIGINAL);
+
   if (!uri) return <ActivityIndicator color="#ffffff" style={StyleSheet.absoluteFill} />;
+
   return <VideoPlayer uri={uri} />;
 }
 
 function VideoPlayer({ uri }: { uri: string }) {
   const insets = useSafeAreaInsets();
+
   const player = useVideoPlayer(uri, (p) => {
     p.play();
   });
+
   return (
     <VideoView
       player={player}

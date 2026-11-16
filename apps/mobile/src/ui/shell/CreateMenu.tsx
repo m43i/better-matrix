@@ -22,14 +22,24 @@ export function CreateMenu({ account, scope }: { account: AccountId; scope: Scop
   const room = useToolbarIcon('hash', palette.text);
   const space = useToolbarIcon('space', palette.text);
   const section = useToolbarIcon('bullets', palette.text);
-  const spaceId = typeof scope === 'object' ? scope.space : null;
+  const spaceId = scope === 'home' ? null : scope.space;
+
   const canAddRooms = useStore((s) =>
-    spaceId === null ? true : (accountOf(s, account)?.spaces.find((x) => x.room_id === spaceId)?.can_add_rooms ?? false),
+    spaceId === null
+      ? true
+      : (accountOf(s, account)?.spaces.find((x) => x.room_id === spaceId)?.can_add_rooms ?? false),
   );
+
   return (
     <Stack.Toolbar placement="right">
-      <Stack.Toolbar.Button icon={bell} accessibilityLabel={t('mobile.tabs.activity')} onPress={() => router.push(routes.activity())}>
-        {unseen > 0 ? <Stack.Toolbar.Badge>{unseen > 99 ? '99+' : String(unseen)}</Stack.Toolbar.Badge> : null}
+      <Stack.Toolbar.Button
+        icon={bell}
+        accessibilityLabel={t('mobile.tabs.activity')}
+        onPress={() => router.push(routes.activity())}
+      >
+        {unseen > 0 ? (
+          <Stack.Toolbar.Badge>{unseen > 99 ? '99+' : String(unseen)}</Stack.Toolbar.Badge>
+        ) : null}
       </Stack.Toolbar.Button>
       <Stack.Toolbar.Menu icon={plus} accessibilityLabel={t('create.menu')}>
         <Stack.Toolbar.MenuAction icon={chat} onPress={() => router.push(routes.newChat())}>
@@ -42,10 +52,17 @@ export function CreateMenu({ account, scope }: { account: AccountId; scope: Scop
         >
           {t('create.room')}
         </Stack.Toolbar.MenuAction>
-        <Stack.Toolbar.MenuAction icon={space} hidden={spaceId !== null} onPress={() => router.push(routes.newSpace())}>
+        <Stack.Toolbar.MenuAction
+          icon={space}
+          hidden={spaceId !== null}
+          onPress={() => router.push(routes.newSpace())}
+        >
           {t('create.space')}
         </Stack.Toolbar.MenuAction>
-        <Stack.Toolbar.MenuAction icon={section} onPress={() => router.push(routes.sectionMenu(account))}>
+        <Stack.Toolbar.MenuAction
+          icon={section}
+          onPress={() => router.push(routes.sectionMenu(account))}
+        >
           {t('sections.new')}
         </Stack.Toolbar.MenuAction>
       </Stack.Toolbar.Menu>

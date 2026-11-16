@@ -16,6 +16,7 @@ export default function InfoScreen() {
   const palette = usePalette();
   const [shown, setShown] = useState(false);
   const version = Constants.expoConfig?.version ?? Constants.nativeApplicationVersion ?? '';
+
   return (
     <SettingsPage title={t('settings.info')} testID="info">
       <View style={styles.app}>
@@ -24,13 +25,19 @@ export default function InfoScreen() {
         <Text testID="app-version" style={[font.body, { color: palette.textMuted }]}>
           {t('info.version', { version })}
         </Text>
-        <Text style={[font.meta, { color: palette.textMuted }]}>{t('mobile.accounts.license')}</Text>
+        <Text style={[font.meta, { color: palette.textMuted }]}>
+          {t('mobile.accounts.license')}
+        </Text>
       </View>
       <ListSection title={t('info.third_party')} footer={t('mobile.accounts.third_party_hint')}>
         <ListRow
           testID="third-party-toggle"
           icon="package"
-          title={shown ? t('info.hide_third_party') : t('info.show_third_party', { count: THIRD_PARTY.length })}
+          title={
+            shown
+              ? t('info.hide_third_party')
+              : t('info.show_third_party', { count: THIRD_PARTY.length })
+          }
           chevron={false}
           onPress={() => setShown((s) => !s)}
         />

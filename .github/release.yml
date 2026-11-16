@@ -21,4 +21,4 @@ changelog:
     - title: 🧰 Maintenance
       labels: [ci, dependencies]
     - title: Other changes
-      labels: ["*"]
+      labels: ['*']

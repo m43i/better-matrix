@@ -4,7 +4,9 @@
  */
 export function initials(name: string): string {
   let text = name;
+
   if (/^[@#!]/.test(text)) text = text.slice(1).split(':')[0] ?? '';
+
   const letters = text
     .split(/\s+/)
     .map((word) => [...word].find((c) => /[\p{L}\p{N}]/u.test(c)))
@@ -12,5 +14,6 @@ export function initials(name: string): string {
     .slice(0, 2)
     .map((c) => c.toUpperCase())
     .join('');
+
   return letters || '?';
 }

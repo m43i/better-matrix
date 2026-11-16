@@ -20,9 +20,12 @@ export function Notices() {
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => dismissNotice(store, notice.id), SHOWN_MS);
+
     return () => clearTimeout(timer);
   }, [store, notice]);
+
   if (!notice) return null;
+
   return (
     <Animated.View
       key={notice.id}

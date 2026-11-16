@@ -7,7 +7,13 @@ import { Fragment, useReducer, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
-import { addContact, confirmContactCode, contactLabel, removeContact, requestContactCode } from '../../state/actions/accounts';
+import {
+  addContact,
+  confirmContactCode,
+  contactLabel,
+  removeContact,
+  requestContactCode,
+} from '../../state/actions/accounts';
 import { useAppStore } from '../../state/react';
 import { font } from '../../theme/palette';
 import { Button, Divider, ListRow, ListSection, TextField } from '../components';
@@ -19,8 +25,8 @@ function region(): string {
   return getLocales().find((l) => l.regionCode)?.regionCode ?? '';
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 export function ContactSection({
@@ -52,18 +58,21 @@ export function ContactSection({
     setCode('');
     requestContactCode(store, account, kind, address, region()).then(
       (pending) => dispatch({ type: 'sent', pending }),
-      (error: unknown) => dispatch({ type: 'failed', error: messageOf(error) }),
+      (cause: unknown) => dispatch({ type: 'failed', error: messageOf(cause) }),
     );
   };
 
   const confirm = async () => {
     if (form.step.type !== 'sent' || form.step.busy) return;
     const pending = form.step.pending;
+
     if (!email && !code.trim()) return;
     dispatch({ type: 'confirm' });
+
     try {
       if (!email) await confirmContactCode(store, account, pending, code);
       const added = await addContact(store, account, pending, { askPassword });
+
       if (added) {
         dispatch({ type: 'reset' });
         setAddress('');
@@ -79,7 +88,11 @@ export function ContactSection({
     const label = contactLabel(contact);
     Alert.alert(t('profile.remove', { address: label }), undefined, [
       { text: t('common.cancel'), style: 'cancel' },
-      { text: t('common.remove'), style: 'destructive', onPress: () => removeContact(store, account, contact) },
+      {
+        text: t('common.remove'),
+        style: 'destructive',
+        onPress: () => removeContact(store, account, contact),
+      },
     ]);
   };
 
@@ -152,7 +165,9 @@ export function ContactSection({
                   testID={`contact-new-${id}`}
                   value={address}
                   onChangeText={setAddress}
-                  placeholder={email ? t('profile.email_placeholder') : t('profile.phone_placeholder')}
+                  placeholder={
+                    email ? t('profile.email_placeholder') : t('profile.phone_placeholder')
+                  }
                   keyboardType={email ? 'email-address' : 'phone-pad'}
                   autoComplete={email ? 'email' : 'tel'}
                   autoCapitalize="none"
@@ -176,7 +191,9 @@ export function ContactSection({
                 />
               </>
             )}
-            {form.error ? <Text style={[font.body, { color: palette.danger }]}>{form.error}</Text> : null}
+            {form.error ? (
+              <Text style={[font.body, { color: palette.danger }]}>{form.error}</Text>
+            ) : null}
           </View>
         </>
       ) : null}

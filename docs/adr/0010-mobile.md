@@ -52,6 +52,12 @@ Date: 2026-11-16
   `packages/matrix-native/src/generated/types`; a test fails when they drift. The FFI surface
   stays three calls (`start`, `send`, and the listener), so a new feature adds no FFI code; the
   one exception is a push handled without the engine (`fetch_push`, Push below).
+- **External JavaScript data is decoded at its boundary.** Zod validates saved settings and
+  pusher registrations, Expo configuration, notification payloads, and the push gateway's Matrix
+  requests and Expo ticket responses. Downstream functions receive the decoded domain types.
+  Rust bridge JSON is trusted from the shared generated types; assertions there document that
+  invariant. Tests inject call permissions, media resolution, and navigation through their
+  interfaces instead of replacing modules.
 - **Bytes become files.** `MediaLoaded` and `GifLoaded` are written under the cache directory,
   named by what they are, and reported as `MediaFile` / `GifFile` with the path; image and
   video views open the file directly. Uploads go the other way as paths (`Upload::Path`);
@@ -96,12 +102,12 @@ Date: 2026-11-16
   and loop the desktop's chime (`assets/sounds/ring.wav`, rendered from its `chime`) unless
   rings are silent.
 - **Call layouts are the desktop's, ported as pure TypeScript** (ADR 0009):
-  - *Planner:* `state/callLayout.ts` is `state::call_layout` line for line (Auto, Grid, Focus;
+  - _Planner:_ `state/callLayout.ts` is `state::call_layout` line for line (Auto, Grid, Focus;
     tile identity by participant key and surface kind; equal 16:9 cells paging before 160×90 pt,
     25 a page; the one-to-one self-view inset; the participant strip beside the focused surface
     when the stage is at least 640 pt wide and 1.5 times as wide as tall, else below, 18–40%),
     with its tests ported one for one.
-  - *The call's view:* `state/callView.ts` is the rest of `state::call` — `CallView` (layout,
+  - _The call's view:_ `state/callView.ts` is the rest of `state::call` — `CallView` (layout,
     page, self-view, Full video / Fill tile per camera, strip, chat), kept in
     `State.call.view` beside the engine's `CallInfo`. The reducer starts a new call from the
     default view and reconciles the same call's view on every `CallUpdated` (a departed
@@ -112,19 +118,19 @@ Date: 2026-11-16
     store's levels by one follower per store (`ui/call/useCallAudio.ts`), so going between the
     stage and the chat keeps the speaker, and a stage redraws only when the rings or the focus
     change.
-  - *Watching:* only planned tiles mount, and a `CallVideoView` watches its video while mounted
+  - _Watching:_ only planned tiles mount, and a `CallVideoView` watches its video while mounted
     (below), so the plan alone decides what is watched: hidden pages, a hidden self-view and
     a strip's other pages convert no frames, and hiding self-view never stops the camera.
     Going between the stage and the chat remounts the views, so a video may be unwatched and
     watched again across the transition.
-  - *Stage* (`app/call.tsx`, `ui/call/CallTiles.tsx`): the native header carries the room's
+  - _Stage_ (`app/call.tsx`, `ui/call/CallTiles.tsx`): the native header carries the room's
     name, the way back and the call layout menu (`Stack.Toolbar.Menu`: Auto, Grid and Focus
     for a video call with the current one checked, then Hide / Show self-view). Tapping a video
     tile pins it in Focus; cameras big enough carry the desktop's Full video / Fill tile button;
     swiping or the paging row turns pages; the strip's divider drags (or adjusts by screen
     reader) within 18–40%. The controls are the phone's (microphone, camera, switch camera,
     loudspeaker) plus Show chat and hang up.
-  - *Source aspects are unknown on phones:* the engine shapes each frame to its view in Rust
+  - _Source aspects are unknown on phones:_ the engine shapes each frame to its view in Rust
     and reports no source size to JavaScript, so every surface plans at 16:9 and cameras
     default to Fill tile (the desktop measures `Pixels` and shows portrait cameras whole).
     The planner already takes aspects (`Aspects`, by `VideoId`); reporting them needs an event
@@ -143,7 +149,7 @@ Date: 2026-11-16
   like the desktop's display preferences.
 - **Call media is native and never crosses JavaScript.** A local Expo module
   (`apps/mobile/modules/call-media`, Kotlin and Swift) does what the engine can't on phones:
-  - *Android start-up:* libwebrtc needs the Java VM and the application context before its
+  - _Android start-up:_ libwebrtc needs the Java VM and the application context before its
     audio device module exists. The module's `CallMediaNative` loads `libmatrix_ffi.so` with
     `System.loadLibrary` (the turbo module only links it, which doesn't run `JNI_OnLoad`), so
     `JNI_OnLoad` (`matrix-ffi/src/android.rs`) hands libwebrtc the VM, and
@@ -154,24 +160,24 @@ Date: 2026-11-16
     `matrix-ffi/build.rs` keeps and exports libwebrtc's `Java_livekit_org_webrtc_*` symbols
     (`webrtc-sys` asks for that in its own build script, but a dependency's link arguments
     never reach the final library).
-  - *Video views:* `CallVideoView` (a `TextureView` on Android, a layer on iOS) registers with
+  - _Video views:_ `CallVideoView` (a `TextureView` on Android, a layer on iOS) registers with
     the bridge for one `VideoId` (`matrix-ffi/src/video.rs`): the bridge keeps the engine's
     handle and sends `WatchVideo` with a sink that draws every frame into each view showing that
     video, cropped (cameras) or letterboxed (screens) to the view's shape in Rust; the last view
     to go sends `UnwatchVideo`. Android draws into the `Surface` through `ANativeWindow`; iOS
     gets a C callback (`bm_video_*`, `native.rs`). Views are keyed by call and video, since
     each call numbers its videos afresh.
-  - *Camera:* the app registers its camera with the engine once (`registerNativeCamera`, a
+  - _Camera:_ the app registers its camera with the engine once (`registerNativeCamera`, a
     UniFFI foreign trait the JavaScript side forwards to the module): the engine starts, stops
     and switches it as it would `nokhwa` (a platform camera, ADR 0009), and the camera's frames
     go to the engine natively (Android: libwebrtc's own Camera2 capturer, I420 over JNI; iOS:
     AVFoundation NV12 over `bm_camera_frame_nv12`), rotated upright in Rust. Cameras are named
     `front`, `back`, … and the stage's switch button picks the next.
-  - *Audio route:* communication mode while a call runs (`AudioManager` on Android, the
+  - _Audio route:_ communication mode while a call runs (`AudioManager` on Android, the
     `voiceChat` session on iOS), the earpiece for voice calls and the loudspeaker for video
     calls, switchable on the stage.
-  Without the module (Expo Go, tests) calls still work as voice: the stage shows faces and hides
-  the camera and speaker controls.
+    Without the module (Expo Go, tests) calls still work as voice: the stage shows faces and hides
+    the camera and speaker controls.
 - **Screen sharing** is desktop-only: libwebrtc has no desktop capturer on phones, so
   `start_screen` reports it unavailable there.
 - **TLS uses ring on phones.** `Engine::start` installs rustls' `ring` provider on Android and
@@ -229,26 +235,26 @@ Date: 2026-11-16
   folder to download to).
 - **Push goes through Expo's push service and our own gateway** (`docs/push.md` is the release
   checklist):
-  - *Why Expo:* the FCM and APNs credentials live in EAS (`eas credentials`), not in the repo or
+  - _Why Expo:_ the FCM and APNs credentials live in EAS (`eas credentials`), not in the repo or
     on a server of ours, and both platforms get one kind of token (`getExpoPushTokenAsync` with
     the EAS project ID from the app config). Homeservers only speak the Matrix push gateway API,
     so `packages/push-gateway` (a dependency-free handler for Bun or a Cloudflare Worker)
     translates `POST /_matrix/push/v1/notify` into Expo's send API and answers `rejected` for
     tokens Expo reports as `DeviceNotRegistered`. It keeps and logs nothing.
-  - *No content leaves the homeserver:* pushers ask for `format: "event_id_only"`, so the
+  - _No content leaves the homeserver:_ pushers ask for `format: "event_id_only"`, so the
     gateway, Expo, Google and Apple see an account, a room and event ID, the unread count and
     the timing, never a message. The phone fetches and decrypts the event itself.
-  - *One token, several accounts:* each account's pusher (app ID `chat.bettermatrix.mobile`,
+  - _One token, several accounts:_ each account's pusher (app ID `chat.bettermatrix.mobile`,
     registered with `append`, so accounts on one server keep each other's) carries
     `default_payload.account`; the gateway sends it with the room, event and count as the push's
     data, so the device knows whose push it is. iOS pushers add a fallback `alert` (in the
     user's language), which the gateway sends as a mutable alert; Android's are data only.
-  - *Engine:* `Command::RegisterPusher` / `RemovePusher` (matrix-sdk's pusher API) and
+  - _Engine:_ `Command::RegisterPusher` / `RemovePusher` (matrix-sdk's pusher API) and
     `Command::FetchNotification`, answered by `Event::PushContent` (`Message`, `Invite`,
     `Hidden` for what can't be read, `Nothing` for what doesn't notify), fetched with
     matrix-sdk-ui's `NotificationClient` (sliding sync, else `/context`, decrypting with the
     account's store; `MultipleProcesses`, since the engine's own sync runs beside it).
-  - *Without the engine* (`matrix_core::push::fetch_without_engine`): one account's store
+  - _Without the engine_ (`matrix_core::push::fetch_without_engine`): one account's store
     opened from the data directory and the secret store, the event fetched, the store closed,
     within 22 s. Its clients hold the SDK's cross-process locks as `push`, the engine's as
     `main`: OAuth refreshes go through the cross-process refresh lock and are saved inside it
@@ -257,13 +263,13 @@ Date: 2026-11-16
     crypto store's lock through each sync (`Account::sync_once_locked`), which reloads what a
     push process wrote and keeps the two from writing the store at once. A store directory is found under the data
     directory wherever the account list says it was, so the data directory may move.
-  - *Android:* the push is an FCM data message (through Expo); expo-notifications runs the push
+  - _Android:_ the push is an FCM data message (through Expo); expo-notifications runs the push
     task (`engine/pushTask.ts`, defined by the entry `index.ts` before the router, headless when
     the app isn't running). With the engine running it asks the engine; headless it calls
     `fetch_push` (UniFFI, a thread of its own, the app's secret store). In front it does
     nothing: the running engine notifies. Each event shows once per JavaScript context
     (`Seen`), whichever of sync and push comes first.
-  - *iOS:* a Notification Service Extension (`BetterMatrixPush`, Swift, added with its
+  - _iOS:_ a Notification Service Extension (`BetterMatrixPush`, Swift, added with its
     entitlements by `plugins/withPush.js`) links the engine's static library and calls
     `bm_push_fetch` (C, `matrix-ffi/src/push.rs`) with the payload, the data directory and its
     keychain functions; Rust parses the push, opens the store, fetches, and words the
@@ -273,8 +279,8 @@ Date: 2026-11-16
     front (`app-active`, a timestamp it writes every 30 s) the extension leaves pushes alone and
     the app keeps them from showing; in the background the app leaves notifications of accounts
     with a pusher to the extension, since the two processes can't agree on what showed.
-  - *App:* pushers follow the accounts, the push token and the settings (*Notifications on this
-    device*, and per account when there are several) in `engine/push.ts`, deciding in
+  - _App:_ pushers follow the accounts, the push token and the settings (_Notifications on this
+    device_, and per account when there are several) in `engine/push.ts`, deciding in
     `engine/pushRules.ts`; what this device registered is kept in `pushers.json`, and signing
     out removes the account's pusher first. A push token that can't be had (offline at launch)
     is asked for again from 30 s, doubling to 10 minutes, while an account needs it

@@ -17,7 +17,8 @@ import {
 } from '../messages';
 import { ADA, GRACE, message, roomSummary, withContent } from '../../test/fixtures';
 
-const text = (body: string, html: string | null = null) => withContent('$m', { type: 'Text', data: { body, html } });
+const text = (body: string, html: string | null = null) =>
+  withContent('$m', { type: 'Text', data: { body, html } });
 
 describe('prepare', () => {
   it('should parse a message once', () => {
@@ -32,7 +33,9 @@ describe('prepare', () => {
   it('should show a GIF link as the GIF with the rest of the words', () => {
     const gif = prepare(text('lol https://media.tenor.com/x/kiwi.gif')).gif;
     expect(gif?.url).toBe('https://media.tenor.com/x/kiwi.gif');
-    expect(gif?.rest).toEqual([{ type: 'paragraph', inlines: [{ type: 'text', text: 'lol', marks: {} }] }]);
+    expect(gif?.rest).toEqual([
+      { type: 'paragraph', inlines: [{ type: 'text', text: 'lol', marks: {} }] },
+    ]);
   });
 
   it('should leave no words of a message that is only a GIF link', () => {
@@ -40,7 +43,9 @@ describe('prepare', () => {
   });
 
   it('should card a GIF link while GIFs do not play', () => {
-    expect(cardLink(prepare(text('https://media.tenor.com/x/kiwi.gif')), false)).toBe('https://media.tenor.com/x/kiwi.gif');
+    expect(cardLink(prepare(text('https://media.tenor.com/x/kiwi.gif')), false)).toBe(
+      'https://media.tenor.com/x/kiwi.gif',
+    );
   });
 
   it('should not card a GIF link while GIFs play', () => {
@@ -68,13 +73,22 @@ describe('messageActions', () => {
   });
 
   it('should not offer reactions on a call card', () => {
-    const call = withContent('$m', { type: 'Call', data: { video: null, direct: false, declined_by: [] } });
+    const call = withContent('$m', {
+      type: 'Call',
+      data: { video: null, direct: false, declined_by: [] },
+    });
+
     expect(messageActions(call, ADA, false).react).toBe(false);
   });
 
   it('should not act on a message still sending', () => {
     const pending = { ...message('$m'), sender_id: ADA, editable: true, pending: true };
-    expect(messageActions(pending, ADA, false)).toMatchObject({ react: false, reply: false, edit: false, delete: false });
+    expect(messageActions(pending, ADA, false)).toMatchObject({
+      react: false,
+      reply: false,
+      edit: false,
+      delete: false,
+    });
   });
 
   it('should not offer a thread inside a thread', () => {
@@ -143,13 +157,16 @@ describe('poll results', () => {
 
 describe('callStatus', () => {
   const card: CallCard = { video: true, direct: false, declined_by: [] };
+
   const room = (participants: string[], via: 'Rtc' | null = 'Rtc') => ({
     ...roomSummary('!r'),
     call: { via, participants },
   });
 
   it('should show the newest card of a call with people in it under way', () => {
-    expect(callStatus(card, room([GRACE]), { latest: true, callHere: null, ringing: false })).toMatchObject({
+    expect(
+      callStatus(card, room([GRACE]), { latest: true, callHere: null, ringing: false }),
+    ).toMatchObject({
       ongoing: true,
       join: true,
       label: 'Under way · 1 in the call',
@@ -157,34 +174,52 @@ describe('callStatus', () => {
   });
 
   it('should show older cards ended', () => {
-    expect(callStatus(card, room([GRACE]), { latest: false, callHere: null, ringing: false })).toMatchObject({
+    expect(
+      callStatus(card, room([GRACE]), { latest: false, callHere: null, ringing: false }),
+    ).toMatchObject({
       ongoing: false,
       label: 'Ended',
     });
   });
 
   it('should not offer to join a call the user is in', () => {
-    expect(callStatus(card, room([GRACE]), { latest: true, callHere: 'Rtc', ringing: false })).toMatchObject({
+    expect(
+      callStatus(card, room([GRACE]), { latest: true, callHere: 'Rtc', ringing: false }),
+    ).toMatchObject({
       joined: true,
       join: false,
     });
   });
 
   it('should not offer to join where the room allows no calls', () => {
-    expect(callStatus(card, room([GRACE], null), { latest: true, callHere: null, ringing: false }).join).toBe(false);
+    expect(
+      callStatus(card, room([GRACE], null), { latest: true, callHere: null, ringing: false }).join,
+    ).toBe(false);
   });
 
   it('should show a ringing one-to-one call ringing', () => {
     const direct = { ...card, direct: true };
-    expect(callStatus(direct, room([]), { latest: true, callHere: null, ringing: true }).label).toBe('Ringing…');
+    expect(
+      callStatus(direct, room([]), { latest: true, callHere: null, ringing: true }).label,
+    ).toBe('Ringing…');
   });
 });
 
 describe('attachments', () => {
-  const image: Attachment = { kind: 'Image', name: 'a.png', size: 10, media: 'mxc-a', thumbnail: null, dimensions: [1440, 720] };
+  const image: Attachment = {
+    kind: 'Image',
+    name: 'a.png',
+    size: 10,
+    media: 'mxc-a',
+    thumbnail: null,
+    dimensions: [1440, 720],
+  };
 
   it('should preview an image from its thumbnail when it has one', () => {
-    expect(attachmentPreview({ ...image, thumbnail: 'mxc-t' })).toEqual({ media: 'mxc-t', size: { type: 'Original' } });
+    expect(attachmentPreview({ ...image, thumbnail: 'mxc-t' })).toEqual({
+      media: 'mxc-t',
+      size: { type: 'Original' },
+    });
   });
 
   it('should preview an image as a server thumbnail otherwise', () => {
@@ -196,7 +231,10 @@ describe('attachments', () => {
   });
 
   it('should fit a wide image to the box width', () => {
-    expect(previewSize([1440, 720], { width: 360, height: 280 })).toEqual({ width: 360, height: 180 });
+    expect(previewSize([1440, 720], { width: 360, height: 280 })).toEqual({
+      width: 360,
+      height: 180,
+    });
   });
 
   it('should not upscale small images', () => {
@@ -210,11 +248,17 @@ describe('attachments', () => {
 
 describe('editText', () => {
   it('should bring formatting back as the composer markers', () => {
-    const formatted = withContent('$1', { type: 'Text', data: { body: 'hi there', html: '<strong>hi</strong> there' } });
+    const formatted = withContent('$1', {
+      type: 'Text',
+      data: { body: 'hi there', html: '<strong>hi</strong> there' },
+    });
+
     expect(editText(formatted)).toBe('**hi** there');
   });
 
   it('should keep plain text as it is', () => {
-    expect(editText(withContent('$1', { type: 'Text', data: { body: 'plain', html: null } }))).toBe('plain');
+    expect(editText(withContent('$1', { type: 'Text', data: { body: 'plain', html: null } }))).toBe(
+      'plain',
+    );
   });
 });

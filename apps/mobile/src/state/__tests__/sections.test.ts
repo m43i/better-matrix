@@ -1,6 +1,14 @@
 import type { RoomSummary, SidebarLayout, SpaceSummary } from '@better-matrix/matrix-native/types';
 
-import { ADA, message, messageEntry, roomSummary, spaceSummary, summary, timelineOf } from '../../test/fixtures';
+import {
+  ADA,
+  message,
+  messageEntry,
+  roomSummary,
+  spaceSummary,
+  summary,
+  timelineOf,
+} from '../../test/fixtures';
 import { apply, initialState } from '../reducer';
 import {
   activity,
@@ -26,11 +34,20 @@ import {
 import type { AccountData } from '../types';
 
 const NOW = 1_800_000_000_000;
+
 const EMPTY: SidebarLayout = { scopes: {}, changed_at: 0 };
 
-function accountWith(rooms: RoomSummary[], spaces: SpaceSummary[] = [], change: Partial<AccountData> = {}): AccountData {
+function accountWith(
+  rooms: RoomSummary[],
+  spaces: SpaceSummary[] = [],
+  change: Partial<AccountData> = {},
+): AccountData {
   let state = apply(initialState(), { type: 'AccountAdded', data: summary(ADA) });
-  state = apply(state, { type: 'RoomsUpdated', data: { account: ADA, list: { rooms, spaces, invitations: [] } } });
+  state = apply(state, {
+    type: 'RoomsUpdated',
+    data: { account: ADA, list: { rooms, spaces, invitations: [] } },
+  });
+
   return { ...state.accounts[0]!, ...change };
 }
 
@@ -54,14 +71,26 @@ describe('wantsAttention', () => {
   });
 
   it('a muted room should want attention when it mentions the user', () => {
-    expect(wantsAttention(room('!a', { unread: 2, mentions: 1, notifications: 'Mute' }))).toBe(true);
+    expect(wantsAttention(room('!a', { unread: 2, mentions: 1, notifications: 'Mute' }))).toBe(
+      true,
+    );
   });
 });
 
 describe('roomsInScope', () => {
-  const spaces = [spaceSummary('!space', ['!inside', '!sub'], ['@member:x']), spaceSummary('!sub', ['!deep'])];
+  const spaces = [
+    spaceSummary('!space', ['!inside', '!sub'], ['@member:x']),
+    spaceSummary('!sub', ['!deep']),
+  ];
+
   const account = accountWith(
-    [room('!inside'), room('!deep'), room('!outside'), dm('!dm-member', '@member:x'), dm('!dm-other', '@other:x')],
+    [
+      room('!inside'),
+      room('!deep'),
+      room('!outside'),
+      dm('!dm-member', '@member:x'),
+      dm('!dm-other', '@other:x'),
+    ],
     spaces,
   );
 
@@ -82,7 +111,11 @@ describe('roomsInScope', () => {
   });
 
   it('spaces containing each other should not loop', () => {
-    const looped = accountWith([room('!r')], [spaceSummary('!a', ['!b', '!r']), spaceSummary('!b', ['!a'])]);
+    const looped = accountWith(
+      [room('!r')],
+      [spaceSummary('!a', ['!b', '!r']), spaceSummary('!b', ['!a'])],
+    );
+
     expect(ids(roomsInScope(looped, { space: '!b' }))).toEqual(['!r']);
   });
 });
@@ -105,13 +138,17 @@ describe('lastMessage', () => {
       latest: { '!a': { ...message('$old'), timestamp_ms: 1 } },
       timelines: { '!a': timelineOf([messageEntry('$new', { timestamp_ms: 2 })]) },
     });
+
     expect(lastMessage(account, '!a')?.event_id).toBe('$new');
   });
 });
 
 describe('activity', () => {
   it('a room should count from its newest message', () => {
-    const account = accountWith([room('!a')], [], { latest: { '!a': { ...message('$m'), timestamp_ms: NOW - 10 } } });
+    const account = accountWith([room('!a')], [], {
+      latest: { '!a': { ...message('$m'), timestamp_ms: NOW - 10 } },
+    });
+
     expect(activity(account, account.rooms[0]!, NOW)).toBe(NOW - 10);
   });
 
@@ -120,6 +157,7 @@ describe('activity', () => {
       latest: { '!a': { ...message('$m'), timestamp_ms: NOW + 3_600_000 } },
       heardAt: { '!a': NOW - 5 },
     });
+
     expect(activity(account, account.rooms[0]!, NOW)).toBe(NOW - 5);
   });
 
@@ -133,21 +171,33 @@ describe('sections', () => {
   const at = (id: string, ms: number) => ({ [id]: { ...message(`$${id}`), timestamp_ms: ms } });
 
   it('the built-in sections should list the latest conversation first', () => {
-    const account = accountWith([room('!old'), room('!new'), room('!quiet', { name: 'quiet' })], [], {
-      latest: { ...at('!old', NOW - 100), ...at('!new', NOW - 1) },
-    });
+    const account = accountWith(
+      [room('!old'), room('!new'), room('!quiet', { name: 'quiet' })],
+      [],
+      {
+        latest: { ...at('!old', NOW - 100), ...at('!new', NOW - 1) },
+      },
+    );
+
     const rooms = sections(account, 'home', NOW).find((s) => s.id === ROOMS)!.rooms;
     expect(ids(rooms)).toEqual(['!new', '!old', '!quiet']);
   });
 
   it('rooms with nothing known should follow by name', () => {
     const account = accountWith([room('!b', { name: 'Beta' }), room('!a', { name: 'alpha' })]);
-    expect(ids(sections(account, 'home', NOW).find((s) => s.id === ROOMS)!.rooms)).toEqual(['!a', '!b']);
+    expect(ids(sections(account, 'home', NOW).find((s) => s.id === ROOMS)!.rooms)).toEqual([
+      '!a',
+      '!b',
+    ]);
   });
 
   it('a room in a section of the user should leave the built-in one', () => {
     const { layout, id } = addSection(EMPTY, 'home', 'Team');
-    const account = accountWith([room('!a'), room('!b')], [], { sidebar: moveRoom(layout, 'home', '!a', id) });
+
+    const account = accountWith([room('!a'), room('!b')], [], {
+      sidebar: moveRoom(layout, 'home', '!a', id),
+    });
+
     const shown = sections(account, 'home', NOW);
     expect(shown.map((s) => [s.id, ids(s.rooms)])).toEqual([
       [id, ['!a']],
@@ -177,25 +227,37 @@ describe('sections', () => {
 
   it('a section should hide rooms outside the scope', () => {
     const { layout, id } = addSection(EMPTY, 'home', 'Team');
+
     const account = accountWith([room('!in-space')], [spaceSummary('!s', ['!in-space'])], {
       sidebar: moveRoom(layout, 'home', '!in-space', id),
     });
+
     expect(sections(account, 'home', NOW)[0]!.rooms).toEqual([]);
   });
 });
 
 describe('unreadRooms', () => {
   it('rooms mentioning the user should come first', () => {
-    const account = accountWith([room('!many', { unread: 9 }), room('!mention', { unread: 1, mentions: 1 }), room('!read')]);
+    const account = accountWith([
+      room('!many', { unread: 9 }),
+      room('!mention', { unread: 1, mentions: 1 }),
+      room('!read'),
+    ]);
+
     expect(ids(unreadRooms(account, 'home'))).toEqual(['!mention', '!many']);
   });
 });
 
 describe('directChats', () => {
   it('every direct chat should be listed, latest first, whatever space it is in', () => {
-    const account = accountWith([dm('!a', '@a:x'), room('!group'), dm('!b', '@b:x')], [spaceSummary('!s', ['!a'])], {
-      latest: { '!b': { ...message('$b'), timestamp_ms: NOW - 1 } },
-    });
+    const account = accountWith(
+      [dm('!a', '@a:x'), room('!group'), dm('!b', '@b:x')],
+      [spaceSummary('!s', ['!a'])],
+      {
+        latest: { '!b': { ...message('$b'), timestamp_ms: NOW - 1 } },
+      },
+    );
+
     expect(ids(directChats(account, NOW))).toEqual(['!b', '!a']);
   });
 });
@@ -233,6 +295,7 @@ describe('layout edits', () => {
   it('a room should land where it is dropped', () => {
     const a = addSection(EMPTY, 'home', 'A');
     let layout = a.layout;
+
     for (const [id, index] of [
       ['!x', 0],
       ['!y', 1],
@@ -240,6 +303,7 @@ describe('layout edits', () => {
     ] as const) {
       layout = moveRoom(layout, 'home', id, a.id, index);
     }
+
     expect(layout.scopes.home!.sections[0]!.rooms).toEqual(['!x', '!z', '!y']);
   });
 

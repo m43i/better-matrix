@@ -45,17 +45,21 @@ export default function AccountMenuScreen() {
 
   const confirmSignOut = () => {
     if (!current) return;
-    Alert.alert(t('accounts.sign_out', { name: current.display_name }), t('mobile.accounts.sign_out_hint'), [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: t('sessions.sign_out'),
-        style: 'destructive',
-        onPress: () => {
-          router.back();
-          signOut(store, current.id);
+    Alert.alert(
+      t('accounts.sign_out', { name: current.display_name }),
+      t('mobile.accounts.sign_out_hint'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('sessions.sign_out'),
+          style: 'destructive',
+          onPress: () => {
+            router.back();
+            signOut(store, current.id);
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   return (
@@ -83,10 +87,20 @@ export default function AccountMenuScreen() {
           </View>
         ))}
         <Divider inset={66} />
-        <ListRow testID="account-menu-add" icon="userAdd" title={t('accounts.add')} onPress={() => go(routes.signIn())} />
+        <ListRow
+          testID="account-menu-add"
+          icon="userAdd"
+          title={t('accounts.add')}
+          onPress={() => go(routes.signIn())}
+        />
       </ListSection>
       <ListSection>
-        <ListRow testID="account-menu-settings" icon="settings" title={t('settings.title')} onPress={() => go(routes.settings())} />
+        <ListRow
+          testID="account-menu-settings"
+          icon="settings"
+          title={t('settings.title')}
+          onPress={() => go(routes.settings())}
+        />
         {current ? (
           <>
             <Divider inset={52} />

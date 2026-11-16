@@ -12,6 +12,7 @@ import { usePalette } from '../theme';
 
 export function JumpTo() {
   const palette = usePalette();
+
   return (
     <Touchable
       testID="jump-to"

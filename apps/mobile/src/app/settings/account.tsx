@@ -8,7 +8,13 @@ import { routes } from '../../routes';
 import { fetchRoomKeys } from '../../state/actions/accounts';
 import { useAppStore } from '../../state/react';
 import { Divider, ListRow, ListSection } from '../../ui/components';
-import { AccountHeading, NoAccount, SettingsPage, StatusLine, useSettingsAccount } from '../../ui/settings/common';
+import {
+  AccountHeading,
+  NoAccount,
+  SettingsPage,
+  StatusLine,
+  useSettingsAccount,
+} from '../../ui/settings/common';
 import { usePalette } from '../../ui/theme';
 
 export default function AccountScreen() {
@@ -16,6 +22,7 @@ export default function AccountScreen() {
   const palette = usePalette();
   const account = useSettingsAccount();
   const title = t('mobile.accounts.security_title');
+
   if (!account) return <NoAccount title={title} />;
   const id = account.summary.id;
   const security = account.security ?? { session_verified: false, recovery: 'Unknown' as const };
@@ -37,12 +44,25 @@ export default function AccountScreen() {
   return (
     <SettingsPage title={title} testID="account-security">
       <AccountHeading account={account} />
-      <ListSection title={t('account.session')} footer={verified ? t('account.session_hint') : t('account.unverified_hint')}>
+      <ListSection
+        title={t('account.session')}
+        footer={verified ? t('account.session_hint') : t('account.unverified_hint')}
+      >
         {verified ? (
-          <StatusLine testID="session-verified" icon="verified" color={palette.success} text={t('account.verified')} />
+          <StatusLine
+            testID="session-verified"
+            icon="verified"
+            color={palette.success}
+            text={t('account.verified')}
+          />
         ) : (
           <>
-            <StatusLine testID="session-unverified" icon="lock" color={palette.warning} text={t('account.unverified')} />
+            <StatusLine
+              testID="session-unverified"
+              icon="lock"
+              color={palette.warning}
+              text={t('account.unverified')}
+            />
             <Divider />
             <ListRow
               testID="verify-device"
@@ -51,13 +71,23 @@ export default function AccountScreen() {
               onPress={() => router.push(routes.verify(id))}
             />
             <Divider inset={52} />
-            <ListRow testID="verify-key" icon="key" title={t('account.verify_key')} onPress={() => router.push(routes.recovery(id))} />
+            <ListRow
+              testID="verify-key"
+              icon="key"
+              title={t('account.verify_key')}
+              onPress={() => router.push(routes.recovery(id))}
+            />
           </>
         )}
       </ListSection>
 
       <ListSection title={t('recovery.title')} footer={t('recovery.hint')}>
-        <StatusLine testID="recovery-status" icon={recovery.icon} color={recovery.color} text={recovery.text} />
+        <StatusLine
+          testID="recovery-status"
+          icon={recovery.icon}
+          color={recovery.color}
+          text={recovery.text}
+        />
         {security.recovery === 'Enabled' && verified ? (
           <>
             <Divider />

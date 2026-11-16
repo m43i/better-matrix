@@ -41,8 +41,18 @@ function info(participants: CallParticipant[], change: Partial<CallInfo> = {}): 
   };
 }
 
-function person(key: string, cameraId: number | null, screenId: number | null = null): CallParticipant {
-  return { key, person: { id: key, name: key, avatar: null }, muted: false, camera: cameraId, screen: screenId };
+function person(
+  key: string,
+  cameraId: number | null,
+  screenId: number | null = null,
+): CallParticipant {
+  return {
+    key,
+    person: { id: key, name: key, avatar: null },
+    muted: false,
+    camera: cameraId,
+    screen: screenId,
+  };
 }
 
 function focus(): CallView {
@@ -52,7 +62,9 @@ function focus(): CallView {
 /** Hears `levels` in order, one at each `[ms, levels]`. */
 function listen(call: CallInfo, heard: Array<[number, Record<string, number>]>): CallAudio {
   let audio = initialCallAudio();
+
   for (const [at, levels] of heard) audio = hearCall(audio, levels, call.participants, at).audio;
+
   return audio;
 }
 
@@ -78,29 +90,51 @@ describe('speaking', () => {
 describe('pins', () => {
   it('a pin should survive its camera restarting', () => {
     const pin = camera('a');
-    const view = reconcileView({ ...initialCallView(), layout: { type: 'Focus', pin } }, info([person('a', 2)]));
-    expect([view.layout, videoOf(info([person('a', 2)]), pin)]).toEqual([{ type: 'Focus', pin }, 2]);
+
+    const view = reconcileView(
+      { ...initialCallView(), layout: { type: 'Focus', pin } },
+      info([person('a', 2)]),
+    );
+
+    expect([view.layout, videoOf(info([person('a', 2)]), pin)]).toEqual([
+      { type: 'Focus', pin },
+      2,
+    ]);
   });
 
   it('a departed pin should restore the automatic layout', () => {
-    const view = reconcileView({ ...initialCallView(), layout: { type: 'Focus', pin: camera('a') } }, info([]));
+    const view = reconcileView(
+      { ...initialCallView(), layout: { type: 'Focus', pin: camera('a') } },
+      info([]),
+    );
+
     expect(view.layout).toEqual({ type: 'Auto' });
   });
 
   it('an ended pinned share should restore the automatic layout', () => {
-    const view = reconcileView({ ...initialCallView(), layout: { type: 'Focus', pin: screen('a') } }, info([person('a', 1)]));
+    const view = reconcileView(
+      { ...initialCallView(), layout: { type: 'Focus', pin: screen('a') } },
+      info([person('a', 1)]),
+    );
+
     expect(view.layout).toEqual({ type: 'Auto' });
   });
 
   it('an unchanged call should keep the same view', () => {
-    const view = { ...initialCallView(), layout: { type: 'Focus', pin: camera('a') } } satisfies CallView;
+    const view = {
+      ...initialCallView(),
+      layout: { type: 'Focus', pin: camera('a') },
+    } satisfies CallView;
+
     expect(reconcileView(view, info([person('a', 1)]))).toBe(view);
   });
 });
 
 describe('speaker focus', () => {
   const call = info([person('a', 1), person('b', 2)]);
-  const main = (audio: CallAudio) => planCall(call, focus(), SIZE, focusedSpeaker(audio.focus), false).tiles[0]?.key;
+
+  const main = (audio: CallAudio) =>
+    planCall(call, focus(), SIZE, focusedSpeaker(audio.focus), false).tiles[0]?.key;
 
   it('a brief interjection should not switch focus', () => {
     const audio = listen(call, [
@@ -108,6 +142,7 @@ describe('speaker focus', () => {
       [SPEAKER_HOLD_MS, { a: 200 }],
       [SPEAKER_HOLD_MS + 100, { b: 240 }],
     ]);
+
     expect(main(audio)).toEqual(camera('a'));
   });
 
@@ -116,6 +151,7 @@ describe('speaker focus', () => {
       [0, { b: 240 }],
       [SPEAKER_HOLD_MS, { b: 240 }],
     ]);
+
     expect(main(audio)).toEqual(camera('b'));
   });
 
@@ -124,15 +160,18 @@ describe('speaker focus', () => {
       tick * 100,
       { b: tick === 8 || tick === 12 ? 0 : 240 },
     ]);
+
     expect(main(listen(call, ticks))).toEqual(camera('b'));
   });
 
   it('a muted participant should not take focus', () => {
     const muted = info([person('a', 1), { ...person('b', 2), muted: true }]);
+
     const audio = listen(muted, [
       [0, { b: 240 }],
       [SPEAKER_HOLD_MS, { b: 240 }],
     ]);
+
     expect(focusedSpeaker(audio.focus)).toBeNull();
   });
 
@@ -141,6 +180,7 @@ describe('speaker focus', () => {
       [0, { b: 240 }],
       [SPEAKER_HOLD_MS, { b: 240 }],
     ]);
+
     const after = hearCall(audio, {}, [person('a', 1)], SPEAKER_HOLD_MS + 100);
     expect([after.changed, focusedSpeaker(after.audio.focus)]).toEqual([true, null]);
   });
@@ -169,12 +209,17 @@ describe('self-view and fit', () => {
   it('a landscape camera should fill its tile until asked for the full video', () => {
     const call = info([person('a', 1)]);
     const view = toggledFit(call, initialCallView(), camera('a'));
-    expect([showsFullVideo(call, initialCallView(), camera('a')), showsFullVideo(call, view, camera('a'))]).toEqual([false, true]);
+    expect([
+      showsFullVideo(call, initialCallView(), camera('a')),
+      showsFullVideo(call, view, camera('a')),
+    ]).toEqual([false, true]);
   });
 
   it('a shared screen should always show its full image', () => {
     const call = info([person('a', 1, 3)]);
-    expect(showsFullVideo(call, { ...initialCallView(), fullVideo: { 'screen:a': false } }, screen('a'))).toBe(true);
+    expect(
+      showsFullVideo(call, { ...initialCallView(), fullVideo: { 'screen:a': false } }, screen('a')),
+    ).toBe(true);
   });
 });
 
@@ -183,14 +228,20 @@ describe('paging and watching', () => {
     const call = info([person('a', 1, 3), person('b', 2)]);
     let view: CallView = { ...withLayout(initialCallView(), { type: 'Grid' }), chat: true };
     const seen: CallTile[] = [];
+
     for (let i = 0; i < 4; i++) {
       const planned = planCall(call, view, [360, 200], null, true);
       expect(planned.tiles).toHaveLength(1);
       seen.push(planned.tiles[0]!.key);
       view = paged(view, planned, true);
     }
+
     expect(new Set(seen.map((t) => `${t.screen}:${t.participant}`))).toEqual(
-      new Set([camera('a'), camera('b'), screen('a'), camera('')].map((t) => `${t.screen}:${t.participant}`)),
+      new Set(
+        [camera('a'), camera('b'), screen('a'), camera('')].map(
+          (t) => `${t.screen}:${t.participant}`,
+        ),
+      ),
     );
   });
 
@@ -216,7 +267,9 @@ describe('paging and watching', () => {
 
   it('a compact voice call should page through faces rather than one at a time', () => {
     const call = info([person('a', null), person('b', null)], { video: false });
-    expect(planCall(call, initialCallView(), [360, 110], null, true).tiles.length).toBeGreaterThan(1);
+    expect(planCall(call, initialCallView(), [360, 110], null, true).tiles.length).toBeGreaterThan(
+      1,
+    );
   });
 
   it('paging past the last page should stay on it', () => {

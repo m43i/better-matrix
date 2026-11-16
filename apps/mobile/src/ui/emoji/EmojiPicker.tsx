@@ -7,7 +7,15 @@ import { useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 
 import { type Key, t } from '../../i18n';
-import { type Emoji, emojiByGroup, emojiLabel, type Group, QUICK, searchEmoji } from '../../state/emoji';
+import {
+  type Emoji,
+  emojiByGroup,
+  emojiLabel,
+  type Group,
+  GROUPS,
+  QUICK,
+  searchEmoji,
+} from '../../state/emoji';
 import { shallow, useStore } from '../../state/react';
 import { font } from '../../theme/palette';
 import { EmptyState } from '../components';
@@ -35,15 +43,21 @@ type Item =
 
 const CELL = 46;
 
-function rows(section: Section, emoji: ReadonlyArray<{ emoji: string; label: string }>, columns: number): Item[] {
+function rows(
+  section: Section,
+  emoji: ReadonlyArray<{ emoji: string; label: string }>,
+  columns: number,
+): Item[] {
   const items: Item[] = [];
+
   for (let i = 0; i < emoji.length; i += columns) {
     items.push({ type: 'row', id: `${section}-${i}`, section, emoji: emoji.slice(i, i + columns) });
   }
+
   return items;
 }
 
-function labelled(emoji: Emoji): { emoji: string; label: string } {
+function labelled(emoji: Emoji) {
   return { emoji: emoji.emoji, label: emoji.label };
 }
 
@@ -57,19 +71,39 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
   const columns = Math.max(6, Math.floor((width - 16) / CELL));
 
   const groups = useMemo(() => emojiByGroup(), []);
+
   const { items, headers } = useMemo(() => {
     const all: Item[] = [];
     const at = new Map<Section, number>();
-    const first = (recent.length > 0 ? recent : QUICK).map((emoji) => ({ emoji, label: emojiLabel(emoji) ?? emoji }));
-    const sections: Array<{ section: Section; title: string; emoji: Array<{ emoji: string; label: string }> }> = [
-      { section: 'recent', title: recent.length > 0 ? t('mobile.composer.emoji_recent') : t('emoji.quick'), emoji: first },
-      ...groups.map((g) => ({ section: g.group, title: t(SECTIONS[g.group].title), emoji: g.emoji.map(labelled) })),
+
+    const first = (recent.length > 0 ? recent : QUICK).map((emoji) => ({
+      emoji,
+      label: emojiLabel(emoji) ?? emoji,
+    }));
+
+    const sections: Array<{
+      section: Section;
+      title: string;
+      emoji: Array<{ emoji: string; label: string }>;
+    }> = [
+      {
+        section: 'recent',
+        title: recent.length > 0 ? t('mobile.composer.emoji_recent') : t('emoji.quick'),
+        emoji: first,
+      },
+      ...groups.map((g) => ({
+        section: g.group,
+        title: t(SECTIONS[g.group].title),
+        emoji: g.emoji.map(labelled),
+      })),
     ];
+
     for (const { section, title, emoji } of sections) {
       at.set(section, all.length);
       all.push({ type: 'header', id: `header-${section}`, section, title });
       all.push(...rows(section, emoji, columns));
     }
+
     return { items: all, headers: at };
   }, [groups, recent, columns]);
 
@@ -83,7 +117,10 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
       accessibilityLabel={emoji.label}
       onPress={() => onPick(emoji.emoji)}
       android_ripple={{ color: palette.hover, borderless: true, radius: CELL / 2 }}
-      style={({ pressed }) => [styles.cell, { backgroundColor: pressed ? palette.hover : 'transparent' }]}
+      style={({ pressed }) => [
+        styles.cell,
+        { backgroundColor: pressed ? palette.hover : 'transparent' },
+      ]}
     >
       <Text style={styles.glyph} allowFontScaling={false}>
         {emoji.emoji}
@@ -93,18 +130,22 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
 
   const onViewable = ({ viewableItems }: { viewableItems: Array<ViewToken<Item>> }) => {
     const top = viewableItems[0]?.item;
+
     if (top) setCurrent(top.section);
   };
 
   const jump = (section: Section) => {
     const index = headers.get(section);
     setCurrent(section);
+
     if (index !== undefined) void list.current?.scrollToIndex({ index, animated: false });
   };
 
   return (
     <View style={[styles.picker, { backgroundColor: palette.bg }]}>
-      <View style={[styles.search, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
+      <View
+        style={[styles.search, { backgroundColor: palette.surface, borderColor: palette.divider }]}
+      >
         <Icon name="search" size={18} color={palette.textMuted} />
         <TextInput
           testID="emoji-search"
@@ -121,6 +162,7 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
           // Enter picks the first match, as on the desktop.
           onSubmitEditing={() => {
             const first = results?.[0];
+
             if (first) onPick(first.emoji);
           }}
           style={[font.body, styles.searchInput, { color: palette.text }]}
@@ -135,13 +177,17 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
             data={rows('recent', results, columns)}
             keyExtractor={(item) => item.id}
             keyboardShouldPersistTaps="handled"
-            renderItem={({ item }) => (item.type === 'row' ? <View style={styles.row}>{item.emoji.map((e) => cell(e, 'found'))}</View> : null)}
+            renderItem={({ item }) =>
+              item.type === 'row' ? (
+                <View style={styles.row}>{item.emoji.map((e) => cell(e, 'found'))}</View>
+              ) : null
+            }
           />
         )
       ) : (
         <>
           <View style={[styles.tabs, { borderBottomColor: palette.divider }]}>
-            {(Object.keys(SECTIONS) as Section[]).map((section) => (
+            {(['recent', ...GROUPS] as const).map((section) => (
               <Pressable
                 key={section}
                 testID={`emoji-tab-${section}`}
@@ -150,9 +196,16 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
                 accessibilityLabel={t(SECTIONS[section].title)}
                 onPress={() => jump(section)}
                 hitSlop={4}
-                style={[styles.tab, current === section ? { borderBottomColor: palette.accent } : null]}
+                style={[
+                  styles.tab,
+                  current === section ? { borderBottomColor: palette.accent } : null,
+                ]}
               >
-                <Icon name={SECTIONS[section].icon} size={18} color={current === section ? palette.accent : palette.textMuted} />
+                <Icon
+                  name={SECTIONS[section].icon}
+                  size={18}
+                  color={current === section ? palette.accent : palette.textMuted}
+                />
               </Pressable>
             ))}
           </View>
@@ -166,7 +219,9 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
             onViewableItemsChanged={onViewable}
             renderItem={({ item }) =>
               item.type === 'header' ? (
-                <Text style={[font.section, styles.header, { color: palette.textMuted }]}>{item.title}</Text>
+                <Text style={[font.section, styles.header, { color: palette.textMuted }]}>
+                  {item.title}
+                </Text>
               ) : (
                 <View style={styles.row}>{item.emoji.map((e) => cell(e, item.section))}</View>
               )
@@ -197,9 +252,20 @@ const styles = StyleSheet.create({
     marginTop: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  tab: { paddingVertical: 8, paddingHorizontal: 4, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tab: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
   header: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4 },
   row: { flexDirection: 'row', paddingHorizontal: 8 },
-  cell: { width: CELL, height: CELL, borderRadius: CELL / 2, alignItems: 'center', justifyContent: 'center' },
+  cell: {
+    width: CELL,
+    height: CELL,
+    borderRadius: CELL / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   glyph: { fontSize: 28 },
 });

@@ -21,10 +21,20 @@ import { usePalette } from '../../ui/theme';
 export default function TabsLayout() {
   const palette = usePalette();
   const summary = useStore((s) => activeAccount(s)?.summary);
+
   // Another account has something new: a dot on the account tab, as the desktop's rail shows.
-  const othersUnread = useStore((s) => s.accounts.some((a) => a.summary.id !== s.active && hasUnread(a, 'home')));
-  const picture = useMedia(summary?.id ?? null, Platform.OS === 'ios' ? summary?.avatar : null, AVATAR_SIZE);
+  const othersUnread = useStore((s) =>
+    s.accounts.some((a) => a.summary.id !== s.active && hasUnread(a, 'home')),
+  );
+
+  const picture = useMedia(
+    summary?.id ?? null,
+    Platform.OS === 'ios' ? summary?.avatar : null,
+    AVATAR_SIZE,
+  );
+
   const name = summary ? summary.display_name || summary.id : t('mobile.tabs.you');
+
   return (
     <NativeTabs
       backgroundColor={palette.bg}
@@ -41,7 +51,10 @@ export default function TabsLayout() {
       <NativeTabs.Trigger name="dms">
         <NativeTabs.Trigger.Label>{t('mobile.tabs.dms')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
-          sf={{ default: 'bubble.left.and.bubble.right', selected: 'bubble.left.and.bubble.right.fill' }}
+          sf={{
+            default: 'bubble.left.and.bubble.right',
+            selected: 'bubble.left.and.bubble.right.fill',
+          }}
           md="forum"
         />
       </NativeTabs.Trigger>

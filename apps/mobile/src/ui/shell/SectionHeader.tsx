@@ -26,6 +26,7 @@ export function SectionHeader({
   onMenu?: () => void;
 }) {
   const palette = usePalette();
+
   return (
     <View style={{ backgroundColor: palette.bg }}>
       <Touchable
@@ -39,7 +40,11 @@ export function SectionHeader({
         delayLongPress={350}
         style={styles.header}
       >
-        <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} size={14} color={palette.textMuted} />
+        <Icon
+          name={collapsed ? 'chevronRight' : 'chevronDown'}
+          size={14}
+          color={palette.textMuted}
+        />
         <Text style={[font.section, styles.title, { color: palette.textMuted }]} numberOfLines={1}>
           {title}
         </Text>
@@ -52,7 +57,14 @@ export function SectionHeader({
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 18, paddingTop: 16, paddingBottom: 6 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 6,
+  },
   title: { flex: 1 },
   dot: { width: 8, height: 8, borderRadius: 4 },
 });

@@ -8,7 +8,9 @@ export function isOAuthRedirect(path: string): boolean {
   // `org.example.bettermatrix:/oauth` → `/oauth`
   const redirectPath = OAUTH_REDIRECT.slice(OAUTH_REDIRECT.indexOf(':') + 1);
   const ends = (rest: string) => /^([/?#]|$)/.test(rest);
+
   if (path.startsWith(OAUTH_REDIRECT)) return ends(path.slice(OAUTH_REDIRECT.length));
   const bare = `/${path.replace(/^\/+/, '')}`;
+
   return bare.startsWith(redirectPath) && ends(bare.slice(redirectPath.length));
 }

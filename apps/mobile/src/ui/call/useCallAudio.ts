@@ -31,9 +31,12 @@ class Follower {
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
+
     if (!this.stop) this.start();
+
     return () => {
       this.listeners.delete(listener);
+
       if (this.listeners.size === 0) {
         this.stop?.();
         this.stop = null;
@@ -45,13 +48,16 @@ class Follower {
     let levels = this.store.getState().call.levels;
     let current = this.store.getState().call.current;
     this.tick();
+
     const unsubscribe = this.store.subscribe(() => {
       const state = this.store.getState().call;
+
       if (state.levels === levels && state.current === current) return;
       levels = state.levels;
       current = state.current;
       this.tick();
     });
+
     // Someone going quiet stops speaking after the hold, even if no new levels come.
     const timer = setInterval(() => this.tick(), 200);
     this.stop = () => {
@@ -63,19 +69,26 @@ class Follower {
   private tick(): void {
     const { current, levels } = this.store.getState().call;
     const call = current?.call ?? null;
+
     if (call !== this.call) {
       this.call = call;
       this.audio = initialCallAudio();
       this.publish();
     }
+
     if (!current) return;
     const heard = hearCall(this.audio, levels, current.participants, Date.now());
     this.audio = heard.audio;
+
     if (heard.changed) this.publish();
   }
 
   private publish(): void {
-    this.heard = { speaking: new Set(this.audio.speaking), speaker: focusedSpeaker(this.audio.focus) };
+    this.heard = {
+      speaking: new Set(this.audio.speaking),
+      speaker: focusedSpeaker(this.audio.focus),
+    };
+
     for (const listener of this.listeners) listener();
   }
 }
@@ -86,9 +99,11 @@ const followers = new WeakMap<Store, Follower>();
 export function useCallAudio(): HeardCall {
   const store = useAppStore();
   let follower = followers.get(store);
+
   if (!follower) {
     follower = new Follower(store);
     followers.set(store, follower);
   }
+
   return useSyncExternalStore(follower.subscribe, follower.snapshot);
 }

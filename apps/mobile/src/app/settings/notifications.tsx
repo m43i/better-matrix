@@ -26,10 +26,12 @@ function useNotificationsAllowed(): boolean | null {
         if (live) setAllowed(permission.granted);
       })
       .catch(() => undefined);
+
     return () => {
       live = false;
     };
   }, []);
+
   return allowed;
 }
 
@@ -37,14 +39,21 @@ export default function NotificationsScreen() {
   const store = useAppStore();
   const ringSound = useStore((s) => s.settings.ringSound);
   const accounts = useStore((s) => s.accounts.map((a) => a.summary), shallow);
-  const push = useStore((s) => ({ pushEnabled: s.settings.pushEnabled, pushOff: s.settings.pushOff }), shallow);
+
+  const push = useStore(
+    (s) => ({ pushEnabled: s.settings.pushEnabled, pushOff: s.settings.pushOff }),
+    shallow,
+  );
+
   const pushReady = pushUnavailable() === null;
   const allowed = useNotificationsAllowed();
+
   const pushFooter = !pushReady
     ? t('mobile.push.unavailable')
     : allowed === false
       ? t('mobile.push.denied')
       : t('mobile.push.device_hint');
+
   return (
     <SettingsPage title={t('settings.notifications')} testID="notification-settings">
       <ListSection footer={pushFooter}>
@@ -52,10 +61,17 @@ export default function NotificationsScreen() {
           testID="push-device"
           icon="bell"
           title={t('mobile.push.device')}
-          toggle={pushReady ? { value: push.pushEnabled, onChange: (on) => setPushEnabled(store, on) } : undefined}
+          toggle={
+            pushReady
+              ? { value: push.pushEnabled, onChange: (on) => setPushEnabled(store, on) }
+              : undefined
+          }
         />
       </ListSection>
-      <ListSection title={t('settings.ring')} footer={ringSound ? t('settings.ring_on_hint') : t('settings.ring_off_hint')}>
+      <ListSection
+        title={t('settings.ring')}
+        footer={ringSound ? t('settings.ring_on_hint') : t('settings.ring_off_hint')}
+      >
         <ListRow
           testID="ring-sound"
           icon="call"
@@ -67,12 +83,22 @@ export default function NotificationsScreen() {
         <ListSection
           key={summary.id}
           title={accounts.length > 1 ? summary.display_name : t('settings.notifications')}
-          footer={index === accounts.length - 1 ? t('mobile.accounts.notifications_hint') : undefined}
+          footer={
+            index === accounts.length - 1 ? t('mobile.accounts.notifications_hint') : undefined
+          }
         >
           {accounts.length > 1 ? (
             <>
               <ListRow
-                leading={<Avatar account={summary.id} id={summary.id} name={summary.display_name} media={summary.avatar} size={28} />}
+                leading={
+                  <Avatar
+                    account={summary.id}
+                    id={summary.id}
+                    name={summary.display_name}
+                    media={summary.avatar}
+                    size={28}
+                  />
+                }
                 title={summary.display_name}
                 subtitle={summary.id}
               />
@@ -86,7 +112,10 @@ export default function NotificationsScreen() {
                 icon="bell"
                 title={t('mobile.push.account')}
                 subtitle={t('mobile.push.account_hint')}
-                toggle={{ value: accountPushOn(push, summary.id), onChange: (on) => setAccountPush(store, summary.id, on) }}
+                toggle={{
+                  value: accountPushOn(push, summary.id),
+                  onChange: (on) => setAccountPush(store, summary.id, on),
+                }}
               />
               <Divider />
             </>
@@ -96,7 +125,9 @@ export default function NotificationsScreen() {
               {i > 0 ? <Divider inset={52} /> : null}
               <ListRow
                 testID={`default-${summary.id}-${mode.id}`}
-                icon={mode.id === 'AllMessages' ? 'bell' : mode.id === 'MentionsOnly' ? 'at' : 'bellOff'}
+                icon={
+                  mode.id === 'AllMessages' ? 'bell' : mode.id === 'MentionsOnly' ? 'at' : 'bellOff'
+                }
                 title={t(mode.label)}
                 subtitle={t(mode.hint)}
                 selected={summary.default_notifications === mode.id}

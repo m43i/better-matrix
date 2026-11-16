@@ -22,20 +22,25 @@ const REDIRECT_GRACE_MS = 1500;
 export const authBrowser: AuthBrowser = async (url, redirect) => {
   let redirected: string | null = null;
   let heard: (() => void) | null = null;
+
   const subscription = Linking.addEventListener('url', (event) => {
     if (!event.url.startsWith(redirect)) return;
     redirected = event.url;
     heard?.();
   });
+
   try {
     const result = await WebBrowser.openAuthSessionAsync(url, redirect);
+
     if (result.type === 'success') return result.url;
+
     if (redirected === null) {
       await new Promise<void>((resolve) => {
         heard = resolve;
         setTimeout(resolve, REDIRECT_GRACE_MS);
       });
     }
+
     return redirected;
   } finally {
     subscription.remove();
@@ -44,7 +49,7 @@ export const authBrowser: AuthBrowser = async (url, redirect) => {
 
 /** Opens a page in the in-app browser; a failure becomes a notice. */
 export function openInBrowser(store: Store, url: string): void {
-  WebBrowser.openBrowserAsync(url).catch((error: unknown) => {
-    store.update((s) => addNotice(s, t('notice.browser', { error: String(error) })));
+  WebBrowser.openBrowserAsync(url).catch((cause: unknown) => {
+    store.update((s) => addNotice(s, t('notice.browser', { error: String(cause) })));
   });
 }

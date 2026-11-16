@@ -12,21 +12,42 @@ import { Avatar } from '../Avatar';
 import { usePalette } from '../theme';
 
 const FACES = 3;
+
 const FACE = 16;
+
 const NOBODY: Person[] = [];
 
 export function TypingLine({ account, roomId }: { account: AccountId; roomId: string }) {
   const palette = usePalette();
-  const people = useStore((s) => (accountOf(s, account)?.typing[roomId] ?? NOBODY).filter((p) => p.id !== account), shallow);
+
+  const people = useStore(
+    (s) => (accountOf(s, account)?.typing[roomId] ?? NOBODY).filter((p) => p.id !== account),
+    shallow,
+  );
+
   const sentence = typingText(people);
+
   return (
-    <View style={styles.line} accessibilityLiveRegion="polite" accessibilityLabel={sentence || undefined}>
+    <View
+      style={styles.line}
+      accessibilityLiveRegion="polite"
+      accessibilityLabel={sentence || undefined}
+    >
       {people.length > 0 ? (
         <>
           <View style={styles.faces}>
             {people.slice(0, FACES).map((person, index) => (
-              <View key={person.id} style={[styles.face, { marginLeft: index === 0 ? 0 : -5, borderColor: palette.bg }]}>
-                <Avatar account={account} id={person.id} name={person.name} media={person.avatar} size={FACE} />
+              <View
+                key={person.id}
+                style={[styles.face, { marginLeft: index === 0 ? 0 : -5, borderColor: palette.bg }]}
+              >
+                <Avatar
+                  account={account}
+                  id={person.id}
+                  name={person.name}
+                  media={person.avatar}
+                  size={FACE}
+                />
               </View>
             ))}
           </View>

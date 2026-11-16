@@ -9,5 +9,10 @@ declare const Bun: {
 };
 
 const config = configFrom(Bun.env);
-const server = Bun.serve({ port: Number(Bun.env.PORT ?? 5000), fetch: (request) => handle(request, config) });
+
+const server = Bun.serve({
+  port: Number(Bun.env.PORT ?? 5000),
+  fetch: (request) => handle(request, config),
+});
+
 console.log(`push gateway listening on port ${server.port} for ${config.appIds.join(', ')}`);

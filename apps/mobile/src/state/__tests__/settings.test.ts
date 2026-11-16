@@ -6,7 +6,10 @@ describe('parseSettings', () => {
   });
 
   it('saved push choices should be read back', () => {
-    const saved = parseSettings(JSON.stringify({ ...DEFAULT_SETTINGS, pushEnabled: false, pushOff: ['@a:x'] }));
+    const saved = parseSettings(
+      JSON.stringify({ ...DEFAULT_SETTINGS, pushEnabled: false, pushOff: ['@a:x'] }),
+    );
+
     expect([saved.pushEnabled, saved.pushOff]).toEqual([false, ['@a:x']]);
   });
 

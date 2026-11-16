@@ -51,8 +51,11 @@ function isStart(entry: TimelineEntry): boolean {
 /** Whether there is nothing older to load: the room's start, or a thread's root, is in. */
 export function atStart(timeline: Timeline, thread: string | null): boolean {
   if (timeline.reachedStart) return true;
+
   return timeline.entries.some((entry) =>
-    thread === null ? isStart(entry) : entry.kind.type === 'Message' && entry.kind.data.event_id === thread,
+    thread === null
+      ? isStart(entry)
+      : entry.kind.type === 'Message' && entry.kind.data.event_id === thread,
   );
 }
 
@@ -69,57 +72,88 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
   const rows: Row[] = [];
   const prefix = inThread ? 'thread-' : '';
   const hasStart = entries.some(isStart);
-  if (!inThread && timeline.reachedStart && !hasStart) rows.push({ kind: 'start', key: 'timeline-start' });
+
+  if (!inThread && timeline.reachedStart && !hasStart)
+    rows.push({ kind: 'start', key: 'timeline-start' });
+
   if (timeline.historyError !== null) {
-    rows.push({ kind: 'historyFailed', key: `${prefix}timeline-history-failed`, error: timeline.historyError });
+    rows.push({
+      kind: 'historyFailed',
+      key: `${prefix}timeline-history-failed`,
+      error: timeline.historyError,
+    });
   } else if (timeline.loadingOlder && !atStart(timeline, thread)) {
     rows.push({ kind: 'loading', key: `${prefix}timeline-loading` });
   }
-  const rootLoaded = inThread && entries.some((e) => e.kind.type === 'Message' && e.kind.data.event_id === thread);
+
+  const rootLoaded =
+    inThread && entries.some((e) => e.kind.type === 'Message' && e.kind.data.event_id === thread);
+
   // The thread's own copy of its root may lack the summary: the replies loaded count too.
   const loadedReplies = inThread
     ? entries.filter((e) => e.kind.type === 'Message' && e.kind.data.event_id !== thread).length
     : 0;
+
   let previous: Message | null = null;
+
   const pushMessage = (key: string, message: Message) => {
     const prev: Message | null = previous;
+
     const continues =
       prev !== null &&
       prev.sender_id === message.sender_id &&
       message.timestamp_ms - prev.timestamp_ms < GROUP_WINDOW_MS &&
       message.reply_to === null;
+
     rows.push({ kind: 'message', key, message, continues, latestCall: false });
     previous = message;
+
     if (inThread && message.event_id === thread) {
-      rows.push({ kind: 'replies', key: 'thread-replies', count: Math.max(message.thread?.replies ?? 0, loadedReplies) });
+      rows.push({
+        kind: 'replies',
+        key: 'thread-replies',
+        count: Math.max(message.thread?.replies ?? 0, loadedReplies),
+      });
       // Replies start their own run under the root.
       previous = null;
     }
   };
+
   if (inThread && !rootLoaded && options.root) pushMessage(`${prefix}msg-root`, options.root);
   const marker = options.marker;
   let index = 0;
+
   for (let entry = entries[0]; entry !== undefined; entry = entries[index]) {
     index += 1;
     const kind = entry.kind;
+
     if (marker && entry.id === marker.boundary) {
       rows.push({ kind: 'new', key: `${prefix}new-marker`, fading: marker.fading });
     }
+
     switch (kind.type) {
       case 'RoomEvent': {
         const events = [kind.data];
         // Hidden entries between joins don't break the run.
         // A run stops at the "New" divider, which stands between two of its events.
         const atMarker = () => marker != null && entries[index]?.id === marker.boundary;
-        for (let next = entries[index]?.kind; groups(kind.data) && next !== undefined && !atMarker(); next = entries[index]?.kind) {
-          if (next.type === 'RoomEvent' && next.data.change.type === kind.data.change.type) events.push(next.data);
+
+        for (
+          let next = entries[index]?.kind;
+          groups(kind.data) && next !== undefined && !atMarker();
+          next = entries[index]?.kind
+        ) {
+          if (next.type === 'RoomEvent' && next.data.change.type === kind.data.change.type)
+            events.push(next.data);
           else if (next.type !== 'Other') break;
           index += 1;
         }
+
         rows.push({ kind: 'events', key: `${prefix}${entry.id}`, events });
         previous = null;
         break;
       }
+
       case 'Message':
         pushMessage(`${prefix}msg-${entry.id}`, kind.data);
         break;
@@ -128,25 +162,30 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
         previous = null;
         break;
       case 'ReadMarker':
-        if (marker === undefined) rows.push({ kind: 'new', key: `${prefix}${entry.id}`, fading: false });
+        if (marker === undefined)
+          rows.push({ kind: 'new', key: `${prefix}${entry.id}`, fading: false });
         break;
       case 'Start':
         if (!inThread) {
           rows.push({ kind: 'start', key: entry.id });
           previous = null;
         }
+
         break;
       case 'Other':
         break;
     }
   }
+
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i];
+
     if (row?.kind === 'message' && row.message.content.type === 'Call') {
       rows[i] = { ...row, latestCall: true };
       break;
     }
   }
+
   return rows;
 }
 
@@ -162,8 +201,11 @@ export function rowOf(rows: readonly Row[], eventId: string): number {
 export function newestSent(entries: readonly TimelineEntry[]): string | null {
   for (let i = entries.length - 1; i >= 0; i--) {
     const kind = entries[i]?.kind;
-    if (kind?.type === 'Message' && !kind.data.pending && !kind.data.event_id.startsWith('local:')) return kind.data.event_id;
+
+    if (kind?.type === 'Message' && !kind.data.pending && !kind.data.event_id.startsWith('local:'))
+      return kind.data.event_id;
   }
+
   return null;
 }
 
@@ -188,6 +230,8 @@ export function shouldMarkRead(options: {
   lastMarked: Marked | null;
 }): boolean {
   const { focused, positioned, atLatest, newest, fullyRead, lastMarked } = options;
+
   if (!focused || !positioned || !atLatest || newest === null) return false;
+
   return newest !== lastMarked?.eventId || (fullyRead && !lastMarked.fullyRead);
 }

@@ -30,11 +30,18 @@ export default function MessageActionsScreen() {
     eventId: string;
     thread?: string;
   }>();
+
   const palette = usePalette();
   const store = useAppStore();
-  const key = useMemo(() => (thread ? threadKey(roomId, thread) : roomKey(roomId)), [roomId, thread]);
+
+  const key = useMemo(
+    () => (thread ? threadKey(roomId, thread) : roomKey(roomId)),
+    [roomId, thread],
+  );
+
   const message = useStore((s) => findMessage(timeline(s, account, key).entries, eventId));
   const [busy, setBusy] = useState<'save' | 'share' | null>(null);
+
   if (!message) {
     return (
       <View style={[styles.sheet, { backgroundColor: palette.bg }]}>
@@ -42,23 +49,32 @@ export default function MessageActionsScreen() {
       </View>
     );
   }
+
   const can = messageActions(message, account, thread !== undefined);
   const text = messageText(message);
   const attachment = message.content.type === 'Attachment' ? message.content.data : null;
   const close = () => router.back();
+
   const reactWith = (emoji: string) => {
     react(store, account, key, message.event_id, emoji);
     close();
   };
+
   const file = (kind: 'save' | 'share') => {
     if (!attachment) return;
     setBusy(kind);
-    const done = kind === 'save' ? saveAttachment(store, account, attachment) : shareAttachment(store, account, attachment);
+
+    const done =
+      kind === 'save'
+        ? saveAttachment(store, account, attachment)
+        : shareAttachment(store, account, attachment);
+
     void done.finally(() => {
       setBusy(null);
       close();
     });
   };
+
   const askDelete = () =>
     Alert.alert(t('confirm.delete_message_title'), t('confirm.delete_message_body'), [
       { text: t('common.cancel'), style: 'cancel' },
@@ -71,12 +87,18 @@ export default function MessageActionsScreen() {
         },
       },
     ]);
+
   return (
-    <ScrollView style={{ backgroundColor: palette.bg }} contentContainerStyle={styles.sheet} testID="message-actions">
+    <ScrollView
+      style={{ backgroundColor: palette.bg }}
+      contentContainerStyle={styles.sheet}
+      testID="message-actions"
+    >
       {can.react ? (
         <View style={styles.quick}>
           {QUICK.map((emoji) => {
             const mine = message.reactions.some((r) => r.key === emoji && r.mine);
+
             return (
               <Pressable
                 key={emoji}
@@ -84,14 +106,25 @@ export default function MessageActionsScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={emoji}
                 accessibilityState={{ selected: mine }}
-                style={[styles.emoji, { backgroundColor: mine ? `${palette.accent}33` : palette.surface }]}
+                style={[
+                  styles.emoji,
+                  { backgroundColor: mine ? `${palette.accent}33` : palette.surface },
+                ]}
               >
                 <Text style={styles.emojiText}>{emoji}</Text>
               </Pressable>
             );
           })}
           <Pressable
-            onPress={() => router.replace(routes.emoji(account, roomId, thread ? { eventId: message.event_id, thread } : { eventId: message.event_id }))}
+            onPress={() =>
+              router.replace(
+                routes.emoji(
+                  account,
+                  roomId,
+                  thread ? { eventId: message.event_id, thread } : { eventId: message.event_id },
+                ),
+              )
+            }
             accessibilityRole="button"
             accessibilityLabel={t('mobile.conversation.more_reactions')}
             style={[styles.emoji, { backgroundColor: palette.surface }]}
@@ -101,7 +134,9 @@ export default function MessageActionsScreen() {
           </Pressable>
         </View>
       ) : null}
-      <View style={[styles.list, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
+      <View
+        style={[styles.list, { backgroundColor: palette.surface, borderColor: palette.divider }]}
+      >
         {can.reply ? (
           <ListRow
             icon="reply"
@@ -185,7 +220,14 @@ export default function MessageActionsScreen() {
         {can.delete ? (
           <>
             <Divider inset={52} />
-            <ListRow icon="trash" title={t('actions.delete')} danger chevron={false} testID="message-actions-delete" onPress={askDelete} />
+            <ListRow
+              icon="trash"
+              title={t('actions.delete')}
+              danger
+              chevron={false}
+              testID="message-actions-delete"
+              onPress={askDelete}
+            />
           </>
         ) : null}
       </View>
@@ -196,7 +238,13 @@ export default function MessageActionsScreen() {
 const styles = StyleSheet.create({
   sheet: { paddingTop: 20, paddingBottom: 32, paddingHorizontal: 16, gap: 16 },
   quick: { flexDirection: 'row', justifyContent: 'space-between' },
-  emoji: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  emoji: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   emojiText: { fontSize: 24 },
   list: { borderRadius: 12, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
 });

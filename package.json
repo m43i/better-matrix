@@ -1,7 +1,6 @@
 {
   "name": "better-matrix",
   "private": true,
-  "packageManager": "bun@1.4.4",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -9,12 +8,12 @@
   "scripts": {
     "build": "turbo run build",
     "build:release": "turbo run build -- --release",
-    "dev": "turbo run dev --filter=better-matrix-desktop",
+    "dev": "bun run dev:desktop",
     "test": "turbo run test --filter=better-matrix-cargo --filter=better-matrix-mobile --filter=@better-matrix/matrix-native --filter=@better-matrix/push-gateway",
     "check": "turbo run check --filter=better-matrix-cargo",
-    "lint": "turbo run lint --filter=better-matrix-cargo && bun run typecheck && bun run format:check && bun run third-party:check",
-    "format": "turbo run format --filter=better-matrix-cargo",
-    "format:check": "turbo run format --filter=better-matrix-cargo -- --check",
+    "lint": "bun run lint:js && turbo run lint --filter=better-matrix-cargo && bun run typecheck && bun run format:check && bun run third-party:check",
+    "format": "oxfmt --write . && turbo run format --filter=better-matrix-cargo",
+    "format:check": "oxfmt --check . && turbo run format --filter=better-matrix-cargo -- --check",
     "build:windows": "bun scripts/build-windows.ts",
     "install:linux": "bun scripts/install-linux.ts",
     "agent-tools": "bun scripts/sync-agent-tools.ts",
@@ -24,11 +23,21 @@
     "typecheck": "turbo run typecheck --filter=better-matrix-mobile --filter=@better-matrix/matrix-native --filter=@better-matrix/push-gateway",
     "bindings:types": "UPDATE_BINDINGS=1 cargo test -p matrix-ffi typescript",
     "ubrn:android": "bun --cwd packages/matrix-native ubrn:android",
-    "ubrn:ios": "bun --cwd packages/matrix-native ubrn:ios"
+    "ubrn:ios": "bun --cwd packages/matrix-native ubrn:ios",
+    "lint:js": "oxlint --deny-warnings .",
+    "lint:fix": "oxlint --fix --deny-warnings .",
+    "dev:desktop": "turbo run dev --filter=better-matrix-desktop",
+    "prebuild": "bun --cwd apps/mobile prebuild",
+    "dev:ios": "bun run ubrn:ios && bun --cwd apps/mobile ios",
+    "dev:android": "bun run ubrn:android && bun --cwd apps/mobile android"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.94.0",
+    "oxfmt": "0.79.0",
+    "oxlint": "1.94.0",
     "turbo": "2.11.11"
   },
+  "packageManager": "bun@1.4.4",
   "patchedDependencies": {
     "expo-router@58.0.31": "patches/expo-router@58.0.31.patch"
   }

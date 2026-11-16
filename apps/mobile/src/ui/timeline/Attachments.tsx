@@ -6,7 +6,14 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { type ReactNode, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { t } from '../../i18n';
 import { fetchOriginal } from '../../state/actions/timeline';
@@ -26,19 +33,38 @@ import { shareAttachment } from './files';
 const ROW_INSET = 16 + 36 + 10 + 16;
 
 /** The largest box an image or video takes: the row's width, up to the desktop's 360 × 280. */
-function useMediaBox(): { width: number; height: number } {
+function useMediaBox() {
   const { width } = useWindowDimensions();
+
   return { width: Math.min(width - ROW_INSET, 360), height: 280 };
 }
 
-export function AttachmentView({ message, attachment }: { message: Message; attachment: Attachment }) {
+export function AttachmentView({
+  message,
+  attachment,
+}: {
+  message: Message;
+  attachment: Attachment;
+}) {
   switch (attachment.kind) {
     case 'Image':
-      return attachmentPreview(attachment) ? <ImageAttachment message={message} attachment={attachment} /> : <FileCard attachment={attachment} />;
+      return attachmentPreview(attachment) ? (
+        <ImageAttachment message={message} attachment={attachment} />
+      ) : (
+        <FileCard attachment={attachment} />
+      );
     case 'Video':
-      return attachment.media ? <VideoAttachment message={message} attachment={attachment} /> : <FileCard attachment={attachment} />;
+      return attachment.media ? (
+        <VideoAttachment message={message} attachment={attachment} />
+      ) : (
+        <FileCard attachment={attachment} />
+      );
     case 'Audio':
-      return attachment.media ? <AudioCard key={attachment.media} attachment={attachment} /> : <FileCard attachment={attachment} />;
+      return attachment.media ? (
+        <AudioCard key={attachment.media} attachment={attachment} />
+      ) : (
+        <FileCard attachment={attachment} />
+      );
     case 'File':
       return <FileCard attachment={attachment} />;
   }
@@ -46,7 +72,11 @@ export function AttachmentView({ message, attachment }: { message: Message; atta
 
 function useOpenPreview(message: Message): () => void {
   const { account, timelineKey, thread } = useTimelineContext();
-  return () => router.push(routes.preview(account, timelineKey.room_id, message.event_id, thread ?? undefined));
+
+  return () =>
+    router.push(
+      routes.preview(account, timelineKey.room_id, message.event_id, thread ?? undefined),
+    );
 }
 
 function ImageAttachment({ message, attachment }: { message: Message; attachment: Attachment }) {
@@ -56,12 +86,31 @@ function ImageAttachment({ message, attachment }: { message: Message; attachment
   const uri = useMedia(account, preview?.media ?? null, preview?.size ?? PREVIEW_SIZE);
   const size = previewSize(attachment.dimensions, useMediaBox());
   const open = useOpenPreview(message);
+
   return (
-    <Pressable onPress={open} accessibilityRole="imagebutton" accessibilityLabel={attachment.name} style={styles.media}>
+    <Pressable
+      onPress={open}
+      accessibilityRole="imagebutton"
+      accessibilityLabel={attachment.name}
+      style={styles.media}
+    >
       {uri ? (
-        <Image source={{ uri }} style={[size, styles.rounded]} contentFit="cover" transition={120} recyclingKey={uri} />
+        <Image
+          source={{ uri }}
+          style={[size, styles.rounded]}
+          contentFit="cover"
+          transition={120}
+          recyclingKey={uri}
+        />
       ) : (
-        <View style={[size, styles.rounded, styles.placeholder, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
+        <View
+          style={[
+            size,
+            styles.rounded,
+            styles.placeholder,
+            { backgroundColor: palette.surface, borderColor: palette.divider },
+          ]}
+        >
           <Icon name="image" size={24} color={palette.textMuted} />
         </View>
       )}
@@ -76,6 +125,7 @@ function VideoAttachment({ message, attachment }: { message: Message; attachment
   const poster = useMedia(account, attachment.thumbnail, ORIGINAL);
   const size = previewSize(attachment.dimensions, useMediaBox());
   const open = useOpenPreview(message);
+
   return (
     <Pressable
       onPress={open}
@@ -83,8 +133,21 @@ function VideoAttachment({ message, attachment }: { message: Message; attachment
       accessibilityLabel={`${t('mobile.conversation.play_video')}: ${attachment.name}`}
       style={styles.media}
     >
-      <View style={[size, styles.rounded, styles.placeholder, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
-        {poster ? <Image source={{ uri: poster }} style={[StyleSheet.absoluteFill, styles.rounded]} contentFit="cover" /> : null}
+      <View
+        style={[
+          size,
+          styles.rounded,
+          styles.placeholder,
+          { backgroundColor: palette.surface, borderColor: palette.divider },
+        ]}
+      >
+        {poster ? (
+          <Image
+            source={{ uri: poster }}
+            style={[StyleSheet.absoluteFill, styles.rounded]}
+            contentFit="cover"
+          />
+        ) : null}
         <View style={[styles.play, { backgroundColor: palette.scrim }]}>
           <Icon name="play" size={22} color="#ffffff" />
         </View>
@@ -111,11 +174,16 @@ function Card({
 }) {
   const palette = usePalette();
   const sub = detail ?? (attachment.size !== null ? humanSize(attachment.size) : undefined);
+
   const body = (
     <>
       {leading ?? (
         <View style={[styles.cardIcon, { backgroundColor: `${palette.accent}26` }]}>
-          {busy ? <ActivityIndicator color={palette.accent} /> : <Icon name={icon} size={20} color={palette.accent} />}
+          {busy ? (
+            <ActivityIndicator color={palette.accent} />
+          ) : (
+            <Icon name={icon} size={20} color={palette.accent} />
+          )}
         </View>
       )}
       <View style={styles.cardText}>
@@ -126,8 +194,11 @@ function Card({
       </View>
     </>
   );
+
   const style = [styles.card, { backgroundColor: palette.surface, borderColor: palette.divider }];
+
   if (!onPress) return <View style={style}>{body}</View>;
+
   return (
     <Pressable
       onPress={onPress}
@@ -147,12 +218,29 @@ function FileCard({ attachment }: { attachment: Attachment }) {
   const store = useAppStore();
   const { account } = useTimelineContext();
   const [busy, setBusy] = useState(false);
-  const icon: IconName = attachment.kind === 'Image' ? 'image' : attachment.kind === 'Video' ? 'video' : attachment.kind === 'Audio' ? 'audio' : 'file';
+
+  const icon: IconName =
+    attachment.kind === 'Image'
+      ? 'image'
+      : attachment.kind === 'Video'
+        ? 'video'
+        : attachment.kind === 'Audio'
+          ? 'audio'
+          : 'file';
+
   const share = () => {
     setBusy(true);
     void shareAttachment(store, account, attachment).finally(() => setBusy(false));
   };
-  return <Card icon={icon} attachment={attachment} busy={busy} onPress={attachment.media ? share : undefined} />;
+
+  return (
+    <Card
+      icon={icon}
+      attachment={attachment}
+      busy={busy}
+      onPress={attachment.media ? share : undefined}
+    />
+  );
 }
 
 /** Audio and voice memos: play and pause, the time played of its length, and a progress bar. */
@@ -165,8 +253,10 @@ function AudioCard({ attachment }: { attachment: Attachment }) {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const media = attachment.media;
+
   const toggle = () => {
     if (!media) return;
+
     if (!loaded) {
       setBusy(true);
       fetchOriginal(store, account, media)
@@ -175,23 +265,33 @@ function AudioCard({ attachment }: { attachment: Attachment }) {
           setLoaded(true);
           player.play();
         })
-        .catch((error: unknown) => store.update((s) => addNotice(s, t('notice.audio', { error: String(error) }))))
+        .catch((cause: unknown) =>
+          store.update((s) => addNotice(s, t('notice.audio', { error: String(cause) }))),
+        )
         .finally(() => setBusy(false));
+
       return;
     }
+
     if (status.playing) {
       player.pause();
+
       return;
     }
-    if (status.didJustFinish || (status.duration > 0 && status.currentTime >= status.duration)) void player.seekTo(0);
+
+    if (status.didJustFinish || (status.duration > 0 && status.currentTime >= status.duration))
+      void player.seekTo(0);
     player.play();
   };
+
   const progress = status.duration > 0 ? Math.min(1, status.currentTime / status.duration) : 0;
+
   const detail = loaded
     ? status.duration > 0
       ? `${playTime(status.currentTime)} / ${playTime(status.duration)}`
       : playTime(status.currentTime)
     : undefined;
+
   const button = (
     <Pressable
       onPress={toggle}
@@ -201,15 +301,22 @@ function AudioCard({ attachment }: { attachment: Attachment }) {
       hitSlop={6}
       style={[styles.playButton, { backgroundColor: palette.accent }]}
     >
-      {busy ? <ActivityIndicator color={palette.onAccent} /> : <Icon name={status.playing ? 'pause' : 'play'} size={18} color={palette.onAccent} />}
+      {busy ? (
+        <ActivityIndicator color={palette.onAccent} />
+      ) : (
+        <Icon name={status.playing ? 'pause' : 'play'} size={18} color={palette.onAccent} />
+      )}
     </Pressable>
   );
+
   return (
     <View>
       <Card icon="audio" attachment={attachment} leading={button} detail={detail} />
       {loaded ? (
         <View style={[styles.progress, { backgroundColor: palette.divider }]}>
-          <View style={{ width: `${progress * 100}%`, height: '100%', backgroundColor: palette.accent }} />
+          <View
+            style={{ width: `${progress * 100}%`, height: '100%', backgroundColor: palette.accent }}
+          />
         </View>
       ) : null}
     </View>
@@ -219,7 +326,11 @@ function AudioCard({ attachment }: { attachment: Attachment }) {
 const styles = StyleSheet.create({
   media: { marginTop: 4, alignSelf: 'flex-start' },
   rounded: { borderRadius: 8, overflow: 'hidden' },
-  placeholder: { alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
+  placeholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   play: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   card: {
     marginTop: 4,
@@ -233,8 +344,20 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
-  cardIcon: { width: 36, height: 36, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  cardIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   cardText: { flexShrink: 1, gap: 2 },
-  playButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  playButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   progress: { height: 3, borderRadius: 1.5, marginTop: 4, maxWidth: 420, overflow: 'hidden' },
 });

@@ -2,15 +2,23 @@ import { catalogs, mobileCatalogs, pluralForm, t, tp } from '../index';
 
 describe('catalogs', () => {
   it.each(['de', 'fr'] as const)('should give %s every mobile key English has', (locale) => {
-    const missing = Object.keys(mobileCatalogs.en).filter((key) => !(key in mobileCatalogs[locale]));
+    const missing = Object.keys(mobileCatalogs.en).filter(
+      (key) => !(key in mobileCatalogs[locale]),
+    );
+
     expect(missing).toEqual([]);
   });
 
   it.each(['de', 'fr'] as const)('should give %s every placeholder English uses', (locale) => {
-    const placeholders = (text: string) => [...text.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort();
+    const placeholders = (text: string) =>
+      [...text.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort();
+
     const wrong = Object.entries(mobileCatalogs.en).filter(
-      ([key, text]) => key in mobileCatalogs[locale] && placeholders(text).join() !== placeholders(mobileCatalogs[locale][key]!).join(),
+      ([key, text]) =>
+        key in mobileCatalogs[locale] &&
+        placeholders(text).join() !== placeholders(mobileCatalogs[locale][key]!).join(),
     );
+
     expect(wrong.map(([key]) => key)).toEqual([]);
   });
 
@@ -19,7 +27,9 @@ describe('catalogs', () => {
   });
 
   it('should pick the plural form for a count', () => {
-    expect(tp('thread.replies', 1)).toBe(catalogs.en['thread.replies.one']!.replace('{{count}}', '1'));
+    expect(tp('thread.replies', 1)).toBe(
+      catalogs.en['thread.replies.one']!.replace('{{count}}', '1'),
+    );
   });
 });
 

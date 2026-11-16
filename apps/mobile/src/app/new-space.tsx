@@ -17,8 +17,10 @@ export default function NewSpaceScreen() {
   const account = useStore((s) => s.active);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+
   if (account === null) return null;
   const command = createSpaceCommand(account, name);
+
   const submit = () => {
     if (command === null || busy) return;
     setBusy(true);
@@ -27,8 +29,16 @@ export default function NewSpaceScreen() {
       () => setBusy(false),
     );
   };
+
   return (
-    <RoomForm testID="new-space" title={t('create.space_title')} confirm={t('create.create')} valid={command !== null} busy={busy} onSubmit={submit}>
+    <RoomForm
+      testID="new-space"
+      title={t('create.space_title')}
+      confirm={t('create.create')}
+      valid={command !== null}
+      busy={busy}
+      onSubmit={submit}
+    >
       <TextField
         testID="new-space-name"
         label={t('create.name')}

@@ -15,7 +15,12 @@ import { openInBrowser } from '../../ui/accounts/browser';
 import { usePrompt } from '../../ui/accounts/Prompt';
 import { Divider, ListRow, ListSection, Touchable } from '../../ui/components';
 import { Icon } from '../../ui/icons';
-import { AccountHeading, NoAccount, SettingsPage, useSettingsAccount } from '../../ui/settings/common';
+import {
+  AccountHeading,
+  NoAccount,
+  SettingsPage,
+  useSettingsAccount,
+} from '../../ui/settings/common';
 import { sessionDetails, sortSessions } from '../../ui/settings/sessions';
 import { usePalette } from '../../ui/theme';
 
@@ -44,6 +49,7 @@ export default function SessionsScreen() {
       defaultValue: session.name ?? session.device_id,
       placeholder: t('sessions.name_placeholder'),
     });
+
     if (name !== null) renameSession(store, id, session.device_id, name);
   };
 
@@ -64,8 +70,14 @@ export default function SessionsScreen() {
 
   const actions = (session: Session) => {
     const name = session.name ?? session.device_id;
+
     if (Platform.OS === 'ios') {
-      const options = [t('sessions.rename'), ...(session.current ? [] : [t('sessions.sign_out')]), t('common.cancel')];
+      const options = [
+        t('sessions.rename'),
+        ...(session.current ? [] : [t('sessions.sign_out')]),
+        t('common.cancel'),
+      ];
+
       ActionSheetIOS.showActionSheetWithOptions(
         {
           title: name,
@@ -78,16 +90,21 @@ export default function SessionsScreen() {
           else if (index === 1 && !session.current) void end(session);
         },
       );
+
       return;
     }
+
     Alert.alert(name, undefined, [
       { text: t('common.cancel'), style: 'cancel' },
-      ...(session.current ? [] : [{ text: t('sessions.sign_out'), onPress: () => void end(session) }]),
+      ...(session.current
+        ? []
+        : [{ text: t('sessions.sign_out'), onPress: () => void end(session) }]),
       { text: t('sessions.rename'), onPress: () => void rename(session) },
     ]);
   };
 
   const sessions = account.sessions === null ? null : sortSessions(account.sessions);
+
   return (
     <SettingsPage title={t('settings.sessions')} testID="sessions">
       <AccountHeading account={account} />
@@ -110,10 +127,15 @@ export default function SessionsScreen() {
 
 function SessionRow({ session, onPress }: { session: Session; onPress: () => void }) {
   const palette = usePalette();
+
   return (
     <Touchable testID={`session-${session.device_id}`} onPress={onPress} accessibilityRole="button">
       <View style={styles.row}>
-        <Icon name="laptop" size={22} color={session.current ? palette.accent : palette.textMuted} />
+        <Icon
+          name="laptop"
+          size={22}
+          color={session.current ? palette.accent : palette.textMuted}
+        />
         <View style={styles.text}>
           <Text style={[font.bodyStrong, { color: palette.text }]} numberOfLines={1}>
             {session.name ?? session.device_id}
@@ -144,7 +166,13 @@ function Chip({ label, color }: { label: string; color: string }) {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 12 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
   text: { flex: 1, gap: 4 },
   badges: { flexDirection: 'row', gap: 6 },
   chip: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },

@@ -10,11 +10,17 @@ import { Divider, ListRow, ListSection } from '../components';
 
 export function SettingsRows() {
   const active = useStore((s) => s.active);
+
   return (
     <>
       {active ? (
         <ListSection>
-          <ListRow testID="open-profile" icon="user" title={t('settings.profile')} onPress={() => router.push(routes.settingsProfile(active))} />
+          <ListRow
+            testID="open-profile"
+            icon="user"
+            title={t('settings.profile')}
+            onPress={() => router.push(routes.settingsProfile(active))}
+          />
           <Divider inset={52} />
           <ListRow
             testID="open-notifications"
@@ -46,7 +52,12 @@ export function SettingsRows() {
           onPress={() => router.push(routes.settingsPreferences())}
         />
         <Divider inset={52} />
-        <ListRow testID="open-info" icon="info" title={t('settings.info')} onPress={() => router.push(routes.settingsInfo())} />
+        <ListRow
+          testID="open-info"
+          icon="info"
+          title={t('settings.info')}
+          onPress={() => router.push(routes.settingsInfo())}
+        />
       </ListSection>
     </>
   );

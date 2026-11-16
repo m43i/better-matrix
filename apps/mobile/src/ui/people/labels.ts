@@ -1,6 +1,10 @@
 // The words people and rooms are shown with, in the desktop's terms.
 
-import type { HistoryVisibility, MemberRole, NotificationMode } from '@better-matrix/matrix-native/types';
+import type {
+  HistoryVisibility,
+  MemberRole,
+  NotificationMode,
+} from '@better-matrix/matrix-native/types';
 
 import { type Key, t } from '../../i18n';
 import { dayOf } from '../../state/people';
@@ -56,6 +60,8 @@ export function historyLabel(history: HistoryVisibility): string {
 /** When something happened, as the desktop's lists show it: the day, then the time. */
 export function when(ms: number, now: number = Date.now()): string {
   const day = dayOf(ms, now);
+
+  // SAFETY: dayOf returns calendar months 1–12; every catalog defines the twelve date.month_XX keys.
   const date =
     day === 'today'
       ? t('date.today')
@@ -66,7 +72,9 @@ export function when(ms: number, now: number = Date.now()): string {
             day: String(day.day),
             year: String(day.year),
           });
+
   const at = new Date(ms);
   const time = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+
   return `${date}, ${time}`;
 }

@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "singleQuote": true,
+  "printWidth": 100,
+  "ignorePatterns": [
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    ".agent-tools/**",
+    "tools/oxlint/anti-slop/**",
+    "packages/matrix-native/src/generated/**",
+    "apps/mobile/android/**",
+    "apps/mobile/ios/**",
+    "**/.expo/**"
+  ]
+}

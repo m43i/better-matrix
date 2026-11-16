@@ -13,8 +13,11 @@ import {
 } from '../timelineText';
 import { person } from '../../test/fixtures';
 
-const at = (y: number, m: number, d: number, h = 12, min = 0) => new Date(y, m - 1, d, h, min).getTime();
+const at = (y: number, m: number, d: number, h = 12, min = 0) =>
+  new Date(y, m - 1, d, h, min).getTime();
+
 const ada = person('@ada:x', 'Ada');
+
 const event = (change: RoomChange, sender = ada) => ({ sender, change });
 
 describe('dates and times', () => {
@@ -35,7 +38,9 @@ describe('dates and times', () => {
   });
 
   it('should say a thread last reply came today', () => {
-    expect(lastReplyText(at(2025, 11, 13, 9, 51), at(2025, 11, 13, 10))).toBe('Last reply today at 09:51');
+    expect(lastReplyText(at(2025, 11, 13, 9, 51), at(2025, 11, 13, 10))).toBe(
+      'Last reply today at 09:51',
+    );
   });
 });
 
@@ -45,20 +50,30 @@ describe('room events', () => {
   });
 
   it('should name whom an invite was for', () => {
-    expect(roomEventText(event({ type: 'Invited', data: person('@g:x', 'Grace') }))).toBe('Ada invited Grace');
+    expect(roomEventText(event({ type: 'Invited', data: person('@g:x', 'Grace') }))).toBe(
+      'Ada invited Grace',
+    );
   });
 
   it('should say a display name was removed', () => {
-    expect(roomEventText(event({ type: 'DisplayName', data: null }))).toBe('Ada removed their display name');
+    expect(roomEventText(event({ type: 'DisplayName', data: null }))).toBe(
+      'Ada removed their display name',
+    );
   });
 
   it('should list everyone who joined in a row', () => {
-    const run = ['Ada', 'Grace', 'Linus'].map((name) => event({ type: 'Joined' }, person(`@${name}:x`, name)));
+    const run = ['Ada', 'Grace', 'Linus'].map((name) =>
+      event({ type: 'Joined' }, person(`@${name}:x`, name)),
+    );
+
     expect(eventRunText(run)).toBe('Ada, Grace and Linus joined');
   });
 
   it('should count the rest of a long run', () => {
-    const run = ['A', 'B', 'C', 'D', 'E', 'F'].map((name) => event({ type: 'Left' }, person(`@${name}:x`, name)));
+    const run = ['A', 'B', 'C', 'D', 'E', 'F'].map((name) =>
+      event({ type: 'Left' }, person(`@${name}:x`, name)),
+    );
+
     expect(eventRunText(run)).toBe('A, B, C, D and 2 more left');
   });
 
@@ -90,13 +105,20 @@ describe('typingText', () => {
 
 describe('quotes', () => {
   it('should quote a call by its kind', () => {
-    expect(quoteText({ event_id: '$c', sender_name: null, body: null, call: { video: true, direct: false, declined_by: [] } })).toBe(
-      'Video call',
-    );
+    expect(
+      quoteText({
+        event_id: '$c',
+        sender_name: null,
+        body: null,
+        call: { video: true, direct: false, declined_by: [] },
+      }),
+    ).toBe('Video call');
   });
 
   it('should say when the quoted message is not loaded', () => {
-    expect(quoteText({ event_id: '$c', sender_name: null, body: null, call: null })).toBe('Original message not loaded');
+    expect(quoteText({ event_id: '$c', sender_name: null, body: null, call: null })).toBe(
+      'Original message not loaded',
+    );
   });
 });
 

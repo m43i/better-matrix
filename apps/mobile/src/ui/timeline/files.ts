@@ -14,33 +14,40 @@ import type { Store } from '../../state/store';
 
 /** A name safe for a file system, keeping the attachment's own as far as possible. */
 function safeName(name: string): string {
-  const cleaned = name.replace(/[/\\:*?"<>|\u0000-\u001f]/g, '_').trim();
+  const cleaned = [...name]
+    .map((char) => (char.charCodeAt(0) < 32 || '/\\:*?"<>|'.includes(char) ? '_' : char))
+    .join('')
+    .trim();
+
   return cleaned === '' || cleaned === '.' || cleaned === '..' ? 'file' : cleaned;
 }
 
-const MIME: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  heic: 'image/heic',
-  mp4: 'video/mp4',
-  mov: 'video/quicktime',
-  webm: 'video/webm',
-  ogg: 'audio/ogg',
-  oga: 'audio/ogg',
-  opus: 'audio/ogg',
-  mp3: 'audio/mpeg',
-  m4a: 'audio/mp4',
-  pdf: 'application/pdf',
-  txt: 'text/plain',
-  zip: 'application/zip',
-};
+const MIME = new Map(
+  Object.entries({
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    heic: 'image/heic',
+    mp4: 'video/mp4',
+    mov: 'video/quicktime',
+    webm: 'video/webm',
+    ogg: 'audio/ogg',
+    oga: 'audio/ogg',
+    opus: 'audio/ogg',
+    mp3: 'audio/mpeg',
+    m4a: 'audio/mp4',
+    pdf: 'application/pdf',
+    txt: 'text/plain',
+    zip: 'application/zip',
+  }),
+);
 
 function mimeOf(name: string): string {
   const extension = name.split('.').pop()?.toLowerCase() ?? '';
-  return MIME[extension] ?? 'application/octet-stream';
+
+  return MIME.get(extension) ?? 'application/octet-stream';
 }
 
 /** The attachment's file under its own name, in the cache. */
@@ -50,31 +57,49 @@ async function namedFile(store: Store, account: AccountId, attachment: Attachmen
   const folder = new Directory(Paths.cache, 'shared');
   folder.create({ intermediates: true, idempotent: true });
   const named = new File(folder, safeName(attachment.name));
+
   if (named.exists) named.delete();
   await new File(uri).copy(named);
+
   return named;
 }
 
-function cancelled(error: unknown): boolean {
-  return /cancel/i.test(String(error));
+function cancelled(cause: unknown): boolean {
+  return /cancel/i.test(String(cause));
 }
 
 /** Hands the attachment to the system share sheet. */
-export async function shareAttachment(store: Store, account: AccountId, attachment: Attachment): Promise<void> {
+export async function shareAttachment(
+  store: Store,
+  account: AccountId,
+  attachment: Attachment,
+): Promise<void> {
   try {
     const file = await namedFile(store, account, attachment);
-    await Sharing.shareAsync(file.uri, { mimeType: mimeOf(attachment.name), dialogTitle: attachment.name });
+    await Sharing.shareAsync(file.uri, {
+      mimeType: mimeOf(attachment.name),
+      dialogTitle: attachment.name,
+    });
   } catch (error) {
-    if (!cancelled(error)) store.update((s) => addNotice(s, t('mobile.conversation.share_failed', { error: String(error) })));
+    if (!cancelled(error))
+      store.update((s) =>
+        addNotice(s, t('mobile.conversation.share_failed', { error: String(error) })),
+      );
   }
 }
 
 /** Saves the attachment where the user picks (Android), or offers the share sheet's saving (iOS). */
-export async function saveAttachment(store: Store, account: AccountId, attachment: Attachment): Promise<void> {
+export async function saveAttachment(
+  store: Store,
+  account: AccountId,
+  attachment: Attachment,
+): Promise<void> {
   if (Platform.OS !== 'android') {
     await shareAttachment(store, account, attachment);
+
     return;
   }
+
   try {
     const folder = await Directory.pickDirectoryAsync();
     const file = await namedFile(store, account, attachment);
@@ -82,6 +107,7 @@ export async function saveAttachment(store: Store, account: AccountId, attachmen
     await saved.write(await file.bytes());
     store.update((s) => addNotice(s, t('mobile.conversation.saved', { name: attachment.name })));
   } catch (error) {
-    if (!cancelled(error)) store.update((s) => addNotice(s, t('notice.save', { error: String(error) })));
+    if (!cancelled(error))
+      store.update((s) => addNotice(s, t('notice.save', { error: String(error) })));
   }
 }

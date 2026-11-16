@@ -2,7 +2,12 @@
 // topic and facts; quick actions (notifications, invite, rename, leave); and its people, threads
 // and files, one at a time under a segmented control.
 
-import type { NotificationMode, RoomMember, SharedFile, ThreadInfo } from '@better-matrix/matrix-native/types';
+import type {
+  NotificationMode,
+  RoomMember,
+  SharedFile,
+  ThreadInfo,
+} from '@better-matrix/matrix-native/types';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useEffect, useState } from 'react';
@@ -51,7 +56,11 @@ export default function RoomInfoScreen() {
   const members = useStore((s) => accountOf(s, account)?.members[roomId]);
   const threads = useStore((s) => accountOf(s, account)?.threads[roomId]);
   const files = useStore((s) => accountOf(s, account)?.files[roomId]);
-  const defaultMode = useStore((s) => accountOf(s, account)?.summary.default_notifications ?? 'AllMessages');
+
+  const defaultMode = useStore(
+    (s) => accountOf(s, account)?.summary.default_notifications ?? 'AllMessages',
+  );
+
   const [segment, setSegment] = useState<Segment>('members');
   const [search, setSearch] = useState('');
   const [modes, setModes] = useState(false);
@@ -61,6 +70,7 @@ export default function RoomInfoScreen() {
   // Each time a list is shown, it is fresh.
   useEffect(() => {
     if (segment === 'threads') listThreads(store, account, roomId);
+
     if (segment === 'files') listFiles(store, account, roomId);
   }, [store, account, roomId, segment]);
 
@@ -69,8 +79,17 @@ export default function RoomInfoScreen() {
 
   const askToLeave = () => {
     const [title, body, confirm] = direct
-      ? [t('confirm.delete_title', { name: room.name }), t('confirm.delete_body', { name: room.name }), t('confirm.delete')]
-      : [t('confirm.leave_title', { room: room.name }), t('confirm.leave_body'), t('confirm.leave')];
+      ? [
+          t('confirm.delete_title', { name: room.name }),
+          t('confirm.delete_body', { name: room.name }),
+          t('confirm.delete'),
+        ]
+      : [
+          t('confirm.leave_title', { room: room.name }),
+          t('confirm.leave_body'),
+          t('confirm.leave'),
+        ];
+
     Alert.alert(title, body, [
       { text: t('common.cancel'), style: 'cancel' },
       {
@@ -88,12 +107,16 @@ export default function RoomInfoScreen() {
   const openFile = (file: SharedFile) => {
     if (fileOpens(file.attachment.kind) === 'preview') {
       router.push(routes.preview(account, roomId, file.event_id));
+
       return;
     }
+
     if (sharing !== null) return;
     setSharing(file.event_id);
     fileForSharing(store, account, file.attachment)
-      .then((uri) => (uri ? Sharing.shareAsync(uri, { dialogTitle: file.attachment.name }) : undefined))
+      .then((uri) =>
+        uri ? Sharing.shareAsync(uri, { dialogTitle: file.attachment.name }) : undefined,
+      )
       // Closing the share sheet without sharing is no failure; a failed fetch was told already.
       .catch(() => {})
       .finally(() => setSharing(null));
@@ -101,7 +124,11 @@ export default function RoomInfoScreen() {
 
   const rows: Row[] =
     segment === 'members'
-      ? filterMembers(members?.people ?? [], search).map((member) => ({ kind: 'member', key: member.person.id, member }))
+      ? filterMembers(members?.people ?? [], search).map((member) => ({
+          kind: 'member',
+          key: member.person.id,
+          member,
+        }))
       : segment === 'threads'
         ? (threads ?? []).map((thread) => ({ kind: 'thread', key: thread.root, thread }))
         : (files ?? []).map((file) => ({ kind: 'file', key: file.event_id, file }));
@@ -126,12 +153,15 @@ export default function RoomInfoScreen() {
           name={room.name}
           media={room.avatar}
           size={84}
-         
         />
         <Text style={[font.title, styles.center, { color: palette.text }]} selectable>
           {room.name}
         </Text>
-        <Text testID="info-topic" style={[font.body, styles.center, { color: palette.textMuted }]} selectable>
+        <Text
+          testID="info-topic"
+          style={[font.body, styles.center, { color: palette.textMuted }]}
+          selectable
+        >
           {room.topic ?? t('room.no_topic')}
         </Text>
       </View>
@@ -176,9 +206,15 @@ export default function RoomInfoScreen() {
                 testID={`info-mode-${mode ?? 'default'}`}
                 title={mode === null ? t('notify.default') : notificationLabel(mode)}
                 subtitle={
-                  mode === null ? t('notify.default_hint', { mode: notificationLabel(defaultMode) }) : notificationHint(mode)
+                  mode === null
+                    ? t('notify.default_hint', { mode: notificationLabel(defaultMode) })
+                    : notificationHint(mode)
                 }
-                selected={mode === null ? !room.custom_notifications : room.custom_notifications && room.notifications === mode}
+                selected={
+                  mode === null
+                    ? !room.custom_notifications
+                    : room.custom_notifications && room.notifications === mode
+                }
                 chevron={false}
                 onPress={() => {
                   setModes(false);
@@ -207,7 +243,12 @@ export default function RoomInfoScreen() {
         />
       </View>
       {segment === 'members' ? (
-        <View style={[styles.search, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
+        <View
+          style={[
+            styles.search,
+            { backgroundColor: palette.surface, borderColor: palette.divider },
+          ]}
+        >
           <Icon name="search" size={16} color={palette.textMuted} />
           <TextInput
             testID="member-search"
@@ -239,7 +280,9 @@ export default function RoomInfoScreen() {
         keyboardDismissMode="on-drag"
         ListHeaderComponent={header}
         ItemSeparatorComponent={() => <Divider inset={segment === 'threads' ? 16 : 68} />}
-        ListEmptyComponent={<Text style={[font.body, styles.empty, { color: palette.textMuted }]}>{empty}</Text>}
+        ListEmptyComponent={
+          <Text style={[font.body, styles.empty, { color: palette.textMuted }]}>{empty}</Text>
+        }
         contentContainerStyle={styles.list}
         renderItem={({ item }) => {
           switch (item.kind) {
@@ -253,9 +296,20 @@ export default function RoomInfoScreen() {
                 />
               );
             case 'thread':
-              return <ThreadRow thread={item.thread} onPress={() => router.push(routes.thread(account, roomId, item.thread.root))} />;
+              return (
+                <ThreadRow
+                  thread={item.thread}
+                  onPress={() => router.push(routes.thread(account, roomId, item.thread.root))}
+                />
+              );
             case 'file':
-              return <FileRow file={item.file} busy={sharing === item.file.event_id} onPress={() => openFile(item.file)} />;
+              return (
+                <FileRow
+                  file={item.file}
+                  busy={sharing === item.file.event_id}
+                  onPress={() => openFile(item.file)}
+                />
+              );
           }
         }}
       />
@@ -267,7 +321,13 @@ const styles = StyleSheet.create({
   list: { paddingBottom: 32 },
   head: { alignItems: 'center', gap: 8, paddingHorizontal: 24, paddingTop: 20 },
   center: { textAlign: 'center' },
-  actions: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 20, paddingHorizontal: 12 },
+  actions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 20,
+    paddingHorizontal: 12,
+  },
   segments: { marginHorizontal: 16, marginTop: 22, marginBottom: 10 },
   search: {
     flexDirection: 'row',

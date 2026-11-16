@@ -24,7 +24,12 @@ import { usePalette } from '../ui/theme';
 type Open = 'none' | 'invite' | 'role';
 
 export default function MemberScreen() {
-  const { account, roomId, userId } = useLocalSearchParams<{ account: string; roomId: string; userId: string }>();
+  const { account, roomId, userId } = useLocalSearchParams<{
+    account: string;
+    roomId: string;
+    userId: string;
+  }>();
+
   const store = useAppStore();
   const router = useRouter();
   const palette = usePalette();
@@ -33,6 +38,7 @@ export default function MemberScreen() {
   const [open, setOpen] = useState<Open>('none');
   const [busy, setBusy] = useState<'chat' | MemberRole | null>(null);
   const member = memberOf(members, userId);
+
   if (!members || !member) return null;
   const { person } = member;
   const me = person.id === account;
@@ -73,16 +79,28 @@ export default function MemberScreen() {
         moderate(store, account, roomId, person.id, action).catch(() => {});
       }
     };
+
     if (!asksFirst(action, members.own_level)) {
       run();
+
       return;
     }
+
     const [title, body, confirm] =
       action.type === 'Kick'
-        ? [t('confirm.kick_title', { name: person.name }), t('confirm.kick_body'), t('confirm.kick')]
+        ? [
+            t('confirm.kick_title', { name: person.name }),
+            t('confirm.kick_body'),
+            t('confirm.kick'),
+          ]
         : action.type === 'Ban'
           ? [t('confirm.ban_title', { name: person.name }), t('confirm.ban_body'), t('confirm.ban')]
-          : [t('confirm.promote_title', { name: person.name }), t('confirm.promote_body'), t('confirm.promote')];
+          : [
+              t('confirm.promote_title', { name: person.name }),
+              t('confirm.promote_body'),
+              t('confirm.promote'),
+            ];
+
     Alert.alert(title, body, [
       { text: t('common.cancel'), style: 'cancel' },
       { text: confirm, style: 'destructive', onPress: run },
@@ -95,7 +113,14 @@ export default function MemberScreen() {
     // A plain view, not a scroll view: the sheet fits its content.
     <View testID="member-sheet" style={styles.content}>
       <View style={styles.head}>
-        <Avatar account={account} id={person.id} name={person.name} media={person.avatar} size={72} presence={member.presence} />
+        <Avatar
+          account={account}
+          id={person.id}
+          name={person.name}
+          media={person.avatar}
+          size={72}
+          presence={member.presence}
+        />
         <View style={styles.name}>
           <Text style={[font.title, { color: palette.text }]} numberOfLines={2}>
             {person.name}
@@ -109,7 +134,9 @@ export default function MemberScreen() {
         <Text style={[font.body, { color: palette.textMuted }]} selectable>
           {person.id}
         </Text>
-        <Text style={[font.meta, { color: palette.textMuted }]}>{me ? t('mobile.people.you') : roleLabel(member.role)}</Text>
+        <Text style={[font.meta, { color: palette.textMuted }]}>
+          {me ? t('mobile.people.you') : roleLabel(member.role)}
+        </Text>
       </View>
       {me ? null : (
         <>
@@ -120,7 +147,9 @@ export default function MemberScreen() {
               title={t('members.chat')}
               onPress={message}
               chevron={false}
-              leading={busy === 'chat' ? <ActivityIndicator color={palette.textMuted} /> : undefined}
+              leading={
+                busy === 'chat' ? <ActivityIndicator color={palette.textMuted} /> : undefined
+              }
             />
             <Divider inset={52} />
             <ListRow
@@ -133,13 +162,23 @@ export default function MemberScreen() {
             {open === 'invite' ? (
               <ScrollView style={styles.nested} nestedScrollEnabled>
                 {rooms.length === 0 ? (
-                  <Text style={[font.body, styles.note, { color: palette.textMuted }]}>{t('mobile.people.no_rooms')}</Text>
+                  <Text style={[font.body, styles.note, { color: palette.textMuted }]}>
+                    {t('mobile.people.no_rooms')}
+                  </Text>
                 ) : (
                   rooms.map((r) => (
                     <ListRow
                       key={r.room_id}
                       testID={`member-invite-${r.room_id}`}
-                      leading={<Avatar account={account} id={r.room_id} name={r.name} media={r.avatar} size={28} />}
+                      leading={
+                        <Avatar
+                          account={account}
+                          id={r.room_id}
+                          name={r.name}
+                          media={r.avatar}
+                          size={28}
+                        />
+                      }
                       title={r.name}
                       onPress={() => inviteTo(r.room_id, r.name)}
                       chevron={false}
@@ -152,31 +191,62 @@ export default function MemberScreen() {
           {roles.length > 0 || mayKick || mayBan ? (
             <ListSection>
               {roles.length > 0 ? (
-                <ListRow testID="member-role" icon="shield" title={t('members.role')} value={roleLabel(member.role)} onPress={() => toggle('role')} chevron={false} />
+                <ListRow
+                  testID="member-role"
+                  icon="shield"
+                  title={t('members.role')}
+                  value={roleLabel(member.role)}
+                  onPress={() => toggle('role')}
+                  chevron={false}
+                />
               ) : null}
               {open === 'role'
-                ? ROLES.filter((role) => role === member.role || roles.includes(role)).map((role) => (
-                    <ListRow
-                      key={role}
-                      testID={`member-role-${role}`}
-                      title={roleLabel(role)}
-                      selected={role === member.role}
-                      leading={busy === role ? <ActivityIndicator color={palette.textMuted} /> : <View style={styles.indent} />}
-                      onPress={role === member.role ? undefined : () => act({ type: 'Role', data: role })}
-                      chevron={false}
-                    />
-                  ))
+                ? ROLES.filter((role) => role === member.role || roles.includes(role)).map(
+                    (role) => (
+                      <ListRow
+                        key={role}
+                        testID={`member-role-${role}`}
+                        title={roleLabel(role)}
+                        selected={role === member.role}
+                        leading={
+                          busy === role ? (
+                            <ActivityIndicator color={palette.textMuted} />
+                          ) : (
+                            <View style={styles.indent} />
+                          )
+                        }
+                        onPress={
+                          role === member.role ? undefined : () => act({ type: 'Role', data: role })
+                        }
+                        chevron={false}
+                      />
+                    ),
+                  )
                 : null}
               {mayKick ? (
                 <>
                   {roles.length > 0 ? <Divider inset={52} /> : null}
-                  <ListRow testID="member-kick" icon="leave" title={t('members.kick')} danger onPress={() => act({ type: 'Kick' })} chevron={false} />
+                  <ListRow
+                    testID="member-kick"
+                    icon="leave"
+                    title={t('members.kick')}
+                    danger
+                    onPress={() => act({ type: 'Kick' })}
+                    chevron={false}
+                  />
                 </>
               ) : null}
               {mayBan ? (
                 <>
                   {roles.length > 0 || mayKick ? <Divider inset={52} /> : null}
-                  <ListRow testID="member-ban" icon="alert" title={t('members.ban')} danger onPress={() => act({ type: 'Ban' })} chevron={false} />
+                  <ListRow
+                    testID="member-ban"
+                    icon="alert"
+                    title={t('members.ban')}
+                    danger
+                    onPress={() => act({ type: 'Ban' })}
+                    chevron={false}
+                  />
                 </>
               ) : null}
             </ListSection>

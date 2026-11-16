@@ -1,8 +1,18 @@
 // The desktop's `state::call_layout` tests, one for one.
 
-import { ASPECT, camera, type CallLayout, MIN_HEIGHT, MIN_WIDTH, plan, screen, type TileGeometry } from '../callLayout';
+import {
+  ASPECT,
+  camera,
+  type CallLayout,
+  MIN_HEIGHT,
+  MIN_WIDTH,
+  plan,
+  screen,
+  type TileGeometry,
+} from '../callLayout';
 
 const AUTO: CallLayout = { type: 'Auto' };
+
 const GRID: CallLayout = { type: 'Grid' };
 
 function cameras(count: number): TileGeometry[] {
@@ -21,7 +31,9 @@ describe('plan', () => {
   it('an incomplete row should keep the other tiles size', () => {
     const result = plan(cameras(5), [1000, 500], GRID, null, 0, 0.24, false);
     const first = result.tiles[0]!.rect;
-    expect(result.tiles.every((tile) => tile.rect[2] === first[2] && tile.rect[3] === first[3])).toBe(true);
+    expect(
+      result.tiles.every((tile) => tile.rect[2] === first[2] && tile.rect[3] === first[3]),
+    ).toBe(true);
   });
 
   it('layouts should keep non-inset tiles inside the viewport and apart', () => {
@@ -32,14 +44,24 @@ describe('plan', () => {
       [1000, 300],
       [1800, 900],
     ];
+
     for (const size of sizes) {
       for (const count of [0, 1, 2, 3, 5, 9, 50]) {
         const tiles = [...cameras(count), { key: screen('share'), aspect: 9 / 16 }];
-        for (const layout of [AUTO, GRID, { type: 'Focus', pin: null } as CallLayout]) {
+
+        for (const layout of [AUTO, GRID, { type: 'Focus' as const, pin: null }]) {
           const result = plan(tiles, size, layout, null, 100, 0.24, false);
           result.tiles.forEach((tile, i) => {
             const [x, y, w, h] = tile.rect;
-            expect(x >= -0.01 && y >= -0.01 && w >= 0 && h >= 0 && x + w <= size[0] + 0.01 && y + h <= size[1] + 0.01).toBe(true);
+            expect(
+              x >= -0.01 &&
+                y >= -0.01 &&
+                w >= 0 &&
+                h >= 0 &&
+                x + w <= size[0] + 0.01 &&
+                y + h <= size[1] + 0.01,
+            ).toBe(true);
+
             for (const other of result.tiles.slice(i + 1)) {
               const [ox, oy, ow, oh] = other.rect;
               expect(
@@ -64,7 +86,9 @@ describe('plan', () => {
   it('a crowded call should page before tiles become unreadable', () => {
     const result = plan(cameras(40), [800, 450], GRID, null, 0, 0.24, false);
     expect(result.pages).toBeGreaterThan(1);
-    expect(result.tiles.every((tile) => tile.rect[2] >= MIN_WIDTH && tile.rect[3] >= MIN_HEIGHT)).toBe(true);
+    expect(
+      result.tiles.every((tile) => tile.rect[2] >= MIN_WIDTH && tile.rect[3] >= MIN_HEIGHT),
+    ).toBe(true);
   });
 
   it('an out of range page should show the last page', () => {
@@ -73,8 +97,19 @@ describe('plan', () => {
   });
 
   it('a shared screen should keep its native aspect', () => {
-    const result = plan([{ key: screen('a'), aspect: 9 / 16 }], [1000, 500], AUTO, null, 0, 0.24, false);
-    expect(Math.abs(result.tiles[0]!.rect[2] / result.tiles[0]!.rect[3] - 9 / 16)).toBeLessThan(0.001);
+    const result = plan(
+      [{ key: screen('a'), aspect: 9 / 16 }],
+      [1000, 500],
+      AUTO,
+      null,
+      0,
+      0.24,
+      false,
+    );
+
+    expect(Math.abs(result.tiles[0]!.rect[2] / result.tiles[0]!.rect[3] - 9 / 16)).toBeLessThan(
+      0.001,
+    );
   });
 
   it('a narrow share view should put the participants below', () => {
@@ -105,13 +140,16 @@ describe('plan', () => {
       { key: camera('remote'), aspect: ASPECT },
       { key: camera(''), aspect: ASPECT },
     ];
+
     const result = plan(tiles, [800, 500], AUTO, null, 0, 0.24, false);
     expect(result.tiles[1]!.inset).toBe(true);
     expect(result.tiles[1]!.rect[2]).toBeLessThan(result.tiles[0]!.rect[2] / 2);
   });
 
   it('a compact voice call should fit several faces', () => {
-    expect(plan(cameras(4), [360, 100], AUTO, null, 0, 0.24, true).tiles.length).toBeGreaterThanOrEqual(2);
+    expect(
+      plan(cameras(4), [360, 100], AUTO, null, 0, 0.24, true).tiles.length,
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it('hiding self-view should keep two remote participants in a gallery', () => {

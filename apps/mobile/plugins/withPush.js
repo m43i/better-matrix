@@ -16,7 +16,9 @@
 // Options: { appGroup, googleServicesFile, notificationServiceExtension: boolean }.
 
 const fs = require('node:fs');
+
 const path = require('node:path');
+
 const {
   withDangerousMod,
   withEntitlementsPlist,
@@ -24,9 +26,12 @@ const {
 } = require('expo/config-plugins');
 
 const TARGET = 'BetterMatrixPush';
+
 const SOURCES = path.join(__dirname, 'push', 'ios');
+
 /** The engine's xcframework (`bun run ubrn:ios`), from the generated ios/ folder. */
-const ENGINE = '$(PROJECT_DIR)/../../../packages/matrix-native/build/MatrixNativeFramework.xcframework';
+const ENGINE =
+  '$(PROJECT_DIR)/../../../packages/matrix-native/build/MatrixNativeFramework.xcframework';
 
 function keychainGroup(bundleId) {
   return `$(AppIdentifierPrefix)${bundleId}`;
@@ -34,7 +39,9 @@ function keychainGroup(bundleId) {
 
 function addUnique(list, value) {
   const items = Array.isArray(list) ? [...list] : [];
+
   if (!items.includes(value)) items.push(value);
+
   return items;
 }
 
@@ -43,26 +50,34 @@ function withGoogleServices(config, options) {
   const projectRoot = config._internal?.projectRoot ?? process.cwd();
   const candidates = [process.env.GOOGLE_SERVICES_JSON, options.googleServicesFile].filter(Boolean);
   const found = candidates.find((file) => fs.existsSync(path.resolve(projectRoot, file)));
+
   if (found) {
     config.android = { ...config.android, googleServicesFile: found };
   } else {
     console.warn('[withPush] no google-services.json: Android builds without push (docs/push.md)');
   }
+
   return config;
 }
 
 /** The app's own entitlements: the App Group and the shared keychain group. */
 function withAppEntitlements(config, options) {
   const bundleId = config.ios?.bundleIdentifier;
+
   return withEntitlementsPlist(config, (config) => {
     const entitlements = config.modResults;
     entitlements['com.apple.security.application-groups'] = addUnique(
       entitlements['com.apple.security.application-groups'],
       options.appGroup,
     );
+
     // First: expo-secure-store writes to the first group, where the items were before too.
-    const groups = (entitlements['keychain-access-groups'] ?? []).filter((g) => g !== keychainGroup(bundleId));
+    const groups = (entitlements['keychain-access-groups'] ?? []).filter(
+      (g) => g !== keychainGroup(bundleId),
+    );
+
     entitlements['keychain-access-groups'] = [keychainGroup(bundleId), ...groups];
+
     return config;
   });
 }
@@ -70,6 +85,7 @@ function withAppEntitlements(config, options) {
 function infoPlist(config, options) {
   const version = config.version ?? '1.0.0';
   const build = config.ios?.buildNumber ?? '1';
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -133,11 +149,17 @@ function withExtensionFiles(config, options) {
     (config) => {
       const dir = path.join(config.modRequest.platformProjectRoot, TARGET);
       fs.mkdirSync(dir, { recursive: true });
+
       for (const file of fs.readdirSync(SOURCES)) {
         fs.copyFileSync(path.join(SOURCES, file), path.join(dir, file));
       }
+
       fs.writeFileSync(path.join(dir, `${TARGET}-Info.plist`), infoPlist(config, options));
-      fs.writeFileSync(path.join(dir, `${TARGET}.entitlements`), entitlementsPlist(config, options));
+      fs.writeFileSync(
+        path.join(dir, `${TARGET}.entitlements`),
+        entitlementsPlist(config, options),
+      );
+
       return config;
     },
   ]);
@@ -147,6 +169,7 @@ function withExtensionFiles(config, options) {
 function withExtensionTarget(config) {
   return withXcodeProject(config, (config) => {
     const project = config.modResults;
+
     if (project.pbxTargetByName(TARGET)) return config;
     const bundleId = `${config.ios?.bundleIdentifier}.${TARGET}`;
     const objects = project.hash.project.objects;
@@ -161,13 +184,16 @@ function withExtensionTarget(config) {
       `${TARGET}-Info.plist`,
       `${TARGET}.entitlements`,
     ];
+
     const group = project.addPbxGroup(files, TARGET, TARGET);
     const mainGroup = project.getFirstProject().firstProject.mainGroup;
     project.addToPbxGroup(group.uuid, mainGroup);
     // The group made build files for every file; only the Swift is built.
     const buildFiles = objects.PBXBuildFile;
+
     for (const child of group.pbxGroup.children) {
       if (child.comment === 'NotificationService.swift') continue;
+
       for (const key of Object.keys(buildFiles)) {
         if (buildFiles[key]?.fileRef === child.value) {
           delete buildFiles[key];
@@ -177,7 +203,12 @@ function withExtensionTarget(config) {
     }
 
     const target = project.addTarget(TARGET, 'app_extension', TARGET, bundleId);
-    project.addBuildPhase(['NotificationService.swift'], 'PBXSourcesBuildPhase', 'Sources', target.uuid);
+    project.addBuildPhase(
+      ['NotificationService.swift'],
+      'PBXSourcesBuildPhase',
+      'Sources',
+      target.uuid,
+    );
     project.addBuildPhase([], 'PBXResourcesBuildPhase', 'Resources', target.uuid);
     project.addBuildPhase([], 'PBXFrameworksBuildPhase', 'Frameworks', target.uuid);
     // The app embeds the extension right after its resources, before the script phases: after
@@ -185,6 +216,7 @@ function withExtensionTarget(config) {
     const app = project.getFirstTarget().firstTarget;
     const embed = app.buildPhases.findIndex((phase) => phase.comment === 'Copy Files');
     const resources = app.buildPhases.findIndex((phase) => phase.comment === 'Resources');
+
     if (embed > resources && resources >= 0) {
       const [phase] = app.buildPhases.splice(embed, 1);
       app.buildPhases.splice(resources + 1, 0, phase);
@@ -192,8 +224,10 @@ function withExtensionTarget(config) {
 
     const deploymentTarget = '17.0';
     const sections = project.pbxXCBuildConfigurationSection();
+
     for (const key of Object.keys(sections)) {
       const settings = sections[key].buildSettings;
+
       if (!settings || settings.PRODUCT_NAME !== `"${TARGET}"`) continue;
       Object.assign(settings, {
         CLANG_ENABLE_MODULES: 'YES',
@@ -214,24 +248,38 @@ function withExtensionTarget(config) {
           '"-lc++"',
           '"-lresolv"',
           '"-lz"',
-          '"-framework"', '"Security"',
-          '"-framework"', '"SystemConfiguration"',
-          '"-framework"', '"CoreFoundation"',
-          '"-framework"', '"Network"',
-          '"-framework"', '"AVFoundation"',
-          '"-framework"', '"AudioToolbox"',
-          '"-framework"', '"CoreAudio"',
-          '"-framework"', '"CoreMedia"',
-          '"-framework"', '"CoreVideo"',
-          '"-framework"', '"VideoToolbox"',
-          '"-framework"', '"Metal"',
-          '"-framework"', '"CoreGraphics"',
-          '"-framework"', '"QuartzCore"',
+          '"-framework"',
+          '"Security"',
+          '"-framework"',
+          '"SystemConfiguration"',
+          '"-framework"',
+          '"CoreFoundation"',
+          '"-framework"',
+          '"Network"',
+          '"-framework"',
+          '"AVFoundation"',
+          '"-framework"',
+          '"AudioToolbox"',
+          '"-framework"',
+          '"CoreAudio"',
+          '"-framework"',
+          '"CoreMedia"',
+          '"-framework"',
+          '"CoreVideo"',
+          '"-framework"',
+          '"VideoToolbox"',
+          '"-framework"',
+          '"Metal"',
+          '"-framework"',
+          '"CoreGraphics"',
+          '"-framework"',
+          '"QuartzCore"',
         ],
         // The engine is big; only what the push path reaches is kept.
         DEAD_CODE_STRIPPING: 'YES',
       });
     }
+
     return config;
   });
 }
@@ -268,6 +316,7 @@ function withEasExtension(config, options) {
       },
     },
   };
+
   return config;
 }
 
@@ -277,13 +326,16 @@ module.exports = function withPush(config, input = {}) {
     googleServicesFile: input.googleServicesFile ?? './google-services.json',
     notificationServiceExtension: input.notificationServiceExtension !== false,
   };
+
   config.extra = { ...config.extra, push: { ...config.extra?.push, appGroup: options.appGroup } };
   config = withGoogleServices(config, options);
   config = withAppEntitlements(config, options);
+
   if (options.notificationServiceExtension) {
     config = withEasExtension(config, options);
     config = withExtensionFiles(config, options);
     config = withExtensionTarget(config);
   }
+
   return config;
 };

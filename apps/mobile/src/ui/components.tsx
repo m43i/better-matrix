@@ -22,12 +22,20 @@ import { Icon, type IconName } from './icons';
 import { usePalette } from './theme';
 
 /** A pressable surface with the platform's press feedback. */
-export function Touchable({ style, children, ...props }: PressableProps & { style?: ViewStyle; children: ReactNode }) {
+export function Touchable({
+  style,
+  children,
+  ...props
+}: PressableProps & { style?: ViewStyle; children: ReactNode }) {
   const palette = usePalette();
+
   return (
     <Pressable
       android_ripple={{ color: palette.hover, foreground: true }}
-      style={({ pressed }) => [style, Platform.OS === 'ios' && pressed ? { backgroundColor: palette.hover } : null]}
+      style={({ pressed }) => [
+        style,
+        Platform.OS === 'ios' && pressed ? { backgroundColor: palette.hover } : null,
+      ]}
       {...props}
     >
       {children}
@@ -55,10 +63,25 @@ export function Button({
   testID?: string;
 }) {
   const palette = usePalette();
+
   const bg =
-    kind === 'primary' ? palette.accent : kind === 'danger' ? palette.danger : kind === 'secondary' ? palette.surface : 'transparent';
-  const fg = kind === 'primary' || kind === 'danger' ? palette.onAccent : kind === 'plain' ? palette.accent : palette.text;
+    kind === 'primary'
+      ? palette.accent
+      : kind === 'danger'
+        ? palette.danger
+        : kind === 'secondary'
+          ? palette.surface
+          : 'transparent';
+
+  const fg =
+    kind === 'primary' || kind === 'danger'
+      ? palette.onAccent
+      : kind === 'plain'
+        ? palette.accent
+        : palette.text;
+
   const inactive = disabled || busy;
+
   return (
     <Pressable
       testID={testID}
@@ -96,6 +119,7 @@ export function TextField({
   ...input
 }: TextInputProps & { label?: string; hint?: string; error?: string | null }) {
   const palette = usePalette();
+
   return (
     <View style={styles.field}>
       {label ? <Text style={[font.section, { color: palette.text }]}>{label}</Text> : null}
@@ -106,7 +130,11 @@ export function TextField({
         style={[
           styles.input,
           font.body,
-          { color: palette.text, backgroundColor: palette.surface, borderColor: error ? palette.danger : palette.divider },
+          {
+            color: palette.text,
+            backgroundColor: palette.surface,
+            borderColor: error ? palette.danger : palette.divider,
+          },
           input.style,
         ]}
       />
@@ -122,7 +150,9 @@ export function TextField({
 /** A count of unread messages; red when they mention the user. */
 export function Badge({ count, mention = false }: { count: number; mention?: boolean }) {
   const palette = usePalette();
+
   if (count <= 0) return null;
+
   return (
     <View style={[styles.badge, { backgroundColor: mention ? palette.mention : palette.accent }]}>
       <Text style={[font.badge, { color: palette.onAccent }]} allowFontScaling={false}>
@@ -133,13 +163,37 @@ export function Badge({ count, mention = false }: { count: number; mention?: boo
 }
 
 /** A group of rows, as iOS's grouped lists and Android's settings sections draw them. */
-export function ListSection({ title, footer, children }: { title?: string; footer?: string; children: ReactNode }) {
+export function ListSection({
+  title,
+  footer,
+  children,
+}: {
+  title?: string;
+  footer?: string;
+  children: ReactNode;
+}) {
   const palette = usePalette();
+
   return (
     <View style={styles.section}>
-      {title ? <Text style={[styles.sectionTitle, font.section, { color: palette.textMuted }]}>{title.toUpperCase()}</Text> : null}
-      <View style={[styles.sectionBody, { backgroundColor: palette.surface, borderColor: palette.divider }]}>{children}</View>
-      {footer ? <Text style={[styles.sectionFooter, font.meta, { color: palette.textMuted }]}>{footer}</Text> : null}
+      {title ? (
+        <Text style={[styles.sectionTitle, font.section, { color: palette.textMuted }]}>
+          {title.toUpperCase()}
+        </Text>
+      ) : null}
+      <View
+        style={[
+          styles.sectionBody,
+          { backgroundColor: palette.surface, borderColor: palette.divider },
+        ]}
+      >
+        {children}
+      </View>
+      {footer ? (
+        <Text style={[styles.sectionFooter, font.meta, { color: palette.textMuted }]}>
+          {footer}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -172,9 +226,13 @@ export function ListRow({
 }) {
   const palette = usePalette();
   const color = danger ? palette.danger : palette.text;
+
   const body = (
     <View style={styles.row}>
-      {leading ?? (icon ? <Icon name={icon} size={22} color={danger ? palette.danger : palette.textMuted} /> : null)}
+      {leading ??
+        (icon ? (
+          <Icon name={icon} size={22} color={danger ? palette.danger : palette.textMuted} />
+        ) : null)}
       <View style={styles.rowText}>
         <Text style={[font.body, { color }]} numberOfLines={1}>
           {title}
@@ -198,7 +256,9 @@ export function ListRow({
       {chevron && !toggle ? <Icon name="chevronRight" size={16} color={palette.textMuted} /> : null}
     </View>
   );
+
   if (!onPress) return <View testID={testID}>{body}</View>;
+
   return (
     <Touchable testID={testID} onPress={onPress} accessibilityRole="button">
       {body}
@@ -208,17 +268,43 @@ export function ListRow({
 
 export function Divider({ inset = 0 }: { inset?: number }) {
   const palette = usePalette();
-  return <View style={{ height: StyleSheet.hairlineWidth, marginLeft: inset, backgroundColor: palette.divider }} />;
+
+  return (
+    <View
+      style={{
+        height: StyleSheet.hairlineWidth,
+        marginLeft: inset,
+        backgroundColor: palette.divider,
+      }}
+    />
+  );
 }
 
 /** What a screen shows when it has nothing to list, or while it loads. */
-export function EmptyState({ icon, title, body, loading = false }: { icon?: IconName; title: string; body?: string; loading?: boolean }) {
+export function EmptyState({
+  icon,
+  title,
+  body,
+  loading = false,
+}: {
+  icon?: IconName;
+  title: string;
+  body?: string;
+  loading?: boolean;
+}) {
   const palette = usePalette();
+
   return (
     <View style={styles.empty}>
-      {loading ? <ActivityIndicator color={palette.textMuted} /> : icon ? <Icon name={icon} size={40} color={palette.textMuted} /> : null}
+      {loading ? (
+        <ActivityIndicator color={palette.textMuted} />
+      ) : icon ? (
+        <Icon name={icon} size={40} color={palette.textMuted} />
+      ) : null}
       <Text style={[font.header, { color: palette.text, textAlign: 'center' }]}>{title}</Text>
-      {body ? <Text style={[font.body, { color: palette.textMuted, textAlign: 'center' }]}>{body}</Text> : null}
+      {body ? (
+        <Text style={[font.body, { color: palette.textMuted, textAlign: 'center' }]}>{body}</Text>
+      ) : null}
     </View>
   );
 }
@@ -242,6 +328,7 @@ export function IconButton({
   testID?: string;
 }) {
   const palette = usePalette();
+
   return (
     <Pressable
       testID={testID}
@@ -277,13 +364,32 @@ const styles = StyleSheet.create({
   },
   buttonContent: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   field: { gap: 6 },
-  input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: Platform.OS === 'ios' ? 13 : 10 },
-  badge: { minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center' },
+  input: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 13 : 10,
+  },
+  badge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   section: { marginTop: 22, marginHorizontal: 16 },
   sectionTitle: { marginLeft: 16, marginBottom: 6 },
   sectionBody: { borderRadius: 12, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
   sectionFooter: { marginHorizontal: 16, marginTop: 6 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 12, minHeight: 52 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    minHeight: 52,
+  },
   rowText: { flex: 1, gap: 2 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 32 },
 });

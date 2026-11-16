@@ -54,6 +54,7 @@ export interface Tile {
 export function describeTile(info: CallInfo, tile: CallTile): Tile {
   const person = participantOf(info, tile) ?? null;
   const name = person?.person.name ?? t('call.you');
+
   return {
     key: `${tile.screen ? 'screen' : 'tile'}-${tile.participant === '' ? 'you' : tile.participant}`,
     speaker: tile.screen ? '' : tile.participant,
@@ -76,10 +77,15 @@ export interface Control {
 }
 
 /** The microphone and camera controls, as the desktop shows them. */
-export function controls(info: CallInfo, canFilm: boolean): { microphone: Control; camera: Control } {
+export function controls(info: CallInfo, canFilm: boolean) {
   const filming = info.camera !== null;
+
   return {
-    microphone: { shown: true, on: info.microphone, label: info.microphone ? t('call.mute') : t('call.unmute') },
+    microphone: {
+      shown: true,
+      on: info.microphone,
+      label: info.microphone ? t('call.mute') : t('call.unmute'),
+    },
     camera: {
       // Device to device, the connection carries the camera it started with (if any).
       shown: canFilm && (info.via === 'Rtc' || info.video),
@@ -99,10 +105,19 @@ export type HeaderCall =
   /** The user is in this room's call: back to its stage. */
   | { kind: 'return' };
 
-export function headerCall(room: RoomSummary | undefined, current: CallInfo | null, account: string): HeaderCall {
+export function headerCall(
+  room: RoomSummary | undefined,
+  current: CallInfo | null,
+  account: string,
+): HeaderCall {
   if (!room || room.call.via === null) return { kind: 'none' };
-  if (current && current.account === account && current.room_id === room.room_id) return { kind: 'return' };
-  if (room.call.participants.length > 0) return { kind: 'join', count: room.call.participants.length };
+
+  if (current && current.account === account && current.room_id === room.room_id)
+    return { kind: 'return' };
+
+  if (room.call.participants.length > 0)
+    return { kind: 'join', count: room.call.participants.length };
+
   return { kind: 'start' };
 }
 
@@ -140,5 +155,6 @@ export { hear, type LoudAt, SPEAKING_HOLD_MS, SPEAKING_LEVEL } from '../../state
 export function nextCamera(names: string[], current: string | null): string | null {
   if (names.length === 0) return null;
   const at = current === null ? 0 : names.indexOf(current);
+
   return names[(at + 1) % names.length] ?? null;
 }

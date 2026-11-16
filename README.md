@@ -37,7 +37,7 @@ They need glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36, openSUSE Tumb
 
 ### Linux
 
-**Debian, Ubuntu, Linux Mint, Pop!_OS**
+**Debian, Ubuntu, Linux Mint, Pop!\_OS**
 
 ```sh
 curl -fLo /tmp/better-matrix.deb "https://github.com/m43i/better-matrix/releases/latest/download/better-matrix-linux-$(uname -m).deb" && sudo apt install -y /tmp/better-matrix.deb
@@ -108,7 +108,8 @@ delete the AppImage, the app in Applications, or the `Better Matrix` folder, Sta
 
 ## Develop
 
-You need [Bun](https://bun.sh) and [rustup](https://rustup.rs); the pinned Rust toolchain installs
+You need [Bun](https://bun.sh), [Node.js 26](https://nodejs.org) (Oxlint plugins and Jest), and
+[rustup](https://rustup.rs); the pinned Rust toolchain installs
 itself. On Linux, also clang 21 or newer (libwebrtc's C++ library needs it; set `CC` and `CXX` if
 it isn't your default compiler) and the development packages for `libxkbcommon`, `wayland`, `alsa`,
 `glib`, `pipewire` and `libclang`; on ARM also `lld` (libwebrtc links with it). On Debian or Ubuntu:
@@ -120,9 +121,14 @@ wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 21 && export CC=clang-2
 
 ```sh
 bun install
-bun run dev            # run the desktop app
+bun run dev:desktop    # run the desktop app (dev is an alias)
+bun run prebuild       # generate mobile native projects; --platform ios or android to select
+bun run dev:ios        # build the Rust bridge and run iOS (Mac with Xcode)
+bun run dev:android    # build the Rust bridge and run Android (SDK/NDK required)
 bun run test           # all tests
-bun run lint           # clippy (warnings are errors), formatting, third-party list
+bun run lint           # Oxlint + anti-slop, clippy, typechecks, formatting, third-party list
+bun run lint:fix       # apply safe JavaScript/TypeScript lint fixes
+bun run format         # Oxfmt for supported files, rustfmt for Rust
 bun run build          # debug build; build:release for release
 bun run install:linux  # install a release build for this user (Linux)
 ```

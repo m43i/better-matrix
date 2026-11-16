@@ -27,3 +27,13 @@ describe('selectFrom', () => {
     expect(second.value).toBe(first.value);
   });
 });
+
+describe('shallow', () => {
+  it('different undefined-valued properties should not compare equal', () => {
+    expect(shallow({ first: undefined }, { second: undefined })).toBe(false);
+  });
+
+  it('objects with the same properties in a different order should compare equal', () => {
+    expect(shallow({ first: 1, second: 2 }, { second: 2, first: 1 })).toBe(true);
+  });
+});

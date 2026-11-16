@@ -31,15 +31,26 @@ export function Avatar({
   const uri = useMedia(account, media, AVATAR_SIZE);
   // Everyone and everything is a rounded square, as the desktop draws avatars.
   const radius = size * 0.22;
+
   return (
     <View style={{ width: size, height: size }}>
       {uri ? (
-        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: radius }} transition={120} />
+        <Image
+          source={{ uri }}
+          style={{ width: size, height: size, borderRadius: radius }}
+          transition={120}
+        />
       ) : (
         <View
-          style={[styles.fallback, { width: size, height: size, borderRadius: radius, backgroundColor: identityColor(id) }]}
+          style={[
+            styles.fallback,
+            { width: size, height: size, borderRadius: radius, backgroundColor: identityColor(id) },
+          ]}
         >
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: size * 0.4 }} allowFontScaling={false}>
+          <Text
+            style={{ color: '#fff', fontWeight: '700', fontSize: size * 0.4 }}
+            allowFontScaling={false}
+          >
             {initials(name)}
           </Text>
         </View>

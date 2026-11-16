@@ -43,7 +43,8 @@ describe('notifyUrl', () => {
     expect(notifyUrl('http://10.0.2.2:5000')).toBe('http://10.0.2.2:5000/_matrix/push/v1/notify');
   });
 
-  it('something that is no url should mean none', () => expect(notifyUrl('push gateway')).toBeNull());
+  it('something that is no url should mean none', () =>
+    expect(notifyUrl('push gateway')).toBeNull());
 });
 
 describe('unavailable', () => {
@@ -55,7 +56,8 @@ describe('unavailable', () => {
     expect(unavailable({ gateway: NOTIFY, projectId: undefined })).toBe('no-project');
   });
 
-  it('a configured build should push', () => expect(unavailable({ gateway: NOTIFY, projectId: 'p' })).toBeNull());
+  it('a configured build should push', () =>
+    expect(unavailable({ gateway: NOTIFY, projectId: 'p' })).toBeNull());
 });
 
 describe('wantedAccounts', () => {
@@ -74,23 +76,30 @@ describe('wantedAccounts', () => {
 
 describe('carryOut', () => {
   /** Steps over a remembered list, failing the server calls named in `failing`. */
-  function steps(saved: Record<string, PusherRegistration>, failing: { remove?: boolean; register?: boolean } = {}) {
+  function steps(
+    saved: Record<string, PusherRegistration>,
+    failing: { remove?: boolean; register?: boolean } = {},
+  ) {
     const current = registration();
     const log: string[] = [];
+
     const s: PlanSteps = {
       signedIn: () => true,
       remove: async (account) => {
         log.push(`remove ${account}`);
+
         if (failing.remove) throw new Error('offline');
       },
       register: async (account) => {
         log.push(`register ${account}`);
+
         if (failing.register) throw new Error('offline');
       },
       removed: (account) => delete saved[account],
       registered: (account) => (saved[account] = current),
       failed: (account) => log.push(`failed ${account}`),
     };
+
     return { s, log, current };
   }
 
@@ -104,7 +113,7 @@ describe('carryOut', () => {
 
   it('a new token should not replace a pusher whose removal failed', async () => {
     const old = registration({ token: 'ExponentPushToken[old]' });
-    const saved: Record<string, PusherRegistration> = { [ADA]: old };
+    const saved = { [ADA]: old };
     const { s, log, current } = steps(saved, { remove: true });
     expect(await carryOut(plan(saved, [ADA], current), s)).toBe(false);
     expect([saved[ADA], log]).toEqual([old, [`remove ${ADA}`]]);
@@ -112,7 +121,7 @@ describe('carryOut', () => {
 
   it('a removal that went through on retry should let the new token register', async () => {
     const old = registration({ token: 'ExponentPushToken[old]' });
-    const saved: Record<string, PusherRegistration> = { [ADA]: old };
+    const saved = { [ADA]: old };
     const { s, current } = steps(saved, { remove: true });
     await carryOut(plan(saved, [ADA], current), s);
     expect(await carryOut(plan(saved, [ADA], current), steps(saved).s)).toBe(true);
@@ -125,7 +134,11 @@ describe('tokenFetcher', () => {
   afterEach(() => jest.useRealTimers());
 
   it('a token that could not be had should be asked for again later', async () => {
-    const get = jest.fn<Promise<string>, []>().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce('ExponentPushToken[a]');
+    const get = jest
+      .fn<Promise<string>, []>()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce('ExponentPushToken[a]');
+
     const got = jest.fn();
     tokenFetcher({ get, got, wanted: () => true })();
     await jest.advanceTimersByTimeAsync(tokenRetryMs(1));
@@ -164,21 +177,33 @@ describe('plan', () => {
   });
 
   it('an account registered as it is should be left alone', () => {
-    expect(plan({ [ADA]: registration() }, [ADA], registration())).toEqual({ register: [], remove: [] });
+    expect(plan({ [ADA]: registration() }, [ADA], registration())).toEqual({
+      register: [],
+      remove: [],
+    });
   });
 
   it('a new token should replace the old pusher', () => {
     const old = registration({ token: 'ExponentPushToken[old]' });
-    expect(plan({ [ADA]: old }, [ADA], registration())).toEqual({ register: [ADA], remove: [{ account: ADA, registration: old }] });
+    expect(plan({ [ADA]: old }, [ADA], registration())).toEqual({
+      register: [ADA],
+      remove: [{ account: ADA, registration: old }],
+    });
   });
 
   it('a new language should register again without removing', () => {
-    expect(plan({ [ADA]: registration() }, [ADA], registration({ lang: 'de' }))).toEqual({ register: [ADA], remove: [] });
+    expect(plan({ [ADA]: registration() }, [ADA], registration({ lang: 'de' }))).toEqual({
+      register: [ADA],
+      remove: [],
+    });
   });
 
   it('an account no longer wanted should lose its pusher', () => {
     const plain = registration();
-    expect(plan({ [ADA]: plain }, [], plain)).toEqual({ register: [], remove: [{ account: ADA, registration: plain }] });
+    expect(plan({ [ADA]: plain }, [], plain)).toEqual({
+      register: [],
+      remove: [{ account: ADA, registration: plain }],
+    });
   });
 
   it('no token yet should keep what is registered', () => {
@@ -214,7 +239,9 @@ describe('targetOfPush', () => {
 
   it('a push as android hands it over should name its account and event', () => {
     const json = JSON.stringify({ ...data, unread: '3' });
-    expect(targetOfPush({ body: json, dataString: json, experienceId: '@o/better-matrix' })).toEqual({
+    expect(
+      targetOfPush({ body: json, dataString: json, experienceId: '@o/better-matrix' }),
+    ).toEqual({
       account: ADA,
       room_id: '!r',
       event_id: '$e',
@@ -272,22 +299,34 @@ describe('leftToPush', () => {
     expect(leftToPush(true, false, true)).toBe(true);
   });
 
-  it('the app in front should notify itself', () => expect(leftToPush(true, true, true)).toBe(false));
+  it('the app in front should notify itself', () =>
+    expect(leftToPush(true, true, true)).toBe(false));
 
-  it('an account without a pusher should notify itself', () => expect(leftToPush(true, false, false)).toBe(false));
+  it('an account without a pusher should notify itself', () =>
+    expect(leftToPush(true, false, false)).toBe(false));
 
-  it('android should notify itself and show each event once', () => expect(leftToPush(false, false, true)).toBe(false));
+  it('android should notify itself and show each event once', () =>
+    expect(leftToPush(false, false, true)).toBe(false));
 });
 
 describe('badgeCount', () => {
   it('the badge should count conversations wanting attention over every account', () => {
     let state = apply(initialState(), { type: 'AccountAdded', data: summary(ADA) });
     state = apply(state, { type: 'AccountAdded', data: summary(GRACE, 'Grace') });
+
     const rooms = (account: string, unread: number[]) =>
       apply(state, {
         type: 'RoomsUpdated',
-        data: { account, list: { rooms: unread.map((u, i) => ({ ...roomSummary(`!${i}`), unread: u })), spaces: [], invitations: [] } },
+        data: {
+          account,
+          list: {
+            rooms: unread.map((u, i) => ({ ...roomSummary(`!${i}`), unread: u })),
+            spaces: [],
+            invitations: [],
+          },
+        },
       });
+
     state = rooms(ADA, [2, 0]);
     state = rooms(GRACE, [1]);
     expect(badgeCount(state.accounts)).toBe(2);

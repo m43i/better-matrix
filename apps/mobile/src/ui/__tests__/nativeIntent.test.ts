@@ -1,8 +1,6 @@
 import { redirectSystemPath } from '../../app/+native-intent';
 import { takeLinks } from '../links/inbox';
 
-jest.mock('expo-asset', () => ({ Asset: { fromModule: () => ({ downloadAsync: async () => ({ localUri: null }) }) } }));
-
 describe('links into the app', () => {
   beforeEach(() => void takeLinks());
 
@@ -12,12 +10,16 @@ describe('links into the app', () => {
   });
 
   it('should keep a matrix.to link that comes while the app runs, leaving the router where it is', () => {
-    expect(redirectSystemPath({ path: 'https://matrix.to/#/@grace:example.org', initial: false })).toBeNull();
+    expect(
+      redirectSystemPath({ path: 'https://matrix.to/#/@grace:example.org', initial: false }),
+    ).toBeNull();
     expect(takeLinks()).toEqual(['https://matrix.to/#/@grace:example.org']);
   });
 
   it('should route other links as they are', () => {
-    expect(redirectSystemPath({ path: 'bettermatrix://settings', initial: false })).toBe('bettermatrix://settings');
+    expect(redirectSystemPath({ path: 'bettermatrix://settings', initial: false })).toBe(
+      'bettermatrix://settings',
+    );
     expect(takeLinks()).toEqual([]);
   });
 });

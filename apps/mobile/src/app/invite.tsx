@@ -27,6 +27,7 @@ export default function InviteScreen() {
   const [status, setStatus] = useState<Record<string, Status>>({});
   // Who is in the room already shows as such in the results.
   useEffect(() => listAllMembers(store, account, roomId), [store, account, roomId]);
+
   const pick = (userId: string) => {
     if (status[userId] !== undefined || members?.people.some((m) => m.person.id === userId)) return;
     setStatus((s) => ({ ...s, [userId]: 'inviting' }));
@@ -35,16 +36,25 @@ export default function InviteScreen() {
       () =>
         setStatus((s) => {
           const { [userId]: _failed, ...rest } = s;
+
           return rest;
         }),
     );
   };
+
   return (
     <>
       <Stack.Screen
         options={{
           title: t('invite.title', { room: room?.name ?? roomId }),
-          headerRight: () => <HeaderButton title={t('common.done')} onPress={() => router.back()} strong testID="invite-done" />,
+          headerRight: () => (
+            <HeaderButton
+              title={t('common.done')}
+              onPress={() => router.back()}
+              strong
+              testID="invite-done"
+            />
+          ),
         }}
       />
       <PeoplePicker
@@ -54,15 +64,24 @@ export default function InviteScreen() {
         onPick={(person) => pick(person.id)}
         trailing={(person) => {
           if (members?.people.some((m) => m.person.id === person.id)) {
-            return <Text style={[font.meta, { color: palette.textMuted }]}>{t('invite.member')}</Text>;
+            return (
+              <Text style={[font.meta, { color: palette.textMuted }]}>{t('invite.member')}</Text>
+            );
           }
+
           switch (status[person.id]) {
             case 'inviting':
               return <ActivityIndicator color={palette.textMuted} />;
             case 'invited':
-              return <Text style={[font.meta, { color: palette.success }]}>{t('invite.invited')}</Text>;
+              return (
+                <Text style={[font.meta, { color: palette.success }]}>{t('invite.invited')}</Text>
+              );
             default:
-              return <Text style={[font.bodyStrong, { color: palette.accent }]}>{t('invite.invite')}</Text>;
+              return (
+                <Text style={[font.bodyStrong, { color: palette.accent }]}>
+                  {t('invite.invite')}
+                </Text>
+              );
           }
         }}
       />

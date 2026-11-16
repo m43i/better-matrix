@@ -21,12 +21,15 @@ export default function InvitationScreen() {
   const { account, roomId } = useLocalSearchParams<{ account: string; roomId: string }>();
   const store = useAppStore();
   const palette = usePalette();
+
   const invite = useStore((s) =>
     s.accounts.find((a) => a.summary.id === account)?.invitations.find((i) => i.room_id === roomId),
   );
+
   const [busy, setBusy] = useState<'accept' | 'decline' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const shown = useShown();
+
   if (!invite || !account) return null;
   const room = !invite.space && invite.kind === 'Group';
 
@@ -35,20 +38,34 @@ export default function InvitationScreen() {
     setError(null);
     const result = await answerInvitation(store, account, invite.room_id, accept);
     setBusy(null);
+
     if (result.kind === 'failed') setError(result.error);
     const next = afterAnswer(result, invite.space, shown.current);
+
     if (next.type === 'stay') return;
     router.back();
+
     // As a link does: the invited account comes on screen, a space as its scope on Home.
     if (next.type === 'space') openJoined(store, { type: 'space', account, spaceId: next.spaceId });
-    if (next.type === 'room') openJoined(store, { type: 'room', account, roomId: next.roomId, eventId: null });
+
+    if (next.type === 'room')
+      openJoined(store, { type: 'room', account, roomId: next.roomId, eventId: null });
   };
 
   return (
     <ScrollView style={{ backgroundColor: palette.bg }} contentContainerStyle={styles.content}>
       <View style={styles.head}>
-        <Avatar account={account} id={invite.room_id} name={invite.name} media={invite.avatar} size={64} />
-        <Text style={[font.title, styles.center, { color: palette.text, fontSize: 24 }]} numberOfLines={2}>
+        <Avatar
+          account={account}
+          id={invite.room_id}
+          name={invite.name}
+          media={invite.avatar}
+          size={64}
+        />
+        <Text
+          style={[font.title, styles.center, { color: palette.text, fontSize: 24 }]}
+          numberOfLines={2}
+        >
           {room ? `# ${invite.name}` : invite.name}
         </Text>
         {invite.topic ? (
@@ -62,8 +79,12 @@ export default function InvitationScreen() {
           {t('invitations.from', { name: invite.inviter.name, user: invite.inviter.id })}
         </Text>
       ) : null}
-      <Text style={[font.meta, styles.center, { color: palette.textMuted }]}>{t('invitations.account', { account })}</Text>
-      {error ? <Text style={[font.meta, styles.center, { color: palette.danger }]}>{error}</Text> : null}
+      <Text style={[font.meta, styles.center, { color: palette.textMuted }]}>
+        {t('invitations.account', { account })}
+      </Text>
+      {error ? (
+        <Text style={[font.meta, styles.center, { color: palette.danger }]}>{error}</Text>
+      ) : null}
       <View style={styles.buttons}>
         <View style={styles.button}>
           <Button

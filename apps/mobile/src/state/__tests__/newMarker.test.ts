@@ -17,7 +17,10 @@ describe('sdkBoundary', () => {
 
 describe('nextMarker', () => {
   it('should show the divider where the read marker first stands', () => {
-    expect(nextMarker(NO_MARKER, '$2')).toEqual({ shown: { boundary: '$2', fading: false }, hidden: false });
+    expect(nextMarker(NO_MARKER, '$2')).toEqual({
+      shown: { boundary: '$2', fading: false },
+      hidden: false,
+    });
   });
 
   it('should keep the divider in place and fade it when receipts move the marker', () => {

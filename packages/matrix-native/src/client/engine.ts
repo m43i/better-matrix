@@ -32,6 +32,7 @@ export class Engine {
   /** Adds a listener; the returned function removes it. */
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
+
     return () => {
       this.listeners.delete(listener);
     };
@@ -46,6 +47,7 @@ export class Engine {
 
   /** Hands one event, as the bridge's JSON, to every listener. */
   emitJson(json: string): void {
+    // SAFETY: the Rust bridge serialized Event or BridgeEvent from the same types generated into this package.
     this.emit(JSON.parse(json) as EngineEvent);
   }
 }
@@ -61,12 +63,16 @@ export interface DetachedEngine {
 export function detachedEngine(): DetachedEngine {
   const sent: DetachedEngine['sent'] = [];
   let next = 1;
+
   const engine = new Engine({
     send(json) {
       const request = next++;
+      // SAFETY: Engine.send serialized the typed Command immediately before this detached transport received it.
       sent.push({ request, command: JSON.parse(json) as Command });
+
       return request;
     },
   });
+
   return { engine, sent };
 }

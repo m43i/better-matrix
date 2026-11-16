@@ -1,6 +1,7 @@
 // What a system notification for `Event::Notification` says and when it shows: pure, so it is
 // tested without the native module (notifications.ts presents what this decides).
 
+import { z } from 'zod';
 import type { AccountId, Notification, PushContent } from '@better-matrix/matrix-native/types';
 
 import { t } from '../i18n';
@@ -36,7 +37,10 @@ export function contentOf(n: Notification): NotificationContent {
   return {
     identifier: `${n.account}|${n.event_id}`,
     title: n.room_name,
-    body: n.sender_name === n.room_name ? n.body : t('overview.preview', { sender: n.sender_name, body: n.body }),
+    body:
+      n.sender_name === n.room_name
+        ? n.body
+        : t('overview.preview', { sender: n.sender_name, body: n.body }),
     thread: `${n.account}|${n.room_id}`,
     data: { account: n.account, roomId: n.room_id, eventId: n.event_id },
   };
@@ -52,6 +56,7 @@ export function pushContentOf(content: PushContent): NotificationContent | null 
       return contentOf(content.data);
     case 'Invite': {
       const { account, room_id, room_name, event_id, sender_name } = content.data;
+
       return {
         identifier: `${account}|${event_id}`,
         title: room_name,
@@ -60,8 +65,10 @@ export function pushContentOf(content: PushContent): NotificationContent | null 
         data: { account, roomId: room_id, eventId: event_id },
       };
     }
+
     case 'Hidden': {
       const { account, room_id, room_name, event_id } = content.data;
+
       return {
         identifier: `${account}|${event_id}`,
         title: room_name ?? t('app.name'),
@@ -70,6 +77,7 @@ export function pushContentOf(content: PushContent): NotificationContent | null 
         data: { account, roomId: room_id, eventId: event_id },
       };
     }
+
     case 'Nothing':
       return null;
   }
@@ -80,15 +88,22 @@ export function pushContentOf(content: PushContent): NotificationContent | null 
  * (`roomId`, `eventId`), or a push's as the gateway sent it (`room_id`, `event_id`, which iOS
  * keeps when the Notification Service Extension rewrote the text).
  */
-export function targetOf(data: unknown): NotificationTarget | null {
-  if (typeof data !== 'object' || data === null) return null;
-  const fields = data as Record<string, unknown>;
-  const account = fields.account;
-  const roomId = fields.roomId ?? fields.room_id;
-  const eventId = fields.eventId ?? fields.event_id;
-  if (typeof account !== 'string' || typeof roomId !== 'string' || typeof eventId !== 'string') return null;
-  return { account, roomId, eventId };
-}
+export const targetOf = z
+  .object({
+    account: z.string(),
+    roomId: z.json().optional(),
+    room_id: z.json().optional(),
+    eventId: z.json().optional(),
+    event_id: z.json().optional(),
+  })
+  .transform((fields) => ({
+    account: fields.account,
+    roomId: fields.roomId ?? fields.room_id,
+    eventId: fields.eventId ?? fields.event_id,
+  }))
+  .pipe(z.object({ account: z.string(), roomId: z.string(), eventId: z.string() }))
+  .nullable()
+  .catch(null).parse;
 
 /**
  * Where a tapped notification goes: the invitation's sheet when it is about a pending invitation
@@ -96,9 +111,18 @@ export function targetOf(data: unknown): NotificationTarget | null {
  * while the account's lists know neither: the room list from before the first sync may not have
  * a room joined or an invitation received while the app was closed. Once `waitedOut`, the room.
  */
-export function tapRoute(state: State, target: NotificationTarget, waitedOut = false): 'wait' | 'invitation' | 'room' {
+export function tapRoute(
+  state: State,
+  target: NotificationTarget,
+  waitedOut = false,
+): 'wait' | 'invitation' | 'room' {
   const account = state.accounts.find((a) => a.summary.id === target.account);
+
   if (account?.invitations.some((invite) => invite.room_id === target.roomId)) return 'invitation';
-  const joined = account?.rooms.some((room) => room.room_id === target.roomId) || account?.spaces.some((space) => space.room_id === target.roomId);
+
+  const joined =
+    account?.rooms.some((room) => room.room_id === target.roomId) ||
+    account?.spaces.some((space) => space.room_id === target.roomId);
+
   return joined || waitedOut ? 'room' : 'wait';
 }

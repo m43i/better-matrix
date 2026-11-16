@@ -5,11 +5,13 @@
 type Listener = () => void;
 
 let waiting: string[] = [];
+
 const listeners = new Set<Listener>();
 
 /** Keeps `link` for the opener and tells it one came. */
 export function deliverLink(link: string): void {
   waiting = [...waiting, link];
+
   for (const listener of listeners) listener();
 }
 
@@ -17,12 +19,14 @@ export function deliverLink(link: string): void {
 export function takeLinks(): string[] {
   const taken = waiting;
   waiting = [];
+
   return taken;
 }
 
 /** Hears every link delivered from now on; returns the unsubscribe. */
 export function onLinkDelivered(listener: Listener): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };

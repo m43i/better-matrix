@@ -17,7 +17,9 @@ export function LinkOpener() {
   useEffect(() => onLinkDelivered(() => setDelivered((count) => count + 1)), []);
   useEffect(() => {
     if (!ready || !navigation?.key) return;
+
     for (const link of takeLinks()) openPermalink(store, link);
   }, [ready, navigation?.key, delivered, store]);
+
   return null;
 }

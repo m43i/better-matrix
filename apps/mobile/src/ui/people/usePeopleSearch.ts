@@ -17,11 +17,13 @@ export function usePeopleSearch(account: AccountId | null): [PeopleSearch, (text
     const next = new PeopleSearcher(store, account, setSearch);
     searcher.current = next;
     next.suggest();
+
     return () => {
       next.close();
       searcher.current = null;
     };
   }, [store, account]);
   const type = useCallback((text: string) => searcher.current?.type(text), []);
+
   return [search, type];
 }

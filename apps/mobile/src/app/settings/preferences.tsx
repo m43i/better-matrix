@@ -13,6 +13,7 @@ import { SettingsPage } from '../../ui/settings/common';
 export default function PreferencesScreen() {
   const store = useAppStore();
   const settings = useStore((s) => s.settings);
+
   return (
     <SettingsPage title={t('mobile.accounts.preferences')} testID="preferences">
       <ListSection title={t('settings.language')} footer={t('settings.language_hint')}>
@@ -45,21 +46,32 @@ export default function PreferencesScreen() {
       </ListSection>
       <ListSection
         title={t('settings.previews')}
-        footer={settings.showLinkPreviews ? t('settings.previews_on_hint') : t('settings.previews_hint')}
+        footer={
+          settings.showLinkPreviews ? t('settings.previews_on_hint') : t('settings.previews_hint')
+        }
       >
         <ListRow
           testID="previews"
           icon="link"
           title={t('settings.previews_on')}
-          toggle={{ value: settings.showLinkPreviews, onChange: (on) => updateSettings(store, { showLinkPreviews: on }) }}
+          toggle={{
+            value: settings.showLinkPreviews,
+            onChange: (on) => updateSettings(store, { showLinkPreviews: on }),
+          }}
         />
       </ListSection>
-      <ListSection title={t('settings.gifs')} footer={settings.showLinkGifs ? t('settings.gifs_on_hint') : t('settings.gifs_hint')}>
+      <ListSection
+        title={t('settings.gifs')}
+        footer={settings.showLinkGifs ? t('settings.gifs_on_hint') : t('settings.gifs_hint')}
+      >
         <ListRow
           testID="gifs"
           icon="image"
           title={t('settings.gifs_on')}
-          toggle={{ value: settings.showLinkGifs, onChange: (on) => updateSettings(store, { showLinkGifs: on }) }}
+          toggle={{
+            value: settings.showLinkGifs,
+            onChange: (on) => updateSettings(store, { showLinkGifs: on }),
+          }}
         />
       </ListSection>
     </SettingsPage>

@@ -3,6 +3,7 @@
 // token or a setting does, which account and event a push is for, and showing each event once.
 // ADR 0010 records the design.
 
+import { z } from 'zod';
 import type { AccountId, Pusher, PushTarget } from '@better-matrix/matrix-native/types';
 
 import { wantsAttention } from '../state/sections';
@@ -35,29 +36,41 @@ export type PushUnavailable = 'no-gateway' | 'no-project';
  */
 export function notifyUrl(gateway: string | undefined): string | null {
   const trimmed = gateway?.trim();
+
   if (!trimmed) return null;
   let url: URL;
+
   try {
     url = new URL(trimmed);
   } catch {
     return null;
   }
-  const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '10.0.2.2';
+
+  const local =
+    url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '10.0.2.2';
+
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) return null;
   const base = url.toString().replace(/\/+$/, '');
+
   return base.endsWith(NOTIFY_PATH) ? base : `${base}${NOTIFY_PATH}`;
 }
 
 /** Why push can't run with `config`, or null when it can. */
 export function unavailable(config: PushConfig): PushUnavailable | null {
   if (!notifyUrl(config.gateway)) return 'no-gateway';
+
   if (!config.projectId?.trim()) return 'no-project';
+
   return null;
 }
 
 /** The accounts that should have a pusher on this device. */
-export function wantedAccounts(accounts: readonly AccountId[], settings: Pick<Settings, 'pushEnabled' | 'pushOff'>): AccountId[] {
+export function wantedAccounts(
+  accounts: readonly AccountId[],
+  settings: Pick<Settings, 'pushEnabled' | 'pushOff'>,
+): AccountId[] {
   if (!settings.pushEnabled) return [];
+
   return accounts.filter((account) => !settings.pushOff.includes(account));
 }
 
@@ -65,7 +78,10 @@ export function wantedAccounts(accounts: readonly AccountId[], settings: Pick<Se
  * Whether a push for `account` may show: a pusher whose removal failed may still deliver after
  * push was turned off, for the device or the account.
  */
-export function pushAllowed(account: AccountId, settings: Pick<Settings, 'pushEnabled' | 'pushOff'>): boolean {
+export function pushAllowed(
+  account: AccountId,
+  settings: Pick<Settings, 'pushEnabled' | 'pushOff'>,
+): boolean {
   return wantedAccounts([account], settings).length > 0;
 }
 
@@ -91,16 +107,23 @@ export function plan(
   current: PusherRegistration | null,
 ): PushPlan {
   const result: PushPlan = { register: [], remove: [] };
+
   for (const [account, registration] of Object.entries(registered)) {
-    const keep = wanted.includes(account) && current !== null && registration.token === current.token;
-    if (!keep && (!wanted.includes(account) || current !== null)) result.remove.push({ account, registration });
+    const keep =
+      wanted.includes(account) && current !== null && registration.token === current.token;
+
+    if (!keep && (!wanted.includes(account) || current !== null))
+      result.remove.push({ account, registration });
   }
+
   if (current) {
     for (const account of wanted) {
       const before = registered[account];
+
       if (!before || !same(before, current)) result.register.push(account);
     }
   }
+
   return result;
 }
 
@@ -117,7 +140,7 @@ export interface PlanSteps {
   /** The current pusher is registered: remember it. */
   registered(account: AccountId): void;
   /** Registering failed. */
-  failed(account: AccountId, error: unknown): void;
+  failed(account: AccountId, cause: unknown): void;
 }
 
 /**
@@ -128,6 +151,7 @@ export interface PlanSteps {
 export async function carryOut(changes: PushPlan, steps: PlanSteps): Promise<boolean> {
   let settled = true;
   const blocked = new Set<AccountId>();
+
   for (const { account, registration } of changes.remove) {
     if (steps.signedIn(account)) {
       try {
@@ -138,10 +162,13 @@ export async function carryOut(changes: PushPlan, steps: PlanSteps): Promise<boo
         continue;
       }
     }
+
     steps.removed(account);
   }
+
   for (const account of changes.register) {
     if (blocked.has(account)) continue;
+
     try {
       await steps.register(account);
       steps.registered(account);
@@ -150,6 +177,7 @@ export async function carryOut(changes: PushPlan, steps: PlanSteps): Promise<boo
       steps.failed(account, error);
     }
   }
+
   return settled;
 }
 
@@ -163,10 +191,15 @@ export function tokenRetryMs(failures: number): number {
  * (offline at launch) is tried again later (`tokenRetryMs`) while `wanted` says the token is
  * still needed. The returned function asks now.
  */
-export function tokenFetcher(options: { get: () => Promise<string>; got: (token: string) => void; wanted: () => boolean }): () => void {
+export function tokenFetcher(options: {
+  get: () => Promise<string>;
+  got: (token: string) => void;
+  wanted: () => boolean;
+}): () => void {
   let fetching = false;
   let failures = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
+
   const fetch = () => {
     if (fetching) return;
     fetching = true;
@@ -178,9 +211,11 @@ export function tokenFetcher(options: { get: () => Promise<string>; got: (token:
       })
       .catch(() => {
         failures += 1;
+
         if (timer) return;
         timer = setTimeout(() => {
           timer = null;
+
           if (options.wanted()) fetch();
         }, tokenRetryMs(failures));
       })
@@ -188,6 +223,7 @@ export function tokenFetcher(options: { get: () => Promise<string>; got: (token:
         fetching = false;
       });
   };
+
   return fetch;
 }
 
@@ -219,48 +255,55 @@ export function pusherOf(
   };
 }
 
-/** The data object of a push, wherever Expo put it: flat, or as `body` (object or JSON) or `dataString`. */
-function dataOf(payload: unknown): Record<string, unknown> | null {
-  if (typeof payload !== 'object' || payload === null) return null;
-  const object = payload as Record<string, unknown>;
-  if ('account' in object) return object;
-  for (const key of ['body', 'dataString']) {
-    const nested = object[key];
-    if (typeof nested === 'object' && nested !== null) return nested as Record<string, unknown>;
-    if (typeof nested === 'string') {
-      try {
-        const parsed: unknown = JSON.parse(nested);
-        if (typeof parsed === 'object' && parsed !== null) return parsed as Record<string, unknown>;
-      } catch {
-        // Not ours.
-      }
+/** The event identity sent by our gateway; other fields are never used as message content. */
+const pushIdentity = z.object({
+  account: z.string().min(1),
+  room_id: z.string().min(1),
+  event_id: z.string().min(1),
+  unread: z.json().optional(),
+  unread_count: z.json().optional(),
+});
+
+const unreadCount = z
+  .union([z.number(), z.string().regex(/^\d+$/).transform(Number)])
+  .nullable()
+  .catch(null);
+
+const pushTarget = pushIdentity.transform((data): PushTarget => ({
+  account: data.account,
+  room_id: data.room_id,
+  event_id: data.event_id,
+  unread: unreadCount.parse(data.unread ?? data.unread_count),
+}));
+
+const pushJson = z
+  .string()
+  .transform((json, context) => {
+    try {
+      return JSON.parse(json);
+    } catch {
+      context.addIssue({ code: 'custom', message: 'Invalid push JSON' });
+
+      return z.NEVER;
     }
-  }
-  return null;
-}
+  })
+  .pipe(pushTarget);
 
-/**
- * What a push names, as the gateway sends it (`matrix_core::PushTarget::parse` reads the same):
- * the account, room and event, and the unread count as a number or a string. Null for a push
- * that names no event, or isn't this app's.
- */
-export function targetOfPush(payload: unknown): PushTarget | null {
-  const data = dataOf(payload);
-  if (!data) return null;
-  const text = (key: string) => (typeof data[key] === 'string' && data[key] !== '' ? (data[key] as string) : null);
-  const account = text('account');
-  const roomId = text('room_id');
-  const eventId = text('event_id');
-  if (!account || !roomId || !eventId) return null;
-  const count = data.unread ?? data.unread_count;
-  const unread = typeof count === 'number' ? count : typeof count === 'string' && /^\d+$/.test(count) ? Number(count) : null;
-  return { account, room_id: roomId, event_id: eventId, unread };
-}
+/** A gateway push, flat or wrapped by Expo as an object or JSON string. */
+export const targetOfPush = z
+  .union([
+    pushTarget,
+    z.object({ body: z.union([pushTarget, pushJson]) }).transform(({ body }) => body),
+    z.object({ dataString: pushJson }).transform(({ dataString }) => dataString),
+  ])
+  .nullable()
+  .catch(null).parse;
 
-/** Whether a notification the system hands the app came as a push (not one the app scheduled). */
-export function isPush(trigger: unknown): boolean {
-  return typeof trigger === 'object' && trigger !== null && (trigger as { type?: unknown }).type === 'push';
-}
+/** Whether a system notification came as a push rather than one the app scheduled. */
+export const isPush = z
+  .object({ type: z.literal('push') })
+  .transform(() => true)
+  .catch(false).parse;
 
 /**
  * The events notified about already, so the engine's sync and a push never show one twice.
@@ -275,13 +318,17 @@ export class Seen {
   /** Marks the event seen; false when it was already. */
   mark(account: AccountId, eventId: string): boolean {
     const key = `${account}|${eventId}`;
+
     if (this.set.has(key)) return false;
     this.set.add(key);
     this.keys.push(key);
+
     if (this.keys.length > this.limit) {
       const oldest = this.keys.shift();
+
       if (oldest !== undefined) this.set.delete(oldest);
     }
+
     return true;
   }
 }

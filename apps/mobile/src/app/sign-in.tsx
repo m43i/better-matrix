@@ -10,7 +10,13 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { t } from '../i18n';
-import { removeEnded, serverHost, serverName, SignInFlow, type SignInStep } from '../state/actions/accounts';
+import {
+  removeEnded,
+  serverHost,
+  serverName,
+  SignInFlow,
+  type SignInStep,
+} from '../state/actions/accounts';
 import { shallow, useAppStore, useStore } from '../state/react';
 import { font } from '../theme/palette';
 import { authBrowser } from '../ui/accounts/browser';
@@ -25,15 +31,24 @@ export default function SignInScreen() {
   const { resume } = useLocalSearchParams<{ resume?: AccountId }>();
   const adding = useStore((s) => s.accounts.length > 0);
   const [flow] = useState(() => new SignInFlow(store, authBrowser));
-  const { step, username: filled } = useSyncExternalStore(flow.subscribe, flow.snapshot, flow.snapshot);
-  const [homeserver, setHomeserver] = useState(resume ?? 'matrix.org');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
 
-  // A full Matrix ID fills in the username.
-  useEffect(() => {
+  const { step, username: filled } = useSyncExternalStore(
+    flow.subscribe,
+    flow.snapshot,
+    flow.snapshot,
+  );
+
+  const [homeserver, setHomeserver] = useState(resume ?? 'matrix.org');
+  const [username, setUsername] = useState(filled);
+  const [lastFilled, setLastFilled] = useState(filled);
+
+  if (lastFilled !== filled) {
+    setLastFilled(filled);
+
     if (filled) setUsername(filled);
-  }, [filled]);
+  }
+
+  const [password, setPassword] = useState('');
 
   // Signing in again as an account starts from its ID.
   const started = useRef(false);
@@ -73,7 +88,9 @@ export default function SignInScreen() {
       >
         <View style={styles.brand}>
           <Logo size={40} color={palette.accent} />
-          <Text style={[font.workspace, { color: palette.text, fontSize: 22 }]}>{t('app.name')}</Text>
+          <Text style={[font.workspace, { color: palette.text, fontSize: 22 }]}>
+            {t('app.name')}
+          </Text>
         </View>
         {step.type === 'server' || step.type === 'discovering' ? (
           <ServerStep
@@ -103,7 +120,9 @@ export default function SignInScreen() {
           <>
             <ServerRow server={step.server} onChange={() => flow.changeServer()} />
             <View style={styles.step}>
-              <Text style={[font.title, { color: palette.text }]}>{t('sign_in.password_title')}</Text>
+              <Text style={[font.title, { color: palette.text }]}>
+                {t('sign_in.password_title')}
+              </Text>
               <TextField
                 testID="username"
                 label={t('sign_in.username')}
@@ -135,7 +154,12 @@ export default function SignInScreen() {
                 onPress={() => flow.submitPassword(username, password)}
               />
               {step.server.methods.oauth ? (
-                <Button testID="use-browser" title={t('sign_in.use_browser')} kind="plain" onPress={() => flow.retryBrowser()} />
+                <Button
+                  testID="use-browser"
+                  title={t('sign_in.use_browser')}
+                  kind="plain"
+                  onPress={() => flow.retryBrowser()}
+                />
               ) : null}
             </View>
           </>
@@ -152,8 +176,14 @@ export default function SignInScreen() {
 
 function StepError({ step }: { step: SignInStep }) {
   const palette = usePalette();
-  const error = step.type === 'server' || step.type === 'browser' || step.type === 'password' ? step.error : null;
+
+  const error =
+    step.type === 'server' || step.type === 'browser' || step.type === 'password'
+      ? step.error
+      : null;
+
   if (!error) return null;
+
   return (
     <Text testID="sign-in-error" style={[font.body, { color: palette.danger }]}>
       {error}
@@ -180,9 +210,12 @@ function ServerStep({
   const palette = usePalette();
   const ended = useStore((s) => s.ended, shallow);
   const discovering = step.type === 'discovering';
+
   return (
     <View style={styles.step}>
-      <Text style={[font.title, { color: palette.text }]}>{adding ? t('sign_in.add_title') : t('sign_in.title')}</Text>
+      <Text style={[font.title, { color: palette.text }]}>
+        {adding ? t('sign_in.add_title') : t('sign_in.title')}
+      </Text>
       {ended.length > 0 ? (
         <View style={styles.ended}>
           <ListSection title={t('sign_in.signed_out_heading')}>
@@ -214,7 +247,9 @@ function ServerStep({
       />
       <Button
         testID="continue"
-        title={discovering ? t('sign_in.looking_up', { server: step.server }) : t('common.continue')}
+        title={
+          discovering ? t('sign_in.looking_up', { server: step.server }) : t('common.continue')
+        }
         busy={discovering}
         onPress={() => onSubmit(homeserver)}
       />
@@ -235,6 +270,7 @@ function EndedRow({
   onRemove: () => void;
 }) {
   const palette = usePalette();
+
   return (
     <View style={styles.endedRow}>
       <Icon name="user" size={22} color={palette.textMuted} />
@@ -248,8 +284,18 @@ function EndedRow({
           </Text>
         ) : null}
       </View>
-      <Button testID={`resume-${account}`} title={t('session_ended.sign_in')} kind="plain" onPress={onResume} />
-      <Button testID={`forget-${account}`} title={t('common.remove')} kind="plain" onPress={onRemove} />
+      <Button
+        testID={`resume-${account}`}
+        title={t('session_ended.sign_in')}
+        kind="plain"
+        onPress={onResume}
+      />
+      <Button
+        testID={`forget-${account}`}
+        title={t('common.remove')}
+        kind="plain"
+        onPress={onRemove}
+      />
     </View>
   );
 }
@@ -259,11 +305,18 @@ function ServerRow({ server, onChange }: { server: Homeserver; onChange: () => v
   const palette = usePalette();
   const name = serverName(server);
   const host = serverHost(server);
+
   return (
-    <View style={[styles.serverRow, { borderColor: palette.divider, backgroundColor: palette.surface }]}>
+    <View
+      style={[styles.serverRow, { borderColor: palette.divider, backgroundColor: palette.surface }]}
+    >
       <Icon name="globe" size={20} color={palette.textMuted} />
       <View style={styles.serverNames}>
-        <Text testID="server-name" style={[font.bodyStrong, { color: palette.text }]} numberOfLines={1}>
+        <Text
+          testID="server-name"
+          style={[font.bodyStrong, { color: palette.text }]}
+          numberOfLines={1}
+        >
           {name}
         </Text>
         {host !== name ? (
@@ -293,21 +346,34 @@ function BrowserStep({
   onPassword: () => void;
 }) {
   const palette = usePalette();
+
   return (
     <View style={styles.step}>
       <Text style={[font.title, { color: palette.text }]}>{t('sign_in.browser_title')}</Text>
       <Text style={[font.body, { color: palette.textMuted }]}>
-        {waiting ? t('mobile.accounts.browser_waiting', { server: serverName(server) }) : t('sign_in.browser_failed')}
+        {waiting
+          ? t('mobile.accounts.browser_waiting', { server: serverName(server) })
+          : t('sign_in.browser_failed')}
       </Text>
       {!waiting ? (
         <Button testID="retry-browser" title={t('sign_in.try_again')} onPress={onRetry} />
       ) : opened ? (
-        <Button testID="reopen-browser" title={t('sign_in.reopen')} kind="secondary" onPress={onReopen} />
+        <Button
+          testID="reopen-browser"
+          title={t('sign_in.reopen')}
+          kind="secondary"
+          onPress={onReopen}
+        />
       ) : (
         <Button title={t('sign_in.browser_title')} busy onPress={onReopen} />
       )}
       {server.methods.password ? (
-        <Button testID="use-password" title={t('sign_in.use_password')} kind="plain" onPress={onPassword} />
+        <Button
+          testID="use-password"
+          title={t('sign_in.use_password')}
+          kind="plain"
+          onPress={onPassword}
+        />
       ) : null}
     </View>
   );
@@ -316,7 +382,15 @@ function BrowserStep({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   topBar: { flexDirection: 'row', justifyContent: 'flex-start', paddingHorizontal: 8 },
-  content: { flexGrow: 1, justifyContent: 'center', padding: 24, gap: 24, maxWidth: 480, width: '100%', alignSelf: 'center' },
+  content: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: 24,
+    gap: 24,
+    maxWidth: 480,
+    width: '100%',
+    alignSelf: 'center',
+  },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   step: { gap: 16 },
   ended: { marginHorizontal: -16, marginTop: -22 },

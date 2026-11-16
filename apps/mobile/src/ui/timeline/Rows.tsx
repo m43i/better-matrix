@@ -11,10 +11,18 @@ import { retryHistory } from '../../state/actions/timeline';
 import { MARKER_FADE_MS, MARKER_FADE_REDUCED_MS } from '../../state/newMarker';
 import { shallow, useAppStore, useStore } from '../../state/react';
 import { room as roomOf } from '../../state/selectors';
-import { dateLabel, EVENT_PEOPLE, eventPeople, eventRunText, inlineName, repliesText } from '../../state/timelineText';
+import {
+  dateLabel,
+  EVENT_PEOPLE,
+  eventPeople,
+  eventRunText,
+  inlineName,
+  repliesText,
+} from '../../state/timelineText';
 import { font } from '../../theme/palette';
 import { Avatar } from '../Avatar';
 import { Icon } from '../icons';
+import { useNow } from '../shell/useNow';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
 
@@ -27,21 +35,39 @@ function RoomEventLineView({ events }: { events: RoomEvent[] }) {
   const palette = usePalette();
   const { account } = useTimelineContext();
   const people = eventPeople(events);
+
   return (
     <View style={styles.event}>
       <View style={styles.faces}>
         {people.slice(0, EVENT_PEOPLE).map((person, index) => (
-          <View key={person.id} style={[styles.face, { marginLeft: index === 0 ? 0 : -6, borderColor: palette.bg }]}>
-            <Avatar account={account} id={person.id} name={person.name} media={person.avatar} size={FACE} />
+          <View
+            key={person.id}
+            style={[styles.face, { marginLeft: index === 0 ? 0 : -6, borderColor: palette.bg }]}
+          >
+            <Avatar
+              account={account}
+              id={person.id}
+              name={person.name}
+              media={person.avatar}
+              size={FACE}
+            />
           </View>
         ))}
         {people.length > EVENT_PEOPLE ? (
-          <View style={[styles.face, styles.more, { marginLeft: -6, borderColor: palette.bg, backgroundColor: palette.surface }]}>
+          <View
+            style={[
+              styles.face,
+              styles.more,
+              { marginLeft: -6, borderColor: palette.bg, backgroundColor: palette.surface },
+            ]}
+          >
             <Text style={[font.badge, { color: palette.textMuted }]}>+</Text>
           </View>
         ) : null}
       </View>
-      <Text style={[font.meta, styles.grow, { color: palette.textMuted }]}>{eventRunText(events)}</Text>
+      <Text style={[font.meta, styles.grow, { color: palette.textMuted }]}>
+        {eventRunText(events)}
+      </Text>
     </View>
   );
 }
@@ -51,6 +77,7 @@ export function Rule({ label, accent = false }: { label: string; accent?: boolea
   const palette = usePalette();
   const color = accent ? palette.mention : palette.textMuted;
   const line = accent ? palette.mention : palette.divider;
+
   return (
     <View style={styles.rule} accessibilityRole="header">
       <View style={[styles.line, { backgroundColor: line }]} />
@@ -61,14 +88,20 @@ export function Rule({ label, accent = false }: { label: string; accent?: boolea
 }
 
 export function DateDivider({ at }: { at: number }) {
-  return <Rule label={dateLabel(at, Date.now())} />;
+  const now = useNow();
+
+  return <Rule label={dateLabel(at, now)} />;
 }
 
 /** The "New" divider; once read past it fades out in place, keeping its height. */
 export function NewMarker({ fading = false }: { fading?: boolean }) {
   const reducedMotion = useReducedMotion();
   const fade = reducedMotion ? MARKER_FADE_REDUCED_MS : MARKER_FADE_MS;
-  const style = useAnimatedStyle(() => ({ opacity: withTiming(fading ? 0 : 1, { duration: fading ? fade : 0 }) }));
+
+  const style = useAnimatedStyle(() => ({
+    opacity: withTiming(fading ? 0 : 1, { duration: fading ? fade : 0 }),
+  }));
+
   return (
     <Animated.View style={style}>
       <Rule label={t('timeline.new')} accent />
@@ -85,14 +118,25 @@ export function StartBlock() {
   const palette = usePalette();
   const { account, timelineKey } = useTimelineContext();
   const room = useStore((s) => roomOf(s, account, timelineKey.room_id));
+
   if (!room) return null;
+
   const hidden =
-    room.history === 'Joined' ? t('timeline.start_hidden_joined') : room.history === 'Invited' ? t('timeline.start_hidden_invited') : null;
+    room.history === 'Joined'
+      ? t('timeline.start_hidden_joined')
+      : room.history === 'Invited'
+        ? t('timeline.start_hidden_invited')
+        : null;
+
   return (
     <View style={styles.start}>
       <Avatar account={account} id={room.room_id} name={room.name} media={room.avatar} size={56} />
-      <Text style={[font.title, { color: palette.text }]}>{room.kind === 'Group' ? `# ${room.name}` : room.name}</Text>
-      <Text style={[font.body, { color: palette.textMuted }]}>{t('timeline.start', { room: inlineName(room) })}</Text>
+      <Text style={[font.title, { color: palette.text }]}>
+        {room.kind === 'Group' ? `# ${room.name}` : room.name}
+      </Text>
+      <Text style={[font.body, { color: palette.textMuted }]}>
+        {t('timeline.start', { room: inlineName(room) })}
+      </Text>
       {hidden ? (
         <View style={styles.hidden}>
           <Icon name="eyeOff" size={16} color={palette.textMuted} />
@@ -105,6 +149,7 @@ export function StartBlock() {
 
 export function LoadingRow() {
   const palette = usePalette();
+
   return (
     <View style={styles.loading}>
       <ActivityIndicator color={palette.textMuted} size="small" />
@@ -118,6 +163,7 @@ export function HistoryFailedRow({ error }: { error: string }) {
   const palette = usePalette();
   const store = useAppStore();
   const { account, timelineKey } = useTimelineContext();
+
   return (
     <View style={styles.loading}>
       <Text style={[font.meta, { color: palette.textMuted }]}>{t('timeline.history_failed')}</Text>
@@ -127,21 +173,41 @@ export function HistoryFailedRow({ error }: { error: string }) {
         accessibilityLabel={t('timeline.history_failed_detail', { error })}
         hitSlop={8}
       >
-        <Text style={[font.meta, { color: palette.accent, fontWeight: '600' }]}>{t('common.try_again')}</Text>
+        <Text style={[font.meta, { color: palette.accent, fontWeight: '600' }]}>
+          {t('common.try_again')}
+        </Text>
       </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  event: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 4 },
+  event: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+  },
   faces: { flexDirection: 'row', alignItems: 'center' },
   face: { borderWidth: 1.5, borderRadius: FACE, overflow: 'hidden' },
   more: { width: FACE + 3, height: FACE + 3, alignItems: 'center', justifyContent: 'center' },
   grow: { flex: 1 },
-  rule: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 10 },
+  rule: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
   line: { flex: 1, height: StyleSheet.hairlineWidth },
   start: { paddingHorizontal: 16, paddingTop: 24, paddingBottom: 16, gap: 6 },
   hidden: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
-  loading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 44 },
+  loading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 44,
+  },
 });

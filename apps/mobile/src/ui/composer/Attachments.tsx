@@ -13,18 +13,48 @@ import { usePalette } from '../theme';
 
 const SIZE = 64;
 
-export function Attachments({ attachments, onRemove }: { attachments: PendingAttachment[]; onRemove: (path: string) => void }) {
+export function Attachments({
+  attachments,
+  onRemove,
+}: {
+  attachments: PendingAttachment[];
+  onRemove: (path: string) => void;
+}) {
   const palette = usePalette();
+
   if (attachments.length === 0) return null;
+
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.list}
+      keyboardShouldPersistTaps="handled"
+    >
       {attachments.map((attachment) => (
-        <View key={attachment.path} style={styles.item} testID={`composer-attachment-${attachment.name}`}>
+        <View
+          key={attachment.path}
+          style={styles.item}
+          testID={`composer-attachment-${attachment.name}`}
+        >
           {attachment.kind === 'image' ? (
-            <Image source={{ uri: attachment.uri }} style={[styles.thumb, { backgroundColor: palette.surface }]} contentFit="cover" />
+            <Image
+              source={{ uri: attachment.uri }}
+              style={[styles.thumb, { backgroundColor: palette.surface }]}
+              contentFit="cover"
+            />
           ) : (
-            <View style={[styles.file, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
-              <Icon name={attachment.kind === 'video' ? 'video' : 'file'} size={22} color={palette.textMuted} />
+            <View
+              style={[
+                styles.file,
+                { backgroundColor: palette.surface, borderColor: palette.divider },
+              ]}
+            >
+              <Icon
+                name={attachment.kind === 'video' ? 'video' : 'file'}
+                size={22}
+                color={palette.textMuted}
+              />
               <Text style={[font.meta, styles.name, { color: palette.text }]} numberOfLines={2}>
                 {attachment.name}
               </Text>

@@ -12,7 +12,12 @@ export function setFocused(account: AccountId, key: TimelineKey): void {
 
 /** Clears the focus, if it is still `key`'s (a newer screen may have taken it). */
 export function clearFocused(account: AccountId, key: TimelineKey): void {
-  if (focused && focused.account === account && focused.key.room_id === key.room_id && focused.key.thread === key.thread) {
+  if (
+    focused &&
+    focused.account === account &&
+    focused.key.room_id === key.room_id &&
+    focused.key.thread === key.thread
+  ) {
     focused = null;
   }
 }

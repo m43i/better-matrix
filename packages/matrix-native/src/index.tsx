@@ -5,6 +5,7 @@ import installer from './NativeMatrixNative';
 // - the boolean flag ensures this loads exactly once, even if the JS
 //   code is reloaded (e.g. during development with metro).
 let rustInstalled = false;
+
 if (!rustInstalled) {
   installer.installRustCrate();
   rustInstalled = true;
@@ -22,6 +23,7 @@ import * as matrix_ffi from './generated/bridge/matrix_ffi';
 // - the boolean flag ensures this loads exactly once, even if the JS code
 //   is reloaded (e.g. during development with metro).
 let initialized = false;
+
 if (!initialized) {
   matrix_ffi.default.initialize();
   initialized = true;
@@ -38,4 +40,3 @@ export async function uniffiInitAsync() {
 export default {
   matrix_ffi,
 };
-

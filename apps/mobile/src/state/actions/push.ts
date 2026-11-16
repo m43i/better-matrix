@@ -14,11 +14,15 @@ export function setPushEnabled(store: Store, on: boolean): void {
 /** The accounts turned off for push after turning `account` on or off. */
 export function pushOffWith(off: readonly AccountId[], account: AccountId, on: boolean): string[] {
   const others = off.filter((id) => id !== account);
+
   return on ? others : [...others, account];
 }
 
 /** Whether `account` gets pushes on this device. */
-export function accountPushOn(settings: Pick<Settings, 'pushEnabled' | 'pushOff'>, account: AccountId): boolean {
+export function accountPushOn(
+  settings: Pick<Settings, 'pushEnabled' | 'pushOff'>,
+  account: AccountId,
+): boolean {
   return settings.pushEnabled && !settings.pushOff.includes(account);
 }
 

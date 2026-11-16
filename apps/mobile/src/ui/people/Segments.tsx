@@ -13,11 +13,26 @@ export interface SegmentsProps<T extends string> {
   testID?: string;
 }
 
-export function Segments<T extends string>({ options, selected, onChange, testID }: SegmentsProps<T>) {
+export function Segments<T extends string>({
+  options,
+  selected,
+  onChange,
+  testID,
+}: SegmentsProps<T>) {
   const palette = usePalette();
+
   return (
-    <Host matchContents={{ vertical: true }} colorScheme={palette.dark ? 'dark' : 'light'} style={{ alignSelf: 'stretch' }} testID={testID}>
-      <Picker<T> selection={selected} onSelectionChange={onChange} modifiers={[pickerStyle('segmented')]}>
+    <Host
+      matchContents={{ vertical: true }}
+      colorScheme={palette.dark ? 'dark' : 'light'}
+      style={{ alignSelf: 'stretch' }}
+      testID={testID}
+    >
+      <Picker<T>
+        selection={selected}
+        onSelectionChange={onChange}
+        modifiers={[pickerStyle('segmented')]}
+      >
         {options.map((option) => (
           <Text key={option.value} modifiers={[tag(option.value)]}>
             {option.label}

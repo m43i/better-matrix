@@ -7,7 +7,10 @@ import type { Href } from 'expo-router';
 export const routes = {
   /** The Home tab, under every other screen. */
   home: (): Href => '/',
-  signIn: (resume?: AccountId): Href => ({ pathname: '/sign-in', params: resume ? { resume } : {} }),
+  signIn: (resume?: AccountId): Href => ({
+    pathname: '/sign-in',
+    params: resume ? { resume } : {},
+  }),
   /** The account menu, from the avatar in the tab bar: switch or add accounts, settings. */
   accountMenu: (): Href => '/account-menu',
   /** Home and the spaces of the account on screen, from Home's title. */
@@ -15,7 +18,10 @@ export const routes = {
   /** Notifications, from the bell in Home's header. */
   activity: (): Href => '/activity',
   search: (): Href => '/search',
-  roomMenu: (account: AccountId, roomId: string): Href => ({ pathname: '/room-menu', params: { account, roomId } }),
+  roomMenu: (account: AccountId, roomId: string): Href => ({
+    pathname: '/room-menu',
+    params: { account, roomId },
+  }),
   /** A room list section's sheet (collapse, rename, delete); without `section`, naming a new one. */
   sectionMenu: (account: AccountId, section?: string): Href => ({
     pathname: '/room-menu',
@@ -40,7 +46,11 @@ export const routes = {
     params: thread ? { account, roomId, eventId, thread } : { account, roomId, eventId },
   }),
   /** The emoji picker: reacting to a message (`eventId`), or inserting into a composer. */
-  emoji: (account: AccountId, roomId: string, options: { eventId?: string; thread?: string } = {}): Href => ({
+  emoji: (
+    account: AccountId,
+    roomId: string,
+    options: { eventId?: string; thread?: string } = {},
+  ): Href => ({
     pathname: '/emoji',
     params: { account, roomId, ...options },
   }),
@@ -49,27 +59,51 @@ export const routes = {
     params: thread ? { account, roomId, thread } : { account, roomId },
   }),
   /** An invitation's sheet: accept or decline. */
-  invitation: (account: AccountId, roomId: string): Href => ({ pathname: '/invitation', params: { account, roomId } }),
-  roomInfo: (account: AccountId, roomId: string): Href => ({ pathname: '/room-info/[account]/[roomId]', params: { account, roomId } }),
+  invitation: (account: AccountId, roomId: string): Href => ({
+    pathname: '/invitation',
+    params: { account, roomId },
+  }),
+  roomInfo: (account: AccountId, roomId: string): Href => ({
+    pathname: '/room-info/[account]/[roomId]',
+    params: { account, roomId },
+  }),
   member: (account: AccountId, roomId: string, userId: string): Href => ({
     pathname: '/member',
     params: { account, roomId, userId },
   }),
-  invite: (account: AccountId, roomId: string): Href => ({ pathname: '/invite', params: { account, roomId } }),
+  invite: (account: AccountId, roomId: string): Href => ({
+    pathname: '/invite',
+    params: { account, roomId },
+  }),
   newChat: (): Href => '/new-chat',
   newRoom: (space?: string): Href => ({ pathname: '/new-room', params: space ? { space } : {} }),
   newSpace: (): Href => '/new-space',
-  renameRoom: (account: AccountId, roomId: string): Href => ({ pathname: '/rename-room', params: { account, roomId } }),
+  renameRoom: (account: AccountId, roomId: string): Href => ({
+    pathname: '/rename-room',
+    params: { account, roomId },
+  }),
   settings: (): Href => '/settings',
   settingsNotifications: (): Href => '/settings/notifications',
-  settingsAccount: (account: AccountId): Href => ({ pathname: '/settings/account', params: { account } }),
-  settingsProfile: (account: AccountId): Href => ({ pathname: '/settings/profile', params: { account } }),
-  settingsSessions: (account: AccountId): Href => ({ pathname: '/settings/sessions', params: { account } }),
+  settingsAccount: (account: AccountId): Href => ({
+    pathname: '/settings/account',
+    params: { account },
+  }),
+  settingsProfile: (account: AccountId): Href => ({
+    pathname: '/settings/profile',
+    params: { account },
+  }),
+  settingsSessions: (account: AccountId): Href => ({
+    pathname: '/settings/sessions',
+    params: { account },
+  }),
   settingsInfo: (): Href => '/settings/info',
   /** This device's preferences: language, appearance, link previews and GIFs. */
   settingsPreferences: (): Href => '/settings/preferences',
   /** Resetting the account's identity, when the recovery key and every other session are lost. */
-  settingsReset: (account: AccountId): Href => ({ pathname: '/settings/reset', params: { account } }),
+  settingsReset: (account: AccountId): Href => ({
+    pathname: '/settings/reset',
+    params: { account },
+  }),
   /** Setting up recovery (or with `reset` replacing the key), then showing the new key once. */
   settingsRecoveryKey: (account: AccountId, reset = false): Href => ({
     pathname: '/settings/recovery-key',
@@ -85,5 +119,8 @@ export const routes = {
    * A permalink (matrix.to or `matrix:`) to a room that isn't joined or to a person: the preview
    * with Join, or the person with Start chat, acting for `account` when given.
    */
-  link: (uri: string, account?: AccountId): Href => ({ pathname: '/link', params: account ? { uri, account } : { uri } }),
+  link: (uri: string, account?: AccountId): Href => ({
+    pathname: '/link',
+    params: account ? { uri, account } : { uri },
+  }),
 };

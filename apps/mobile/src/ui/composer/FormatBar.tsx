@@ -24,14 +24,30 @@ const ITEMS: Record<Format, { icon: IconName; label: Key }> = {
 /** Where a new group starts in the toolbar (the desktop's `Format::starts_group`). */
 const GROUP_STARTS: ReadonlySet<Format> = new Set(['link', 'bullets', 'codeBlock']);
 
-export function FormatBar({ active, onFormat }: { active: readonly Format[]; onFormat: (format: Format) => void }) {
+export function FormatBar({
+  active,
+  onFormat,
+}: {
+  active: readonly Format[];
+  onFormat: (format: Format) => void;
+}) {
   const palette = usePalette();
+
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.bar}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      keyboardShouldPersistTaps="always"
+      contentContainerStyle={styles.bar}
+    >
       {FORMATS.map((format) => {
         const on = active.includes(format);
+
         return (
-          <View key={format} style={[styles.item, GROUP_STARTS.has(format) ? styles.groupStart : null]}>
+          <View
+            key={format}
+            style={[styles.item, GROUP_STARTS.has(format) ? styles.groupStart : null]}
+          >
             <IconButton
               icon={ITEMS[format].icon}
               label={t(ITEMS[format].label)}

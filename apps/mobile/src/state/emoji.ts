@@ -2,12 +2,14 @@
 // (emojibase's compact data, with its own and GitHub's shortcodes, as the desktop's `emojis`
 // crate has gemoji's), in Unicode's groups and order. Search and recents are pure.
 
+import { z } from 'zod';
 import compact from 'emojibase-data/en/compact.json';
 import emojibaseCodes from 'emojibase-data/en/shortcodes/emojibase.json';
 import githubCodes from 'emojibase-data/en/shortcodes/github.json';
 
 /** How many search results show at most, as on the desktop. */
 export const RESULTS = 96;
+
 /** How many recently used emoji the picker keeps. */
 export const RECENT_KEPT = 24;
 
@@ -15,7 +17,18 @@ export const RECENT_KEPT = 24;
 export const QUICK = ['👍', '❤️', '😂', '🎉', '😮', '😢', '🙏', '👀'] as const;
 
 /** The picker's groups, in Unicode's order (skin tone components are left out). */
-export const GROUPS = ['smileys', 'people', 'nature', 'food', 'travel', 'activities', 'objects', 'symbols', 'flags'] as const;
+export const GROUPS = [
+  'smileys',
+  'people',
+  'nature',
+  'food',
+  'travel',
+  'activities',
+  'objects',
+  'symbols',
+  'flags',
+] as const;
+
 export type Group = (typeof GROUPS)[number];
 
 export interface Emoji {
@@ -26,29 +39,29 @@ export interface Emoji {
   group: Group;
 }
 
-interface CompactEmoji {
-  hexcode: string;
-  label: string;
-  unicode: string;
-  group?: number;
-  order?: number;
-  tags?: string[];
-}
+const compactEmoji = z.object({
+  hexcode: z.string(),
+  label: z.string(),
+  unicode: z.string(),
+  group: z.number().optional(),
+  order: z.number().optional(),
+  tags: z.array(z.string()).optional(),
+});
 
 type Shortcodes = Record<string, string | string[]>;
 
 /** Unicode's group numbers (emojibase's `meta/groups.json`) by picker group; 2 is components. */
-const GROUP_BY_NUMBER: Record<number, Group> = {
-  0: 'smileys',
-  1: 'people',
-  3: 'nature',
-  4: 'food',
-  5: 'travel',
-  6: 'activities',
-  7: 'objects',
-  8: 'symbols',
-  9: 'flags',
-};
+const GROUP_BY_NUMBER = new Map<number, Group>([
+  [0, 'smileys'],
+  [1, 'people'],
+  [3, 'nature'],
+  [4, 'food'],
+  [5, 'travel'],
+  [6, 'activities'],
+  [7, 'objects'],
+  [8, 'symbols'],
+  [9, 'flags'],
+]);
 
 interface Indexed extends Emoji {
   /** Name, tags and shortcodes, lower case, for search. */
@@ -59,28 +72,35 @@ let index: Indexed[] | null = null;
 
 function codesOf(table: Shortcodes, hexcode: string): string[] {
   const codes = table[hexcode];
+
   return codes === undefined ? [] : Array.isArray(codes) ? codes : [codes];
 }
 
 /** Every emoji in the picker, built once on first use. */
 function all(): Indexed[] {
   if (index) return index;
-  const data = compact as unknown as CompactEmoji[];
+  const data = z.array(compactEmoji).parse(compact);
   index = data
-    .filter((e) => e.group !== undefined && GROUP_BY_NUMBER[e.group] !== undefined)
+    .filter((e) => e.group !== undefined && GROUP_BY_NUMBER.get(e.group) !== undefined)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     .map((e) => {
       const shortcodes = [
-        ...new Set([...codesOf(githubCodes as Shortcodes, e.hexcode), ...codesOf(emojibaseCodes as Shortcodes, e.hexcode)]),
+        ...new Set([...codesOf(githubCodes, e.hexcode), ...codesOf(emojibaseCodes, e.hexcode)]),
       ];
+
       return {
         emoji: e.unicode,
         label: e.label,
         shortcodes,
-        group: GROUP_BY_NUMBER[e.group ?? -1] ?? 'symbols',
-        words: [e.label.toLowerCase(), ...(e.tags ?? []).map((t) => t.toLowerCase()), ...shortcodes],
+        group: GROUP_BY_NUMBER.get(e.group ?? -1) ?? 'symbols',
+        words: [
+          e.label.toLowerCase(),
+          ...(e.tags ?? []).map((t) => t.toLowerCase()),
+          ...shortcodes,
+        ],
       };
     });
+
   return index;
 }
 
@@ -92,7 +112,9 @@ export function emojiIn(group: Group): Emoji[] {
 /** The emoji by group, in the picker's order. */
 export function emojiByGroup(): Array<{ group: Group; emoji: Emoji[] }> {
   const groups = new Map<Group, Emoji[]>(GROUPS.map((g) => [g, []]));
+
   for (const e of all()) groups.get(e.group)?.push(e);
+
   return GROUPS.map((group) => ({ group, emoji: groups.get(group) ?? [] }));
 }
 
@@ -103,13 +125,22 @@ export function emojiByGroup(): Array<{ group: Group; emoji: Emoji[] }> {
  */
 export function searchEmoji(query: string): Emoji[] {
   const words = query.toLowerCase().replace(/:/g, ' ').split(/\s+/).filter(Boolean);
+
   if (words.length === 0) return [];
   const whole = words.join('_');
+
   const rank = (e: Indexed): number => {
     if (e.shortcodes.includes(whole)) return 0;
-    if (e.label.toLowerCase().startsWith(words.join(' ')) || e.shortcodes.some((c) => c.startsWith(whole))) return 1;
+
+    if (
+      e.label.toLowerCase().startsWith(words.join(' ')) ||
+      e.shortcodes.some((c) => c.startsWith(whole))
+    )
+      return 1;
+
     return 2;
   };
+
   return all()
     .filter((e) => words.every((word) => e.words.some((w) => w.includes(word))))
     .map((e, position) => ({ e, position, rank: rank(e) }))

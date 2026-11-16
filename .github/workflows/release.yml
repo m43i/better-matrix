@@ -12,7 +12,7 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       version:
@@ -127,7 +127,7 @@ jobs:
     timeout-minutes: 60
     env:
       # libwebrtc links ScreenCaptureKit, which macOS has from 12.3.
-      MACOSX_DEPLOYMENT_TARGET: "12.3"
+      MACOSX_DEPLOYMENT_TARGET: '12.3'
     steps:
       - uses: actions/checkout@v7
         with:

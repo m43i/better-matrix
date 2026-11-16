@@ -9,6 +9,7 @@ import { usePalette } from '../../ui/theme';
 
 export default function SettingsLayout() {
   const palette = usePalette();
+
   return (
     <Stack
       screenOptions={({ navigation, route }) => ({

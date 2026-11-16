@@ -15,17 +15,37 @@ import {
 
 const LAYOUT: SidebarLayout = { scopes: {}, changed_at: 10 };
 
+function isCommand<T extends Command['type']>(
+  command: Command,
+  type: T,
+): command is Extract<Command, { type: T }> {
+  return command.type === type;
+}
+
 function setUp({ layoutLoaded = true } = {}) {
   const { engine, sent } = detachedEngine();
   const store = new Store(engine);
   engine.emit({ type: 'AccountAdded', data: summary(ADA) });
   engine.emit({
     type: 'RoomsUpdated',
-    data: { account: ADA, list: { rooms: [roomSummary('!a'), roomSummary('!dm', 'Grace', 'Direct')], spaces: [], invitations: [] } },
+    data: {
+      account: ADA,
+      list: {
+        rooms: [roomSummary('!a'), roomSummary('!dm', 'Grace', 'Direct')],
+        spaces: [],
+        invitations: [],
+      },
+    },
   });
+
   if (layoutLoaded) engine.emit({ type: 'SidebarLayout', data: { account: ADA, layout: LAYOUT } });
+
   const finish = (request: number, error?: string) =>
-    engine.emit({ type: 'Finished', data: { request, result: error ? { Err: error } : { Ok: null } } });
+    engine.emit({
+      type: 'Finished',
+      data: { request, result: error ? { Err: error } : { Ok: null } },
+    });
+
   return { store, sent, finish, account: () => store.getState().accounts[0]! };
 }
 
@@ -33,13 +53,19 @@ function setUp({ layoutLoaded = true } = {}) {
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const ofType = <T extends Command['type']>(sent: Array<{ command: Command }>, type: T) =>
-  sent.map((s) => s.command).filter((c): c is Extract<Command, { type: T }> => c.type === type);
+  sent.reduce<Extract<Command, { type: T }>[]>((commands, { command }) => {
+    if (isCommand(command, type)) commands.push(command);
+
+    return commands;
+  }, []);
 
 describe('layout actions', () => {
   it('collapsing a section should save the layout to the account', () => {
     const { store, sent } = setUp();
     toggleSection(store, ADA, 'home', DIRECT);
-    expect(ofType(sent, 'SetSidebarLayout')[0]!.data.layout.scopes.home!.collapsed).toEqual([DIRECT]);
+    expect(ofType(sent, 'SetSidebarLayout')[0]!.data.layout.scopes.home!.collapsed).toEqual([
+      DIRECT,
+    ]);
   });
 
   it('a change should show before the server has it', () => {
@@ -57,7 +83,9 @@ describe('layout actions', () => {
   it('a change before the saved layout arrived should be refused with a notice', () => {
     const { store, sent } = setUp({ layoutLoaded: false });
     toggleSection(store, ADA, 'home', DIRECT);
-    expect([ofType(sent, 'SetSidebarLayout').length, store.getState().notices.length]).toEqual([0, 1]);
+    expect([ofType(sent, 'SetSidebarLayout').length, store.getState().notices.length]).toEqual([
+      0, 1,
+    ]);
   });
 
   it('changes made while a save runs should wait for it', () => {
@@ -73,7 +101,10 @@ describe('layout actions', () => {
     toggleSection(store, ADA, 'home', 'rooms');
     finish(sent[0]!.request);
     await settled();
-    expect(ofType(sent, 'SetSidebarLayout').at(-1)!.data.layout.scopes.home!.collapsed).toEqual([DIRECT, 'rooms']);
+    expect(ofType(sent, 'SetSidebarLayout').at(-1)!.data.layout.scopes.home!.collapsed).toEqual([
+      DIRECT,
+      'rooms',
+    ]);
   });
 
   it('a failed save should tell the user', async () => {
@@ -87,7 +118,9 @@ describe('layout actions', () => {
   it('a new section made from a room should hold that room', () => {
     const { store, account } = setUp();
     addSection(store, ADA, 'home', 'Team', '!a');
-    expect(account().sidebar.scopes.home!.sections).toEqual([{ id: 'section-1', name: 'Team', rooms: ['!a'] }]);
+    expect(account().sidebar.scopes.home!.sections).toEqual([
+      { id: 'section-1', name: 'Team', rooms: ['!a'] },
+    ]);
   });
 
   it('a section without a name should not be made', () => {
@@ -108,7 +141,11 @@ describe('room actions', () => {
   it('choosing a notification mode should tell the engine', () => {
     const { store, sent } = setUp();
     setNotificationMode(store, ADA, '!a', 'Mute');
-    expect(ofType(sent, 'SetNotificationMode')[0]!.data).toEqual({ account: ADA, room_id: '!a', mode: 'Mute' });
+    expect(ofType(sent, 'SetNotificationMode')[0]!.data).toEqual({
+      account: ADA,
+      room_id: '!a',
+      mode: 'Mute',
+    });
   });
 
   it('choosing a notification mode should show at once', () => {
@@ -131,7 +168,11 @@ describe('room actions', () => {
     const done = markRoomRead(store, ADA, '!a');
     finish(sent.find((s) => s.command.type === 'OpenTimeline')!.request);
     await settled();
-    expect(ofType(sent, 'MarkRead')[0]!.data).toMatchObject({ key: { room_id: '!a', thread: null }, event_id: null, fully_read: true });
+    expect(ofType(sent, 'MarkRead')[0]!.data).toMatchObject({
+      key: { room_id: '!a', thread: null },
+      event_id: null,
+      fully_read: true,
+    });
     finish(sent.find((s) => s.command.type === 'MarkRead')!.request);
     await done;
     expect(sent.map((s) => s.command.type).slice(-1)).toEqual(['CloseTimeline']);
@@ -148,6 +189,10 @@ describe('room actions', () => {
   it('deleting a direct chat should also forget it', () => {
     const { store, sent } = setUp();
     leaveRoom(store, ADA, '!dm', true);
-    expect(ofType(sent, 'LeaveRoom')[0]!.data).toEqual({ account: ADA, room_id: '!dm', forget: true });
+    expect(ofType(sent, 'LeaveRoom')[0]!.data).toEqual({
+      account: ADA,
+      room_id: '!dm',
+      forget: true,
+    });
   });
 });

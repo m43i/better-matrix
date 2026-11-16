@@ -26,17 +26,17 @@ and keychain group on the Apple team (below), or the plugin's `notificationServi
 
 ## What goes where
 
-| What | Where | Notes |
-| --- | --- | --- |
-| EAS project ID | `apps/mobile/app.json` → `expo.extra.eas.projectId` | Written by `eas init` (run in `apps/mobile`). The app reads it; never hard-code it. |
-| Push gateway URL | `EXPO_PUBLIC_PUSH_GATEWAY` | E.g. `https://push.example.org` (the notify path is added). Put it in `apps/mobile/.env.local` for local builds and in the EAS environment (`eas env:create --name EXPO_PUBLIC_PUSH_GATEWAY --visibility plaintext`) for EAS builds. Inlined at build time. |
-| Firebase Android config | `apps/mobile/google-services.json` (gitignored), or the EAS file variable `GOOGLE_SERVICES_JSON` | From the Firebase project's Android app `chat.bettermatrix.mobile`. Expo's push service delivers through FCM, so Android needs it even though the app uses Expo tokens. |
-| FCM V1 service account key | EAS: `eas credentials` → Android → *Google Service Account* → *FCM V1* | The JSON key of a service account with the *Firebase Cloud Messaging API Admin* role. Never in the repo. |
-| APNs key | EAS: `eas credentials` → iOS → *Push Notifications* | A `.p8` key from the Apple developer account (Keys → Apple Push Notifications service). Never in the repo. |
-| App Group | Apple developer account: `group.chat.bettermatrix.mobile` | On both App IDs: `chat.bettermatrix.mobile` and `chat.bettermatrix.mobile.BetterMatrixPush`. EAS creates the extension's App ID and profile from `extra.eas.build.experimental.ios.appExtensions` (the plugin writes it); check the group is enabled on both. Another ID: change `appGroup` in the `./plugins/withPush` entry of `app.json`. |
-| Keychain sharing | nothing to do | The plugin adds `$(AppIdentifierPrefix)chat.bettermatrix.mobile` to both targets' `keychain-access-groups`; it is the app's default group already, so existing sign-ins stay readable. |
-| `aps-environment` | `app.json` → `["expo-notifications", { "mode": "production" }]` for store builds | The default is `development` (sandbox APNs). Expo's push service picks the APNs environment from the token. |
-| Gateway: Expo access token (optional) | Gateway environment `EXPO_ACCESS_TOKEN` | Only if *Enhanced security for push notifications* is on in the Expo project. |
+| What                                  | Where                                                                                            | Notes                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| EAS project ID                        | `apps/mobile/app.json` → `expo.extra.eas.projectId`                                              | Written by `eas init` (run in `apps/mobile`). The app reads it; never hard-code it.                                                                                                                                                                                                                                                          |
+| Push gateway URL                      | `EXPO_PUBLIC_PUSH_GATEWAY`                                                                       | E.g. `https://push.example.org` (the notify path is added). Put it in `apps/mobile/.env.local` for local builds and in the EAS environment (`eas env:create --name EXPO_PUBLIC_PUSH_GATEWAY --visibility plaintext`) for EAS builds. Inlined at build time.                                                                                  |
+| Firebase Android config               | `apps/mobile/google-services.json` (gitignored), or the EAS file variable `GOOGLE_SERVICES_JSON` | From the Firebase project's Android app `chat.bettermatrix.mobile`. Expo's push service delivers through FCM, so Android needs it even though the app uses Expo tokens.                                                                                                                                                                      |
+| FCM V1 service account key            | EAS: `eas credentials` → Android → _Google Service Account_ → _FCM V1_                           | The JSON key of a service account with the _Firebase Cloud Messaging API Admin_ role. Never in the repo.                                                                                                                                                                                                                                     |
+| APNs key                              | EAS: `eas credentials` → iOS → _Push Notifications_                                              | A `.p8` key from the Apple developer account (Keys → Apple Push Notifications service). Never in the repo.                                                                                                                                                                                                                                   |
+| App Group                             | Apple developer account: `group.chat.bettermatrix.mobile`                                        | On both App IDs: `chat.bettermatrix.mobile` and `chat.bettermatrix.mobile.BetterMatrixPush`. EAS creates the extension's App ID and profile from `extra.eas.build.experimental.ios.appExtensions` (the plugin writes it); check the group is enabled on both. Another ID: change `appGroup` in the `./plugins/withPush` entry of `app.json`. |
+| Keychain sharing                      | nothing to do                                                                                    | The plugin adds `$(AppIdentifierPrefix)chat.bettermatrix.mobile` to both targets' `keychain-access-groups`; it is the app's default group already, so existing sign-ins stay readable.                                                                                                                                                       |
+| `aps-environment`                     | `app.json` → `["expo-notifications", { "mode": "production" }]` for store builds                 | The default is `development` (sandbox APNs). Expo's push service picks the APNs environment from the token.                                                                                                                                                                                                                                  |
+| Gateway: Expo access token (optional) | Gateway environment `EXPO_ACCESS_TOKEN`                                                          | Only if _Enhanced security for push notifications_ is on in the Expo project.                                                                                                                                                                                                                                                                |
 
 ## Deploy the gateway
 
@@ -71,7 +71,7 @@ From `apps/mobile`:
 
 ## Test end to end
 
-1. Settings → Notifications: *Notifications on this device* is on (off: push isn't configured in
+1. Settings → Notifications: _Notifications on this device_ is on (off: push isn't configured in
    this build). The account's sessions page on another client lists a pusher named after this
    device (`GET /_matrix/client/v3/pushers` shows `app_id` `chat.bettermatrix.mobile`, `format`
    `event_id_only`, `default_payload.account`).
@@ -80,7 +80,7 @@ From `apps/mobile`:
    - app in the background: one notification with the sender and text;
    - app swiped away / phone rebooted (after first unlock): the same, decrypted.
 3. Tap it: the room opens at the message.
-4. Two accounts signed in, one turned off under *On this device*: only the other notifies.
+4. Two accounts signed in, one turned off under _On this device_: only the other notifies.
 5. Sign out: the pusher is gone from the server's list.
 6. Uninstall the app and send again: the gateway answers `rejected` once Expo reports the token
    gone, and the homeserver removes the pusher.
@@ -88,7 +88,7 @@ From `apps/mobile`:
 ## Verify on a Mac (written without one)
 
 - `bun run ubrn:ios`, then `expo prebuild --platform ios` and open the workspace: the
-  `BetterMatrixPush` target exists, is embedded in the app ("Copy Files", destination *Plug-ins*)
+  `BetterMatrixPush` target exists, is embedded in the app ("Copy Files", destination _Plug-ins_)
   and builds. Check the xcframework's slice folders are `ios-arm64` and `ios-arm64-simulator`
   (the target's `LIBRARY_SEARCH_PATHS`), and that the extension links (missing frameworks show
   as undefined symbols: add them to `OTHER_LDFLAGS` in `plugins/withPush.js`).

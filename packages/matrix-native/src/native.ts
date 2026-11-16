@@ -25,20 +25,27 @@ export interface NativeEngineConfig {
 /** Starts the engine; saved accounts restore at once and report on the returned engine. */
 export function startNativeEngine(config: NativeEngineConfig, secrets: SecretStore): Engine {
   let bridge: ReturnType<typeof Bridge.start> | null = null;
+
   const engine = new Engine({
     send(json) {
       if (!bridge) throw new Error('the engine is not running');
+
       return Number(bridge.send(json));
     },
   });
-  bridge = Bridge.start(config, nativeSecrets(secrets), { onEvent: (json) => engine.emitJson(json) });
+
+  bridge = Bridge.start(config, nativeSecrets(secrets), {
+    onEvent: (json) => engine.emitJson(json),
+  });
+
   return engine;
 }
 
 /** The app's secret store as the bridge calls it, its failures as the bridge's error. */
 function nativeSecrets(secrets: SecretStore) {
-  const failed = (error: unknown) =>
-    new SecretFailure.Failed({ reason: error instanceof Error ? error.message : String(error) });
+  const failed = (cause: unknown) =>
+    new SecretFailure.Failed({ reason: cause instanceof Error ? cause.message : String(cause) });
+
   return {
     get(key: string) {
       try {
@@ -70,10 +77,15 @@ function nativeSecrets(secrets: SecretStore) {
  * hasn't started the engine (Android's headless push task); with the engine running, send it
  * `FetchNotification` instead. Never rejects for the event: what can't be read is `Hidden`.
  */
-export function fetchPushWithoutEngine(dataDir: string, target: PushTarget, secrets: SecretStore): Promise<PushContent> {
+export function fetchPushWithoutEngine(
+  dataDir: string,
+  target: PushTarget,
+  secrets: SecretStore,
+): Promise<PushContent> {
   return new Promise((resolve, reject) => {
     try {
       fetchPush(dataDir, JSON.stringify(target), nativeSecrets(secrets), {
+        // SAFETY: the Rust fetch_push callback serializes the generated PushContent union.
         onContent: (json) => resolve(JSON.parse(json) as PushContent),
       });
     } catch (error) {
@@ -102,7 +114,9 @@ export function registerCamera(camera: CameraApi): void {
       try {
         camera.start(device ?? null);
       } catch (error) {
-        throw new CameraFailure.Failed({ reason: error instanceof Error ? error.message : String(error) });
+        throw new CameraFailure.Failed({
+          reason: error instanceof Error ? error.message : String(error),
+        });
       }
     },
     stop: () => camera.stop(),

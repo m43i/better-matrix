@@ -12,7 +12,16 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { t, tp } from '../i18n';
 import { findPerson, joinRoom, previewRoom } from '../state/actions/links';
 import { openDirectChat } from '../state/actions/people';
-import { joinedAfterPreview, joinedRoute, linkAccount, mayChooseAccount, type LinkStep, linkNote, offersJoin, shownPreview } from '../state/linkRoute';
+import {
+  joinedAfterPreview,
+  joinedRoute,
+  linkAccount,
+  mayChooseAccount,
+  type LinkStep,
+  linkNote,
+  offersJoin,
+  shownPreview,
+} from '../state/linkRoute';
 import { parsePermalink } from '../state/permalinks';
 import { shallow, useAppStore, useStore } from '../state/react';
 import type { CommandFailed } from '../state/requests';
@@ -30,16 +39,32 @@ export default function LinkScreen() {
   const palette = usePalette();
   const link = useMemo(() => parsePermalink(params.uri ?? ''), [params.uri]);
   const accounts = useStore((s) => s.accounts.map((a) => a.summary), shallow);
-  const [account, setAccount] = useState<AccountId | null>(() => linkAccount(store.getState(), params.account ?? null));
+
+  const [account, setAccount] = useState<AccountId | null>(() =>
+    linkAccount(store.getState(), params.account ?? null),
+  );
+
   // Once the user picks the account, a room another account has joined no longer opens there.
   const [chosen, setChosen] = useState(false);
+
   const [step, setStep] = useState<LinkStep>(() =>
     link?.kind === 'user' ? { type: 'person', person: null, loading: true } : { type: 'loading' },
   );
 
+  const requestKey = `${params.uri}|${account}|${chosen}`;
+  const [previousRequest, setPreviousRequest] = useState(requestKey);
+
+  if (previousRequest !== requestKey) {
+    setPreviousRequest(requestKey);
+    setStep(
+      link?.kind === 'user' ? { type: 'person', person: null, loading: true } : { type: 'loading' },
+    );
+  }
+
   // A space opens as the account's scope on Home, a room at the linked message; not once the
   // user left the sheet while it waited (the join or chat still happened).
   const shown = useShown();
+
   const openRoom = useCallback(
     (owner: AccountId, roomId: string, space: boolean) => {
       if (!shown.current) return;
@@ -52,28 +77,32 @@ export default function LinkScreen() {
   useEffect(() => {
     if (!link || !account) return;
     let current = true;
+
     if (link.kind === 'user') {
-      setStep({ type: 'person', person: null, loading: true });
-      const found = (person: Person | null) => current && setStep({ type: 'person', person, loading: false });
+      const found = (person: Person | null) =>
+        current && setStep({ type: 'person', person, loading: false });
+
       findPerson(store, account, link.id).then(found, () => found(null));
     } else {
-      setStep({ type: 'loading' });
       previewRoom(store, account, link.id, link.via).then(
         (preview) => {
           if (!current) return;
           const owner = joinedAfterPreview(store.getState(), preview, account, chosen);
+
           if (owner !== null) openRoom(owner, preview.room_id, preview.space);
           else setStep({ type: 'preview', preview });
         },
         (error: CommandFailed) => current && setStep({ type: 'failed', error: error.message }),
       );
     }
+
     return () => {
       current = false;
     };
   }, [link, account, chosen, store, openRoom]);
 
   if (!link) return <EmptyState icon="link" title={t('link.invalid')} />;
+
   if (!account) return null;
 
   const choose = (id: AccountId) => {
@@ -108,7 +137,9 @@ export default function LinkScreen() {
       {step.type === 'loading' || (step.type === 'person' && step.loading) ? (
         <View style={styles.loading}>
           <ActivityIndicator color={palette.textMuted} />
-          <Text style={[font.body, { color: palette.textMuted }]}>{t(step.type === 'person' ? 'link.person_loading' : 'link.loading')}</Text>
+          <Text style={[font.body, { color: palette.textMuted }]}>
+            {t(step.type === 'person' ? 'link.person_loading' : 'link.loading')}
+          </Text>
         </View>
       ) : step.type === 'person' ? (
         <PersonHead account={account} id={link.id} person={step.person} />
@@ -118,7 +149,13 @@ export default function LinkScreen() {
       <Note step={step} />
       <View style={styles.actions}>
         {step.type === 'person' && !step.loading ? (
-          <Button testID="link-chat" icon="chat" title={t('members.chat')} busy={step.chatting === true} onPress={chat} />
+          <Button
+            testID="link-chat"
+            icon="chat"
+            title={t('members.chat')}
+            busy={step.chatting === true}
+            onPress={chat}
+          />
         ) : null}
         {offersJoin(step) ? (
           <Button
@@ -136,7 +173,15 @@ export default function LinkScreen() {
               {i > 0 ? <Divider inset={52} /> : null}
               <ListRow
                 testID={`link-account-${summary.id}`}
-                leading={<Avatar account={summary.id} id={summary.id} name={summary.display_name} media={summary.avatar} size={28} />}
+                leading={
+                  <Avatar
+                    account={summary.id}
+                    id={summary.id}
+                    name={summary.display_name}
+                    media={summary.avatar}
+                    size={28}
+                  />
+                }
                 title={summary.display_name}
                 subtitle={summary.id}
                 selected={summary.id === account}
@@ -152,13 +197,28 @@ export default function LinkScreen() {
 }
 
 /** The room's picture, name, address, member count and topic; its address alone without a preview. */
-function RoomHead({ account, id, preview }: { account: AccountId; id: string; preview: RoomPreview | null }) {
+function RoomHead({
+  account,
+  id,
+  preview,
+}: {
+  account: AccountId;
+  id: string;
+  preview: RoomPreview | null;
+}) {
   const palette = usePalette();
   const name = preview?.name ?? preview?.alias ?? id;
   const address = preview?.alias ?? (preview ? preview.room_id : null);
+
   return (
     <View style={styles.head}>
-      <Avatar account={account} id={preview?.room_id ?? id} name={name} media={preview?.avatar} size={72} />
+      <Avatar
+        account={account}
+        id={preview?.room_id ?? id}
+        name={name}
+        media={preview?.avatar}
+        size={72}
+      />
       <Text style={[font.title, styles.centered, { color: palette.text }]} numberOfLines={2}>
         {name}
       </Text>
@@ -167,7 +227,11 @@ function RoomHead({ account, id, preview }: { account: AccountId; id: string; pr
           {address}
         </Text>
       ) : null}
-      {preview ? <Text style={[font.meta, { color: palette.textMuted }]}>{tp('overview.members', preview.member_count)}</Text> : null}
+      {preview ? (
+        <Text style={[font.meta, { color: palette.textMuted }]}>
+          {tp('overview.members', preview.member_count)}
+        </Text>
+      ) : null}
       {preview?.topic ? (
         <Text style={[font.body, styles.centered, { color: palette.text }]} numberOfLines={4}>
           {preview.topic}
@@ -178,9 +242,18 @@ function RoomHead({ account, id, preview }: { account: AccountId; id: string; pr
 }
 
 /** The person's picture, name and ID; the ID alone when their server didn't say. */
-function PersonHead({ account, id, person }: { account: AccountId; id: string; person: Person | null }) {
+function PersonHead({
+  account,
+  id,
+  person,
+}: {
+  account: AccountId;
+  id: string;
+  person: Person | null;
+}) {
   const palette = usePalette();
   const name = person?.name ?? id;
+
   return (
     <View style={styles.head}>
       <Avatar account={account} id={id} name={name} media={person?.avatar} size={72} />
@@ -193,7 +266,9 @@ function PersonHead({ account, id, person }: { account: AccountId; id: string; p
         </Text>
       ) : null}
       {person === null ? (
-        <Text style={[font.meta, styles.centered, { color: palette.textMuted }]}>{t('mobile.links.no_profile')}</Text>
+        <Text style={[font.meta, styles.centered, { color: palette.textMuted }]}>
+          {t('mobile.links.no_profile')}
+        </Text>
       ) : null}
     </View>
   );
@@ -203,7 +278,9 @@ function PersonHead({ account, id, person }: { account: AccountId; id: string; p
 function Note({ step }: { step: LinkStep }) {
   const palette = usePalette();
   const note = linkNote(step);
+
   if (note === null) return null;
+
   return <Text style={[font.body, styles.note, { color: palette.textMuted }]}>{t(note)}</Text>;
 }
 

@@ -5,25 +5,43 @@ import { ADA, summary } from '../../../test/fixtures';
 import { Store } from '../../store';
 import { afterAnswer, answerInvitation } from '../invitations';
 
-const DESIGN: Invitation = { room_id: '!design:x', name: 'Design', topic: null, avatar: null, inviter: null, space: false, kind: 'Group' };
+const DESIGN: Invitation = {
+  room_id: '!design:x',
+  name: 'Design',
+  topic: null,
+  avatar: null,
+  inviter: null,
+  space: false,
+  kind: 'Group',
+};
 
 function setup() {
   const detached = detachedEngine();
   const store = new Store(detached.engine);
   detached.engine.emit({ type: 'AccountAdded', data: summary(ADA) });
-  detached.engine.emit({ type: 'RoomsUpdated', data: { account: ADA, list: { rooms: [], spaces: [], invitations: [DESIGN] } } });
+  detached.engine.emit({
+    type: 'RoomsUpdated',
+    data: { account: ADA, list: { rooms: [], spaces: [], invitations: [DESIGN] } },
+  });
+
   return { ...detached, store };
 }
 
-const finish = (engine: ReturnType<typeof setup>['engine'], request: number, result: { Ok: null } | { Err: string }) =>
-  engine.emit({ type: 'Finished', data: { request, result } });
+const finish = (
+  engine: ReturnType<typeof setup>['engine'],
+  request: number,
+  result: { Ok: null } | { Err: string },
+) => engine.emit({ type: 'Finished', data: { request, result } });
 
 describe('answerInvitation', () => {
   it('should join an accepted invitation and say which room it joined', async () => {
     const { store, engine, sent } = setup();
     const answer = answerInvitation(store, ADA, '!design:x', true);
     const { request, command } = sent.at(-1)!;
-    expect(command).toEqual({ type: 'JoinRoom', data: { account: ADA, room_id: '!design:x', via: [] } });
+    expect(command).toEqual({
+      type: 'JoinRoom',
+      data: { account: ADA, room_id: '!design:x', via: [] },
+    });
     engine.emit({ type: 'RoomJoined', data: { request, room_id: '!design:x' } });
     finish(engine, request, { Ok: null });
     await expect(answer).resolves.toEqual({ kind: 'joined', roomId: '!design:x' });
@@ -33,7 +51,10 @@ describe('answerInvitation', () => {
     const { store, engine, sent } = setup();
     const answer = answerInvitation(store, ADA, '!design:x', false);
     const { request, command } = sent.at(-1)!;
-    expect(command).toEqual({ type: 'LeaveRoom', data: { account: ADA, room_id: '!design:x', forget: false } });
+    expect(command).toEqual({
+      type: 'LeaveRoom',
+      data: { account: ADA, room_id: '!design:x', forget: false },
+    });
     finish(engine, request, { Ok: null });
     await expect(answer).resolves.toEqual({ kind: 'declined' });
   });

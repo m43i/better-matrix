@@ -22,16 +22,21 @@ export const NO_MARKER: MarkerState = { shown: null, hidden: false };
 
 /** How long the divider fades, in milliseconds (the desktop's), and under reduced motion. */
 export const MARKER_FADE_MS = 2500;
+
 export const MARKER_FADE_REDUCED_MS = 150;
 
 /** The entry the SDK's read marker stands before: the first message or room event after it. */
 export function sdkBoundary(entries: readonly TimelineEntry[]): string | null {
   const at = entries.findIndex((entry) => entry.kind.type === 'ReadMarker');
+
   if (at < 0) return null;
+
   for (let i = at + 1; i < entries.length; i++) {
     const kind = entries[i]!.kind.type;
+
     if (kind === 'Message' || kind === 'RoomEvent') return entries[i]!.id;
   }
+
   return null;
 }
 
@@ -39,8 +44,12 @@ export function sdkBoundary(entries: readonly TimelineEntry[]): string | null {
 export function nextMarker(state: MarkerState, sdk: string | null): MarkerState {
   if (state.hidden) return state;
   const shown = state.shown;
-  if (shown === null) return sdk === null ? state : { shown: { boundary: sdk, fading: false }, hidden: false };
+
+  if (shown === null)
+    return sdk === null ? state : { shown: { boundary: sdk, fading: false }, hidden: false };
+
   if (shown.fading || sdk === shown.boundary) return state;
+
   // Receipts moved or removed the marker: the divider stays where it was and fades.
   return { ...state, shown: { ...shown, fading: true } };
 }

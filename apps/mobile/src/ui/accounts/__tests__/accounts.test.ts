@@ -26,6 +26,7 @@ describe('unverifiedAccount', () => {
       type: 'SecurityChanged',
       data: { account: ADA, security: { session_verified: false, recovery: 'Enabled' } },
     });
+
     expect(unverifiedAccount(state)).toBe(ADA);
   });
 

@@ -34,6 +34,7 @@ export function PeoplePicker({
   const people = candidates(search, account);
   const typing = query(search) !== '';
   const loading = busy(search);
+
   return (
     <>
       <Stack.SearchBar
@@ -57,7 +58,9 @@ export function PeoplePicker({
         ItemSeparatorComponent={() => <Divider inset={68} />}
         ListHeaderComponent={
           !typing && people.length > 0 ? (
-            <Text style={[styles.section, font.section, { color: palette.textMuted }]}>{t('create.suggested')}</Text>
+            <Text style={[styles.section, font.section, { color: palette.textMuted }]}>
+              {t('create.suggested')}
+            </Text>
           ) : undefined
         }
         ListEmptyComponent={

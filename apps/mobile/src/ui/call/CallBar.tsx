@@ -17,19 +17,27 @@ export function CallBar() {
   const openStage = useOpenStage();
   const palette = usePalette();
   const call = useStore((s) => s.call.current);
+
   const name = useStore((s) => {
     const current = s.call.current;
+
     if (!current) return null;
+
     return roomOf(s, current.account, current.room_id)?.name ?? current.room_id;
   });
+
   if (!call) return null;
+
   return (
     <Pressable
       testID="call-bar"
       accessibilityRole="button"
       accessibilityLabel={t('call.return')}
       onPress={openStage}
-      style={[styles.bar, { backgroundColor: `${palette.success}29`, borderColor: palette.divider }]}
+      style={[
+        styles.bar,
+        { backgroundColor: `${palette.success}29`, borderColor: palette.divider },
+      ]}
     >
       <View style={[styles.dot, { backgroundColor: palette.success }]} />
       <View style={styles.text}>

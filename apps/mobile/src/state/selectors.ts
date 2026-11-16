@@ -1,6 +1,11 @@
 // Derived data views read: kept here so every screen derives it the same way.
 
-import type { AccountId, MediaRef, MediaSize, TimelineKey } from '@better-matrix/matrix-native/types';
+import type {
+  AccountId,
+  MediaRef,
+  MediaSize,
+  TimelineKey,
+} from '@better-matrix/matrix-native/types';
 
 import { EMPTY_TIMELINE, mediaKey } from './reducer';
 import { timelineId } from './timeline';
@@ -26,5 +31,6 @@ export function room(state: State, id: AccountId, roomId: string) {
 /** A fetched media file's `file://` URI, once it's there. */
 export function mediaUri(state: State, media: MediaRef, size: MediaSize): string | undefined {
   const path = state.media[mediaKey(media, size)];
+
   return path === undefined ? undefined : `file://${path}`;
 }

@@ -9,6 +9,7 @@ export function storeKey(key: string): string {
   return [...new TextEncoder().encode(key)]
     .map((byte) => {
       const c = String.fromCharCode(byte);
+
       return /[A-Za-z0-9.-]/.test(c) ? c : `_${byte.toString(16).padStart(2, '0')}`;
     })
     .join('');

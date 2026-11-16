@@ -20,6 +20,8 @@ export const TimelineContext = createContext<TimelineContextValue | null>(null);
 
 export function useTimelineContext(): TimelineContextValue {
   const value = useContext(TimelineContext);
+
   if (!value) throw new Error('timeline rows need a TimelineContext');
+
   return value;
 }

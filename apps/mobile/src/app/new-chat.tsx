@@ -18,7 +18,9 @@ export default function NewChatScreen() {
   const palette = usePalette();
   const account = useStore((s) => s.active);
   const [opening, setOpening] = useState<string | null>(null);
+
   if (account === null) return null;
+
   const open = (userId: string) => {
     if (opening !== null) return;
     setOpening(userId);
@@ -28,6 +30,7 @@ export default function NewChatScreen() {
       () => setOpening(null),
     );
   };
+
   return (
     <>
       <Stack.Screen options={{ title: t('create.chat') }} />
@@ -36,7 +39,9 @@ export default function NewChatScreen() {
         account={account}
         placeholder={t('create.chat_placeholder')}
         onPick={(person) => open(person.id)}
-        trailing={(person) => (opening === person.id ? <ActivityIndicator color={palette.textMuted} /> : null)}
+        trailing={(person) =>
+          opening === person.id ? <ActivityIndicator color={palette.textMuted} /> : null
+        }
       />
     </>
   );

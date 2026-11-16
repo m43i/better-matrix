@@ -27,7 +27,11 @@ describe('sortSessions', () => {
 
 describe('sessionDetails', () => {
   it('should give the ID, the last activity and the address', () => {
-    const details = sessionDetails({ ...session('DEV', 5), last_seen_ip: '10.0.0.1' }, () => 'today');
+    const details = sessionDetails(
+      { ...session('DEV', 5), last_seen_ip: '10.0.0.1' },
+      () => 'today',
+    );
+
     expect(details).toBe(`DEV · ${t('sessions.last_seen', { when: 'today' })} · 10.0.0.1`);
   });
 

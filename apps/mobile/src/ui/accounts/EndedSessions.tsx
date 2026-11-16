@@ -19,11 +19,20 @@ export function EndedSessions() {
   const palette = usePalette();
   const ended = useStore((s) => s.ended, shallow);
   const restoring = useStore((s) => s.restoring, shallow);
+
   if (ended.length === 0 && restoring.length === 0) return null;
+
   return (
     <View style={styles.list} testID="ended-sessions">
       {restoring.map((account) => (
-        <View key={account} style={[styles.card, styles.restoring, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
+        <View
+          key={account}
+          style={[
+            styles.card,
+            styles.restoring,
+            { backgroundColor: palette.surface, borderColor: palette.divider },
+          ]}
+        >
           <ActivityIndicator color={palette.textMuted} />
           <Text style={[font.body, { color: palette.textMuted, flex: 1 }]} numberOfLines={1}>
             {t('mobile.accounts.restoring', { account })}

@@ -11,7 +11,9 @@ describe('Engine', () => {
   it('should record what a detached engine was sent', () => {
     const { engine, sent } = detachedEngine();
     engine.send({ type: 'Discover', data: { server: 'matrix.org' } });
-    expect(sent.map((s) => s.command)).toEqual([{ type: 'Discover', data: { server: 'matrix.org' } }]);
+    expect(sent.map((s) => s.command)).toEqual([
+      { type: 'Discover', data: { server: 'matrix.org' } },
+    ]);
   });
 
   it('should hand bridge json to every listener as an event', () => {

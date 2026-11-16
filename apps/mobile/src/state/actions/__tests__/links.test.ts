@@ -10,17 +10,23 @@ function setUp(): DetachedEngine & { store: Store } {
   const detached = detachedEngine();
   const store = new Store(detached.engine);
   detached.engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+
   return { ...detached, store };
 }
 
 function last({ sent }: DetachedEngine): { request: number; command: Command } {
   const entry = sent[sent.length - 1];
+
   if (!entry) throw new Error('nothing was sent');
+
   return entry;
 }
 
 function finish(engine: DetachedEngine['engine'], request: number, error?: string): void {
-  engine.emit({ type: 'Finished', data: { request, result: error === undefined ? { Ok: null } : { Err: error } } });
+  engine.emit({
+    type: 'Finished',
+    data: { request, result: error === undefined ? { Ok: null } : { Err: error } },
+  });
 }
 
 const rust: RoomPreview = {
@@ -40,7 +46,10 @@ describe('link actions', () => {
   it('should look a room up with the servers the link names', () => {
     const app = setUp();
     void previewRoom(app.store, ADA, '#rust:matrix.org', ['matrix.org']).catch(() => {});
-    expect(last(app).command).toEqual({ type: 'PreviewRoom', data: { account: ADA, room: '#rust:matrix.org', via: ['matrix.org'] } });
+    expect(last(app).command).toEqual({
+      type: 'PreviewRoom',
+      data: { account: ADA, room: '#rust:matrix.org', via: ['matrix.org'] },
+    });
   });
 
   it('should answer with the room the engine previewed', async () => {
@@ -66,14 +75,19 @@ describe('link actions', () => {
     const joined = joinRoom(app.store, ADA, '!closed:example.org', []);
     finish(app.engine, last(app).request, 'forbidden');
     await expect(joined).rejects.toThrow('forbidden');
-    expect(app.store.getState().notices.map((n) => n.message)).toEqual([t('notice.join', { error: 'forbidden' })]);
+    expect(app.store.getState().notices.map((n) => n.message)).toEqual([
+      t('notice.join', { error: 'forbidden' }),
+    ]);
   });
 
   it('should find the person a link names among people found for their ID', async () => {
     const app = setUp();
     const found = findPerson(app.store, ADA, GRACE);
     const { request, command } = last(app);
-    app.engine.emit({ type: 'PeopleFound', data: { request, people: [person('@gracie:example.org'), person(GRACE, 'Grace')] } });
+    app.engine.emit({
+      type: 'PeopleFound',
+      data: { request, people: [person('@gracie:example.org'), person(GRACE, 'Grace')] },
+    });
     finish(app.engine, request);
     await expect(found).resolves.toEqual(person(GRACE, 'Grace'));
     expect(command).toEqual({ type: 'SearchPeople', data: { account: ADA, term: GRACE } });

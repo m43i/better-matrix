@@ -20,7 +20,13 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 # Renders PDF pages for the attachment preview: pure Rust, so every platform previews without a system library.
 hayro = "0.9"
 image = { version = "0.25", default-features = false, features = ["gif"] }
-keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
+keyring = { version = "3", features = [
+  "apple-native",
+  "windows-native",
+  "async-secret-service",
+  "async-io",
+  "crypto-rust",
+] }
 matrix-core.workspace = true
 pollster = "0.4"
 rfd = "0.17"
@@ -35,7 +41,17 @@ emojis = "0.9"
 opuscule = "0.2"
 # Logs to stderr, only when RUST_LOG asks for them.
 tracing-subscriber.workspace = true
-symphonia = { version = "0.5.5", default-features = false, features = ["ogg", "vorbis", "mkv", "wav", "pcm", "mp3", "aac", "isomp4", "flac"] }
+symphonia = { version = "0.5.5", default-features = false, features = [
+  "ogg",
+  "vorbis",
+  "mkv",
+  "wav",
+  "pcm",
+  "mp3",
+  "aac",
+  "isomp4",
+  "flac",
+] }
 
 [dev-dependencies]
 serde_json.workspace = true

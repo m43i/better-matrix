@@ -4,27 +4,32 @@ import { bootDemo } from '../boot';
 import { answer, demoEngine } from '../engine';
 import { ADA, ADA_HOBBY, DEMO_THREAD, GENERAL } from '../fixtures';
 import { demoScene } from '../link';
-import { scenes, type SceneName } from '../scenes';
+import { scenes, isScene } from '../scenes';
 
 const noMedia = async () => null;
 
-jest.mock('expo-asset', () => ({ Asset: { fromModule: () => ({ downloadAsync: async () => ({ localUri: null }) }) } }));
-
 describe('demoScene', () => {
-  it('should read the scene from a demo link', () => expect(demoScene('bettermatrix://demo/room')).toBe('room'));
-  it('should read the scene from a demo path', () => expect(demoScene('/demo/thread')).toBe('thread'));
-  it('should ignore a scene that does not exist', () => expect(demoScene('bettermatrix://demo/nowhere')).toBeNull());
-  it('should ignore other links', () => expect(demoScene('org.example.bettermatrix:/oauth?code=1')).toBeNull());
+  it('should read the scene from a demo link', () =>
+    expect(demoScene('bettermatrix://demo/room')).toBe('room'));
+  it('should read the scene from a demo path', () =>
+    expect(demoScene('/demo/thread')).toBe('thread'));
+  it('should ignore a scene that does not exist', () =>
+    expect(demoScene('bettermatrix://demo/nowhere')).toBeNull());
+  it('should ignore other links', () =>
+    expect(demoScene('org.example.bettermatrix:/oauth?code=1')).toBeNull());
 });
 
 describe('scenes', () => {
-  it.each(Object.keys(scenes) as SceneName[])('%s should start without an error', (name) => {
+  it.each(Object.keys(scenes).filter(isScene))('%s should start without an error', (name) => {
     expect(() => bootDemo(name, noMedia)).not.toThrow();
   });
 
   it('should seed both of Ada’s accounts with Ada’s work on screen', () => {
     const state = bootDemo('home', noMedia).getState();
-    expect([state.accounts.map((a) => a.summary.id), state.active]).toEqual([[ADA, ADA_HOBBY], ADA]);
+    expect([state.accounts.map((a) => a.summary.id), state.active]).toEqual([
+      [ADA, ADA_HOBBY],
+      ADA,
+    ]);
   });
 
   it('should fill the general room’s timeline', () => {
@@ -34,11 +39,15 @@ describe('scenes', () => {
 
   it('should fill the demo thread', () => {
     const id = timelineId({ room_id: DEMO_THREAD.roomId, thread: DEMO_THREAD.root });
-    expect(bootDemo('thread', noMedia).getState().accounts[0]!.timelines[id]!.entries.length).toBeGreaterThan(1);
+    expect(
+      bootDemo('thread', noMedia).getState().accounts[0]!.timelines[id]!.entries.length,
+    ).toBeGreaterThan(1);
   });
 
   it('should put the unverified account on screen for its scene', () => {
-    expect(activeAccount(bootDemo('unverified', noMedia).getState())?.security?.session_verified).toBe(false);
+    expect(
+      activeAccount(bootDemo('unverified', noMedia).getState())?.security?.session_verified,
+    ).toBe(false);
   });
 
   it('should start signed out for the sign-in scene', () => {
@@ -47,7 +56,10 @@ describe('scenes', () => {
   });
 
   it('should follow the speaker in the focus scene', () => {
-    expect(bootDemo('call-focus', noMedia).getState().call.view.layout).toEqual({ type: 'Focus', pin: null });
+    expect(bootDemo('call-focus', noMedia).getState().call.view.layout).toEqual({
+      type: 'Focus',
+      pin: null,
+    });
   });
 
   it('should show the chat under the call in the call chat scene', () => {
@@ -67,33 +79,78 @@ describe('scenes', () => {
 describe('the demo engine', () => {
   it('should answer a discovery with a server offering both sign-ins', () => {
     const [event] = answer({ type: 'Discover', data: { server: 'example.org' } }, 4);
-    expect(event).toMatchObject({ type: 'HomeserverDiscovered', data: { request: 4, homeserver: { methods: { oauth: true, password: true } } } });
+    expect(event).toMatchObject({
+      type: 'HomeserverDiscovered',
+      data: { request: 4, homeserver: { methods: { oauth: true, password: true } } },
+    });
   });
 
   it('should show a sent message in its timeline', () => {
     const key = { room_id: GENERAL, thread: null };
-    const [event] = answer({ type: 'Send', data: { account: ADA, key, reply_to: null, message: { type: 'Text', data: { body: 'hi', html: null } } } }, 9);
-    expect(event).toMatchObject({ type: 'TimelineChanged', data: { key, diffs: [{ type: 'PushBack' }] } });
+
+    const [event] = answer(
+      {
+        type: 'Send',
+        data: {
+          account: ADA,
+          key,
+          reply_to: null,
+          message: { type: 'Text', data: { body: 'hi', html: null } },
+        },
+      },
+      9,
+    );
+
+    expect(event).toMatchObject({
+      type: 'TimelineChanged',
+      data: { key, diffs: [{ type: 'PushBack' }] },
+    });
   });
 
   it('should find people by name', () => {
     const [event] = answer({ type: 'SearchPeople', data: { account: ADA, term: 'grace' } }, 2);
-    expect(event?.type === 'PeopleFound' ? event.data.people.map((p) => p.name) : []).toEqual(['Grace Hopper']);
+    expect(event?.type === 'PeopleFound' ? event.data.people.map((p) => p.name) : []).toEqual([
+      'Grace Hopper',
+    ]);
   });
 
   it('should preview a linked room nobody in the demo joined', () => {
-    const [event] = answer({ type: 'PreviewRoom', data: { account: ADA, room: '#rust:matrix.org', via: ['matrix.org'] } }, 3);
-    expect(event).toMatchObject({ type: 'RoomPreview', data: { request: 3, preview: { name: 'Rust', joined: false } } });
+    const [event] = answer(
+      {
+        type: 'PreviewRoom',
+        data: { account: ADA, room: '#rust:matrix.org', via: ['matrix.org'] },
+      },
+      3,
+    );
+
+    expect(event).toMatchObject({
+      type: 'RoomPreview',
+      data: { request: 3, preview: { name: 'Rust', joined: false } },
+    });
   });
 
   it('should preview the general room as joined by its alias', () => {
-    const [event] = answer({ type: 'PreviewRoom', data: { account: ADA, room: '#general:example.org', via: [] } }, 3);
-    expect(event).toMatchObject({ type: 'RoomPreview', data: { preview: { room_id: GENERAL, joined: true } } });
+    const [event] = answer(
+      { type: 'PreviewRoom', data: { account: ADA, room: '#general:example.org', via: [] } },
+      3,
+    );
+
+    expect(event).toMatchObject({
+      type: 'RoomPreview',
+      data: { preview: { room_id: GENERAL, joined: true } },
+    });
   });
 
   it('should join a linked room by the ID its preview names', () => {
-    const [event] = answer({ type: 'JoinRoom', data: { account: ADA, room_id: '#rust:matrix.org', via: [] } }, 5);
-    expect(event).toEqual({ type: 'RoomJoined', data: { request: 5, room_id: '!rust-lang:matrix.org' } });
+    const [event] = answer(
+      { type: 'JoinRoom', data: { account: ADA, room_id: '#rust:matrix.org', via: [] } },
+      5,
+    );
+
+    expect(event).toEqual({
+      type: 'RoomJoined',
+      data: { request: 5, room_id: '!rust-lang:matrix.org' },
+    });
   });
 
   it('should finish every command', async () => {
@@ -102,7 +159,17 @@ describe('the demo engine', () => {
     engine.subscribe((e) => {
       if (e.type === 'Finished') finished.push(e.data.request);
     });
-    const request = engine.send({ type: 'MarkRead', data: { account: ADA, key: { room_id: GENERAL, thread: null }, event_id: null, fully_read: false } });
+
+    const request = engine.send({
+      type: 'MarkRead',
+      data: {
+        account: ADA,
+        key: { room_id: GENERAL, thread: null },
+        event_id: null,
+        fully_read: false,
+      },
+    });
+
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(finished).toEqual([request]);
   });

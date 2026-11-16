@@ -24,6 +24,7 @@ export function Banner({
   testID: string;
 }) {
   const palette = usePalette();
+
   return (
     <View style={styles.banner} testID={testID}>
       <View style={[styles.bar, { backgroundColor: palette.accent }]} />
@@ -38,13 +39,27 @@ export function Banner({
           </Text>
         ) : null}
       </View>
-      <IconButton icon="close" label={cancelLabel} onPress={onCancel} size={32} color={palette.textMuted} testID={`${testID}-cancel`} />
+      <IconButton
+        icon="close"
+        label={cancelLabel}
+        onPress={onCancel}
+        size={32}
+        color={palette.textMuted}
+        testID={`${testID}-cancel`}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  banner: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 6, paddingTop: 8 },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 12,
+    paddingRight: 6,
+    paddingTop: 8,
+  },
   bar: { width: 3, alignSelf: 'stretch', borderRadius: 2 },
   text: { flex: 1, gap: 1 },
 });

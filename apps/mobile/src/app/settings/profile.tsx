@@ -43,8 +43,10 @@ export default function ProfileScreen() {
 
   if (!account || !summary) return <NoAccount title={t('settings.profile')} />;
 
-  const notice = (error: unknown) =>
-    store.update((s) => addNotice(s, error instanceof Error ? error.message : String(error), summary.id));
+  const notice = (cause: unknown) =>
+    store.update((s) =>
+      addNotice(s, cause instanceof Error ? cause.message : String(cause), summary.id),
+    );
 
   const saveName = () => {
     if (savingName || !nameChanged(summary.display_name, name)) return;
@@ -68,7 +70,9 @@ export default function ProfileScreen() {
       aspect: [1, 1],
       quality: 0.9,
     });
+
     const picked = result.canceled ? undefined : result.assets[0];
+
     if (picked) changeAvatar(pathOf(picked.uri));
   };
 
@@ -85,13 +89,22 @@ export default function ProfileScreen() {
   const contacts = account.contacts;
   const changeable = contacts === null || contacts.changeable;
   const details = contacts?.details ?? null;
+
   // A kind the user can't add to shows only when something is linked.
-  const kinds = (['Email', 'Phone'] as const).filter((kind) => changeable || details?.some((d) => d.kind === kind));
+  const kinds = (['Email', 'Phone'] as const).filter(
+    (kind) => changeable || details?.some((d) => d.kind === kind),
+  );
 
   return (
     <SettingsPage title={t('settings.profile')} testID="profile">
       <View style={styles.picture}>
-        <Avatar account={summary.id} id={summary.id} name={summary.display_name} media={summary.avatar} size={96} />
+        <Avatar
+          account={summary.id}
+          id={summary.id}
+          name={summary.display_name}
+          media={summary.avatar}
+          size={96}
+        />
         <Text style={[font.header, { color: palette.text }]} numberOfLines={1}>
           {summary.display_name}
         </Text>
@@ -160,7 +173,9 @@ export default function ProfileScreen() {
             testID="account-page"
             icon="external"
             title={t('profile.open_account_page')}
-            onPress={() => openAccountPage(store, summary.id, (url) => openInBrowser(store, url)).catch(notice)}
+            onPress={() =>
+              openAccountPage(store, summary.id, (url) => openInBrowser(store, url)).catch(notice)
+            }
           />
         </ListSection>
       ) : null}

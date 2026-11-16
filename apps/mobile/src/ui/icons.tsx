@@ -2,10 +2,7 @@
 // The names mirror the desktop's icon set (apps/desktop/src/ui/icons.rs); add one here before
 // using it, so both platforms always have a glyph.
 
-import { SymbolView } from 'expo-symbols';
-import type { ComponentProps } from 'react';
-
-type SymbolName = ComponentProps<typeof SymbolView>['name'];
+import { type AndroidSymbol, type SFSymbol, SymbolView } from 'expo-symbols';
 
 export const icons = {
   bold: { ios: 'bold', android: 'format_bold' },
@@ -112,7 +109,7 @@ export const icons = {
   fullVideo: { ios: 'arrow.up.left.and.arrow.down.right', android: 'fit_screen' },
   cropVideo: { ios: 'crop', android: 'crop' },
   expand: { ios: 'arrow.up.left.and.arrow.down.right', android: 'open_in_full' },
-} as const satisfies Record<string, { ios: string; android: string }>;
+} as const satisfies Record<string, { ios: SFSymbol; android: AndroidSymbol }>;
 
 export type IconName = keyof typeof icons;
 
@@ -129,7 +126,7 @@ export function Icon({
 }) {
   return (
     <SymbolView
-      name={icons[name] as SymbolName}
+      name={icons[name]}
       size={size}
       tintColor={color}
       weight={weight}

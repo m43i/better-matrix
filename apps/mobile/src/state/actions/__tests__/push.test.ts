@@ -12,7 +12,10 @@ describe('push settings', () => {
   it('turning an account off should keep the others on', () => {
     const s = store();
     setAccountPush(s, GRACE, false);
-    expect([accountPushOn(s.getState().settings, ADA), accountPushOn(s.getState().settings, GRACE)]).toEqual([true, false]);
+    expect([
+      accountPushOn(s.getState().settings, ADA),
+      accountPushOn(s.getState().settings, GRACE),
+    ]).toEqual([true, false]);
   });
 
   it('turning an account on again should forget it was off', () => {

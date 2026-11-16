@@ -2,7 +2,7 @@
 // it: iOS's own alert with a text field, and on Android (which has none) a small dialog in the
 // same shape. The screen renders `element` and calls `ask`.
 
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
@@ -34,7 +34,7 @@ interface Asking {
 let nextId = 1;
 
 /** `ask` shows the prompt and resolves with what was entered, or `null` when cancelled. */
-export function usePrompt(): { ask: (options: PromptOptions) => Promise<string | null>; element: ReactNode } {
+export function usePrompt() {
   const [asking, setAsking] = useState<Asking | null>(null);
   const pending = useRef<Asking | null>(null);
 
@@ -43,6 +43,7 @@ export function usePrompt(): { ask: (options: PromptOptions) => Promise<string |
 
   const ask = useCallback((options: PromptOptions) => {
     pending.current?.resolve(null);
+
     return new Promise<string | null>((resolve) => {
       const entry: Asking = {
         id: nextId++,
@@ -53,7 +54,9 @@ export function usePrompt(): { ask: (options: PromptOptions) => Promise<string |
           resolve(value);
         },
       };
+
       pending.current = entry;
+
       if (Platform.OS === 'ios') promptIos(entry);
       else setAsking(entry);
     });
@@ -88,15 +91,27 @@ function promptIos({ options, resolve }: Pick<Asking, 'options' | 'resolve'>): v
 function PromptDialog({ asking: { options, resolve } }: { asking: Asking }) {
   const palette = usePalette();
   const [value, setValue] = useState(options.defaultValue ?? '');
+
   const submit = () => {
     if (value.trim()) resolve(value);
   };
+
   return (
-    <Modal transparent animationType="fade" onRequestClose={() => resolve(null)} statusBarTranslucent>
-      <KeyboardAvoidingView behavior="padding" style={[styles.scrim, { backgroundColor: palette.scrim }]}>
+    <Modal
+      transparent
+      animationType="fade"
+      onRequestClose={() => resolve(null)}
+      statusBarTranslucent
+    >
+      <KeyboardAvoidingView
+        behavior="padding"
+        style={[styles.scrim, { backgroundColor: palette.scrim }]}
+      >
         <View style={[styles.card, { backgroundColor: palette.bg }]} testID="prompt">
           <Text style={[font.header, { color: palette.text }]}>{options.title}</Text>
-          {options.message ? <Text style={[font.body, { color: palette.textMuted }]}>{options.message}</Text> : null}
+          {options.message ? (
+            <Text style={[font.body, { color: palette.textMuted }]}>{options.message}</Text>
+          ) : null}
           <TextField
             testID="prompt-field"
             value={value}
@@ -111,7 +126,12 @@ function PromptDialog({ asking: { options, resolve } }: { asking: Asking }) {
             returnKeyType="done"
           />
           <View style={styles.buttons}>
-            <Button testID="prompt-cancel" title={t('common.cancel')} kind="plain" onPress={() => resolve(null)} />
+            <Button
+              testID="prompt-cancel"
+              title={t('common.cancel')}
+              kind="plain"
+              onPress={() => resolve(null)}
+            />
             <Button
               testID="prompt-confirm"
               title={options.confirm}

@@ -32,7 +32,15 @@ describe('planSend', () => {
   it('should send plain text without html', () => {
     const plan = planSend({ ...EMPTY_COMPOSER, draft: 'hello' }, ADA, KEY);
     expect(plan.commands).toEqual([
-      { type: 'Send', data: { account: ADA, key: KEY, reply_to: null, message: { type: 'Text', data: { body: 'hello', html: null } } } },
+      {
+        type: 'Send',
+        data: {
+          account: ADA,
+          key: KEY,
+          reply_to: null,
+          message: { type: 'Text', data: { body: 'hello', html: null } },
+        },
+      },
     ]);
   });
 
@@ -45,19 +53,38 @@ describe('planSend', () => {
   });
 
   it('should send the attachments after the text, in the order picked', () => {
-    const plan = planSend({ ...EMPTY_COMPOSER, draft: 'look', attachments: [file('/a.png'), file('/b.pdf')] }, ADA, KEY);
-    expect(plan.commands.map((c) => c.type === 'Send' && c.data.message.type)).toEqual(['Text', 'File', 'File']);
+    const plan = planSend(
+      { ...EMPTY_COMPOSER, draft: 'look', attachments: [file('/a.png'), file('/b.pdf')] },
+      ADA,
+      KEY,
+    );
+
+    expect(plan.commands.map((c) => c.type === 'Send' && c.data.message.type)).toEqual([
+      'Text',
+      'File',
+      'File',
+    ]);
     const last = plan.commands[2];
-    expect(last?.type === 'Send' && last.data.message).toEqual({ type: 'File', data: { type: 'Path', data: '/b.pdf' } });
+    expect(last?.type === 'Send' && last.data.message).toEqual({
+      type: 'File',
+      data: { type: 'Path', data: '/b.pdf' },
+    });
   });
 
   it('should send the reply with the first message only', () => {
-    const plan = planSend({ ...EMPTY_COMPOSER, draft: 'yes', replyTo: message('$q'), attachments: [file('/a.png')] }, ADA, KEY);
+    const plan = planSend(
+      { ...EMPTY_COMPOSER, draft: 'yes', replyTo: message('$q'), attachments: [file('/a.png')] },
+      ADA,
+      KEY,
+    );
+
     expect(plan.commands.map((c) => c.type === 'Send' && c.data.reply_to)).toEqual(['$q', null]);
   });
 
   it('should leave an empty composer after sending', () => {
-    expect(planSend({ ...EMPTY_COMPOSER, draft: 'hi', replyTo: message('$q') }, ADA, KEY).composer).toEqual(EMPTY_COMPOSER);
+    expect(
+      planSend({ ...EMPTY_COMPOSER, draft: 'hi', replyTo: message('$q') }, ADA, KEY).composer,
+    ).toEqual(EMPTY_COMPOSER);
   });
 
   it('should send nothing for an empty draft', () => {
@@ -66,7 +93,10 @@ describe('planSend', () => {
 
   it('should send a changed edit as an edit of the message', () => {
     expect(planSend(editing('helo!', 'helo'), ADA, KEY).commands).toEqual([
-      { type: 'Edit', data: { account: ADA, key: KEY, event_id: '$mine', body: 'helo!', html: null } },
+      {
+        type: 'Edit',
+        data: { account: ADA, key: KEY, event_id: '$mine', body: 'helo!', html: null },
+      },
     ]);
   });
 
@@ -80,7 +110,11 @@ describe('planSend', () => {
 
   it('should bring the draft back after an edit', () => {
     const after = planSend(editing('helo!', 'helo'), ADA, KEY).composer;
-    expect([after.draft, after.attachments?.length, after.editing]).toEqual(['half a thought', 1, null]);
+    expect([after.draft, after.attachments?.length, after.editing]).toEqual([
+      'half a thought',
+      1,
+      null,
+    ]);
   });
 });
 
@@ -119,9 +153,17 @@ describe('excerpt', () => {
       ...message('$1'),
       content: {
         type: 'Attachment' as const,
-        data: { kind: 'Image' as const, name: 'cat.png', size: null, media: null, thumbnail: null, dimensions: null },
+        data: {
+          kind: 'Image' as const,
+          name: 'cat.png',
+          size: null,
+          media: null,
+          thumbnail: null,
+          dimensions: null,
+        },
       },
     };
+
     expect(excerpt(photo)).toBe('cat.png');
   });
 });
@@ -144,7 +186,10 @@ describe('uploadName', () => {
 
 describe('insertAt', () => {
   it('should put the text at the caret and the caret after it', () => {
-    expect(insertAt('ab', { start: 1, end: 1 }, '🎉')).toEqual({ text: 'a🎉b', selection: { start: 3, end: 3 } });
+    expect(insertAt('ab', { start: 1, end: 1 }, '🎉')).toEqual({
+      text: 'a🎉b',
+      selection: { start: 3, end: 3 },
+    });
   });
 
   it('should put the text at the end without a caret', () => {

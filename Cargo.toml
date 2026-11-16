@@ -1,11 +1,7 @@
 [workspace]
 resolver = "3"
 # Listed explicitly so non-Rust packages can live under packages/ later.
-members = [
-    "apps/desktop",
-    "packages/matrix-core",
-    "packages/matrix-ffi",
-]
+members = ["apps/desktop", "packages/matrix-core", "packages/matrix-ffi"]
 
 # Turborepo's identity for the Cargo workspace (experimentalCargoWorkspaces).
 [workspace.metadata]
@@ -19,7 +15,11 @@ version = "0.0.5"
 [workspace.dependencies]
 matrix-core = { path = "packages/matrix-core" }
 # bundled-sqlite: one SQLite build on every platform; Windows has no system copy to link.
-matrix-sdk = { version = "0.19.1", features = ["bundled-sqlite", "local-server", "experimental-send-custom-to-device"] }
+matrix-sdk = { version = "0.19.1", features = [
+  "bundled-sqlite",
+  "local-server",
+  "experimental-send-custom-to-device",
+] }
 matrix-sdk-ui = "0.19.1"
 matrix-sdk-base = "0.19.1"
 eyeball-im = "0.9"
@@ -40,11 +40,21 @@ tracing = "0.1"
 # Only to pick the TLS crypto provider: the SDK and LiveKit pull in both, and rustls then
 # refuses to guess (ADR 0009).
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "env-filter", "tracing-log", "std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+  "fmt",
+  "ansi",
+  "env-filter",
+  "tracing-log",
+  "std",
+] }
 tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "sync"] }
 # Calls: LiveKit's client over Google's libwebrtc (downloaded prebuilt at build time).
 # glib-main-loop: Wayland screen sharing through the desktop portal and PipeWire.
-livekit = { version = "0.11", default-features = false, features = ["tokio", "rustls-tls-webpki-roots", "glib-main-loop"] }
+livekit = { version = "0.11", default-features = false, features = [
+  "tokio",
+  "rustls-tls-webpki-roots",
+  "glib-main-loop",
+] }
 # Cameras, without the C JPEG decoder: MJPEG frames decode with zune-jpeg.
 nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }
 zune-jpeg = "0.5"

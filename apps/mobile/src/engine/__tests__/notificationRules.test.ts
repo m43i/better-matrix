@@ -5,7 +5,15 @@ import { apply, initialState } from '../../state/reducer';
 import { contentOf, pushContentOf, shouldPresent, tapRoute, targetOf } from '../notificationRules';
 
 function notification(change: Partial<Notification> = {}): Notification {
-  return { account: ADA, room_id: '!r', room_name: 'Team', event_id: '$e', sender_name: 'Grace', body: 'hi', ...change };
+  return {
+    account: ADA,
+    room_id: '!r',
+    room_name: 'Team',
+    event_id: '$e',
+    sender_name: 'Grace',
+    body: 'hi',
+    ...change,
+  };
 }
 
 describe('shouldPresent', () => {
@@ -39,8 +47,27 @@ describe('contentOf', () => {
 
 describe('targetOf', () => {
   it('a tapped notification should lead to its room and event', () => {
-    expect(targetOf(contentOf(notification()).data)).toEqual({ account: ADA, roomId: '!r', eventId: '$e' });
+    expect(targetOf(contentOf(notification()).data)).toEqual({
+      account: ADA,
+      roomId: '!r',
+      eventId: '$e',
+    });
   });
+
+  it('a notification may mix the app and gateway field names', () => {
+    expect(targetOf({ account: ADA, roomId: '!r', event_id: '$e' })).toEqual({
+      account: ADA,
+      roomId: '!r',
+      eventId: '$e',
+    });
+  });
+
+  it.each([null, [], 7, { account: ADA, room_id: 7, event_id: '$e' }])(
+    'malformed notification data should lead nowhere: %j',
+    (data) => {
+      expect(targetOf(data)).toBeNull();
+    },
+  );
 
   it('a notification of another kind should lead nowhere', () => {
     expect(targetOf({ url: 'https://example.org' })).toBeNull();
@@ -49,21 +76,38 @@ describe('targetOf', () => {
 
 describe('pushContentOf', () => {
   it('a pushed message should read as the sync would show it', () => {
-    expect(pushContentOf({ type: 'Message', data: notification() })).toEqual(contentOf(notification()));
+    expect(pushContentOf({ type: 'Message', data: notification() })).toEqual(
+      contentOf(notification()),
+    );
   });
 
   it('an unreadable push should say something generic in its room', () => {
-    const shown = pushContentOf({ type: 'Hidden', data: { account: ADA, room_id: '!r', room_name: 'Team', event_id: '$e' } });
+    const shown = pushContentOf({
+      type: 'Hidden',
+      data: { account: ADA, room_id: '!r', room_name: 'Team', event_id: '$e' },
+    });
+
     expect([shown?.title, shown?.body]).toEqual(['Team', 'New message']);
   });
 
   it('an unreadable push from an unknown room should be titled by the app', () => {
-    const shown = pushContentOf({ type: 'Hidden', data: { account: ADA, room_id: '!r', room_name: null, event_id: '$e' } });
+    const shown = pushContentOf({
+      type: 'Hidden',
+      data: { account: ADA, room_id: '!r', room_name: null, event_id: '$e' },
+    });
+
     expect(shown?.title).toBe('Better Matrix');
   });
 
   it('an invite should name who invited', () => {
-    const invite = { account: ADA, room_id: '!r', room_name: 'Team', event_id: '$e', sender_name: 'Grace' };
+    const invite = {
+      account: ADA,
+      room_id: '!r',
+      room_name: 'Team',
+      event_id: '$e',
+      sender_name: 'Grace',
+    };
+
     expect(pushContentOf({ type: 'Invite', data: invite })?.body).toBe('Grace invited you');
   });
 
@@ -74,13 +118,18 @@ describe('pushContentOf', () => {
 
 describe('targetOf a push', () => {
   it('a tapped push should lead to its room and event', () => {
-    expect(targetOf({ account: ADA, room_id: '!r', event_id: '$e', unread: 1 })).toEqual({ account: ADA, roomId: '!r', eventId: '$e' });
+    expect(targetOf({ account: ADA, room_id: '!r', event_id: '$e', unread: 1 })).toEqual({
+      account: ADA,
+      roomId: '!r',
+      eventId: '$e',
+    });
   });
 });
 
 describe('tapRoute', () => {
   const target = { account: ADA, roomId: '!new:x', eventId: '$invite' };
   const signedIn = () => apply(initialState(), { type: 'AccountAdded', data: summary(ADA) });
+
   const listed = (invited: boolean) =>
     apply(signedIn(), {
       type: 'RoomsUpdated',
@@ -90,7 +139,17 @@ describe('tapRoute', () => {
           rooms: invited ? [] : [roomSummary('!new:x')],
           spaces: [],
           invitations: invited
-            ? [{ room_id: '!new:x', name: 'New', topic: null, avatar: null, space: false, kind: 'Group', inviter: null }]
+            ? [
+                {
+                  room_id: '!new:x',
+                  name: 'New',
+                  topic: null,
+                  avatar: null,
+                  space: false,
+                  kind: 'Group',
+                  inviter: null,
+                },
+              ]
             : [],
         },
       },
@@ -109,7 +168,11 @@ describe('tapRoute', () => {
   });
 
   it('a tap the cached room list knows nothing about should wait for sync', () => {
-    const cached = apply(signedIn(), { type: 'RoomsUpdated', data: { account: ADA, list: { rooms: [roomSummary('!old:x')], spaces: [], invitations: [] } } });
+    const cached = apply(signedIn(), {
+      type: 'RoomsUpdated',
+      data: { account: ADA, list: { rooms: [roomSummary('!old:x')], spaces: [], invitations: [] } },
+    });
+
     expect(tapRoute(cached, target)).toBe('wait');
   });
 

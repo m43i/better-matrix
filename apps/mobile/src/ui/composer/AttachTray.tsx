@@ -19,6 +19,7 @@ const CHOICES: ReadonlyArray<{ id: TrayChoice; icon: IconName; label: Key }> = [
 
 export function AttachTray({ onChoose }: { onChoose: (choice: TrayChoice) => void }) {
   const palette = usePalette();
+
   return (
     <View style={styles.tray}>
       {CHOICES.map((choice) => (
@@ -31,7 +32,12 @@ export function AttachTray({ onChoose }: { onChoose: (choice: TrayChoice) => voi
           android_ripple={{ color: palette.hover, borderless: true }}
           style={({ pressed }) => [styles.choice, { opacity: pressed ? 0.6 : 1 }]}
         >
-          <View style={[styles.circle, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
+          <View
+            style={[
+              styles.circle,
+              { backgroundColor: palette.surface, borderColor: palette.divider },
+            ]}
+          >
             <Icon name={choice.icon} size={24} color={palette.text} />
           </View>
           <Text style={[font.meta, { color: palette.text, textAlign: 'center' }]} numberOfLines={2}>
@@ -44,7 +50,12 @@ export function AttachTray({ onChoose }: { onChoose: (choice: TrayChoice) => voi
 }
 
 const styles = StyleSheet.create({
-  tray: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 12, paddingVertical: 16 },
+  tray: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+  },
   choice: { width: 76, alignItems: 'center', gap: 6 },
   circle: {
     width: 56,

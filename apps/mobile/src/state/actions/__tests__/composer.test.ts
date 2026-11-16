@@ -21,6 +21,7 @@ import {
 } from '../composer';
 
 const ROOM = '!lab:example.org';
+
 const KEY = roomKey(ROOM);
 
 function setUp() {
@@ -28,15 +29,30 @@ function setUp() {
   const store = new Store(engine);
   engine.emit({ type: 'AccountAdded', data: summary(ADA) });
   const commands = () => sent.map((s) => s.command);
+
   const fail = (index: number, error: string) =>
-    engine.emit({ type: 'Finished', data: { request: sent[index]!.request, result: { Err: error } } });
-  const succeed = (index: number) => engine.emit({ type: 'Finished', data: { request: sent[index]!.request, result: { Ok: null } } });
+    engine.emit({
+      type: 'Finished',
+      data: { request: sent[index]!.request, result: { Err: error } },
+    });
+
+  const succeed = (index: number) =>
+    engine.emit({
+      type: 'Finished',
+      data: { request: sent[index]!.request, result: { Ok: null } },
+    });
+
   return { store, commands, fail, succeed };
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-const pdf = { path: '/cache/a.pdf', name: 'a.pdf', kind: 'file' as const, uri: 'file:///cache/a.pdf' };
+const pdf = {
+  path: '/cache/a.pdf',
+  name: 'a.pdf',
+  kind: 'file' as const,
+  uri: 'file:///cache/a.pdf',
+};
 
 describe('composer actions', () => {
   it('should send the draft and clear it', () => {
@@ -44,7 +60,15 @@ describe('composer actions', () => {
     setDraft(store, ADA, KEY, 'hello');
     sendComposer(store, ADA, KEY);
     expect(commands()).toEqual([
-      { type: 'Send', data: { account: ADA, key: KEY, reply_to: null, message: { type: 'Text', data: { body: 'hello', html: null } } } },
+      {
+        type: 'Send',
+        data: {
+          account: ADA,
+          key: KEY,
+          reply_to: null,
+          message: { type: 'Text', data: { body: 'hello', html: null } },
+        },
+      },
     ]);
     expect(composer(store.getState(), ADA, KEY).draft).toBe('');
   });
@@ -77,7 +101,9 @@ describe('composer actions', () => {
     setDraft(store, ADA, KEY, 'see');
     sendComposer(store, ADA, KEY);
     const files = commands().filter((c) => c.type === 'Send' && c.data.message.type === 'File');
-    expect(files.map((c) => c.type === 'Send' && c.data.message)).toEqual([{ type: 'File', data: { type: 'Path', data: '/cache/a.pdf' } }]);
+    expect(files.map((c) => c.type === 'Send' && c.data.message)).toEqual([
+      { type: 'File', data: { type: 'Path', data: '/cache/a.pdf' } },
+    ]);
   });
 
   it('should forget a removed attachment', () => {
@@ -92,7 +118,12 @@ describe('composer actions', () => {
     startEdit(store, ADA, KEY, message('$mine', 'helo'), 'helo');
     setDraft(store, ADA, KEY, 'hello');
     sendComposer(store, ADA, KEY);
-    expect(commands()).toEqual([{ type: 'Edit', data: { account: ADA, key: KEY, event_id: '$mine', body: 'hello', html: null } }]);
+    expect(commands()).toEqual([
+      {
+        type: 'Edit',
+        data: { account: ADA, key: KEY, event_id: '$mine', body: 'hello', html: null },
+      },
+    ]);
   });
 
   it('should bring the draft back when an edit is cancelled', () => {
@@ -151,11 +182,13 @@ describe('composer actions', () => {
 
   it('a refused edit should not replace a newer edit of the same message', async () => {
     const { store, fail } = setUp();
+
     for (const text of ['first fix', 'second fix']) {
       startEdit(store, ADA, KEY, message('$mine', 'helo'), 'helo');
       setDraft(store, ADA, KEY, text);
       sendComposer(store, ADA, KEY);
     }
+
     startEdit(store, ADA, KEY, message('$other', 'one'), 'one');
     fail(1, 'offline');
     fail(0, 'offline');
@@ -166,11 +199,13 @@ describe('composer actions', () => {
 
   it('a refused edit should stay away once a newer edit of the message went through', async () => {
     const { store, fail, succeed } = setUp();
+
     for (const text of ['first fix', 'second fix']) {
       startEdit(store, ADA, KEY, message('$mine', 'helo'), 'helo');
       setDraft(store, ADA, KEY, text);
       sendComposer(store, ADA, KEY);
     }
+
     succeed(1);
     fail(0, 'offline');
     await flush();
@@ -190,7 +225,9 @@ describe('composer actions', () => {
     sendComposer(store, ADA, KEY);
     fail(0, 'offline');
     await flush();
-    expect(store.getState().notices.map((n) => n.message)).toEqual([t('notice.not_sent', { error: 'offline' })]);
+    expect(store.getState().notices.map((n) => n.message)).toEqual([
+      t('notice.not_sent', { error: 'offline' }),
+    ]);
   });
 
   it('should send a voice memo with its length', () => {
@@ -205,7 +242,13 @@ describe('composer actions', () => {
 
   it('should send a ready poll', () => {
     const { store, commands } = setUp();
-    expect(sendPoll(store, ADA, KEY, { ...newPollForm(), question: 'Lunch?', answers: ['Pizza', 'Soup'] })).toBe(true);
+    expect(
+      sendPoll(store, ADA, KEY, {
+        ...newPollForm(),
+        question: 'Lunch?',
+        answers: ['Pizza', 'Soup'],
+      }),
+    ).toBe(true);
     const [command] = commands();
     expect(command?.type === 'Send' && command.data.message.type).toBe('Poll');
   });
@@ -220,7 +263,10 @@ describe('composer actions', () => {
     const { store, commands } = setUp();
     react(store, ADA, keyOf(ROOM, '$root'), '$m', '👍');
     expect(commands()).toEqual([
-      { type: 'React', data: { account: ADA, key: threadKey(ROOM, '$root'), event_id: '$m', emoji: '👍' } },
+      {
+        type: 'React',
+        data: { account: ADA, key: threadKey(ROOM, '$root'), event_id: '$m', emoji: '👍' },
+      },
     ]);
   });
 
@@ -233,6 +279,8 @@ describe('composer actions', () => {
   it('should tell the room the user is typing', () => {
     const { store, commands } = setUp();
     sendTyping(store, ADA, ROOM, true);
-    expect(commands()).toEqual([{ type: 'Typing', data: { account: ADA, room_id: ROOM, typing: true } }]);
+    expect(commands()).toEqual([
+      { type: 'Typing', data: { account: ADA, room_id: ROOM, typing: true } },
+    ]);
   });
 });

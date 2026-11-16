@@ -24,19 +24,30 @@ import { Timeline } from '../../../ui/timeline/Timeline';
 import { TypingLine } from '../../../ui/timeline/TypingLine';
 
 export default function RoomScreen() {
-  const { account, roomId, eventId } = useLocalSearchParams<{ account: string; roomId: string; eventId?: string }>();
+  const { account, roomId, eventId } = useLocalSearchParams<{
+    account: string;
+    roomId: string;
+    eventId?: string;
+  }>();
+
   const palette = usePalette();
   const room = useStore((s) => roomOf(s, account, roomId));
   const loaded = useStore((s) => accountOf(s, account)?.roomsLoaded ?? true);
   const key = useMemo(() => roomKey(roomId), [roomId]);
+
   if (!room) {
     return (
       <View style={[styles.screen, { backgroundColor: palette.bg }]}>
         <Stack.Screen options={{ title: '' }} />
-        {loaded ? <EmptyState icon="chat" title={t('mobile.conversation.room_missing')} /> : <EmptyState title="" loading />}
+        {loaded ? (
+          <EmptyState icon="chat" title={t('mobile.conversation.room_missing')} />
+        ) : (
+          <EmptyState title="" loading />
+        )}
       </View>
     );
   }
+
   return (
     <>
       <Stack.Screen
@@ -50,8 +61,17 @@ export default function RoomScreen() {
               style={styles.title}
               testID="room-title"
             >
-              <Avatar account={account} id={room.room_id} name={room.name} media={room.avatar} size={28} />
-              <Text style={[font.header, styles.titleText, { color: palette.text }]} numberOfLines={1}>
+              <Avatar
+                account={account}
+                id={room.room_id}
+                name={room.name}
+                media={room.avatar}
+                size={28}
+              />
+              <Text
+                style={[font.header, styles.titleText, { color: palette.text }]}
+                numberOfLines={1}
+              >
                 {room.name}
               </Text>
             </Pressable>
@@ -59,7 +79,9 @@ export default function RoomScreen() {
           headerRight: () => <CallButtons account={account} roomId={roomId} />,
         }}
       />
-      <Conversation composer={<Composer account={account} timelineKey={key} roomName={inlineName(room)} />}>
+      <Conversation
+        composer={<Composer account={account} timelineKey={key} roomName={inlineName(room)} />}
+      >
         <CompactCall account={account} roomId={roomId} />
         <Timeline account={account} timelineKey={key} target={eventId ?? null} />
         <TypingLine account={account} roomId={roomId} />

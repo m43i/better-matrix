@@ -23,6 +23,7 @@ function setup() {
   const { engine, sent } = detachedEngine();
   const store = new Store(engine);
   engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+
   return { engine, store, types: () => sent.map((s) => s.command.type), sent };
 }
 
@@ -66,13 +67,19 @@ describe('timeline actions', () => {
   it('should react through the timeline', () => {
     const { store, sent } = setup();
     react(store, ADA, key, '$m', '👍');
-    expect(sent[0]?.command).toEqual({ type: 'React', data: { account: ADA, key, event_id: '$m', emoji: '👍' } });
+    expect(sent[0]?.command).toEqual({
+      type: 'React',
+      data: { account: ADA, key, event_id: '$m', emoji: '👍' },
+    });
   });
 
   it('should vote the poll next vote', () => {
     const { store, sent } = setup();
     vote(store, ADA, key, '$p', poll, 'b');
-    expect(sent[0]?.command).toEqual({ type: 'VotePoll', data: { account: ADA, key, poll_id: '$p', answers: ['b'] } });
+    expect(sent[0]?.command).toEqual({
+      type: 'VotePoll',
+      data: { account: ADA, key, poll_id: '$p', answers: ['b'] },
+    });
   });
 
   it('should not vote in an ended poll', () => {
@@ -84,13 +91,19 @@ describe('timeline actions', () => {
   it('should end a poll', () => {
     const { store, sent } = setup();
     endPoll(store, ADA, key, '$p');
-    expect(sent[0]?.command).toEqual({ type: 'EndPoll', data: { account: ADA, key, poll_id: '$p' } });
+    expect(sent[0]?.command).toEqual({
+      type: 'EndPoll',
+      data: { account: ADA, key, poll_id: '$p' },
+    });
   });
 
   it('should delete a message by redacting it', () => {
     const { store, sent } = setup();
     deleteMessage(store, ADA, key, '$m');
-    expect(sent[0]?.command).toEqual({ type: 'Redact', data: { account: ADA, key, event_id: '$m' } });
+    expect(sent[0]?.command).toEqual({
+      type: 'Redact',
+      data: { account: ADA, key, event_id: '$m' },
+    });
   });
 
   it('should ask again for a page that failed', () => {
@@ -103,7 +116,10 @@ describe('timeline actions', () => {
   it('a timeline that failed to open should show why and open again on retry', async () => {
     const { engine, store, types, sent } = setup();
     retainTimeline(store, ADA, key);
-    engine.emit({ type: 'Finished', data: { request: sent[0]!.request, result: { Err: 'store locked' } } });
+    engine.emit({
+      type: 'Finished',
+      data: { request: sent[0]!.request, result: { Err: 'store locked' } },
+    });
     await Promise.resolve();
     expect(timelineOf(store.getState(), ADA, key).historyError).toBe('store locked');
     retryHistory(store, ADA, key);
@@ -114,14 +130,20 @@ describe('timeline actions', () => {
   it('should join a call by starting it', () => {
     const { store, sent } = setup();
     joinCall(store, ADA, '!r', true);
-    expect(sent[0]?.command).toEqual({ type: 'StartCall', data: { account: ADA, room_id: '!r', video: true } });
+    expect(sent[0]?.command).toEqual({
+      type: 'StartCall',
+      data: { account: ADA, room_id: '!r', video: true },
+    });
   });
 });
 
 describe('fetchOriginal', () => {
   it('should give the file of media already fetched without asking again', async () => {
     const { engine, store, sent } = setup();
-    engine.emit({ type: 'MediaFile', data: { request: 9, media: 'mxc-a', size: { type: 'Original' }, path: '/c/a.png' } });
+    engine.emit({
+      type: 'MediaFile',
+      data: { request: 9, media: 'mxc-a', size: { type: 'Original' }, path: '/c/a.png' },
+    });
     await expect(fetchOriginal(store, ADA, 'mxc-a')).resolves.toBe('file:///c/a.png');
     expect(sent).toEqual([]);
   });
@@ -130,7 +152,10 @@ describe('fetchOriginal', () => {
     const { engine, store, sent } = setup();
     const done = fetchOriginal(store, ADA, 'mxc-a');
     const request = sent[0]?.request ?? 0;
-    engine.emit({ type: 'MediaFile', data: { request, media: 'mxc-a', size: { type: 'Original' }, path: '/c/a.png' } });
+    engine.emit({
+      type: 'MediaFile',
+      data: { request, media: 'mxc-a', size: { type: 'Original' }, path: '/c/a.png' },
+    });
     engine.emit({ type: 'Finished', data: { request, result: { Ok: null } } });
     await expect(done).resolves.toBe('file:///c/a.png');
   });

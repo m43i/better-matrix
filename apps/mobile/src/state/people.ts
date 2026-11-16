@@ -29,6 +29,7 @@ export function matches(name: string, query: string): boolean {
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
     .filter((w) => w.length > 0);
+
   return query
     .toLowerCase()
     .split(/\s+/)
@@ -42,9 +43,13 @@ export function matches(name: string, query: string): boolean {
  */
 export function filterMembers(people: RoomMember[], query: string): RoomMember[] {
   const trimmed = query.trim();
+
   if (trimmed === '') return people;
   const id = trimmed.toLowerCase();
-  return people.filter((m) => matches(m.person.name, trimmed) || m.person.id.toLowerCase().includes(id));
+
+  return people.filter(
+    (m) => matches(m.person.name, trimmed) || m.person.id.toLowerCase().includes(id),
+  );
 }
 
 // ----- moderation ----------------------------------------------------------------------------
@@ -70,6 +75,7 @@ export const ROLES: readonly MemberRole[] = ['Admin', 'Moderator', 'Member'];
  */
 export function may(members: Members, action: Moderation, member: RoomMember): boolean {
   let allowed: boolean;
+
   switch (action.type) {
     case 'Kick':
       allowed = members.can_kick;
@@ -78,9 +84,13 @@ export function may(members: Members, action: Moderation, member: RoomMember): b
       allowed = members.can_ban;
       break;
     case 'Role':
-      allowed = members.can_set_roles && roleLevel(action.data) <= members.own_level && action.data !== member.role;
+      allowed =
+        members.can_set_roles &&
+        roleLevel(action.data) <= members.own_level &&
+        action.data !== member.role;
       break;
   }
+
   return allowed && member.level < members.own_level;
 }
 
@@ -107,7 +117,9 @@ export function memberOf(members: Members | undefined, userId: string): RoomMemb
  * Matrix rooms are set up by default: changing a room's state takes a moderator.
  */
 export function mayRename(room: RoomSummary, members: Members | undefined): boolean {
-  return room.kind === 'Group' && members !== undefined && members.own_level >= roleLevel('Moderator');
+  return (
+    room.kind === 'Group' && members !== undefined && members.own_level >= roleLevel('Moderator')
+  );
 }
 
 // ----- rooms ---------------------------------------------------------------------------------
@@ -133,28 +145,51 @@ export interface RoomDraft {
 }
 
 /** The command that makes the room the form describes, or `null` while it has no name. */
-export function createRoomCommand(account: AccountId, draft: RoomDraft): CommandOf<'CreateRoom'> | null {
+export function createRoomCommand(
+  account: AccountId,
+  draft: RoomDraft,
+): CommandOf<'CreateRoom'> | null {
   const name = draft.name.trim();
+
   if (name === '') return null;
   const topic = draft.topic.trim();
-  return { type: 'CreateRoom', data: { account, name, topic: topic === '' ? null : topic, space: draft.space } };
+
+  return {
+    type: 'CreateRoom',
+    data: { account, name, topic: topic === '' ? null : topic, space: draft.space },
+  };
 }
 
 /** The command that makes a space, or `null` while it has no name. */
-export function createSpaceCommand(account: AccountId, name: string): CommandOf<'CreateSpace'> | null {
+export function createSpaceCommand(
+  account: AccountId,
+  name: string,
+): CommandOf<'CreateSpace'> | null {
   const trimmed = name.trim();
+
   return trimmed === '' ? null : { type: 'CreateSpace', data: { account, name: trimmed } };
 }
 
 /** The command that renames a room, or `null` while there is no name or it is unchanged. */
-export function renameCommand(account: AccountId, roomId: string, current: string, name: string): CommandOf<'RenameRoom'> | null {
+export function renameCommand(
+  account: AccountId,
+  roomId: string,
+  current: string,
+  name: string,
+): CommandOf<'RenameRoom'> | null {
   const trimmed = name.trim();
+
   if (trimmed === '' || trimmed === current) return null;
+
   return { type: 'RenameRoom', data: { account, room_id: roomId, name: trimmed } };
 }
 
 /** `room` as its notification mode leaves it: its own, or with `null` the account's default. */
-export function withNotificationMode(room: RoomSummary, mode: NotificationMode | null, fallback: NotificationMode): RoomSummary {
+export function withNotificationMode(
+  room: RoomSummary,
+  mode: NotificationMode | null,
+  fallback: NotificationMode,
+): RoomSummary {
   return { ...room, notifications: mode ?? fallback, custom_notifications: mode !== null };
 }
 
@@ -204,14 +239,18 @@ export function query(search: PeopleSearch): string {
  */
 export function typed(search: PeopleSearch, text: string): PeopleSearch {
   const next = text.trim();
+
   if (next === query(search)) return { ...search, text };
+
   if (next === '') return { ...search, text, searched: '', request: null, people: [] };
+
   return { ...search, text, searched: null, request: null };
 }
 
 /** The text to search for now, if it changed since the last search. */
 export function due(search: PeopleSearch): string | null {
   const text = query(search);
+
   return text !== '' && search.searched !== text ? text : null;
 }
 
@@ -219,20 +258,25 @@ export function due(search: PeopleSearch): string | null {
 export function searching(search: PeopleSearch, term: string, request: RequestId): PeopleSearch {
   // The text may have moved on while the search was resting; only the current one goes out.
   if (term !== query(search)) return search;
+
   return { ...search, searched: term, request };
 }
 
 /** The search after `request` found `people`; an answer to an older search is dropped. */
 export function found(search: PeopleSearch, request: RequestId, people: Person[]): PeopleSearch {
   if (search.suggesting === request) return { ...search, suggested: people, suggesting: null };
+
   if (search.request !== request) return search;
+
   return { ...search, people };
 }
 
 /** The search after `request` finished: nothing is on its way for it any more. */
 export function finished(search: PeopleSearch, request: RequestId): PeopleSearch {
   if (search.request === request) return { ...search, request: null };
+
   if (search.suggesting === request) return { ...search, suggesting: null };
+
   return search;
 }
 
@@ -250,16 +294,24 @@ export function candidates(search: PeopleSearch, me: AccountId): Person[] {
   // While new text rests, the last results stay: the list changes once, when the answer comes.
   const list = text === '' ? search.suggested : search.people;
   const people = list.filter((p) => p.id !== me);
-  if (isUserId(text) && text !== me && !people.some((p) => p.id.toLowerCase() === text.toLowerCase())) {
+
+  if (
+    isUserId(text) &&
+    text !== me &&
+    !people.some((p) => p.id.toLowerCase() === text.toLowerCase())
+  ) {
     return [{ id: text, name: text, avatar: null }, ...people];
   }
+
   return people;
 }
 
 /** Whether a search is on its way for the text as typed. */
 export function busy(search: PeopleSearch): boolean {
   const text = query(search);
+
   if (text === '') return search.suggesting !== null;
+
   return search.searched !== text || search.request !== null;
 }
 
@@ -276,10 +328,16 @@ export interface Day {
 export function dayOf(ms: number, now: number): 'today' | 'yesterday' | Day {
   const at = new Date(ms);
   const today = new Date(now);
+
   const same = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
   if (same(at, today)) return 'today';
   const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+
   if (same(at, yesterday)) return 'yesterday';
+
   return { year: at.getFullYear(), month: at.getMonth() + 1, day: at.getDate() };
 }

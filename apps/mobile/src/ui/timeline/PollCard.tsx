@@ -16,7 +16,14 @@ import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
 
 /** Asks before ending a poll: it can't be opened again. */
-export function confirmEndPoll(store: Store, account: AccountId, key: TimelineKey, pollId: string, question: string, after?: () => void) {
+export function confirmEndPoll(
+  store: Store,
+  account: AccountId,
+  key: TimelineKey,
+  pollId: string,
+  question: string,
+  after?: () => void,
+) {
   Alert.alert(t('confirm.end_poll_title'), t('confirm.end_poll_body', { question }), [
     { text: t('common.cancel'), style: 'cancel' },
     {
@@ -40,6 +47,7 @@ export function PollCard({ message, poll }: { message: Message; poll: Poll }) {
   // A local echo has no event ID to vote on yet.
   const votable = !poll.ended && !isLocal(message);
   const multiple = poll.max_selections > 1;
+
   return (
     <View style={[styles.card, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
       <View style={styles.title}>
@@ -49,6 +57,7 @@ export function PollCard({ message, poll }: { message: Message; poll: Poll }) {
       {poll.answers.map((answer) => {
         const won = winners.has(answer.id);
         const share = total > 0 ? answer.votes / total : 0;
+
         return (
           <Pressable
             key={answer.id}
@@ -64,27 +73,46 @@ export function PollCard({ message, poll }: { message: Message; poll: Poll }) {
               <View
                 style={[
                   styles.mark,
-                  { borderRadius: multiple ? 4 : 9, borderColor: answer.mine ? palette.accent : palette.textMuted },
+                  {
+                    borderRadius: multiple ? 4 : 9,
+                    borderColor: answer.mine ? palette.accent : palette.textMuted,
+                  },
                 ]}
               >
                 {answer.mine ? <Icon name="check" size={12} color={palette.accent} /> : null}
               </View>
-              <Text style={[won ? font.bodyStrong : font.body, styles.grow, { color: palette.text }]}>{answer.text}</Text>
-              {results ? <Text style={[font.meta, { color: palette.textMuted }]}>{answer.votes}</Text> : null}
+              <Text
+                style={[won ? font.bodyStrong : font.body, styles.grow, { color: palette.text }]}
+              >
+                {answer.text}
+              </Text>
+              {results ? (
+                <Text style={[font.meta, { color: palette.textMuted }]}>{answer.votes}</Text>
+              ) : null}
             </View>
             {results ? (
               <View style={[styles.bar, { backgroundColor: palette.divider }]}>
-                <View style={{ width: `${share * 100}%`, height: '100%', backgroundColor: won ? palette.success : palette.accent }} />
+                <View
+                  style={{
+                    width: `${share * 100}%`,
+                    height: '100%',
+                    backgroundColor: won ? palette.success : palette.accent,
+                  }}
+                />
               </View>
             ) : null}
           </Pressable>
         );
       })}
       <View style={styles.footer}>
-        <Text style={[font.meta, styles.grow, { color: palette.textMuted }]}>{pollStatus(poll)}</Text>
+        <Text style={[font.meta, styles.grow, { color: palette.textMuted }]}>
+          {pollStatus(poll)}
+        </Text>
         {votable && message.sender_id === account ? (
           <Pressable
-            onPress={() => confirmEndPoll(store, account, timelineKey, message.event_id, poll.question)}
+            onPress={() =>
+              confirmEndPoll(store, account, timelineKey, message.event_id, poll.question)
+            }
             accessibilityRole="button"
             hitSlop={8}
           >
@@ -97,10 +125,24 @@ export function PollCard({ message, poll }: { message: Message; poll: Poll }) {
 }
 
 const styles = StyleSheet.create({
-  card: { marginTop: 4, maxWidth: 460, padding: 14, gap: 10, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth },
+  card: {
+    marginTop: 4,
+    maxWidth: 460,
+    padding: 14,
+    gap: 10,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   title: { flexDirection: 'row', gap: 8 },
   grow: { flex: 1 },
-  answer: { paddingHorizontal: 10, paddingVertical: 8, gap: 6, borderRadius: 8, borderWidth: 1, overflow: 'hidden' },
+  answer: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
   answerHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   mark: { width: 18, height: 18, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   bar: { height: 4, borderRadius: 2, overflow: 'hidden' },

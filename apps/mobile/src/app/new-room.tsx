@@ -24,8 +24,10 @@ export default function NewRoomScreen() {
   const [topic, setTopic] = useState('');
   const [space, setSpace] = useState<string | null>(params.space ?? null);
   const [busy, setBusy] = useState(false);
+
   if (account === null) return null;
   const command = createRoomCommand(account, { name, topic, space });
+
   const submit = () => {
     if (command === null || busy) return;
     setBusy(true);
@@ -34,9 +36,18 @@ export default function NewRoomScreen() {
       () => setBusy(false),
     );
   };
+
   const chosen = spaces.find((s) => s.room_id === space);
+
   return (
-    <RoomForm testID="new-room" title={t('create.room_title')} confirm={t('create.create')} valid={command !== null} busy={busy} onSubmit={submit}>
+    <RoomForm
+      testID="new-room"
+      title={t('create.room_title')}
+      confirm={t('create.create')}
+      valid={command !== null}
+      busy={busy}
+      onSubmit={submit}
+    >
       <TextField
         testID="new-room-name"
         label={t('create.name')}
@@ -55,7 +66,10 @@ export default function NewRoomScreen() {
         onSubmitEditing={submit}
       />
       {spaces.length > 0 ? (
-        <ListSection title={t('mobile.people.space')} footer={chosen ? t('create.room_in', { space: chosen.name }) : undefined}>
+        <ListSection
+          title={t('mobile.people.space')}
+          footer={chosen ? t('create.room_in', { space: chosen.name }) : undefined}
+        >
           <ListRow
             testID="new-room-space-none"
             title={t('mobile.people.no_space')}
@@ -69,7 +83,9 @@ export default function NewRoomScreen() {
               key={s.room_id}
               testID={`new-room-space-${s.room_id}`}
               title={s.name}
-              leading={<Avatar account={account} id={s.room_id} name={s.name} media={s.avatar} size={28} />}
+              leading={
+                <Avatar account={account} id={s.room_id} name={s.name} media={s.avatar} size={28} />
+              }
               selected={space === s.room_id}
               chevron={false}
               onPress={() => setSpace(s.room_id)}

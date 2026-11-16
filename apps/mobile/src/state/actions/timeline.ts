@@ -23,6 +23,7 @@ export function retainTimeline(store: Store, account: AccountId, key: TimelineKe
   const id = `${account}|${timelineId(key)}`;
   const count = counts.get(id) ?? 0;
   counts.set(id, count + 1);
+
   if (count === 0) openTimeline(store, account, key);
 }
 
@@ -34,11 +35,15 @@ export function untilOpened(store: Store, account: AccountId, key: TimelineKey):
   return new Promise((resolve) => {
     const settled = () => {
       const now = timelineOf(store.getState(), account, key);
+
       if (now.opening) return false;
       resolve(!now.openFailed);
+
       return true;
     };
+
     if (settled()) return;
+
     const stop = store.subscribe(() => {
       if (settled()) stop();
     });
@@ -50,7 +55,9 @@ export function releaseTimeline(store: Store, account: AccountId, key: TimelineK
   const counts = shown.get(store);
   const id = `${account}|${timelineId(key)}`;
   const count = counts?.get(id) ?? 0;
+
   if (count <= 0) return;
+
   if (count === 1) {
     counts?.delete(id);
     closeTimeline(store, account, key);
@@ -60,14 +67,30 @@ export function releaseTimeline(store: Store, account: AccountId, key: TimelineK
 }
 
 /** Adds the user's reaction, or takes it back. */
-export function react(store: Store, account: AccountId, key: TimelineKey, eventId: string, emoji: string): void {
+export function react(
+  store: Store,
+  account: AccountId,
+  key: TimelineKey,
+  eventId: string,
+  emoji: string,
+): void {
   store.send({ type: 'React', data: { account, key, event_id: eventId, emoji } });
 }
 
 /** Votes for `answer` in a poll, as pressing it does (see `nextVote`). Ended polls take no votes. */
-export function vote(store: Store, account: AccountId, key: TimelineKey, pollId: string, poll: Poll, answer: string): void {
+export function vote(
+  store: Store,
+  account: AccountId,
+  key: TimelineKey,
+  pollId: string,
+  poll: Poll,
+  answer: string,
+): void {
   if (poll.ended) return;
-  store.send({ type: 'VotePoll', data: { account, key, poll_id: pollId, answers: nextVote(poll, answer) } });
+  store.send({
+    type: 'VotePoll',
+    data: { account, key, poll_id: pollId, answers: nextVote(poll, answer) },
+  });
 }
 
 /** Ends a poll the user started; nobody can vote after. */
@@ -76,7 +99,12 @@ export function endPoll(store: Store, account: AccountId, key: TimelineKey, poll
 }
 
 /** Deletes one of the user's messages, for everyone. */
-export function deleteMessage(store: Store, account: AccountId, key: TimelineKey, eventId: string): void {
+export function deleteMessage(
+  store: Store,
+  account: AccountId,
+  key: TimelineKey,
+  eventId: string,
+): void {
   store.send({ type: 'Redact', data: { account, key, event_id: eventId } });
 }
 
@@ -87,12 +115,19 @@ export function retryHistory(store: Store, account: AccountId, key: TimelineKey)
 }
 
 /** The `file://` URI of an attachment's original file, fetched first if it isn't yet. */
-export async function fetchOriginal(store: Store, account: AccountId, media: MediaRef): Promise<string> {
+export async function fetchOriginal(
+  store: Store,
+  account: AccountId,
+  media: MediaRef,
+): Promise<string> {
   const original = { type: 'Original' } as const;
   const known = mediaUri(store.getState(), media, original);
+
   if (known) return known;
   await store.run({ type: 'FetchMedia', data: { account, media, size: original } });
   const uri = mediaUri(store.getState(), media, original);
+
   if (!uri) throw new Error('media not loaded');
+
   return uri;
 }

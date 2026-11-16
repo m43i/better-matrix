@@ -8,6 +8,11 @@ import type { RequestId } from '@better-matrix/matrix-native/types';
 /** An event that answers one request, by its `request` field. */
 export type RequestEvent = Extract<EngineEvent, { data: { request: RequestId } }>;
 
+/** The typed engine emits request events as objects carrying their request ID. */
+function isRequestEvent(event: EngineEvent): event is RequestEvent {
+  return 'data' in event && event.data instanceof Object && 'request' in event.data;
+}
+
 /** A command the engine finished with an error. */
 export class CommandFailed extends Error {
   constructor(
@@ -47,20 +52,24 @@ export class Requests {
 
   /** Routes one event to whoever waits for its request. Returns whether someone did. */
   hear(event: EngineEvent): boolean {
-    if (!('data' in event) || event.data === null || typeof event.data !== 'object' || !('request' in event.data)) {
-      return false;
-    }
+    if (!isRequestEvent(event)) return false;
+
     const request = event.data.request;
+
     if (request === null || request === undefined) return false;
     const waiting = this.waiting.get(request);
+
     if (!waiting) return false;
+
     if (event.type === 'Finished') {
       this.waiting.delete(request);
+
       if ('Ok' in event.data.result) waiting.resolve();
       else waiting.reject(new CommandFailed(event.data.result.Err, request));
     } else {
-      waiting.onEvent?.(event as RequestEvent);
+      waiting.onEvent?.(event);
     }
+
     return true;
   }
 }

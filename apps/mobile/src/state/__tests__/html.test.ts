@@ -2,7 +2,9 @@ import { type Block, blocksText, htmlBlocks, plainBlocks } from '../html';
 
 const paragraph = (blocks: Block[]) => {
   const first = blocks[0];
+
   if (first?.type !== 'paragraph') throw new Error(`not a paragraph: ${JSON.stringify(first)}`);
+
   return first.inlines;
 };
 
@@ -27,7 +29,9 @@ describe('htmlBlocks', () => {
   });
 
   it('should drop a link that runs script', () => {
-    expect(paragraph(htmlBlocks('<a href="javascript:alert(1)">x</a>'))).toEqual([{ type: 'text', text: 'x', marks: {} }]);
+    expect(paragraph(htmlBlocks('<a href="javascript:alert(1)">x</a>'))).toEqual([
+      { type: 'text', text: 'x', marks: {} },
+    ]);
   });
 
   it('should show a script as nothing', () => {
@@ -35,7 +39,9 @@ describe('htmlBlocks', () => {
   });
 
   it('should show unknown tags as their text', () => {
-    expect(paragraph(htmlBlocks('<marquee>hi</marquee>'))).toEqual([{ type: 'text', text: 'hi', marks: {} }]);
+    expect(paragraph(htmlBlocks('<marquee>hi</marquee>'))).toEqual([
+      { type: 'text', text: 'hi', marks: {} },
+    ]);
   });
 
   it('should read a stray angle bracket as text', () => {
@@ -43,7 +49,9 @@ describe('htmlBlocks', () => {
   });
 
   it('should decode entities', () => {
-    expect(paragraph(htmlBlocks('a &amp; b &#x1F600; &lt;3'))).toEqual([{ type: 'text', text: 'a & b 😀 <3', marks: {} }]);
+    expect(paragraph(htmlBlocks('a &amp; b &#x1F600; &lt;3'))).toEqual([
+      { type: 'text', text: 'a & b 😀 <3', marks: {} },
+    ]);
   });
 
   it('should leave out the reply fallback', () => {
@@ -53,21 +61,25 @@ describe('htmlBlocks', () => {
   });
 
   it('should make a matrix.to link to a person a mention', () => {
-    expect(paragraph(htmlBlocks('hi <a href="https://matrix.to/#/%40ada%3Aexample.org">Ada</a>'))).toEqual([
+    expect(
+      paragraph(htmlBlocks('hi <a href="https://matrix.to/#/%40ada%3Aexample.org">Ada</a>')),
+    ).toEqual([
       { type: 'text', text: 'hi ', marks: {} },
       { type: 'mention', kind: 'user', id: '@ada:example.org', label: 'Ada' },
     ]);
   });
 
   it('should make a matrix.to link to a room a mention', () => {
-    expect(paragraph(htmlBlocks('<a href="https://matrix.to/#/#general:example.org">#general</a>'))).toEqual([
-      { type: 'mention', kind: 'room', id: '#general:example.org', label: '#general' },
-    ]);
+    expect(
+      paragraph(htmlBlocks('<a href="https://matrix.to/#/#general:example.org">#general</a>')),
+    ).toEqual([{ type: 'mention', kind: 'room', id: '#general:example.org', label: '#general' }]);
   });
 
   it('should keep a matrix.to link to a message a link, so it opens at the message', () => {
     const href = 'https://matrix.to/#/!lab:example.org/$event?via=example.org';
-    expect(paragraph(htmlBlocks(`<a href="${href}">that</a>`))).toEqual([{ type: 'text', text: 'that', marks: { link: href } }]);
+    expect(paragraph(htmlBlocks(`<a href="${href}">that</a>`))).toEqual([
+      { type: 'text', text: 'that', marks: { link: href } },
+    ]);
   });
 
   it('should make a matrix: URI to a person a mention', () => {
@@ -77,21 +89,28 @@ describe('htmlBlocks', () => {
   });
 
   it('should collapse spaces from the markup', () => {
-    expect(paragraph(htmlBlocks('<p>\n  one\n  two  </p>'))).toEqual([{ type: 'text', text: 'one two', marks: {} }]);
-  });
-
-  it('should keep line breaks', () => {
-    expect(paragraph(htmlBlocks('one<br>two'))).toEqual([{ type: 'text', text: 'one\ntwo', marks: {} }]);
-  });
-
-  it('should keep a code block as written', () => {
-    expect(htmlBlocks('<pre><code class="language-rust">fn main() {\n    run();\n}\n</code></pre>')).toEqual([
-      { type: 'code', text: 'fn main() {\n    run();\n}' },
+    expect(paragraph(htmlBlocks('<p>\n  one\n  two  </p>'))).toEqual([
+      { type: 'text', text: 'one two', marks: {} },
     ]);
   });
 
+  it('should keep line breaks', () => {
+    expect(paragraph(htmlBlocks('one<br>two'))).toEqual([
+      { type: 'text', text: 'one\ntwo', marks: {} },
+    ]);
+  });
+
+  it('should keep a code block as written', () => {
+    expect(
+      htmlBlocks('<pre><code class="language-rust">fn main() {\n    run();\n}\n</code></pre>'),
+    ).toEqual([{ type: 'code', text: 'fn main() {\n    run();\n}' }]);
+  });
+
   it('should read paragraphs as blocks', () => {
-    expect(htmlBlocks('<p>one</p><p>two</p>').map((b) => b.type)).toEqual(['paragraph', 'paragraph']);
+    expect(htmlBlocks('<p>one</p><p>two</p>').map((b) => b.type)).toEqual([
+      'paragraph',
+      'paragraph',
+    ]);
   });
 
   it('should read a list with its items', () => {
@@ -110,12 +129,17 @@ describe('htmlBlocks', () => {
 
   it('should read a quote with its blocks', () => {
     expect(htmlBlocks('<blockquote><p>said</p></blockquote>')).toEqual([
-      { type: 'quote', blocks: [{ type: 'paragraph', inlines: [{ type: 'text', text: 'said', marks: {} }] }] },
+      {
+        type: 'quote',
+        blocks: [{ type: 'paragraph', inlines: [{ type: 'text', text: 'said', marks: {} }] }],
+      },
     ]);
   });
 
   it('should read a heading with its level', () => {
-    expect(htmlBlocks('<h2>Title</h2>')).toEqual([{ type: 'heading', level: 2, inlines: [{ type: 'text', text: 'Title', marks: {} }] }]);
+    expect(htmlBlocks('<h2>Title</h2>')).toEqual([
+      { type: 'heading', level: 2, inlines: [{ type: 'text', text: 'Title', marks: {} }] },
+    ]);
   });
 
   it('should make bare addresses links', () => {
@@ -140,7 +164,9 @@ describe('htmlBlocks', () => {
 
 describe('plainBlocks', () => {
   it('should keep the text as written', () => {
-    expect(paragraph(plainBlocks('one\n  two'))).toEqual([{ type: 'text', text: 'one\n  two', marks: {} }]);
+    expect(paragraph(plainBlocks('one\n  two'))).toEqual([
+      { type: 'text', text: 'one\n  two', marks: {} },
+    ]);
   });
 
   it('should make addresses links', () => {
@@ -152,6 +178,8 @@ describe('plainBlocks', () => {
 
 describe('blocksText', () => {
   it('should read mentions by their label', () => {
-    expect(blocksText(htmlBlocks('hi <a href="https://matrix.to/#/@ada:example.org">Ada</a>'))).toBe('hi Ada');
+    expect(
+      blocksText(htmlBlocks('hi <a href="https://matrix.to/#/@ada:example.org">Ada</a>')),
+    ).toBe('hi Ada');
   });
 });

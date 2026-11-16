@@ -14,6 +14,7 @@ import type {
 import type { Timeline } from '../state/types';
 
 export const ADA = '@ada:example.org';
+
 export const GRACE = '@grace:example.org';
 
 export function summary(id: string = ADA, display_name = 'Ada'): AccountSummary {
@@ -27,7 +28,11 @@ export function summary(id: string = ADA, display_name = 'Ada'): AccountSummary 
   };
 }
 
-export function roomSummary(room_id: string, name = room_id, kind: RoomSummary['kind'] = 'Group'): RoomSummary {
+export function roomSummary(
+  room_id: string,
+  name = room_id,
+  kind: RoomSummary['kind'] = 'Group',
+): RoomSummary {
   return {
     room_id,
     name,
@@ -76,7 +81,11 @@ export function messageEntry(id: string, change: Partial<Message> = {}): Timelin
 }
 
 /** A message with other content. */
-export function withContent(id: string, content: MessageContent, change: Partial<Message> = {}): Message {
+export function withContent(
+  id: string,
+  content: MessageContent,
+  change: Partial<Message> = {},
+): Message {
   return { ...message(id), content, ...change };
 }
 
@@ -91,10 +100,24 @@ export function roomEventEntry(id: string, sender: Person, change: RoomChange): 
 
 /** A timeline holding `entries`, with its paging as given. */
 export function timelineOf(entries: TimelineEntry[], change: Partial<Timeline> = {}): Timeline {
-  return { entries, readBoundary: { kind: 'unknown' }, reachedStart: false, loadingOlder: false, historyError: null, opening: false, openFailed: false, ...change };
+  return {
+    entries,
+    readBoundary: { kind: 'unknown' },
+    reachedStart: false,
+    loadingOlder: false,
+    historyError: null,
+    opening: false,
+    openFailed: false,
+    ...change,
+  };
 }
 
 /** A space holding `children` (rooms or subspaces), with `members` joined. */
-export function spaceSummary(room_id: string, children: string[] = [], members: string[] = [], name = room_id): SpaceSummary {
+export function spaceSummary(
+  room_id: string,
+  children: string[] = [],
+  members: string[] = [],
+  name = room_id,
+): SpaceSummary {
   return { room_id, name, avatar: null, can_add_rooms: true, can_rename: true, children, members };
 }

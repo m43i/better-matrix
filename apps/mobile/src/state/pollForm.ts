@@ -6,6 +6,7 @@ import type { Outgoing } from '@better-matrix/matrix-native/types';
 
 /** The most answers a poll may have (MSC3381). */
 export const MAX_ANSWERS = 20;
+
 /** The fewest answer fields the form shows. */
 export const MIN_ANSWERS = 2;
 
@@ -28,13 +29,22 @@ export function writtenAnswers(form: PollForm): string[] {
 /** Whether it can be sent: a question and two to twenty answers. */
 export function pollReady(form: PollForm): boolean {
   const written = writtenAnswers(form).length;
+
   return form.question.trim() !== '' && written >= MIN_ANSWERS && written <= MAX_ANSWERS;
 }
 
 /** The poll to send, once ready. */
 export function pollOutgoing(form: PollForm): Outgoing | null {
   if (!pollReady(form)) return null;
-  return { type: 'Poll', data: { question: form.question.trim(), answers: writtenAnswers(form), disclosed: form.disclosed } };
+
+  return {
+    type: 'Poll',
+    data: {
+      question: form.question.trim(),
+      answers: writtenAnswers(form),
+      disclosed: form.disclosed,
+    },
+  };
 }
 
 /** Whether another answer may be added. */
@@ -55,11 +65,13 @@ export function canRemoveAnswer(form: PollForm): boolean {
 /** The answer at `index` removed, keeping two at least. */
 export function removeAnswer(form: PollForm, index: number): PollForm {
   if (!canRemoveAnswer(form) || index < 0 || index >= form.answers.length) return form;
+
   return { ...form, answers: form.answers.filter((_, i) => i !== index) };
 }
 
 /** The answer at `index` changed to `text`. */
 export function setAnswer(form: PollForm, index: number, text: string): PollForm {
   if (index < 0 || index >= form.answers.length) return form;
+
   return { ...form, answers: form.answers.map((answer, i) => (i === index ? text : answer)) };
 }

@@ -27,6 +27,7 @@ export function PersonRow({
   testID?: string;
 }) {
   const palette = usePalette();
+
   const body = (
     <View style={styles.row}>
       <Avatar account={account} id={person.id} name={person.name} media={person.avatar} size={40} />
@@ -43,9 +44,16 @@ export function PersonRow({
       {trailing}
     </View>
   );
+
   if (!onPress) return <View testID={testID}>{body}</View>;
+
   return (
-    <Touchable testID={testID} onPress={onPress} accessibilityRole="button" accessibilityLabel={person.name}>
+    <Touchable
+      testID={testID}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={person.name}
+    >
       {body}
     </Touchable>
   );
@@ -68,33 +76,59 @@ export function MemberRow({
 }) {
   const palette = usePalette();
   const { person } = member;
+
   const body = (
     <View style={styles.row}>
-      <Avatar account={account} id={person.id} name={person.name} media={person.avatar} size={40} presence={member.presence} />
+      <Avatar
+        account={account}
+        id={person.id}
+        name={person.name}
+        media={person.avatar}
+        size={40}
+        presence={member.presence}
+      />
       <View style={styles.text}>
         <Text style={[font.body, { color: palette.text }]} numberOfLines={1}>
           {person.name}
         </Text>
-        {me ? <Text style={[font.meta, { color: palette.textMuted }]}>{t('mobile.people.you')}</Text> : null}
+        {me ? (
+          <Text style={[font.meta, { color: palette.textMuted }]}>{t('mobile.people.you')}</Text>
+        ) : null}
       </View>
       {member.verified ? (
         <View accessible accessibilityLabel={t('members.verified')}>
           <Icon name="verified" size={18} color={palette.success} />
         </View>
       ) : null}
-      {member.role !== 'Member' ? <Text style={[font.meta, { color: palette.textMuted }]}>{roleLabel(member.role)}</Text> : null}
+      {member.role !== 'Member' ? (
+        <Text style={[font.meta, { color: palette.textMuted }]}>{roleLabel(member.role)}</Text>
+      ) : null}
     </View>
   );
+
   // The user's own row leads nowhere, as on the desktop.
   if (me) return <View testID={`member-${person.id}`}>{body}</View>;
+
   return (
-    <Touchable testID={`member-${person.id}`} onPress={onPress} accessibilityRole="button" accessibilityLabel={person.name}>
+    <Touchable
+      testID={`member-${person.id}`}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={person.name}
+    >
       {body}
     </Touchable>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 8, minHeight: 56 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    minHeight: 56,
+  },
   text: { flex: 1, minWidth: 0, gap: 1 },
 });

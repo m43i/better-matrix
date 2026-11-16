@@ -30,7 +30,7 @@ export default function RecoveryKeyScreen() {
     setError(null);
     setBusy(true);
     setUpRecovery(store, id, reset === '1')
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
       .finally(() => setBusy(false));
   }, [store, id, reset]);
 
@@ -45,6 +45,7 @@ export default function RecoveryKeyScreen() {
   useEffect(() => () => forgetRecoveryKey(store), [store]);
 
   const title = t('recovery.new_title');
+
   if (!account) return <NoAccount title={title} />;
 
   const copy = () => {
@@ -65,7 +66,12 @@ export default function RecoveryKeyScreen() {
         {key ? (
           <>
             <Text style={[font.body, { color: palette.textMuted }]}>{t('recovery.new_hint')}</Text>
-            <View style={[styles.key, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
+            <View
+              style={[
+                styles.key,
+                { backgroundColor: palette.surface, borderColor: palette.divider },
+              ]}
+            >
               <Text
                 testID="recovery-key-shown"
                 selectable
@@ -104,7 +110,9 @@ export default function RecoveryKeyScreen() {
         ) : (
           <View style={styles.busy}>
             {busy ? <ActivityIndicator color={palette.textMuted} /> : null}
-            <Text style={[font.body, { color: palette.textMuted }]}>{t('mobile.accounts.making_key')}</Text>
+            <Text style={[font.body, { color: palette.textMuted }]}>
+              {t('mobile.accounts.making_key')}
+            </Text>
           </View>
         )}
       </View>

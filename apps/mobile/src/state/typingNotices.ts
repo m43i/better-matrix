@@ -27,10 +27,14 @@ export function typingFor(draft: string): TypingNotices {
 /** The draft changed to `draft` at `now` (ms). */
 export function draftChanged(state: TypingNotices, draft: string, now: number): TypingStep {
   if (draft === state.draft) return { next: state, notice: null };
+
   if (draft.trim() === '') {
     return { next: { draft, told: null }, notice: state.told === null ? null : false };
   }
-  if (state.told === null || now - state.told >= REPEAT_MS) return { next: { draft, told: now }, notice: true };
+
+  if (state.told === null || now - state.told >= REPEAT_MS)
+    return { next: { draft, told: now }, notice: true };
+
   return { next: { ...state, draft }, notice: null };
 }
 

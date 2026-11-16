@@ -33,6 +33,7 @@ export default function ResetScreen() {
   useEffect(
     () => () => {
       const last = running.current;
+
       if (last.type === 'resetting' && last.request !== null) {
         store.send({ type: 'Cancel', data: last.request }, { quiet: true });
       }
@@ -64,15 +65,25 @@ export default function ResetScreen() {
     if (step.type === 'resetting' && step.request !== null) {
       store.send({ type: 'Cancel', data: step.request }, { quiet: true });
     }
+
     router.back();
   };
 
   const title =
-    step.type === 'done' ? t('reset.done_title') : step.type === 'resetting' && step.url ? t('reset.approve_title') : t('reset.title');
+    step.type === 'done'
+      ? t('reset.done_title')
+      : step.type === 'resetting' && step.url
+        ? t('reset.approve_title')
+        : t('reset.title');
 
   return (
     <SettingsPage title={t('reset.title_short')} testID="reset-identity">
-      <Stack.Screen options={{ gestureEnabled: step.type !== 'resetting', headerBackVisible: step.type !== 'resetting' }} />
+      <Stack.Screen
+        options={{
+          gestureEnabled: step.type !== 'resetting',
+          headerBackVisible: step.type !== 'resetting',
+        }}
+      />
       <View style={styles.page}>
         <Text style={[font.title, { color: palette.text }]}>{title}</Text>
         {step.type === 'warning' ? (
@@ -81,14 +92,21 @@ export default function ResetScreen() {
             <Consequence icon="check" color={palette.success} text={t('reset.keeps')} />
             <Consequence icon="alert" color={palette.warning} text={t('reset.loses_history')} />
             <Consequence icon="alert" color={palette.warning} text={t('reset.verify_again')} />
-            {step.error ? <Text style={[font.body, { color: palette.danger }]}>{step.error}</Text> : null}
+            {step.error ? (
+              <Text style={[font.body, { color: palette.danger }]}>{step.error}</Text>
+            ) : null}
             <Button
               testID="reset-confirm"
               title={step.error ? t('common.try_again') : t('reset.confirm')}
               kind="danger"
               onPress={confirm}
             />
-            <Button testID="reset-cancel" title={t('common.cancel')} kind="secondary" onPress={cancel} />
+            <Button
+              testID="reset-cancel"
+              title={t('common.cancel')}
+              kind="secondary"
+              onPress={cancel}
+            />
           </>
         ) : step.type === 'resetting' ? (
           <>
@@ -97,7 +115,9 @@ export default function ResetScreen() {
             ) : (
               <View style={styles.busy}>
                 <ActivityIndicator color={palette.textMuted} />
-                <Text style={[font.body, { color: palette.textMuted }]}>{t('reset.resetting')}</Text>
+                <Text style={[font.body, { color: palette.textMuted }]}>
+                  {t('reset.resetting')}
+                </Text>
               </View>
             )}
             {step.url ? (
@@ -108,7 +128,12 @@ export default function ResetScreen() {
                 onPress={() => step.url && openInBrowser(store, step.url)}
               />
             ) : null}
-            <Button testID="reset-cancel" title={t('common.cancel')} kind="secondary" onPress={cancel} />
+            <Button
+              testID="reset-cancel"
+              title={t('common.cancel')}
+              kind="secondary"
+              onPress={cancel}
+            />
           </>
         ) : (
           <>
@@ -121,7 +146,12 @@ export default function ResetScreen() {
               title={t('recovery.set_up')}
               onPress={() => router.replace(routes.settingsRecoveryKey(id))}
             />
-            <Button testID="reset-later" title={t('reset.later')} kind="secondary" onPress={() => router.back()} />
+            <Button
+              testID="reset-later"
+              title={t('reset.later')}
+              kind="secondary"
+              onPress={() => router.back()}
+            />
           </>
         )}
       </View>
@@ -133,6 +163,7 @@ export default function ResetScreen() {
 /** One line of what a reset keeps or costs. */
 function Consequence({ icon, color, text }: { icon: IconName; color: string; text: string }) {
   const palette = usePalette();
+
   return (
     <View style={styles.consequence}>
       <Icon name={icon} size={20} color={color} />

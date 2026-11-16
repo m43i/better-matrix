@@ -5,15 +5,42 @@
 import type { EngineEvent } from '@better-matrix/matrix-native/client';
 import type { AccountId, CallInfo, Command } from '@better-matrix/matrix-native/types';
 
-import { askCallPermissions, type CallPermissions, cameraNames, knownPermissions, prepareCallMedia } from '../../engine/callMedia';
+import {
+  askCallPermissions,
+  type CallPermissions,
+  cameraNames,
+  knownPermissions,
+  prepareCallMedia,
+} from '../../engine/callMedia';
 import { t } from '../../i18n';
 import { endedNotice, nextCamera, stoppedNotice } from '../../ui/call/stage';
 import type { CallLayout, CallPlan, CallTile } from '../callLayout';
-import { type CallView, paged, pinned, toggledFit, toggledSelf, withLayout, withStrip } from '../callView';
+import {
+  type CallView,
+  paged,
+  pinned,
+  toggledFit,
+  toggledSelf,
+  withLayout,
+  withStrip,
+} from '../callView';
 import { addNotice } from '../reducer';
 import type { CommandFailed } from '../requests';
 import type { Store } from '../store';
 import type { State } from '../types';
+
+/** The native permission boundary; tests provide the permissions a phone would return. */
+export interface CallAccess {
+  prepare(): void;
+  known(video: boolean): CallPermissions | null;
+  ask(video: boolean): Promise<CallPermissions>;
+}
+
+const callAccess: CallAccess = {
+  prepare: prepareCallMedia,
+  known: knownPermissions,
+  ask: askCallPermissions,
+};
 
 /** Sends a call command; a failure shows as the desktop's "The call failed: …". */
 function dispatch(store: Store, command: Command): Promise<void> {
@@ -30,9 +57,12 @@ function notice(store: Store, message: string): void {
 function decide(store: Store, video: boolean, allowed: CallPermissions): { video: boolean } | null {
   if (!allowed.microphone) {
     notice(store, t('mobile.calls.microphone_needed'));
+
     return null;
   }
+
   if (video && !allowed.camera) notice(store, t('mobile.calls.camera_needed'));
+
   return { video: video && allowed.camera };
 }
 
@@ -40,20 +70,41 @@ function decide(store: Store, video: boolean, allowed: CallPermissions): { video
  * Gets the native media ready and the microphone (and camera for `video`) allowed, then runs
  * `go`; at once when nothing has to be asked, so the command goes out without a wait.
  */
-function whenReady(store: Store, video: boolean, go: (video: boolean) => Promise<void>, refused?: () => Promise<void>): Promise<void> {
-  prepareCallMedia();
+function whenReady(
+  store: Store,
+  video: boolean,
+  go: (video: boolean) => Promise<void>,
+  refused: (() => Promise<void>) | undefined,
+  access: CallAccess,
+): Promise<void> {
+  access.prepare();
+
   const proceed = (allowed: CallPermissions) => {
     const decided = decide(store, video, allowed);
+
     return decided ? go(decided.video) : (refused?.() ?? Promise.resolve());
   };
-  const known = knownPermissions(video);
-  return known ? proceed(known) : askCallPermissions(video).then(proceed);
+
+  const known = access.known(video);
+
+  return known ? proceed(known) : access.ask(video).then(proceed);
 }
 
 /** Starts a call in a room, or joins the one under way there (the engine tells them apart). */
-export function startCall(store: Store, account: AccountId, roomId: string, video: boolean): Promise<void> {
-  return whenReady(store, video, (withVideo) =>
-    dispatch(store, { type: 'StartCall', data: { account, room_id: roomId, video: withVideo } }),
+export function startCall(
+  store: Store,
+  account: AccountId,
+  roomId: string,
+  video: boolean,
+  access: CallAccess = callAccess,
+): Promise<void> {
+  return whenReady(
+    store,
+    video,
+    (withVideo) =>
+      dispatch(store, { type: 'StartCall', data: { account, room_id: roomId, video: withVideo } }),
+    undefined,
+    access,
   );
 }
 
@@ -63,24 +114,37 @@ export const joinCall = startCall;
 function withoutRing(account: AccountId, roomId: string) {
   return (s: State): State => ({
     ...s,
-    call: { ...s.call, rings: s.call.rings.filter((r) => !(r.account === account && r.room_id === roomId)) },
+    call: {
+      ...s.call,
+      rings: s.call.rings.filter((r) => !(r.account === account && r.room_id === roomId)),
+    },
   });
 }
 
 /** Answers the call ringing in a room; its card goes at once. Without the microphone, declines. */
-export function answerCall(store: Store, account: AccountId, roomId: string, video: boolean): Promise<void> {
+export function answerCall(
+  store: Store,
+  account: AccountId,
+  roomId: string,
+  video: boolean,
+  access: CallAccess = callAccess,
+): Promise<void> {
   store.update(withoutRing(account, roomId));
+
   return whenReady(
     store,
     video,
-    (withVideo) => dispatch(store, { type: 'AnswerCall', data: { account, room_id: roomId, video: withVideo } }),
+    (withVideo) =>
+      dispatch(store, { type: 'AnswerCall', data: { account, room_id: roomId, video: withVideo } }),
     () => dispatch(store, { type: 'DeclineCall', data: { account, room_id: roomId } }),
+    access,
   );
 }
 
 /** Declines the call ringing in a room. */
 export function declineCall(store: Store, account: AccountId, roomId: string): Promise<void> {
   store.update(withoutRing(account, roomId));
+
   return dispatch(store, { type: 'DeclineCall', data: { account, room_id: roomId } });
 }
 
@@ -91,25 +155,36 @@ export function hangUp(store: Store): Promise<void> {
 /** Mutes or unmutes the user in the call under way. */
 export function toggleMicrophone(store: Store): Promise<void> {
   const current = store.getState().call.current;
+
   if (!current) return Promise.resolve();
-  return dispatch(store, { type: 'SetCallMedia', data: { type: 'Microphone', data: !current.microphone } });
+
+  return dispatch(store, {
+    type: 'SetCallMedia',
+    data: { type: 'Microphone', data: !current.microphone },
+  });
 }
 
 /** Turns the user's camera on or off in the call under way. */
-export function toggleCamera(store: Store): Promise<void> {
+export function toggleCamera(store: Store, access: CallAccess = callAccess): Promise<void> {
   const current = store.getState().call.current;
+
   if (!current) return Promise.resolve();
   const on = current.camera === null;
   const send = () => dispatch(store, { type: 'SetCallMedia', data: { type: 'Camera', data: on } });
+
   if (!on) return send();
-  prepareCallMedia();
+  access.prepare();
+
   const go = (allowed: CallPermissions) => {
     if (allowed.camera) return send();
     notice(store, t('mobile.calls.camera_needed'));
+
     return Promise.resolve();
   };
-  const known = knownPermissions(true);
-  return known ? go(known) : askCallPermissions(true).then(go);
+
+  const known = access.known(true);
+
+  return known ? go(known) : access.ask(true).then(go);
 }
 
 /** The camera the user switched to, by name; `null` while it's the phone's default. */
@@ -118,8 +193,10 @@ let camera: string | null = null;
 /** Switches to the phone's next camera (front, back, …), for this call and the next. */
 export function switchCamera(store: Store): Promise<void> {
   const next = nextCamera(cameraNames(), camera);
+
   if (next === null) return Promise.resolve();
   camera = next;
+
   return dispatch(store, { type: 'ChooseCallDevice', data: { kind: 'Camera', id: next } });
 }
 
@@ -141,6 +218,7 @@ export function callNotice(event: EngineEvent): string | null {
 export function callEffect(event: EngineEvent, store: Store): void {
   if (event.type === 'CallEnded' && store.getState().call.current !== null) return;
   const message = callNotice(event);
+
   if (message !== null) notice(store, message);
 }
 
@@ -148,7 +226,9 @@ export function callEffect(event: EngineEvent, store: Store): void {
 
 /** Changes the view of the call under way; nothing without a call. */
 function updateView(store: Store, change: (view: CallView, info: CallInfo) => CallView): void {
-  store.update((s) => (s.call.current ? { ...s, call: { ...s.call, view: change(s.call.view, s.call.current) } } : s));
+  store.update((s) =>
+    s.call.current ? { ...s, call: { ...s.call, view: change(s.call.view, s.call.current) } } : s,
+  );
 }
 
 /** Auto, Grid or Focus (following the speaker), from the call layout menu. */

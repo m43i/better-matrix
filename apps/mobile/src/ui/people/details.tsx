@@ -16,8 +16,14 @@ export function ThreadRow({ thread, onPress }: { thread: ThreadInfo; onPress: ()
   const palette = usePalette();
   const replies = tp('thread.replies', thread.replies);
   const meta = thread.latest_at === null ? replies : `${replies} · ${when(thread.latest_at)}`;
+
   return (
-    <Touchable testID={`listed-thread-${thread.root}`} onPress={onPress} accessibilityRole="button" accessibilityLabel={thread.body}>
+    <Touchable
+      testID={`listed-thread-${thread.root}`}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={thread.body}
+    >
       <View style={styles.thread}>
         <Text style={[font.bodyStrong, { color: palette.text }]} numberOfLines={1}>
           {thread.sender_name}
@@ -31,11 +37,25 @@ export function ThreadRow({ thread, onPress }: { thread: ThreadInfo; onPress: ()
   );
 }
 
-const FILE_ICONS: Record<AttachmentKind, IconName> = { Image: 'image', Video: 'video', Audio: 'audio', File: 'file' };
+const FILE_ICONS: Record<AttachmentKind, IconName> = {
+  Image: 'image',
+  Video: 'video',
+  Audio: 'audio',
+  File: 'file',
+};
 
 /** A shared file: its kind, name, who shared it and when. */
-export function FileRow({ file, busy, onPress }: { file: SharedFile; busy: boolean; onPress: () => void }) {
+export function FileRow({
+  file,
+  busy,
+  onPress,
+}: {
+  file: SharedFile;
+  busy: boolean;
+  onPress: () => void;
+}) {
   const palette = usePalette();
+
   return (
     <Touchable
       testID={`listed-file-${file.event_id}`}
@@ -44,7 +64,9 @@ export function FileRow({ file, busy, onPress }: { file: SharedFile; busy: boole
       accessibilityLabel={file.attachment.name}
     >
       <View style={styles.file}>
-        <View style={[styles.kind, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
+        <View
+          style={[styles.kind, { backgroundColor: palette.surface, borderColor: palette.divider }]}
+        >
           <Icon name={FILE_ICONS[file.attachment.kind]} size={20} color={palette.accent} />
         </View>
         <View style={styles.fileText}>
@@ -63,7 +85,13 @@ export function FileRow({ file, busy, onPress }: { file: SharedFile; busy: boole
 
 const styles = StyleSheet.create({
   thread: { paddingHorizontal: 16, paddingVertical: 10, gap: 3 },
-  file: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 10 },
+  file: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
   kind: {
     width: 40,
     height: 40,

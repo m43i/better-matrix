@@ -74,7 +74,10 @@ export function updateComposer(
   change: (composer: ComposerState) => ComposerState,
 ): void {
   const id = composerId(account, key);
-  store.update((s) => ({ ...s, composers: { ...s.composers, [id]: change(s.composers[id] ?? EMPTY_COMPOSER) } }));
+  store.update((s) => ({
+    ...s,
+    composers: { ...s.composers, [id]: change(s.composers[id] ?? EMPTY_COMPOSER) },
+  }));
 }
 
 /** `composer` editing `edit`: what it held is set aside until the edit is sent or dropped. */
@@ -85,13 +88,23 @@ function editing(composer: ComposerState, edit: KeptEdit): ComposerState {
     attachments: composer.attachments ?? [],
     original: edit.original,
   };
-  return { ...composer, editing: edit.message, replyTo: null, draft: edit.text, attachments: [], setAside, selection: undefined };
+
+  return {
+    ...composer,
+    editing: edit.message,
+    replyTo: null,
+    draft: edit.text,
+    attachments: [],
+    setAside,
+    selection: undefined,
+  };
 }
 
 /** `composer` with any edit dropped and the draft set aside for it back; kept edits stay. */
 function freed(composer: ComposerState): ComposerState {
   if (!composer.editing) return composer;
   const aside = composer.setAside;
+
   return {
     ...composer,
     editing: null,
@@ -110,6 +123,7 @@ function freed(composer: ComposerState): ComposerState {
 export function endEdit(composer: ComposerState): ComposerState {
   if (!composer.editing) return composer;
   const [next, ...rest] = composer.kept ?? [];
+
   return next ? editing({ ...freed(composer), kept: rest }, next) : freed(composer);
 }
 
@@ -120,8 +134,13 @@ export function endEdit(composer: ComposerState): ComposerState {
  */
 export function refusedEdit(composer: ComposerState, edit: KeptEdit): ComposerState {
   if (!composer.editing) return editing(composer, edit);
+
   if (composer.editing.event_id === edit.message.event_id) return composer;
-  const others = (composer.kept ?? []).filter((kept) => kept.message.event_id !== edit.message.event_id);
+
+  const others = (composer.kept ?? []).filter(
+    (kept) => kept.message.event_id !== edit.message.event_id,
+  );
+
   return { ...composer, kept: [edit, ...others] };
 }
 
@@ -129,7 +148,12 @@ export function refusedEdit(composer: ComposerState, edit: KeptEdit): ComposerSt
  * Answers `message` with the next send. Replying ends an edit: its draft comes back, and kept
  * edits wait for the next edit to end.
  */
-export function startReply(store: Store, account: AccountId, key: TimelineKey, message: Message): void {
+export function startReply(
+  store: Store,
+  account: AccountId,
+  key: TimelineKey,
+  message: Message,
+): void {
   updateComposer(store, account, key, (c) => ({ ...freed(c), replyTo: message }));
 }
 
@@ -138,11 +162,18 @@ export function startReply(store: Store, account: AccountId, key: TimelineKey, m
  * writes a formatted message's HTML back as the composer's markers). The draft, reply and
  * attachments are set aside until the edit is sent or cancelled.
  */
-export function startEdit(store: Store, account: AccountId, key: TimelineKey, message: Message, text: string): void {
+export function startEdit(
+  store: Store,
+  account: AccountId,
+  key: TimelineKey,
+  message: Message,
+  text: string,
+): void {
   updateComposer(store, account, key, (c) => {
     // A kept edit of the same message comes back in its place; other kept edits wait.
     const kept = c.kept?.find((edit) => edit.message.event_id === message.event_id);
     const others = c.kept?.filter((edit) => edit !== kept);
+
     return editing({ ...freed(c), kept: others }, kept ?? { message, text, original: text });
   });
 }

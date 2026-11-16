@@ -5,10 +5,15 @@
 // scrolls into view and is highlighted.
 
 import type { AccountId, Message, TimelineKey } from '@better-matrix/matrix-native/types';
-import { FlashList, type FlashListRef, type ListRenderItem, type ViewToken } from '@shopify/flash-list';
+import {
+  FlashList,
+  type FlashListRef,
+  type ListRenderItem,
+  type ViewToken,
+} from '@shopify/flash-list';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useReducedMotion } from 'react-native-reanimated';
 import {
   ActivityIndicator,
@@ -34,7 +39,15 @@ import {
   nextMarker,
   sdkBoundary,
 } from '../../state/newMarker';
-import { atStart, type Marked, newestSent, planTimeline, type Row, rowOf, shouldMarkRead } from '../../state/plan';
+import {
+  atStart,
+  type Marked,
+  newestSent,
+  planTimeline,
+  type Row,
+  rowOf,
+  shouldMarkRead,
+} from '../../state/plan';
 import { useAppStore, useStore } from '../../state/react';
 import { timeline as timelineOf } from '../../state/selectors';
 import { routes } from '../../routes';
@@ -43,14 +56,25 @@ import { Icon } from '../icons';
 import { usePalette } from '../theme';
 import { TimelineContext, type TimelineContextValue } from './context';
 import { MessageRow } from './MessageRow';
-import { DateDivider, HistoryFailedRow, LoadingRow, NewMarker, RepliesDivider, RoomEventLine, StartBlock } from './Rows';
+import {
+  DateDivider,
+  HistoryFailedRow,
+  LoadingRow,
+  NewMarker,
+  RepliesDivider,
+  RoomEventLine,
+  StartBlock,
+} from './Rows';
 
 /** Within this far of the newest message counts as at it. */
 const AT_LATEST = 48;
+
 /** How long a message scrolled to stays highlighted. */
 const HIGHLIGHT_MS = 2500;
+
 /** How many pages to load back looking for a linked message before giving up. */
 const TARGET_PAGES = 10;
+
 /** After jumping to a linked message: long enough for the list to report where it stands. */
 const SETTLE_MS = 250;
 
@@ -71,6 +95,7 @@ function useOnScreen(account: AccountId, timelineKey: TimelineKey): boolean {
     useCallback(() => {
       setFocused(account, timelineKey);
       setFocusedState(true);
+
       return () => {
         clearFocused(account, timelineKey);
         setFocusedState(false);
@@ -78,9 +103,13 @@ function useOnScreen(account: AccountId, timelineKey: TimelineKey): boolean {
     }, [account, timelineKey]),
   );
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => setActive(state === 'active'));
+    const subscription = AppState.addEventListener('change', (state) =>
+      setActive(state === 'active'),
+    );
+
     return () => subscription.remove();
   }, []);
+
   return focused && active;
 }
 
@@ -94,19 +123,27 @@ export function Timeline({ account, timelineKey, root = null, target = null }: T
   const sdkMarker = useMemo(() => sdkBoundary(timeline.entries), [timeline.entries]);
   const [marker, setMarker] = useState(() => nextMarker(NO_MARKER, sdkMarker));
   const nextState = nextMarker(marker, sdkMarker);
+
   if (nextState !== marker) setMarker(nextState);
   const reducedMotion = useReducedMotion();
   const fading = marker.shown?.fading ?? false;
   useEffect(() => {
     if (!fading) return;
-    const timer = setTimeout(() => setMarker(markerFaded), reducedMotion ? MARKER_FADE_REDUCED_MS : MARKER_FADE_MS);
+
+    const timer = setTimeout(
+      () => setMarker(markerFaded),
+      reducedMotion ? MARKER_FADE_REDUCED_MS : MARKER_FADE_MS,
+    );
+
     return () => clearTimeout(timer);
   }, [fading, reducedMotion]);
   const shownMarker = marker.shown;
+
   const rows = useMemo(
     () => planTimeline(timeline, { thread, root, marker: shownMarker }),
     [timeline, thread, root, shownMarker],
   );
+
   const list = useRef<FlashListRef<Row>>(null);
   // The list starts drawing at the newest; opened at a linked message, it is positioned once it
   // jumped there (or gave up looking), so the newest isn't marked read on the way.
@@ -120,6 +157,7 @@ export function Timeline({ account, timelineKey, root = null, target = null }: T
   // The engine follows the timeline while a screen shows it (sheets over it act on it too).
   useEffect(() => {
     retainTimeline(store, account, timelineKey);
+
     return () => releaseTimeline(store, account, timelineKey);
   }, [store, account, timelineKey]);
 
@@ -127,52 +165,97 @@ export function Timeline({ account, timelineKey, root = null, target = null }: T
   // cross-device fully-read marker stays put (`markerAcknowledged`).
   const [seenMarker, setSeenMarker] = useState<string | null>(null);
   const sdkMarkerNow = useRef(sdkMarker);
-  sdkMarkerNow.current = sdkMarker;
-  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken<Row>[] }) => {
-    if (viewableItems.some((token) => token.item?.kind === 'new')) setSeenMarker(sdkMarkerNow.current);
-  }, []);
+  useLayoutEffect(() => {
+    sdkMarkerNow.current = sdkMarker;
+  }, [sdkMarker]);
+
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken<Row>[] }) => {
+      if (viewableItems.some((token) => token.item?.kind === 'new'))
+        setSeenMarker(sdkMarkerNow.current);
+    },
+    [],
+  );
 
   // Marking read: the newest message on screen while the user looks at it.
   const lastMarked = useRef<Marked | null>(null);
   const newest = newestSent(timeline.entries);
   const readBoundary = timeline.readBoundary;
   useEffect(() => {
-    const fullyRead = mayMarkFullyRead(store, account, timelineKey) && markerAcknowledged(sdkMarker, seenMarker);
-    if (!shouldMarkRead({ focused: onScreen, positioned, atLatest, newest, fullyRead, lastMarked: lastMarked.current })) return;
+    const fullyRead =
+      mayMarkFullyRead(store, account, timelineKey) && markerAcknowledged(sdkMarker, seenMarker);
+
+    if (
+      !shouldMarkRead({
+        focused: onScreen,
+        positioned,
+        atLatest,
+        newest,
+        fullyRead,
+        lastMarked: lastMarked.current,
+      })
+    )
+      return;
+
     if (newest === null) return;
     lastMarked.current = { eventId: newest, fullyRead };
     markRead(store, account, timelineKey, newest, fullyRead);
-  }, [store, account, timelineKey, onScreen, positioned, atLatest, newest, readBoundary, sdkMarker, seenMarker]);
+  }, [
+    store,
+    account,
+    timelineKey,
+    onScreen,
+    positioned,
+    atLatest,
+    newest,
+    readBoundary,
+    sdkMarker,
+    seenMarker,
+  ]);
 
   const reachedStart = atStart(timeline, thread);
+
   const loadMore = useCallback(() => {
     const now = timelineOf(store.getState(), account, timelineKey);
+
     if (!atStart(now, thread) && now.historyError === null) loadOlder(store, account, timelineKey);
   }, [store, account, timelineKey, thread]);
 
   const rowsRef = useRef(rows);
-  rowsRef.current = rows;
+  useLayoutEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const scrollTo = useCallback((eventId: string, animated = true): boolean => {
     const index = rowOf(rowsRef.current, eventId);
+
     if (index < 0) return false;
     void list.current?.scrollToIndex({ index, viewPosition: 0.5, animated });
     setHighlighted(eventId);
+
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlighted(null), HIGHLIGHT_MS);
+
     return true;
   }, []);
+
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (highlightTimer.current) clearTimeout(highlightTimer.current);
-    if (settleTimer.current) clearTimeout(settleTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+
+      if (settleTimer.current) clearTimeout(settleTimer.current);
+    },
+    [],
+  );
 
   // A linked message: scroll to it once loaded, paging back a little to find it.
   const targetDone = useRef<string | null>(null);
   const targetPages = useRef(0);
   useEffect(() => {
     if (!target || targetDone.current === target) return;
+
     if (rowOf(rows, target) >= 0) {
       targetDone.current = target;
       // Once the list laid the rows out; it is positioned once the jump's scroll was reported.
@@ -191,7 +274,16 @@ export function Timeline({ account, timelineKey, root = null, target = null }: T
       targetDone.current = target;
       setPositionedAt(target);
     }
-  }, [target, rows, reachedStart, timeline.opening, timeline.loadingOlder, timeline.historyError, scrollTo, loadMore]);
+  }, [
+    target,
+    rows,
+    reachedStart,
+    timeline.opening,
+    timeline.loadingOlder,
+    timeline.historyError,
+    scrollTo,
+    loadMore,
+  ]);
 
   const context = useMemo<TimelineContextValue>(
     () => ({
@@ -201,7 +293,14 @@ export function Timeline({ account, timelineKey, root = null, target = null }: T
       scrollTo: (eventId) => void scrollTo(eventId),
       openActions: (message) => {
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        router.push(routes.messageActions(account, timelineKey.room_id, message.event_id, thread ?? undefined));
+        router.push(
+          routes.messageActions(
+            account,
+            timelineKey.room_id,
+            message.event_id,
+            thread ?? undefined,
+          ),
+        );
       },
     }),
     [account, timelineKey, thread, scrollTo],
@@ -214,38 +313,36 @@ export function Timeline({ account, timelineKey, root = null, target = null }: T
     setFarFromLatest(fromEnd > layoutMeasurement.height);
   }, []);
 
-  const renderItem: ListRenderItem<Row> = useCallback(
-    ({ item, extraData }) => {
-      switch (item.kind) {
-        case 'message':
-          return (
-            <MessageRow
-              message={item.message}
-              continues={item.continues}
-              latestCall={item.latestCall}
-              highlighted={extraData === item.message.event_id}
-            />
-          );
-        case 'events':
-          return <RoomEventLine events={item.events} />;
-        case 'date':
-          return <DateDivider at={item.at} />;
-        case 'new':
-          return <NewMarker fading={item.fading} />;
-        case 'start':
-          return <StartBlock />;
-        case 'loading':
-          return <LoadingRow />;
-        case 'historyFailed':
-          return <HistoryFailedRow error={item.error} />;
-        case 'replies':
-          return <RepliesDivider count={item.count} />;
-      }
-    },
-    [],
-  );
+  const renderItem: ListRenderItem<Row> = useCallback(({ item, extraData }) => {
+    switch (item.kind) {
+      case 'message':
+        return (
+          <MessageRow
+            message={item.message}
+            continues={item.continues}
+            latestCall={item.latestCall}
+            highlighted={extraData === item.message.event_id}
+          />
+        );
+      case 'events':
+        return <RoomEventLine events={item.events} />;
+      case 'date':
+        return <DateDivider at={item.at} />;
+      case 'new':
+        return <NewMarker fading={item.fading} />;
+      case 'start':
+        return <StartBlock />;
+      case 'loading':
+        return <LoadingRow />;
+      case 'historyFailed':
+        return <HistoryFailedRow error={item.error} />;
+      case 'replies':
+        return <RepliesDivider count={item.count} />;
+    }
+  }, []);
 
   const empty = !reachedStart && timeline.historyError === null;
+
   return (
     <TimelineContext.Provider value={context}>
       <View style={styles.frame}>
@@ -269,17 +366,24 @@ export function Timeline({ account, timelineKey, root = null, target = null }: T
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.content}
-          ListEmptyComponent={empty ? <ActivityIndicator style={styles.spinner} color={palette.textMuted} /> : null}
+          ListEmptyComponent={
+            empty ? <ActivityIndicator style={styles.spinner} color={palette.textMuted} /> : null
+          }
         />
         {farFromLatest ? (
           <Pressable
             onPress={() => list.current?.scrollToEnd({ animated: true })}
             accessibilityRole="button"
             accessibilityLabel={t('mobile.conversation.jump_latest')}
-            style={[styles.jump, { backgroundColor: palette.surface, borderColor: palette.divider }]}
+            style={[
+              styles.jump,
+              { backgroundColor: palette.surface, borderColor: palette.divider },
+            ]}
           >
             <Icon name="arrowDown" size={16} color={palette.accent} />
-            <Text style={[font.section, { color: palette.accent }]}>{t('mobile.conversation.jump_latest')}</Text>
+            <Text style={[font.section, { color: palette.accent }]}>
+              {t('mobile.conversation.jump_latest')}
+            </Text>
           </Pressable>
         ) : null}
       </View>

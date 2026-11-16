@@ -5,13 +5,21 @@
 // scope shows, which "want attention", and the edits to a `SidebarLayout` the user can make.
 // Pure: every function takes what it needs and returns new values.
 
-import type { Message, RoomKind, RoomSummary, ScopeLayout, SidebarLayout, SpaceSummary } from '@better-matrix/matrix-native/types';
+import type {
+  Message,
+  RoomKind,
+  RoomSummary,
+  ScopeLayout,
+  SidebarLayout,
+  SpaceSummary,
+} from '@better-matrix/matrix-native/types';
 
 import { roomKey, timelineId } from './timeline';
 import type { AccountData, Scope } from './types';
 
 /** The built-in sections' IDs: they can be collapsed, never removed. */
 export const ROOMS = 'rooms';
+
 export const DIRECT = 'direct';
 
 /** Whether a section is one of the built-in ones. */
@@ -42,16 +50,20 @@ export function spaceRooms(spaces: readonly SpaceSummary[], spaceId: string): Se
   const rooms = new Set<string>();
   const seen = new Set<string>();
   const pending = [spaceId];
+
   for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
     if (seen.has(id)) continue;
     seen.add(id);
     const space = byId.get(id);
+
     if (!space) continue;
+
     for (const child of space.children) {
       if (byId.has(child)) pending.push(child);
       else rooms.add(child);
     }
   }
+
   return rooms;
 }
 
@@ -59,17 +71,29 @@ export function spaceRooms(spaces: readonly SpaceSummary[], spaceId: string): Se
  * The rooms a scope shows. Home: every direct chat, and the group rooms in no space. A space:
  * its rooms (subspaces included), and direct chats in it or with its members.
  */
-export function roomsInScope(account: Pick<AccountData, 'rooms' | 'spaces'>, scope: Scope, kind?: RoomKind): RoomSummary[] {
+export function roomsInScope(
+  account: Pick<AccountData, 'rooms' | 'spaces'>,
+  scope: Scope,
+  kind?: RoomKind,
+): RoomSummary[] {
   const ofKind = kind ? account.rooms.filter((r) => r.kind === kind) : account.rooms;
+
   if (scope === 'home') {
     const inSpaces = new Set<string>();
-    for (const space of account.spaces) for (const id of spaceRooms(account.spaces, space.room_id)) inSpaces.add(id);
+
+    for (const space of account.spaces)
+      for (const id of spaceRooms(account.spaces, space.room_id)) inSpaces.add(id);
+
     return ofKind.filter((room) => room.kind === 'Direct' || !inSpaces.has(room.room_id));
   }
+
   const rooms = spaceRooms(account.spaces, scope.space);
   const members = new Set(account.spaces.find((s) => s.room_id === scope.space)?.members ?? []);
+
   return ofKind.filter(
-    (room) => rooms.has(room.room_id) || (room.kind === 'Direct' && room.dm_users.some((u) => members.has(u))),
+    (room) =>
+      rooms.has(room.room_id) ||
+      (room.kind === 'Direct' && room.dm_users.some((u) => members.has(u))),
   );
 }
 
@@ -79,18 +103,27 @@ export function hasUnread(account: Pick<AccountData, 'rooms' | 'spaces'>, scope:
 }
 
 /** The newest message in a room: from its timeline when open, else from sync. */
-export function lastMessage(account: Pick<AccountData, 'timelines' | 'latest'>, roomId: string): Message | undefined {
+export function lastMessage(
+  account: Pick<AccountData, 'timelines' | 'latest'>,
+  roomId: string,
+): Message | undefined {
   const entries = account.timelines[timelineId(roomKey(roomId))]?.entries ?? [];
   let fromTimeline: Message | undefined;
+
   for (let i = entries.length - 1; i >= 0; i--) {
     const kind = entries[i]?.kind;
+
     if (kind?.type === 'Message') {
       fromTimeline = kind.data;
       break;
     }
   }
+
   const synced = account.latest[roomId];
-  if (fromTimeline && synced) return fromTimeline.timestamp_ms >= synced.timestamp_ms ? fromTimeline : synced;
+
+  if (fromTimeline && synced)
+    return fromTimeline.timestamp_ms >= synced.timestamp_ms ? fromTimeline : synced;
+
   return fromTimeline ?? synced;
 }
 
@@ -103,22 +136,40 @@ const DRIFT_MS = 5 * 60_000;
  * than clocks drift doesn't count, so a misdated event can't hold a room at the top: a message
  * heard this session counts from when it was heard instead.
  */
-export function activity(account: Pick<AccountData, 'timelines' | 'latest' | 'heardAt'>, room: RoomSummary, now: number): number {
+export function activity(
+  account: Pick<AccountData, 'timelines' | 'latest' | 'heardAt'>,
+  room: RoomSummary,
+  now: number,
+): number {
   const plausible = (at: number) => at <= now + DRIFT_MS;
   const message = lastMessage(account, room.room_id);
+
   const seen = message
     ? plausible(message.timestamp_ms)
       ? message.timestamp_ms
       : account.heardAt[room.room_id]
     : undefined;
-  const stored = room.activity_ms !== null && plausible(room.activity_ms) ? room.activity_ms : undefined;
+
+  const stored =
+    room.activity_ms !== null && plausible(room.activity_ms) ? room.activity_ms : undefined;
+
   return Math.max(seen ?? 0, stored ?? 0);
 }
 
 /** Rooms latest conversation first; rooms with nothing known yet after them, by name. */
-export function byRecency(account: Pick<AccountData, 'timelines' | 'latest' | 'heardAt'>, rooms: readonly RoomSummary[], now: number): RoomSummary[] {
-  const keyed = rooms.map((room) => ({ room, at: activity(account, room, now), name: room.name.toLowerCase() }));
+export function byRecency(
+  account: Pick<AccountData, 'timelines' | 'latest' | 'heardAt'>,
+  rooms: readonly RoomSummary[],
+  now: number,
+): RoomSummary[] {
+  const keyed = rooms.map((room) => ({
+    room,
+    at: activity(account, room, now),
+    name: room.name.toLowerCase(),
+  }));
+
   keyed.sort((a, b) => b.at - a.at || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
   return keyed.map((k) => k.room);
 }
 
@@ -146,23 +197,35 @@ export function sections(account: AccountData, scope: Scope, now: number): Secti
   const byId = new Map(inScope.map((r) => [r.room_id, r]));
   const placed = new Set<string>();
   const out: SectionView[] = [];
+
   for (const section of kept?.sections ?? []) {
     const rooms = section.rooms.flatMap((id) => byId.get(id) ?? []);
+
     for (const room of rooms) placed.add(room.room_id);
     out.push({ id: section.id, name: section.name, collapsed: collapsed.has(section.id), rooms });
   }
+
   for (const [id, kind] of [
     [ROOMS, 'Group'],
     [DIRECT, 'Direct'],
   ] as const) {
     const rooms = inScope.filter((room) => room.kind === kind && !placed.has(room.room_id));
-    out.push({ id, name: null, collapsed: collapsed.has(id), rooms: byRecency(account, rooms, now) });
+    out.push({
+      id,
+      name: null,
+      collapsed: collapsed.has(id),
+      rooms: byRecency(account, rooms, now),
+    });
   }
+
   const order = kept?.order ?? [];
+
   const rank = (id: string) => {
     const at = order.indexOf(id);
+
     return at < 0 ? Number.MAX_SAFE_INTEGER : at;
   };
+
   // A stable sort: sections the order doesn't name keep their place after the ones it does.
   return out
     .map((view, index) => ({ view, index }))
@@ -187,12 +250,18 @@ export function directChats(account: AccountData, now: number): RoomSummary[] {
 }
 
 /** The spaces in the user's order: those the layout names, in its order, then the rest. */
-export function orderedSpaces(spaces: readonly SpaceSummary[], layout: SidebarLayout): SpaceSummary[] {
+export function orderedSpaces(
+  spaces: readonly SpaceSummary[],
+  layout: SidebarLayout,
+): SpaceSummary[] {
   const order = layout.spaces ?? [];
+
   const rank = (id: string) => {
     const at = order.indexOf(id);
+
     return at < 0 ? Number.MAX_SAFE_INTEGER : at;
   };
+
   return spaces
     .map((space, index) => ({ space, index }))
     .sort((a, b) => rank(a.space.room_id) - rank(b.space.room_id) || a.index - b.index)
@@ -213,37 +282,57 @@ export function ownSections(account: AccountData, scope: Scope, now: number): Se
 
 const EMPTY_SCOPE: ScopeLayout = { collapsed: [], sections: [], order: [] };
 
-function withScope(layout: SidebarLayout, scope: Scope, change: (s: ScopeLayout) => ScopeLayout): SidebarLayout {
+function withScope(
+  layout: SidebarLayout,
+  scope: Scope,
+  change: (s: ScopeLayout) => ScopeLayout,
+): SidebarLayout {
   const key = scopeKey(scope);
-  return { ...layout, scopes: { ...layout.scopes, [key]: change(layout.scopes[key] ?? EMPTY_SCOPE) } };
+
+  return {
+    ...layout,
+    scopes: { ...layout.scopes, [key]: change(layout.scopes[key] ?? EMPTY_SCOPE) },
+  };
 }
 
 /** Collapses a section, or expands it again. */
 export function toggleCollapsed(layout: SidebarLayout, scope: Scope, id: string): SidebarLayout {
   return withScope(layout, scope, (s) => ({
     ...s,
-    collapsed: s.collapsed.includes(id) ? s.collapsed.filter((c) => c !== id) : [...s.collapsed, id],
+    collapsed: s.collapsed.includes(id)
+      ? s.collapsed.filter((c) => c !== id)
+      : [...s.collapsed, id],
   }));
 }
 
 /** Adds a section of the user's, first in the scope. Returns the layout and the section's ID. */
-export function addSection(layout: SidebarLayout, scope: Scope, name: string): { layout: SidebarLayout; id: string } {
+export function addSection(layout: SidebarLayout, scope: Scope, name: string) {
   const taken = new Set((scopeLayout(layout, scope)?.sections ?? []).map((s) => s.id));
   let n = 1;
+
   while (taken.has(`section-${n}`)) n++;
   const id = `section-${n}`;
+
   const next = withScope(layout, scope, (s) => ({
     ...s,
     sections: [{ id, name: name.trim(), rooms: [] }, ...s.sections],
     order: s.order.length > 0 ? [id, ...s.order] : s.order,
   }));
+
   return { layout: next, id };
 }
 
-export function renameSection(layout: SidebarLayout, scope: Scope, id: string, name: string): SidebarLayout {
+export function renameSection(
+  layout: SidebarLayout,
+  scope: Scope,
+  id: string,
+  name: string,
+): SidebarLayout {
   return withScope(layout, scope, (s) => ({
     ...s,
-    sections: s.sections.map((section) => (section.id === id ? { ...section, name: name.trim() } : section)),
+    sections: s.sections.map((section) =>
+      section.id === id ? { ...section, name: name.trim() } : section,
+    ),
   }));
 }
 
@@ -260,32 +349,57 @@ export function deleteSection(layout: SidebarLayout, scope: Scope, id: string): 
  * Moves a room into a section at `index` among its rooms (the end when omitted): one of the
  * user's, or a built-in one, which takes it out of the user's sections.
  */
-export function moveRoom(layout: SidebarLayout, scope: Scope, roomId: string, to: string, index?: number): SidebarLayout {
+export function moveRoom(
+  layout: SidebarLayout,
+  scope: Scope,
+  roomId: string,
+  to: string,
+  index?: number,
+): SidebarLayout {
   return withScope(layout, scope, (s) => ({
     ...s,
     sections: s.sections.map((section) => {
       const rooms = section.rooms.filter((r) => r !== roomId);
+
       if (section.id === to) rooms.splice(Math.min(index ?? rooms.length, rooms.length), 0, roomId);
+
       return { ...section, rooms };
     }),
   }));
 }
 
 /** Moves a section to `index` among the sections `shown`, in their current order. */
-export function moveSection(layout: SidebarLayout, scope: Scope, shown: readonly string[], id: string, index: number): SidebarLayout {
+export function moveSection(
+  layout: SidebarLayout,
+  scope: Scope,
+  shown: readonly string[],
+  id: string,
+  index: number,
+): SidebarLayout {
   const order = shown.filter((known) => known !== id);
   order.splice(Math.min(index, order.length), 0, id);
+
   return withScope(layout, scope, (s) => ({ ...s, order }));
 }
 
 /** Moves a space to `index` among the spaces `shown`, in their order. */
-export function moveSpace(layout: SidebarLayout, shown: readonly string[], id: string, index: number): SidebarLayout {
+export function moveSpace(
+  layout: SidebarLayout,
+  shown: readonly string[],
+  id: string,
+  index: number,
+): SidebarLayout {
   const spaces = shown.filter((known) => known !== id);
   spaces.splice(Math.min(index, spaces.length), 0, id);
+
   return { ...layout, spaces };
 }
 
 /** The layout marked as changed now: later than the one it changes, even with a clock behind. */
-export function stamped(layout: SidebarLayout, previous: SidebarLayout, now: number): SidebarLayout {
+export function stamped(
+  layout: SidebarLayout,
+  previous: SidebarLayout,
+  now: number,
+): SidebarLayout {
   return { ...layout, changed_at: Math.max(now, previous.changed_at + 1) };
 }

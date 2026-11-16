@@ -21,11 +21,13 @@ import { openPermalink } from '../links/open';
 export function openLink(store: Store, url: string, account: AccountId | null = null): void {
   if (isPermalink(url)) {
     openPermalink(store, url, account);
+
     return;
   }
+
   const opened = /^https?:/i.test(url) ? WebBrowser.openBrowserAsync(url) : Linking.openURL(url);
-  opened.catch((error: unknown) => {
-    store.update((s) => addNotice(s, t('notice.browser', { error: String(error) })));
+  opened.catch((cause: unknown) => {
+    store.update((s) => addNotice(s, t('notice.browser', { error: String(cause) })));
   });
 }
 
@@ -38,12 +40,15 @@ export function openMention(
 ): void {
   if (mention.kind === 'user') {
     router.push(routes.member(account, roomId, mention.id));
+
     return;
   }
+
   const joined = store
     .getState()
     .accounts.find((a) => a.summary.id === account)
     ?.rooms.some((r) => r.room_id === mention.id);
+
   if (joined) router.push(routes.room(account, mention.id));
   else openPermalink(store, `https://matrix.to/#/${encodeURIComponent(mention.id)}`, account);
 }

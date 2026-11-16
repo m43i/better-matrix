@@ -23,13 +23,19 @@ export default function DirectMessagesScreen() {
   const compose = useToolbarIcon('compose', palette.text);
   const now = useNow();
   const chats = useMemo(() => (account ? directChats(account, now) : []), [account, now]);
+
   if (!account) return null;
   const id = account.summary.id;
+
   return (
     <>
       <Stack.Screen options={{ title: t('sidebar.direct') }} />
       <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Button icon={compose} accessibilityLabel={t('create.chat')} onPress={() => router.push(routes.newChat())} />
+        <Stack.Toolbar.Button
+          icon={compose}
+          accessibilityLabel={t('create.chat')}
+          onPress={() => router.push(routes.newChat())}
+        />
       </Stack.Toolbar>
       {!account.roomsLoaded ? (
         <EmptyState loading title={t('sidebar.syncing')} />
@@ -41,11 +47,28 @@ export default function DirectMessagesScreen() {
           data={chats}
           keyExtractor={(room) => room.room_id}
           ListHeaderComponent={<CallBar />}
-          renderItem={({ item }) => <RoomRow account={id} room={item} last={lastMessage(account, item.room_id)} now={now} detailed />}
+          renderItem={({ item }) => (
+            <RoomRow
+              account={id}
+              room={item}
+              last={lastMessage(account, item.room_id)}
+              now={now}
+              detailed
+            />
+          )}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <EmptyState icon="chat" title={t('sidebar.empty')} body={t('mobile.shell.dms_empty')} />
-              <Button title={t('create.chat')} icon="compose" onPress={() => router.push(routes.newChat())} testID="dms-new-chat" />
+              <EmptyState
+                icon="chat"
+                title={t('sidebar.empty')}
+                body={t('mobile.shell.dms_empty')}
+              />
+              <Button
+                title={t('create.chat')}
+                icon="compose"
+                onPress={() => router.push(routes.newChat())}
+                testID="dms-new-chat"
+              />
             </View>
           }
         />

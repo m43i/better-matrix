@@ -23,11 +23,13 @@ import { Icon, type IconName } from '../icons';
 import { usePalette } from '../theme';
 import { ringLabel } from './stage';
 
+// SAFETY: Metro transforms the bundled WAV asset's require into its numeric asset registry ID.
 const RING_SOUND = require('../../../assets/sounds/ring.wav') as number;
 
 export function Rings() {
   const rings = useStore((s) => s.call.rings, shallow);
   const insets = useSafeAreaInsets();
+
   return (
     <>
       <CallEffects />
@@ -46,6 +48,7 @@ function RingCard({ ring }: { ring: IncomingCall }) {
   const store = useAppStore();
   const palette = usePalette();
   const id = `${ring.account}-${ring.room_id}`;
+
   return (
     <Animated.View
       entering={FadeInUp}
@@ -56,7 +59,13 @@ function RingCard({ ring }: { ring: IncomingCall }) {
       style={[styles.card, { backgroundColor: palette.surface, borderColor: palette.divider }]}
     >
       <View style={[styles.ringed, { borderColor: palette.accent, shadowColor: palette.accent }]}>
-        <Avatar account={ring.account} id={ring.caller.id} name={ring.caller.name} media={ring.caller.avatar} size={44} />
+        <Avatar
+          account={ring.account}
+          id={ring.caller.id}
+          name={ring.caller.name}
+          media={ring.caller.avatar}
+          size={44}
+        />
       </View>
       <View style={styles.who}>
         <Text style={[font.bodyStrong, { color: palette.text }]} numberOfLines={1}>
@@ -93,7 +102,19 @@ function RingCard({ ring }: { ring: IncomingCall }) {
   );
 }
 
-function RoundButton({ icon, label, color, onPress, testID }: { icon: IconName; label: string; color: string; onPress: () => void; testID: string }) {
+function RoundButton({
+  icon,
+  label,
+  color,
+  onPress,
+  testID,
+}: {
+  icon: IconName;
+  label: string;
+  color: string;
+  onPress: () => void;
+  testID: string;
+}) {
   return (
     <Pressable
       testID={testID}
@@ -101,7 +122,10 @@ function RoundButton({ icon, label, color, onPress, testID }: { icon: IconName; 
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={4}
-      style={({ pressed }) => [styles.round, { backgroundColor: color, opacity: pressed ? 0.8 : 1 }]}
+      style={({ pressed }) => [
+        styles.round,
+        { backgroundColor: color, opacity: pressed ? 0.8 : 1 },
+      ]}
     >
       <Icon name={icon} size={22} color="#ffffff" />
     </Pressable>
@@ -126,6 +150,7 @@ function CallEffects() {
   useEffect(() => {
     if (call === null || opened.current === call) return;
     opened.current = call;
+
     if (pathname !== '/call') router.push(routes.call());
   }, [call, pathname, router]);
 
@@ -140,7 +165,8 @@ function CallEffects() {
   // A buzz for each new ring.
   const rung = useRef(0);
   useEffect(() => {
-    if (ringCount > rung.current) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    if (ringCount > rung.current)
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     rung.current = ringCount;
   }, [ringCount]);
 
@@ -151,6 +177,7 @@ function CallEffects() {
     const player = createAudioPlayer(RING_SOUND);
     player.loop = true;
     player.play();
+
     return () => player.remove();
   }, [ringing]);
 
@@ -172,7 +199,20 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 8,
   },
-  ringed: { borderWidth: 2, borderRadius: 26, padding: 2, shadowOpacity: 0.55, shadowRadius: 11, shadowOffset: { width: 0, height: 0 } },
+  ringed: {
+    borderWidth: 2,
+    borderRadius: 26,
+    padding: 2,
+    shadowOpacity: 0.55,
+    shadowRadius: 11,
+    shadowOffset: { width: 0, height: 0 },
+  },
   who: { flex: 1, minWidth: 0 },
-  round: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  round: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

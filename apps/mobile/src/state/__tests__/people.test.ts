@@ -32,12 +32,26 @@ function person(id: string, name = id): Person {
   return { id, name, avatar: null };
 }
 
-function member(id: string, name: string, role: RoomMember['role'] = 'Member', level = 0): RoomMember {
+function member(
+  id: string,
+  name: string,
+  role: RoomMember['role'] = 'Member',
+  level = 0,
+): RoomMember {
   return { person: person(id, name), role, presence: 'Unknown', verified: false, level };
 }
 
 function members(own_level: number, rights: Partial<Members> = {}): Members {
-  return { people: [], complete: true, can_invite: true, own_level, can_kick: true, can_ban: true, can_set_roles: true, ...rights };
+  return {
+    people: [],
+    complete: true,
+    can_invite: true,
+    own_level,
+    can_kick: true,
+    can_ban: true,
+    can_set_roles: true,
+    ...rights,
+  };
 }
 
 const space = (room_id: string, can_add_rooms: boolean) => ({
@@ -65,7 +79,10 @@ describe('matches', () => {
 });
 
 describe('filterMembers', () => {
-  const people = [member('@ada:example.org', 'Ada Lovelace'), member('@grace:navy.mil', 'Grace Hopper')];
+  const people = [
+    member('@ada:example.org', 'Ada Lovelace'),
+    member('@grace:navy.mil', 'Grace Hopper'),
+  ];
 
   it('should keep everyone in order when nothing is typed', () => {
     expect(filterMembers(people, '  ')).toBe(people);
@@ -90,7 +107,9 @@ describe('moderation rights', () => {
   });
 
   it('should not let a moderator without the right ban', () => {
-    expect(may(members(50, { can_ban: false }), { type: 'Ban' }, member(GRACE, 'Grace'))).toBe(false);
+    expect(may(members(50, { can_ban: false }), { type: 'Ban' }, member(GRACE, 'Grace'))).toBe(
+      false,
+    );
   });
 
   it('should offer only the roles up to the user own level, besides the member current one', () => {
@@ -98,11 +117,16 @@ describe('moderation rights', () => {
   });
 
   it('should offer no roles without the right to set them', () => {
-    expect(rolesOffered(members(100, { can_set_roles: false }), member(GRACE, 'Grace'))).toEqual([]);
+    expect(rolesOffered(members(100, { can_set_roles: false }), member(GRACE, 'Grace'))).toEqual(
+      [],
+    );
   });
 
   it('should ask before kicking or banning', () => {
-    expect([asksFirst({ type: 'Kick' }, 100), asksFirst({ type: 'Ban' }, 100)]).toEqual([true, true]);
+    expect([asksFirst({ type: 'Kick' }, 100), asksFirst({ type: 'Ban' }, 100)]).toEqual([
+      true,
+      true,
+    ]);
   });
 
   it('should give a role below the user own level without asking', () => {
@@ -128,12 +152,19 @@ describe('rooms', () => {
   });
 
   it('should offer the other group rooms to invite a member to', () => {
-    const rooms = [roomSummary('!here'), roomSummary('!there'), roomSummary('!dm', 'Grace', 'Direct')];
+    const rooms = [
+      roomSummary('!here'),
+      roomSummary('!there'),
+      roomSummary('!dm', 'Grace', 'Direct'),
+    ];
+
     expect(inviteTargets(rooms, '!here').map((r) => r.room_id)).toEqual(['!there']);
   });
 
   it('should offer only the spaces the user may add rooms to', () => {
-    expect(spacesForNewRoom([space('!a', true), space('!b', false)]).map((s) => s.room_id)).toEqual(['!a']);
+    expect(spacesForNewRoom([space('!a', true), space('!b', false)]).map((s) => s.room_id)).toEqual(
+      ['!a'],
+    );
   });
 
   it('should not make a room without a name', () => {
@@ -167,7 +198,12 @@ describe('rooms', () => {
   });
 
   it('should make a room follow the account default when its own mode is cleared', () => {
-    const room = { ...roomSummary('!a'), notifications: 'Mute' as const, custom_notifications: true };
+    const room = {
+      ...roomSummary('!a'),
+      notifications: 'Mute' as const,
+      custom_notifications: true,
+    };
+
     expect(withNotificationMode(room, null, 'MentionsOnly')).toMatchObject({
       notifications: 'MentionsOnly',
       custom_notifications: false,
@@ -175,12 +211,9 @@ describe('rooms', () => {
   });
 
   it('should open images and videos in the preview and share other files', () => {
-    expect([fileOpens('Image'), fileOpens('Video'), fileOpens('Audio'), fileOpens('File')]).toEqual([
-      'preview',
-      'preview',
-      'share',
-      'share',
-    ]);
+    expect([fileOpens('Image'), fileOpens('Video'), fileOpens('Audio'), fileOpens('File')]).toEqual(
+      ['preview', 'preview', 'share', 'share'],
+    );
   });
 });
 
@@ -188,6 +221,7 @@ describe('people search', () => {
   /** A search that typed `text` and sent it as `request`. */
   function sent(text: string, request: number, from: PeopleSearch = EMPTY_SEARCH): PeopleSearch {
     const next = typed(from, text);
+
     return searching(next, due(next) ?? '', request);
   }
 
@@ -239,7 +273,9 @@ describe('people search', () => {
   });
 
   it('should offer a typed user ID the directory does not know', () => {
-    expect(candidates(sent('@turing:example.org', 1), ADA)).toEqual([person('@turing:example.org')]);
+    expect(candidates(sent('@turing:example.org', 1), ADA)).toEqual([
+      person('@turing:example.org'),
+    ]);
   });
 
   it('should not offer a typed user ID twice when the directory found it', () => {
@@ -248,7 +284,11 @@ describe('people search', () => {
   });
 
   it('should tell a full user ID from a name', () => {
-    expect([isUserId('@ada:example.org'), isUserId('ada'), isUserId('@ada')]).toEqual([true, false, false]);
+    expect([isUserId('@ada:example.org'), isUserId('ada'), isUserId('@ada')]).toEqual([
+      true,
+      false,
+      false,
+    ]);
   });
 
   it('should be busy while the typed text is not answered', () => {
@@ -272,6 +312,10 @@ describe('dayOf', () => {
   });
 
   it('should give the date of anything older', () => {
-    expect(dayOf(new Date(2026, 0, 3, 9, 0).getTime(), now)).toEqual({ year: 2026, month: 1, day: 3 });
+    expect(dayOf(new Date(2026, 0, 3, 9, 0).getTime(), now)).toEqual({
+      year: 2026,
+      month: 1,
+      day: 3,
+    });
   });
 });

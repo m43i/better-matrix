@@ -7,11 +7,19 @@
 export function linkRanges(text: string): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
   const word = /\S+/g;
+
   for (let match = word.exec(text); match !== null; match = word.exec(text)) {
     const { start, link } = unwrapLink(match[0]);
-    const rest = link.startsWith('https://') ? link.slice(8) : link.startsWith('http://') ? link.slice(7) : null;
+
+    const rest = link.startsWith('https://')
+      ? link.slice(8)
+      : link.startsWith('http://')
+        ? link.slice(7)
+        : null;
+
     if (rest) ranges.push([match.index + start, match.index + start + link.length]);
   }
+
   return ranges;
 }
 
@@ -24,6 +32,7 @@ export function links(text: string): string[] {
 export function isLink(text: string): boolean {
   const trimmed = text.trim();
   const first = linkRanges(trimmed)[0];
+
   return first !== undefined && first[0] === 0 && first[1] === trimmed.length;
 }
 
@@ -31,16 +40,19 @@ export function isLink(text: string): boolean {
  * A word without the punctuation around it, and where the rest starts in it. A closing
  * parenthesis stays when the link opened one (`…/wiki/Rust_(programming_language)`).
  */
-function unwrapLink(word: string): { start: number; link: string } {
+function unwrapLink(word: string) {
   const opened = word.replace(/^[<("']+/, '');
   let link = opened;
+
   for (;;) {
     const trimmed = link.replace(/[>"',.!?;:]+$/, '');
     const count = (c: string) => trimmed.split(c).length - 1;
     const next = trimmed.endsWith(')') && count(')') > count('(') ? trimmed.slice(0, -1) : trimmed;
+
     if (next === link) break;
     link = next;
   }
+
   return { start: word.length - opened.length, link };
 }
 
@@ -49,7 +61,12 @@ export type GifSource = { file: string } | { page: string };
 
 /** The GIF behind a link, if the link is one. */
 export function gifSource(link: string): GifSource | null {
-  const rest = link.startsWith('https://') ? link.slice(8) : link.startsWith('http://') ? link.slice(7) : null;
+  const rest = link.startsWith('https://')
+    ? link.slice(8)
+    : link.startsWith('http://')
+      ? link.slice(7)
+      : null;
+
   if (rest === null) return null;
   const slash = rest.indexOf('/');
   const rawHost = slash < 0 ? rest : rest.slice(0, slash);
@@ -57,12 +74,15 @@ export function gifSource(link: string): GifSource | null {
   const path = (rawPath.split(/[?#]/)[0] ?? '').replace(/\/+$/, '');
   const host = rawHost.replace(/^(www\.)+/, '').toLowerCase();
   const last = path.split('/').pop() ?? '';
+
   switch (host) {
     case 'giphy.com':
       if (path.startsWith('gifs/') || path.startsWith('stickers/')) {
         const id = last.split('-').pop() ?? '';
+
         return id ? { file: `https://i.giphy.com/${id}.gif` } : null;
       }
+
       break;
     case 'gph.is':
       return null;
@@ -73,10 +93,13 @@ export function gifSource(link: string): GifSource | null {
       if (path !== '' && !path.includes('/')) return { file: `https://i.imgur.com/${path}.gif` };
       break;
     case 'i.imgur.com':
-      if (last.endsWith('.gifv')) return { file: `https://i.imgur.com/${last.slice(0, -'.gifv'.length)}.gif` };
+      if (last.endsWith('.gifv'))
+        return { file: `https://i.imgur.com/${last.slice(0, -'.gifv'.length)}.gif` };
       break;
   }
+
   if (last.toLowerCase().endsWith('.gif')) return { file: link.split(/[?#]/)[0] ?? link };
+
   return null;
 }
 
@@ -104,15 +127,19 @@ export function withoutLink(text: string, url: string): string {
 export function htmlWithoutLink(html: string, url: string): string {
   const escaped = url.split('&').join('&amp;');
   let out = html;
+
   for (const href of [url, escaped]) {
     for (;;) {
       const at = out.indexOf(`href="${href}"`);
+
       if (at < 0) break;
       const open = out.lastIndexOf('<a', at);
       const close = out.indexOf('</a>', at);
+
       if (open < 0 || close < 0) break;
       out = out.slice(0, open) + out.slice(close + '</a>'.length);
     }
   }
+
   return out.split(escaped).join('').split(url).join('').trim();
 }

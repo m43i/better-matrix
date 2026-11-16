@@ -34,7 +34,9 @@ export default function CallScreen() {
   useEffect(() => {
     if (!call && router.canGoBack()) router.back();
   }, [call, router]);
+
   if (!call) return <View style={{ flex: 1, backgroundColor: palette.bg }} />;
+
   return <Stage info={call} />;
 }
 
@@ -47,10 +49,12 @@ function Stage({ info }: { info: CallInfo }) {
   const heard = useCallAudio();
   const { planned, size, onLayout, preview } = useCallPlan(info, view, heard.speaker, false);
   const status = stageStatus(info);
+
   const chat = () => {
     showCallChat(store, true);
     router.dismissTo(routes.room(info.account, info.room_id));
   };
+
   return (
     <>
       <Stack.Screen
@@ -63,10 +67,18 @@ function Stage({ info }: { info: CallInfo }) {
         }}
       />
       <Header view={view} video={showsVideo(info)} onClose={() => router.back()} />
-      <SafeAreaView edges={['left', 'right', 'bottom']} style={[styles.screen, { backgroundColor: palette.bg }]} testID="call-stage">
+      <SafeAreaView
+        edges={['left', 'right', 'bottom']}
+        style={[styles.screen, { backgroundColor: palette.bg }]}
+        testID="call-stage"
+      >
         <Glow />
         {status ? (
-          <Text testID="call-status" style={[font.body, styles.status, { color: palette.textMuted }]} numberOfLines={1}>
+          <Text
+            testID="call-status"
+            style={[font.body, styles.status, { color: palette.textMuted }]}
+            numberOfLines={1}
+          >
             {status}
           </Text>
         ) : null}
@@ -106,13 +118,22 @@ function Header({ view, video, onClose }: { view: CallView; video: boolean; onCl
   const down = useToolbarIcon('chevronDown', palette.text);
   const layout = useToolbarIcon('layout', palette.text);
   const self = useToolbarIcon(view.showSelf ? 'eyeOff' : 'eye', palette.text);
+
   return (
     <>
       <Stack.Toolbar placement="left">
-        <Stack.Toolbar.Button icon={down} accessibilityLabel={t('mobile.calls.minimize')} onPress={onClose} />
+        <Stack.Toolbar.Button
+          icon={down}
+          accessibilityLabel={t('mobile.calls.minimize')}
+          onPress={onClose}
+        />
       </Stack.Toolbar>
       <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Menu icon={layout} accessibilityLabel={t('call.layout')} title={t('call.layout')}>
+        <Stack.Toolbar.Menu
+          icon={layout}
+          accessibilityLabel={t('call.layout')}
+          title={t('call.layout')}
+        >
           <Stack.Toolbar.Menu inline hidden={!video} title={t('call.layout')}>
             {LAYOUTS.map((choice) => (
               <Stack.Toolbar.MenuAction
@@ -137,13 +158,21 @@ function Header({ view, video, onClose }: { view: CallView; video: boolean; onCl
 /** A soft wash of the accent behind the stage that swells with everyone's voices. */
 function Glow() {
   const palette = usePalette();
-  const loudest = useStore((s) => Object.values(s.call.levels).reduce((max, level) => Math.max(max, level), 0));
+
+  const loudest = useStore((s) =>
+    Object.values(s.call.levels).reduce((max, level) => Math.max(max, level), 0),
+  );
+
   // Steps of 16 keep the stage from redrawing on every level report.
   const step = Math.round(loudest / 16) / 16;
+
   return (
     <View
       pointerEvents="none"
-      style={[StyleSheet.absoluteFill, { backgroundColor: palette.accent, opacity: 0.04 + step * 0.14 }]}
+      style={[
+        StyleSheet.absoluteFill,
+        { backgroundColor: palette.accent, opacity: 0.04 + step * 0.14 },
+      ]}
     />
   );
 }

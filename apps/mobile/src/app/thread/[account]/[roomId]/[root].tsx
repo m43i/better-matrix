@@ -20,11 +20,21 @@ import { Conversation } from '../../../../ui/timeline/Conversation';
 import { Timeline } from '../../../../ui/timeline/Timeline';
 
 export default function ThreadScreen() {
-  const { account, roomId, root } = useLocalSearchParams<{ account: string; roomId: string; root: string }>();
+  const { account, roomId, root } = useLocalSearchParams<{
+    account: string;
+    roomId: string;
+    root: string;
+  }>();
+
   const palette = usePalette();
   const room = useStore((s) => roomOf(s, account, roomId));
-  const rootMessage = useStore((s) => findMessage(timeline(s, account, roomKey(roomId)).entries, root) ?? null);
+
+  const rootMessage = useStore(
+    (s) => findMessage(timeline(s, account, roomKey(roomId)).entries, root) ?? null,
+  );
+
   const key = useMemo(() => threadKey(roomId, root), [roomId, root]);
+
   if (!room) {
     return (
       <View style={[styles.screen, { backgroundColor: palette.bg }]}>
@@ -33,6 +43,7 @@ export default function ThreadScreen() {
       </View>
     );
   }
+
   return (
     <>
       <Stack.Screen
@@ -48,7 +59,9 @@ export default function ThreadScreen() {
           ),
         }}
       />
-      <Conversation composer={<Composer account={account} timelineKey={key} roomName={inlineName(room)} />}>
+      <Conversation
+        composer={<Composer account={account} timelineKey={key} roomName={inlineName(room)} />}
+      >
         <Timeline account={account} timelineKey={key} root={rootMessage} />
       </Conversation>
     </>

@@ -46,7 +46,9 @@ export function htmlBlocks(html: string): Block[] {
 
 /** The text a tree shows, for copying and accessibility. */
 export function blocksText(blocks: Block[]): string {
-  const inlineText = (inlines: Inline[]) => inlines.map((i) => (i.type === 'text' ? i.text : i.label)).join('');
+  const inlineText = (inlines: Inline[]) =>
+    inlines.map((i) => (i.type === 'text' ? i.text : i.label)).join('');
+
   return blocks
     .map((block): string => {
       switch (block.type) {
@@ -69,115 +71,195 @@ export function blocksText(blocks: Block[]): string {
 // ----- tokenizing --------------------------------------------------------------------------
 
 interface Element {
+  type: 'element';
   name: string;
   attrs: Record<string, string>;
   children: Node[];
 }
-type Node = Element | string;
+
+type Node = Element | { type: 'text'; text: string };
 
 /** Elements with no content. */
 const VOID = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'wbr', 'area', 'col', 'source']);
+
 /** Elements whose content is never shown. */
-const DROPPED = new Set(['mx-reply', 'script', 'style', 'head', 'title', 'iframe', 'object', 'template']);
+const DROPPED = new Set([
+  'mx-reply',
+  'script',
+  'style',
+  'head',
+  'title',
+  'iframe',
+  'object',
+  'template',
+]);
+
 /** Elements that close an open paragraph, as HTML has it. */
-const CLOSES_P = new Set(['p', 'div', 'ul', 'ol', 'blockquote', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'table']);
+const CLOSES_P = new Set([
+  'p',
+  'div',
+  'ul',
+  'ol',
+  'blockquote',
+  'pre',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'table',
+]);
+
 /** Deeper nesting reads as text: keeps the converter's recursion bounded. */
 const MAX_DEPTH = 64;
 
-const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+const ENTITIES = new Map(
+  Object.entries({
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+  }),
+);
 
 function decodeEntities(text: string): string {
   return text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (whole, name: string) => {
     if (name[0] === '#') {
-      const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
-      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+      const code =
+        name[1] === 'x' || name[1] === 'X'
+          ? parseInt(name.slice(2), 16)
+          : parseInt(name.slice(1), 10);
+
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : whole;
     }
-    return ENTITIES[name.toLowerCase()] ?? whole;
+
+    return ENTITIES.get(name.toLowerCase()) ?? whole;
   });
 }
 
-const OPEN_TAG = /<([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*(\/?)>/y;
+const OPEN_TAG =
+  /<([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*(\/?)>/y;
+
 const CLOSE_TAG = /<\/([a-zA-Z][a-zA-Z0-9-]*)\s*>/y;
+
 const ATTRIBUTE = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
 
-function parseAttributes(source: string): Record<string, string> {
+function parseAttributes(source: string) {
   const attrs: Record<string, string> = {};
+
   for (const match of source.matchAll(ATTRIBUTE)) {
     const name = match[1]?.toLowerCase();
+
     if (name) attrs[name] = decodeEntities(match[2] ?? match[3] ?? match[4] ?? '');
   }
+
   return attrs;
 }
 
 /** The HTML as a tree of elements and text. Forgiving: stray closing tags are ignored. */
 function buildTree(html: string): Element {
-  const root: Element = { name: '#root', attrs: {}, children: [] };
+  const root: Element = { type: 'element', name: '#root', attrs: {}, children: [] };
   const stack: Element[] = [root];
   const top = () => stack[stack.length - 1] ?? root;
+
   const addText = (text: string) => {
     if (text === '') return;
     const children = top().children;
     const last = children[children.length - 1];
-    if (typeof last === 'string') children[children.length - 1] = last + text;
-    else children.push(text);
+
+    if (last?.type === 'text') last.text += text;
+    else children.push({ type: 'text', text });
   };
+
   const closeTo = (name: string): boolean => {
     for (let i = stack.length - 1; i > 0; i--) {
       if (stack[i]?.name === name) {
         stack.length = i;
+
         return true;
       }
     }
+
     return false;
   };
+
   let i = 0;
+
   while (i < html.length) {
     const lt = html.indexOf('<', i);
+
     if (lt < 0) {
       addText(decodeEntities(html.slice(i)));
       break;
     }
+
     addText(decodeEntities(html.slice(i, lt)));
     i = lt;
+
     if (html.startsWith('<!--', i)) {
       const end = html.indexOf('-->', i + 4);
       i = end < 0 ? html.length : end + 3;
       continue;
     }
+
     CLOSE_TAG.lastIndex = i;
     const close = CLOSE_TAG.exec(html);
+
     if (close) {
       closeTo((close[1] ?? '').toLowerCase());
       i = CLOSE_TAG.lastIndex;
       continue;
     }
+
     OPEN_TAG.lastIndex = i;
     const open = OPEN_TAG.exec(html);
+
     if (open) {
       i = OPEN_TAG.lastIndex;
       const name = (open[1] ?? '').toLowerCase();
+
       if (name === 'script' || name === 'style') {
         // Raw text up to its end tag, never shown.
         const end = html.toLowerCase().indexOf(`</${name}`, i);
         i = end < 0 ? html.length : html.indexOf('>', end) + 1 || html.length;
         continue;
       }
+
       if (CLOSES_P.has(name) && top().name === 'p') stack.pop();
+
       if (name === 'li' && top().name === 'li') stack.pop();
+
       if (stack.length > MAX_DEPTH) continue;
-      const element: Element = { name, attrs: parseAttributes(open[2] ?? ''), children: [] };
+
+      const element: Element = {
+        type: 'element',
+        name,
+        attrs: parseAttributes(open[2] ?? ''),
+        children: [],
+      };
+
       top().children.push(element);
+
       if (!VOID.has(name) && open[3] !== '/') stack.push(element);
       continue;
     }
+
     if (html.startsWith('<!', i) || html.startsWith('<?', i)) {
       const end = html.indexOf('>', i);
       i = end < 0 ? html.length : end + 1;
       continue;
     }
+
     addText('<');
     i += 1;
   }
+
   return root;
 }
 
@@ -191,19 +273,25 @@ const SAFE_LINK = /^(https?:|mailto:|ftp:|matrix:)/i;
  */
 export function mentionOf(href: string): { kind: 'user' | 'room'; id: string } | null {
   const link = parsePermalink(href);
+
   if (!link || link.event !== null) return null;
+
   return { kind: link.kind, id: link.id };
 }
 
 /** The text an element holds, as written (for code blocks). */
 function rawText(node: Node): string {
-  if (typeof node === 'string') return node;
+  if (node.type === 'text') return node.text;
+
   if (DROPPED.has(node.name)) return '';
+
   if (node.name === 'br') return '\n';
+
   return node.children.map(rawText).join('');
 }
 
-const HEADINGS: Record<string, number> = { h1: 1, h2: 2, h3: 3, h4: 4, h5: 5, h6: 6 };
+const HEADINGS = new Map(Object.entries({ h1: 1, h2: 2, h3: 3, h4: 4, h5: 5, h6: 6 }));
+
 const BLOCK_WRAPPERS = new Set([
   'p',
   'div',
@@ -225,10 +313,11 @@ const BLOCK_WRAPPERS = new Set([
   'dd',
   '#root',
 ]);
+
 function isBlock(name: string): boolean {
   return (
     BLOCK_WRAPPERS.has(name) ||
-    name in HEADINGS ||
+    HEADINGS.has(name) ||
     name === 'blockquote' ||
     name === 'ul' ||
     name === 'ol' ||
@@ -242,31 +331,45 @@ function isBlock(name: string): boolean {
 function toBlocks(nodes: Node[], marks: Marks): Block[] {
   const blocks: Block[] = [];
   let run: Node[] = [];
+
   const flush = () => {
     const inlines = tidy(linkify(run.flatMap((node) => toInlines(node, marks))));
+
     if (inlines.length > 0) blocks.push({ type: 'paragraph', inlines });
     run = [];
   };
+
   for (const node of nodes) {
-    if (typeof node === 'string' || !isBlock(node.name)) {
+    if (node.type === 'text' || !isBlock(node.name)) {
       run.push(node);
       continue;
     }
+
     flush();
-    const level = HEADINGS[node.name];
+    const level = HEADINGS.get(node.name);
+
     if (level !== undefined) {
       const inlines = tidy(linkify(node.children.flatMap((child) => toInlines(child, marks))));
+
       if (inlines.length > 0) blocks.push({ type: 'heading', level, inlines });
     } else if (node.name === 'blockquote') {
       const inner = toBlocks(node.children, marks);
+
       if (inner.length > 0) blocks.push({ type: 'quote', blocks: inner });
     } else if (node.name === 'ul' || node.name === 'ol') {
-      const items = node.children
-        .filter((child): child is Element => typeof child !== 'string' && child.name === 'li')
-        .map((li) => toBlocks(li.children, marks));
+      const items = node.children.flatMap((child) =>
+        child.type === 'element' && child.name === 'li' ? [toBlocks(child.children, marks)] : [],
+      );
+
       const start = parseInt(node.attrs.start ?? '1', 10);
+
       if (items.length > 0) {
-        blocks.push({ type: 'list', ordered: node.name === 'ol', start: Number.isFinite(start) ? start : 1, items });
+        blocks.push({
+          type: 'list',
+          ordered: node.name === 'ol',
+          start: Number.isFinite(start) ? start : 1,
+          items,
+        });
       }
     } else if (node.name === 'pre') {
       const text = rawText(node).replace(/\n$/, '');
@@ -275,16 +378,24 @@ function toBlocks(nodes: Node[], marks: Marks): Block[] {
       blocks.push({ type: 'rule' });
     } else if (node.name === 'tr') {
       // A table row reads as one line, its cells apart.
-      const cells = node.children
-        .filter((c): c is Element => typeof c !== 'string')
-        .map((cell) => tidy(linkify(cell.children.flatMap((child) => toInlines(child, marks)))));
-      const inlines = cells.flatMap((cell, index) => (index === 0 ? cell : [{ type: 'text' as const, text: ' · ', marks: {} }, ...cell]));
+      const cells = node.children.flatMap((cell) =>
+        cell.type === 'element'
+          ? [tidy(linkify(cell.children.flatMap((child) => toInlines(child, marks))))]
+          : [],
+      );
+
+      const inlines = cells.flatMap((cell, index) =>
+        index === 0 ? cell : [{ type: 'text' as const, text: ' · ', marks: {} }, ...cell],
+      );
+
       if (inlines.length > 0) blocks.push({ type: 'paragraph', inlines });
     } else {
       blocks.push(...toBlocks(node.children, marks));
     }
   }
+
   flush();
+
   return blocks;
 }
 
@@ -311,29 +422,46 @@ function withMark(marks: Marks, name: string): Marks {
 
 /** One node's inline content. Blocks nested inside inline elements read as their text. */
 function toInlines(node: Node, marks: Marks): Inline[] {
-  if (typeof node === 'string') {
+  if (node.type === 'text') {
     // Spaces collapse as in HTML; code keeps its own.
-    return [{ type: 'text', text: marks.code ? node : node.replace(/[ \t\n\r\f]+/g, ' '), marks }];
+    return [
+      {
+        type: 'text',
+        text: marks.code ? node.text : node.text.replace(/[ \t\n\r\f]+/g, ' '),
+        marks,
+      },
+    ];
   }
+
   if (DROPPED.has(node.name)) return [];
+
   switch (node.name) {
     case 'br':
       return [{ type: 'text', text: '\n', marks }];
     case 'img': {
       const alt = node.attrs.alt ?? node.attrs.title ?? '';
+
       return alt ? [{ type: 'text', text: alt, marks }] : [];
     }
+
     case 'a': {
       const href = node.attrs.href ?? '';
       const label = node.children.map(rawText).join('').trim();
       const mention = mentionOf(href);
-      if (mention) return [{ type: 'mention', kind: mention.kind, id: mention.id, label: label || mention.id }];
+
+      if (mention)
+        return [
+          { type: 'mention', kind: mention.kind, id: mention.id, label: label || mention.id },
+        ];
       const linked = SAFE_LINK.test(href) ? { ...marks, link: href } : marks;
+
       return node.children.flatMap((child) => toInlines(child, linked));
     }
+
     default: {
       const inner = withMark(marks, node.name);
       const inlines = node.children.flatMap((child) => toInlines(child, inner));
+
       // A block inside inline content (`<b><p>…</p></b>`) keeps its line.
       return isBlock(node.name) ? [...inlines, { type: 'text', text: '\n', marks }] : inlines;
     }
@@ -354,37 +482,51 @@ function sameMarks(a: Marks, b: Marks): boolean {
 /** Inlines with runs of the same marks joined, spaces not doubled and the ends trimmed. */
 function tidy(inlines: Inline[]): Inline[] {
   const out: Inline[] = [];
+
   for (const inline of inlines) {
     const last = out[out.length - 1];
+
     if (inline.type === 'text') {
       let text = inline.text;
       const before = last?.type === 'text' ? last.text : last ? 'x' : '\n';
+
       if (!inline.marks.code && /[ \n]$/.test(before)) text = text.replace(/^ +/, '');
+
       if (text === '') continue;
+
       if (last?.type === 'text' && sameMarks(last.marks, inline.marks)) {
         out[out.length - 1] = { ...last, text: last.text + text };
         continue;
       }
+
       out.push({ ...inline, text });
     } else {
       out.push(inline);
     }
   }
+
   // Trim the ends: spaces and line breaks from the markup's layout.
   while (out[0]?.type === 'text' && !out[0].marks.code && /^[ \n]*$/.test(out[0].text)) out.shift();
   const first = out[0];
-  if (first?.type === 'text' && !first.marks.code) out[0] = { ...first, text: first.text.replace(/^[ \n]+/, '') };
+
+  if (first?.type === 'text' && !first.marks.code)
+    out[0] = { ...first, text: first.text.replace(/^[ \n]+/, '') };
+
   for (;;) {
     const last = out[out.length - 1];
+
     if (last?.type !== 'text' || last.marks.code) break;
     const text = last.text.replace(/[ \n]+$/, '');
+
     if (text === '') {
       out.pop();
       continue;
     }
+
     out[out.length - 1] = { ...last, text };
     break;
   }
+
   return out;
 }
 
@@ -393,16 +535,22 @@ export function linkify(inlines: Inline[]): Inline[] {
   return inlines.flatMap((inline): Inline[] => {
     if (inline.type !== 'text' || inline.marks.code || inline.marks.link) return [inline];
     const ranges = linkRanges(inline.text);
+
     if (ranges.length === 0) return [inline];
     const parts: Inline[] = [];
     let at = 0;
+
     for (const [start, end] of ranges) {
-      if (start > at) parts.push({ type: 'text', text: inline.text.slice(at, start), marks: inline.marks });
+      if (start > at)
+        parts.push({ type: 'text', text: inline.text.slice(at, start), marks: inline.marks });
       const url = inline.text.slice(start, end);
       parts.push({ type: 'text', text: url, marks: { ...inline.marks, link: url } });
       at = end;
     }
-    if (at < inline.text.length) parts.push({ type: 'text', text: inline.text.slice(at), marks: inline.marks });
+
+    if (at < inline.text.length)
+      parts.push({ type: 'text', text: inline.text.slice(at), marks: inline.marks });
+
     return parts;
   });
 }
