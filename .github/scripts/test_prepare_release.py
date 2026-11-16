@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 
@@ -82,11 +83,27 @@ class PrepareReleaseTests(unittest.TestCase):
         self.run_git("clone", str(self.origin), str(self.work), cwd=self.root)
         self.run_git("config", "user.name", "Release test")
         self.run_git("config", "user.email", "release@example.org")
-        (self.work / "Cargo.toml").write_text('[workspace.package]\nversion = "0.0.4"\n')
+        (self.work / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["apps/desktop", "packages/matrix-core", "packages/independent"]\n'
+            '[workspace.package]\nversion = "0.0.4"\n'
+        )
+        for member, name in (("apps/desktop", "better-matrix-desktop"),
+                             ("packages/matrix-core", "matrix-core")):
+            directory = self.work / member
+            directory.mkdir(parents=True)
+            (directory / "Cargo.toml").write_text(
+                f'[package]\nname = "{name}"\nversion.workspace = true\n'
+            )
+        independent = self.work / "packages/independent"
+        independent.mkdir()
+        (independent / "Cargo.toml").write_text(
+            '[package]\nname = "independent"\nversion = "0.0.4"\n'
+        )
         (self.work / "Cargo.lock").write_text(
             'version = 4\n\n[[package]]\nname = "better-matrix-desktop"\nversion = "0.0.4"\n'
             '\n[[package]]\nname = "matrix-core"\nversion = "0.0.4"\n'
             '\n[[package]]\nname = "dependency"\nversion = "0.0.4"\n'
+            '\n[[package]]\nname = "independent"\nversion = "0.0.4"\n'
         )
         (self.work / "application.rs").write_text("original code\n")
         self.run_git("add", ".")
@@ -142,7 +159,32 @@ class PrepareReleaseTests(unittest.TestCase):
         self.assertIn('version = "0.0.5"', manifest)
         self.assertEqual(lock.count('version = "0.0.5"'), 2)
         self.assertIn('name = "dependency"\nversion = "0.0.4"', lock)
+        self.assertIn('name = "independent"\nversion = "0.0.4"', lock)
         self.assertEqual(self.run_git("ls-remote", "--heads", "origin", "release/*"), "")
+
+    def test_a_new_workspace_member_should_get_the_release_version_in_the_lockfile(self):
+        manifest = self.work / "Cargo.toml"
+        manifest.write_text(manifest.read_text().replace(
+            'members = [', 'members = ["packages/matrix-ffi", ',
+        ))
+        member = self.work / "packages/matrix-ffi"
+        member.mkdir()
+        (member / "Cargo.toml").write_text(
+            '[package]\nname = "matrix-ffi"\nversion.workspace = true\n'
+        )
+        lockfile = self.work / "Cargo.lock"
+        lockfile.write_text(lockfile.read_text() +
+                            '\n[[package]]\nname = "matrix-ffi"\nversion = "0.0.4"\n')
+        self.run_git("add", ".")
+        self.run_git("commit", "-m", "Add the mobile bridge")
+        self.run_git("push", "origin", "HEAD:refs/heads/fixture")
+        self.run_git("--git-dir", str(self.origin), "update-ref", "refs/heads/main",
+                     self.run_git("rev-parse", "HEAD"))
+
+        self.assert_succeeded(self.prepare())
+        packages = tomllib.loads(self.run_git("show", self.outputs()["sha"] + ":Cargo.lock"))
+        bridge = next(package for package in packages["package"] if package["name"] == "matrix-ffi")
+        self.assertEqual(bridge["version"], "0.0.5")
 
     def test_a_prerelease_should_update_the_version_without_making_a_tag(self):
         self.assert_succeeded(self.prepare(VERSION="0.0.5-rc.1"))

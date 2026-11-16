@@ -69,8 +69,11 @@ Date: 2026-11-14
     pull requests read it. Linux builds use clang 21 from LLVM's packages (libwebrtc's libc++
     needs it), passed to Cargo through Turbo (`CC`, `CXX`, `CARGO_*` in `turbo.json`).
   - A release (`release.yml`) starts by hand with a version (checked as Cargo reads versions,
-    set in `Cargo.toml` and `Cargo.lock` on `main`) or from a pushed `v*` tag. When the version
-    changes, the release job uses `GITHUB_TOKEN` with `contents: write` and `pull-requests: write`
+    set in `Cargo.toml` and `Cargo.lock` on `main`) or from a pushed `v*` tag. Preparation reads
+    every explicitly listed workspace member's manifest and updates each inherited version in
+    the lockfile; members with their own versions and registry dependencies keep theirs. This
+    uses Python's TOML reader so preparation needs no Rust toolchain or dependency downloads.
+    When the version changes, the release job uses `GITHUB_TOKEN` with `contents: write` and `pull-requests: write`
     to push a temporary branch, open a version-only PR labeled `skip-changelog`, and squash-merge
     it with the expected head SHA. This obeys the PR rule on `main` without a bypass token or
     manual version bump. Repository Actions settings must allow creating pull requests

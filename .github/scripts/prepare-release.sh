@@ -31,20 +31,38 @@ if [[ "$(git log -1 --format=%s)" == "Release v"* ]] && [ "$(git diff --name-onl
 fi
 
 sed -i '/^\[workspace.package\]/,/^\[/s/^version = ".*"/version = "'"$VERSION"'"/' Cargo.toml
-for crate in better-matrix-desktop matrix-core; do
-  sed -i '/^name = "'"$crate"'"$/{n;s/^version = ".*"/version = "'"$VERSION"'"/}' Cargo.lock
-done
-python3 - <<'PY'
-import os, tomllib
+# Read the explicitly listed Cargo workspace members instead of keeping another crate list.
+python3 - <<'PYTHON'
+import os
+from pathlib import Path
+import re
+import tomllib
+
 version = os.environ["VERSION"]
-with open("Cargo.toml", "rb") as file:
-    manifest = tomllib.load(file)
+manifest = tomllib.loads(Path("Cargo.toml").read_text())
 assert manifest["workspace"]["package"]["version"] == version, "Cargo.toml"
-with open("Cargo.lock", "rb") as file:
-    lock = {p["name"]: p["version"] for p in tomllib.load(file)["package"]}
-for crate in ("better-matrix-desktop", "matrix-core"):
-    assert lock[crate] == version, f"Cargo.lock: {crate}"
-PY
+inherited = set()
+for member in manifest["workspace"]["members"]:
+    package = tomllib.loads((Path(member) / "Cargo.toml").read_text())["package"]
+    if package.get("version") == {"workspace": True}:
+        inherited.add(package["name"])
+
+lockfile = Path("Cargo.lock")
+blocks = re.split(r"(?=^\[\[package\]\]$)", lockfile.read_text(), flags=re.MULTILINE)
+updated = set()
+for index, block in enumerate(blocks):
+    if not block.startswith("[[package]]"):
+        continue
+    package = tomllib.loads(block)["package"][0]
+    if package["name"] in inherited and "source" not in package:
+        blocks[index] = re.sub(r'^version = ".*"$', f'version = "{version}"',
+                               block, count=1, flags=re.MULTILINE)
+        updated.add(package["name"])
+missing = inherited - updated
+if missing:
+    raise SystemExit("Workspace members missing from Cargo.lock: " + ", ".join(sorted(missing)))
+lockfile.write_text("".join(blocks))
+PYTHON
 
 sha=$(git rev-parse HEAD)
 if ! git diff --quiet; then
