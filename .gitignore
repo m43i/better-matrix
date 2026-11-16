@@ -4,6 +4,9 @@ node_modules/
 # Rust
 target/
 
+# Python test artifacts
+__pycache__/
+
 # Turborepo
 .turbo/
 

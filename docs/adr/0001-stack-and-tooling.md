@@ -51,8 +51,18 @@ Date: 2026-11-14
     pull requests read it. Linux builds use clang 21 from LLVM's packages (libwebrtc's libc++
     needs it), passed to Cargo through Turbo (`CC`, `CXX`, `CARGO_*` in `turbo.json`).
   - A release (`release.yml`) starts by hand with a version (checked as Cargo reads versions,
-    set in `Cargo.toml` and `Cargo.lock` on `main`) or from a pushed `v*` tag. The tag is made
-    only when the release is published, so a failed run leaves none behind. It tests the commit
+    set in `Cargo.toml` and `Cargo.lock` on `main`) or from a pushed `v*` tag. When the version
+    changes, the release job uses `GITHUB_TOKEN` with `contents: write` and `pull-requests: write`
+    to push a temporary branch, open a version-only PR labeled `skip-changelog`, and squash-merge
+    it with the expected head SHA. This obeys the PR rule on `main` without a bypass token or
+    manual version bump. Repository Actions settings must allow creating pull requests
+    (`can_approve_pull_request_reviews: true`); default token permissions stay read-only. The
+    job stops if reviews or required checks block the merge. It releases the confirmed merge
+    commit. Token-created PR workflows need manual approval and token-created merges do not
+    trigger CI, so the release verifies the commit with its own test job as needed. If
+    `main` advanced and changed the prepared tree, earlier CI no longer counts. Preparation
+    tests use a local remote that rejects direct pushes to `main`, run in CI before Cargo.
+    The tag is made only when the release is published, so a failed run leaves none behind. It tests the commit
     unless it already passed CI on `main` (a version-only change counts as the same commit),
     then builds macOS arm64 (`.dmg`, signed ad hoc), Windows x86_64 (`.zip`) and Linux x86_64
     and aarch64 on Ubuntu 22.04 (glibc 2.35, which the packages require): `.deb`, `.rpm` and an

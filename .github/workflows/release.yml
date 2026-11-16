@@ -1,7 +1,8 @@
 # A release. Started by hand with the version to release (Actions → Release → Run workflow), or
 # by pushing a version tag (v1.2.3; v1.2.3-rc.1 makes a pre-release).
 #
-# By hand, it sets the version in Cargo.toml and Cargo.lock on main (a commit, when it changes);
+# By hand, it sets the version in Cargo.toml and Cargo.lock on main through an automatically
+# created and merged version-only PR (Actions must be allowed to create PRs in repo settings);
 # the tag is only made when the release is published, so a run that fails leaves no tag behind
 # and can simply be started again. Then: tests (unless the commit already passed CI on main, a
 # version-only change counting as the same commit), builds for macOS (arm64), Windows (x86_64)
@@ -37,64 +38,22 @@ jobs:
     runs-on: ubuntu-26.04
     permissions:
       contents: write
+      pull-requests: write
     outputs:
       tag: ${{ steps.set.outputs.tag }}
       sha: ${{ steps.set.outputs.sha }}
       base: ${{ steps.set.outputs.base }}
     steps:
-      - name: The version is a version
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          # Semantic versioning as Cargo reads it: no leading zeros, no empty pre-release parts.
-          num='(0|[1-9][0-9]*)'
-          part='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
-          if ! [[ "$VERSION" =~ ^$num\.$num\.$num(-$part(\.$part)*)?$ ]]; then
-            echo "::error::\"$VERSION\" isn't a version like 1.2.0 or 1.2.0-rc.1"
-            exit 1
-          fi
       - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 2
       - id: set
-        name: Set it on main
+        name: Set it through a version PR
         env:
           VERSION: ${{ inputs.version }}
-        run: |
-          tag="v$VERSION"
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
-            echo "::error::$tag exists already"
-            exit 1
-          fi
-          base=$(git rev-parse HEAD)
-          # Run again after a failure, main ends in this workflow's own version commit, which
-          # CI never saw: the commit before it is what was tested.
-          if [[ "$(git log -1 --format=%s)" == "Release v"* ]] && [ "$(git diff --name-only HEAD~1 HEAD | sort | tr '\n' ' ')" = "Cargo.lock Cargo.toml " ]; then
-            base=$(git rev-parse HEAD~1)
-          fi
-          # The workspace version, and the workspace crates' entries in the lockfile.
-          sed -i '/^\[workspace.package\]/,/^\[/s/^version = ".*"/version = "'"$VERSION"'"/' Cargo.toml
-          for crate in better-matrix-desktop matrix-core; do
-            sed -i '/^name = "'"$crate"'"$/{n;s/^version = ".*"/version = "'"$VERSION"'"/}' Cargo.lock
-          done
-          # Both files still parse and say the new version, before anything reaches main.
-          python3 - <<'PY'
-          import os, tomllib
-          version = os.environ["VERSION"]
-          manifest = tomllib.load(open("Cargo.toml", "rb"))
-          assert manifest["workspace"]["package"]["version"] == version, "Cargo.toml"
-          lock = {p["name"]: p["version"] for p in tomllib.load(open("Cargo.lock", "rb"))["package"]}
-          for crate in ("better-matrix-desktop", "matrix-core"):
-              assert lock[crate] == version, f"Cargo.lock: {crate}"
-          PY
-          if ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -am "Release $tag"
-            git push origin HEAD:main
-          fi
-          { echo "tag=$tag"; echo "sha=$(git rev-parse HEAD)"; echo "base=$base"; } >> "$GITHUB_OUTPUT"
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/prepare-release.sh
 
   verify:
     name: Check version and earlier tests
