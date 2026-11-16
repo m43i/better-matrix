@@ -59,7 +59,7 @@ pub fn sidebar(s: &State, account: &AccountData, p: &Palette) -> El {
                 .role("button")
                 .cursor(rune::Cursor::Pointer)
                 .label(t!("overview.show"))
-                .on_press(State::show_overview)
+                .on_press_tx(crate::state::navigate(State::show_overview))
                 .child(text(title).font(font::WORKSPACE).color(p.sidebar_text).truncate()),
         )
         .child(
@@ -258,7 +258,7 @@ fn build_room_row(
     nav_row(leading, &room.name, emphasis, status, room.mentions, p)
         .key(format!("room-{}", room.room_id))
         .opacity(if dragged { 0.35 } else { 1.0 })
-        .on_press(move |s: &mut State| s.select_room(&open))
+        .on_press_tx(crate::state::navigate(move |s| s.select_room(&open)))
         .on_secondary_press(move |s: &mut State, _, _| s.toggle_room_menu(&menu))
         .on_drag(move |s: &mut State, gesture, _| s.drag_in_sidebar(Dragged::Room(drag.clone()), gesture))
         .on_layout_tx(move |s: &mut State, rect, tx| {

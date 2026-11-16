@@ -142,7 +142,7 @@ fn scope_slot(
                 }
             }
         })
-        .on_press(move |s: &mut State| s.select_scope(scope.clone()))
+        .on_press_tx(crate::state::navigate(move |s| s.select_scope(scope.clone())))
 }
 
 /// A space's menu on the rail: rename it (when the user may), or leave it.

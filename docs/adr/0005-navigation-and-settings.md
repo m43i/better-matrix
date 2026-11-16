@@ -36,6 +36,10 @@ Date: 2026-11-14
     when it lists the room, otherwise choose Home or a joined space that lists it. A joined
     room opens with a corresponding sidebar entry, including invitations accepted from another
     space.
+  - Changing screen, account, scope or room lands the destination at once. Navigation actions
+    use `navigate` in the input transaction; the reducer also settles an event that navigates.
+    A deferred poll is too late, because Rune polls before input. Threads and side panels keep
+    their motion within the current room.
 - **Sections:** separate for Home and for each space.
   - Invitations is a fixed built-in section before all reorderable sections. It appears only
     when invitations are pending, collapses through the shared sidebar layout, and keeps its
@@ -91,6 +95,8 @@ Date: 2026-11-14
   - The engine re-reads rooms on the SDK's room-info updates, so badges follow its counts.
 - **Settings:** a modal in sections (`SettingsSection`). Device settings go to a prefs file off
   the UI thread; account settings live on the homeserver.
+  - The section content uses `instant_changes`: switching sections replaces it immediately,
+    without morphing unrelated controls. The modal itself keeps its entrance and exit.
   - Choices with more than a couple of options (language, each account's notifications,
     the ring, devices) are selects: the current choice in a button that opens its list
     (`select_button`, `select_option`, `select_menu`; `Popover::Select(SelectFor)`). The list

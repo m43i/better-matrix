@@ -28,6 +28,9 @@ mod theme;
 mod thread;
 mod timeline;
 
+#[cfg(test)]
+mod tests;
+
 use crate::i18n::t;
 use rune::{Color, Cx, El, col, el, row, text};
 

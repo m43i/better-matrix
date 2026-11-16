@@ -19,6 +19,18 @@ const GRACE: &str = "@grace:example.org";
 const ALAN: &str = "@alan:example.org";
 pub const ADA: &str = "@ada:example.org";
 
+/// A divider between the last few messages, for inspecting its fade in place.
+pub fn unread(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    if let Some(timeline) = s.accounts.timeline_mut(&AccountId::new(ADA), &TimelineKey::room(DEMO_THREAD.0)) {
+        timeline.apply(vec![TimelineDiff::Insert {
+            index: timeline.entries.len().saturating_sub(2),
+            entry: TimelineEntry { id: "new-marker".into(), kind: EntryKind::ReadMarker },
+        }]);
+    }
+}
+
 /// A received invitation, for checking its sidebar entry and preview.
 pub fn invitation(s: &mut State) {
     seed(s);

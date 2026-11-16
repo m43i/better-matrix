@@ -38,6 +38,11 @@ needs one, add it here.
 : The main pane when no room is open: the scope's greeting or size, its unread rooms and recent
   conversations.
 
+**Navigation**
+: The screen, account, scope and room currently shown (`Nav`, with `Location` as a snapshot).
+  Changing destination lands it at once through `navigate`; threads and side panels belong to
+  the current room. See [ADR 0005](adr/0005-navigation-and-settings.md).
+
 **Invitations**
 : The fixed, collapsible section at the top of the sidebar for rooms and spaces the account
   was invited to. Its counter stays while collapsed. Home also lists invitations; each opens

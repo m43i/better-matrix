@@ -29,6 +29,7 @@ fn spec() -> AppSpec<State> {
         min_size: Some((720.0, 480.0)),
         scenes: &[
             ("demo", demo::seed),
+            ("demo-unread", demo::unread),
             ("demo-invitation", demo::invitation),
             ("demo-discovery", demo::discovery),
             ("demo-public-rooms", |s| {
@@ -522,6 +523,7 @@ mod tests {
         let mut s = State::detached();
         scene(&mut s);
         let mut rt = Runtime::new(s, ui::view, (1200.0, 760.0), Env { system_dark: true, scale: 1.0 });
+        rt.poll = spec().poll;
         rt.frame(0.0);
         rt
     }

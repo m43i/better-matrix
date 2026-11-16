@@ -31,7 +31,8 @@ pub fn account_menu(s: &State, p: &Palette) -> El {
             trailing,
             p,
         );
-        panel = panel.child(row.key(format!("switch-{id}")).on_press(move |s: &mut State| s.select_account(&id)));
+        panel = panel
+            .child(row.key(format!("switch-{id}")).on_press_tx(crate::state::navigate(move |s| s.select_account(&id))));
     }
     // Accounts signed out softly: their data waits here; pressing one signs in again.
     for id in &s.suspended {
@@ -42,7 +43,7 @@ pub fn account_menu(s: &State, p: &Palette) -> El {
         panel = panel.child(
             menu_row(menu_icon(&icons::USER, p), id.as_str(), Some(t!("accounts.signed_out")), Some(remove), p)
                 .key(format!("resume-{id}"))
-                .on_press(move |s: &mut State| s.sign_in_as(&resume)),
+                .on_press_tx(crate::state::navigate(move |s| s.sign_in_as(&resume))),
         );
     }
     panel = panel
@@ -50,7 +51,7 @@ pub fn account_menu(s: &State, p: &Palette) -> El {
         .child(
             menu_row(menu_icon(&icons::PLUS, p), t!("accounts.add"), None, None, p)
                 .key("menu-add-account")
-                .on_press(State::start_adding_account),
+                .on_press_tx(crate::state::navigate(State::start_adding_account)),
         )
         .children(s.active_account().map(|_| {
             menu_row(menu_icon(&icons::USER, p), t!("settings.profile"), None, None, p)

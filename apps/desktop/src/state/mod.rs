@@ -16,6 +16,7 @@ mod composer;
 mod gifs;
 mod link_previews;
 mod media;
+mod navigation;
 mod poll;
 mod preview;
 mod profile;
@@ -41,6 +42,7 @@ use matrix_core::{
 };
 use rune::{TextEdit, Tx};
 
+pub use accounts::READ_MARKER_FADE;
 pub use accounts::{AccountData, Accounts, EntryView, RoomTimeline, Scope, TimelineItem, now_ms, wants_attention};
 pub use call::Call;
 pub use call_layout::{CallLayout, CallTile};
@@ -48,6 +50,7 @@ pub use composer::{Composer, EditTarget, Format, ReplyTarget, VoiceMemo};
 pub use gifs::GifCache;
 pub use link_previews::LinkPreviews;
 pub use media::MediaCache;
+pub use navigation::navigate;
 pub use poll::{MAX_ANSWERS, PollForm};
 pub use preview::{DocumentStatus, ImageStatus, Opens, Preview, PreviewContent, render_document};
 pub use profile::{ContactStep, ProfileForm};
@@ -562,8 +565,6 @@ pub struct State {
     /// What the shown room was last told about the user's typing.
     typing: typing::Typing,
     receipts: receipts::Receipts,
-    /// Land the next commit without animation: a room was opened.
-    settle_next: bool,
     /// A room being dragged in the sidebar, and the section it is over.
     pub dragging: Option<SidebarDrag>,
     /// Where the sidebar's sections are, by ID, for dropping a dragged room.
@@ -655,7 +656,6 @@ impl State {
             reduced_motion: std::cell::Cell::new(false),
             on_screen: HashMap::new(),
             retry_at: None,
-            settle_next: false,
             dragging: None,
             section_zones: Vec::new(),
             space_zones: HashMap::new(),
@@ -794,6 +794,7 @@ impl State {
 
     /// Folds one engine event into the state.
     pub fn apply(&mut self, event: Event, tx: &mut Tx) {
+        let location = navigation::Location::of(self);
         match event {
             Event::Finished { request, result } => self.finish(request, result),
             Event::HomeserverDiscovered { request, homeserver } => {
@@ -1208,6 +1209,9 @@ impl State {
             Event::CallDevices(devices) => self.call_devices = Some(devices),
             Event::Threads { account, room_id, threads } => self.accounts.set_threads(&account, room_id, threads),
             Event::Files { account, room_id, files } => self.accounts.set_files(&account, room_id, files),
+        }
+        if !location.is_current(self) {
+            tx.settle();
         }
     }
 
@@ -1656,9 +1660,7 @@ impl State {
     /// scrolled near its top. True when it changed state.
     pub fn poll(&mut self, tx: &mut Tx) -> bool {
         let mut changed = self.expire_notice(tx);
-        if std::mem::take(&mut self.settle_next) {
-            tx.settle();
-        }
+        changed |= self.accounts.poll_read_markers(tx, self.reduced_motion.get());
         let now = std::time::Instant::now();
         for command in self.receipts.due(now) {
             self.dispatch(command, Purpose::Read);
@@ -2613,8 +2615,7 @@ impl State {
             self.nav.threads.remove(&account);
         }
         self.nav.rooms.insert(account.clone(), room_id.to_owned());
-        // The new room lands as it is, without its rows easing in, and is ready to type into.
-        self.settle_next = true;
+        // The new room is ready to type into.
         self.composer.edit.focused = true;
         self.sync_timeline();
         self.request_timeline_media();

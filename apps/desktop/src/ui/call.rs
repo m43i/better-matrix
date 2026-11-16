@@ -542,7 +542,7 @@ pub fn call_bar(s: &State, p: &Palette) -> Option<El> {
             .role("button")
             .cursor(rune::Cursor::Pointer)
             .label(t!("call.return").to_owned())
-            .on_press(State::open_call)
+            .on_press_tx(crate::state::navigate(State::open_call))
             .child(el().size(8.0, 8.0).radius(4.0).fill(p.success))
             .child(
                 col()
@@ -594,7 +594,7 @@ fn ring_card(s: &State, ring: &IncomingCall, p: &Palette) -> El {
         let (account, room_id) = (account.clone(), room_id.clone());
         control(&icons::CALL, t!("call.answer"), p.success, Color::WHITE, p)
             .key(format!("ring-answer-{}-{}", ring.account, ring.room_id))
-            .on_press(move |s: &mut State| s.answer_call(&account, &room_id, false))
+            .on_press_tx(crate::state::navigate(move |s| s.answer_call(&account, &room_id, false)))
     };
     let decline = {
         let (account, room_id) = (account.clone(), room_id.clone());
@@ -608,7 +608,7 @@ fn ring_card(s: &State, ring: &IncomingCall, p: &Palette) -> El {
         buttons = buttons.child(
             control(&icons::VIDEO, t!("call.answer_video"), p.success, Color::WHITE, p)
                 .key(format!("ring-answer-video-{}-{}", ring.account, ring.room_id))
-                .on_press(move |s: &mut State| s.answer_call(&account, &room_id, true)),
+                .on_press_tx(crate::state::navigate(move |s| s.answer_call(&account, &room_id, true))),
         );
     }
     buttons = buttons.child(answer);

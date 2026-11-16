@@ -201,7 +201,11 @@ see who is typing there.
   - The engine re-reads rooms on the SDK's room-info updates (receipts, unread markers), so
     badges follow the counts the SDK works out after sync.
   - The "New" marker is dismissed when its own row enters the viewport, including on open,
-    without the media prefetch margin. It fades over a 2.5-second exit spring. The desktop
+    without the media prefetch margin. It fades over a 2.5-second opacity spring, keeping its
+    row's full height until the fade ends, then removing the row. A small fade state machine
+    uses Rune's logical clock and a scheduled wake (150 ms under reduced motion). Removing the
+    row at the start of an exit fade would let the virtual list close its space after 150 ms,
+    while the divider still draws over the messages. The desktop
     remembers the first unread entry at that boundary across diffs and warm reopens, while
     keeping the engine's diff indices intact. A new boundary can show a new marker.
     As in [Element Web](https://github.com/element-hq/element-web/blob/75eaab6ca5ac7ab4bac91a6097c8e77bb469455d/apps/web/src/components/structures/TimelinePanel.tsx),

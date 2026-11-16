@@ -110,7 +110,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette) -> El {
             .cursor(rune::Cursor::Pointer)
             .child(mark)
             .child(text(display_name(room)).font(font::BODY).color(p.text).grow(1.0).truncate())
-            .on_press(move |s: &mut State| s.open_found_room(&id))
+            .on_press_tx(crate::state::navigate(move |s| s.open_found_room(&id)))
     };
     for (kind, title) in [(RoomKind::Group, t!("search.rooms")), (RoomKind::Direct, t!("search.direct"))] {
         let found: Vec<&RoomSummary> =
@@ -136,7 +136,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette) -> El {
                     &s.media,
                     p,
                 )
-                .on_press(move |s: &mut State| s.open_found_space(&id)),
+                .on_press_tx(crate::state::navigate(move |s| s.open_found_space(&id))),
             );
         }
     }

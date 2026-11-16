@@ -42,7 +42,8 @@ impl Notifier for Recording {
 }
 
 fn open_room(app: &AppHandle<State>, account: String, room_id: String) {
-    app.update(move |s: &mut State, _| s.open_room(&matrix_core::AccountId::new(account), &room_id));
+    let account = matrix_core::AccountId::new(account);
+    app.update(crate::state::navigate(move |s| s.open_room(&account, &room_id)));
     app.open();
 }
 

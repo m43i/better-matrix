@@ -43,7 +43,7 @@ pub fn sign_in(s: &State, p: &Palette) -> El {
             button(t!("common.cancel"), ButtonKind::Secondary, true, p)
                 .key("cancel")
                 .w_full()
-                .on_press(State::cancel_adding_account),
+                .on_press_tx(crate::state::navigate(State::cancel_adding_account)),
         );
     }
     col().key("sign-in-screen").w_full().h_full().padding(24.0).center().child(card)
@@ -90,7 +90,7 @@ fn server_step(s: &State, adding: bool, p: &Palette) -> El {
                     .child(
                         link(t!("session_ended.sign_in"), p.accent)
                             .key(format!("resume-{id}"))
-                            .on_press(move |s: &mut State| s.sign_in_as(&resume)),
+                            .on_press_tx(crate::state::navigate(move |s| s.sign_in_as(&resume))),
                     )
                     .child(
                         link(t!("common.remove"), p.text_muted)

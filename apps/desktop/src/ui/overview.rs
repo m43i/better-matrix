@@ -160,5 +160,5 @@ fn room_card(
         card = card.child(mentions);
     }
     let room_id = room.room_id.clone();
-    card.on_press(move |s: &mut State| s.select_room(&room_id))
+    card.on_press_tx(crate::state::navigate(move |s| s.select_room(&room_id)))
 }

@@ -7,7 +7,10 @@ use matrix_core::{
     AccountId, AccountSummary, Attachment, EntryKind, Message, MessageContent, NotificationMode, RoomChange, RoomKind,
     RoomList, RoomSummary, SpaceSummary, TimelineDiff, TimelineEntry, TimelineKey,
 };
-use rune::TextEdit;
+use rune::{TextEdit, Tx};
+
+/// Seconds reserved for the "New" divider's fade before its row closes.
+pub const READ_MARKER_FADE: f32 = 2.5;
 
 /// Whether a room should draw attention: any unread message, or only mentions when the room
 /// notifies for mentions only or is muted.
@@ -137,6 +140,21 @@ enum ReadBoundary {
     Loaded(String),
 }
 
+/// The divider keeps its row until its opacity has finished fading.
+#[derive(Debug)]
+enum ReadMarkerFade {
+    Pending(String),
+    Running { id: String, until: f64 },
+}
+
+impl ReadMarkerFade {
+    fn id(&self) -> &str {
+        match self {
+            Self::Pending(id) | Self::Running { id, .. } => id,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct RoomTimeline {
     pub entries: Vec<Entry>,
@@ -146,6 +164,7 @@ pub struct RoomTimeline {
     seen_read_marker: Option<String>,
     /// Once caught up, advancing receipts stays invisible until a later inactive period.
     read_marker_hidden: bool,
+    read_marker_fade: Option<ReadMarkerFade>,
     /// The actual viewport's marker, without the media prefetch margin.
     pub visible_read_marker: Option<String>,
     /// The last actual viewport message, excluding the media prefetch margin.
@@ -177,6 +196,42 @@ fn next_revision() -> u64 {
 }
 
 impl RoomTimeline {
+    pub fn read_marker_fading(&self, id: &str) -> bool {
+        self.read_marker_fade.as_ref().is_some_and(|fade| fade.id() == id)
+    }
+
+    pub fn read_marker_opacity(&self, id: &str) -> f32 {
+        if matches!(&self.read_marker_fade, Some(ReadMarkerFade::Running { id: fading, .. }) if fading == id) {
+            0.0
+        } else {
+            1.0
+        }
+    }
+
+    fn poll_read_marker(&mut self, tx: &mut Tx, reduced_motion: bool) -> bool {
+        let Some(fade) = self.read_marker_fade.take() else { return false };
+        let mut started = false;
+        let (id, until) = match fade {
+            ReadMarkerFade::Pending(id) => {
+                // Viewport reports are not input. Explicitly animate this acknowledgement,
+                // including when the marker was visible on the room's first frame.
+                tx.animated();
+                self.revision = next_revision();
+                started = true;
+                let duration = if reduced_motion { 0.15 } else { f64::from(READ_MARKER_FADE) };
+                (id, tx.clock() + duration)
+            }
+            ReadMarkerFade::Running { id, until } => (id, until),
+        };
+        if tx.clock() >= until || !self.read_marker_seen(&id) {
+            self.revision = next_revision();
+            return true;
+        }
+        self.read_marker_fade = Some(ReadMarkerFade::Running { id, until });
+        tx.wake_at(until);
+        started
+    }
+
     pub fn set_read_boundary(&mut self, event_id: Option<String>, loaded: bool) {
         let previous = match &self.read_boundary {
             ReadBoundary::Unresolved(id) | ReadBoundary::Loaded(id) => Some(id.as_str()),
@@ -235,6 +290,7 @@ impl RoomTimeline {
     }
 
     pub fn show_read_marker(&mut self) {
+        self.read_marker_fade = None;
         self.read_marker_hidden = false;
         self.seen_read_marker = None;
     }
@@ -626,6 +682,16 @@ pub struct Accounts {
 }
 
 impl Accounts {
+    pub fn poll_read_markers(&mut self, tx: &mut Tx, reduced_motion: bool) -> bool {
+        let mut changed = false;
+        for account in &mut self.list {
+            for timeline in account.timelines.values_mut() {
+                changed |= timeline.poll_read_marker(tx, reduced_motion);
+            }
+        }
+        changed
+    }
+
     pub fn forget_invitation(&mut self, account: &AccountId, room_id: &str) {
         if let Some(data) = self.get_mut(account) {
             data.invitations.retain(|invite| invite.room_id != room_id);
@@ -749,6 +815,7 @@ impl Accounts {
         if timeline.read_marker_seen(marker) || !timeline.see_read_marker(marker) {
             return false;
         }
+        timeline.read_marker_fade = Some(ReadMarkerFade::Pending(marker.to_owned()));
         timeline.revision = next_revision();
         true
     }
@@ -802,6 +869,9 @@ impl Accounts {
     /// warm timelines, then go.
     pub fn timeline_closed(&mut self, id: &AccountId, key: &TimelineKey) {
         let Some(account) = self.get_mut(id) else { return };
+        if let Some(timeline) = account.timelines.get_mut(key) {
+            timeline.read_marker_fade = None;
+        }
         // Typing shows only while the room is open: what arrives later is dropped, so what was
         // shown would go stale.
         if key.thread.is_none() {

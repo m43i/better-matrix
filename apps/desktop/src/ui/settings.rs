@@ -88,7 +88,7 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
                 .key("settings-close")
                 .on_press(State::close_modal),
         );
-    let content = col().grow(1.0).h_full().min_w(0.0).child(header).child(
+    let content = col().instant_changes().grow(1.0).h_full().min_w(0.0).child(header).child(
         col()
             .key("settings-body")
             .w_full()

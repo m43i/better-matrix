@@ -280,7 +280,7 @@ fn session_ended(account: &str, kept: bool, p: &Palette) -> El {
     buttons.push(
         button(t!("session_ended.sign_in"), ButtonKind::Primary, true, p)
             .key("session-ended-sign-in")
-            .on_press(State::sign_in_again),
+            .on_press_tx(crate::state::navigate(State::sign_in_again)),
     );
     let hint = if kept { t!("session_ended.kept_hint") } else { t!("session_ended.hint") };
     dialog("session-ended-dialog", &tf!("session_ended.title", account = account), muted(hint, p), buttons, p)

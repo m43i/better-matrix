@@ -299,7 +299,8 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
                 rows.push((row_key(cx.key, &entry.id), Row::Message { entry: at, continues, latest_call: false }));
                 previous = Some(message);
             }
-            EntryView::ReadMarker if timeline.is_some_and(|t| t.read_marker_seen(&entry.id)) => {}
+            EntryView::ReadMarker
+                if timeline.is_some_and(|t| t.read_marker_seen(&entry.id) && !t.read_marker_fading(&entry.id)) => {}
             EntryView::DateDivider(_) | EntryView::ReadMarker => {
                 rows.push((cx.key(&entry.id), Row::Divider(at)));
                 if matches!(entry.kind, EntryView::DateDivider(_)) {
@@ -374,11 +375,9 @@ fn build_row(cx: &Context<'_>, timeline: &RoomTimeline, key: &str, row: &Row, p:
             Some(EntryView::DateDivider(at)) => {
                 rule_with_label(key, &date_label(local_ms(*at), local_ms(now_ms())), p.text_muted, p)
             }
-            _ => rule_with_label(key, t!("timeline.new"), p.mention, p).transition(
-                rune::Transition::opacity()
-                    .springs(rune::SpringPair::new(rune::Spring::NONE, rune::Spring::new(2.5, 0.0)))
-                    .hold_layout(),
-            ),
+            _ => rule_with_label(key, t!("timeline.new"), p.mention, p)
+                .opacity(entries.get(*entry).map_or(1.0, |entry| timeline.read_marker_opacity(&entry.id)))
+                .opacity_motion(rune::Spring::new(crate::state::READ_MARKER_FADE, 0.0)),
         },
     }
 }
