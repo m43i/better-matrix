@@ -1110,10 +1110,54 @@ fn clicking_an_image_should_preview_it_full_size() {
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
     drain(&mut commands);
     s.open_attachment(&attachment("cat.png", matrix_core::AttachmentKind::Image));
-    assert!(matches!(&s.preview, Some(Preview { content: PreviewContent::Image(None), .. })));
+    assert!(matches!(
+        &s.preview,
+        Some(Preview { content: PreviewContent::Image { status: ImageStatus::Downloading, .. }, .. })
+    ));
     assert!(matches!(
         commands.try_next(),
         Some((_, Command::FetchMedia { size: matrix_core::MediaSize::Original, .. }))
+    ));
+}
+
+#[test]
+fn a_decoded_attachment_preview_should_refresh_without_another_user_action() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.media.attach(Arc::new(|| {}));
+    s.poll(&mut Tx::default());
+    drain(&mut commands);
+    s.open_attachment(&attachment("cat.png", matrix_core::AttachmentKind::Image));
+    let (request, _) = commands.try_next().unwrap();
+    let bytes: Arc<[u8]> = include_bytes!("../../../../packaging/icons/better-matrix-256.png").as_slice().into();
+    apply(
+        &mut s,
+        Event::MediaLoaded {
+            request,
+            media: MediaRef::opaque("cat.png"),
+            size: MediaSize::Original,
+            bytes: bytes.clone(),
+        },
+    );
+    s.media.decode(bytes).unwrap().wait().unwrap();
+    assert!(s.poll(&mut Tx::default()), "finishing the original decode must rebuild the viewer");
+    assert!(!s.poll(&mut Tx::default()), "a ready preview should stop rebuilding");
+}
+
+#[test]
+fn opening_an_attachment_should_show_its_cached_thumbnail_while_the_original_loads() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.media.attach(Arc::new(|| {}));
+    let file = attachment("cat.png", matrix_core::AttachmentKind::Image);
+    let bytes: Arc<[u8]> = include_bytes!("../../../../packaging/icons/better-matrix-256.png").as_slice().into();
+    s.media.loaded(file.media.clone().unwrap(), bytes.clone(), Some((256, 256)));
+    s.media.decode(bytes).unwrap().wait().unwrap();
+    s.media.measure();
+    s.open_attachment(&file);
+    assert!(matches!(
+        &s.preview,
+        Some(Preview { content: PreviewContent::Image { thumbnail: Some(_), status: ImageStatus::Downloading }, .. })
     ));
 }
 

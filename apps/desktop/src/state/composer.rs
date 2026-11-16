@@ -116,6 +116,8 @@ pub struct Composer {
     /// The user's own message being edited. The field holds its text, and sending changes it
     /// rather than sending a new message.
     pub editing: Option<Editing>,
+    /// The selection and its content-space caret line last revealed by the editor.
+    pub revealed_caret: Option<(usize, usize, f32)>,
 }
 
 impl Default for Composer {
@@ -129,6 +131,7 @@ impl Default for Composer {
             link: None,
             reply_to: None,
             editing: None,
+            revealed_caret: None,
         }
     }
 }

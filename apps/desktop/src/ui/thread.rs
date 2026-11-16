@@ -2,7 +2,7 @@
 //! its own composer. Replies sent here join the thread.
 
 use matrix_core::{RoomSummary, TimelineKey};
-use rune::{El, col, row, text};
+use rune::{Cx, El, col, row, text};
 
 use super::components::icon_button;
 use super::composer::composer;
@@ -15,7 +15,14 @@ use crate::state::{AccountData, ComposerTarget, State};
 
 const WIDTH: f32 = 420.0;
 
-pub fn thread_panel(s: &State, account: &AccountData, room: &RoomSummary, root: &str, p: &Palette) -> El {
+pub fn thread_panel(
+    s: &State,
+    account: &AccountData,
+    room: &RoomSummary,
+    root: &str,
+    p: &Palette,
+    ui: &mut Cx<State>,
+) -> El {
     let key = TimelineKey::thread(&room.room_id, root);
     let cx = Context::new(s, account, room, &key);
     let header = row()
@@ -52,6 +59,6 @@ pub fn thread_panel(s: &State, account: &AccountData, room: &RoomSummary, root: 
         .children(water)
         .child(header)
         .child(timeline(&cx, account.timeline(&key), "thread-timeline", &s.thread_near_top, None, p))
-        .child(composer(s, ComposerTarget::Thread, t!("thread.placeholder"), p))
+        .child(composer(s, ComposerTarget::Thread, t!("thread.placeholder"), p, ui))
         .on_drop_files(|s: &mut State, files, _| s.attach_files_to(ComposerTarget::Thread, files))
 }

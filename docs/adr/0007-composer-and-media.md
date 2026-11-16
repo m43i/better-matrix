@@ -26,9 +26,14 @@ screenshots, voice memos, and images and PDFs that open large.
   - `Format` lists every toolbar action; the toolbar renders the list.
 - **Composer layout:**
   - Room and thread editors grow up to eight lines, then scroll inside their own viewport,
-    keeping the caret visible while typing or pasting. Padding and the bottom bar stay outside
+    keeping the caret visible while typing or pasting. Vertical padding and the bottom bar stay outside
     that viewport so the controls remain visible; clicking its padding focuses the editor.
     The editor shrinks again when text is removed.
+  - The wheel works over the text and its side padding. A Rune Kit scrollbar indicates the
+    position and can be dragged without taking focus. Keyboard navigation and selection keep
+    the caret visible. Pointer selections use a content-space caret marker to reveal their
+    moving end too; only a changed selection or caret line requests a reveal, so scrolling by
+    hand can leave the caret off screen.
   - The field comes first. A bottom bar holds attach, emoji, `Aa`, voice memo and poll, with send at
     the right. The formatting toolbar shows only while `Aa` is on.
   - Both bars `preserve_focus_on_press` and their buttons don't take focus, so formatting and
@@ -137,6 +142,10 @@ screenshots, voice memos, and images and PDFs that open large.
     right; Esc or a press beside the file closes it.
   - Images fetch the original (`MediaSize::Original`) and decode outside `MediaCache`, since a
     thumbnail may share the original's `MediaRef`.
+    The cached timeline thumbnail shows immediately while the original downloads and decodes.
+    Downloading, decoding, ready and failed are explicit states; `poll` promotes a finished
+    decode once so the decoder's wake rebuilds the viewer without waiting for another UI action.
+    A failed decode shows an error and keeps the thumbnail available.
   - PDFs render on a worker with hayro, a pure-Rust rasteriser, so no platform needs a system
     library. Pages arrive one by one as `rune::Pixels` at 2× point size, up to 60.
   - A PDF render stops at 40 million pixels (160 MiB), draws pages above 8 million pixels

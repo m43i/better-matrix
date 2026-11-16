@@ -6,10 +6,38 @@ use rune::{Image, Pixels};
 /// What a preview shows.
 #[derive(Debug)]
 pub enum PreviewContent {
-    /// A picture, decoded once downloaded.
-    Image(Option<Image>),
+    /// The original picture, with the timeline's thumbnail while it loads.
+    Image { thumbnail: Option<Image>, status: ImageStatus },
     /// A PDF's pages as they are rendered, each with its size in pixels.
     Document { pages: Vec<(Pixels, (u32, u32))>, status: DocumentStatus },
+}
+
+/// Download and decode are separate steps; either finishing must refresh the viewer.
+#[derive(Debug)]
+pub enum ImageStatus {
+    Downloading,
+    Decoding(Image),
+    Ready(Image),
+    Failed(String),
+}
+
+impl PreviewContent {
+    /// Promotes a completed decode once, so the setup waker rebuilds the viewer and then rests.
+    pub fn poll(&mut self) -> bool {
+        let Self::Image { thumbnail, status } = self else { return false };
+        let ImageStatus::Decoding(image) = status else { return false };
+        if !image.is_ready() {
+            return false;
+        }
+        *status = match image.error() {
+            Some(error) => ImageStatus::Failed(error.to_string()),
+            None => {
+                thumbnail.take();
+                ImageStatus::Ready(image.clone())
+            }
+        };
+        true
+    }
 }
 
 /// How far a PDF has got.
@@ -113,5 +141,16 @@ mod tests {
     #[test]
     fn a_file_that_is_no_pdf_should_fail_to_render() {
         assert!(render_document(b"not a pdf", 1, || true, |_, _| {}).is_err());
+    }
+
+    #[test]
+    fn an_image_that_cannot_decode_should_stop_loading_and_report_its_error() {
+        let decoder = rune::ImageCache::new(std::sync::Arc::new(|| {}));
+        let image = decoder.load(b"not an image".as_slice());
+        assert!(image.wait().is_err());
+        let mut content = PreviewContent::Image { thumbnail: None, status: ImageStatus::Decoding(image) };
+        assert!(content.poll());
+        assert!(matches!(content, PreviewContent::Image { status: ImageStatus::Failed(_), .. }));
+        assert!(!content.poll());
     }
 }

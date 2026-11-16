@@ -2,7 +2,7 @@
 //! on the room attach to its composer.
 
 use matrix_core::{RoomKind, RoomSummary, TimelineKey};
-use rune::{El, col, row, text};
+use rune::{Cx, El, col, row, text};
 
 use super::components::icon_button;
 use super::composer::composer;
@@ -13,7 +13,7 @@ use super::timeline::{Context, timeline};
 use crate::i18n::{t, tf};
 use crate::state::{AccountData, ComposerTarget, EmojiFor, Popover, SidePanel, State};
 
-pub fn room_pane(s: &State, account: &AccountData, p: &Palette) -> El {
+pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<State>) -> El {
     let Some(room) = s.active_room_id().and_then(|id| account.room(id)) else {
         return super::overview::overview(s, account, p);
     };
@@ -38,7 +38,7 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette) -> El {
         Some(call) => main.child(super::call::stage(s, account, call, p)),
         None => main
             .child(timeline(&cx, account.timeline(&key), "timeline", &s.near_top, Some(&s.at_bottom), p))
-            .child(composer(s, ComposerTarget::Room, &tf!("composer.placeholder", room = inline_name(room)), p)),
+            .child(composer(s, ComposerTarget::Room, &tf!("composer.placeholder", room = inline_name(room)), p, ui)),
     };
     let main = main
         .on_drop_files(|s: &mut State, files, _| s.attach_files_to(ComposerTarget::Room, files))
@@ -50,7 +50,7 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette) -> El {
         Some(SidePanel::Threads) => pane.child(super::info::threads(account, room, p)),
         Some(SidePanel::Files) => pane.child(super::info::files(account, room, p)),
         None => match s.active_thread() {
-            Some(root) => pane.child(thread_panel(s, account, room, root, p)),
+            Some(root) => pane.child(thread_panel(s, account, room, root, p, ui)),
             None => pane,
         },
     };

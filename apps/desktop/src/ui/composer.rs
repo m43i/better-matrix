@@ -4,7 +4,8 @@
 //! bars leave the field focused, so formatting and emoji go where the caret is. Keys carry the
 //! composer's prefix, so both can be on screen at once.
 
-use rune::{Color, El, Key, auto_grow, col, el, icon, row, text, text_input};
+use rune::{Color, Cx, El, Key, auto_grow, col, el, icon, row, text, text_input};
+use rune_kit::{ScrollBar, ScrollBarStyle};
 
 use super::components::icon_button;
 use super::icons;
@@ -16,6 +17,9 @@ const EDITOR_LINES: usize = 8;
 const EDITOR_TOP: f32 = 14.0;
 const EDITOR_BOTTOM: f32 = 8.0;
 
+#[cfg(test)]
+mod tests;
+
 /// A key unique to this composer.
 fn key(target: ComposerTarget, name: &str) -> String {
     match target {
@@ -24,7 +28,7 @@ fn key(target: ComposerTarget, name: &str) -> String {
     }
 }
 
-pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palette) -> El {
+pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palette, cx: &mut Cx<State>) -> El {
     let c = s.composer(target);
     let input = text_input(&c.edit, font::BODY)
         .key(composer_field(target))
@@ -60,12 +64,20 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
     let input = col()
         .key(key(target, "composer-editor"))
         .w_full()
-        .px(16.0)
         .pt(EDITOR_TOP)
         .pb(EDITOR_BOTTOM)
+        .preserve_focus_on_press(true)
         .cursor(rune::Cursor::Text)
         .on_press_tx(move |_: &mut State, tx| tx.focus(composer_field(target), false))
-        .child(auto_grow(input, 1, EDITOR_LINES).key(key(target, "composer-scroll")));
+        .child(
+            auto_grow(input, 1, EDITOR_LINES)
+                .key(key(target, "composer-scroll"))
+                .px(16.0)
+                .children(selection_caret(s, target, cx))
+                .scroll_bar_styled(
+                    ScrollBarStyle::neutral(s.dark(cx.system_dark())).thumb(p.divider).thumb_hover(p.text_muted),
+                ),
+        );
 
     let mut frame = col()
         .key(key(target, "composer-frame"))
@@ -103,6 +115,41 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
         ComposerTarget::Thread => el().h(TYPING_LINE),
     };
     col().w_full().px(20.0).pt(4.0).child(frame).child(below)
+}
+
+/// Rune follows keyboard edits itself; pointer selection also needs its moving end revealed.
+/// The marker lives in content coordinates, so a wheel scroll alone never asks to reveal it.
+fn selection_caret(s: &State, target: ComposerTarget, cx: &Cx<State>) -> Option<El> {
+    let edit = &s.composer(target).edit;
+    if edit.anchor == edit.focus {
+        return None;
+    }
+    let caret = cx.caret(composer_field(target))?;
+    let field = cx.window_layout(composer_field(target))?;
+    let viewport = cx.window_layout(&key(target, "composer-scroll"))?;
+    let outside = caret[1] < viewport[1] || caret[1] + caret[3] > viewport[1] + viewport[3];
+    let top = caret[1] - field[1];
+    let selection = (edit.anchor, edit.focus);
+    let marker = key(target, "composer-caret");
+    Some(el().key(marker.clone()).absolute(0.0, top).size(1.0, caret[3]).a11y_hidden().on_layout_tx(
+        move |s: &mut State, _, tx| {
+            let c = s.composer_mut(target);
+            if (c.edit.anchor, c.edit.focus) != selection
+                || c.revealed_caret
+                    .is_some_and(|(anchor, focus, y)| (anchor, focus) == selection && (y - top).abs() < 0.5)
+            {
+                tx.live_only();
+                return;
+            }
+            c.revealed_caret = Some((selection.0, selection.1, top));
+            if outside {
+                tx.instant();
+                tx.scroll_into_view_in(key(target, "composer-scroll"), marker.clone());
+            } else {
+                tx.live_only();
+            }
+        },
+    ))
 }
 
 /// The height of the line under the room's composer, shown or empty, so the composer never

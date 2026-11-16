@@ -47,7 +47,7 @@ pub use gifs::GifCache;
 pub use link_previews::LinkPreviews;
 pub use media::MediaCache;
 pub use poll::{MAX_ANSWERS, PollForm};
-pub use preview::{DocumentStatus, Opens, Preview, PreviewContent, render_document};
+pub use preview::{DocumentStatus, ImageStatus, Opens, Preview, PreviewContent, render_document};
 pub use profile::{ContactStep, ProfileForm};
 pub use room_discovery::Directory;
 pub use search::{PeopleSearch, SEARCH_PAUSE, matches};
@@ -1488,7 +1488,7 @@ impl State {
                 if let Some(preview) = self.preview.as_mut().filter(|preview| preview.media == media) {
                     match &mut preview.content {
                         PreviewContent::Document { status, .. } => *status = DocumentStatus::Failed(error),
-                        PreviewContent::Image(_) => self.notice = Some(error),
+                        PreviewContent::Image { status, .. } => *status = ImageStatus::Failed(error),
                     }
                 }
             }
@@ -1661,6 +1661,7 @@ impl State {
         }
         // Images decoded since the last frame count at their exact size from now on.
         changed |= self.media.measure();
+        changed |= self.preview.as_mut().is_some_and(|preview| preview.content.poll());
         self.retry_due(now, tx);
         changed |= self.search_people(now);
         // Searches go out for the active account; with none, nothing waits.
@@ -2455,7 +2456,10 @@ impl State {
     pub fn open_attachment(&mut self, attachment: &matrix_core::Attachment) {
         let (Some(account), Some(media)) = (self.nav.account.clone(), attachment.media.clone()) else { return };
         let content = match Opens::of(attachment) {
-            Opens::Image => PreviewContent::Image(None),
+            Opens::Image => PreviewContent::Image {
+                thumbnail: attachment.preview().and_then(|(media, _)| self.media.image(&media).cloned()),
+                status: ImageStatus::Downloading,
+            },
             Opens::Document => PreviewContent::Document { pages: Vec::new(), status: DocumentStatus::Downloading },
             Opens::Download => {
                 self.download(account, media, &attachment.name);
@@ -2471,7 +2475,11 @@ impl State {
     fn preview_loaded(&mut self, media: &MediaRef, bytes: std::sync::Arc<[u8]>) {
         let Some(preview) = self.preview.as_mut().filter(|preview| preview.media == *media) else { return };
         match &mut preview.content {
-            PreviewContent::Image(image) => *image = self.media.decode(bytes),
+            PreviewContent::Image { status, .. } => {
+                if let Some(image) = self.media.decode(bytes) {
+                    *status = ImageStatus::Decoding(image);
+                }
+            }
             PreviewContent::Document { status, .. } => {
                 *status = DocumentStatus::Rendering;
                 self.shell.render_document(media.clone(), bytes);

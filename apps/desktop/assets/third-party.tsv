@@ -616,7 +616,9 @@ ruma-identifiers-validation	0.14.0	MIT
 ruma-macros	0.20.2	MIT
 ruma-signatures	0.22.1	MIT
 rune	0.0.1	MIT
+rune-highlights	0.0.1	MIT AND Apache-2.0
 rune-i18n	0.1.0	MIT
+rune-kit	0.0.1	MIT
 rune-motion	0.1.0	MIT
 rune-notify	0.0.1	MIT
 rune-staging	0.0.1	MIT
@@ -796,6 +798,7 @@ wasm-bindgen-macro	0.2.130	MIT OR Apache-2.0
 wasm-bindgen-macro-support	0.2.130	MIT OR Apache-2.0
 wasm-bindgen-shared	0.2.130	MIT OR Apache-2.0
 wasm-streams	0.5.0	MIT OR Apache-2.0
+wasmparser	0.245.1	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 wayland-backend	0.3.17	MIT
 wayland-client	0.31.15	MIT
 wayland-csd-frame	0.3.0	MIT

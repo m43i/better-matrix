@@ -795,7 +795,7 @@ mod tests {
             (state::ComposerTarget::Thread, "thread-composer-scroll"),
         ] {
             let viewport = rt.presented(scroll).unwrap().0;
-            let (x, y) = (viewport[0] - 8.0, viewport[1] + viewport[3] / 2.0);
+            let (x, y) = (viewport[0] + 8.0, viewport[1] + viewport[3] / 2.0);
             rt.pointer_down(x, y);
             rt.pointer_up(x, y);
             rt.frame(1.0 / 60.0);

@@ -46,7 +46,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             .h_full()
             .min_w(0.0)
             .child(sidebar::sidebar(s, account, &p))
-            .child(room::room_pane(s, account, &p)),
+            .child(room::room_pane(s, account, &p, cx)),
         (Screen::Chat, None) => room::empty_state(t!("room.pick_account"), &p),
         (Screen::SignIn, _) => {
             let front = sign_in::sign_in(s, &p);

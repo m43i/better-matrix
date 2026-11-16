@@ -24,7 +24,7 @@ Date: 2026-11-14
 - **Rune for the desktop UI:**
   - [Rune](https://github.com/anomalyco/rune), a GPU-rendered Rust UI framework; views are
     plain functions of state.
-  - One `dev` rev is pinned for `rune`, `rune-i18n` and `rune-notify`; `[patch.crates-io]`
+  - One `dev` rev is pinned for `rune`, `rune-i18n`, `rune-kit` and `rune-notify`; `[patch.crates-io]`
     mirrors Rune's own patch table at that rev.
   - Agents read Rune's docs synced at that rev (`bun run agent-tools`), never memory.
   - What Rune lacks goes behind the app's **shell** ([0002](0002-engine-and-desktop-state.md)).

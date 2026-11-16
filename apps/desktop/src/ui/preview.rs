@@ -6,12 +6,15 @@ use rune::{Color, El, ScrollSpec, SurfaceFit, col, el, icon, row, text};
 use super::icons;
 use super::theme::font;
 use crate::i18n::{t, tf};
-use crate::state::{DocumentStatus, Preview, PreviewContent, State};
+use crate::state::{DocumentStatus, ImageStatus, Preview, PreviewContent, State};
 
 /// The widest a PDF page draws, in points.
 const PAGE_WIDTH: f32 = 820.0;
 /// Room around the file for the bar above it.
 const MARGIN: f32 = 72.0;
+
+#[cfg(test)]
+mod tests;
 
 pub fn preview(preview: &Preview, window: [f32; 2]) -> El {
     let backdrop = el()
@@ -23,13 +26,37 @@ pub fn preview(preview: &Preview, window: [f32; 2]) -> El {
         .on_press(State::close_preview);
     let [w, h] = window;
     let content = match &preview.content {
-        PreviewContent::Image(Some(image)) if image.is_ready() => el()
-            .key("preview-image")
-            .size((w - 2.0 * MARGIN).max(100.0), (h - 2.0 * MARGIN).max(100.0))
-            .role("img")
-            .label(preview.attachment.name.clone())
-            .pixels_fit(image.pixels(), SurfaceFit::Fit),
-        PreviewContent::Image(_) => status(t!("preview.loading")),
+        PreviewContent::Image { thumbnail, status: state } => {
+            let image = match state {
+                ImageStatus::Ready(image) => Some(image),
+                _ => thumbnail.as_ref(),
+            };
+            let (width, height) = ((w - 2.0 * MARGIN).max(100.0), (h - 2.0 * MARGIN).max(100.0));
+            let mut content = col().items_center();
+            if let Some(image) = image {
+                content = content.size(width, height).child(
+                    el().key("preview-image")
+                        .size(width, height)
+                        .role("img")
+                        .label(preview.attachment.name.clone())
+                        .pixels_fit(image.pixels(), SurfaceFit::Fit),
+                );
+            }
+            let message = match state {
+                ImageStatus::Failed(error) => Some(tf!("preview.failed", error = error)),
+                ImageStatus::Downloading | ImageStatus::Decoding(_) => Some(t!("preview.loading").to_owned()),
+                ImageStatus::Ready(_) => None,
+            };
+            if let Some(message) = message {
+                let label = status(&message);
+                content = content.child(if image.is_some() {
+                    col().absolute(0.0, height + 8.0).w_full().items_center().child(label)
+                } else {
+                    label
+                });
+            }
+            content
+        }
         PreviewContent::Document { pages, status: state } => {
             let mut list = col().key("preview-pages").items_center().gap(16.0).py(MARGIN);
             let width = PAGE_WIDTH.min(w - 2.0 * MARGIN).max(100.0);

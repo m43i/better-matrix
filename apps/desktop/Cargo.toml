@@ -26,6 +26,7 @@ pollster = "0.4"
 rfd = "0.17"
 rune = { workspace = true, features = ["native-file-dialog"] }
 rune-i18n.workspace = true
+rune-kit.workspace = true
 # Sound the app plays and records itself (voice messages, audio files, the ring), on the device
 # the user picked: decoders in pure Rust, cpal for the device.
 cpal = "0.18"

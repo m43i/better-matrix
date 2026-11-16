@@ -701,6 +701,7 @@ dependencies = [
  "rfd",
  "rune",
  "rune-i18n",
+ "rune-kit",
  "rune-notify",
  "serde_json",
  "symphonia",
@@ -7101,6 +7102,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rune-highlights"
+version = "0.0.1"
+source = "git+https://github.com/anomalyco/rune?rev=384c2991e582418ba529835279c5876ac3915e02#384c2991e582418ba529835279c5876ac3915e02"
+dependencies = [
+ "unicode-ident",
+ "wasmparser",
+]
+
+[[package]]
 name = "rune-i18n"
 version = "0.1.0"
 source = "git+https://github.com/anomalyco/rune?rev=384c2991e582418ba529835279c5876ac3915e02#384c2991e582418ba529835279c5876ac3915e02"
@@ -7117,6 +7127,18 @@ dependencies = [
  "web-sys",
  "windows",
  "writeable",
+]
+
+[[package]]
+name = "rune-kit"
+version = "0.0.1"
+source = "git+https://github.com/anomalyco/rune?rev=384c2991e582418ba529835279c5876ac3915e02#384c2991e582418ba529835279c5876ac3915e02"
+dependencies = [
+ "icu_normalizer",
+ "rune",
+ "rune-highlights",
+ "rune-motion",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -9063,6 +9085,16 @@ dependencies = [
  "tokio",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "wasmparser"
+version = "0.245.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f08c9adee0428b7bddf3890fc27e015ac4b761cc608c822667102b8bfd6995e"
+dependencies = [
+ "bitflags 2.13.2",
+ "indexmap",
 ]
 
 [[package]]
