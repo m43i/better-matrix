@@ -1,0 +1,17 @@
+{
+  "mobile.accounts.back": "Back",
+  "mobile.accounts.browser_waiting": "Finish signing in on {{server}}'s page. The app continues on its own once you're done.",
+  "mobile.accounts.copied": "Copied",
+  "mobile.accounts.fetch_keys": "Fetch keys from backup",
+  "mobile.accounts.fetch_keys_hint": "Messages that couldn't be decrypted can be read once their keys come from your key backup. This happens on its own after verifying; try it again if some still can't be read.",
+  "mobile.accounts.license": "Free software under the MIT license",
+  "mobile.accounts.making_key": "Making your recovery key…",
+  "mobile.accounts.no_code": "The server didn't send a link or code.",
+  "mobile.accounts.notifications_hint": "When rooms notify you, unless a room has its own setting. Change a single room from its menu. Saved on your homeserver, so your other apps follow it.",
+  "mobile.accounts.preferences": "Preferences",
+  "mobile.accounts.restoring": "Signing in as {{account}}…",
+  "mobile.accounts.security_title": "Account & security",
+  "mobile.accounts.share": "Share",
+  "mobile.accounts.sign_out_hint": "Its messages and keys are removed from this device. Keep your recovery key or another signed-in session, so you can read your encrypted messages after signing in again.",
+  "mobile.accounts.third_party_hint": "The main libraries Better Matrix is built with, each with its version and license."
+}

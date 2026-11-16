@@ -1,0 +1,8 @@
+{
+  "mobile.calls.microphone_needed": "Anrufe brauchen das Mikrofon. Erlaube es in den Systemeinstellungen.",
+  "mobile.calls.camera_needed": "Video braucht die Kamera. Erlaube sie in den Systemeinstellungen; der Anruf beginnt ohne Video.",
+  "mobile.calls.minimize": "Zurück zum Chat",
+  "mobile.calls.speaker_on": "Lautsprecher verwenden",
+  "mobile.calls.speaker_off": "Hörmuschel verwenden",
+  "mobile.calls.flip_camera": "Kamera wechseln"
+}

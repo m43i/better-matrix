@@ -11,7 +11,7 @@ needs one, add it here.
 
 **Account menu**
 : The popover opened from the signed-in user's avatar at the bottom of the rail: switch account,
-  add an account, settings, sign out.
+  add an account, settings, sign out. On phones, the sheet the avatar in the tab bar opens.
 
 **Rail**
 : The narrow column on the far left: Home and the active account's spaces in the user's order,
@@ -55,6 +55,16 @@ needs one, add it here.
 **Sidebar**
 : The column listing the rooms and direct chats of the current scope.
 
+**Space picker**
+: On phones, the sheet Home's title opens: Home and the account's spaces, the desktop's rail.
+
+**Jump to**
+: On phones, the search at the top of Home: the account's rooms, direct chats and spaces by name.
+
+**Activity**
+: On phones, the screen behind the bell in Home's header, listing what notified the user
+  (`Event::Notification`), newest first, for every account.
+
 **Timeline**
 : A room's messages, oldest first, with date dividers, the "New" marker and the start of visible
   history. Followed only for the room on screen; changes arrive as diffs. A **timeline item** is
@@ -71,6 +81,10 @@ needs one, add it here.
 
 **Reaction**
 : An emoji added to a message; the same emoji from several people is counted on one chip.
+
+**Message actions**
+: On phones, the sheet a long press on a message opens: quick reactions, reply, reply in thread,
+  copy, edit, delete, end poll, share. The mobile counterpart of the hover toolbar.
 
 **Hover toolbar**
 : React, reply and reply-in-thread buttons at a message's top right, shown while it is hovered.
@@ -191,6 +205,21 @@ needs one, add it here.
 **Homeserver**
 : The server an account lives on. Entered as a server name (`matrix.org`) or URL.
 
+**Permalink**
+: A link naming a Matrix user, room or message rather than a web page: `https://matrix.to/#/…` or
+  a `matrix:` URI (`matrix_core::Permalink`). It opens in the app, never the browser. See
+  [ADR 0008](adr/0008-people-and-rooms.md).
+
+**Room preview**
+: A room as someone outside it sees it: name, alias, picture, topic, member count, who may join,
+  and whether the account joined or is invited (`RoomPreview`, `Command::PreviewRoom`). What a
+  permalink to an unjoined room shows, with Join.
+
+**Link dialog** / **link screen**
+: Where a permalink opens when its room isn't joined, or names a person: the room preview with
+  Join, or the person with Start chat, and the account it acts for. A dialog on the desktop
+  (`Modal::Link`), a sheet on phones (`app/link.tsx`).
+
 **Discovery**
 : Resolving what the user typed (server name, URL or Matrix ID; `SignInInput`) to a homeserver
   through `.well-known`, and learning its sign-in methods (`LoginMethods`). The result is a
@@ -211,6 +240,31 @@ needs one, add it here.
 
 **Push rules**
 : Server-side rules that decide which events notify. The SDK evaluates them during sync.
+
+**Push**
+: A notification the homeserver sends a phone while the app may not be running: only an account,
+  a room and an event ID (`event_id_only`), which the phone fetches and decrypts itself
+  (`PushTarget`, `PushContent`). See [ADR 0010](adr/0010-mobile.md) and [push.md](push.md).
+
+**Pusher**
+: An account's registration of one device for pushes on its homeserver: the push gateway, the
+  device's push token, and what each push carries (`Pusher`, `Command::RegisterPusher`).
+
+**Push gateway**
+: The service a homeserver sends pushes to, which hands them to the phones: ours translates the
+  Matrix push gateway API into Expo's push service (`packages/push-gateway`).
+
+**Push token**
+: The device's address for pushes: an Expo push token (`ExponentPushToken[…]`), one per device,
+  shared by every account on it.
+
+**Notification Service Extension**
+: The small iOS process that gets each push before it shows and replaces its generic text with
+  the decrypted message (`BetterMatrixPush`, `bm_push_fetch`).
+
+**Push task**
+: Android's handler for a push, run in the app's JavaScript (headless when the app isn't
+  running): it asks the engine, or the account's store without it (`fetch_push`).
 
 **Session**
 : One signed-in device of an account (a Matrix device). This app's own session's tokens are saved
@@ -283,7 +337,8 @@ needs one, add it here.
 
 **Call stage**
 : What a room shows in place of its timeline during its call: faces (voice) or the video grid,
-  over the call glow, with the controls. It can share the room pane with chat.
+  over the call glow, with the controls. It can share the room pane with chat; on phones it is a
+  full-screen modal over the app.
 
 **Call layout**
 : How the call stage arranges its surfaces: Auto chooses a gallery, one-to-one view or shared
@@ -305,8 +360,25 @@ needs one, add it here.
 : The user's own camera preview. Hiding it changes only the local call layout, not what the
   camera publishes to others.
 
+**Compact stage**
+: The call stage made small above the room's chat, one video surface at a time with small
+  controls: above the chat in a narrow desktop room, and on phones the top of the call's room
+  while its chat is shown. Tapping it returns to the full stage. See
+  [ADR 0010](adr/0010-mobile.md).
+
 **Call bar**
 : The strip at the bottom of the sidebar while the call's stage isn't shown, leading back to it.
+  On phones, the strip at the top of the tab screens.
+
+**Platform camera**
+: A camera the app runs with the system's own API (Camera2, AVFoundation) for the engine, which
+  pushes its frames into the call (`calls::PlatformCamera`, `push_camera_frame`): phones, where
+  `nokhwa` has no backend. See [ADR 0009](adr/0009-calls.md).
+
+**Video view**
+: A native view on phones that shows one call video (`CallVideoView`, by `VideoId`); the engine
+  draws its frames straight into it, never through JavaScript. See
+  [ADR 0010](adr/0010-mobile.md).
 
 **Ring**
 : A call ringing for the user (`Event::IncomingCall`), shown as a card until answered, declined
@@ -367,7 +439,21 @@ needs one, add it here.
 : How the app introduces itself to OAuth servers: name and public URI (`ClientIdentity`).
 
 **Reducer**
-: `State::apply`, the one function that folds engine events into desktop state.
+: `State::apply`, the one function that folds engine events into desktop state. The mobile app has its own, `apply` in
+  `apps/mobile/src/state/reducer.ts`.
+
+**Bridge**
+: The engine for the phones: `matrix-ffi`'s UniFFI object that takes commands and gives events
+  as JSON, with media handed over as files (`Bridge`, `BridgeEvent`). See
+  [ADR 0010](adr/0010-mobile.md).
+
+**Launch handoff**
+: The folder where a second desktop launch leaves its permalinks for the running app, which reads
+  them when Rune reopens it (`platform::launch`). See [ADR 0001](adr/0001-stack-and-tooling.md).
+
+**Link inbox**
+: On phones, where permalinks the system opened the app with wait until an account can open them
+  (`ui/links/inbox.ts`). See [ADR 0010](adr/0010-mobile.md).
 
 **Scratch folder**
 : A private folder under the app's cache for files made for a moment (audio to play, voice
@@ -393,6 +479,7 @@ needs one, add it here.
 **Scene**
 : A named starting state for a headless render (`--scene demo-space`), built from the demo
   fixtures.
+  On phones, `bettermatrix://demo/<scene>` opens one in a dev build (`apps/mobile/src/demo`).
 
 **Headless**
 : Running the UI without a window: `--snap` renders a PNG, `--tree` dumps the element tree, and

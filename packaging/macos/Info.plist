@@ -22,6 +22,15 @@
   <string>12.3</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.social-networking</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>chat.bettermatrix.desktop.matrix</string>
+      <key>CFBundleURLSchemes</key>
+      <array><string>matrix</string></array>
+    </dict>
+  </array>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSCameraUsageDescription</key>

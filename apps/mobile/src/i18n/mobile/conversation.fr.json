@@ -1,0 +1,13 @@
+{
+  "mobile.conversation.jump_latest": "Aller aux plus récents",
+  "mobile.conversation.copy": "Copier le texte",
+  "mobile.conversation.share": "Partager",
+  "mobile.conversation.saved": "{{name}} enregistré",
+  "mobile.conversation.share_failed": "Impossible de partager le fichier : {{error}}",
+  "mobile.conversation.more_reactions": "Plus de réactions",
+  "mobile.conversation.room_missing": "Cette conversation n'est pas disponible.",
+  "mobile.conversation.message_missing": "Ce message n'est plus chargé.",
+  "mobile.conversation.gif": "GIF",
+  "mobile.conversation.play_video": "Lire la vidéo",
+  "mobile.conversation.open_thread": "Ouvrir le fil"
+}

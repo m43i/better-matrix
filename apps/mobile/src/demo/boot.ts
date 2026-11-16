@@ -1,0 +1,34 @@
+// Starts the app on a demo scene: a store on the demo engine, seeded through `apply`.
+
+import { Asset } from 'expo-asset';
+
+import { setLanguage } from '../i18n';
+import { DEFAULT_SETTINGS } from '../state/settings';
+import { Store } from '../state/store';
+import { demoEngine, type MediaResolver } from './engine';
+import { DEMO_MEDIA } from './fixtures';
+import { type Scene, sceneEvents, scenes, type SceneName } from './scenes';
+
+/** The app's own images, standing in for media on a server. */
+const ASSETS: Record<string, number> = {
+  [DEMO_MEDIA.screenshot]: require('../../assets/images/icon.png'),
+  [DEMO_MEDIA.release]: require('../../assets/images/android-icon-background.png'),
+};
+
+async function resolveMedia(media: string): Promise<string | null> {
+  const module = ASSETS[media];
+  if (module === undefined) return null;
+  const asset = await Asset.fromModule(module).downloadAsync();
+  return asset.localUri ? decodeURI(asset.localUri.replace(/^file:\/\//, '')) : null;
+}
+
+export function bootDemo(name: SceneName, media: MediaResolver = resolveMedia): Store {
+  const scene: Scene = scenes[name];
+  const settings = { ...DEFAULT_SETTINGS, ...scene.settings };
+  setLanguage(settings.language);
+  const engine = demoEngine(media);
+  const store = new Store(engine, settings);
+  for (const event of sceneEvents(scene)) engine.emit(event);
+  scene.setup?.(store);
+  return store;
+}

@@ -4,6 +4,7 @@ resolver = "3"
 members = [
     "apps/desktop",
     "packages/matrix-core",
+    "packages/matrix-ffi",
 ]
 
 # Turborepo's identity for the Cargo workspace (experimentalCargoWorkspaces).
@@ -31,6 +32,8 @@ rune-kit = { git = "https://github.com/anomalyco/rune", rev = "384c2991e582418ba
 rune-notify = { git = "https://github.com/anomalyco/rune", rev = "384c2991e582418ba529835279c5876ac3915e02" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# TypeScript types of the engine boundary, for the mobile app (matrix-core `ffi` feature).
+ts-rs = { version = "12", features = ["no-serde-warnings"] }
 thiserror = "2"
 # Diagnostics: the engine logs through `tracing`; the app prints them when RUST_LOG is set.
 tracing = "0.1"

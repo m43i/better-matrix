@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["CallMediaModule"]
+  },
+  "android": {
+    "modules": ["chat.bettermatrix.callmedia.CallMediaModule"]
+  }
+}

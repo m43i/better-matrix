@@ -37,6 +37,12 @@
         "-D",
         "warnings"
       ]
+    },
+    "typecheck": {
+      "outputs": []
+    },
+    "test": {
+      "outputs": []
     }
   }
 }

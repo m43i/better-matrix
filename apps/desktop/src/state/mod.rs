@@ -15,6 +15,7 @@ mod call_layout;
 mod composer;
 mod gifs;
 mod link_previews;
+mod links;
 mod media;
 mod navigation;
 mod poll;
@@ -49,8 +50,9 @@ pub use call_layout::{CallLayout, CallTile};
 pub use composer::{Composer, EditTarget, Format, ReplyTarget, VoiceMemo};
 pub use gifs::GifCache;
 pub use link_previews::LinkPreviews;
+pub use links::{LinkDialog, LinkStep};
 pub use media::MediaCache;
-pub use navigation::navigate;
+pub use navigation::{navigate, navigate_now};
 pub use poll::{MAX_ANSWERS, PollForm};
 pub use preview::{DocumentStatus, ImageStatus, Opens, Preview, PreviewContent, render_document};
 pub use profile::{ContactStep, ProfileForm};
@@ -324,6 +326,8 @@ pub enum Modal {
         /// Who was invited while the dialog is open.
         invited: Vec<String>,
     },
+    /// A permalink to a room the user hasn't joined (its preview, Join), or to a person.
+    Link(LinkDialog),
     /// A new name for a session.
     RenameSession {
         account: AccountId,
@@ -509,6 +513,8 @@ enum Purpose {
     Gif(String),
     /// A link's preview card, from an account's homeserver.
     LinkPreview(link_previews::LinkKey),
+    /// Looking up or joining what a permalink names; the link dialog's step holds the request.
+    Permalink,
     Cancel,
 }
 
@@ -609,6 +615,8 @@ pub struct State {
     pub window_focused: bool,
     /// The latest error worth telling the user about; dismissable.
     pub notice: Option<String>,
+    /// A permalink that came before any account was ready: it opens with the first room list.
+    pending_link: Option<matrix_core::Permalink>,
     /// The notice on screen and since when, so it goes after a while.
     notice_shown: Option<(String, std::time::Instant)>,
     /// Where a dialog's text field types when its dialog has just closed.
@@ -680,6 +688,7 @@ impl State {
             drop_hover: false,
             window_focused: true,
             notice: None,
+            pending_link: None,
             notice_shown: None,
             scratch: TextEdit::new(""),
             near_top: Arc::new(AtomicBool::new(false)),
@@ -929,6 +938,7 @@ impl State {
                     self.nav.threads.remove(&account);
                     self.sync_timeline();
                 }
+                self.open_pending_link();
             }
             Event::PublicRooms { request, mut rooms } => {
                 if let Some(Purpose::Directory { account, space }) = self.pending.get(&request)
@@ -1056,6 +1066,7 @@ impl State {
                 self.invalidate_members(&account, &room_id);
             }
             Event::PeopleFound { request, people } => {
+                self.link_person_found(request, &people);
                 self.search.found(request, people.clone());
                 self.invite_search.found(request, people.clone());
                 self.chat_search.found(request, people);
@@ -1072,6 +1083,8 @@ impl State {
                 }
                 _ => {}
             },
+            Event::RoomPreview { request, preview } => self.link_previewed(request, *preview),
+            Event::RoomJoined { request, room_id } => self.link_joined(request, &room_id),
             Event::RoomCreated { request, room_id } => {
                 let Some(Purpose::Create { account, space }) = self.pending.get(&request).cloned() else { return };
                 if self.nav.account.as_ref() != Some(&account) {
@@ -1209,6 +1222,8 @@ impl State {
             Event::CallDevices(devices) => self.call_devices = Some(devices),
             Event::Threads { account, room_id, threads } => self.accounts.set_threads(&account, room_id, threads),
             Event::Files { account, room_id, files } => self.accounts.set_files(&account, room_id, files),
+            // Pushes are for phones: the desktop syncs while it runs and never registers a pusher.
+            Event::PushContent { .. } => {}
         }
         if !location.is_current(self) {
             tx.settle();
@@ -1534,6 +1549,7 @@ impl State {
                 self.notice = Some(tf!("notice.side", error = error));
             }
             Purpose::Poll => self.notice = Some(tf!("notice.poll", error = error)),
+            Purpose::Permalink => self.link_failed(request, error),
             Purpose::DirectChat(_) | Purpose::DirectCall { .. } => {
                 self.notice = Some(tf!("notice.direct_chat", error = error));
             }
@@ -2060,6 +2076,7 @@ impl State {
             wanted.extend(faces.map(|media| (call.info.account.clone(), media)));
         }
         wanted.extend(self.rings.iter().filter_map(|ring| Some((ring.account.clone(), ring.caller.avatar.clone()?))));
+        wanted.extend(self.link_pictures());
         let mut seen = HashSet::new();
         let now = std::time::Instant::now();
         // Pictures on screen count as just used, so making room for previews keeps them.
@@ -3740,9 +3757,11 @@ impl State {
         self.shell.save_settings(self.settings.clone());
     }
 
-    /// Opens a link in the browser.
+    /// Opens a link: a permalink in the app, anything else in the browser.
     pub fn open_link(&mut self, url: &str, tx: &mut Tx) {
-        if let Err(error) = tx.open_url(url) {
+        if matrix_core::Permalink::is_permalink(url) {
+            navigation::navigate_now(self, tx, |s| s.open_permalink(url));
+        } else if let Err(error) = tx.open_url(url) {
             self.notice = Some(tf!("notice.browser", error = error));
         }
     }

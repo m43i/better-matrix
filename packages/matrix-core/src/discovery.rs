@@ -35,6 +35,7 @@ impl SignInInput {
 
 /// A discovered homeserver.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Homeserver {
     /// The server name users belong to (`example.org`), when found through `.well-known`.
     pub server_name: Option<String>,
@@ -55,7 +56,7 @@ impl Homeserver {
 
 /// Resolves `server` (a server name or URL) and asks it for its sign-in methods.
 pub(crate) async fn discover(server: &str) -> Result<Homeserver, Error> {
-    let client = Client::builder().server_name_or_homeserver_url(server).build().await?;
+    let client = crate::tls::sdk(Client::builder()).server_name_or_homeserver_url(server).build().await?;
     let oauth = client.oauth().server_metadata().await.is_ok();
     let password = match client.matrix_auth().get_login_types().await {
         Ok(response) => response.flows.iter().any(|flow| matches!(flow, LoginType::Password(_))),

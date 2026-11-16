@@ -3,6 +3,7 @@
 //! so tests run it headless.
 
 mod files;
+pub mod launch;
 mod notify;
 mod secrets;
 pub mod sound;
@@ -30,6 +31,9 @@ pub struct Shell {
     /// Where files made for a moment go (audio to play, voice memos being recorded): private to
     /// the user, and emptied at launch and exit.
     scratch: std::path::PathBuf,
+    /// Where a later launch of the app leaves its permalinks for this process
+    /// ([`launch`]); none headless.
+    handoff: Option<std::path::PathBuf>,
 }
 
 impl std::fmt::Debug for Shell {
@@ -49,6 +53,7 @@ impl Shell {
             document: Arc::default(),
             saves: Arc::default(),
             scratch,
+            handoff: None,
         }
     }
 
@@ -61,6 +66,7 @@ impl Shell {
             document: Arc::default(),
             saves: Arc::default(),
             scratch: std::env::temp_dir(),
+            handoff: None,
         }
     }
 
@@ -77,6 +83,7 @@ impl Shell {
                 document: Arc::default(),
                 saves: Arc::default(),
                 scratch: std::env::temp_dir(),
+                handoff: None,
             },
             posted,
         )
@@ -108,6 +115,27 @@ impl Shell {
         });
         if let Err(error) = spawned {
             eprintln!("better-matrix: could not render the document: {error}");
+        }
+    }
+
+    /// Reads the permalinks later launches leave in `handoff` (see [`launch`]).
+    pub fn with_handoff(mut self, handoff: std::path::PathBuf) -> Self {
+        self.handoff = Some(handoff);
+        self
+    }
+
+    /// Takes the permalinks a later launch handed on, off the UI thread; each opens through
+    /// [`State::open_permalink`].
+    pub fn take_handed_links(&self) {
+        let (Some(app), Some(handoff)) = (self.app.clone(), self.handoff.clone()) else { return };
+        let spawned = std::thread::Builder::new().name("handed-links".into()).spawn(move || {
+            let links = launch::take(&handoff);
+            if !links.is_empty() {
+                app.update(move |s: &mut State, _| links.iter().for_each(|link| s.open_permalink(link)));
+            }
+        });
+        if let Err(error) = spawned {
+            eprintln!("better-matrix: could not read the links handed on: {error}");
         }
     }
 

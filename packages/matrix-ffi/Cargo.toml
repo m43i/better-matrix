@@ -1,0 +1,36 @@
+[package]
+name = "matrix-ffi"
+description = "The mobile bridge to matrix-core: the engine behind a UniFFI object that takes commands and gives events as JSON."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+# lib: tests and the TypeScript export; staticlib: iOS; cdylib: Android and the binding generator.
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[dependencies]
+matrix-core = { workspace = true, features = ["ffi"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+ts-rs.workspace = true
+uniffi = "0.31"
+
+# Android: libwebrtc's start-up and the JNI entry points for video views and the camera.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+livekit.workspace = true
+
+[build-dependencies]
+# Android: libwebrtc's JNI symbols, kept and exported (build.rs).
+webrtc-sys-build = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

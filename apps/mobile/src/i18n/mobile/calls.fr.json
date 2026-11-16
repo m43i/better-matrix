@@ -1,0 +1,8 @@
+{
+  "mobile.calls.microphone_needed": "Les appels ont besoin du micro. Autorisez-le dans les réglages du système.",
+  "mobile.calls.camera_needed": "La vidéo a besoin de la caméra. Autorisez-la dans les réglages du système ; l’appel commence sans vidéo.",
+  "mobile.calls.minimize": "Retour à la discussion",
+  "mobile.calls.speaker_on": "Utiliser le haut-parleur",
+  "mobile.calls.speaker_off": "Utiliser l’écouteur",
+  "mobile.calls.flip_camera": "Changer de caméra"
+}

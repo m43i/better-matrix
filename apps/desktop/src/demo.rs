@@ -510,6 +510,8 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
         // The demo's homeserver names a call service.
         call: matrix_core::RoomCall { via: Some(matrix_core::CallVia::Rtc), ..matrix_core::RoomCall::default() },
         activity_ms: None,
+        encrypted: true,
+        can_rename: true,
     }
 }
 
@@ -746,4 +748,47 @@ pub fn stress(s: &mut State) {
         .collect();
     seed_timeline(s, &account, &TimelineKey::room("!big:example.org"), timeline(messages));
     s.select_room("!big:example.org");
+}
+
+/// The link dialog for a public room the demo accounts haven't joined, its preview in.
+pub fn link_preview(s: &mut State) {
+    seed(s);
+    s.open_permalink("https://matrix.to/#/%23rust%3Amatrix.org?via=matrix.org");
+    if let Some(crate::state::Modal::Link(crate::state::LinkDialog {
+        step: crate::state::LinkStep::Previewing(request),
+        ..
+    })) = &s.modal
+    {
+        let preview = matrix_core::RoomPreview {
+            room_id: "!rustlang:matrix.org".into(),
+            alias: Some("#rust:matrix.org".into()),
+            name: Some("Rust".into()),
+            topic: Some(
+                "The Rust programming language: questions, news and help. Be kind; the code of conduct applies.".into(),
+            ),
+            avatar: None,
+            member_count: 12_480,
+            join_rule: Some(matrix_core::JoinRule::Public),
+            space: false,
+            joined: false,
+            invited: false,
+        };
+        let event = matrix_core::Event::RoomPreview { request: *request, preview: Box::new(preview) };
+        s.apply(event, &mut rune::Tx::default());
+    }
+}
+
+/// The link dialog for a person, their profile in.
+pub fn link_person(s: &mut State) {
+    seed(s);
+    s.open_permalink("matrix:u/grace:example.org?action=chat");
+    if let Some(crate::state::Modal::Link(crate::state::LinkDialog {
+        step: crate::state::LinkStep::Person { request: Some(request), .. },
+        ..
+    })) = &s.modal
+    {
+        let grace = matrix_core::Person { id: "@grace:example.org".into(), name: "Grace Hopper".into(), avatar: None };
+        let event = matrix_core::Event::PeopleFound { request: *request, people: vec![grace] };
+        s.apply(event, &mut rune::Tx::default());
+    }
 }

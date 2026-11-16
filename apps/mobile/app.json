@@ -1,0 +1,129 @@
+{
+  "expo": {
+    "name": "Better Matrix",
+    "slug": "better-matrix",
+    "version": "0.0.2",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": [
+      "bettermatrix",
+      "org.example.bettermatrix",
+      "matrix"
+    ],
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./assets/images/icon.png",
+      "bundleIdentifier": "chat.bettermatrix.mobile",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Better Matrix uses the camera for video calls and to send photos.",
+        "NSMicrophoneUsageDescription": "Better Matrix uses the microphone for calls and voice messages.",
+        "NSPhotoLibraryUsageDescription": "Better Matrix lets you send photos and videos from your library.",
+        "UIBackgroundModes": [
+          "audio",
+          "voip"
+        ]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1e3a8a",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "chat.bettermatrix.mobile",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.FOREGROUND_SERVICE_CAMERA",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "https",
+              "host": "matrix.to"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-video",
+      "expo-localization",
+      "expo-sharing",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#171717",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 76
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          },
+          "ios": {
+            "deploymentTarget": "17.0"
+          }
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Better Matrix lets you send photos and videos from your library.",
+          "cameraPermission": "Better Matrix uses the camera to send photos."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Better Matrix uses the microphone for calls and voice messages."
+        }
+      ],
+      "expo-notifications",
+      "expo-asset",
+      "./plugins/withBadgeSize",
+      [
+        "./plugins/withPush",
+        {
+          "appGroup": "group.chat.bettermatrix.mobile",
+          "googleServicesFile": "./google-services.json"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "5c226781-87c9-485b-a09c-852e3a730d44"
+      }
+    },
+    "owner": "m43is-team"
+  }
+}

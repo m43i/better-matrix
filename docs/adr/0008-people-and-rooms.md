@@ -11,6 +11,10 @@ Date: 2026-11-14
   client-facing one. Name and picture still change through the client-server API everywhere.
 - Rooms can have thousands of members, and the user directory is a server request. Neither may
   be loaded or asked for all at once.
+- People share rooms, people and messages as links: `https://matrix.to/#/…` (what most clients
+  write) and `matrix:` URIs (MSC2312, in the spec since v1.2). A link names a room by its ID or
+  an alias, often one the account hasn't joined, sometimes on a server the account's own
+  doesn't know (`?via=`). The phones must route a link before the engine could answer.
 
 ## Decision
 
@@ -102,6 +106,11 @@ Date: 2026-11-14
   Decline leaves without forgetting the room. Buttons wait for completion and failures keep
   the invite available to retry. Joining refreshes the room feed before navigation, and late
   completion does not move another account or room.
+  Phones show the same fixed Invitations section first in Home's room list and open a sheet
+  with the same content and buttons (`app/invitation.tsx`, `state/actions/invitations.ts`).
+  Accepting brings the invited account on screen and opens the room, or shows a space as its
+  scope on Home (`openJoined`, as links do); an answer that ends after the sheet was left
+  navigates nowhere (`afterAnswer`).
 - **Public rooms in a space:** `Command::ListPublicRooms` reads all pages of the space hierarchy,
   including nested spaces, retains only public rooms and ranks by joined-member count. The
   space itself, subspaces and invite-only rooms are excluded; the UI also omits joined rooms.
@@ -117,6 +126,42 @@ Date: 2026-11-14
     `SpaceSummary::can_add_rooms`, or a room or space from Home.
   - Right-clicking a space on the rail offers rename (`can_rename`) and leave. Matrix can't
     delete a space for everyone.
+- **Permalinks** (`matrix_core::Permalink`, `permalinks.rs`) read matrix.to links (encoded or
+  not, `#/@user`, `#/#alias`, `#/!room`, `#/!room/$event`, `?via=`) and `matrix:` URIs
+  (`u/`, `r/`, `roomid/`, `/e/`, `?via=`, `?action=join|chat`). IDs are checked loosely (a sigil,
+  no spaces, a server where the kind needs one: v12 room IDs have none). The mobile app has the
+  same parser in TypeScript (`apps/mobile/src/state/permalinks.ts`); both run the shared vectors
+  in `packages/matrix-core/src/permalinks.json`, so a link reads the same in every app. A new
+  case is a new vector.
+- **Where a link goes:** a room ID an account has joined opens at once (the account the link was
+  clicked in first, then the one on screen, then any); a space opens as that account's scope,
+  as it does when one is joined from its preview. Anything else looks the room up for one
+  account (`Command::PreviewRoom` → `Event::RoomPreview`, the SDK's `get_room_preview`: the
+  summary API, then the directory, then world-readable state) and shows a **room preview**:
+  picture, name, alias, members, topic, and Join when `RoomPreview::joinable` (invited, public,
+  or restricted, which only the server can check). A preview that names a room some account
+  joined opens it instead, unless the user picked the account. A room no server describes
+  still offers Join. Knocking isn't offered (the preview says so), and `?action=join|chat` never
+  acts by itself: a link can't make the user join or start a chat without a press.
+- **Joining** (`Command::JoinRoom`, by the previewed room ID or the link's alias, through the
+  link's `via` servers) waits for the account's room feed to list the room before
+  `Event::RoomJoined`, so the room the app then opens is in its list.
+- **People:** a link to a person shows their profile (`Command::SearchPeople` with the full ID,
+  which fetches it from their server) and Start chat (`OpenDirectChat`).
+- **Several accounts:** the preview acts for one account; the user can switch it ("Open as"),
+  which looks the room or person up again.
+- **Permalinks on the desktop:** `State::open_permalink` handles every matrix.to link and
+  `matrix:` URI, from a message (`open_link`), from the OS (`App::on_open_url`, the launch
+  handoff of [0001](0001-stack-and-tooling.md)) or from launch. A room ID one of the accounts
+  has joined opens at once, preferring the active account. The desktop has no jump to a
+  message, so a link to one opens its room. Anything else opens `Modal::Link`, stepping through
+  `LinkStep`: `Previewing`, then `Preview` (or `NoPreview`, which still offers Join), `Joining`,
+  or `Person`; a failed join returns to the preview with a notice. A link that comes before any
+  account is ready waits for the first room list.
+- **Permalinks on phones** are routed before the router ([0010](0010-mobile.md)) and open the
+  link screen (`app/link.tsx`), the same steps as the desktop's dialog in a sheet; a joined
+  room opens at the linked message. The account can't change while a join or chat is under
+  way, and one that ends after the sheet was left navigates nowhere (`useShown`).
 - **Shared layout:** every pane header is `HEADER_HEIGHT` (56) tall so dividers line up; a
   short timeline sits by the composer; a thread summary shows the last replier, "N replies" and
   "Last reply today at …".
@@ -129,3 +174,7 @@ Date: 2026-11-14
   actions on password accounts.
 - Opening a room makes no member request. A large room's full list is fetched once, on demand.
 - New pictures should go through `media_avatar` and `request_avatars` and stay on-screen only.
+- A room only an alias names can't be checked against the room lists (summaries carry no
+  aliases), so it always costs a preview request before it opens, even when joined.
+- A private room's link shows no preview: its members see it, nobody else (by design).
+- Watch: a change to how links read goes into both parsers and the shared vectors together.

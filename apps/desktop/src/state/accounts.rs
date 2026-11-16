@@ -1061,6 +1061,8 @@ mod tests {
             custom_notifications: false,
             call: matrix_core::RoomCall::default(),
             activity_ms: None,
+            encrypted: false,
+            can_rename: false,
         }
     }
 

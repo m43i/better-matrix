@@ -1,0 +1,17 @@
+{
+  "mobile.composer.library": "Photos & videos",
+  "mobile.composer.camera": "Camera",
+  "mobile.composer.files": "Files",
+  "mobile.composer.poll": "Poll",
+  "mobile.composer.camera_denied": "Allow camera access in Settings to take photos here.",
+  "mobile.composer.microphone_denied": "Allow microphone access in Settings to record voice memos.",
+  "mobile.composer.voice_hint": "Hold to record and release to send, or tap to start.",
+  "mobile.composer.release_to_send": "Release to send",
+  "mobile.composer.link_address": "Link address",
+  "mobile.composer.attach_failed": "Could not attach the file: {{error}}",
+  "mobile.composer.emoji_recent": "Recently used",
+  "mobile.composer.emoji_travel": "Travel & places",
+  "mobile.composer.emoji_activities": "Activities",
+  "mobile.composer.emoji_objects": "Objects",
+  "mobile.composer.emoji_flags": "Flags"
+}

@@ -1,0 +1,17 @@
+{
+  "mobile.composer.library": "Fotos & Videos",
+  "mobile.composer.camera": "Kamera",
+  "mobile.composer.files": "Dateien",
+  "mobile.composer.poll": "Umfrage",
+  "mobile.composer.camera_denied": "Erlaube den Kamerazugriff in den Einstellungen, um hier Fotos aufzunehmen.",
+  "mobile.composer.microphone_denied": "Erlaube den Mikrofonzugriff in den Einstellungen, um Sprachnachrichten aufzunehmen.",
+  "mobile.composer.voice_hint": "Gedrückt halten zum Aufnehmen und loslassen zum Senden, oder tippen zum Starten.",
+  "mobile.composer.release_to_send": "Zum Senden loslassen",
+  "mobile.composer.link_address": "Linkadresse",
+  "mobile.composer.attach_failed": "Die Datei konnte nicht angehängt werden: {{error}}",
+  "mobile.composer.emoji_recent": "Zuletzt verwendet",
+  "mobile.composer.emoji_travel": "Reisen & Orte",
+  "mobile.composer.emoji_activities": "Aktivitäten",
+  "mobile.composer.emoji_objects": "Objekte",
+  "mobile.composer.emoji_flags": "Flaggen"
+}

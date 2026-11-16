@@ -1,0 +1,8 @@
+{
+  "mobile.calls.microphone_needed": "Calls need the microphone. Allow it in the system settings.",
+  "mobile.calls.camera_needed": "Video needs the camera. Allow it in the system settings; the call starts without video.",
+  "mobile.calls.minimize": "Back to the chat",
+  "mobile.calls.speaker_on": "Use the loudspeaker",
+  "mobile.calls.speaker_off": "Use the earpiece",
+  "mobile.calls.flip_camera": "Switch camera"
+}

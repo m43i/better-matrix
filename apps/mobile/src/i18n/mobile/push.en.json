@@ -1,0 +1,11 @@
+{
+  "mobile.push.new_message": "New message",
+  "mobile.push.invite": "{{sender}} invited you",
+  "mobile.push.device": "Notifications on this device",
+  "mobile.push.device_hint": "Get notified while the app is closed. This device fetches and decrypts each message itself; the push service only learns that something arrived.",
+  "mobile.push.account": "On this device",
+  "mobile.push.account_hint": "Turn off to stop this account's notifications on this device only.",
+  "mobile.push.unavailable": "Push isn't set up in this build, so notifications arrive only while the app runs.",
+  "mobile.push.denied": "Notifications for Better Matrix are off in the system settings.",
+  "mobile.push.failed": "Couldn't turn on notifications for {{account}}: {{error}}"
+}

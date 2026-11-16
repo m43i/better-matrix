@@ -1,0 +1,11 @@
+{
+  "mobile.push.new_message": "Neue Nachricht",
+  "mobile.push.invite": "{{sender}} hat dich eingeladen",
+  "mobile.push.device": "Mitteilungen auf diesem Gerät",
+  "mobile.push.device_hint": "Werde benachrichtigt, auch wenn die App geschlossen ist. Dieses Gerät lädt und entschlüsselt jede Nachricht selbst; der Push-Dienst erfährt nur, dass etwas angekommen ist.",
+  "mobile.push.account": "Auf diesem Gerät",
+  "mobile.push.account_hint": "Ausschalten, um die Mitteilungen dieses Kontos nur auf diesem Gerät zu stoppen.",
+  "mobile.push.unavailable": "Push ist in diesem Build nicht eingerichtet, daher kommen Mitteilungen nur, solange die App läuft.",
+  "mobile.push.denied": "Mitteilungen für Better Matrix sind in den Systemeinstellungen ausgeschaltet.",
+  "mobile.push.failed": "Mitteilungen für {{account}} konnten nicht eingeschaltet werden: {{error}}"
+}

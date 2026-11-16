@@ -1,0 +1,17 @@
+{
+  "name": "@better-matrix/push-gateway",
+  "version": "0.0.2",
+  "private": true,
+  "description": "Better Matrix's push gateway: the Matrix Push Gateway API (`/_matrix/push/v1/notify`) in front of Expo's push service. Runs on Bun or as a Cloudflare Worker.",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/gateway.ts",
+  "scripts": {
+    "start": "bun src/server.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3"
+  }
+}

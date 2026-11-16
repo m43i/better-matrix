@@ -134,8 +134,8 @@ Date: 2026-11-16
   rings only in a direct chat. A one-to-one invite's
   candidates that arrive while it rings are kept and used when answering.
 - **Devices:** `Command::ListCallDevices` lists microphones and speakers (the audio device
-  module) and cameras (nokhwa) by name; `Command::ChooseCallDevice` picks one by name for the
-  next calls and switches the one under way (a camera switch feeds the same track, so nothing
+  module) and cameras (nokhwa, or the platform camera) by name; `Command::ChooseCallDevice`
+  picks one by name for the next calls and switches the one under way (a camera switch feeds the same track, so nothing
   renegotiates). No pick, or a picked device that's gone, means the system's default (the
   device module's first). A pick switches only that device (a switch restarts it). Cameras are
   listed once by name, the first node of each (Linux webcams have a metadata node by the same
@@ -144,7 +144,14 @@ Date: 2026-11-16
   controls have a chevron beside the microphone (microphones and
   speakers) and the camera.
 - **Media:** the microphone through `PlatformAudio`; remote audio plays through the same
-  device module. Cameras: `nokhwa` frames converted to I420. Screens: libwebrtc's desktop
+  device module. Cameras: `nokhwa` frames converted to I420. Where the app registers a
+  **platform camera** (`calls::use_platform_camera`: phones, where nokhwa has no backend), every
+  camera comes from it instead: the engine starts, stops and switches it through
+  `PlatformCamera` from its blocking threads, and the app's native code pushes each frame
+  (`calls::push_camera_frame`, I420 or NV12 with the rotation to stand upright) into the running
+  capture, which rotates it upright and feeds the track and the preview; a camera the system
+  takes away ends through `calls::camera_lost`. Stopping a platform capture on drop happens on a
+  thread of its own, so dropping still never waits. The desktop registers none. Screens: libwebrtc's desktop
   capturer (the system picker on Linux and macOS). Remote and local video arrive as RGBA through
   `VideoSink`s the desktop asks for by `VideoId` (`Command::WatchVideo`). A camera or share
   that stops on its own (unplugged, taken by another app, stopped from the system) is reported
@@ -214,6 +221,12 @@ Date: 2026-11-16
     `demo-call-video`, `demo-call-gallery`, `demo-call-many`, `demo-call-direct`,
     `demo-call-shares`, `demo-call-focus`, `demo-call-no-sidebar`, `demo-call-layout-menu`, `demo-call-video-chat`,
     `demo-call-ringing`, `demo-call-chat`.
+
+- **Phones** show calls with the same commands and events and film through a platform camera,
+  and lay them out with the same planner, call layouts and speaker focus, ported to
+  TypeScript. The phone's chat shows the call's room under a compact stage, one surface at a
+  time, rather than beside the stage. How their views, layouts and native media work is in
+  [0010](0010-mobile.md).
 
 ## Consequences
 

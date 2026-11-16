@@ -1,0 +1,17 @@
+{
+  "mobile.accounts.back": "Zurück",
+  "mobile.accounts.browser_waiting": "Schließe die Anmeldung auf der Seite von {{server}} ab. Die App macht danach von selbst weiter.",
+  "mobile.accounts.copied": "Kopiert",
+  "mobile.accounts.fetch_keys": "Schlüssel aus dem Backup laden",
+  "mobile.accounts.fetch_keys_hint": "Nachrichten, die nicht entschlüsselt werden konnten, werden lesbar, sobald ihre Schlüssel aus deinem Schlüssel-Backup kommen. Das passiert nach dem Verifizieren von selbst; versuche es erneut, falls manche noch nicht lesbar sind.",
+  "mobile.accounts.license": "Freie Software unter der MIT-Lizenz",
+  "mobile.accounts.making_key": "Dein Wiederherstellungsschlüssel wird erstellt …",
+  "mobile.accounts.no_code": "Der Server hat keinen Link und keinen Code gesendet.",
+  "mobile.accounts.notifications_hint": "Wann Räume dich benachrichtigen, sofern ein Raum keine eigene Einstellung hat. Einzelne Räume änderst du über ihr Menü. Auf deinem Homeserver gespeichert, damit deine anderen Apps folgen.",
+  "mobile.accounts.preferences": "Einstellungen",
+  "mobile.accounts.restoring": "Anmeldung als {{account}} …",
+  "mobile.accounts.security_title": "Konto & Sicherheit",
+  "mobile.accounts.share": "Teilen",
+  "mobile.accounts.sign_out_hint": "Seine Nachrichten und Schlüssel werden von diesem Gerät entfernt. Bewahre deinen Wiederherstellungsschlüssel oder eine andere angemeldete Sitzung auf, damit du deine verschlüsselten Nachrichten nach der erneuten Anmeldung lesen kannst.",
+  "mobile.accounts.third_party_hint": "Die wichtigsten Bibliotheken, mit denen Better Matrix gebaut ist, jeweils mit Version und Lizenz."
+}

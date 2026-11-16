@@ -1,0 +1,19 @@
+{
+  "mobile.tabs.home": "Start",
+  "mobile.tabs.dms": "Direkt",
+  "mobile.tabs.activity": "Aktivität",
+  "mobile.tabs.you": "Du",
+  "mobile.shell.jump_to": "Springe zu …",
+  "mobile.shell.jump_title": "Springe zu",
+  "mobile.shell.room_hint": "Gedrückt halten für weitere Optionen",
+  "mobile.shell.section_empty": "Halte eine Unterhaltung gedrückt, um sie hierher zu verschieben",
+  "mobile.shell.dms_empty": "Beginne eine Unterhaltung mit jemandem, um sie hier zu sehen.",
+  "mobile.shell.activity_empty": "Erwähnungen und Nachrichten, über die du benachrichtigt wirst, erscheinen hier.",
+  "mobile.shell.move_to_section": "In Abschnitt verschieben",
+  "mobile.shell.remove_from_section": "Aus Abschnitt entfernen",
+  "mobile.shell.mark_read": "Als gelesen markieren",
+  "mobile.shell.channel_messages": "Nachrichten",
+  "mobile.shell.switch_space": "Zwischen Start und Spaces wechseln",
+  "mobile.shell.spaces": "Start und Spaces",
+  "mobile.shell.account_menu": "{{name}}: Konten und Einstellungen"
+}

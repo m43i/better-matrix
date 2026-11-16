@@ -66,6 +66,14 @@ impl StoredAuth {
         }
     }
 
+    /// The session's tokens.
+    pub fn tokens(&self) -> matrix_sdk::SessionTokens {
+        match self {
+            Self::Password(session) => session.tokens.clone(),
+            Self::OAuth { user, .. } => user.tokens.clone(),
+        }
+    }
+
     pub fn into_session(self) -> AuthSession {
         match self {
             Self::Password(session) => session.into(),
@@ -99,7 +107,29 @@ impl Sessions {
     }
 
     pub fn list(&self) -> Vec<StoredAccount> {
-        std::fs::read(&self.index).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+        let mut list: Vec<StoredAccount> =
+            std::fs::read(&self.index).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+        for account in &mut list {
+            account.store_dir = self.rebased(&account.store_dir);
+        }
+        list
+    }
+
+    /// A store directory under this data directory, wherever the list says it was: stores live
+    /// in `<root>/accounts/<name>`, and the data directory may have moved since the list was
+    /// written (an iOS app's container path changes with updates, and the data moves into the
+    /// App Group container for push, ADR 0010). Paths elsewhere stay as they are.
+    fn rebased(&self, dir: &Path) -> PathBuf {
+        let in_accounts = dir.parent().and_then(Path::file_name).is_some_and(|parent| parent == "accounts");
+        match (in_accounts, dir.file_name(), self.index.parent()) {
+            (true, Some(name), Some(root)) => root.join("accounts").join(name),
+            _ => dir.to_owned(),
+        }
+    }
+
+    /// The saved tokens of an account, for a client whose tokens another process refreshed.
+    pub fn tokens(&self, id: &str) -> Result<Option<matrix_sdk::SessionTokens>, Error> {
+        Ok(self.secrets(id)?.map(|secrets| secrets.auth.tokens()))
     }
 
     fn write_list(&self, accounts: &[StoredAccount]) -> Result<(), Error> {
@@ -272,6 +302,35 @@ mod tests {
         let count = s.list().len();
         let _ = std::fs::remove_dir_all(root);
         assert_eq!(count, 8);
+    }
+
+    #[test]
+    fn a_store_should_be_found_under_a_data_directory_that_moved() {
+        let (s, root) = sessions();
+        let moved =
+            StoredAccount { store_dir: PathBuf::from("/old/container/accounts/abc"), ..account("@a:example.org") };
+        s.save(moved, &secrets()).unwrap();
+        let listed = s.list();
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(listed[0].store_dir, root.join("accounts").join("abc"));
+    }
+
+    #[test]
+    fn a_store_outside_an_accounts_directory_should_keep_its_path() {
+        let (s, root) = sessions();
+        s.save(account("@a:example.org"), &secrets()).unwrap();
+        let listed = s.list();
+        let _ = std::fs::remove_dir_all(root);
+        assert_eq!(listed[0].store_dir, PathBuf::from("/nonexistent"));
+    }
+
+    #[test]
+    fn saved_tokens_should_be_readable_for_another_process() {
+        let (s, root) = sessions();
+        s.save(account("@a:example.org"), &secrets()).unwrap();
+        let tokens = s.tokens("@a:example.org").unwrap();
+        let _ = std::fs::remove_dir_all(root);
+        assert_eq!(tokens.unwrap().access_token, "token");
     }
 
     #[test]

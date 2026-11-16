@@ -1,6 +1,7 @@
 # Lint and test: on every pull request, on every commit to main, and (called) before a release
 # when its commit hasn't passed here already. One Linux job: the code is the same on every
-# platform, and the release builds catch platform breakage.
+# platform, and the release builds catch platform breakage. It covers the mobile app's
+# TypeScript (typecheck and Jest) too; releases build only the desktop app for now.
 name: CI
 
 on:
@@ -52,6 +53,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+      # The mobile app's and matrix-native's tests run Jest under Node, in a version Expo supports.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run test

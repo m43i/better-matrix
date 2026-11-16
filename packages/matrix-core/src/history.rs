@@ -20,6 +20,7 @@ const ENCRYPTED_PAGES: usize = 6;
 
 /// A thread of a room, as the info panel lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct ThreadInfo {
     /// Its root event, which opens it.
     pub root: String,
@@ -35,6 +36,7 @@ pub struct ThreadInfo {
 
 /// A file shared in a room.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct SharedFile {
     /// The message that carries it.
     pub event_id: String,

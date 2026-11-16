@@ -92,19 +92,19 @@ it to Applications, then right-click it and choose **Open** the first time.
 In PowerShell:
 
 ```powershell
-$dir = "$env:LOCALAPPDATA\Programs\Better Matrix"; $zip = "$env:TEMP\better-matrix.zip"; Invoke-WebRequest https://github.com/m43i/better-matrix/releases/latest/download/better-matrix-windows-x86_64.zip -OutFile $zip; Expand-Archive $zip -DestinationPath $dir -Force; $link = (New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Better Matrix.lnk"); $link.TargetPath = "$dir\better-matrix.exe"; $link.IconLocation = "$dir\better-matrix.ico"; $link.Save(); & "$dir\better-matrix.exe"
+$dir = "$env:LOCALAPPDATA\Programs\Better Matrix"; $zip = "$env:TEMP\better-matrix.zip"; Invoke-WebRequest https://github.com/m43i/better-matrix/releases/latest/download/better-matrix-windows-x86_64.zip -OutFile $zip; Expand-Archive $zip -DestinationPath $dir -Force; $link = (New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Better Matrix.lnk"); $link.TargetPath = "$dir\better-matrix.exe"; $link.IconLocation = "$dir\better-matrix.ico"; $link.Save(); $key = "HKCU:\Software\Classes\matrix"; New-Item -Force "$key\shell\open\command" | Out-Null; Set-Item $key "URL:Matrix link"; New-ItemProperty $key "URL Protocol" -Value "" -Force | Out-Null; Set-Item "$key\shell\open\command" "`"$dir\better-matrix.exe`" `"%1`""; & "$dir\better-matrix.exe"
 ```
 
-This installs for your user only (no administrator rights needed) and adds Better Matrix to the Start
-menu. Windows may show a SmartScreen warning for a new app: choose **More info**, then **Run anyway**.
+This installs for your user only (no administrator rights needed), adds Better Matrix to the Start
+menu and opens `matrix:` links with it. Windows may show a SmartScreen warning for a new app: choose **More info**, then **Run anyway**.
 
 ### Updating and removing
 
 Run the install line again to update; your accounts, history and keys stay where they are. To remove
 the app, uninstall the package (`sudo apt remove better-matrix`, `sudo dnf remove better-matrix`,
 `sudo pacman -R better-matrix`, or `sudo pacman -R better-matrix-bin` after a `PKGBUILD` install), or
-delete the AppImage, the app in Applications, or the `Better Matrix` folder and Start menu entry on
-Windows.
+delete the AppImage, the app in Applications, or the `Better Matrix` folder, Start menu entry and
+`matrix:` link handler (`Remove-Item -Recurse HKCU:\Software\Classes\matrix`) on Windows.
 
 ## Develop
 

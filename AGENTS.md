@@ -14,7 +14,12 @@ in side by side. Goal: every Matrix feature, calls included, in a Slack-style la
 ## Layout
 
 - `apps/desktop` (Cargo `better-matrix-desktop`, binary `better-matrix`): the desktop app, Rune UI.
+- `apps/mobile` (`better-matrix-mobile`): the Android and iOS app, Expo / React Native. Read its
+  own `AGENTS.md` before working there.
 - `packages/matrix-core` (`matrix-core`): the shared Matrix engine. No UI code.
+- `packages/matrix-ffi` (`matrix-ffi`): the engine behind UniFFI for the phones, JSON in and out.
+- `packages/matrix-native` (`@better-matrix/matrix-native`): the React Native turbo module
+  generated from `matrix-ffi`, the typed client and the generated engine types (ADR 0010).
 - `docs/`: glossary, ADRs, README images. `scripts/`: Bun scripts.
 - `packaging/` and `.github/`: icons, desktop entry and per-platform packaging scripts; CI and
   the release workflow (ADR 0001).

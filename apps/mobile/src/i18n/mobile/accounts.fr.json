@@ -1,0 +1,17 @@
+{
+  "mobile.accounts.back": "Retour",
+  "mobile.accounts.browser_waiting": "Terminez la connexion sur la page de {{server}}. L'application reprend d'elle-même une fois que c'est fait.",
+  "mobile.accounts.copied": "Copiée",
+  "mobile.accounts.fetch_keys": "Récupérer les clés de la sauvegarde",
+  "mobile.accounts.fetch_keys_hint": "Les messages qui n'ont pas pu être déchiffrés deviennent lisibles dès que leurs clés arrivent de votre sauvegarde de clés. Cela se fait tout seul après la vérification ; réessayez si certains restent illisibles.",
+  "mobile.accounts.license": "Logiciel libre sous licence MIT",
+  "mobile.accounts.making_key": "Création de votre clé de récupération…",
+  "mobile.accounts.no_code": "Le serveur n'a envoyé ni lien ni code.",
+  "mobile.accounts.notifications_hint": "Quand les salons vous notifient, sauf si un salon a son propre réglage. Modifiez un seul salon depuis son menu. Enregistré sur votre serveur d'accueil, pour que vos autres applications suivent.",
+  "mobile.accounts.preferences": "Préférences",
+  "mobile.accounts.restoring": "Connexion en tant que {{account}}…",
+  "mobile.accounts.security_title": "Compte et sécurité",
+  "mobile.accounts.share": "Partager",
+  "mobile.accounts.sign_out_hint": "Ses messages et ses clés sont supprimés de cet appareil. Gardez votre clé de récupération ou une autre session connectée pour pouvoir lire vos messages chiffrés après vous être reconnecté.",
+  "mobile.accounts.third_party_hint": "Les principales bibliothèques avec lesquelles Better Matrix est construit, chacune avec sa version et sa licence."
+}

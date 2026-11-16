@@ -30,10 +30,13 @@ use crate::{Error, convert};
 
 /// Identifies one command, so its [`Event::Finished`] can be matched to it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct RequestId(pub u64);
 
 /// What an app asks the engine to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum Command {
     /// Resolve a server name or URL (through `.well-known`) and find out how it lets users sign
     /// in; answered by [`Event::HomeserverDiscovered`].
@@ -50,6 +53,16 @@ pub enum Command {
         homeserver: String,
         /// A suspended account to sign in as again, taking back its store and device.
         resume: Option<AccountId>,
+    },
+    /// The browser came back to the app's own redirect URI ([`OAuthRedirect::App`]) for the
+    /// sign-in `request` started: finishes it. Unknown or finished sign-ins answer cancelled.
+    ///
+    /// [`OAuthRedirect::App`]: crate::account::OAuthRedirect::App
+    FinishOAuth {
+        /// The [`Command::LoginOAuth`] it answers.
+        request: RequestId,
+        /// The full URL the app received, query included.
+        url: String,
     },
     /// Sign an account out on the server and forget it locally, its data included. A
     /// suspended account is only forgotten.
@@ -377,13 +390,16 @@ pub enum Command {
         /// The space whose hierarchy to browse.
         space: String,
     },
-    /// Join a public room or accept an invitation; refreshes the room list before finishing.
+    /// Join a room or space by its ID or an alias: a public room, an invitation to accept, a
+    /// [`Permalink`](crate::Permalink). Answered by [`Event::RoomJoined`] once the account's
+    /// room list has it.
     JoinRoom {
         /// The joining account.
         account: AccountId,
-        /// The room or space.
+        /// The room ID (`!…`) or alias (`#…`).
         room_id: String,
-        /// Servers advertised by the space.
+        /// Servers to join through (advertised by a space, or from a link); ones that aren't
+        /// server names are left out.
         via: Vec<String>,
     },
     /// Invite someone to a room; an updated [`Event::Members`] follows.
@@ -402,6 +418,17 @@ pub enum Command {
         account: AccountId,
         /// Who with.
         user_id: String,
+    },
+    /// Look at a room the account may not have joined, by its ID or an alias (from a
+    /// [`Permalink`](crate::Permalink)); answered by [`Event::RoomPreview`]. Fails when no
+    /// server will describe the room.
+    PreviewRoom {
+        /// Whose.
+        account: AccountId,
+        /// The room ID (`!…`) or alias (`#…`).
+        room: String,
+        /// Servers to ask, from the link; ones that aren't server names are left out.
+        via: Vec<String>,
     },
     /// Create a private, encrypted room, in a space when given; answered by
     /// [`Event::RoomCreated`].
@@ -510,6 +537,7 @@ pub enum Command {
     /// Turn the user's microphone, camera or screen sharing on or off in the call under way.
     SetCallMedia(crate::calls::MediaToggle),
     /// Send a video of the call to `sink`, from now on.
+    #[cfg_attr(feature = "ffi", serde(skip), ts(skip))]
     WatchVideo {
         /// Which video.
         video: crate::calls::VideoId,
@@ -528,10 +556,38 @@ pub enum Command {
         /// The device's name from [`Event::CallDevices`].
         id: Option<String>,
     },
+    /// Send the account's pushes to this device through a push gateway (or update its
+    /// pusher there): the homeserver sends only room and event IDs.
+    RegisterPusher {
+        /// Whose pushes.
+        account: AccountId,
+        /// The gateway, the device's token and how the pusher introduces itself.
+        pusher: crate::model::Pusher,
+    },
+    /// Stop sending the account's pushes to this device.
+    RemovePusher {
+        /// Whose pushes.
+        account: AccountId,
+        /// The pusher's app ID, as registered.
+        app_id: String,
+        /// The device's token, as registered.
+        push_key: String,
+    },
+    /// Fetch and decrypt what a push is about; answered by [`Event::PushContent`].
+    FetchNotification {
+        /// Whose push.
+        account: AccountId,
+        /// The room it names.
+        room_id: String,
+        /// The event it names.
+        event_id: String,
+    },
 }
 
 /// What the engine reports. Delivered on the engine's threads; a sink forwards them to its UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum Event {
     /// A command ended. `Err` holds a message fit to show the user.
     Finished {
@@ -708,6 +764,20 @@ pub enum Event {
         /// The chat's room ID.
         room_id: String,
     },
+    /// A room as [`Command::PreviewRoom`] found it.
+    RoomPreview {
+        /// The command it answers.
+        request: RequestId,
+        /// What the room looks like from outside.
+        preview: Box<crate::RoomPreview>,
+    },
+    /// The room [`Command::JoinRoom`] joined, now in the account's room list.
+    RoomJoined {
+        /// The command it answers.
+        request: RequestId,
+        /// Its ID, also when it was joined by an alias.
+        room_id: String,
+    },
     /// A room or space made by [`Command::CreateRoom`] or [`Command::CreateSpace`].
     RoomCreated {
         /// The command it answers.
@@ -749,6 +819,7 @@ pub enum Event {
         /// The link it was asked for with.
         url: String,
         /// The GIF file.
+        #[cfg_attr(feature = "ffi", serde(skip), ts(skip))]
         bytes: Arc<[u8]>,
     },
     /// A link's preview card for [`Command::PreviewLink`]; `None` when the page has nothing to
@@ -770,6 +841,7 @@ pub enum Event {
         /// The rendition.
         size: MediaSize,
         /// The file's bytes.
+        #[cfg_attr(feature = "ffi", serde(skip), ts(skip))]
         bytes: Arc<[u8]>,
     },
     /// The server's push rules say the user should hear about this.
@@ -833,6 +905,13 @@ pub enum Event {
         /// Where it rang.
         room_id: String,
     },
+    /// What a push is about, for [`Command::FetchNotification`].
+    PushContent {
+        /// The fetch it answers.
+        request: RequestId,
+        /// What to show.
+        content: crate::model::PushContent,
+    },
 }
 
 /// Receives the engine's events. Called from the engine's threads, so it must hand them to the
@@ -857,11 +936,17 @@ pub struct EngineConfig {
     pub secrets: Arc<dyn SecretStore>,
     /// How the app introduces itself to OAuth servers.
     pub identity: ClientIdentity,
+    /// Where the browser returns after an OAuth sign-in.
+    pub oauth_redirect: crate::account::OAuthRedirect,
 }
 
 impl std::fmt::Debug for EngineConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EngineConfig").field("data_dir", &self.data_dir).field("identity", &self.identity).finish()
+        f.debug_struct("EngineConfig")
+            .field("data_dir", &self.data_dir)
+            .field("identity", &self.identity)
+            .field("oauth_redirect", &self.oauth_redirect)
+            .finish()
     }
 }
 
@@ -999,10 +1084,7 @@ impl Engine {
     /// Starts an engine on its own thread with its own Tokio runtime. Saved accounts are
     /// restored right away and reported with [`Event::AccountAdded`].
     pub fn start(config: EngineConfig, sink: impl EventSink) -> Result<EngineHandle, Error> {
-        // Both of rustls' crypto providers are built in (the SDK asks for one, LiveKit for the
-        // other), so it can't choose for itself: without this, a call's connection panics. An
-        // error means one is installed already.
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        crate::tls::install_provider();
         let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().thread_name("matrix-engine").build()?;
         let (commands, receiver) = mpsc::unbounded_channel();
         let (signals, signal_receiver) = mpsc::unbounded_channel();
@@ -1010,6 +1092,8 @@ impl Engine {
             layout: StoreLayout::new(&config.data_dir),
             sessions: Sessions::new(&config.data_dir, config.secrets),
             identity: config.identity,
+            oauth_redirect: config.oauth_redirect,
+            oauth_returns: HashMap::new(),
             sink: Arc::new(sink),
             accounts: HashMap::new(),
             tasks: JoinSet::new(),
@@ -1148,6 +1232,9 @@ struct State {
     layout: StoreLayout,
     sessions: Sessions,
     identity: ClientIdentity,
+    oauth_redirect: crate::account::OAuthRedirect,
+    /// Browser sign-ins waiting for the app to hand their redirect back, by request.
+    oauth_returns: HashMap<RequestId, tokio::sync::oneshot::Sender<String>>,
     sink: Arc<dyn EventSink>,
     accounts: HashMap<AccountId, Running>,
     tasks: JoinSet<Completion>,
@@ -1465,6 +1552,14 @@ impl State {
         let sink = Arc::clone(&self.sink);
         let command_kind = if matches!(command, Command::ResetRecoveryKey(_)) { Kind::Reset } else { Kind::Other };
         let task: std::pin::Pin<Box<dyn Future<Output = Result<Outcome, Error>> + Send>> = match command {
+            Command::FinishOAuth { request: sign_in, url } => {
+                let result = match self.oauth_returns.remove(&sign_in) {
+                    Some(waiting) => waiting.send(url).map_err(|_| Error::Cancelled.to_string()),
+                    None => Err(Error::Cancelled.to_string()),
+                };
+                self.sink.emit(Event::Finished { request, result });
+                return;
+            }
             Command::Cancel(target) => {
                 if let Some(handle) = self.running.remove(&target) {
                     handle.abort();
@@ -1824,14 +1919,6 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
-            Command::JoinRoom { account: id, room_id, via } => {
-                let (account, feed) = (self.account(&id), self.feed(&id));
-                Box::pin(async move {
-                    account?.join_room(&room_id, &via).await?;
-                    feed?.refresh(None).await;
-                    Ok(Outcome::Done)
-                })
-            }
             Command::Invite { account: id, room_id, user_id } => {
                 let account = self.account(&id);
                 Box::pin(async move {
@@ -1847,6 +1934,25 @@ impl State {
                 Box::pin(async move {
                     let room_id = account?.direct_chat(&user_id).await?;
                     sink.emit(Event::DirectChat { request, room_id });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::PreviewRoom { account, room, via } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    let preview = account?.preview_room(&room, &via).await?;
+                    sink.emit(Event::RoomPreview { request, preview: Box::new(preview) });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::JoinRoom { account: id, room_id: room, via } => {
+                let (account, feed) = (self.account(&id), self.feed(&id));
+                Box::pin(async move {
+                    let (account, feed) = (account?, feed?);
+                    let room_id = account.join_room(&room, &via).await?;
+                    // The app opens the room at once: the list it reads must have it already.
+                    feed.refresh(Some(&HashSet::from([room_id.clone()]))).await;
+                    sink.emit(Event::RoomJoined { request, room_id });
                     Ok(Outcome::Done)
                 })
             }
@@ -1965,9 +2071,19 @@ impl State {
             }
             Command::LoginOAuth { homeserver, resume } => {
                 let (layout, sessions, identity) = (self.layout.clone(), self.sessions.clone(), self.identity.clone());
+                self.oauth_returns.retain(|_, waiting| !waiting.is_closed());
+                let app_redirect = match &self.oauth_redirect {
+                    crate::account::OAuthRedirect::Loopback => None,
+                    crate::account::OAuthRedirect::App(uri) => {
+                        let (sender, returned) = tokio::sync::oneshot::channel();
+                        self.oauth_returns.insert(request, sender);
+                        Some((uri.clone(), returned))
+                    }
+                };
                 Box::pin(async move {
                     let pending =
-                        Account::start_oauth(&layout, &sessions, &homeserver, &identity, resume.as_ref()).await?;
+                        Account::start_oauth(&layout, &sessions, &homeserver, &identity, resume.as_ref(), app_redirect)
+                            .await?;
                     sink.emit(Event::OpenUrl { request, url: pending.url.to_string() });
                     Ok(signed_in(pending.finish(&sessions).await?).await)
                 })
@@ -2066,6 +2182,29 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            Command::RegisterPusher { account, pusher } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    account?.register_pusher(&pusher).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::RemovePusher { account, app_id, push_key } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    account?.remove_pusher(&app_id, &push_key).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::FetchNotification { account, room_id, event_id } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    let account = account?;
+                    let content = crate::push::fetch(account.client(), account.id(), &room_id, &event_id).await?;
+                    sink.emit(Event::PushContent { request, content });
+                    Ok(Outcome::Done)
+                })
+            }
         };
         let handle = self.tasks.spawn(async move { Completion { request: Some(request), result: task.await } });
         self.running.insert(request, handle);
@@ -2083,8 +2222,7 @@ impl State {
                 // adding when it arrives.
                 self.sink.emit(Event::AccountAdded((*cached).clone()));
                 // Saving refreshed tokens comes first: the summary's requests may refresh them.
-                let tokens =
-                    tokio::spawn(watch_session(account.clone(), self.sessions.clone(), Arc::clone(&self.sink)));
+                let tokens = tokio::spawn(watch_session(account.clone(), Arc::clone(&self.sink)));
                 let flows = crate::security::Flows::default();
                 let feed = RoomFeed { account: account.clone(), sink: Arc::clone(&self.sink), state: Arc::default() };
                 let call_handlers = crate::calls::listen(account.client(), account.id(), &self.signals);
@@ -2299,61 +2437,73 @@ async fn sync_until_error(
         })
     };
     let _unread = AbortOnDrop(unread.abort_handle());
-    account
-        .client()
-        .sync_with_callback(settings, |response| {
-            let (account, sink, caught_up, feed) =
-                (account.clone(), Arc::clone(sink), Arc::clone(caught_up), feed.clone());
-            let want_members = &want_members;
-            async move {
-                for (room_id, update) in &response.rooms.joined {
-                    let Some(room) = account.client().get_room(room_id) else { continue };
-                    if members_changed(update) {
-                        sink.emit(Event::MembersInvalidated {
-                            account: account.id().clone(),
-                            room_id: room_id.to_string(),
-                        });
-                    }
-                    want_members(&room);
-                    if let Some(message) = convert::messages(&room, &update.timeline.events).await.pop() {
-                        sink.emit(Event::LatestMessage {
-                            account: account.id().clone(),
-                            room_id: room_id.to_string(),
-                            message: Box::new(message),
-                        });
-                    }
+    let on_response = |response: matrix_sdk::sync::SyncResponse| {
+        let (account, sink, caught_up, feed) = (account.clone(), Arc::clone(sink), Arc::clone(caught_up), feed.clone());
+        let want_members = &want_members;
+        async move {
+            for (room_id, update) in &response.rooms.joined {
+                let Some(room) = account.client().get_room(room_id) else { continue };
+                if members_changed(update) {
+                    sink.emit(Event::MembersInvalidated {
+                        account: account.id().clone(),
+                        room_id: room_id.to_string(),
+                    });
                 }
-                if caught_up.swap(true, Ordering::Relaxed) {
-                    for (room_id, notifications) in &response.notifications {
-                        let Some(room) = account.client().get_room(room_id) else { continue };
-                        for notification in notifications {
-                            if let Some(n) = convert::notification(account.id(), &room, notification).await {
-                                sink.emit(Event::Notification(n));
-                            }
+                want_members(&room);
+                if let Some(message) = convert::messages(&room, &update.timeline.events).await.pop() {
+                    sink.emit(Event::LatestMessage {
+                        account: account.id().clone(),
+                        room_id: room_id.to_string(),
+                        message: Box::new(message),
+                    });
+                }
+            }
+            if caught_up.swap(true, Ordering::Relaxed) {
+                for (room_id, notifications) in &response.notifications {
+                    let Some(room) = account.client().get_room(room_id) else { continue };
+                    for notification in notifications {
+                        if let Some(n) = convert::notification(account.id(), &room, notification).await {
+                            sink.emit(Event::Notification(n));
                         }
                     }
                 }
-                // Only the rooms this sync touched are read again; account data (direct chats,
-                // push rules) can change any room, so it reads them all.
-                let rooms = &response.rooms;
-                let changed: HashSet<String> = rooms
-                    .joined
-                    .keys()
-                    .chain(rooms.left.keys())
-                    .chain(rooms.invited.keys())
-                    .map(ToString::to_string)
-                    .collect();
-                let all = !response.account_data.is_empty();
-                if crate::sidebar::changed_in(&response.account_data)
-                    && let Ok(layout) = account.sidebar_layout().await
-                {
-                    sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
-                }
-                feed.refresh((!all).then_some(&changed)).await;
-                LoopCtrl::Continue
             }
-        })
-        .await
+            // Only the rooms this sync touched are read again; account data (direct chats,
+            // push rules) can change any room, so it reads them all.
+            let rooms = &response.rooms;
+            let changed: HashSet<String> = rooms
+                .joined
+                .keys()
+                .chain(rooms.left.keys())
+                .chain(rooms.invited.keys())
+                .map(ToString::to_string)
+                .collect();
+            let all = !response.account_data.is_empty();
+            if crate::sidebar::changed_in(&response.account_data)
+                && let Ok(layout) = account.sidebar_layout().await
+            {
+                sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
+            }
+            feed.refresh((!all).then_some(&changed)).await;
+            LoopCtrl::Continue
+        }
+    };
+    // The SDK's sync loop, with each sync under the crypto store's lock (`sync_once_locked`):
+    // the next sync continues from the last one's token, the first error ends the loop for
+    // `sync_loop` to retry, and syncs answered at once are spaced a second apart.
+    let mut settings = settings;
+    let mut last_sync: Option<std::time::Instant> = None;
+    loop {
+        if last_sync.is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1)) {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        last_sync = Some(std::time::Instant::now());
+        let response = account.sync_once_locked(settings.clone()).await?;
+        settings = settings.token(response.next_batch.clone());
+        if on_response(response).await == LoopCtrl::Break {
+            return Ok(());
+        }
+    }
 }
 
 fn members_changed(update: &matrix_sdk_base::sync::JoinedRoomUpdate) -> bool {
@@ -2722,29 +2872,20 @@ async fn send_in(
     Ok(())
 }
 
-/// Saves refreshed tokens and reports a session the server no longer accepts.
-async fn watch_session(account: Account, sessions: Sessions, sink: Arc<dyn EventSink>) {
+/// Reports a session the server no longer accepts. Refreshed tokens are saved by the client's
+/// session callback inside the refresh's cross-process lock (`account::build_client`), and only
+/// there: a later save from here could overwrite tokens another process refreshed since.
+async fn watch_session(account: Account, sink: Arc<dyn EventSink>) {
     use tokio::sync::broadcast::error::RecvError;
 
     let mut changes = account.session_changes();
     loop {
-        let change = match changes.recv().await {
-            Ok(change) => change,
-            // Missed changes (a slow keychain write spanned two refreshes): what is current now
-            // is what needs saving.
-            Err(RecvError::Lagged(_)) => SessionChange::TokensRefreshed,
-            Err(RecvError::Closed) => return,
-        };
-        match change {
-            SessionChange::TokensRefreshed => {
-                if let Err(error) = account.save_tokens(&sessions).await {
-                    let error = format!("could not save refreshed tokens: {error}");
-                    sink.emit(Event::AccountError { account: account.id().clone(), error });
-                }
-            }
-            SessionChange::UnknownToken(token) => {
+        match changes.recv().await {
+            Ok(SessionChange::UnknownToken(token)) => {
                 sink.emit(Event::SessionEnded { account: account.id().clone(), kept: token.soft_logout });
             }
+            Ok(SessionChange::TokensRefreshed) | Err(RecvError::Lagged(_)) => {}
+            Err(RecvError::Closed) => return,
         }
     }
 }
@@ -3005,6 +3146,7 @@ mod tests {
             data_dir,
             secrets: Arc::new(MemorySecrets::default()),
             identity: ClientIdentity { name: "Test".into(), uri: "https://example.org".parse().unwrap() },
+            oauth_redirect: crate::OAuthRedirect::Loopback,
         };
         (Engine::start(config, sink).expect("engine starts"), received)
     }
@@ -3059,11 +3201,41 @@ mod tests {
     }
 
     #[test]
+    fn a_room_preview_for_an_unknown_account_should_finish_with_an_error() {
+        let (engine, events) = start();
+        let request = engine.send(Command::PreviewRoom {
+            account: AccountId::new("@nobody:example.org"),
+            room: "#rust:matrix.org".into(),
+            via: vec!["matrix.org".into()],
+        });
+        assert_eq!(finished(&events, request), Err("no signed-in account @nobody:example.org".into()));
+    }
+
+    #[test]
+    fn a_join_for_an_unknown_account_should_finish_with_an_error() {
+        let (engine, events) = start();
+        let request = engine.send(Command::JoinRoom {
+            account: AccountId::new("@nobody:example.org"),
+            room_id: "!abc:example.org".into(),
+            via: Vec::new(),
+        });
+        assert_eq!(finished(&events, request), Err("no signed-in account @nobody:example.org".into()));
+    }
+
+    #[test]
     fn a_cancelled_command_should_finish_as_cancelled() {
         let (engine, events) = start();
         // A routable but unanswering address keeps discovery waiting until it is cancelled.
         let request = engine.send(Command::Discover { server: "http://10.255.255.1".into() });
         engine.send(Command::Cancel(request));
+        assert_eq!(finished(&events, request), Err("cancelled".into()));
+    }
+
+    #[test]
+    fn a_redirect_for_no_pending_sign_in_should_finish_as_cancelled() {
+        let (engine, events) = start();
+        let request =
+            engine.send(Command::FinishOAuth { request: RequestId(999), url: "com.example.app:/oauth?code=x".into() });
         assert_eq!(finished(&events, request), Err("cancelled".into()));
     }
 

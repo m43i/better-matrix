@@ -48,7 +48,11 @@ see who is typing there.
   - `RoomTimeline.history_error` holds the error. The timeline shows "Couldn't load earlier
     messages" with Try again, the error in the button's accessible label.
   - A failed first page keeps the timeline open (`Event::HistoryFailed`). A timeline that fails
-    to open leaves the open set; Try again opens it again.
+    to open leaves the open set; Try again opens it again. Phones do the same
+    (`Timeline.openFailed`), and a page that fails with only the command's error (no
+    `HistoryFailed`) shows it too. Phones ask for no page while the timeline opens
+    (`Timeline.opening`); a linked message is looked for once it has opened, and a failed page
+    pauses the search until Try again.
 - **Opening fast:**
   - The engine subscribes and sends what is cached at once. The first page loads in a spawned
     task beside it, ending in `HistoryLoaded` or `HistoryFailed`; the desktop's `loading` flag
@@ -95,7 +99,10 @@ see who is typing there.
   still on its way then doesn't come back either), and sending one ends an edit of the same message
   under way in the other composer. Kept edits come back newest first. Starting an edit brings the
   kept edit back when it was made in the same timeline, and keeps an edit of another message under
-  way when it changed anything. A failed delete has its own notice.
+  way when it changed anything. Phones keep a refused edit in its composer
+  (`ComposerState.kept`, `refusedEdit`): it takes the free field at once, setting aside what
+  was typed since, or waits for the edit holding the field to end; a refusal of an edit older
+  than the newest sent of the same message is ignored. A failed delete has its own notice.
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
     reaction's count and whether the user is among them. The picker offers quick reactions,
@@ -198,6 +205,10 @@ see who is typing there.
     `ReadBoundary` reports the existing fully-read event (or receipt fallback) independently of
     the rendered marker. Until its event enters applied subscription history or the user reaches
     its marker, an omitted marker remains unresolved and cannot authorize a fully-read update.
+    Phones hold the fully-read marker the same way until the "New" row has been in view
+    (`markerAcknowledged`), and mark again once it has. Their room list's "Mark as read"
+    opens the room's timeline for the request (the engine marks through open timelines) and
+    closes it after.
   - The engine re-reads rooms on the SDK's room-info updates (receipts, unread markers), so
     badges follow the counts the SDK works out after sync.
   - The "New" marker is dismissed when its own row enters the viewport, including on open,
@@ -210,6 +221,10 @@ see who is typing there.
     while the divider still draws over the messages. The desktop
     remembers the first unread entry at that boundary across diffs and warm reopens, while
     keeping the engine's diff indices intact. A new boundary can show a new marker.
+    Phones keep the same rule (`apps/mobile/src/state/newMarker.ts`): the divider stays before
+    the entry it first stood before, fades over 2.5 s (150 ms under reduced motion) keeping its
+    height when receipts move or drop the SDK's marker, and no later divider shows until the
+    timeline leaves the screen.
     As in [Element Web](https://github.com/element-hq/element-web/blob/75eaab6ca5ac7ab4bac91a6097c8e77bb469455d/apps/web/src/components/structures/TimelinePanel.tsx),
     the visible indicator is separate from the advancing receipt: once reached it stays hidden
     while reading, including when receipts advance during an upscroll. New boundaries while

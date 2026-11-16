@@ -128,6 +128,7 @@ pub fn find_preview_link(text: &str) -> Option<&str> {
 
 /// A link's preview card: what its page says about itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct LinkPreview {
     /// The site's name (`og:site_name`).
     pub site: Option<String>,
@@ -295,7 +296,7 @@ async fn fetch(http: &reqwest::Client, url: &str, limit: usize) -> Result<Vec<u8
 
 /// An HTTP client for linked files: no cookies, a short timeout.
 pub(crate) fn http_client() -> Result<reqwest::Client, Error> {
-    reqwest::Client::builder()
+    crate::tls::http(reqwest::Client::builder())
         .timeout(Duration::from_secs(20))
         .user_agent("BetterMatrix")
         .build()

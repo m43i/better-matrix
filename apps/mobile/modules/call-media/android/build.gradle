@@ -1,0 +1,28 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'chat.bettermatrix'
+version = '0.0.2'
+
+// libwebrtc's Java half, copied next to the engine's libraries by `bun run ubrn:android`
+// (packages/matrix-native/scripts/webrtc-jar.ts): the engine's libwebrtc calls into it, and the
+// camera capturer lives in it.
+def matrixNative = new File(
+  ["node", "--print", "require.resolve('@better-matrix/matrix-native/package.json')"]
+    .execute(null, rootDir).text.trim()
+).getParentFile()
+
+android {
+  namespace "chat.bettermatrix.callmedia"
+  defaultConfig {
+    versionCode 1
+    versionName '0.0.2'
+    consumerProguardFiles 'consumer-rules.pro'
+  }
+}
+
+dependencies {
+  implementation files("${matrixNative}/android/libs/libwebrtc.jar")
+}

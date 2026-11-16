@@ -12,6 +12,7 @@ use crate::account::Account;
 
 /// The kind of a contact detail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum ContactKind {
     /// An email address.
     Email,
@@ -21,6 +22,7 @@ pub enum ContactKind {
 
 /// An email address or phone number linked to the account (a Matrix third-party identifier).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct ContactDetail {
     /// Email or phone.
     pub kind: ContactKind,
@@ -30,6 +32,7 @@ pub struct ContactDetail {
 
 /// The contact details linked to an account, and whether the app may change them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Contacts {
     /// The email addresses and phone numbers.
     pub details: Vec<ContactDetail>,
@@ -42,12 +45,15 @@ pub struct Contacts {
 /// A contact detail being added: the server sent a link (email) or a code (phone) to confirm it.
 /// Hand it back to confirm and add it; never inspect it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct PendingContact {
     /// Email or phone.
     pub kind: ContactKind,
     /// What the user entered.
     pub address: String,
+    #[cfg_attr(feature = "ffi", ts(type = "string"))]
     secret: OwnedClientSecret,
+    #[cfg_attr(feature = "ffi", ts(type = "string"))]
     sid: OwnedSessionId,
     /// Where a phone code goes; `None` when the server checks it itself.
     submit_url: Option<String>,
@@ -55,6 +61,7 @@ pub struct PendingContact {
 
 /// A page of the homeserver's account management, for OAuth accounts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum AccountPage {
     /// Name, picture and contact details.
     Profile,

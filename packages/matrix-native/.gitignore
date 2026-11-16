@@ -1,0 +1,8 @@
+# Built by ubrn (`bun run ubrn:android`, `bun run ubrn:ios`).
+android/src/main/jniLibs/
+android/build/
+android/.cxx/
+build/
+*.xcframework
+lib/
+android/libs/

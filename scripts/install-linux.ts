@@ -53,11 +53,12 @@ Type=Application
 Name=Better Matrix
 GenericName=Matrix Client
 Comment=Chat on Matrix with several accounts side by side
-Exec=${target}
+Exec=${target} %u
 Icon=${ICON}
 Terminal=false
 Categories=Network;InstantMessaging;Chat;
 Keywords=matrix;chat;messenger;
+MimeType=x-scheme-handler/matrix;
 StartupWMClass=${APP_ID}
 StartupNotify=true
 `;
@@ -65,6 +66,7 @@ const applications = join(data, "applications");
 await mkdir(applications, { recursive: true });
 await writeFile(join(applications, `${APP_ID}.desktop`), entry);
 
+// The entry claims `matrix:` links (MimeType); the database tells xdg-open.
 await $`update-desktop-database ${applications}`.nothrow().quiet();
 await $`gtk-update-icon-cache -f -t ${icons}`.nothrow().quiet();
 

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 /// Identifies one signed-in account: its full Matrix user ID, e.g. `@alice:example.org`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct AccountId(String);
 
 impl AccountId {
@@ -28,6 +29,7 @@ impl fmt::Display for AccountId {
 
 /// An account as the account switcher shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct AccountSummary {
     /// Which account this is.
     pub id: AccountId,
@@ -46,6 +48,7 @@ pub struct AccountSummary {
 /// How an account signed in. An OAuth account manages its email, password and sessions on the
 /// homeserver's account page; a password account manages them in the app.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum SignInMethod {
     /// Through the homeserver's authorization server in the browser.
     OAuth,
@@ -56,6 +59,7 @@ pub enum SignInMethod {
 
 /// Whether a room is a group conversation or a direct chat.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum RoomKind {
     /// A group room, listed under rooms.
     Group,
@@ -65,6 +69,7 @@ pub enum RoomKind {
 
 /// A joined room as the room list shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct RoomSummary {
     /// The room's ID, e.g. `!abc:example.org`.
     pub room_id: String,
@@ -98,11 +103,16 @@ pub struct RoomSummary {
     /// it across restarts (the room list's order, before any timeline opens). `None` until the
     /// SDK has worked it out.
     pub activity_ms: Option<u64>,
+    /// Whether messages here are end-to-end encrypted.
+    pub encrypted: bool,
+    /// Whether the user may rename the room.
+    pub can_rename: bool,
 }
 
 /// Who can read a room's messages from before they joined, by the room's settings. The server
 /// enforces it: history a member may not see is never sent.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum HistoryVisibility {
     /// Anyone, even without joining.
     WorldReadable,
@@ -124,6 +134,7 @@ impl HistoryVisibility {
 
 /// One entry of a room's timeline, as a timeline subscription delivers it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct TimelineEntry {
     /// Stable across updates of the same entry; use it as the UI key.
     pub id: String,
@@ -134,6 +145,8 @@ pub struct TimelineEntry {
 /// What a timeline entry is. Entries the UI doesn't draw yet still take their place, so diff
 /// indices stay aligned.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum EntryKind {
     /// Something that happened to the room.
     RoomEvent(Box<RoomEvent>),
@@ -152,6 +165,8 @@ pub enum EntryKind {
 /// One change to a room's timeline, in the order the timeline applies them. Mirrors the
 /// standard vector diff, by index.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum TimelineDiff {
     /// Replace everything.
     Reset(Vec<TimelineEntry>),
@@ -195,6 +210,7 @@ pub enum TimelineDiff {
 
 /// When a room notifies. Stored as push rules on the server, so every client follows it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum NotificationMode {
     /// Every new message.
     #[default]
@@ -207,6 +223,7 @@ pub enum NotificationMode {
 
 /// Something the server's push rules say the user should be told about.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Notification {
     /// The account it is for.
     pub account: AccountId,
@@ -222,8 +239,84 @@ pub struct Notification {
     pub body: String,
 }
 
+/// Where an account's pushes for this device go: the app's push gateway, which hands them to
+/// Expo's push service, as the app registers it with [`Command::RegisterPusher`](crate::Command).
+/// The homeserver sends only room and event IDs (`event_id_only`): no message content leaves it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct Pusher {
+    /// The gateway's ID for this app, e.g. `chat.bettermatrix.mobile`.
+    pub app_id: String,
+    /// The device's push token (an Expo push token, `ExponentPushToken[…]`).
+    pub push_key: String,
+    /// The gateway's notify URL, ending in `/_matrix/push/v1/notify`.
+    pub gateway_url: String,
+    /// The app's name, shown in the account's list of pushers.
+    pub app_display_name: String,
+    /// This device's name, shown there too.
+    pub device_display_name: String,
+    /// The language the user reads, e.g. `en`.
+    pub lang: String,
+    /// More of what the gateway puts in every push, as a JSON object (the fallback `alert` an
+    /// iOS push shows until the device has read the event, say). The engine adds `account`,
+    /// which tells the device whose push it is.
+    pub payload: Option<String>,
+}
+
+/// What a push turned out to be once its event was fetched and decrypted
+/// ([`Command::FetchNotification`](crate::Command), or a push handled without the engine).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
+pub enum PushContent {
+    /// A message to show, as the sync's notifications show it.
+    Message(Notification),
+    /// Someone invited the user to a room.
+    Invite {
+        /// The account invited.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+        /// The room's display name.
+        room_name: String,
+        /// The invite.
+        event_id: String,
+        /// Who invited them.
+        sender_name: String,
+    },
+    /// Something notified that can't be shown: it couldn't be decrypted, or isn't a message.
+    /// The app says something generic, in its room when the room is known.
+    Hidden {
+        /// The account it is for.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+        /// The room's display name, when this device knows the room.
+        room_name: Option<String>,
+        /// The event.
+        event_id: String,
+    },
+    /// Nothing to show: the event is gone, redacted, or the push rules say it doesn't notify.
+    Nothing,
+}
+
+/// What one push names: whose it is, and the event that notified.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct PushTarget {
+    /// The account, from the pusher's `default_payload`.
+    pub account: AccountId,
+    /// The room.
+    pub room_id: String,
+    /// The event.
+    pub event_id: String,
+    /// The account's unread count the server sent along, if it did.
+    pub unread: Option<u64>,
+}
+
 /// How a homeserver lets users sign in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct LoginMethods {
     /// OAuth 2.0 in the browser (Matrix's next-generation auth).
     pub oauth: bool,
@@ -233,6 +326,7 @@ pub struct LoginMethods {
 
 /// A space: a room that groups other rooms. Never listed among [`RoomList::rooms`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct SpaceSummary {
     /// The space's room ID.
     pub room_id: String,
@@ -252,6 +346,7 @@ pub struct SpaceSummary {
 
 /// Everything an account has joined, split into rooms and spaces.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct RoomList {
     /// Joined rooms and direct chats, sorted by name.
     pub rooms: Vec<RoomSummary>,
@@ -263,6 +358,7 @@ pub struct RoomList {
 
 /// An invitation received by an account, from the room's stripped state.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Invitation {
     /// The invited room or space.
     pub room_id: String,
@@ -282,6 +378,7 @@ pub struct Invitation {
 
 /// A public room discovered in a space hierarchy.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct PublicRoom {
     /// Its Matrix room ID.
     pub room_id: String,
@@ -299,6 +396,7 @@ pub struct PublicRoom {
 
 /// One message in a room timeline.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Message {
     /// The event ID, unique within the room.
     pub event_id: String,
@@ -329,6 +427,7 @@ pub struct Message {
 
 /// Someone as a timeline shows them: ID, name in the room, and picture.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Person {
     /// The full Matrix user ID.
     pub id: String,
@@ -341,6 +440,7 @@ pub struct Person {
 /// Something that happened to a room rather than something someone wrote: a member came or
 /// went, the room's settings changed. Timelines show it as a small line.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct RoomEvent {
     /// Who did it.
     pub sender: Person,
@@ -351,6 +451,8 @@ pub struct RoomEvent {
 /// What a [`RoomEvent`] changed. The member a membership change is about is named; the sender
 /// is the one who made it (inviting, removing, banning).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum RoomChange {
     /// The room was created.
     Created,
@@ -421,6 +523,7 @@ impl RoomChange {
 
 /// One reaction on a message: an emoji (or other key) and who used it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Reaction {
     /// The emoji.
     pub key: String,
@@ -432,6 +535,7 @@ pub struct Reaction {
 
 /// The message a reply answers, as shown above the reply.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Quote {
     /// The answered message's event ID.
     pub event_id: String,
@@ -445,6 +549,7 @@ pub struct Quote {
 
 /// The replies in a thread, as its root message shows them.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct ThreadSummary {
     /// How many replies it has.
     pub replies: u32,
@@ -456,6 +561,7 @@ pub struct ThreadSummary {
 
 /// Which timeline of a room: the room itself, or one thread in it (by its root event).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct TimelineKey {
     /// The room's ID.
     pub room_id: String,
@@ -477,6 +583,8 @@ impl TimelineKey {
 
 /// What a message carries. New message types become new variants here.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum MessageContent {
     /// Text, notices and emotes.
     Text {
@@ -501,6 +609,7 @@ pub enum MessageContent {
 /// A call's card in the timeline. Whether the call is still under way is the room's
 /// ([`RoomSummary::call`]), not the card's.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct CallCard {
     /// Video or voice, when the caller said.
     pub video: Option<bool>,
@@ -512,6 +621,7 @@ pub struct CallCard {
 
 /// A poll and where its votes stand.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Poll {
     /// What it asks.
     pub question: String,
@@ -529,6 +639,7 @@ pub struct Poll {
 
 /// One choice of a poll.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct PollAnswer {
     /// Stable within the poll; votes name it.
     pub id: String,
@@ -560,6 +671,7 @@ impl MessageContent {
 
 /// A file attached to a message.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Attachment {
     /// How the file is presented.
     pub kind: AttachmentKind,
@@ -592,6 +704,7 @@ impl Attachment {
 /// An opaque handle to a piece of Matrix media (plain or encrypted), as the engine needs it to
 /// download. Compare and hash it to key caches; never parse it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct MediaRef(pub(crate) String);
 
 impl MediaRef {
@@ -603,6 +716,8 @@ impl MediaRef {
 
 /// Which rendition of media to fetch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum MediaSize {
     /// The file as uploaded.
     Original,
@@ -622,6 +737,7 @@ impl MediaSize {
 
 /// How an attachment is presented.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum AttachmentKind {
     /// A picture.
     Image,
@@ -635,6 +751,8 @@ pub enum AttachmentKind {
 
 /// A message to send. New kinds of outgoing content become new variants here.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum Outgoing {
     /// Text, optionally formatted.
     Text {
@@ -665,10 +783,13 @@ pub enum Outgoing {
 
 /// A file to send: one on disk, or bytes already in memory (a pasted screenshot).
 #[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum Upload {
     /// A file on disk, read when it is sent.
     Path(PathBuf),
     /// Bytes in memory, with the file name to send them under.
+    #[cfg_attr(feature = "ffi", serde(skip), ts(skip))]
     Bytes {
         /// The file name; its extension decides the type.
         name: String,
@@ -765,6 +886,7 @@ mod tests {
 
 /// A password or key on its way to the engine. `Debug` never shows it.
 #[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Password(pub String);
 
 impl fmt::Debug for Password {

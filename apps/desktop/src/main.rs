@@ -421,6 +421,8 @@ fn spec() -> AppSpec<State> {
                 demo::seed(s);
                 s.ask_to_leave("!lab:example.org");
             }),
+            ("demo-link-preview", demo::link_preview),
+            ("demo-link-person", demo::link_person),
         ],
         // Inter for text; the system's monospace font for code, recovery keys and the sign-in
         // backdrop (Rune's default mono slot is Inter too).
@@ -461,7 +463,19 @@ fn main() {
     // The window reports this id (Wayland `app_id`, X11 `WM_CLASS`), so the desktop matches it
     // to the installed entry and its icon.
     rune::set_app_id(APP_ID);
-    let app = App::new(spec()).on_focus(|s, focused, _| s.focus_changed(focused));
+    let app = App::new(spec())
+        .on_focus(|s, focused, _| s.focus_changed(focused))
+        // Permalinks the system opens with the app: every link on macOS, `scheme://` ones from a
+        // later launch on Linux and Windows.
+        .on_open_url(|s, url, tx| state::navigate_now(s, tx, |s| s.open_permalink(url)))
+        // A later launch on Linux or Windows: the links it handed on open, and Rune brings the
+        // window forward.
+        .on_reopen(|s, _, tx| {
+            state::navigate_now(s, tx, |s| {
+                s.take_handed_links();
+            });
+            false
+        });
     // Renders, scripts and traces run on the detached demo state: no engine, no keychain, and
     // nothing they change reaches the user's saved settings.
     if rune::is_headless() {
@@ -476,12 +490,32 @@ fn main() {
         eprintln!("better-matrix: no home folder to keep data in; running without an engine");
         return app.run();
     };
+    // One process per user: a later launch leaves its permalinks for the running one and goes
+    // (`platform::launch`). Before the engine starts, so two never share the stores.
+    let handoff = dirs.cache().join("links");
+    let launched = platform::launch::links(std::env::args().skip(1));
+    if !launched.is_empty()
+        && let Err(error) = platform::launch::hand_on(&handoff, &launched)
+    {
+        eprintln!("better-matrix: could not hand the link on: {error}");
+    }
+    if !rune::single_instance(APP_ID) {
+        return;
+    }
+    // This is the app's process: what this launch (or one racing it) left is its own to open.
+    let mut links = platform::launch::take(&handoff);
+    for link in launched {
+        if !links.contains(&link) {
+            links.push(link);
+        }
+    }
     let handle = app.handle();
     let config = match CLIENT_URI.parse() {
         Ok(uri) => EngineConfig {
             data_dir: dirs.data().to_path_buf(),
             secrets: platform::system_secrets(dirs.data()),
             identity: ClientIdentity { name: "Better Matrix".into(), uri },
+            oauth_redirect: matrix_core::OAuthRedirect::Loopback,
         },
         Err(error) => {
             eprintln!("better-matrix: invalid client URI {CLIENT_URI}: {error}");
@@ -500,11 +534,20 @@ fn main() {
             platform::reset_scratch(&scratch);
             let shell_scratch = scratch.clone();
             let stopped = engine.stopped();
-            app.init(move || State::new(engine, Shell::native(handle, prefs, shell_scratch), settings)).run();
+            app.init(move || {
+                let shell = Shell::native(handle, prefs, shell_scratch).with_handoff(handoff);
+                let mut state = State::new(engine, shell, settings);
+                // They wait for the first account's rooms.
+                links.iter().for_each(|link| state.open_permalink(link));
+                state
+            })
+            .run();
             // The app's state, and with it the engine's handle, is gone: the engine leaves a call
             // under way and stops.
             stopped.wait(QUIT_WAIT);
             let _ = std::fs::remove_dir_all(&scratch);
+            // The stores are closed: a launch waiting for this process can take over now.
+            rune::release_instance();
         }
         Err(error) => {
             eprintln!("better-matrix: the Matrix engine failed to start: {error}");
@@ -1182,6 +1225,18 @@ mod tests {
             s.select_room("!dm-grace:example.org");
         });
         assert!(rt.find("more-$demo-@ada:example.org-0").is_none());
+    }
+
+    #[test]
+    fn a_linked_room_the_user_can_join_should_offer_join() {
+        let rt = runtime(demo::link_preview);
+        assert!(rt.find("link-join").is_some() && rt.find("link-account-@ada:hobby.chat").is_some());
+    }
+
+    #[test]
+    fn a_linked_person_should_offer_to_start_a_chat() {
+        let rt = runtime(demo::link_person);
+        assert!(rt.find("link-chat").is_some());
     }
 
     #[test]

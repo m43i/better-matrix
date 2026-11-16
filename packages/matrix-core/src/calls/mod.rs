@@ -7,6 +7,7 @@
 mod direct;
 mod keys;
 mod media;
+mod platform;
 mod rtc;
 mod session;
 mod signals;
@@ -20,12 +21,14 @@ use crate::model::{AccountId, Person};
 
 pub(crate) use direct::{has_video, reject};
 pub(crate) use media::list_devices;
+pub use platform::{CameraFrame, CameraPlanes, PlatformCamera, camera_lost, push_camera_frame, use_platform_camera};
 pub(crate) use signals::{DirectEvent, Signal, listen};
 pub use support::via;
 pub(crate) use task::{CallHandle, Control, Invite, Leaving, RingHeard, Start, hear_ringing, person, start};
 
 /// Which standard a call speaks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum CallVia {
     /// A MatrixRTC session through the homeserver's LiveKit service: any number of people.
     Rtc,
@@ -35,6 +38,7 @@ pub enum CallVia {
 
 /// A room's calls, as its summary carries them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct RoomCall {
     /// How a call would start here; `None` when the server or the room allows none, which hides
     /// the call buttons.
@@ -45,6 +49,7 @@ pub struct RoomCall {
 
 /// A video track the app can watch: the user's camera or screen, or someone else's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct VideoId(pub u64);
 
 /// Takes one video frame: its width, height and straight-alpha RGBA pixels (sRGB, rows packed).
@@ -70,6 +75,8 @@ impl fmt::Debug for VideoSink {
 
 /// Turns one of the user's own media on or off during a call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum MediaToggle {
     /// The microphone: `false` mutes.
     Microphone(bool),
@@ -81,6 +88,7 @@ pub enum MediaToggle {
 
 /// A kind of media device a call uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum DeviceKind {
     /// What the user speaks into.
     Microphone,
@@ -92,6 +100,7 @@ pub enum DeviceKind {
 
 /// A microphone, speaker or camera.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct MediaDevice {
     /// Its name, which also identifies it: the app's own sound finds the same device by it.
     pub name: String,
@@ -99,6 +108,7 @@ pub struct MediaDevice {
 
 /// The devices calls can use now.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct CallDevices {
     /// Microphones.
     pub microphones: Vec<MediaDevice>,
@@ -142,6 +152,7 @@ impl DeviceChoice {
 
 /// Where a call stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum CallPhase {
     /// A one-to-one call the other side hasn't answered yet.
     Calling,
@@ -155,6 +166,7 @@ pub enum CallPhase {
 
 /// One person in a call (other than the user).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct CallParticipant {
     /// Stable for the call: their LiveKit identity, or their user ID in a one-to-one call.
     pub key: String,
@@ -170,6 +182,7 @@ pub struct CallParticipant {
 
 /// The call under way, as the app shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct CallInfo {
     /// Which call this is: unique in the process, so a call ending can't be taken for the one
     /// that replaced it in the same room.
@@ -196,6 +209,8 @@ pub struct CallInfo {
 
 /// Why a call ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum CallEnd {
     /// The user hung up.
     HungUp,
@@ -213,6 +228,7 @@ pub enum CallEnd {
 
 /// A call ringing for the user.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct IncomingCall {
     /// Whose account it rings on.
     pub account: AccountId,

@@ -1,5 +1,6 @@
-//! Making and naming rooms and spaces: a new room (in a space, or on its own), a new space, and
-//! a new name for either.
+//! Making, naming and joining rooms and spaces: a new room (in a space, or on its own), a new
+//! space, a new name for either, and a look at a room the account hasn't joined (a
+//! [`RoomPreview`]) before joining it by its ID or an alias.
 
 use matrix_sdk::ruma::api::client::room::create_room::v3::{CreationContent, Request as CreateRoom, RoomPreset};
 use matrix_sdk::ruma::events::InitialStateEvent;
@@ -8,21 +9,92 @@ use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::space::parent::SpaceParentEventContent;
 use matrix_sdk::ruma::room::RoomType;
 use matrix_sdk::ruma::serde::Raw;
-use matrix_sdk::ruma::{OwnedRoomId, RoomId};
+use matrix_sdk::ruma::{OwnedRoomId, OwnedServerName, RoomId, RoomOrAliasId, ServerName};
 
 use crate::Error;
 use crate::account::Account;
+use crate::model::MediaRef;
+
+/// Who may join a room, as its preview tells it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub enum JoinRule {
+    /// Anyone.
+    Public,
+    /// Members of certain other rooms or spaces, and anyone invited.
+    Restricted,
+    /// Anyone who asks and is let in, and anyone invited.
+    Knock,
+    /// Only those invited.
+    Invite,
+}
+
+/// A room as someone who hasn't joined it may see it: what a permalink to it shows before the
+/// user joins.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct RoomPreview {
+    /// Its ID, also when it was looked up by an alias.
+    pub room_id: String,
+    /// Its main alias (`#rust:matrix.org`), if it has one.
+    pub alias: Option<String>,
+    /// Its name, if it has one.
+    pub name: Option<String>,
+    /// Its topic, if it has one.
+    pub topic: Option<String>,
+    /// Its picture.
+    pub avatar: Option<MediaRef>,
+    /// How many people have joined.
+    pub member_count: u64,
+    /// Who may join, when the server says.
+    pub join_rule: Option<JoinRule>,
+    /// Whether it is a space.
+    pub space: bool,
+    /// Whether this account has joined it already.
+    pub joined: bool,
+    /// Whether this account is invited to it, so it may join whatever the rule.
+    pub invited: bool,
+}
+
+impl RoomPreview {
+    /// Whether joining may work: the account is invited, or the rule lets anyone (or members of
+    /// another room, which only the server can check) in. Asking to join isn't offered.
+    pub fn joinable(&self) -> bool {
+        self.invited || matches!(self.join_rule, None | Some(JoinRule::Public | JoinRule::Restricted))
+    }
+}
+
+/// Our preview of the SDK's.
+fn preview_of(preview: matrix_sdk::room_preview::RoomPreview) -> RoomPreview {
+    use matrix_sdk::RoomState;
+    use matrix_sdk::ruma::room::JoinRuleSummary;
+    let join_rule = preview.join_rule.map(|rule| match rule {
+        JoinRuleSummary::Public => JoinRule::Public,
+        JoinRuleSummary::Restricted(_) | JoinRuleSummary::KnockRestricted(_) => JoinRule::Restricted,
+        JoinRuleSummary::Knock => JoinRule::Knock,
+        // Private is reserved and unknown rules can't be followed: both as invite-only.
+        _ => JoinRule::Invite,
+    });
+    RoomPreview {
+        room_id: preview.room_id.to_string(),
+        alias: preview.canonical_alias.map(|alias| alias.to_string()),
+        name: preview.name.filter(|name| !name.trim().is_empty()),
+        topic: preview.topic.filter(|topic| !topic.trim().is_empty()),
+        avatar: preview.avatar_url.and_then(crate::convert::avatar),
+        member_count: preview.num_joined_members,
+        join_rule,
+        space: preview.room_type == Some(RoomType::Space),
+        joined: preview.state == Some(RoomState::Joined),
+        invited: preview.state == Some(RoomState::Invited),
+    }
+}
+
+/// The servers among `via` that are server names; the others are left out.
+fn servers(via: &[String]) -> Vec<OwnedServerName> {
+    via.iter().filter_map(|server| ServerName::parse(server).ok()).collect()
+}
 
 impl Account {
-    /// Joins a room, accepting an invitation when one exists. Advertised servers let the
-    /// homeserver find public rooms on other servers.
-    pub async fn join_room(&self, room_id: &str, via: &[String]) -> Result<(), Error> {
-        let room_id = matrix_sdk::ruma::RoomOrAliasId::parse(room_id)?;
-        let via = via.iter().map(matrix_sdk::ruma::ServerName::parse).collect::<Result<Vec<_>, _>>()?;
-        self.client().join_room_by_id_or_alias(&room_id, &via).await?;
-        Ok(())
-    }
-
     /// Public rooms anywhere under a space, with all hierarchy pages included before ranking.
     pub async fn public_rooms(&self, space: &str) -> Result<Vec<crate::PublicRoom>, Error> {
         use matrix_sdk::ruma::api::client::space::get_hierarchy::v1::Request;
@@ -136,6 +208,21 @@ impl Account {
         creation.room_type = Some(RoomType::Space);
         request.creation_content = Some(Raw::new(&creation).map_err(|e| Error::Storage(e.into()))?);
         Ok(self.client().create_room(request).await?.room_id().to_string())
+    }
+
+    /// What `room` (an ID or an alias) looks like from outside, asking the `via` servers when
+    /// this account's server doesn't know it. Fails when no server will describe it (a private
+    /// room the account isn't in).
+    pub async fn preview_room(&self, room: &str, via: &[String]) -> Result<RoomPreview, Error> {
+        let room = RoomOrAliasId::parse(room)?;
+        Ok(preview_of(self.client().get_room_preview(&room, servers(via)).await?))
+    }
+
+    /// Joins `room` (an ID or an alias) through the `via` servers, accepting an invitation when
+    /// one exists; returns its ID. Advertised servers let the homeserver find rooms elsewhere.
+    pub async fn join_room(&self, room: &str, via: &[String]) -> Result<String, Error> {
+        let room = RoomOrAliasId::parse(room)?;
+        Ok(self.client().join_room_by_id_or_alias(&room, &servers(via)).await?.room_id().to_string())
     }
 
     /// Gives a room or space a new name.

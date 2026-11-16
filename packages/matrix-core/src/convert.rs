@@ -74,7 +74,17 @@ pub(crate) async fn room_summary(room: &Room, settings: &NotificationSettings, r
         custom_notifications: custom.is_some(),
         call: room_call(room, kind, rtc_service).await,
         activity_ms: room.latest_event_timestamp().map(|at| at.get().into()),
+        encrypted: room.encryption_state().is_encrypted(),
+        can_rename: may_rename(room).await,
     }
+}
+
+/// Whether the user's power level lets them rename the room.
+async fn may_rename(room: &Room) -> bool {
+    let me = room.own_user_id();
+    room.power_levels()
+        .await
+        .is_ok_and(|power| power.user_can_send_state(me, matrix_sdk::ruma::events::StateEventType::RoomName))
 }
 
 /// How a call would start in the room, and who is in its call now.

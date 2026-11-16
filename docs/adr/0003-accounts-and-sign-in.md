@@ -18,7 +18,9 @@ end a session at any time, hard or softly.
     encrypted with a random 32-byte passphrase. A new sign-in is a new device, unless it resumes
     a suspended account.
   - `<data>/accounts.json` lists the accounts (`StoredAccount`: ID, homeserver URL, store
-    directory, `signed_out`). No secrets.
+    directory, `signed_out`). No secrets. A store directory is read as `<data>/accounts/<name>`
+    wherever the list says it was, so the data directory may move (an iOS container changes
+    path, and the data moves into the App Group for push, ADR 0010).
   - Saving an account over one with a different store deletes the old store, after the new
     secrets and list are written. If the list can't be written, the previous secrets go back,
     so the store it still lists stays readable. Signing out deletes the account's
@@ -52,6 +54,10 @@ end a session at any time, hard or softly.
     `restore_session`, in `signed_in` right after sign-in.
   - `watch_session` gets that subscription before the first request and saves tokens on each
     refresh. A lagged channel counts as a refresh.
+  - Every client also saves a refresh synchronously, inside it (the SDK's session callbacks),
+    and OAuth refreshes take a cross-process lock: a push handled in another process (ADR 0010)
+    may refresh the same session, and a client that finds the tokens refreshed elsewhere reads
+    them back from the secret store instead of spending a used refresh token.
 - **Restoring at launch:**
   - The engine sends `Event::Restoring`, then restores every saved account that isn't
     suspended. Restored accounts get ready like fresh ones (`Account::ready`).

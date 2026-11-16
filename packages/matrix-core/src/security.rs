@@ -24,6 +24,7 @@ use crate::model::AccountId;
 
 /// How the account's encryption stands on this device.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Security {
     /// This session is verified: signed by the user's identity, so it can read and share keys.
     pub session_verified: bool,
@@ -33,6 +34,7 @@ pub struct Security {
 
 /// Whether the account has a recovery key.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum RecoveryStatus {
     /// Not known yet.
     #[default]
@@ -47,6 +49,7 @@ pub enum RecoveryStatus {
 
 /// One signed-in session (device) of the account.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Session {
     /// The device ID.
     pub device_id: String,
@@ -64,6 +67,7 @@ pub struct Session {
 
 /// One emoji of a verification's short authentication string.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct SasEmoji {
     /// The emoji.
     pub symbol: String,
@@ -73,6 +77,8 @@ pub struct SasEmoji {
 
 /// Where a verification between this session and another of the user's sessions stands.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum VerificationStep {
     /// Another session asks to verify this one; accept or cancel.
     Incoming {

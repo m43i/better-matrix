@@ -10,6 +10,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+// Screen capture is desktop-only in libwebrtc; phones share no screen yet (ADR 0010).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use livekit::webrtc::desktop_capturer::{
     CaptureError, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions,
 };
@@ -21,16 +23,18 @@ use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_stream::native::NativeVideoStream;
 use nokhwa::utils::{CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType};
 
+use super::platform::{self, PlatformCamera};
 use super::{CallError, VideoId, VideoSink};
 
 /// The camera's resolution and rate, as asked; the camera picks the closest it has.
 const CAMERA: (u32, u32, u32) = (1280, 720, 30);
 /// How often a shared screen is captured.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const SCREEN_INTERVAL: Duration = Duration::from_millis(1000 / 15);
 /// How long the camera's reads may keep failing before it counts as gone.
 const CAMERA_GONE_AFTER: Duration = Duration::from_secs(1);
 /// Previews of the user's own video are scaled down to this width at most.
-const PREVIEW_WIDTH: u32 = 640;
+pub(super) const PREVIEW_WIDTH: u32 = 640;
 
 /// The video sinks the app asked for, by video, shared with the threads and tasks that feed them.
 #[derive(Clone, Default)]
@@ -59,7 +63,7 @@ impl Sinks {
     }
 
     /// Capture `instance` ended without being stopped.
-    fn ended(&self, instance: u64, unstarted: bool) {
+    pub(super) fn ended(&self, instance: u64, unstarted: bool) {
         if let Some(sender) = &self.ended {
             let _ = sender.send(Ended { instance, unstarted });
         }
@@ -88,7 +92,7 @@ impl Sinks {
 
     /// Hands a frame to `id`'s sink, if the app watches it, as RGBA no wider than `max`
     /// (scaled while still I420, a quarter of the pixels' bytes).
-    fn send(&self, id: VideoId, buffer: &dyn VideoBuffer, max: Option<u32>) {
+    pub(super) fn send(&self, id: VideoId, buffer: &dyn VideoBuffer, max: Option<u32>) {
         let Some(sink) = self.sink(id) else { return };
         let (width, height) = (buffer.width(), buffer.height());
         if width == 0 || height == 0 {
@@ -122,8 +126,9 @@ fn fit(width: u32, height: u32, max: u32) -> (u32, u32) {
 /// Numbers captures: a switched camera keeps its preview, so its end is told apart by this.
 static CAPTURES: AtomicU64 = AtomicU64::new(1);
 
-/// A capture thread and the flag that stops it. Dropping it stops the thread without waiting;
-/// [`Capture::stop_and_wait`] (through [`release`]) also waits for the device to close.
+/// A capture thread and the flag that stops it, or the platform's camera (phones). Dropping it
+/// stops the capture without waiting; [`Capture::stop_and_wait`] (through [`release`]) also
+/// waits for the device to close.
 pub(crate) struct Capture {
     pub source: NativeVideoSource,
     pub preview: VideoId,
@@ -131,12 +136,14 @@ pub(crate) struct Capture {
     pub instance: u64,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    /// The platform's camera, while it films for this capture.
+    platform: Option<Arc<dyn PlatformCamera>>,
 }
 
 impl Capture {
     /// A capture of nothing, holding a source and preview while the camera is off or switches.
     pub fn idle(source: NativeVideoSource, preview: VideoId) -> Self {
-        Self { source, preview, instance: 0, stop: Arc::new(AtomicBool::new(true)), thread: None }
+        Self { source, preview, instance: 0, stop: Arc::new(AtomicBool::new(true)), thread: None, platform: None }
     }
 
     fn running(
@@ -146,7 +153,7 @@ impl Capture {
         thread: JoinHandle<()>,
         instance: u64,
     ) -> Self {
-        Self { source, preview, instance, stop, thread: Some(thread) }
+        Self { source, preview, instance, stop, thread: Some(thread), platform: None }
     }
 
     pub fn rtc_source(&self) -> RtcVideoSource {
@@ -155,7 +162,7 @@ impl Capture {
 
     /// Whether a device feeds it (it isn't [`Capture::idle`]).
     pub fn is_running(&self) -> bool {
-        self.thread.is_some()
+        self.thread.is_some() || self.platform.is_some()
     }
 
     /// Stops the thread and waits for it, so its device is free. Blocking.
@@ -164,12 +171,18 @@ impl Capture {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+        if let Some(camera) = self.platform.take() {
+            platform::stop(camera, self.instance, true);
+        }
     }
 }
 
 impl Drop for Capture {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        if let Some(camera) = self.platform.take() {
+            platform::stop(camera, self.instance, false);
+        }
     }
 }
 
@@ -183,6 +196,13 @@ pub(crate) fn start_camera(
 ) -> Result<Capture, CallError> {
     let (width, height, fps) = CAMERA;
     let source = source.unwrap_or_else(|| NativeVideoSource::new(VideoResolution { width, height }, false));
+    // Phones film with the system's camera API, which pushes its frames in.
+    if let Some(camera) = platform::camera() {
+        let instance = CAPTURES.fetch_add(1, Ordering::Relaxed);
+        platform::start(&camera, sinks, preview, device, source.clone(), instance).map_err(CallError::Media)?;
+        let stop = Arc::new(AtomicBool::new(false));
+        return Ok(Capture { source, preview, instance, stop, thread: None, platform: Some(camera) });
+    }
     // The camera by its name, else the first.
     let index = device
         .and_then(|name| cameras().into_iter().find(|(_, found)| found == name).map(|(index, _)| index))
@@ -250,8 +270,15 @@ pub(crate) fn start_camera(
     }
 }
 
+/// Phones share no screen yet: libwebrtc's desktop capturer doesn't exist there (ADR 0010).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) fn start_screen(_sinks: Sinks, _preview: VideoId) -> Result<Capture, CallError> {
+    Err(CallError::Media("screen sharing isn't available here".to_owned()))
+}
+
 /// Starts sharing a screen or window: the system picker chooses on Linux (the desktop portal)
 /// and macOS, the first screen elsewhere.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn start_screen(sinks: Sinks, preview: VideoId) -> Result<Capture, CallError> {
     let source = NativeVideoSource::new(VideoResolution { width: 1920, height: 1080 }, true);
     let stop = Arc::new(AtomicBool::new(false));
@@ -350,7 +377,10 @@ pub(crate) fn list_devices() -> super::CallDevices {
         devices.microphones = audio.recording_devices().map(|d| MediaDevice { name: d.name }).collect();
         devices.speakers = audio.playout_devices().map(|d| MediaDevice { name: d.name }).collect();
     }
-    devices.cameras = cameras().into_iter().map(|(_, name)| MediaDevice { name }).collect();
+    devices.cameras = match platform::camera() {
+        Some(camera) => camera.cameras().into_iter().map(|name| MediaDevice { name }).collect(),
+        None => cameras().into_iter().map(|(_, name)| MediaDevice { name }).collect(),
+    };
     devices
 }
 

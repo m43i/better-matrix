@@ -1,0 +1,15 @@
+{
+  "mobile.people.action.invite": "Inviter",
+  "mobile.people.action.leave": "Quitter",
+  "mobile.people.action.delete": "Supprimer",
+  "mobile.people.history.world_readable": "Tout le monde peut lire les messages de ce salon, même sans le rejoindre.",
+  "mobile.people.history.shared": "Les membres peuvent lire tous les messages précédents, y compris ceux d'avant leur arrivée.",
+  "mobile.people.history.invited": "Les membres peuvent lire les messages à partir de leur invitation.",
+  "mobile.people.history.joined": "Les membres peuvent lire les messages à partir de leur arrivée.",
+  "mobile.people.you": "Vous",
+  "mobile.people.no_rooms": "Il n'y a aucun autre salon où l'inviter.",
+  "mobile.people.invited_to": "{{name}} a été invité·e dans {{room}}.",
+  "mobile.people.space": "Espace",
+  "mobile.people.no_space": "Aucun",
+  "mobile.people.no_members": "Personne ne correspond à votre recherche."
+}

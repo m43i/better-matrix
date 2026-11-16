@@ -1,0 +1,11 @@
+{
+  "mobile.push.new_message": "Nouveau message",
+  "mobile.push.invite": "{{sender}} vous a invité",
+  "mobile.push.device": "Notifications sur cet appareil",
+  "mobile.push.device_hint": "Soyez notifié même quand l'application est fermée. Cet appareil récupère et déchiffre lui-même chaque message ; le service de push apprend seulement que quelque chose est arrivé.",
+  "mobile.push.account": "Sur cet appareil",
+  "mobile.push.account_hint": "Désactivez pour ne plus recevoir les notifications de ce compte sur cet appareil uniquement.",
+  "mobile.push.unavailable": "Le push n'est pas configuré dans cette version : les notifications n'arrivent que pendant que l'application tourne.",
+  "mobile.push.denied": "Les notifications de Better Matrix sont désactivées dans les réglages du système.",
+  "mobile.push.failed": "Impossible d'activer les notifications pour {{account}} : {{error}}"
+}

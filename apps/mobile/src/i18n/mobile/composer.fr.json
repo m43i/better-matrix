@@ -1,0 +1,17 @@
+{
+  "mobile.composer.library": "Photos et vidéos",
+  "mobile.composer.camera": "Appareil photo",
+  "mobile.composer.files": "Fichiers",
+  "mobile.composer.poll": "Sondage",
+  "mobile.composer.camera_denied": "Autorisez l’accès à l’appareil photo dans les Réglages pour prendre des photos ici.",
+  "mobile.composer.microphone_denied": "Autorisez l’accès au micro dans les Réglages pour enregistrer des messages vocaux.",
+  "mobile.composer.voice_hint": "Maintenez pour enregistrer et relâchez pour envoyer, ou touchez pour commencer.",
+  "mobile.composer.release_to_send": "Relâchez pour envoyer",
+  "mobile.composer.link_address": "Adresse du lien",
+  "mobile.composer.attach_failed": "Impossible de joindre le fichier : {{error}}",
+  "mobile.composer.emoji_recent": "Utilisés récemment",
+  "mobile.composer.emoji_travel": "Voyages et lieux",
+  "mobile.composer.emoji_activities": "Activités",
+  "mobile.composer.emoji_objects": "Objets",
+  "mobile.composer.emoji_flags": "Drapeaux"
+}

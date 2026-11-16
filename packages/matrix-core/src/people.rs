@@ -17,6 +17,7 @@ use crate::model::Person;
 
 /// What someone may do in a room, by their power level.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum MemberRole {
     /// Power level 100 or more, or the room's creator.
     Admin,
@@ -29,6 +30,7 @@ pub enum MemberRole {
 
 /// Whether someone is around, as their homeserver last said (servers may not share presence).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum Presence {
     /// Active now.
     Online,
@@ -43,6 +45,7 @@ pub enum Presence {
 
 /// One joined member, as the member list shows them.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct RoomMember {
     /// Who they are.
     pub person: Person,
@@ -69,6 +72,8 @@ impl MemberRole {
 
 /// What a moderator does to a member.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum Moderation {
     /// Remove them from the room; they may join again.
     Kick,
@@ -80,6 +85,7 @@ pub enum Moderation {
 
 /// A room's joined members, as the member list shows them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Members {
     /// Everyone joined: those around first, then by role, then by name; only those this device
     /// knows unless `complete`.

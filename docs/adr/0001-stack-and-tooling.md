@@ -43,11 +43,13 @@ Date: 2026-11-14
     orchestration, macOS 26 arm64 and Windows Server 2025 for their release builds. Linux
     release builds keep Ubuntu 22.04 deliberately, preserving the glibc 2.35 baseline below.
   - Actions use current stable major versions: checkout v7, upload-artifact v7,
-    download-artifact v8, rust-cache v2 and setup-bun v2. Their own manifests select Node 24;
-    installing Node 26 on the runner would not change that action runtime. Repository scripts
-    run with the Bun version in `package.json`, without a separate Node installation.
+    download-artifact v8, rust-cache v2, setup-bun v2 and setup-node v6. Their own manifests
+    select Node 24; the Node 26 CI installs doesn't change that action runtime. Repository
+    scripts run with the Bun version in `package.json`; only Jest (the mobile app's and
+    matrix-native's tests, under `jest-expo`) needs Node, 26 in CI.
   - CI (`ci.yml`) lints and tests in one Linux job on every pull request and every commit to
-    `main`. A newer push cancels a pull request's older run. Only `main` writes the Rust cache;
+    `main`, the mobile app's TypeScript (typecheck and Jest, [0010](0010-mobile.md)) included;
+    releases build the desktop app only, until the phones ship. A newer push cancels a pull request's older run. Only `main` writes the Rust cache;
     pull requests read it. Linux builds use clang 21 from LLVM's packages (libwebrtc's libc++
     needs it), passed to Cargo through Turbo (`CC`, `CXX`, `CARGO_*` in `turbo.json`).
   - A release (`release.yml`) starts by hand with a version (checked as Cargo reads versions,
@@ -76,6 +78,23 @@ Date: 2026-11-14
   - Release notes come from the merged pull requests, grouped by label (`.github/release.yml`;
     the labels are in `.github/labels.yml`). The packaging lives in `packaging/`, runnable
     locally.
+- **`matrix:` links and one process** (desktop):
+  - The installs claim the `matrix` scheme: the Linux desktop entry (`packaging/linux`, and
+    `bun run install:linux`) has `MimeType=x-scheme-handler/matrix;` and `Exec=… %u`; the macOS
+    bundle's `Info.plist` has `CFBundleURLTypes`; the Windows install line in the README writes
+    `HKCU\Software\Classes\matrix` (`URL Protocol`, `shell\open\command` → `"…exe" "%1"`).
+    `https://matrix.to` isn't claimed: no desktop OS hands a web domain to an app without the
+    domain's consent, so those links open the browser, and matrix.to's page offers clients.
+  - The app runs as one process per user (`rune::single_instance`, before the engine starts, so
+    two never share the stores; `rune::release_instance` once it stops). Rune hands a later
+    launch's `scheme://` arguments to `App::on_open_url` (and macOS every link), but not an
+    opaque `matrix:r/…` URI, after which it only reopens the app. So `platform::launch` writes
+    the permalinks Rune won't pass into a private handoff folder (`<cache>/links`, one file per
+    link, written whole then renamed) before asking for the instance; the running process takes
+    them in `App::on_reopen` (on a worker) and lets Rune bring its window forward, and a launch
+    that becomes the running process takes them itself. Links older than a minute are dropped.
+    Every link reaches `State::open_permalink`, which waits for the first room list when no
+    account is ready.
 - **Translations:**
   - Each **catalog** is flat JSON, `apps/desktop/i18n/app/<locale>.json`, listed in
     `i18n/locales.json`. English is the source and the fallback.
@@ -102,3 +121,7 @@ Date: 2026-11-14
   three catalogs.
 - SDK error messages show in English inside translated sentences.
 - Monospace text, the backdrop included, depends on the system's font.
+- A second desktop launch no longer runs beside the first; links are verified only by the unit
+  tests of the handoff folder and the state: the scheme registration on each OS and Rune's
+  instance handoff were not exercised here (Linux needs `update-desktop-database`; the AppImage
+  installs no desktop entry, so it claims nothing).

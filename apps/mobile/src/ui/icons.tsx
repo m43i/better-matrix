@@ -1,0 +1,139 @@
+// The app's icons, native on each platform: SF Symbols on iOS, Material Symbols on Android.
+// The names mirror the desktop's icon set (apps/desktop/src/ui/icons.rs); add one here before
+// using it, so both platforms always have a glyph.
+
+import { SymbolView } from 'expo-symbols';
+import type { ComponentProps } from 'react';
+
+type SymbolName = ComponentProps<typeof SymbolView>['name'];
+
+export const icons = {
+  bold: { ios: 'bold', android: 'format_bold' },
+  italic: { ios: 'italic', android: 'format_italic' },
+  strike: { ios: 'strikethrough', android: 'strikethrough_s' },
+  code: { ios: 'chevron.left.forwardslash.chevron.right', android: 'code' },
+  link: { ios: 'link', android: 'link' },
+  bullets: { ios: 'list.bullet', android: 'format_list_bulleted' },
+  numbers: { ios: 'list.number', android: 'format_list_numbered' },
+  quote: { ios: 'text.quote', android: 'format_quote' },
+  codeBlock: { ios: 'curlybraces', android: 'data_object' },
+  attach: { ios: 'paperclip', android: 'attach_file' },
+  send: { ios: 'paperplane.fill', android: 'send' },
+  close: { ios: 'xmark', android: 'close' },
+  file: { ios: 'doc', android: 'description' },
+  image: { ios: 'photo', android: 'image' },
+  video: { ios: 'video', android: 'videocam' },
+  audio: { ios: 'music.note', android: 'music_note' },
+  home: { ios: 'house', android: 'home' },
+  homeFilled: { ios: 'house.fill', android: 'home' },
+  plus: { ios: 'plus', android: 'add' },
+  check: { ios: 'checkmark', android: 'check' },
+  signOut: { ios: 'rectangle.portrait.and.arrow.right', android: 'logout' },
+  settings: { ios: 'gearshape', android: 'settings' },
+  language: { ios: 'globe', android: 'language' },
+  appearance: { ios: 'sun.max', android: 'light_mode' },
+  bell: { ios: 'bell', android: 'notifications' },
+  bellOff: { ios: 'bell.slash', android: 'notifications_off' },
+  at: { ios: 'at', android: 'alternate_email' },
+  chevronRight: { ios: 'chevron.right', android: 'chevron_right' },
+  chevronLeft: { ios: 'chevron.left', android: 'chevron_left' },
+  chevronDown: { ios: 'chevron.down', android: 'expand_more' },
+  leave: { ios: 'rectangle.portrait.and.arrow.right', android: 'logout' },
+  trash: { ios: 'trash', android: 'delete' },
+  eye: { ios: 'eye', android: 'visibility' },
+  smile: { ios: 'face.smiling', android: 'mood' },
+  reply: { ios: 'arrowshape.turn.up.left', android: 'reply' },
+  thread: { ios: 'bubble.left.and.bubble.right', android: 'forum' },
+  threadFilled: { ios: 'bubble.left.and.bubble.right.fill', android: 'forum' },
+  lock: { ios: 'lock', android: 'lock' },
+  alert: { ios: 'exclamationmark.triangle', android: 'warning' },
+  user: { ios: 'person', android: 'person' },
+  userAdd: { ios: 'person.badge.plus', android: 'person_add' },
+  users: { ios: 'person.2', android: 'group' },
+  mail: { ios: 'envelope', android: 'mail' },
+  phone: { ios: 'phone', android: 'call' },
+  external: { ios: 'arrow.up.right.square', android: 'open_in_new' },
+  download: { ios: 'arrow.down.circle', android: 'download' },
+  mic: { ios: 'mic', android: 'mic' },
+  micOff: { ios: 'mic.slash', android: 'mic_off' },
+  videoOff: { ios: 'video.slash', android: 'videocam_off' },
+  screen: { ios: 'rectangle.on.rectangle', android: 'screen_share' },
+  call: { ios: 'phone', android: 'call' },
+  hangUp: { ios: 'phone.down.fill', android: 'call_end' },
+  search: { ios: 'magnifyingglass', android: 'search' },
+  info: { ios: 'info.circle', android: 'info' },
+  poll: { ios: 'chart.bar', android: 'bar_chart' },
+  verified: { ios: 'checkmark.seal', android: 'verified' },
+  speaker: { ios: 'speaker.wave.2', android: 'volume_up' },
+  flipCamera: { ios: 'arrow.triangle.2.circlepath.camera', android: 'cameraswitch' },
+  package: { ios: 'shippingbox', android: 'inventory_2' },
+  play: { ios: 'play.fill', android: 'play_arrow' },
+  pause: { ios: 'pause.fill', android: 'pause' },
+  chat: { ios: 'bubble.left', android: 'chat' },
+  key: { ios: 'key', android: 'key' },
+  shield: { ios: 'checkmark.shield', android: 'shield' },
+  laptop: { ios: 'laptopcomputer', android: 'laptop' },
+  more: { ios: 'ellipsis', android: 'more_horiz' },
+  pencil: { ios: 'pencil', android: 'edit' },
+  globe: { ios: 'globe', android: 'public' },
+  copy: { ios: 'doc.on.doc', android: 'content_copy' },
+  camera: { ios: 'camera', android: 'photo_camera' },
+  library: { ios: 'photo.on.rectangle', android: 'photo_library' },
+  hash: { ios: 'number', android: 'tag' },
+  radio: { ios: 'circle', android: 'radio_button_unchecked' },
+  radioOn: { ios: 'checkmark.circle.fill', android: 'check_circle' },
+  compose: { ios: 'square.and.pencil', android: 'edit_square' },
+  markRead: { ios: 'checkmark.message', android: 'mark_chat_read' },
+  folder: { ios: 'folder', android: 'folder' },
+  folderAdd: { ios: 'folder.badge.plus', android: 'create_new_folder' },
+  folderRemove: { ios: 'folder.badge.minus', android: 'folder_off' },
+  space: { ios: 'square.grid.2x2', android: 'grid_view' },
+  share: { ios: 'square.and.arrow.up', android: 'share' },
+  tune: { ios: 'slider.horizontal.3', android: 'tune' },
+  cloudDownload: { ios: 'icloud.and.arrow.down', android: 'cloud_download' },
+  devices: { ios: 'laptopcomputer.and.iphone', android: 'devices' },
+  arrowDown: { ios: 'arrow.down', android: 'arrow_downward' },
+  eyeOff: { ios: 'eye.slash', android: 'visibility_off' },
+  addReaction: { ios: 'face.smiling', android: 'add_reaction' },
+  save: { ios: 'square.and.arrow.down', android: 'save' },
+  textFormat: { ios: 'textformat', android: 'text_format' },
+  stop: { ios: 'stop.fill', android: 'stop' },
+  clock: { ios: 'clock', android: 'schedule' },
+  hand: { ios: 'hand.raised', android: 'waving_hand' },
+  leaf: { ios: 'leaf', android: 'eco' },
+  food: { ios: 'fork.knife', android: 'restaurant' },
+  car: { ios: 'car', android: 'directions_car' },
+  ball: { ios: 'soccerball', android: 'sports_soccer' },
+  lightbulb: { ios: 'lightbulb', android: 'lightbulb' },
+  heart: { ios: 'heart', android: 'favorite' },
+  flag: { ios: 'flag', android: 'flag' },
+  minusCircle: { ios: 'minus.circle', android: 'remove_circle' },
+  layout: { ios: 'rectangle.3.group', android: 'view_quilt' },
+  fullVideo: { ios: 'arrow.up.left.and.arrow.down.right', android: 'fit_screen' },
+  cropVideo: { ios: 'crop', android: 'crop' },
+  expand: { ios: 'arrow.up.left.and.arrow.down.right', android: 'open_in_full' },
+} as const satisfies Record<string, { ios: string; android: string }>;
+
+export type IconName = keyof typeof icons;
+
+export function Icon({
+  name,
+  size = 22,
+  color,
+  weight,
+}: {
+  name: IconName;
+  size?: number;
+  color: string;
+  weight?: 'regular' | 'semibold' | 'bold';
+}) {
+  return (
+    <SymbolView
+      name={icons[name] as SymbolName}
+      size={size}
+      tintColor={color}
+      weight={weight}
+      style={{ width: size, height: size }}
+    />
+  );
+}

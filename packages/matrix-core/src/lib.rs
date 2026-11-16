@@ -18,7 +18,9 @@ pub mod discovery;
 pub mod engine;
 pub mod model;
 pub mod people;
+pub mod permalinks;
 pub mod profile;
+pub mod push;
 pub mod rooms;
 pub mod secrets;
 pub mod security;
@@ -33,10 +35,11 @@ mod session;
 mod test_server;
 mod timeline;
 mod timeline_bootstrap;
+mod tls;
 
 pub mod links;
 
-pub use account::{Account, ClientIdentity, LoginRequest};
+pub use account::{Account, ClientIdentity, LoginRequest, OAuthRedirect};
 pub use calls::{
     CallDevices, CallEnd, CallInfo, CallParticipant, CallPhase, CallVia, DeviceChoice, DeviceKind, IncomingCall,
     MediaDevice, MediaToggle, RoomCall, VideoId, VideoSink,
@@ -48,8 +51,9 @@ pub use engine::{
 pub use model::{
     AccountId, AccountSummary, Attachment, AttachmentKind, CallCard, EntryKind, HistoryVisibility, Invitation,
     LoginMethods, MediaRef, MediaSize, Message, MessageContent, Notification, NotificationMode, Outgoing, Password,
-    Person, Poll, PollAnswer, PublicRoom, Quote, Reaction, RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary,
-    SignInMethod, SpaceSummary, ThreadSummary, TimelineDiff, TimelineEntry, TimelineKey, Upload,
+    Person, Poll, PollAnswer, PublicRoom, PushContent, PushTarget, Pusher, Quote, Reaction, RoomChange, RoomEvent,
+    RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary, ThreadSummary, TimelineDiff, TimelineEntry,
+    TimelineKey, Upload,
 };
 
 /// How many messages a timeline page holds: what a room shows when it opens, and what each
@@ -57,7 +61,9 @@ pub use model::{
 pub const HISTORY_PAGE: u16 = 30;
 pub use history::{SharedFile, ThreadInfo};
 pub use people::{MemberRole, Members, Moderation, Presence, RoomMember};
+pub use permalinks::{LinkAction, LinkTarget, Permalink};
 pub use profile::{AccountPage, ContactDetail, ContactKind, Contacts, PendingContact};
+pub use rooms::{JoinRule, RoomPreview};
 pub use secrets::{FileSecrets, MemorySecrets, SecretError, SecretStore};
 pub use security::{RecoveryStatus, SasEmoji, Security, Session, VerificationStep};
 pub use sidebar::{ScopeLayout, Section, SidebarLayout};
@@ -189,6 +195,9 @@ pub enum Error {
     /// The command was cancelled.
     #[error("cancelled")]
     Cancelled,
+    /// A push couldn't be registered or read.
+    #[error("push notifications: {0}")]
+    Push(String),
     /// The server accepted a login but the client reports no user.
     #[error("the server accepted the login but reported no user ID")]
     NoUserId,

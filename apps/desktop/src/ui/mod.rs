@@ -10,6 +10,7 @@ mod confirm;
 mod emoji;
 mod icons;
 mod info;
+mod link;
 mod members;
 mod message_text;
 mod overview;
@@ -115,6 +116,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         }
         Some(Modal::Confirm(action)) => Some(confirm::confirm(action, &p)),
         Some(Modal::Poll) => Some(poll::form(s, &p)),
+        Some(Modal::Link(dialog)) => Some(link::link_dialog(s, dialog, &p)),
         Some(Modal::Invite { room_id, invited, .. }) => {
             account.map(|account| people::invite_dialog(s, account, room_id, invited, &p))
         }

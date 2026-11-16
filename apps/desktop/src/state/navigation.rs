@@ -14,6 +14,16 @@ pub fn navigate(action: impl Fn(&mut State)) -> impl Fn(&mut State, &mut Tx) {
     }
 }
 
+/// Run `action` from a handler that already holds the input's transaction (an opened link, a
+/// launch handing links over), landing a changed destination in that same commit.
+pub fn navigate_now(state: &mut State, tx: &mut Tx, action: impl FnOnce(&mut State)) {
+    let location = Location::of(state);
+    action(state);
+    if !location.is_current(state) {
+        tx.settle();
+    }
+}
+
 /// The main pane's destination. Threads and side panels can animate within it.
 #[derive(Debug)]
 pub(super) struct Location {

@@ -17,6 +17,7 @@ const EVENT_TYPE: &str = "chat.bettermatrix.sidebar";
 
 /// The sidebar's arrangement, by scope: `home`, or a space's room ID.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(ts_rs::TS))]
 pub struct SidebarLayout {
     /// Each scope's arrangement, by `home` or the space's room ID.
     #[serde(default)]
@@ -33,6 +34,7 @@ pub struct SidebarLayout {
 
 /// One scope's arrangement.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(ts_rs::TS))]
 pub struct ScopeLayout {
     /// Sections the user collapsed: the built-in `rooms` and `direct`, or a section's ID.
     #[serde(default)]
@@ -48,6 +50,7 @@ pub struct ScopeLayout {
 
 /// A section the user made.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(ts_rs::TS))]
 pub struct Section {
     /// Stable within the scope.
     pub id: String,

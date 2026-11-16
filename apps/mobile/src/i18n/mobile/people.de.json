@@ -1,0 +1,15 @@
+{
+  "mobile.people.action.invite": "Einladen",
+  "mobile.people.action.leave": "Verlassen",
+  "mobile.people.action.delete": "Löschen",
+  "mobile.people.history.world_readable": "Alle können die Nachrichten dieses Raums lesen, auch ohne beizutreten.",
+  "mobile.people.history.shared": "Mitglieder können alle früheren Nachrichten lesen, auch die von vor ihrem Beitritt.",
+  "mobile.people.history.invited": "Mitglieder können Nachrichten ab ihrer Einladung lesen.",
+  "mobile.people.history.joined": "Mitglieder können Nachrichten ab ihrem Beitritt lesen.",
+  "mobile.people.you": "Du",
+  "mobile.people.no_rooms": "Es gibt keine anderen Räume, in die du sie einladen kannst.",
+  "mobile.people.invited_to": "{{name}} wurde in {{room}} eingeladen.",
+  "mobile.people.space": "Space",
+  "mobile.people.no_space": "Keiner",
+  "mobile.people.no_members": "Niemand passt zu deiner Suche."
+}

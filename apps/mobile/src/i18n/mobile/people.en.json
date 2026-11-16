@@ -1,0 +1,15 @@
+{
+  "mobile.people.action.invite": "Invite",
+  "mobile.people.action.leave": "Leave",
+  "mobile.people.action.delete": "Delete",
+  "mobile.people.history.world_readable": "Anyone can read this room's messages, even without joining.",
+  "mobile.people.history.shared": "Members can read all earlier messages, from before they joined too.",
+  "mobile.people.history.invited": "Members can read messages from when they were invited.",
+  "mobile.people.history.joined": "Members can read messages from when they joined.",
+  "mobile.people.you": "You",
+  "mobile.people.no_rooms": "There are no other rooms to invite them to.",
+  "mobile.people.invited_to": "{{name}} was invited to {{room}}.",
+  "mobile.people.space": "Space",
+  "mobile.people.no_space": "None",
+  "mobile.people.no_members": "Nobody matches your search."
+}
