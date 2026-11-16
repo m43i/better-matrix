@@ -2519,6 +2519,109 @@ fn a_call_in_another_room_should_not_stream_its_video() {
 }
 
 #[test]
+fn paging_a_call_should_stop_hidden_videos_and_start_visible_ones() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.select_room("!one:x");
+    let mut info = call_info(&id, "!one:x", None);
+    info.participants = (1..=10)
+        .map(|n| matrix_core::CallParticipant {
+            key: n.to_string(),
+            person: matrix_core::Person { id: n.to_string(), name: n.to_string(), avatar: None },
+            muted: false,
+            camera: Some(matrix_core::VideoId(n)),
+            screen: None,
+        })
+        .collect();
+    apply(&mut s, Event::CallUpdated(Box::new(info)));
+    s.set_call_layout(CallLayout::Grid);
+    s.resize_call([300.0, 180.0]);
+    let old = s.call.as_ref().unwrap().watched.clone();
+    drain(&mut commands);
+    s.page_call(true);
+    let new = &s.call.as_ref().unwrap().watched;
+    let dispatched = all_commands(&mut commands);
+    assert!(
+        !old.is_empty()
+            && old.is_disjoint(new)
+            && old.iter().all(|id| dispatched.contains(&Command::UnwatchVideo(*id)))
+            && new
+                .iter()
+                .all(|id| dispatched.iter().any(|c| matches!(c, Command::WatchVideo { video, .. } if video == id)))
+    );
+}
+
+#[test]
+fn showing_chat_should_keep_visible_call_videos_watched() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.select_room("!one:x");
+    apply(&mut s, Event::CallUpdated(Box::new(call_info(&id, "!one:x", Some(7)))));
+    drain(&mut commands);
+    s.toggle_call_chat();
+    s.sync_watching();
+    assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::UnwatchVideo(_))));
+}
+
+#[test]
+fn compact_chat_should_close_the_call_layout_menu() {
+    let (mut s, _commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.select_room("!one:x");
+    apply(&mut s, Event::CallUpdated(Box::new(call_info(&id, "!one:x", Some(7)))));
+    s.call.as_mut().unwrap().room_size = [400.0, 600.0];
+    s.open_call_layout();
+    s.toggle_call_chat();
+    assert!(s.popover.is_none());
+}
+
+#[test]
+fn the_end_of_a_call_should_close_its_layout_menu() {
+    let (mut s, _commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.select_room("!one:x");
+    apply(&mut s, Event::CallUpdated(Box::new(call_info(&id, "!one:x", Some(7)))));
+    s.open_call_layout();
+    apply(
+        &mut s,
+        Event::CallEnded { account: id, room_id: "!one:x".into(), call: 1, reason: matrix_core::CallEnd::HungUp },
+    );
+    assert!(s.popover.is_none());
+}
+
+#[test]
+fn compact_chat_paging_should_watch_only_the_selected_video() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.select_room("!one:x");
+    let mut info = call_info(&id, "!one:x", None);
+    info.participants = (1..=2)
+        .map(|n| matrix_core::CallParticipant {
+            key: n.to_string(),
+            person: matrix_core::Person { id: n.to_string(), name: n.to_string(), avatar: None },
+            muted: false,
+            camera: Some(matrix_core::VideoId(n)),
+            screen: None,
+        })
+        .collect();
+    apply(&mut s, Event::CallUpdated(Box::new(info)));
+    let call = s.call.as_mut().unwrap();
+    call.chat = true;
+    call.room_size = [400.0, 600.0];
+    s.set_call_layout(CallLayout::Grid);
+    drain(&mut commands);
+    s.page_call(true);
+    let dispatched = all_commands(&mut commands);
+    assert!(
+        dispatched.contains(&Command::UnwatchVideo(matrix_core::VideoId(1)))
+            && dispatched
+                .iter()
+                .any(|c| matches!(c, Command::WatchVideo { video, .. } if *video == matrix_core::VideoId(2)))
+            && s.call.as_ref().unwrap().watched == [matrix_core::VideoId(2)].into_iter().collect()
+    );
+}
+
+#[test]
 fn the_end_of_a_replaced_call_should_leave_the_new_one() {
     let (mut s, _commands) = state();
     let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);

@@ -45,7 +45,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             .grow(1.0)
             .h_full()
             .min_w(0.0)
-            .child(sidebar::sidebar(s, account, &p))
+            .children((!s.call_here().is_some_and(|call| call.hide_sidebar)).then(|| sidebar::sidebar(s, account, &p)))
             .child(room::room_pane(s, account, &p, cx)),
         (Screen::Chat, None) => room::empty_state(t!("room.pick_account"), &p),
         (Screen::SignIn, _) => {
@@ -79,6 +79,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         (Some(Popover::CreateMenu), Some(account)) => vec![sidebar::create_menu(s, account, &p)],
         (Some(Popover::SpaceMenu(id)), Some(account)) => vec![rail::space_menu(account, id, &p)],
         (Some(Popover::CallDevices(kind)), _) => vec![call::device_menu(s, *kind, &p)],
+        (Some(Popover::CallLayout), _) => s.call_here().map(|call| call::layout_menu(call, &p)).into_iter().collect(),
         (Some(Popover::MemberMenu { user_id, submenu }), Some(account)) => {
             members::menu(s, account, user_id, *submenu, &p)
         }

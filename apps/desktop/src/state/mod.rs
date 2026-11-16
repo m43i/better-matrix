@@ -11,6 +11,7 @@ mod accounts;
 pub mod backdrop;
 mod call;
 mod call_glow;
+mod call_layout;
 mod composer;
 mod gifs;
 mod link_previews;
@@ -42,6 +43,7 @@ use rune::{TextEdit, Tx};
 
 pub use accounts::{AccountData, Accounts, EntryView, RoomTimeline, Scope, TimelineItem, now_ms, wants_attention};
 pub use call::Call;
+pub use call_layout::{CallLayout, CallTile};
 pub use composer::{Composer, EditTarget, Format, ReplyTarget, VoiceMemo};
 pub use gifs::GifCache;
 pub use link_previews::LinkPreviews;
@@ -102,6 +104,8 @@ pub enum Popover {
     SpaceMenu(String),
     /// The devices to pick from in a call, from the chevron beside its microphone or camera.
     CallDevices(matrix_core::DeviceKind),
+    /// Call layout choices, anchored to the stage's layout button.
+    CallLayout,
     /// The options of a select in settings.
     Select(SelectFor),
 }
@@ -1152,6 +1156,9 @@ impl State {
                 let replaced = self.call.as_ref().is_some_and(|shown| shown.info.call != call);
                 if !replaced {
                     self.call = None;
+                    if self.popover == Some(Popover::CallLayout) {
+                        self.popover = None;
+                    }
                     self.notice = match reason {
                         CallEnd::HungUp | CallEnd::Left => None,
                         CallEnd::Declined => Some(t!("call.declined").to_owned()),
@@ -1217,9 +1224,8 @@ impl State {
         }
         let Some(call) = self.call.as_mut() else { return };
         let changes = call.update(info);
-        let watching = call.watching;
-        if watching {
-            self.watch_videos(&changes.added);
+        for video in &changes.removed {
+            call.watched.remove(video);
         }
         for video in changes.removed {
             self.dispatch(Command::UnwatchVideo(video), Purpose::CallVideo);
@@ -1238,22 +1244,22 @@ impl State {
         }
     }
 
-    /// Watches the call's videos while its stage shows, and stops (so nothing converts frames
-    /// nobody sees) while it doesn't.
+    /// Diffs watches against the visible call plan, so hidden pages and hidden self-view
+    /// convert no frames. A call outside the current room watches nothing.
     pub fn sync_watching(&mut self) {
-        let shows = self.call_here().is_some_and(|call| !call.chat);
-        let Some(call) = self.call.as_mut() else { return };
-        if call.watching == shows {
-            return;
+        let layout_menu = self.call_here().is_some_and(|call| call.video() && !call.compact());
+        if !layout_menu && self.popover == Some(Popover::CallLayout) {
+            self.popover = None;
         }
-        call.watching = shows;
-        let videos: Vec<matrix_core::VideoId> = call.videos.keys().copied().collect();
-        if shows {
-            self.watch_videos(&videos);
-        } else {
-            for video in videos {
-                self.dispatch(Command::UnwatchVideo(video), Purpose::CallVideo);
-            }
+        let shows = self.call_here().is_some();
+        let Some(call) = self.call.as_mut() else { return };
+        let visible = if shows { call.visible_videos() } else { HashSet::new() };
+        let added: Vec<_> = visible.difference(&call.watched).copied().collect();
+        let removed: Vec<_> = call.watched.difference(&visible).copied().collect();
+        call.watched = visible;
+        self.watch_videos(&added);
+        for video in removed {
+            self.dispatch(Command::UnwatchVideo(video), Purpose::CallVideo);
         }
     }
 
@@ -1353,11 +1359,12 @@ impl State {
         self.sound_ring();
     }
 
-    /// Switches the call's room between the stage and its chat.
+    /// Shows or hides chat alongside the call stage.
     pub fn toggle_call_chat(&mut self) {
         if let Some(call) = self.call.as_mut() {
             call.chat = !call.chat;
         }
+        self.sync_watching();
     }
 
     /// Goes back to the call: its room, showing the stage.
@@ -1662,6 +1669,7 @@ impl State {
         // Images decoded since the last frame count at their exact size from now on.
         changed |= self.media.measure();
         changed |= self.preview.as_mut().is_some_and(|preview| preview.content.poll());
+        changed |= self.call.as_mut().is_some_and(Call::measure_videos);
         self.retry_due(now, tx);
         changed |= self.search_people(now);
         // Searches go out for the active account; with none, nothing waits.
@@ -1740,7 +1748,7 @@ impl State {
         // The call's videos stream while its stage shows; its glow moves while it shows in a
         // focused window.
         self.sync_watching();
-        let stage = self.call_here().is_some_and(|call| !call.chat);
+        let stage = self.call_here().is_some();
         if let Some(call) = self.call.as_mut() {
             if !stage || !focused || still {
                 call.glow.pause();

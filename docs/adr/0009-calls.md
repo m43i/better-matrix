@@ -1,7 +1,7 @@
 # 0009. Calls
 
 Status: Accepted
-Date: 2026-11-14
+Date: 2026-11-16
 
 ## Context
 
@@ -158,29 +158,62 @@ Date: 2026-11-14
   it's off is only remembered. Each frame
   is handed over by value; the user's own previews are scaled to 640 wide while still I420. The
   desktop
-  watches only while the stage shows (`State::sync_watching`), so a call in another room or
-  behind its chat converts no frames.
+  watches only the videos in the current call plan (`State::sync_watching`): hidden gallery
+  pages, a hidden self-view and calls in another room convert no frames. Removing a sink stops
+  conversion and upload, not SFU reception or WebRTC decode. Adaptive SFU subscriptions and
+  requested receive sizes remain separate media-engine work. The UI measures `Pixels::size`
+  between frames and replans only when the source aspect changes; frames still stream directly
+  to `Pixels`, without rebuilding the view.
 - **Audio levels** come every 100 ms (`Event::CallLevels`, 0 to 255) for the background glow and
   the speaking rings. Someone stays speaking for 400 ms after going quiet, so rings don't
-  flicker between words. The view rebuilds only when who speaks changes; otherwise the event
-  is `live_only`.
+  flicker between words. Speaker focus has a separate state machine: a remote participant must
+  remain the loudest unmuted speaker for 1.5 seconds to take focus, using the same 400 ms
+  speaking hold across pauses between words. Silence keeps the last focus;
+  brief interjections do not switch it. The view rebuilds when speaking rings or speaker focus
+  change; otherwise the event is `live_only`.
 - **Desktop:**
   - Call and video call buttons sit in the room header before the people button; a room
     with a call under way shows Join instead.
-  - The open call's room shows the stage instead of its timeline: profile pictures for a
-    voice call, a grid of video tiles for a video call (a shared screen takes the largest
-    tile, with the cameras in a strip below), on an animated glow that wanders and swells with
-    the participants' voices (`state::call_glow`, drawn into `Pixels` like the voice memo's
-    water; still under reduced motion or in an unfocused window). Each video streams into its
-    own `Pixels` from the engine's media threads, so frames rebuild nothing.
-  - The controls: microphone, camera, screen share, show chat, hang up. Showing the chat puts
-    the timeline back and a "Back to the call" button in the header.
-  - Elsewhere in the app (or while the chat shows) a call bar at the bottom of the sidebar
-    leads back to it, with mute and hang up.
+  - **Call layout:** a pure desktop planner (`state::call_layout`) takes the tile viewport,
+    tile identities and source aspects, layout choice, speaker, page and strip proportion. Its
+    rectangles both place the tiles and select video watches. Grid candidates maximize equally
+    sized 16:9 cells in the available rectangle, centre incomplete rows, and page before cells
+    drop below 160×90 points (one tile remains possible in smaller viewports). At most 25 tiles
+    occupy a gallery page. Voice calls use compact avatars and speaking rings, with a smaller
+    104×80-point minimum so several faces fit above chat.
+  - The call stage's top-right layout icon opens a dropdown for Auto, Grid and Focus, with
+    the current choice checked. This control appears only on the call stage, not other rooms.
+  - **Auto, Grid and Focus:** Auto uses a gallery for groups, a large remote view and small
+    self-view for one-to-one calls, and a large shared screen when content is shared. Grid gives
+    every surface equal space, including simultaneous shares for comparison. Focus follows the
+    stabilized speaker; selecting a tile pins that participant's camera or screen locally.
+    Tile identity uses the participant key and surface kind, never `VideoId`, so a camera restart
+    preserves the pin. A departed participant or ended pinned share returns to Auto.
+  - Screens always show their full image. The main focused surface takes its native aspect;
+    portrait cameras default to showing the full frame. Every camera offers Full video / Fill
+    tile. Hiding self-view stops its local watch without changing the published camera or screen.
+  - A participant strip goes beside focused content when the viewport is at least 640 points
+    wide and 1.5 times as wide as tall, otherwise below. Its divider supports dragging and arrow
+    keys, within 18–40% of the relevant dimension; strip participants page too.
+  - The stage draws over the animated call glow (`state::call_glow`, drawn into `Pixels` like
+    the voice memo's water; still under reduced motion or in an unfocused window). Each video
+    streams into its own `Pixels` from the engine's media threads.
+  - The controls: microphone, camera, screen share, show/hide chat, hang up. Chat opens beside
+    the stage in a room body at least 780 points wide; below a compact stage otherwise. A compact
+    video stage shows one surface at a time, with small controls and single-tile paging
+    through every participant and shared screen. The room header returns to
+    the expanded call. Hide sidebar / Show sidebar sits on the left before the room name.
+    Hiding the rooms/direct messages
+    sidebar applies while viewing that call; elsewhere it reappears, and the account/space rail
+    stays available. These display preferences last for the call.
+  - Elsewhere in the app a call bar at the bottom of the sidebar leads back to the call, with
+    mute and hang up.
   - Rings show as cards at the top right (`ui::call::rings`), each one line: the caller (a long
     name cut short) and the controls; a notice stacks above them rather than under. Scenes:
     `demo-call-voice`,
-    `demo-call-video`, `demo-call-ringing`, `demo-call-chat`.
+    `demo-call-video`, `demo-call-gallery`, `demo-call-many`, `demo-call-direct`,
+    `demo-call-shares`, `demo-call-focus`, `demo-call-no-sidebar`, `demo-call-layout-menu`, `demo-call-video-chat`,
+    `demo-call-ringing`, `demo-call-chat`.
 
 ## Consequences
 

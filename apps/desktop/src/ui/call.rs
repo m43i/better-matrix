@@ -1,41 +1,36 @@
-//! Calls: the buttons in a room's header, the stage that replaces the room's timeline during its
-//! call (faces for a voice call, a grid of videos for a video call, over a glow that wanders and
-//! swells with the voices), its controls, the call bar in the sidebar elsewhere, and the cards of
-//! calls ringing.
+//! Calls: header actions, the planned stage and its layout controls, the call bar in the
+//! sidebar elsewhere, and ringing cards. Chat can sit beside or below the stage.
 
-use matrix_core::{CallParticipant, CallPhase, CallVia, DeviceKind, IncomingCall, RoomSummary, VideoId};
+use matrix_core::{CallPhase, CallVia, DeviceKind, IncomingCall, RoomSummary};
 use rune::{Color, El, SurfaceFit, col, el, icon, row, text};
 
 use super::components::{account_avatar, icon_button, media_avatar, menu_row, popover_panel};
 use super::icons;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf};
-use crate::state::{AccountData, Call, State};
+use crate::state::{AccountData, Call, CallLayout, CallTile, Popover, State};
 
 /// The size of a face on a voice call's stage.
 const FACE: f32 = 96.0;
 /// The size of a round control button.
 const CONTROL: f32 = 48.0;
-/// A video tile's aspect, width over height.
-const TILE_ASPECT: f32 = 16.0 / 9.0;
 
 /// The header's call buttons: Join while a call is under way in the room, else voice and video
 /// call. None while the room's own call shows here, or where the room allows no call.
 pub fn header_buttons(s: &State, room: &RoomSummary, p: &Palette) -> Vec<El> {
-    if room.call.via.is_none() {
-        return Vec::new();
-    }
     if let Some(call) = s.call_here() {
-        // In the call, looking at the chat: the way back to the stage.
-        return if call.chat {
-            vec![
+        let mut buttons = Vec::new();
+        if call.chat {
+            buttons.push(
                 pill(&icons::CALL, t!("call.show_stage"), p.success, p)
                     .key("call-back")
                     .on_press(State::toggle_call_chat),
-            ]
-        } else {
-            Vec::new()
-        };
+            );
+        }
+        return buttons;
+    }
+    if room.call.via.is_none() {
+        return Vec::new();
     }
     if !room.call.participants.is_empty() {
         let label = tf!("call.people", count = room.call.participants.len());
@@ -77,21 +72,102 @@ pub fn pill(glyph: &'static rune::Icon, label: &str, color: Color, p: &Palette) 
 
 /// The stage of the call in the room shown: the glow, everyone in the call, the controls.
 pub fn stage(s: &State, account: &AccountData, call: &Call, p: &Palette) -> El {
-    let info = &call.info;
-    let video = info.video
-        || info.camera.is_some()
-        || info.screen.is_some()
-        || info.participants.iter().any(|person| person.camera.is_some() || person.screen.is_some());
-    let people = if video { grid(s, account, call, p) } else { faces(s, account, call, p) };
-    let mut content = col().w_full().h_full().padding(24.0).gap(16.0).center();
+    let plan = call.plan();
+    let mut viewport = el().key("call-viewport").w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).on_layout_tx(
+        |s: &mut State, rect, tx| {
+            if !s.resize_call([rect[2], rect[3]]) {
+                tx.live_only();
+            }
+        },
+    );
+    for placed in &plan.tiles {
+        let [x, y, w, h] = placed.rect;
+        let tile = if call.video() {
+            video_tile(s, account, call, &placed.key, [w, h], p)
+        } else {
+            voice_tile(s, account, call, &placed.key, [w, h], p)
+        };
+        viewport =
+            viewport.child(tile.absolute(x, y).size(w, h).border(if placed.inset { 1.0 } else { 0.0 }, p.divider));
+    }
+    if let Some([x, y, w, h]) = plan.divider {
+        let beside = plan.strip_beside;
+        let total = if beside { call.size[0] } else { call.size[1] };
+        viewport = viewport.child(
+            el().key("call-divider")
+                .absolute(x, y)
+                .size(w, h)
+                .role("slider")
+                .label(t!("call.resize_strip").to_owned())
+                .cursor(if beside { rune::Cursor::ResizeColumn } else { rune::Cursor::ResizeRow })
+                .center()
+                .child(
+                    el().size(if beside { 3.0 } else { 32.0 }, if beside { 32.0 } else { 3.0 })
+                        .radius(2.0)
+                        .fill(p.divider),
+                )
+                .on_drag(move |s: &mut State, drag, _| {
+                    if let Some(call) = s.call.as_mut() {
+                        match drag.phase {
+                            rune::Phase::Down => drag.data = call.strip,
+                            rune::Phase::Move => {
+                                let travel = if beside { drag.dx } else { drag.dy };
+                                call.strip = (drag.data - travel / total.max(1.0)).clamp(0.18, 0.4);
+                            }
+                            rune::Phase::Up => {
+                                if drag.cancelled() {
+                                    call.strip = drag.data;
+                                }
+                            }
+                        }
+                    }
+                    s.sync_watching();
+                })
+                .on_step(|s: &mut State, delta, _| {
+                    if let Some(call) = s.call.as_mut() {
+                        call.strip = (call.strip + delta as f32 * 0.02).clamp(0.18, 0.4);
+                    }
+                    s.sync_watching();
+                }),
+        );
+    }
+    let paging = row()
+        .key("call-paging")
+        .h(32.0)
+        .w_full()
+        .gap(12.0)
+        .center()
+        .children((plan.pages > 1).then(|| {
+            icon_button(&icons::CHEVRON_LEFT, t!("call.previous_page"), false, p.text, p)
+                .key("call-page-previous")
+                .disabled(plan.page == 0)
+                .on_press(|s: &mut State| s.page_call(false))
+        }))
+        .children((plan.pages > 1).then(|| {
+            text(tf!("call.page", page = plan.page + 1, pages = plan.pages)).font(font::META).color(p.text_muted)
+        }))
+        .children((plan.pages > 1).then(|| {
+            icon_button(&icons::CHEVRON_RIGHT, t!("call.next_page"), false, p.text, p)
+                .key("call-page-next")
+                .disabled(plan.page + 1 >= plan.pages)
+                .on_press(|s: &mut State| s.page_call(true))
+        }));
+    let mut content = col().w_full().h_full().padding(if call.compact() { 12.0 } else { 16.0 }).gap(8.0);
+    if !call.compact() {
+        content = content.child(layout_controls(s, call, p));
+    }
     if let Some(status) = status(call) {
         content = content.child(text(status).key("call-status").font(font::BODY).color(p.text_muted));
     }
-    content = content.child(people);
+    content = content.child(viewport);
+    if !call.compact() || !call.video() || plan.pages > 1 {
+        content = content.child(paging);
+    }
     col()
         .key("call-stage")
         .grow(1.0)
         .w_full()
+        .min_w(0.0)
         .min_h(0.0)
         .fill(p.bg)
         .clip_rounded(0.0)
@@ -125,29 +201,101 @@ fn status(call: &Call) -> Option<String> {
     }
 }
 
-/// A voice call: everyone's face, the user's own first, a ring around whoever speaks.
-fn faces(s: &State, account: &AccountData, call: &Call, p: &Palette) -> El {
-    let own = account_avatar(&account.summary, &s.media, FACE);
-    let mut list = row().key("call-faces").gap(32.0).center().flex_wrap();
-    list = list.child(face(own, t!("call.you"), call.speaking.contains(""), !call.info.microphone, "call-face-you", p));
-    for person in &call.info.participants {
-        let avatar =
-            media_avatar(&person.person.id, &person.person.name, person.person.avatar.as_ref(), &s.media, FACE);
-        let key = format!("call-face-{}", person.key);
-        list =
-            list.child(face(avatar, &person.person.name, call.speaking.contains(&person.key), person.muted, &key, p));
-    }
-    list
+fn participant<'a>(call: &'a Call, key: &CallTile) -> Option<&'a matrix_core::CallParticipant> {
+    call.info.participants.iter().find(|person| person.key == key.participant())
 }
 
-fn face(avatar: El, name: &str, speaking: bool, muted: bool, key: &str, p: &Palette) -> El {
-    let ring = if speaking { speaking_ring(avatar, p) } else { avatar };
-    let mut label =
-        row().gap(6.0).center_y().child(text(name.to_owned()).font(font::BODY_STRONG).color(p.text).truncate());
-    if muted {
-        label = label.child(icon(&icons::MIC_OFF, 14.0).color(p.text_muted));
+fn tile_name(call: &Call, key: &CallTile) -> String {
+    let name = participant(call, key).map_or_else(|| t!("call.you").to_owned(), |person| person.person.name.clone());
+    if key.screen() { tf!("call.screen_of", name = name) } else { name }
+}
+
+fn tile_avatar(s: &State, account: &AccountData, call: &Call, key: &CallTile, size: f32) -> El {
+    match participant(call, key) {
+        Some(person) => {
+            media_avatar(&person.person.id, &person.person.name, person.person.avatar.as_ref(), &s.media, size)
+        }
+        None => account_avatar(&account.summary, &s.media, size),
     }
-    col().key(key.to_owned()).w(FACE + 40.0).gap(10.0).items_center().child(ring).child(label)
+}
+
+fn muted(call: &Call, key: &CallTile) -> bool {
+    participant(call, key).map_or(!call.info.microphone, |person| person.muted)
+}
+
+fn tile_key(key: &CallTile) -> String {
+    let who = if key.participant().is_empty() { "you" } else { key.participant() };
+    format!("call-{}-{who}", if key.screen() { "screen" } else { "tile" })
+}
+
+fn voice_tile(s: &State, account: &AccountData, call: &Call, key: &CallTile, bounds: [f32; 2], p: &Palette) -> El {
+    let size = FACE.min(bounds[0] - 16.0).min(bounds[1] - 40.0).max(24.0);
+    let avatar = tile_avatar(s, account, call, key, size);
+    let avatar = if call.speaking.contains(key.participant()) { speaking_ring(avatar, p) } else { avatar };
+    col().key(tile_key(key)).gap(10.0).center().child(avatar).child(
+        row()
+            .max_w(160.0)
+            .gap(6.0)
+            .center_y()
+            .child(text(tile_name(call, key)).font(font::BODY_STRONG).color(p.text).truncate())
+            .children(muted(call, key).then(|| icon(&icons::MIC_OFF, 14.0).color(p.text_muted))),
+    )
+}
+
+fn layout_controls(s: &State, call: &Call, p: &Palette) -> El {
+    let mut bar = row().key("call-layout-controls").w_full().gap(6.0).center_y().child(el().grow(1.0)).child(
+        icon_button(
+            &icons::EYE_OFF,
+            if call.show_self { t!("call.hide_self") } else { t!("call.show_self") },
+            !call.show_self,
+            p.text_muted,
+            p,
+        )
+        .key("call-self")
+        .help(if call.show_self { t!("call.hide_self") } else { t!("call.show_self") })
+        .on_press(State::toggle_call_self),
+    );
+    if call.video() {
+        bar = bar.child(
+            icon_button(&icons::LAYOUT, t!("call.layout"), s.popover == Some(Popover::CallLayout), p.text_muted, p)
+                .key("call-layout")
+                .help(t!("call.layout"))
+                .expanded(s.popover == Some(Popover::CallLayout))
+                .on_press(State::open_call_layout),
+        );
+    }
+    bar
+}
+
+/// Layout choices live in the shared popover path, aligned with the stage's right edge.
+pub fn layout_menu(call: &Call, p: &Palette) -> El {
+    let mut panel = popover_panel(p).key("call-layout-menu").w(220.0);
+    for (layout, label, key) in [
+        (CallLayout::Auto, t!("call.layout_auto"), "call-layout-auto"),
+        (CallLayout::Grid, t!("call.layout_grid"), "call-layout-grid"),
+        (CallLayout::Focus(None), t!("call.layout_focus"), "call-layout-focus"),
+    ] {
+        let active = std::mem::discriminant(&call.layout) == std::mem::discriminant(&layout);
+        let mark = el().size(28.0, 28.0).center().children(active.then(|| icon(&icons::CHECK, 16.0).color(p.accent)));
+        panel = panel.child(
+            menu_row(mark, label, None, None, p)
+                .key(key)
+                .role("menuitemradio")
+                .checked(active)
+                .help(if matches!(layout, CallLayout::Focus(_)) { t!("call.follow_speaker") } else { label })
+                .on_press(move |s: &mut State| s.set_call_layout(layout.clone())),
+        );
+    }
+    col().child(panel).anchored("call-layout", rune::Side::Bottom, rune::Align::End, 6.0)
+}
+
+/// The sidebar toggle belongs next to the room name, where the sidebar ends.
+pub fn sidebar_button(call: &Call, p: &Palette) -> El {
+    let label = if call.hide_sidebar { t!("call.show_sidebar") } else { t!("call.hide_sidebar") };
+    icon_button(&icons::SIDEBAR, label, call.hide_sidebar, p.text_muted, p)
+        .key("call-sidebar")
+        .help(label)
+        .on_press(State::toggle_call_sidebar)
 }
 
 /// Someone speaking: a ring in the accent and a soft glow of it.
@@ -160,114 +308,51 @@ fn speaking_ring(face: El, p: &Palette) -> El {
     })
 }
 
-/// One tile of the video grid.
-struct Tile<'a> {
-    key: String,
-    name: String,
-    video: Option<VideoId>,
-    /// Shown in full rather than cropped: a shared screen.
-    screen: bool,
-    person: Option<&'a CallParticipant>,
-    speaking: bool,
-    muted: bool,
-}
-
-/// A video call: shared screens first, then everyone's camera (or face), the user's own last.
-fn grid(s: &State, account: &AccountData, call: &Call, p: &Palette) -> El {
-    let info = &call.info;
-    let mut tiles: Vec<Tile> = Vec::new();
-    for person in &info.participants {
-        if let Some(screen) = person.screen {
-            let name = tf!("call.screen_of", name = person.person.name);
-            tiles.push(Tile {
-                key: format!("call-screen-{}", person.key),
-                name,
-                video: Some(screen),
-                screen: true,
-                person: Some(person),
-                speaking: false,
-                muted: false,
-            });
-        }
-    }
-    if let Some(screen) = info.screen {
-        let name = tf!("call.screen_of", name = t!("call.you"));
-        tiles.push(Tile {
-            key: "call-screen-you".into(),
-            name,
-            video: Some(screen),
-            screen: true,
-            person: None,
-            speaking: false,
-            muted: false,
-        });
-    }
-    for person in &info.participants {
-        tiles.push(Tile {
-            key: format!("call-tile-{}", person.key),
-            name: person.person.name.clone(),
-            video: person.camera,
-            screen: false,
-            person: Some(person),
-            speaking: call.speaking.contains(&person.key),
-            muted: person.muted,
-        });
-    }
-    tiles.push(Tile {
-        key: "call-tile-you".into(),
-        name: t!("call.you").to_owned(),
-        video: info.camera,
-        screen: false,
-        person: None,
-        speaking: call.speaking.contains(""),
-        muted: !info.microphone,
-    });
-    let mut rows = col().key("call-grid").w_full().grow(1.0).min_h(0.0).gap(12.0);
-    // Faces in the strip below a shared screen are smaller, to fit its short tiles.
-    let line = |tiles: &[Tile], grow: f32, face: f32| {
-        tiles.iter().fold(row().w_full().grow(grow).min_h(0.0).gap(12.0).center(), |cells, tile| {
-            cells.child(video_tile(s, account, call, tile, face, p))
-        })
-    };
-    // A shared screen takes most of the stage, everyone's camera in a strip below it.
-    let screens = tiles.iter().take_while(|tile| tile.screen).count();
-    if screens > 0 {
-        return rows.child(line(&tiles[..screens], 3.0, 72.0)).child(line(&tiles[screens..], 1.0, 44.0));
-    }
-    // As square a grid as the tiles make: two columns from two tiles, three from five, …
-    let columns = (tiles.len() as f32).sqrt().ceil().max(1.0) as usize;
-    for chunk in tiles.chunks(columns) {
-        rows = rows.child(line(chunk, 1.0, 72.0));
-    }
-    rows
-}
-
-fn video_tile(s: &State, account: &AccountData, call: &Call, tile: &Tile, face: f32, p: &Palette) -> El {
+/// One surface: shared content is always fitted, while cameras offer a full-frame view.
+fn video_tile(s: &State, account: &AccountData, call: &Call, key: &CallTile, size: [f32; 2], p: &Palette) -> El {
+    let name = tile_name(call, key);
+    let focus = key.clone();
     let mut cell = el()
-        .key(tile.key.clone())
-        .grow(1.0)
-        .h_full()
-        .max_w(960.0)
-        .aspect_ratio(TILE_ASPECT)
+        .key(tile_key(key))
         .radius(14.0)
         .fill(Color::BLACK.alpha(0.55))
-        .clip_rounded(14.0);
-    let pixels = tile.video.and_then(|id| call.videos.get(&id));
+        .clip_rounded(14.0)
+        .role("button")
+        .focusable(true)
+        .label(tf!("call.focus_on", name = name))
+        .cursor(rune::Cursor::Pointer)
+        .on_press(move |s: &mut State| s.set_call_layout(CallLayout::Focus(Some(focus.clone()))));
+    let pixels = call.video_id(key).and_then(|id| call.videos.get(&id));
+    let full = key.screen() || call.full_video.get(key).copied().unwrap_or_else(|| call.aspect(key) < 1.0);
     cell = match pixels {
-        Some(pixels) => cell.child(
-            el().w_full().h_full().pixels_fit(pixels, if tile.screen { SurfaceFit::Fit } else { SurfaceFit::Fill }),
-        ),
-        // No video: the face, centred on the tile.
-        None => {
-            let avatar = match tile.person {
-                Some(person) => {
-                    media_avatar(&person.person.id, &person.person.name, person.person.avatar.as_ref(), &s.media, face)
-                }
-                None => account_avatar(&account.summary, &s.media, face),
-            };
-            cell.child(col().w_full().h_full().center().child(avatar))
+        Some(pixels) if pixels.size() != (0, 0) => {
+            cell.child(el().w_full().h_full().pixels_fit(pixels, if full { SurfaceFit::Fit } else { SurfaceFit::Fill }))
         }
+        _ => cell.child(col().w_full().h_full().center().child(tile_avatar(
+            s,
+            account,
+            call,
+            key,
+            (size[1] * 0.45).clamp(24.0, 72.0),
+        ))),
     };
+    if !key.screen() && pixels.is_some() {
+        let fit = key.clone();
+        cell = cell.child(
+            icon_button(
+                &icons::EXTERNAL,
+                if full { t!("call.crop_video") } else { t!("call.full_video") },
+                false,
+                Color::WHITE,
+                p,
+            )
+            .key(format!("{}-fit", tile_key(key)))
+            .pin(None, Some(6.0), Some(6.0), None)
+            .fill(Color::BLACK.alpha(0.5))
+            .help(if full { t!("call.crop_video") } else { t!("call.full_video") })
+            .on_press(move |s: &mut State| s.toggle_call_fit(fit.clone())),
+        );
+    }
     let mut label = row()
         .pin(Some(10.0), None, None, Some(10.0))
         .h(26.0)
@@ -276,13 +361,14 @@ fn video_tile(s: &State, account: &AccountData, call: &Call, tile: &Tile, face: 
         .center_y()
         .radius(13.0)
         .fill(Color::BLACK.alpha(0.5))
-        .child(text(tile.name.clone()).font(font::META).color(Color::WHITE).truncate());
-    if tile.muted {
+        .max_w((size[0] - 20.0).max(0.0))
+        .child(text(name).font(font::META).color(Color::WHITE).truncate());
+    if !key.screen() && muted(call, key) {
         label = label.child(icon(&icons::MIC_OFF, 12.0).color(Color::WHITE));
     }
     cell = cell.child(label);
     // Whoever speaks: a ring just inside the tile, drawn over the video.
-    if tile.speaking {
+    if !key.screen() && call.speaking.contains(key.participant()) {
         cell = cell.child(
             el().pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).radius(14.0).border(2.5, p.accent).a11y_hidden(),
         );
@@ -293,15 +379,20 @@ fn video_tile(s: &State, account: &AccountData, call: &Call, tile: &Tile, face: 
 /// The call's controls, floating at the bottom of the stage.
 fn controls(call: &Call, p: &Palette) -> El {
     let info = &call.info;
+    let size = if call.compact() { 36.0 } else { CONTROL };
+    let button =
+        |glyph, label: &str, fill, color| control(glyph, label, fill, color, p).size(size, size).radius(size / 2.0);
     let toggle = |glyph, label: &str, on: bool, key: &str| {
-        control(glyph, label, if on { p.surface } else { p.text.alpha(0.85) }, if on { p.text } else { p.bg }, p)
+        button(glyph, label, if on { p.surface } else { p.text.alpha(0.85) }, if on { p.text } else { p.bg })
             .key(key.to_owned())
     };
     let mut bar = row()
         .key("call-controls")
-        .gap(14.0)
-        .padding(12.0)
-        .mb(24.0)
+        .gap(8.0)
+        .padding(8.0)
+        .mb(12.0)
+        .flex_wrap()
+        .max_w((call.size[0] - 8.0).max(120.0))
         .center_y()
         .radius(CONTROL / 2.0 + 12.0)
         .fill(p.surface.alpha(0.85))
@@ -312,7 +403,7 @@ fn controls(call: &Call, p: &Palette) -> El {
     } else {
         toggle(&icons::MIC_OFF, t!("call.unmute"), false, "call-mic")
     };
-    bar = bar.child(with_devices(microphone.on_press(State::toggle_microphone), DeviceKind::Microphone, p));
+    bar = bar.child(with_devices(microphone.on_press(State::toggle_microphone), DeviceKind::Microphone, size, p));
     let camera = if info.camera.is_some() {
         toggle(&icons::VIDEO, t!("call.camera_off"), true, "call-camera")
     } else {
@@ -321,24 +412,28 @@ fn controls(call: &Call, p: &Palette) -> El {
     // Device to device, the connection carries the camera it started with (if any) and no
     // screen.
     if info.via == CallVia::Rtc || info.video {
-        bar = bar.child(with_devices(camera.on_press(State::toggle_camera), DeviceKind::Camera, p));
+        bar = bar.child(with_devices(camera.on_press(State::toggle_camera), DeviceKind::Camera, size, p));
     }
     if info.via == CallVia::Rtc {
         let sharing = info.screen.is_some();
         let label = if sharing { t!("call.stop_share") } else { t!("call.share") };
         let (fill, color) = if sharing { (p.accent, p.on_accent) } else { (p.surface, p.text) };
-        bar = bar.child(
-            control(&icons::SCREEN_SHARE, label, fill, color, p).key("call-screen").on_press(State::toggle_screen),
-        );
+        bar = bar
+            .child(button(&icons::SCREEN_SHARE, label, fill, color).key("call-screen").on_press(State::toggle_screen));
     }
     bar = bar
         .child(
-            control(&icons::CHAT, t!("call.show_chat"), p.surface, p.text, p)
-                .key("call-chat")
-                .on_press(State::toggle_call_chat),
+            button(
+                &icons::CHAT,
+                if call.chat { t!("call.hide_chat") } else { t!("call.show_chat") },
+                p.surface,
+                p.text,
+            )
+            .key("call-chat")
+            .on_press(State::toggle_call_chat),
         )
         .child(
-            control(&icons::HANG_UP, t!("call.hang_up"), p.danger, Color::WHITE, p)
+            button(&icons::HANG_UP, t!("call.hang_up"), p.danger, Color::WHITE)
                 .key("call-hang-up")
                 .on_press(State::hang_up),
         );
@@ -346,10 +441,10 @@ fn controls(call: &Call, p: &Palette) -> El {
 }
 
 /// A control with a chevron beside it that opens the devices of its kind.
-fn with_devices(button: El, kind: DeviceKind, p: &Palette) -> El {
+fn with_devices(button: El, kind: DeviceKind, size: f32, p: &Palette) -> El {
     let chevron = el()
         .key(devices_key(kind))
-        .size(20.0, CONTROL)
+        .size(20.0, size)
         .radius(10.0)
         .center()
         .hover(p.hover.alpha(p.hover.a * 2.0))
@@ -428,7 +523,7 @@ fn control(glyph: &'static rune::Icon, label: &str, fill: Color, color: Color, p
 /// button and the hang-up; pressing it goes back to the call.
 pub fn call_bar(s: &State, p: &Palette) -> Option<El> {
     let call = s.call.as_ref()?;
-    if s.call_here().is_some_and(|call| !call.chat) {
+    if s.call_here().is_some() {
         return None;
     }
     let room = s.accounts.get(&call.info.account).and_then(|account| account.room(&call.info.room_id));

@@ -270,10 +270,51 @@ pub fn call(s: &mut State, video: bool) {
     };
     apply(s, Event::CallUpdated(Box::new(info)));
     apply(s, Event::CallLevels(vec![("grace".into(), 190), (String::new(), 40)]));
+    paint_call(s);
+}
+
+/// Camera-only calls, including a crowded gallery and a one-to-one self-view.
+pub fn call_gallery(s: &mut State, people: usize) {
+    call(s, true);
+    let Some(mut info) = s.call.as_ref().map(|call| call.info.clone()) else { return };
+    for person in &mut info.participants {
+        person.screen = None;
+    }
+    info.participants.truncate(people.saturating_sub(1));
+    while info.participants.len() + 1 < people {
+        let n = info.participants.len();
+        info.participants.push(matrix_core::CallParticipant {
+            key: format!("guest-{n}"),
+            person: Person { id: format!("@guest-{n}:example.org"), name: format!("Guest {n}"), avatar: None },
+            muted: n % 3 == 0,
+            camera: Some(matrix_core::VideoId(n as u64 + 10)),
+            screen: None,
+        });
+    }
+    apply(s, Event::CallUpdated(Box::new(info)));
+    paint_call(s);
+}
+
+/// Two simultaneous shares, one portrait, available in Auto and Grid.
+pub fn call_shares(s: &mut State) {
+    call(s, true);
+    let Some(mut info) = s.call.as_ref().map(|call| call.info.clone()) else { return };
+    if let Some(person) = info.participants.last_mut() {
+        person.screen = Some(matrix_core::VideoId(5));
+    }
+    apply(s, Event::CallUpdated(Box::new(info)));
+    paint_call(s);
+}
+
+fn paint_call(s: &mut State) {
     if let Some(call) = s.call.as_mut() {
         // Painted frames in place of cameras: a soft gradient in each tile's own hue.
         for (id, pixels) in &call.videos {
-            let (w, h) = (320u32, 180u32);
+            let (w, h) = match id.0 {
+                2 => (640u32, 400u32),
+                5 => (180, 320),
+                _ => (320, 180),
+            };
             let hue = (id.0 as f32 * 0.23).fract();
             let mut rgba = Vec::with_capacity((w * h * 4) as usize);
             for y in 0..h {
@@ -292,6 +333,7 @@ pub fn call(s: &mut State, video: bool) {
             }
             pixels.set(w, h, rgba);
         }
+        call.measure_videos();
     }
 }
 

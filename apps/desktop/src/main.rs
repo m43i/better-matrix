@@ -333,6 +333,26 @@ fn spec() -> AppSpec<State> {
             }),
             ("demo-call-voice", |s| demo::call(s, false)),
             ("demo-call-video", |s| demo::call(s, true)),
+            ("demo-call-gallery", |s| demo::call_gallery(s, 6)),
+            ("demo-call-many", |s| demo::call_gallery(s, 30)),
+            ("demo-call-direct", |s| demo::call_gallery(s, 2)),
+            ("demo-call-no-sidebar", |s| {
+                demo::call(s, true);
+                s.toggle_call_sidebar();
+            }),
+            ("demo-call-layout-menu", |s| {
+                demo::call(s, true);
+                s.open_call_layout();
+            }),
+            ("demo-call-shares", demo::call_shares),
+            ("demo-call-focus", |s| {
+                demo::call_gallery(s, 6);
+                s.set_call_layout(state::CallLayout::Focus(None));
+            }),
+            ("demo-call-video-chat", |s| {
+                demo::call(s, true);
+                s.toggle_call_chat();
+            }),
             ("demo-call-ringing", demo::ringing),
             ("demo-settings-voice-video", |s| {
                 demo::seed(s);
@@ -1279,12 +1299,162 @@ mod tests {
     }
 
     #[test]
-    fn showing_the_chat_during_a_call_should_offer_the_way_back() {
+    fn showing_chat_should_keep_the_call_stage_and_controls_available() {
         let mut rt = runtime(|s| demo::call(s, false));
         press(&mut rt, "call-chat");
-        assert!(rt.find("timeline").is_some() && rt.find("call-back").is_some() && rt.find("call-bar").is_some());
+        assert!(rt.find("timeline").is_some() && rt.find("call-stage").is_some() && rt.find("call-hang-up").is_some());
         press(&mut rt, "call-back");
         assert!(rt.find("call-stage").is_some());
+    }
+
+    #[test]
+    fn selecting_a_call_tile_should_pin_that_surface() {
+        let mut rt = runtime(|s| demo::call(s, true));
+        press(&mut rt, "call-tile-alan");
+        assert_eq!(
+            rt.state.call.as_ref().unwrap().layout,
+            state::CallLayout::Focus(Some(state::CallTile::Camera("alan".into())))
+        );
+    }
+
+    #[test]
+    fn choosing_automatic_layout_should_release_a_pin() {
+        let mut rt = runtime(|s| demo::call(s, true));
+        press(&mut rt, "call-tile-alan");
+        press(&mut rt, "call-layout");
+        press(&mut rt, "call-layout-auto");
+        assert_eq!(rt.state.call.as_ref().unwrap().layout, state::CallLayout::Auto);
+    }
+
+    #[test]
+    fn choosing_a_layout_from_the_dropdown_should_close_it() {
+        let mut rt = runtime(|s| demo::call(s, true));
+        assert!(rt.find("call-layout-grid").is_none());
+        press(&mut rt, "call-layout");
+        assert!(rt.find("call-layout-menu").is_some());
+        press(&mut rt, "call-layout-grid");
+        assert!(
+            rt.state.call.as_ref().unwrap().layout == state::CallLayout::Grid && rt.find("call-layout-menu").is_none()
+        );
+    }
+
+    #[test]
+    fn the_call_layout_button_should_only_show_on_the_call_stage() {
+        let mut rt = runtime(|s| demo::call(s, true));
+        assert!(rt.find("call-layout").is_some());
+        rt.update(|s, _| s.select_room("!design:example.org"));
+        rt.frame(1.0 / 60.0);
+        assert!(rt.find("call-layout").is_none() && rt.find("call-sidebar").is_none());
+    }
+
+    #[test]
+    fn ordinary_rooms_should_offer_no_call_layout_or_sidebar_toggle() {
+        let rt = runtime(|s| {
+            demo::seed(s);
+            s.select_room("!general:example.org");
+        });
+        assert!(rt.find("call-layout").is_none() && rt.find("call-sidebar").is_none());
+    }
+
+    #[test]
+    fn voice_calls_should_offer_the_sidebar_toggle() {
+        let rt = runtime(|s| demo::call(s, false));
+        assert!(rt.find("call-sidebar").is_some());
+    }
+
+    #[test]
+    fn the_sidebar_toggle_should_sit_before_the_channel_name() {
+        let rt = runtime(|s| demo::call(s, true));
+        let elements = rt.elements();
+        let toggle = elements.iter().find(|el| el.key.as_deref() == Some("call-sidebar")).unwrap().rect;
+        let name = elements.iter().find(|el| el.key.as_deref() == Some("room-name")).unwrap().rect;
+        assert!(toggle[0] + toggle[2] <= name[0]);
+    }
+
+    #[test]
+    fn showing_the_full_video_should_not_pin_the_tile() {
+        let mut rt = runtime(|s| demo::call(s, true));
+        press(&mut rt, "call-tile-alan-fit");
+        let call = rt.state.call.as_ref().unwrap();
+        assert!(
+            call.layout == state::CallLayout::Auto
+                && call.full_video.contains_key(&state::CallTile::Camera("alan".into()))
+        );
+    }
+
+    #[test]
+    fn a_wide_call_should_leave_room_for_chat_beside_it() {
+        let mut rt = runtime(|s| {
+            demo::call(s, true);
+            s.toggle_call_chat();
+        });
+        for _ in 0..60 {
+            rt.frame(1.0 / 60.0);
+        }
+        let elements = rt.elements();
+        let stage = elements.iter().find(|el| el.key.as_deref() == Some("call-stage")).unwrap().rect;
+        let chat = elements.iter().find(|el| el.key.as_deref() == Some("room-chat")).unwrap().rect;
+        assert!(stage[0] + stage[2] <= chat[0] + 1.0 && chat[0] + chat[2] <= 1201.0 && chat[2] >= 300.0);
+    }
+
+    #[test]
+    fn a_narrow_call_should_leave_chat_and_hang_up_in_view() {
+        let mut rt = runtime(|s| {
+            demo::call(s, true);
+            s.toggle_call_chat();
+        });
+        rt.set_viewport((720.0, 480.0), 1.0);
+        for _ in 0..60 {
+            rt.frame(1.0 / 60.0);
+        }
+        let elements = rt.elements();
+        for key in ["room-chat", "call-hang-up"] {
+            let el = elements.iter().find(|el| el.key.as_deref() == Some(key)).unwrap();
+            assert!(
+                el.rect[2] > 0.0
+                    && el.rect[3] > 0.0
+                    && el.rect[0] + el.rect[2] <= 721.0
+                    && el.rect[1] + el.rect[3] <= 481.0,
+                "{key}: {:?}",
+                el.rect
+            );
+        }
+        let viewport = elements.iter().find(|el| el.key.as_deref() == Some("call-viewport")).unwrap();
+        assert!(viewport.rect[3] >= 90.0, "the compact call should leave a readable video preview");
+    }
+
+    #[test]
+    fn compact_video_chat_should_allow_selecting_the_next_surface() {
+        let mut rt = runtime(|s| {
+            demo::call_gallery(s, 4);
+            s.toggle_call_chat();
+        });
+        rt.set_viewport((720.0, 480.0), 1.0);
+        for _ in 0..60 {
+            rt.frame(1.0 / 60.0);
+        }
+        let before = rt.state.call.as_ref().unwrap().plan().tiles[0].key.clone();
+        press(&mut rt, "call-page-next");
+        let call = rt.state.call.as_ref().unwrap();
+        assert!(rt.find("room-chat").is_some() && call.chat && call.plan().tiles[0].key != before);
+    }
+
+    #[test]
+    fn the_call_header_should_hide_and_restore_the_sidebar() {
+        let mut rt = runtime(|s| demo::call(s, true));
+        press(&mut rt, "call-sidebar");
+        assert!(rt.find("sidebar-header").is_none() && rt.find("call-sidebar").is_some());
+        press(&mut rt, "call-sidebar");
+        assert!(rt.find("sidebar-header").is_some());
+    }
+
+    #[test]
+    fn leaving_the_call_room_should_restore_the_sidebar() {
+        let mut rt = runtime(|s| demo::call(s, true));
+        press(&mut rt, "call-sidebar");
+        rt.update(|s, _| s.select_room("!design:example.org"));
+        rt.frame(1.0 / 60.0);
+        assert!(rt.find("sidebar-header").is_some() && rt.state.call.is_some());
     }
 
     #[test]

@@ -17,6 +17,8 @@ macro_rules! icons {
 }
 
 icons! {
+    LAYOUT = "layout": r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18M15 12h6"/>"#;
+    SIDEBAR = "sidebar": r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>"#;
     BOLD = "bold": r#"<path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/>"#;
     ITALIC = "italic": r#"<path d="M19 4h-9M14 20H5M15 4 9 20"/>"#;
     STRIKE = "strike": r#"<path d="M16 6.5C15 5 13.6 4.5 12 4.5c-2.5 0-4.5 1.3-4.5 3.4 0 1.5.8 2.5 2.4 3.1M4 12h16M8 17c1 1.6 2.4 2.5 4.3 2.5 2.6 0 4.7-1.3 4.7-3.6 0-.7-.2-1.3-.5-1.9"/>"#;
@@ -43,6 +45,7 @@ icons! {
     BELL = "bell": r#"<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/>"#;
     BELL_OFF = "bell-off": r#"<path d="M8.7 3A6 6 0 0 1 18 8c0 2.7.4 4.6 1 6M17 17H3s3-2 3-9c0-.7.1-1.4.4-2M10.3 21a1.9 1.9 0 0 0 3.4 0M2 2l20 20"/>"#;
     AT = "at": r#"<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>"#;
+    CHEVRON_LEFT = "chevron-left": r#"<path d="m15 18-6-6 6-6"/>"#;
     CHEVRON_RIGHT = "chevron-right": r#"<path d="m9 18 6-6-6-6"/>"#;
     LEAVE = "leave": r#"<path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5M10 17l-5-5 5-5M5 12h11"/>"#;
     TRASH = "trash": r#"<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>"#;

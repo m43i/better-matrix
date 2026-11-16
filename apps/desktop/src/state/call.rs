@@ -1,5 +1,5 @@
 //! The call under way, as the desktop shows it: the engine's [`CallInfo`], how loud everyone is,
-//! the image each video streams into, and whether the room's chat shows instead of the stage.
+//! the image each video streams into, and the call layout and chat display preferences.
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -7,13 +7,59 @@ use std::time::{Duration, Instant};
 use matrix_core::{CallInfo, VideoId};
 use rune::Pixels;
 
+use super::State;
 use super::call_glow::CallGlow;
+use super::call_layout::{self, CallLayout, CallPlan, CallTile, TileGeometry};
 
 /// Loudness (0 to 1) from which someone counts as speaking, for their ring on the stage.
 pub const SPEAKING: f32 = 0.06;
 /// How long someone still counts as speaking after going quiet, so their ring doesn't flicker
 /// between words.
 const SPEAKING_HOLD: Duration = Duration::from_millis(400);
+const SPEAKER_HOLD: Duration = Duration::from_millis(1500);
+
+/// Switching focus needs sustained speech; the speaking rings remain responsive.
+#[derive(Debug, Default)]
+enum Speaker {
+    #[default]
+    Idle,
+    Steady(String),
+    Switching {
+        current: Option<String>,
+        candidate: String,
+        since: Instant,
+    },
+}
+
+impl Speaker {
+    fn current(&self) -> Option<&str> {
+        match self {
+            Self::Idle => None,
+            Self::Steady(key) => Some(key),
+            Self::Switching { current, .. } => current.as_deref(),
+        }
+    }
+
+    fn heard(&mut self, candidate: Option<&str>, now: Instant) -> bool {
+        let current = self.current().map(str::to_owned);
+        if candidate == current.as_deref() || candidate.is_none() {
+            *self = current.map_or(Self::Idle, Self::Steady);
+            return false;
+        }
+        let Some(candidate) = candidate else { return false };
+        if let Self::Switching { candidate: pending, since, .. } = self {
+            if pending == candidate && now.duration_since(*since) >= SPEAKER_HOLD {
+                *self = Self::Steady(candidate.to_owned());
+                return true;
+            }
+            if pending == candidate {
+                return false;
+            }
+        }
+        *self = Self::Switching { current, candidate: candidate.to_owned(), since: now };
+        false
+    }
+}
 
 #[derive(Debug)]
 pub struct Call {
@@ -25,11 +71,23 @@ pub struct Call {
     /// When each participant was last loud enough to count as speaking.
     loud_at: HashMap<String, Instant>,
     /// The engine streams the videos into their images: while the stage shows.
-    pub watching: bool,
+    pub watched: HashSet<VideoId>,
     /// Each video shown, by ID: the image its frames stream into.
     pub videos: HashMap<VideoId, Pixels>,
-    /// The room's chat shows instead of the stage.
+    /// The room's chat shows alongside the stage.
     pub chat: bool,
+    pub hide_sidebar: bool,
+    pub layout: CallLayout,
+    /// Size of the viewport containing tiles, excluding controls and paging.
+    pub size: [f32; 2],
+    /// The room body decides whether chat fits beside or below the stage.
+    pub room_size: [f32; 2],
+    pub page: usize,
+    pub show_self: bool,
+    pub full_video: HashMap<CallTile, bool>,
+    pub strip: f32,
+    aspects: HashMap<VideoId, f32>,
+    speaker: Speaker,
     pub glow: CallGlow,
 }
 
@@ -49,9 +107,19 @@ impl Call {
             levels: HashMap::new(),
             speaking: HashSet::new(),
             loud_at: HashMap::new(),
-            watching: false,
+            watched: HashSet::new(),
             videos: HashMap::new(),
             chat: false,
+            hide_sidebar: false,
+            layout: CallLayout::Auto,
+            size: [800.0, 450.0],
+            room_size: [800.0, 600.0],
+            page: 0,
+            show_self: true,
+            full_video: HashMap::new(),
+            strip: 0.24,
+            aspects: HashMap::new(),
+            speaker: Speaker::Idle,
             glow: CallGlow::default(),
         }
     }
@@ -87,6 +155,19 @@ impl Call {
         let present = |key: &String| key.is_empty() || self.info.participants.iter().any(|p| p.key == *key);
         self.levels.retain(|key, _| present(key));
         self.loud_at.retain(|key, _| present(key));
+        self.speaking.retain(|key| present(key));
+        self.aspects.retain(|id, _| carried.contains(id));
+        let tiles = self.tiles();
+        self.full_video.retain(|key, _| tiles.iter().any(|tile| tile.key == *key));
+        if let CallLayout::Focus(Some(pin)) = &self.layout
+            && !tiles.iter().any(|tile| tile.key == *pin)
+        {
+            self.layout = CallLayout::Auto;
+        }
+        if self.speaker.current().is_some_and(|key| !self.info.participants.iter().any(|p| p.key == key)) {
+            self.speaker = Speaker::Idle;
+        }
+        self.page = self.plan().page;
         changes
     }
 
@@ -101,6 +182,110 @@ impl Call {
         let speaking: HashSet<String> = self.loud_at.keys().cloned().collect();
         let changed = speaking != self.speaking;
         self.speaking = speaking;
+        let candidate = self
+            .info
+            .participants
+            .iter()
+            .filter(|p| !p.muted && self.speaking.contains(&p.key))
+            .map(|p| (&p.key, self.levels.get(&p.key).copied().unwrap_or(0.0)))
+            .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(b.0)))
+            .map(|(key, _)| key.as_str());
+        self.speaker.heard(candidate, now) || changed
+    }
+
+    pub fn video(&self) -> bool {
+        self.info.video
+            || self.info.camera.is_some()
+            || self.info.screen.is_some()
+            || self.info.participants.iter().any(|p| p.camera.is_some() || p.screen.is_some())
+    }
+
+    pub fn video_id(&self, key: &CallTile) -> Option<VideoId> {
+        let (camera, screen) = if key.participant().is_empty() {
+            (self.info.camera, self.info.screen)
+        } else {
+            let person = self.info.participants.iter().find(|p| p.key == key.participant())?;
+            (person.camera, person.screen)
+        };
+        if key.screen() { screen } else { camera }
+    }
+
+    pub fn aspect(&self, key: &CallTile) -> f32 {
+        self.video_id(key).and_then(|id| self.aspects.get(&id).copied()).unwrap_or(16.0 / 9.0)
+    }
+
+    fn tiles(&self) -> Vec<TileGeometry> {
+        let cameras = self
+            .info
+            .participants
+            .iter()
+            .map(|p| CallTile::Camera(p.key.clone()))
+            .chain(self.show_self.then(|| CallTile::Camera(String::new())));
+        let screens = self
+            .info
+            .participants
+            .iter()
+            .filter(|p| p.screen.is_some())
+            .map(|p| CallTile::Screen(p.key.clone()))
+            .chain(self.info.screen.map(|_| CallTile::Screen(String::new())));
+        screens.chain(cameras).map(|key| TileGeometry { aspect: self.aspect(&key), key }).collect()
+    }
+
+    pub fn plan(&self) -> CallPlan {
+        let tiles = self.tiles();
+        let compact = self.compact() && self.video();
+        let plan = call_layout::plan(
+            &tiles,
+            self.size,
+            &self.layout,
+            self.speaker.current(),
+            if compact { 0 } else { self.page },
+            self.strip,
+            !self.video(),
+        );
+        if compact && let Some(main) = plan.tiles.first() {
+            let page = self.page.min(tiles.len().saturating_sub(1));
+            let selected = if page == 0 {
+                tiles.iter().find(|tile| tile.key == main.key)
+            } else {
+                tiles.iter().filter(|tile| tile.key != main.key).nth(page - 1)
+            };
+            if let Some(tile) = selected {
+                let mut compact = CallPlan::single(tile.key.clone(), self.size, tile.aspect);
+                compact.page = page;
+                compact.pages = tiles.len();
+                return compact;
+            }
+        }
+        plan
+    }
+
+    pub fn chat_beside(&self) -> bool {
+        self.room_size[0] >= 780.0
+    }
+
+    pub fn compact(&self) -> bool {
+        self.chat && !self.chat_beside()
+    }
+
+    pub fn visible_videos(&self) -> HashSet<VideoId> {
+        self.plan().tiles.iter().filter_map(|tile| self.video_id(&tile.key)).collect()
+    }
+
+    /// Frames still go straight to Pixels. Only a change of source geometry rebuilds the view.
+    pub fn measure_videos(&mut self) -> bool {
+        let mut changed = false;
+        for (id, pixels) in &self.videos {
+            let (width, height) = pixels.size();
+            if width == 0 || height == 0 {
+                continue;
+            }
+            let aspect = width as f32 / height as f32;
+            if self.aspects.get(id).is_none_or(|old| (old - aspect).abs() > 0.001) {
+                self.aspects.insert(*id, aspect);
+                changed = true;
+            }
+        }
         changed
     }
 
@@ -113,67 +298,66 @@ impl Call {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use matrix_core::{AccountId, CallParticipant, CallPhase, CallVia, Person};
+impl State {
+    pub fn open_call_layout(&mut self) {
+        self.toggle_popover(super::Popover::CallLayout);
+    }
 
-    fn info(participants: Vec<CallParticipant>) -> CallInfo {
-        CallInfo {
-            call: 1,
-            account: AccountId::new("@me:example.org"),
-            room_id: "!r".into(),
-            via: CallVia::Rtc,
-            phase: CallPhase::Connected,
-            video: true,
-            microphone: true,
-            camera: None,
-            screen: None,
-            participants,
+    pub fn toggle_call_sidebar(&mut self) {
+        if let Some(call) = self.call.as_mut() {
+            call.hide_sidebar = !call.hide_sidebar;
         }
     }
 
-    fn person(key: &str, camera: Option<u64>) -> CallParticipant {
-        CallParticipant {
-            key: key.into(),
-            person: Person { id: key.into(), name: key.into(), avatar: None },
-            muted: false,
-            camera: camera.map(VideoId),
-            screen: None,
+    pub fn set_call_layout(&mut self, layout: CallLayout) {
+        self.popover = None;
+        if let Some(call) = self.call.as_mut() {
+            call.layout = layout;
+            call.page = 0;
         }
+        self.sync_watching();
     }
 
-    #[test]
-    fn a_new_camera_should_be_watched_and_a_gone_one_dropped() {
-        let mut call = Call::new(info(Vec::new()));
-        let first = call.update(info(vec![person("a", Some(1))]));
-        assert_eq!(first.added, [VideoId(1)]);
-        let second = call.update(info(vec![person("a", Some(2))]));
-        assert_eq!((second.added, second.removed), (vec![VideoId(2)], vec![VideoId(1)]));
+    pub fn resize_call(&mut self, size: [f32; 2]) -> bool {
+        let Some(call) = self.call.as_mut() else { return false };
+        if call.size.iter().zip(size).all(|(old, new)| (old - new).abs() < 0.5) {
+            return false;
+        }
+        call.size = size;
+        call.page = call.plan().page;
+        self.sync_watching();
+        true
     }
 
-    #[test]
-    fn someone_starting_to_speak_should_change_the_view() {
-        let mut call = Call::new(info(vec![person("a", None)]));
-        let now = Instant::now();
-        assert!(call.heard(vec![("a".into(), 200)], now));
-        assert!(!call.heard(vec![("a".into(), 180)], now));
-        assert!(call.heard(vec![("a".into(), 0)], now + SPEAKING_HOLD));
+    pub fn page_call(&mut self, forward: bool) {
+        if let Some(call) = self.call.as_mut() {
+            let plan = call.plan();
+            call.page =
+                if forward { (plan.page + 1).min(plan.pages.saturating_sub(1)) } else { plan.page.saturating_sub(1) };
+        }
+        self.sync_watching();
     }
 
-    #[test]
-    fn a_pause_between_words_should_not_stop_the_speaking_ring() {
-        let mut call = Call::new(info(vec![person("a", None)]));
-        let now = Instant::now();
-        call.heard(vec![("a".into(), 200)], now);
-        assert!(!call.heard(vec![("a".into(), 0)], now + Duration::from_millis(100)));
-        assert!(call.speaking.contains("a"));
+    pub fn toggle_call_self(&mut self) {
+        if let Some(call) = self.call.as_mut() {
+            call.show_self = !call.show_self;
+            if !call.show_self
+                && matches!(&call.layout, CallLayout::Focus(Some(CallTile::Camera(key))) if key.is_empty())
+            {
+                call.layout = CallLayout::Auto;
+            }
+            call.page = 0;
+        }
+        self.sync_watching();
     }
 
-    #[test]
-    fn the_glow_should_follow_the_user_then_everyone_else() {
-        let mut call = Call::new(info(vec![person("a", None), person("b", None)]));
-        call.heard(vec![("b".into(), 255), (String::new(), 0)], Instant::now());
-        assert_eq!(call.glow_levels(), [0.0, 0.0, 1.0]);
+    pub fn toggle_call_fit(&mut self, key: CallTile) {
+        if let Some(call) = self.call.as_mut() {
+            let full = call.full_video.get(&key).copied().unwrap_or_else(|| call.aspect(&key) < 1.0);
+            call.full_video.insert(key, !full);
+        }
     }
 }
+
+#[cfg(test)]
+mod tests;

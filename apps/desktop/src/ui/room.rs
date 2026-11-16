@@ -33,13 +33,55 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
         .border(if s.drop_hover { 2.0 } else { 0.0 }, p.accent)
         .children(water)
         .child(header(s, account, room, p));
-    // The room's call shows its stage in place of the timeline, until the user asks for the chat.
-    main = match s.call_here().filter(|call| !call.chat) {
-        Some(call) => main.child(super::call::stage(s, account, call, p)),
-        None => main
+    let mut chat = || {
+        col()
+            .key("room-chat")
+            .grow(1.0)
+            .min_h(0.0)
+            .min_w(0.0)
             .child(timeline(&cx, account.timeline(&key), "timeline", &s.near_top, Some(&s.at_bottom), p))
-            .child(composer(s, ComposerTarget::Room, &tf!("composer.placeholder", room = inline_name(room)), p, ui)),
+            .child(composer(s, ComposerTarget::Room, &tf!("composer.placeholder", room = inline_name(room)), p, ui))
     };
+    let body = match s.call_here() {
+        Some(call) if call.chat && call.chat_beside() => row()
+            .grow(1.0)
+            .min_h(0.0)
+            .min_w(0.0)
+            .child(super::call::stage(s, account, call, p))
+            .child(col().w(340.0).h_full().child(chat())),
+        Some(call) if call.chat => col()
+            .grow(1.0)
+            .min_h(0.0)
+            .min_w(0.0)
+            .child(
+                col()
+                    .w_full()
+                    .h((call.room_size[1] * 0.6).clamp(180.0, if call.video() { 280.0 } else { 220.0 }))
+                    .child(super::call::stage(s, account, call, p)),
+            )
+            .child(chat()),
+        Some(call) => super::call::stage(s, account, call, p),
+        None => chat(),
+    };
+    main = main.child(
+        col()
+            .key(
+                s.call_here()
+                    .map_or_else(|| "room-body".to_owned(), |call| format!("room-body-call-{}", call.info.call)),
+            )
+            .grow(1.0)
+            .min_h(0.0)
+            .min_w(0.0)
+            .child(body)
+            .on_layout_tx(|s: &mut State, rect, tx| {
+                let size = [rect[2], rect[3]];
+                match s.call.as_mut() {
+                    Some(call) if call.room_size != size => call.room_size = size,
+                    _ => tx.live_only(),
+                }
+                s.sync_watching();
+            }),
+    );
     let main = main
         .on_drop_files(|s: &mut State, files, _| s.attach_files_to(ComposerTarget::Room, files))
         .on_drop_hover(|s: &mut State, over, _| s.drop_hover = over);
@@ -94,7 +136,8 @@ fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -> 
         .gap(10.0)
         .center_y()
         .border_sides([0.0, 0.0, 1.0, 0.0], p.divider)
-        .child(text(display_name(room)).font(font::HEADER).color(p.text).grow(1.0).truncate())
+        .children(s.call_here().map(|call| super::call::sidebar_button(call, p)))
+        .child(text(display_name(room)).key("room-name").font(font::HEADER).color(p.text).grow(1.0).truncate())
         .children(super::call::header_buttons(s, room, p))
         .children((room.kind == RoomKind::Group).then(|| super::people::members_button(s, account, room, p)))
         .child(

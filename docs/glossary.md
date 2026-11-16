@@ -278,7 +278,27 @@ needs one, add it here.
 
 **Call stage**
 : What a room shows in place of its timeline during its call: faces (voice) or the video grid,
-  over the call glow, with the controls.
+  over the call glow, with the controls. It can share the room pane with chat.
+
+**Call layout**
+: How the call stage arranges its surfaces: Auto chooses a gallery, one-to-one view or shared
+  screen; Grid gives surfaces equal space; Focus follows the speaker or a locally pinned surface.
+  See [ADR 0009](adr/0009-calls.md).
+
+**Call plan**
+: The visible call tiles and their rectangles, computed from the available space, layout and
+  page. Both the view and the video watches follow this plan.
+
+**Call tile**
+: One participant's camera (or avatar) or shared screen on the call stage. Its identity follows
+  the participant and surface kind, so a camera restarting keeps its pin.
+
+**Participant strip**
+: The smaller call tiles beside or below a focused surface, with a resizable divider and pages.
+
+**Self-view**
+: The user's own camera preview. Hiding it changes only the local call layout, not what the
+  camera publishes to others.
 
 **Call bar**
 : The strip at the bottom of the sidebar while the call's stage isn't shown, leading back to it.
