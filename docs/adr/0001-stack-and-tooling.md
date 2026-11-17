@@ -51,6 +51,10 @@ Date: 2026-11-14
   - Its futures nest deeply, so `matrix-core` sets `recursion_limit = "256"`.
 - **Builds:**
   - `bundled-sqlite` on every platform: all builds link the same SQLite.
+  - Release builds use thin LTO and one codegen unit: a faster engine and UI for the
+    desktop and the phones, for slower release builds.
+  - The desktop's `frame-profile` feature turns on Rune's frame log (`RUNE_FRAME_LOG`): each
+    drawn frame, its cost and what asked for it.
   - `bun run build:windows` builds natively on Windows and cross-compiles elsewhere with
     `cargo-xwin` (clang-cl, lld-link).
   - Windows release builds use the GUI subsystem: no console window.

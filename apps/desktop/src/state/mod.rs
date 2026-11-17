@@ -10,6 +10,7 @@
 mod accounts;
 mod attachments;
 pub mod backdrop;
+pub mod breath;
 mod call;
 mod call_glow;
 mod call_layout;
@@ -662,6 +663,8 @@ pub struct State {
     pub drop_hover: bool,
     /// Whether the window has keyboard focus; notifications for the open room are skipped then.
     pub window_focused: bool,
+    /// The selected rail tile's halo: breathing a while after the user turns to the window.
+    pub breath: breath::Breath,
     /// The latest error worth telling the user about; dismissable.
     pub notice: Option<String>,
     /// A permalink that came before any account was ready: it opens with the first room list.
@@ -738,6 +741,7 @@ impl State {
             settings,
             drop_hover: false,
             window_focused: true,
+            breath: breath::Breath::Asked,
             notice: None,
             pending_link: None,
             notice_shown: None,
@@ -1789,6 +1793,7 @@ impl State {
         if !focused {
             return;
         }
+        self.breath.ask();
         for (account, key) in self.open_timelines.clone() {
             self.accounts.mark_read(&account, &key.room_id);
             let marker = self
@@ -1893,6 +1898,14 @@ impl State {
             let level = memo.0.level();
             memo.1.advance(clock, level.meter(), level.peak_db() - level.rms_db());
             tx.wake_after(memo.1.wait(clock));
+        }
+        // The selected rail tile breathes a while in a focused window, then rests.
+        if focused {
+            let (rested, wait) = self.breath.advance(clock);
+            ended |= rested;
+            if let Some(wait) = wait {
+                tx.wake_after(wait);
+            }
         }
         // The call's videos stream while its stage shows; its glow moves while it shows in a
         // focused window.
@@ -2745,6 +2758,7 @@ impl State {
             self.sync_timeline();
             self.request_timeline_media();
             self.request_avatars();
+            self.breath.ask();
         }
         self.popover = None;
         self.discover_scope();
@@ -2757,6 +2771,7 @@ impl State {
         self.nav.rooms.remove(&account);
         self.sync_timeline();
         self.discover_scope();
+        self.breath.ask();
     }
 
     /// Back to the current scope's overview.

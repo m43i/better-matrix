@@ -133,6 +133,8 @@ impl Bridge {
                 secrets: Arc::new(Secrets(secrets)),
                 identity: ClientIdentity { name: config.client_name, uri },
                 oauth_redirect,
+                // The iOS push extension and Android's headless push task open them too.
+                stores: matrix_core::StoreSharing::WithPush,
             },
             sink,
         )

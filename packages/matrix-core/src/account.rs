@@ -103,6 +103,7 @@ pub(crate) enum Redirect {
 pub(crate) struct PendingOAuth {
     pub url: Url,
     client: Client,
+    holder: Holder,
     redirect: Redirect,
     store_dir: PathBuf,
     passphrase: String,
@@ -133,30 +134,56 @@ fn media_cache() -> matrix_sdk::media::MediaRetentionPolicy {
         .with_cleanup_frequency(Some(DAY))
 }
 
-/// Room summaries kept between syncs, so each sync re-reads only the rooms it touched.
+/// Room summaries kept between syncs, so each sync re-reads only the rooms it touched and a
+/// list is built only when one of them changed.
 #[derive(Debug, Default)]
 pub(crate) struct RoomCache {
     rooms: HashMap<String, crate::RoomSummary>,
     spaces: HashMap<String, crate::SpaceSummary>,
+    invitations: HashMap<String, crate::Invitation>,
+    /// Whether a list was built from it yet: the first is, even when empty.
+    listed: bool,
+}
+
+/// Puts `value` under `id`; true when that changed what `map` held.
+fn changed<T: PartialEq>(map: &mut HashMap<String, T>, id: String, value: T) -> bool {
+    if map.get(&id) == Some(&value) {
+        return false;
+    }
+    map.insert(id, value);
+    true
 }
 
 /// Which process opens an account's store: the engine, or a push handled without it (iOS's
-/// Notification Service Extension, Android's headless push task). Each holds the SDK's
-/// cross-process locks under its own name, so the two never write the crypto store or refresh
-/// tokens at the same time (ADR 0010).
+/// Notification Service Extension, Android's headless push task). Where both may, each holds
+/// the SDK's cross-process locks under its own name, so the two never write the crypto store or
+/// refresh tokens at the same time (ADR 0010).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Holder {
-    /// The engine, which syncs.
+    /// The engine, where nothing else opens its stores (the desktop): no cross-process locks,
+    /// whose leases are written to disk every 50 ms while held, as through each long-poll sync.
+    Alone,
+    /// The engine, beside pushes handled without it (the phones).
     Engine,
     /// A push, fetching one event.
     Push,
 }
 
 impl Holder {
-    fn name(self) -> &'static str {
+    /// The engine's holder for stores shared as `sharing` says.
+    pub(crate) fn engine(sharing: crate::StoreSharing) -> Self {
+        match sharing {
+            crate::StoreSharing::Alone => Self::Alone,
+            crate::StoreSharing::WithPush => Self::Engine,
+        }
+    }
+
+    /// The name it holds the SDK's cross-process locks under; none when it holds none.
+    fn name(self) -> Option<&'static str> {
         match self {
-            Self::Engine => "main",
-            Self::Push => "push",
+            Self::Alone => None,
+            Self::Engine => Some("main"),
+            Self::Push => Some("push"),
         }
     }
 }
@@ -174,16 +201,19 @@ pub(crate) async fn build_client(
     holder: Holder,
 ) -> Result<Client, Error> {
     use matrix_sdk::cross_process_lock::CrossProcessLockConfig;
+    let locks = holder.name().map_or(CrossProcessLockConfig::SingleProcess, CrossProcessLockConfig::multi_process);
     let client = crate::tls::sdk(Client::builder())
         .homeserver_url(homeserver_url)
         .sqlite_store(store_dir, Some(passphrase))
-        .cross_process_store_config(CrossProcessLockConfig::multi_process(holder.name()))
+        .cross_process_store_config(locks)
         .with_encryption_settings(ENCRYPTION)
         .handle_refresh_tokens()
         .build()
         .await?;
     // Only OAuth sessions use it; it takes effect when the session is restored.
-    client.oauth().enable_cross_process_refresh_lock(holder.name().to_owned()).await?;
+    if let Some(name) = holder.name() {
+        client.oauth().enable_cross_process_refresh_lock(name.to_owned()).await?;
+    }
     let (reload, save) = (sessions.clone(), sessions.clone());
     client
         .set_session_callbacks(
@@ -231,19 +261,20 @@ impl Account {
     pub(crate) async fn login_password(
         layout: &StoreLayout,
         sessions: &Sessions,
+        holder: Holder,
         request: &LoginRequest,
     ) -> Result<Self, Error> {
         let resume = request.resume.as_ref();
         let (store_dir, passphrase, device) =
             store_for(layout, sessions, resume, &request.homeserver, Some(&request.username)).await?;
-        let client = build_client(&request.homeserver, &store_dir, &passphrase, sessions, Holder::Engine).await?;
+        let client = build_client(&request.homeserver, &store_dir, &passphrase, sessions, holder).await?;
         let mut login = client.matrix_auth().login_username(&request.username, &request.password);
         login = match &device {
             Some(device) => login.device_id(device.as_str()),
             None => login.initial_device_display_name(DEVICE_DISPLAY_NAME),
         };
         login.await?;
-        Self::signed_in(client, sessions, store_dir, passphrase).await
+        Self::signed_in(client, sessions, holder, store_dir, passphrase).await
     }
 
     /// Starts a browser sign-in on a resolved homeserver URL: registers this app with the
@@ -252,13 +283,14 @@ impl Account {
     pub(crate) async fn start_oauth(
         layout: &StoreLayout,
         sessions: &Sessions,
+        holder: Holder,
         homeserver: &str,
         identity: &ClientIdentity,
         resume: Option<&AccountId>,
         app_redirect: Option<(Url, tokio::sync::oneshot::Receiver<String>)>,
     ) -> Result<PendingOAuth, Error> {
         let (store_dir, passphrase, device) = store_for(layout, sessions, resume, homeserver, None).await?;
-        let client = build_client(homeserver, &store_dir, &passphrase, sessions, Holder::Engine).await?;
+        let client = build_client(homeserver, &store_dir, &passphrase, sessions, holder).await?;
         let (redirect_uri, redirect) = match app_redirect {
             Some((uri, returned)) => (uri, Redirect::App(returned)),
             None => {
@@ -274,24 +306,24 @@ impl Account {
         metadata.client_name = Some(Localized::new(identity.name.clone(), []));
         let metadata = Raw::new(&metadata).map_err(|e| Error::Storage(e.into()))?;
         let data = client.oauth().login(redirect_uri, device, Some(metadata.into()), None).build().await?;
-        Ok(PendingOAuth { url: data.url, client, redirect, store_dir, passphrase })
+        Ok(PendingOAuth { url: data.url, client, holder, redirect, store_dir, passphrase })
     }
 
     /// Resumes a saved session.
-    pub(crate) async fn restore(sessions: &Sessions, stored: &StoredAccount) -> Result<Self, Error> {
+    pub(crate) async fn restore(sessions: &Sessions, holder: Holder, stored: &StoredAccount) -> Result<Self, Error> {
         let id = stored.id.clone();
         let secrets = blocking(sessions, move |s| s.secrets(&id)).await?;
         let secrets = secrets.ok_or_else(|| Error::UnknownAccount(AccountId::new(&stored.id)))?;
-        let client =
-            build_client(&stored.homeserver, &stored.store_dir, &secrets.passphrase, sessions, Holder::Engine).await?;
+        let client = build_client(&stored.homeserver, &stored.store_dir, &secrets.passphrase, sessions, holder).await?;
         let changes = client.subscribe_to_session_changes();
         client.restore_session(secrets.auth.into_session()).await?;
-        Self::ready(AccountId::new(&stored.id), client, changes).await
+        Self::ready(AccountId::new(&stored.id), client, holder, changes).await
     }
 
     async fn signed_in(
         client: Client,
         sessions: &Sessions,
+        holder: Holder,
         store_dir: PathBuf,
         passphrase: String,
     ) -> Result<Self, Error> {
@@ -301,16 +333,22 @@ impl Account {
         let homeserver = client.homeserver().to_string();
         let stored = StoredAccount { id: id.to_string(), homeserver, store_dir, signed_out: false };
         blocking(sessions, move |s| s.save(stored, &StoredSecrets { auth, passphrase })).await?;
-        Self::ready(id, client, changes).await
+        Self::ready(id, client, holder, changes).await
     }
 
     /// Turns on what every signed-in account runs: the event cache, which keeps room history on
     /// disk and fills gaps from time offline, and the send queue, which sends what was written
     /// offline (or in an earlier session) once the server is reachable.
-    async fn ready(id: AccountId, client: Client, changes: broadcast::Receiver<SessionChange>) -> Result<Self, Error> {
+    async fn ready(
+        id: AccountId,
+        client: Client,
+        holder: Holder,
+        changes: broadcast::Receiver<SessionChange>,
+    ) -> Result<Self, Error> {
         // A push handled without the engine may write the crypto store (ADR 0010): with the
         // lock, each sync waits for a push to finish and reloads what it changed (`sync_once_locked`).
-        if let Err(error) = client.encryption().enable_cross_process_store_lock(Holder::Engine.name().to_owned()).await
+        if let Some(name) = holder.name()
+            && let Err(error) = client.encryption().enable_cross_process_store_lock(name.to_owned()).await
         {
             eprintln!("matrix-core: could not share the crypto store with pushes: {error}");
         }
@@ -341,6 +379,27 @@ impl Account {
     ) -> Result<matrix_sdk::sync::SyncResponse, matrix_sdk::Error> {
         let _store = self.client.encryption().spin_lock_store(None).await?;
         self.client.sync_once(settings).await
+    }
+
+    /// One sync sharing the store with pushes as the app's place allows (ADR 0010): under the
+    /// crypto store's lock, or, once the app has been in front long enough
+    /// ([`Front::unlocked`](crate::front::Front::unlocked)), after taking the lock only for a
+    /// moment, which waits for a push and reloads what it wrote. `None` when the app left the
+    /// front meanwhile: the sync stopped, as the app being killed would stop it, and its token
+    /// was not kept.
+    pub(crate) async fn sync_once_shared(
+        &self,
+        settings: matrix_sdk::config::SyncSettings,
+        front: &crate::front::Front,
+    ) -> Result<Option<matrix_sdk::sync::SyncResponse>, matrix_sdk::Error> {
+        let Some(mut unlocked) = front.unlocked().await else {
+            return self.sync_once_locked(settings).await.map(Some);
+        };
+        drop(self.client.encryption().spin_lock_store(None).await?);
+        tokio::select! {
+            response = self.client.sync_once(settings) => response.map(Some),
+            () = unlocked.left() => Ok(None),
+        }
     }
 
     /// Registers (or updates) this device's pusher: the homeserver sends the account's pushes
@@ -468,7 +527,13 @@ impl Account {
 
     /// Every joined room and space, each sorted by name, re-reading only the rooms in
     /// `changed` (all of them when `None`, or when the cache doesn't know a room yet).
-    pub(crate) async fn update_room_list(&self, cache: &mut RoomCache, changed: Option<&HashSet<String>>) -> RoomList {
+    /// Re-reads the rooms in `changed` (all when `None`) into `cache`, and returns the list when
+    /// anything in it changed: most syncs change no room's summary.
+    pub(crate) async fn update_room_list(
+        &self,
+        cache: &mut RoomCache,
+        changed: Option<&HashSet<String>>,
+    ) -> Option<RoomList> {
         let joined = self.client.joined_rooms();
         let ids: HashSet<String> = joined.iter().map(|room| room.room_id().to_string()).collect();
         // Rooms left: the SDK stops working out their latest event.
@@ -478,8 +543,10 @@ impl Account {
                 self.client.latest_events().await.forget_room(&room_id).await;
             }
         }
+        let held = cache.rooms.len() + cache.spaces.len();
         cache.rooms.retain(|id, _| ids.contains(id));
         cache.spaces.retain(|id, _| ids.contains(id));
+        let mut moved = !std::mem::replace(&mut cache.listed, true) || cache.rooms.len() + cache.spaces.len() != held;
         let stale = |id: &str, cache: &RoomCache| {
             changed.is_none_or(|changed| changed.contains(id))
                 || (!cache.rooms.contains_key(id) && !cache.spaces.contains_key(id))
@@ -491,7 +558,7 @@ impl Account {
                 continue;
             }
             if room.is_space() {
-                cache.spaces.insert(id, convert::space_summary(room).await);
+                moved |= self::changed(&mut cache.spaces, id, convert::space_summary(room).await);
             } else {
                 // The SDK keeps each room's latest event (and stores it) once asked to: the
                 // list's order comes from it. Asking again is a no-op.
@@ -503,16 +570,20 @@ impl Account {
                     settings = Some(self.client.notification_settings().await);
                 }
                 if let Some(settings) = &settings {
-                    cache.rooms.insert(id, convert::room_summary(room, settings, self.rtc_service().is_some()).await);
+                    let summary = convert::room_summary(room, settings, self.rtc_service().is_some()).await;
+                    moved |= self::changed(&mut cache.rooms, id, summary);
                 }
             }
         }
-        let mut list = RoomList {
-            rooms: cache.rooms.values().cloned().collect(),
-            spaces: cache.spaces.values().cloned().collect(),
-            invitations: Vec::new(),
-        };
-        for room in self.client.invited_rooms() {
+        let invited = self.client.invited_rooms();
+        let held = cache.invitations.len();
+        cache.invitations.retain(|id, _| invited.iter().any(|room| room.room_id().as_str() == id));
+        moved |= cache.invitations.len() != held;
+        for room in invited {
+            let id = room.room_id().to_string();
+            if changed.is_some_and(|changed| !changed.contains(&id)) && cache.invitations.contains_key(&id) {
+                continue;
+            }
             let inviter = room.invite_details().await.ok().map(|invite| crate::Person {
                 id: invite.inviter_id.to_string(),
                 name: invite
@@ -528,8 +599,8 @@ impl Account {
                     .map(ToOwned::to_owned)
                     .and_then(convert::avatar),
             });
-            list.invitations.push(crate::Invitation {
-                room_id: room.room_id().to_string(),
+            let invitation = crate::Invitation {
+                room_id: id.clone(),
                 name: room.display_name().await.map_or_else(|_| room.room_id().to_string(), |name| name.to_string()),
                 topic: room.topic(),
                 avatar: room.avatar_url().and_then(convert::avatar),
@@ -540,12 +611,21 @@ impl Account {
                 } else {
                     crate::RoomKind::Group
                 },
-            });
+            };
+            moved |= self::changed(&mut cache.invitations, id, invitation);
         }
+        if !moved {
+            return None;
+        }
+        let mut list = RoomList {
+            rooms: cache.rooms.values().cloned().collect(),
+            spaces: cache.spaces.values().cloned().collect(),
+            invitations: cache.invitations.values().cloned().collect(),
+        };
         list.rooms.sort_by_cached_key(|room| room.name.to_lowercase());
         list.spaces.sort_by_cached_key(|space| space.name.to_lowercase());
         list.invitations.sort_by_cached_key(|invite| invite.name.to_lowercase());
-        list
+        Some(list)
     }
 
     /// Queues a message for a joined room. The send queue persists it and retries until the
@@ -719,7 +799,7 @@ impl PendingOAuth {
             }
         };
         self.client.oauth().finish_login(returned).await?;
-        Account::signed_in(self.client, sessions, self.store_dir, self.passphrase).await
+        Account::signed_in(self.client, sessions, self.holder, self.store_dir, self.passphrase).await
     }
 }
 
@@ -871,7 +951,9 @@ mod tests {
         .expect("test session");
         client.restore_session(session).await.expect("restore test session");
         // As `ready` does for the engine, and the notification client for a push.
-        client.encryption().enable_cross_process_store_lock(holder.name().to_owned()).await.expect("store lock");
+        if let Some(name) = holder.name() {
+            client.encryption().enable_cross_process_store_lock(name.to_owned()).await.expect("store lock");
+        }
         Account {
             id: AccountId::new("@a:example.org"),
             client,
@@ -919,6 +1001,14 @@ mod tests {
         let engine = sharing(&server.url(), &dir, Holder::Engine).await;
         let push = sharing(&server.url(), &dir, Holder::Push).await;
         drop(push.client().encryption().spin_lock_store(None).await.expect("lock"));
+        assert_eq!(engine.sync_once_locked(quick_sync()).await.expect("sync").next_batch, "s1");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_engine_alone_should_sync_without_a_cross_process_lock() {
+        let server = sync_server();
+        let engine = sharing(&server.url(), &shared_dir("alone"), Holder::Alone).await;
+        assert!(engine.client().encryption().spin_lock_store(None).await.expect("lock").is_none());
         assert_eq!(engine.sync_once_locked(quick_sync()).await.expect("sync").next_batch, "s1");
     }
 

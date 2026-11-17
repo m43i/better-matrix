@@ -29,7 +29,7 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
             .fill(p.sidebar_hover)
             .center()
             .child(icon(&icons::HOME, 20.0).color(p.sidebar_text));
-        let breathing = s.window_focused;
+        let breathing = s.window_focused && s.breath.breathing();
         scopes = scopes.child(scope_slot(home, Scope::Home, t!("common.home"), &current, account, breathing, p));
         let (dragged, target) = match &s.dragging {
             Some(drag) => match &drag.item {
@@ -135,7 +135,7 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
 /// whoever looks, too slow to draw the eye. The glow is its own layer behind the tile, so the
 /// loop fades only its opacity and never commits.
 fn glow(tile: El, breathing: bool, p: &Palette) -> El {
-    const PERIOD: f32 = 5.0;
+    // Starts and ends at full strength, as it rests (`state::breath`).
     const BREATH: &[(f32, f32)] = &[(0.0, 1.0), (0.5, 0.45), (1.0, 1.0)];
     let mut halo = el()
         .absolute(0.0, 0.0)
@@ -144,7 +144,9 @@ fn glow(tile: El, breathing: bool, p: &Palette) -> El {
         .fill(p.rail_bg)
         .box_shadow(rune::Shadow { blur: 18.0, spread: 3.0, color: p.accent.alpha(0.6), ..rune::Shadow::default() });
     if breathing {
-        halo = halo.cycle(rune::Cycle { period: PERIOD, phase: 0.0, stops: BREATH, still: 0.8, fps: 20.0 });
+        #[expect(clippy::cast_possible_truncation, reason = "a period of a few seconds")]
+        let period = crate::state::breath::PERIOD as f32;
+        halo = halo.cycle(rune::Cycle { period, phase: 0.0, stops: BREATH, still: 0.8, fps: 20.0 });
     }
     el().size(TILE, TILE).child(halo).child(tile.outline(1.0, 2.0, p.accent.alpha(0.55)))
 }

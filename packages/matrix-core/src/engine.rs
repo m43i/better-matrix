@@ -262,6 +262,11 @@ pub enum Command {
         /// been seen. Thread reads never advance the room-wide marker.
         fully_read: bool,
     },
+    /// The app came to the front (`true`) or left it. On a store shared with pushes
+    /// ([`StoreSharing::WithPush`]) syncs in front stop holding the crypto store's lock; leaving
+    /// finishes once none runs without it, so the app may then let pushes open the store
+    /// (ADR 0010). The engine starts out of front.
+    InFront(bool),
     /// Tell a room whether the user is typing in it. Repeating `true` while typing is cheap: the
     /// SDK sends again only once the last notice is about to expire.
     Typing {
@@ -1024,6 +1029,20 @@ pub struct EngineConfig {
     pub identity: ClientIdentity,
     /// Where the browser returns after an OAuth sign-in.
     pub oauth_redirect: crate::account::OAuthRedirect,
+    /// Whether anything besides the engine opens an account's store.
+    pub stores: StoreSharing,
+}
+
+/// Whether anything besides the engine opens an account's store (ADR 0010).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreSharing {
+    /// Only the engine does (the desktop): the stores lock within this process. The SDK's
+    /// cross-process locks would write a lease to disk every 50 ms while held, as each sync
+    /// holds the crypto store's for its whole long poll.
+    Alone,
+    /// A push handled without the engine may too (the phones' push extension and push task):
+    /// the two take the SDK's cross-process locks.
+    WithPush,
 }
 
 impl std::fmt::Debug for EngineConfig {
@@ -1032,6 +1051,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("data_dir", &self.data_dir)
             .field("identity", &self.identity)
             .field("oauth_redirect", &self.oauth_redirect)
+            .field("stores", &self.stores)
             .finish()
     }
 }
@@ -1166,17 +1186,28 @@ enum Kind {
 #[derive(Debug)]
 pub struct Engine;
 
+/// The most threads the engine's runtime runs tasks on. Its work is mostly waiting on the
+/// network and the stores (which have their own blocking threads); one worker per core (24 on
+/// a large desktop) only adds threads that wake to look for work.
+const WORKERS: usize = 4;
+
 impl Engine {
     /// Starts an engine on its own thread with its own Tokio runtime. Saved accounts are
     /// restored right away and reported with [`Event::AccountAdded`].
     pub fn start(config: EngineConfig, sink: impl EventSink) -> Result<EngineHandle, Error> {
         crate::tls::install_provider();
-        let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().thread_name("matrix-engine").build()?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(WORKERS.min(std::thread::available_parallelism().map_or(WORKERS, usize::from)))
+            .enable_all()
+            .thread_name("matrix-engine")
+            .build()?;
         let (commands, receiver) = mpsc::unbounded_channel();
         let (signals, signal_receiver) = mpsc::unbounded_channel();
         let state = State {
             layout: StoreLayout::new(&config.data_dir),
             sessions: Sessions::new(&config.data_dir, config.secrets),
+            holder: crate::account::Holder::engine(config.stores),
+            front: crate::front::Front::default(),
             identity: config.identity,
             oauth_redirect: config.oauth_redirect,
             oauth_returns: HashMap::new(),
@@ -1318,6 +1349,10 @@ fn now_ms() -> u64 {
 struct State {
     layout: StoreLayout,
     sessions: Sessions,
+    /// How accounts' stores are opened: alone, or under the cross-process locks.
+    holder: crate::account::Holder,
+    /// Whether the app is in front, for when syncs hold the crypto store's lock.
+    front: crate::front::Front,
     identity: ClientIdentity,
     oauth_redirect: crate::account::OAuthRedirect,
     /// Browser sign-ins waiting for the app to hand their redirect back, by request.
@@ -1402,9 +1437,9 @@ impl State {
             self.sink.emit(Event::SessionEnded { account: AccountId::new(&stored.id), kept: true });
         }
         for stored in saved {
-            let (sessions, sink) = (self.sessions.clone(), Arc::clone(&self.sink));
+            let (sessions, holder, sink) = (self.sessions.clone(), self.holder, Arc::clone(&self.sink));
             self.tasks.spawn(async move {
-                let result = Account::restore(&sessions, &stored).await;
+                let result = Account::restore(&sessions, holder, &stored).await;
                 if let Err(error) = &result {
                     let error = format!("could not restore the session: {error}");
                     sink.emit(Event::AccountError { account: AccountId::new(&stored.id), error });
@@ -2230,11 +2265,14 @@ impl State {
                 Ok(Outcome::Done)
             }),
             Command::Login(login) => {
-                let (layout, sessions) = (self.layout.clone(), self.sessions.clone());
-                Box::pin(async move { Ok(signed_in(Account::login_password(&layout, &sessions, &login).await?).await) })
+                let (layout, sessions, holder) = (self.layout.clone(), self.sessions.clone(), self.holder);
+                Box::pin(async move {
+                    Ok(signed_in(Account::login_password(&layout, &sessions, holder, &login).await?).await)
+                })
             }
             Command::LoginOAuth { homeserver, resume } => {
                 let (layout, sessions, identity) = (self.layout.clone(), self.sessions.clone(), self.identity.clone());
+                let holder = self.holder;
                 self.oauth_returns.retain(|_, waiting| !waiting.is_closed());
                 let app_redirect = match &self.oauth_redirect {
                     crate::account::OAuthRedirect::Loopback => None,
@@ -2245,9 +2283,16 @@ impl State {
                     }
                 };
                 Box::pin(async move {
-                    let pending =
-                        Account::start_oauth(&layout, &sessions, &homeserver, &identity, resume.as_ref(), app_redirect)
-                            .await?;
+                    let pending = Account::start_oauth(
+                        &layout,
+                        &sessions,
+                        holder,
+                        &homeserver,
+                        &identity,
+                        resume.as_ref(),
+                        app_redirect,
+                    )
+                    .await?;
                     sink.emit(Event::OpenUrl { request, url: pending.url.to_string() });
                     Ok(signed_in(pending.finish(&sessions).await?).await)
                 })
@@ -2273,6 +2318,14 @@ impl State {
                 Box::pin(async move {
                     crate::account::set_signed_out(&sessions, &id).await?;
                     Ok(Outcome::LoggedOut(id))
+                })
+            }
+            Command::InFront(front) => {
+                // Changed now, in the order commands came; only the wait runs beside.
+                let settled = self.front.set(front);
+                Box::pin(async move {
+                    settled.await;
+                    Ok(Outcome::Done)
                 })
             }
             Command::Typing { account, room_id, typing } => {
@@ -2394,13 +2447,14 @@ impl State {
                 // Saving refreshed tokens comes first: the summary's requests may refresh them.
                 let tokens = tokio::spawn(watch_session(account.clone(), Arc::clone(&self.sink)));
                 let flows = crate::security::Flows::default();
-                let feed = RoomFeed { account: account.clone(), sink: Arc::clone(&self.sink), state: Arc::default() };
+                let feed = RoomFeed { account: account.clone(), sink: Arc::clone(&self.sink), cache: Arc::default() };
                 let call_handlers = crate::calls::listen(account.client(), account.id(), &self.signals);
                 // The rest waits on the server, so it runs beside the engine rather than holding
                 // up every account's commands. The account shows before anything about it.
                 let started = {
                     let (account, flows, sink, feed) =
                         (account.clone(), flows.clone(), Arc::clone(&self.sink), feed.clone());
+                    let front = self.front.clone();
                     tokio::spawn(async move {
                         // What this device knew showed at once, even offline; the server's
                         // profile follows.
@@ -2436,7 +2490,7 @@ impl State {
                             layout,
                             calls,
                             crate::security::watch(account.clone(), flows, Arc::clone(&sink)),
-                            sync_loop(account.clone(), Arc::clone(&sink), feed),
+                            sync_loop(account.clone(), Arc::clone(&sink), feed, front),
                         );
                     })
                 };
@@ -2490,7 +2544,7 @@ impl State {
 
 /// Syncs one account until it fails or is aborted, reporting rooms, new messages and
 /// notifications. The first response only catches up, so it notifies about nothing.
-async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed) {
+async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, front: crate::front::Front) {
     // Waits between failed syncs: from a few seconds, doubling, to a minute.
     const FIRST_RETRY: std::time::Duration = std::time::Duration::from_secs(2);
     const LAST_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
@@ -2498,7 +2552,7 @@ async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed) {
     let mut retry = FIRST_RETRY;
     loop {
         let started = std::time::Instant::now();
-        let Err(error) = sync_until_error(&account, &sink, &feed, &caught_up).await else { return };
+        let Err(error) = sync_until_error(&account, &sink, &feed, &front, &caught_up).await else { return };
         // The session is over. The SDK broadcasts every ending as `UnknownToken`, with whether
         // it was soft, and `watch_session` reports that: the error here may hide it (a rejected
         // refresh), so reporting from here too could call a soft ending hard.
@@ -2520,6 +2574,7 @@ async fn sync_until_error(
     account: &Account,
     sink: &Arc<dyn EventSink>,
     feed: &RoomFeed,
+    front: &crate::front::Front,
     caught_up: &Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), matrix_sdk::Error> {
     // Members load as rooms need them (lazy loading): a first sync doesn't download every member
@@ -2640,17 +2695,21 @@ async fn sync_until_error(
                     }
                 }
             }
-            // Only the rooms this sync touched are read again; account data (direct chats,
-            // push rules) can change any room, so it reads them all.
+            // Only the rooms this sync changed are read again; direct chats and push rules can
+            // change any room, so they read them all.
             let rooms = &response.rooms;
             let changed: HashSet<String> = rooms
                 .joined
-                .keys()
+                .iter()
+                .filter(|(_, update)| summary_may_change(update))
+                .map(|(room_id, _)| room_id)
                 .chain(rooms.left.keys())
                 .chain(rooms.invited.keys())
                 .map(ToString::to_string)
                 .collect();
-            let all = !response.account_data.is_empty();
+            let all = response.account_data.iter().any(|event| {
+                matches!(event.get_field::<String>("type").ok().flatten().as_deref(), Some("m.direct" | "m.push_rules"))
+            });
             if crate::sidebar::changed_in(&response.account_data)
                 && let Ok(layout) = account.sidebar_layout().await
             {
@@ -2660,9 +2719,9 @@ async fn sync_until_error(
             LoopCtrl::Continue
         }
     };
-    // The SDK's sync loop, with each sync under the crypto store's lock (`sync_once_locked`):
-    // the next sync continues from the last one's token, the first error ends the loop for
-    // `sync_loop` to retry, and syncs answered at once are spaced a second apart.
+    // The SDK's sync loop, each sync sharing the store with pushes (`sync_once_shared`): the next
+    // sync continues from the last one's token, the first error ends the loop for `sync_loop` to
+    // retry, and syncs answered at once are spaced a second apart.
     let mut settings = settings;
     let mut last_sync: Option<std::time::Instant> = None;
     loop {
@@ -2670,12 +2729,32 @@ async fn sync_until_error(
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
         last_sync = Some(std::time::Instant::now());
-        let response = account.sync_once_locked(settings.clone()).await?;
+        // Stopped as the app left the front: it runs again under the lock, from the same token.
+        let Some(response) = account.sync_once_shared(settings.clone(), front).await? else { continue };
         settings = settings.token(response.next_batch.clone());
         if on_response(response).await == LoopCtrl::Break {
             return Ok(());
         }
     }
+}
+
+/// Whether a room's sync update may change its summary: anything but typing notices, which a
+/// busy room sends many of. Read receipts count; the unread counts they change are also
+/// reported apart (`RoomInfoNotableUpdate`).
+fn summary_may_change(update: &matrix_sdk_base::sync::JoinedRoomUpdate) -> bool {
+    let state = match &update.state {
+        matrix_sdk_base::sync::State::Before(events) | matrix_sdk_base::sync::State::After(events) => events,
+    };
+    let typing = |event: &matrix_sdk::ruma::serde::Raw<_>| {
+        event.get_field::<String>("type").ok().flatten().as_deref() == Some("m.typing")
+    };
+    !update.timeline.events.is_empty()
+        || update.timeline.limited
+        || !state.is_empty()
+        || !update.account_data.is_empty()
+        || !update.ambiguity_changes.is_empty()
+        || update.avatar_changes.is_some()
+        || !update.ephemeral.iter().all(typing)
 }
 
 fn members_changed(update: &matrix_sdk_base::sync::JoinedRoomUpdate) -> bool {
@@ -2688,25 +2767,22 @@ fn members_changed(update: &matrix_sdk_base::sync::JoinedRoomUpdate) -> bool {
             && update.timeline.events.iter().any(|event| relevant(event.raw().get_field("type").ok().flatten()))
 }
 
-/// One sync loop's room list and what it last reported. The sync, the unread listener and the
-/// member fetch all re-read rooms through it, one at a time, so the list reported last is
-/// always the newest.
+/// One sync loop's room list, as last reported. The sync, the unread listener and the member
+/// fetch all re-read rooms through it, one at a time, so the list reported last is always the
+/// newest.
 #[derive(Clone)]
 struct RoomFeed {
     account: Account,
     sink: Arc<dyn EventSink>,
-    state: Arc<tokio::sync::Mutex<(crate::account::RoomCache, Option<crate::RoomList>)>>,
+    cache: Arc<tokio::sync::Mutex<crate::account::RoomCache>>,
 }
 
 impl RoomFeed {
-    /// Re-reads the rooms in `changed` (all when `None`) and reports the list if it differs
-    /// from the last one: most syncs change no room's summary (typing, receipts, presence).
+    /// Re-reads the rooms in `changed` (all when `None`) and reports the list if it changed:
+    /// most syncs change no room's summary (receipts, presence).
     async fn refresh(&self, changed: Option<&HashSet<String>>) {
-        let mut state = self.state.lock().await;
-        let (cache, last) = &mut *state;
-        let list = self.account.update_room_list(cache, changed).await;
-        if last.as_ref() != Some(&list) {
-            *last = Some(list.clone());
+        let mut cache = self.cache.lock().await;
+        if let Some(list) = self.account.update_room_list(&mut cache, changed).await {
             self.sink.emit(Event::RoomsUpdated { account: self.account.id().clone(), list });
         }
     }
@@ -3070,6 +3146,36 @@ mod tests {
     use super::*;
     use crate::secrets::MemorySecrets;
 
+    fn ephemeral(kind: &str) -> matrix_sdk::ruma::serde::Raw<matrix_sdk::ruma::events::AnySyncEphemeralRoomEvent> {
+        matrix_sdk::ruma::serde::Raw::new(&serde_json::json!({ "type": kind, "content": {} }))
+            .expect("event")
+            .cast_unchecked()
+    }
+
+    #[test]
+    fn a_room_update_with_only_typing_notices_should_leave_its_summary_alone() {
+        let update =
+            matrix_sdk_base::sync::JoinedRoomUpdate { ephemeral: vec![ephemeral("m.typing")], ..Default::default() };
+        assert!(!summary_may_change(&update));
+    }
+
+    #[test]
+    fn a_room_update_with_a_read_receipt_should_read_its_summary_again() {
+        let update = matrix_sdk_base::sync::JoinedRoomUpdate {
+            ephemeral: vec![ephemeral("m.typing"), ephemeral("m.receipt")],
+            ..Default::default()
+        };
+        assert!(summary_may_change(&update));
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_room_list_should_not_be_built_again() {
+        let account = Account::for_test("https://example.org").await;
+        let mut cache = crate::account::RoomCache::default();
+        assert!(account.update_room_list(&mut cache, None).await.is_some(), "the first list is reported, even empty");
+        assert!(account.update_room_list(&mut cache, None).await.is_none());
+    }
+
     async fn next_thread_reply(received: &mut tokio::sync::mpsc::UnboundedReceiver<Event>) -> bool {
         while let Some(event) = received.recv().await {
             if let Event::TimelineChanged { diffs, .. } = event {
@@ -3319,6 +3425,7 @@ mod tests {
             secrets: Arc::new(MemorySecrets::default()),
             identity: ClientIdentity { name: "Test".into(), uri: "https://example.org".parse().unwrap() },
             oauth_redirect: crate::OAuthRedirect::Loopback,
+            stores: StoreSharing::Alone,
         };
         (Engine::start(config, sink).expect("engine starts"), received)
     }

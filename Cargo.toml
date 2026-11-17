@@ -81,7 +81,10 @@ debug = false
 opt-level = 2
 
 [profile.release]
-codegen-units = 16
+# Whole-crate optimization across the workspace and its dependencies (matrix-sdk, Rune): faster,
+# smaller binaries for the desktop and the phones' engine, for slower release builds.
+codegen-units = 1
+lto = "thin"
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

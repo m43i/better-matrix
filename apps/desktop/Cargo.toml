@@ -14,6 +14,9 @@ path = "src/main.rs"
 [features]
 # Live Rust editing with Rune's `scripts/rune-dev` (see `.agent-tools/rune/docs/rune.md`).
 hot = ["rune/hot"]
+# Rune's per-frame log: `RUNE_FRAME_LOG=frames.jsonl` writes each drawn frame, its cost and what
+# asked for it (`.agent-tools/rune/docs/rune.md`).
+frame-profile = ["rune/frame-profile"]
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }

@@ -2584,6 +2584,26 @@ fn the_backdrop_should_rest_while_the_window_is_in_the_background() {
 }
 
 #[test]
+fn the_selected_tile_should_stop_breathing_in_an_idle_window() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.animate(0.0, &mut Tx::default());
+    assert!(s.animate(60.0, &mut Tx::default()), "coming to rest changes the view");
+    assert!(!s.breath.breathing());
+}
+
+#[test]
+fn choosing_a_scope_should_make_the_selected_tile_breathe_again() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.animate(0.0, &mut Tx::default());
+    s.animate(60.0, &mut Tx::default());
+    s.select_scope(Scope::Home);
+    s.animate(61.0, &mut Tx::default());
+    assert!(s.breath.breathing());
+}
+
+#[test]
 fn an_account_suspended_and_put_off_should_stay_listed() {
     let (mut s, _) = state();
     let id = AccountId::new("@a:example.org");

@@ -284,7 +284,7 @@ event_id: string | null,
  * Also advance the cross-device fully-read marker after the unread boundary has
  * been seen. Thread reads never advance the room-wide marker.
  */
-fully_read: boolean, } } | { "type": "Typing", "data": { 
+fully_read: boolean, } } | { "type": "InFront", "data": boolean } | { "type": "Typing", "data": { 
 /**
  * Who is typing.
  */

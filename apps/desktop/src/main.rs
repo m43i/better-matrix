@@ -584,6 +584,8 @@ fn main() {
             secrets: platform::system_secrets(dirs.data()),
             identity: ClientIdentity { name: "Better Matrix".into(), uri },
             oauth_redirect: matrix_core::OAuthRedirect::Loopback,
+            // One instance at a time, and no push opens a store without it.
+            stores: matrix_core::StoreSharing::Alone,
         },
         Err(error) => {
             eprintln!("better-matrix: invalid client URI {CLIENT_URI}: {error}");

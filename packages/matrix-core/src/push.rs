@@ -35,7 +35,7 @@ pub const ACCOUNT_KEY: &str = "account";
 
 /// How long a push handled without the engine may take: iOS gives a Notification Service
 /// Extension about 30 seconds, and the generic text must still go out after it.
-const WITHOUT_ENGINE: Duration = Duration::from_secs(22);
+pub(crate) const WITHOUT_ENGINE: Duration = Duration::from_secs(22);
 
 /// The pusher the homeserver keeps for `pusher` on `account`.
 pub(crate) fn pusher(

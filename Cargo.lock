@@ -6392,6 +6392,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "procwatch"
+version = "0.1.0"
+source = "git+https://github.com/anomalyco/rune?rev=384c2991e582418ba529835279c5876ac3915e02#384c2991e582418ba529835279c5876ac3915e02"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "profiling"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7184,6 +7192,7 @@ dependencies = [
  "png 0.18.1",
  "pollster 1.0.1",
  "portable-atomic",
+ "procwatch",
  "raw-window-handle",
  "raw-window-metal",
  "resvg",

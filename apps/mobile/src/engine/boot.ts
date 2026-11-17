@@ -7,6 +7,7 @@ import { Directory, Paths } from 'expo-file-system';
 import { setLanguage } from '../i18n';
 import { installAccountEffects } from '../state/actions/accounts';
 import { Store } from '../state/store';
+import { followFront } from './front';
 import { CLIENT_NAME, CLIENT_URI, OAUTH_REDIRECT } from './identity';
 import { installNotifications } from './notifications';
 import { dataDirectory, pathOf, readSettings, saveSettings } from './paths';
@@ -37,7 +38,7 @@ export function boot(): Store {
   const store = new Store(engine, settings);
   installNotifications(store);
   installAccountEffects(store);
-  installPush(store, data);
+  followFront(store, installPush(store, data));
   let saved = settings;
   store.subscribe(() => {
     const next = store.getState().settings;

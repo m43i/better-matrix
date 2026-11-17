@@ -304,10 +304,20 @@ Date: 2026-11-16
     within 22 s. Its clients hold the SDK's cross-process locks as `push`, the engine's as
     `main`: OAuth refreshes go through the cross-process refresh lock and are saved inside it
     (session callbacks on every client, which read the tokens back when the other process
-    refreshed), and those callbacks are the only place tokens are saved; the engine holds the
-    crypto store's lock through each sync (`Account::sync_once_locked`), which reloads what a
-    push process wrote and keeps the two from writing the store at once. A store directory is found under the data
-    directory wherever the account list says it was, so the data directory may move.
+    refreshed), and those callbacks are the only place tokens are saved. A store directory is
+    found under the data directory wherever the account list says it was, so the data directory
+    may move.
+  - _The crypto store's lock:_ a sync on a store shared with pushes holds it
+    (`Account::sync_once_shared`), which reloads what a push process wrote and keeps the two
+    from writing the store at once. A held lock's lease is written to the store every 50 ms,
+    and a sync would hold it through its whole long poll, so only the phones share
+    (`EngineConfig::stores`: `StoreSharing::WithPush`; the desktop, where nothing else opens a
+    store, is `Alone` and takes no cross-process locks), and only out of front. The app reports
+    its place with `Command::InFront` (`engine/front.ts`); the engine starts out of front. In
+    front no push runs outside the engine, so once the app has been there longer than a push
+    may run (22 s), a sync takes the lock only for a moment first and then runs without it
+    (`front.rs`). Leaving the front stops those syncs (as being killed would: their token isn't
+    kept) before the command finishes, and only then does the app remove `app-active`.
   - _Android:_ the push is an FCM data message (through Expo); expo-notifications runs the push
     task (`engine/pushTask.ts`, defined by the entry `index.ts` before the router, headless when
     the app isn't running). With the engine running it asks the engine; headless it calls
@@ -358,10 +368,10 @@ Date: 2026-11-16
   Screen sharing from phones isn't offered.
 - Push, still open: the extension and its linking were written without Xcode, and the extension
   links the whole engine (calls included), so its memory under iOS's ~24 MB limit must be
-  checked on a device (`docs/push.md` lists what to verify). The engine holds the crypto
-  store's lock through each long-poll sync, so a push that arrives meanwhile waits for it (the
-  SDK's notification client waits up to a minute); the extension stays out while the app is in
-  front, so the two meet only when the app syncs in the background. The extension can't drop a
+  checked on a device (`docs/push.md` lists what to verify). Out of front the engine holds
+  the crypto store's lock through each long-poll sync, so a push that arrives meanwhile waits
+  for it (the SDK's notification client waits up to a minute); the extension stays out while
+  the app is in front, so the two meet only when the app syncs in the background. The extension can't drop a
   push (that needs Apple's notification-filtering entitlement), so a pusher whose removal
   failed may still show a generic notification on iOS until it is removed. iOS may kill a suspended app that holds SQLite locks in the shared container
   (`0xdead10cc`). An extension can't drop a push, so one that turns out to be nothing still
