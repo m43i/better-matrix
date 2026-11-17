@@ -32,7 +32,7 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
         .fill(p.bg)
         .border(if s.drop_hover { 2.0 } else { 0.0 }, p.accent)
         .children(water)
-        .child(header(s, account, room, p));
+        .child(header(s, account, room, p, layout));
     let mut chat = || {
         col()
             .key("room-chat")
@@ -125,7 +125,7 @@ pub fn display_name(room: &RoomSummary) -> String {
 
 /// The room's name, then its members and its info at the right. The topic is behind the info
 /// button rather than in the header.
-fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
+fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, layout: &PaneLayout) -> El {
     let info_open = s.side == Some(SidePanel::Info);
     row()
         .key("room-header")
@@ -135,7 +135,7 @@ fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -> 
         .gap(10.0)
         .center_y()
         .border_sides([0.0, 0.0, 1.0, 0.0], p.divider)
-        .children(s.call_here().map(|call| super::call::sidebar_button(call, p)))
+        .children(s.call_here().filter(|_| layout.sidebar_available).map(|call| super::call::sidebar_button(call, p)))
         .child(text(display_name(room)).key("room-name").font(font::HEADER).color(p.text).grow(1.0).truncate())
         .children(super::call::header_buttons(s, room, p))
         .children((room.kind == RoomKind::Group).then(|| super::people::members_button(s, account, room, p)))

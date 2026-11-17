@@ -29,11 +29,17 @@ pub fn resizable(content: El, pane: Pane, size: PaneSize, p: &Palette) -> El {
         .range_step(10.0)
         .on_drag(move |s: &mut State, drag, _| s.panes.drag(pane, size, drag))
         .on_step(move |s: &mut State, delta, tx| {
-            s.panes.set(pane, size.clamp(size.width + delta as f32 * 10.0));
+            let width = size.clamp(size.width + delta as f32 * 10.0);
+            if width != size.width {
+                s.panes.set(pane, width);
+            }
             tx.instant();
         })
         .on_step_limit(move |s: &mut State, max, tx| {
-            s.panes.set(pane, if max { size.max } else { size.min });
+            let width = if max { size.max } else { size.min };
+            if width != size.width {
+                s.panes.set(pane, width);
+            }
             tx.instant();
         });
     el().key(format!("{key}-pane")).w(size.width).h_full().child(content.min_w(0.0)).child(handle)

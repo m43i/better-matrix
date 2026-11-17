@@ -294,3 +294,61 @@ fn clicking_a_constrained_handle_should_keep_its_preferred_width() {
     settle(&mut rt);
     assert_eq!(width(&rt, "sidebar"), 420.0);
 }
+
+#[test]
+fn dragging_a_blocked_handle_should_keep_its_preferred_width() {
+    let mut rt = runtime(|s| {
+        room(s);
+        s.panes.set(Pane::Sidebar, 380.0);
+        s.show_side(SidePanel::Info);
+    });
+    rt.set_viewport((908.0, 760.0), 1.0);
+    settle(&mut rt);
+    drag(&mut rt, "sidebar-resize", 40.0);
+    rt.set_viewport((1200.0, 760.0), 1.0);
+    settle(&mut rt);
+    assert_eq!(width(&rt, "sidebar"), 380.0);
+}
+
+#[test]
+fn keyboard_adjustment_at_a_limit_should_keep_the_preferred_width() {
+    let mut rt = runtime(|s| {
+        room(s);
+        s.panes.set(Pane::Sidebar, 380.0);
+        s.show_side(SidePanel::Info);
+    });
+    rt.set_viewport((908.0, 760.0), 1.0);
+    settle(&mut rt);
+    press(&mut rt, "sidebar-resize");
+    for key in [Key::Right, Key::Home, Key::End] {
+        rt.key(KeyEvent { key, mods: Mods::default() });
+        rt.frame(0.0);
+    }
+    rt.set_viewport((1200.0, 760.0), 1.0);
+    settle(&mut rt);
+    assert_eq!(width(&rt, "sidebar"), 380.0);
+}
+
+#[test]
+fn a_call_should_hide_the_sidebar_toggle_while_a_panel_leaves_no_room_for_the_sidebar() {
+    let mut rt = runtime(|s| {
+        demo::call(s, false);
+        s.show_side(SidePanel::Info);
+    });
+    rt.set_viewport((720.0, 760.0), 1.0);
+    settle(&mut rt);
+    assert!(rt.find("call-sidebar").is_none());
+}
+
+#[test]
+fn closing_a_panel_should_restore_the_calls_sidebar_toggle() {
+    let mut rt = runtime(|s| {
+        demo::call(s, false);
+        s.show_side(SidePanel::Info);
+    });
+    rt.set_viewport((720.0, 760.0), 1.0);
+    settle(&mut rt);
+    press(&mut rt, "info-panel-close");
+    settle(&mut rt);
+    assert!(rt.find("call-sidebar").is_some());
+}

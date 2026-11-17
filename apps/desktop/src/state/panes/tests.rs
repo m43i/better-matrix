@@ -1,6 +1,12 @@
 use super::{Pane, PaneWidths};
 
 #[test]
+fn opening_a_thread_should_preserve_the_sidebar_width_when_both_fit() {
+    let layout = PaneWidths::default().layout(932.0, true, Some(Pane::Thread));
+    assert_eq!(layout.sidebar.unwrap().width, 260.0);
+}
+
+#[test]
 fn the_sidebar_should_leave_room_for_the_conversation() {
     let mut widths = PaneWidths::default();
     widths.set(Pane::Sidebar, 420.0);

@@ -210,6 +210,7 @@ Date: 2026-11-16
     video stage shows one surface at a time, with small controls and single-tile paging
     through every participant and shared screen. The room header returns to
     the expanded call. Hide sidebar / Show sidebar sits on the left before the room name.
+    The toggle is hidden while a right-hand panel leaves no room to restore the sidebar.
     Hiding the rooms/direct messages
     sidebar applies while viewing that call; elsewhere it reappears, and the account/space rail
     stays available. These display preferences last for the call.

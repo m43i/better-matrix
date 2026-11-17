@@ -49,6 +49,8 @@ impl PaneSize {
 
 pub struct PaneLayout {
     pub sidebar: Option<PaneSize>,
+    /// Whether there is room to show the sidebar, independently of the call's preference.
+    pub sidebar_available: bool,
     pub right: Option<(Pane, PaneSize)>,
 }
 
@@ -84,26 +86,20 @@ impl PaneWidths {
         let available = available.max(0.0);
         let sidebar_min = Pane::Sidebar.limits().0;
         let right_min = right.map_or(0.0, |pane| pane.limits().0);
-        let sidebar = sidebar && (right.is_none() || available >= sidebar_min + right_min + ROOM_MIN);
-        let sidebar_reserve = if sidebar { sidebar_min } else { 0.0 };
-        // Keep the panel readable even when zoom leaves too little space for ROOM_MIN.
-        let mut right = right.map(|pane| {
-            let space = (available - sidebar_reserve - ROOM_MIN).max(right_min).min(available);
-            (pane, PaneSize::new(pane, self.preferred(pane), space))
-        });
-        let right_width = right.map_or(0.0, |(_, size)| size.width);
-        let sidebar = sidebar.then(|| {
+        let sidebar_available = right.is_none() || available >= sidebar_min + right_min + ROOM_MIN;
+        let sidebar = (sidebar && sidebar_available).then(|| {
             PaneSize::new(
                 Pane::Sidebar,
                 self.sidebar,
-                (available - right_width - ROOM_MIN).max(sidebar_min).min(available),
+                (available - right_min - ROOM_MIN).max(sidebar_min).min(available),
             )
         });
-        if let Some((pane, size)) = &mut right {
+        // Keep the panel readable even when zoom leaves too little space for ROOM_MIN.
+        let right = right.map(|pane| {
             let space = (available - sidebar.map_or(0.0, |size| size.width) - ROOM_MIN).max(right_min).min(available);
-            *size = PaneSize::new(*pane, size.width, space);
-        }
-        PaneLayout { sidebar, right }
+            (pane, PaneSize::new(pane, self.preferred(pane), space))
+        });
+        PaneLayout { sidebar, sidebar_available, right }
     }
 
     fn preferred(&self, pane: Pane) -> f32 {
@@ -133,11 +129,8 @@ impl PaneWidths {
                 if let Resize::Dragging { pane: active, start, previous } = self.resize
                     && active == pane
                 {
-                    let width = if drag.cancelled() || drag.dx == 0.0 {
-                        previous
-                    } else {
-                        size.clamp(start + pane.direction() * drag.dx)
-                    };
+                    let resized = size.clamp(start + pane.direction() * drag.dx);
+                    let width = if drag.cancelled() || resized == start { previous } else { resized };
                     self.set(pane, width);
                 }
                 if drag.phase == Phase::Up {

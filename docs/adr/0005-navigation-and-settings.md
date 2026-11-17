@@ -69,14 +69,17 @@ Date: 2026-11-14
   [0008](0008-people-and-rooms.md)).
 - **Desktop pane widths:** the sidebar's right edge and the side panel's or thread's left
   edge are six-point drag handles with the column-resize cursor. Arrow keys adjust a focused
-  handle by ten points; Home and End choose its limits. Escape or losing window focus cancels
-  a drag and restores the previous width.
+  handle by ten points (Right/Up widens, Left/Down narrows); Home and End choose its limits.
+  Escape or losing window focus cancels a drag and restores the previous width.
   - `PaneWidths` keeps preferred widths for the window's session, across rooms and accounts:
     sidebar 260, side panel 320, thread 420 points. The rail stays fixed at 68.
   - The sidebar stays between 220 and 420 points; right-hand panels between 300 and 640.
     `PaneLayout` caps them further to reserve 320 points for the conversation. Opening a
     right-hand panel in a window too narrow for all three temporarily hides the sidebar;
     closing the panel or widening the window restores it. A call can still hide it explicitly.
+    The sidebar's chosen width takes priority over the right-hand panel's preferred width,
+    so opening a thread leaves the room list steady whenever the minimum widths fit.
+    A drag or keyboard adjustment blocked by a limit preserves the remembered width.
   - Layout uses zoomed points from `Cx::layout_size`. Under extreme zoom, panel readability
     takes precedence over the conversation's reserve; no pane exceeds the available width.
     Window resizing never overwrites preferred widths, so widening restores them.
