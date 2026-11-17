@@ -90,7 +90,7 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
         Some(SidePanel::Info) => pane.child(super::info::overview(s, room, p)),
         Some(SidePanel::Members) => pane.child(super::members::panel(s, account, room, p)),
         Some(SidePanel::Threads) => pane.child(super::info::threads(account, room, p)),
-        Some(SidePanel::Pins) => pane.child(super::info::pins(account, room, p)),
+        Some(SidePanel::Pins) => pane.child(super::info::pins(s, account, room, p)),
         Some(SidePanel::Files) => pane.child(super::info::files(account, room, p)),
         None => match s.active_thread() {
             Some(root) => pane.child(thread_panel(s, account, room, root, p, ui)),

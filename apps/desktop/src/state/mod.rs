@@ -1262,6 +1262,7 @@ impl State {
             Event::Threads { account, room_id, threads } => self.accounts.set_threads(&account, room_id, threads),
             Event::PinnedMessages { account, room_id, messages } => {
                 self.accounts.set_pins(&account, room_id, messages);
+                self.request_avatars();
             }
             Event::Files { account, room_id, files } => self.accounts.set_files(&account, room_id, files),
             // Pushes are for phones: the desktop syncs while it runs and never registers a pusher.
@@ -2129,6 +2130,12 @@ impl State {
             let members = self.active_room_id().and_then(|room_id| account.members.get(room_id)).into_iter().flat_map(
                 move |members| members.people.iter().take(shown).filter_map(|member| member.person.avatar.clone()),
             );
+            let pins = self
+                .active_room_id()
+                .filter(|_| self.side == Some(SidePanel::Pins))
+                .and_then(|room| account.pins.get(room))
+                .into_iter()
+                .flat_map(|pins| pins.iter().take(MEMBER_PICTURES).filter_map(|pin| pin.sender_avatar.clone()));
             let typing = self
                 .active_room_id()
                 .and_then(|room_id| account.typing.get(room_id))
@@ -2142,6 +2149,7 @@ impl State {
                     .chain(spaces)
                     .chain(invitations)
                     .chain(members)
+                    .chain(pins)
                     .chain(typing)
                     .chain(found)
                     .map(|media| (id.clone(), media)),

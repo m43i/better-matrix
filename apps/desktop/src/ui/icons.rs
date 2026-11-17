@@ -17,6 +17,7 @@ macro_rules! icons {
 }
 
 icons! {
+    UNPIN = "unpin": r#"<path d="M16 3H8l1 6-4 4v2h6v7M13 15h6v-2l-4-4M3 3l18 18"/>"#;
     PIN = "pin": r#"<path d="M16 3H8l1 6-4 4v2h6v7h2v-7h6v-2l-4-4z"/>"#;
     COPY = "copy": r#"<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>"#;
     FORWARD = "forward": r#"<path d="m15 17 5-5-5-5M20 12H9a5 5 0 0 0-5 5v2"/>"#;

@@ -430,3 +430,14 @@ fn right_clicking_formatted_message_text_should_open_message_actions() {
     rt.frame(0.1);
     assert!(rt.find("message-copy-link").is_some());
 }
+
+#[test]
+fn the_unpin_icon_should_not_open_the_message() {
+    let mut rt = runtime(|s| {
+        demo::pinned_messages(s);
+        s.show_side(SidePanel::Pins);
+    });
+    press(&mut rt, &format!("pinned-unpin-{}", demo::DEMO_THREAD.1));
+    assert_eq!(rt.state.side, Some(SidePanel::Pins));
+    assert!(rt.state.message_jump.is_none());
+}

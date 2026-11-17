@@ -837,20 +837,28 @@ pub fn pinned_messages(s: &mut State) {
     seed(s);
     let account = AccountId::new(ADA);
     let Some(data) = s.accounts.get(&account) else { return };
+    let ids = [DEMO_THREAD.1, "$demo-@alan:example.org-2"];
+    let pins = data
+        .timeline(&TimelineKey::room(DEMO_THREAD.0))
+        .into_iter()
+        .flat_map(|timeline| &timeline.entries)
+        .filter_map(|entry| entry.message())
+        .filter(|message| ids.contains(&message.event_id.as_str()))
+        .map(|message| matrix_core::PinnedMessage {
+            event_id: message.event_id.clone(),
+            sender_name: message.sender_name.clone(),
+            sender_id: message.sender_id.clone(),
+            sender_avatar: message.sender_avatar.clone(),
+            timestamp_ms: Some(message.timestamp_ms),
+            body: Some(message.content.plain().to_owned()),
+            thread: None,
+        })
+        .collect();
     let (mut rooms, spaces) = (data.rooms.clone(), data.spaces.clone());
     if let Some(room) = rooms.iter_mut().find(|r| r.room_id == DEMO_THREAD.0) {
-        room.pinned = vec![DEMO_THREAD.1.into()];
+        room.pinned = ids.iter().map(|id| (*id).to_owned()).collect();
     }
     s.accounts.set_room_list(&account, matrix_core::RoomList { rooms, spaces, invitations: Vec::new() });
-    s.accounts.set_pins(
-        &account,
-        DEMO_THREAD.0.into(),
-        vec![matrix_core::PinnedMessage {
-            event_id: DEMO_THREAD.1.into(),
-            sender_name: "Alan Turing".into(),
-            body: Some("Cross-signing verification passes on Linux, macOS and Windows.".into()),
-            thread: None,
-        }],
-    );
+    s.accounts.set_pins(&account, DEMO_THREAD.0.into(), pins);
     s.select_room(DEMO_THREAD.0);
 }

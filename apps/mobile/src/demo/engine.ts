@@ -80,6 +80,9 @@ export function answer(
                     {
                       event_id: DEMO_THREAD.root,
                       sender_name: 'Alan Turing',
+                      sender_id: '@alan:example.org',
+                      sender_avatar: null,
+                      timestamp_ms: DEMO_DAY_MS + 11 * 3_600_000 + 15 * 60_000,
                       body: 'Cross-signing verification passes on Linux, macOS and Windows.',
                       thread: null,
                     },
@@ -385,6 +388,9 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
         return {
           event_id: eventId,
           sender_name: source?.message.sender_name ?? '',
+          sender_id: source?.message.sender_id ?? '',
+          sender_avatar: source?.message.sender_avatar ?? null,
+          timestamp_ms: source?.message.timestamp_ms ?? null,
           body: source ? messageText(source.message) : null,
           thread: source?.thread ?? null,
         };

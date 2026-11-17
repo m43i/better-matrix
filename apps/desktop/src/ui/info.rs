@@ -219,68 +219,84 @@ pub fn files(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
 }
 
 /// Shared pins, independent of how far the room's timeline has been paged.
-pub fn pins(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
-    let mut list = col().w_full().px(12.0).py(12.0).gap(10.0);
+pub fn pins(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
+    let mut list = col().w_full().py(8.0);
     if let Some(error) = account.pin_errors.get(&room.room_id) {
-        list = list.child(text(error.clone()).font(font::BODY).color(p.danger).wrap()).child(
-            button(t!("info.pins_retry"), ButtonKind::Secondary, true, p)
-                .key("pins-retry")
-                .on_press(|s: &mut State| s.show_side(SidePanel::Pins)),
+        list = list.child(
+            col()
+                .w_full()
+                .px(16.0)
+                .py(12.0)
+                .gap(8.0)
+                .child(text(error.clone()).font(font::BODY).color(p.danger).wrap())
+                .child(
+                    button(t!("info.pins_retry"), ButtonKind::Secondary, true, p)
+                        .key("pins-retry")
+                        .on_press(|s: &mut State| s.show_side(SidePanel::Pins)),
+                ),
         );
     }
     match account.pins.get(&room.room_id) {
         None if account.pin_errors.contains_key(&room.room_id) => {}
-        None => list = list.child(text(t!("info.loading")).font(font::BODY).color(p.text_muted)),
+        None => list = list.child(text(t!("info.loading")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0)),
         Some(pins) => {
             if room.pinned.is_empty() {
-                list = list.child(text(t!("info.no_pins")).font(font::BODY).color(p.text_muted).wrap());
+                list =
+                    list.child(text(t!("info.no_pins")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0).wrap());
             }
             for pin in pins.iter().filter(|pin| room.pinned.contains(&pin.event_id)) {
                 let destination =
                     matrix_core::TimelineKey { room_id: room.room_id.clone(), thread: pin.thread.clone() };
                 let event_id = pin.event_id.clone();
                 let (key, id) = (matrix_core::TimelineKey::room(&room.room_id), pin.event_id.clone());
-                let mut card = col()
-                    .key(format!("pinned-{}", pin.event_id))
-                    .w_full()
-                    .px(12.0)
-                    .py(12.0)
-                    .gap(8.0)
-                    .radius(8.0)
-                    .fill(p.accent.alpha(0.06))
-                    .border(1.0, p.accent.alpha(0.2))
-                    .child(
-                        row()
-                            .gap(6.0)
-                            .center_y()
-                            .child(icon(&icons::PIN, 14.0).color(p.accent))
-                            .child(text(pin.sender_name.clone()).font(font::BODY_STRONG).color(p.text).truncate()),
-                    )
-                    .child(
-                        text(pin.body.clone().unwrap_or_else(|| t!("message.unavailable").to_owned()))
-                            .font(font::BODY)
-                            .color(p.text)
-                            .max_lines(4)
-                            .wrap(),
+                let mut header =
+                    row().w_full().min_h(28.0).gap(4.0).center_y().child(
+                        text(pin.sender_name.clone()).font(font::BODY_STRONG).color(p.text).grow(1.0).truncate(),
                     );
-                if pin.body.is_some() {
-                    card = card.child(
-                        button(t!("message.open"), ButtonKind::Secondary, true, p)
-                            .key(format!("pinned-open-{}", pin.event_id))
-                            .on_press(move |s: &mut State| {
-                                s.side = None;
-                                s.open_message(&destination, &event_id);
-                            }),
-                    );
-                }
                 if room.can_pin {
-                    card = card.child(
-                        button(t!("actions.unpin"), ButtonKind::Link, true, p)
+                    header = header.child(
+                        icon_button(&icons::UNPIN, t!("actions.unpin"), false, p.text_muted, p)
                             .key(format!("pinned-unpin-{}", pin.event_id))
+                            .help(t!("actions.unpin"))
                             .on_press(move |s: &mut State| s.set_message_pinned(&key, &id, false)),
                     );
                 }
-                list = list.child(card);
+                let mut body = col().grow(1.0).min_w(0.0).gap(3.0).child(header).child(
+                    text(pin.body.clone().unwrap_or_else(|| t!("message.unavailable").to_owned()))
+                        .font(font::BODY)
+                        .color(if pin.body.is_some() { p.text } else { p.text_muted })
+                        .max_lines(4)
+                        .wrap(),
+                );
+                if let Some(at) = pin.timestamp_ms {
+                    body = body.child(text(when(at)).font(font::META).color(p.text_muted));
+                }
+                let mut message = row()
+                    .key(format!("pinned-open-{}", pin.event_id))
+                    .w_full()
+                    .px(16.0)
+                    .py(10.0)
+                    .gap(10.0)
+                    .items_start()
+                    .border_sides([0.0, 0.0, 1.0, 0.0], p.divider)
+                    .child(
+                        media_avatar(&pin.sender_id, &pin.sender_name, pin.sender_avatar.as_ref(), &s.media, 32.0)
+                            .mt(3.0),
+                    )
+                    .child(body);
+                if pin.body.is_some() {
+                    message = message
+                        .role("button")
+                        .label(t!("message.open"))
+                        .focusable(true)
+                        .cursor(rune::Cursor::Pointer)
+                        .hover(p.hover)
+                        .on_press(move |s: &mut State| {
+                            s.side = None;
+                            s.open_message(&destination, &event_id);
+                        });
+                }
+                list = list.child(message);
             }
         }
     }

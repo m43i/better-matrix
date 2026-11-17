@@ -56,7 +56,15 @@ it('should keep previews of pins outside the loaded timeline', async () => {
   const done = listPins(store, ADA, '!r:x');
 
   const messages = [
-    { event_id: '$old', sender_name: 'Grace', body: 'Release checklist', thread: null },
+    {
+      event_id: '$old',
+      sender_name: 'Grace',
+      sender_id: '@grace:example.org',
+      sender_avatar: null,
+      timestamp_ms: null,
+      body: 'Release checklist',
+      thread: null,
+    },
   ];
 
   engine.emit({ type: 'PinnedMessages', data: { account: ADA, room_id: '!r:x', messages } });

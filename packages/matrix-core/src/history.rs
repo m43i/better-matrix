@@ -56,6 +56,12 @@ pub struct PinnedMessage {
     pub event_id: String,
     /// Its sender's display name, when available.
     pub sender_name: String,
+    /// The sender's Matrix ID, when the event is available.
+    pub sender_id: String,
+    /// The sender's picture, using the same media cache as timeline rows.
+    pub sender_avatar: Option<crate::MediaRef>,
+    /// When the message was sent, when available.
+    pub timestamp_ms: Option<u64>,
     /// The text, filename or poll question; absent if it cannot be read.
     pub body: Option<String>,
     /// The thread containing it, if any.
@@ -138,11 +144,21 @@ impl Account {
 
         let mut messages = Vec::new();
         for id in ids {
-            let mut preview =
-                PinnedMessage { event_id: id.to_string(), sender_name: String::new(), body: None, thread: None };
+            let mut preview = PinnedMessage {
+                event_id: id.to_string(),
+                sender_name: String::new(),
+                sender_id: String::new(),
+                sender_avatar: None,
+                timestamp_ms: None,
+                body: None,
+                thread: None,
+            };
             if let Some(item) = timeline.item_by_event_id(&id).await {
                 if let Some(message) = crate::timeline::message(&item, room.own_user_id()) {
                     preview.sender_name = message.sender_name;
+                    preview.sender_id = message.sender_id;
+                    preview.sender_avatar = message.sender_avatar;
+                    preview.timestamp_ms = Some(message.timestamp_ms);
                     if !matches!(message.content, MessageContent::Redacted | MessageContent::Undecryptable) {
                         preview.body = Some(message.content.plain().to_owned());
                     }

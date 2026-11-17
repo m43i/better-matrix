@@ -5,6 +5,7 @@
 import { type AndroidSymbol, type SFSymbol, SymbolView } from 'expo-symbols';
 
 export const icons = {
+  unpin: { ios: 'pin.slash', android: 'keep_off' },
   pin: { ios: 'pin', android: 'push_pin' },
   forward: { ios: 'arrowshape.turn.up.right', android: 'forward' },
   translate: { ios: 'character.bubble', android: 'translate' },

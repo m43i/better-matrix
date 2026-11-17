@@ -1,22 +1,19 @@
 // Pins are room state, so this list also fetches messages outside the loaded timeline.
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { FlatList, Text, View } from 'react-native';
+import { FlatList, View } from 'react-native';
 import { t } from '../i18n';
 import { routes } from '../routes';
 import { listPins, setPinned } from '../state/actions/message-actions';
 import { useAppStore, useStore } from '../state/react';
 import { account as accountOf, room as roomOf } from '../state/selectors';
-import { font } from '../theme/palette';
-import { EmptyState, ListRow } from '../ui/components';
-import { Icon } from '../ui/icons';
-import { usePalette } from '../ui/theme';
+import { Divider, EmptyState, ListRow } from '../ui/components';
+import { PinnedRow } from '../ui/people/PinnedRow';
 
 export default function PinnedMessagesScreen() {
   const { account, roomId } = useLocalSearchParams<{ account: string; roomId: string }>();
   const store = useAppStore();
   const router = useRouter();
-  const palette = usePalette();
   const room = useStore((s) => roomOf(s, account, roomId));
   const pins = useStore((s) => accountOf(s, account)?.pins[roomId]);
   const signature = JSON.stringify(room?.pinned ?? []);
@@ -50,7 +47,8 @@ export default function PinnedMessagesScreen() {
       <FlatList
         testID="pinned-messages"
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ padding: 16, gap: 12 }}
+        contentContainerStyle={{ paddingVertical: 8 }}
+        ItemSeparatorComponent={() => <Divider inset={62} />}
         data={(pins ?? []).filter((pin) => room?.pinned.includes(pin.event_id))}
         keyExtractor={(pin) => pin.event_id}
         ListHeaderComponent={
@@ -79,49 +77,22 @@ export default function PinnedMessagesScreen() {
           setRetry((n) => n + 1);
         }}
         renderItem={({ item }) => (
-          <View
-            testID={`pinned-${item.event_id}`}
-            style={{
-              backgroundColor: `${palette.accent}0F`,
-              borderWidth: 1,
-              borderColor: `${palette.accent}33`,
-              borderRadius: 12,
-              overflow: 'hidden',
+          <PinnedRow
+            account={account}
+            message={item}
+            onOpen={() => {
+              router.push(
+                item.thread
+                  ? routes.thread(account, roomId, item.thread, item.event_id)
+                  : routes.room(account, roomId, item.event_id),
+              );
             }}
-          >
-            <View style={{ padding: 16, gap: 8 }}>
-              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                <Icon name="pin" size={16} color={palette.accent} />
-                <Text style={[font.bodyStrong, { color: palette.text }]}>{item.sender_name}</Text>
-              </View>
-              <Text selectable style={[font.body, { color: palette.text }]}>
-                {item.body ?? t('message.unavailable')}
-              </Text>
-            </View>
-            {item.body !== null ? (
-              <ListRow
-                icon="thread"
-                title={t('message.open')}
-                testID={`pinned-open-${item.event_id}`}
-                onPress={() => {
-                  router.push(
-                    item.thread
-                      ? routes.thread(account, roomId, item.thread, item.event_id)
-                      : routes.room(account, roomId, item.event_id),
-                  );
-                }}
-              />
-            ) : undefined}
-            {room?.can_pin ? (
-              <ListRow
-                icon="pin"
-                title={t('actions.unpin')}
-                chevron={false}
-                testID={`pinned-unpin-${item.event_id}`}
-                onPress={() => setPinned(store, account, roomId, item.event_id, false)}
-              />
-            ) : undefined}
-          </View>
+            onUnpin={
+              room?.can_pin
+                ? () => setPinned(store, account, roomId, item.event_id, false)
+                : undefined
+            }
+          />
         )}
       />
     </>

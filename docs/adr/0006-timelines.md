@@ -109,7 +109,8 @@ see who is typing there.
   followed by copy link, pin/unpin, copy text and translate; deletion stays last and separate.
   Permissions, local echoes and content type determine availability. Calls keep their own controls.
   `Command::Forward` reads the open timeline's latest event JSON (including edits), strips source
-  relations, mentions and legacy reply fallbacks, and sends the text or attachment through the chosen room on the same account.
+  relations, mentions and legacy reply fallbacks, and sends the text or attachment through the
+  chosen room on the same account.
   Message links use matrix.to with an account-server routing hint, including v12 room IDs.
   Translate opens Google Translate in the browser targeting the app language, after confirmation
   that its text will be shared with Google. It is offered for text only.
@@ -119,8 +120,11 @@ see who is typing there.
   to Pinned messages (`SidePanel::Pins` on desktop, a native stack screen on phones).
   `ListPinnedMessages` uses an SDK pinned timeline and waits for its initial background fetch
   (at most five seconds), independently of loaded history; unreadable events retain
-  a placeholder with unpin available to authorized members. Lists refresh when pin IDs change,
-  preserve cached content on failure and offer retry. Opening a pin uses the shared message jump to its room or containing thread, loading history
+  a placeholder with unpin available to authorized members. The list uses normal avatar/message
+  rows with sender, excerpt and time; clicking the row opens it and the top-right icon unpins.
+  Lists refresh when pin IDs change,
+  preserve cached content on failure and offer retry. Opening a pin uses the shared message jump
+  to its room or containing thread, loading history
   as needed (desktop `State::open_message`, phone route `eventId`).
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
