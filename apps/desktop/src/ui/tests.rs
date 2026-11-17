@@ -765,3 +765,117 @@ fn forwarding_should_separate_rooms_and_direct_messages() {
     let direct = rt.find("forward-direct").expect("direct messages section");
     assert!(rooms.1 < direct.1);
 }
+
+fn readers_runtime() -> Runtime<State> {
+    runtime(demo::read_receipts)
+}
+
+fn open_readers(rt: &mut Runtime<State>) {
+    press(rt, &format!("readers-{}-$read-demo", demo::DEMO_THREAD.0));
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+}
+
+#[test]
+fn a_read_indicator_should_open_readers_without_opening_a_thread() {
+    let mut rt = readers_runtime();
+    open_readers(&mut rt);
+    assert!(rt.find("readers-panel").is_some());
+    assert!(rt.state.nav.threads.is_empty());
+    let panel = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("readers-panel")).unwrap();
+    assert!(panel.rect[3] <= 380.0);
+    assert!(rt.elements().iter().any(|e| e.text.as_deref() == Some("Seen by 6 people")));
+}
+
+#[test]
+fn selecting_a_reader_should_open_the_existing_member_actions() {
+    let mut rt = readers_runtime();
+    open_readers(&mut rt);
+    press(&mut rt, "reader-@kai:example.org");
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("member-menu-chat").is_some());
+    assert!(rt.find("member-menu-kick").is_some());
+    press(&mut rt, "member-menu-role");
+    assert!(rt.find("member-role-menu").is_some());
+}
+
+#[test]
+fn a_reader_outside_the_member_list_should_keep_chat_actions_without_moderation() {
+    let mut rt = readers_runtime();
+    open_readers(&mut rt);
+    press(&mut rt, "reader-@mira:example.org");
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("member-menu-chat").is_some());
+    assert!(rt.find("member-menu-kick").is_none());
+    assert!(rt.find("member-menu-role").is_none());
+}
+
+#[test]
+fn moving_all_readers_away_should_remove_an_open_read_indicator() {
+    let mut rt = readers_runtime();
+    open_readers(&mut rt);
+    rt.update(|s, tx| {
+        let key = TimelineKey::room(demo::DEMO_THREAD.0);
+        let account = s.nav.account.clone().unwrap();
+        let timeline = s.active_account().unwrap().timeline(&key).unwrap();
+        let index = timeline
+            .entries
+            .iter()
+            .position(|entry| entry.message().is_some_and(|m| m.event_id == "$read-demo"))
+            .unwrap();
+        let entry = &timeline.entries[index];
+        let mut message = entry.message().unwrap().clone();
+        message.read_receipts.clear();
+        let entry = TimelineEntry { id: entry.id.clone(), kind: EntryKind::Message(Box::new(message)) };
+        s.apply(Event::TimelineChanged { account, key, diffs: vec![TimelineDiff::Set { index, entry }] }, tx);
+    });
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("readers-panel").is_none());
+    assert!(rt.find(&format!("readers-{}-$read-demo", demo::DEMO_THREAD.0)).is_none());
+}
+
+#[test]
+fn messages_without_exposed_receipts_should_have_no_read_indicator() {
+    let rt = runtime(|_| {});
+    assert!(rt.elements().iter().all(|e| !e.key.as_deref().is_some_and(|key| key.starts_with("readers-"))));
+}
+
+#[test]
+fn reader_lists_should_not_invent_a_timestamp_for_a_receipt_without_one() {
+    let mut rt = readers_runtime();
+    open_readers(&mut rt);
+    let row = rt.presented("reader-@sam:example.org").unwrap().0;
+    let texts: Vec<_> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.rect[1] >= row[1] && e.rect[1] < row[1] + row[3])
+        .filter_map(|e| e.text)
+        .collect();
+    assert!(!texts.iter().any(|text| text.contains(':') && !text.starts_with('@')));
+}
+
+#[test]
+fn a_large_reader_list_should_scroll_to_every_reader() {
+    let mut rt = runtime(|s| {
+        demo::read_receipts(s);
+        let key = TimelineKey::room(demo::DEMO_THREAD.0);
+        let timeline = s.accounts.timeline_mut(&matrix_core::AccountId::new(demo::ADA), &key).unwrap();
+        let crate::state::EntryView::Message(item) = &mut timeline.entries.last_mut().unwrap().kind else {
+            panic!("last message")
+        };
+        item.message.read_receipts = (0..100)
+            .map(|i| matrix_core::ReadReceipt { user_id: format!("@reader-{i}:example.org"), timestamp_ms: None })
+            .collect();
+    });
+    open_readers(&mut rt);
+    let panel = rt.presented("readers-panel").unwrap().0;
+    assert!(panel[3] <= 380.0);
+    rt.wheel(panel[0] + 100.0, panel[1] + 100.0, -6000.0);
+    for _ in 0..90 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("reader-@reader-99:example.org").is_some());
+}

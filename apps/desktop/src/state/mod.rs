@@ -23,6 +23,7 @@ mod navigation;
 mod poll;
 mod preview;
 mod profile;
+mod readers;
 mod receipts;
 mod retry;
 mod room_discovery;
@@ -59,6 +60,7 @@ pub use navigation::{navigate, navigate_now};
 pub use poll::{MAX_ANSWERS, PollForm};
 pub use preview::{DocumentStatus, ImageStatus, Opens, Preview, PreviewContent, render_document};
 pub use profile::{ContactStep, ProfileForm};
+pub use readers::{READER_FACES, ReaderMenu};
 pub use room_discovery::Directory;
 pub use search::{MessageSearchStatus, PeopleSearch, SEARCH_PAUSE, matches};
 pub use sections::{DIRECT, INVITATIONS, ROOMS, SectionView, is_builtin, ordered_spaces, sections};
@@ -105,6 +107,13 @@ pub enum Popover {
     MemberMenu {
         user_id: String,
         submenu: Option<MemberSubmenu>,
+    },
+    /// Readers at one message, with an optional member menu beside a reader.
+    ReadReceipts {
+        key: TimelineKey,
+        event_id: String,
+        member: Option<ReaderMenu>,
+        shown: std::ops::Range<usize>,
     },
     /// The top bar's search results.
     Search,
@@ -1070,6 +1079,7 @@ impl State {
                         timeline.note_thread_root(root);
                     }
                 }
+                self.refresh_readers();
                 if self.window_focused {
                     self.mark_timeline_read(account, key);
                 }
@@ -1118,6 +1128,7 @@ impl State {
             Event::Members { request, .. } if request.is_some_and(|request| !self.pending.contains_key(&request)) => {}
             Event::Members { account, room_id, members, .. } => {
                 self.accounts.set_members(&account, room_id, members);
+                self.request_timeline_media();
                 self.request_avatars();
             }
             Event::MembersInvalidated { account, room_id } => {
@@ -2002,8 +2013,8 @@ impl State {
         true
     }
 
-    /// The entries of the open timelines on screen, with their account.
-    fn entries_on_screen(&self) -> impl Iterator<Item = (&AccountId, &accounts::Entry)> {
+    /// The entries of the open timelines on screen, with their account and timeline.
+    fn entries_on_screen(&self) -> impl Iterator<Item = ((&AccountId, &TimelineKey), &accounts::Entry)> {
         self.open_timelines.iter().flat_map(move |open| {
             let (account, key) = open;
             let shown = self.on_screen.get(open);
@@ -2011,7 +2022,7 @@ impl State {
                 .get(account)
                 .and_then(|data| data.timeline(key))
                 .into_iter()
-                .flat_map(move |timeline| timeline.on_screen(shown).map(move |entry| (account, entry)))
+                .flat_map(move |timeline| timeline.on_screen(shown).map(move |entry| ((account, key), entry)))
         })
     }
 
@@ -2062,7 +2073,7 @@ impl State {
         let gifs = self.settings.show_link_gifs;
         let shown: HashSet<link_previews::LinkKey> = self
             .entries_on_screen()
-            .filter_map(|(account, entry)| Some((account.clone(), entry.preview_link(gifs)?.to_owned())))
+            .filter_map(|((account, _), entry)| Some((account.clone(), entry.preview_link(gifs)?.to_owned())))
             .collect();
         self.link_previews.trim(&shown);
         let mut wanted: Vec<_> = shown.into_iter().filter(|key| self.link_previews.wants(key, now)).collect();
@@ -2083,12 +2094,26 @@ impl State {
     fn request_timeline_media_at(&mut self, now: std::time::Instant) {
         let mut seen = HashSet::new();
         let mut wanted = Vec::new();
-        for (account, entry) in self.entries_on_screen() {
+        for ((account, key), entry) in self.entries_on_screen() {
             if let Some(attachment) = entry.image()
                 && let Some((media, size)) = attachment.preview()
             {
                 let dimensions = media::preview_size(size, attachment.dimensions);
                 wanted.push((account.clone(), media, size, dimensions));
+            }
+            if key.thread.is_none()
+                && let Some(message) = entry.message().filter(|m| !m.pending)
+            {
+                for receipt in message.read_receipts.iter().take(READER_FACES) {
+                    if let Some(picture) = self
+                        .accounts
+                        .get(account)
+                        .map(|data| data.reader(&key.room_id, &receipt.user_id))
+                        .and_then(|person| person.avatar)
+                    {
+                        wanted.push((account.clone(), picture, AVATAR_SIZE, Some(AVATAR_PIXELS)));
+                    }
+                }
             }
             for media in entry.avatars() {
                 wanted.push((account.clone(), media.clone(), AVATAR_SIZE, Some(AVATAR_PIXELS)));
@@ -2194,6 +2219,7 @@ impl State {
             wanted.extend(faces.map(|media| (call.info.account.clone(), media)));
         }
         wanted.extend(self.rings.iter().filter_map(|ring| Some((ring.account.clone(), ring.caller.avatar.clone()?))));
+        wanted.extend(self.reader_pictures());
         wanted.extend(self.link_pictures());
         let mut seen = HashSet::new();
         let now = std::time::Instant::now();
@@ -2872,6 +2898,8 @@ impl State {
     pub fn toggle_member_submenu(&mut self, which: MemberSubmenu) {
         if let Some(Popover::MemberMenu { submenu, .. }) = &mut self.popover {
             *submenu = if *submenu == Some(which) { None } else { Some(which) };
+        } else if let Some(Popover::ReadReceipts { member: Some(menu), .. }) = &mut self.popover {
+            menu.submenu = if menu.submenu == Some(which) { None } else { Some(which) };
         }
     }
 

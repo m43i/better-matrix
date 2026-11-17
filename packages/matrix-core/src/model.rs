@@ -423,10 +423,24 @@ pub struct Message {
     pub timestamp_ms: u64,
     /// Reactions, in the order they were first used.
     pub reactions: Vec<Reaction>,
+    /// Readers at this message's read position, excluding this account. Empty when no
+    /// receipts are exposed. These are positions, not a cumulative list of earlier reads.
+    #[cfg_attr(feature = "ffi", serde(default, skip_serializing_if = "Vec::is_empty"))]
+    pub read_receipts: Vec<ReadReceipt>,
     /// The message this one answers, when it is a reply.
     pub reply_to: Option<Quote>,
     /// The thread started from this message, if it has replies.
     pub thread: Option<ThreadSummary>,
+}
+
+/// A reader's latest position in a room timeline, as exposed by the SDK.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct ReadReceipt {
+    /// The reader's full Matrix user ID.
+    pub user_id: String,
+    /// The receipt's time, when supplied; never substitute the message's send time.
+    pub timestamp_ms: Option<u64>,
 }
 
 /// Someone as a timeline shows them: ID, name in the room, and picture.

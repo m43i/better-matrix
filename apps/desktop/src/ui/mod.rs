@@ -20,6 +20,7 @@ mod people;
 mod poll;
 mod preview;
 mod rail;
+mod readers;
 mod room;
 mod room_discovery;
 mod room_menu;
@@ -88,7 +89,10 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         (Some(Popover::CallDevices(kind)), _) => vec![call::device_menu(s, *kind, &p)],
         (Some(Popover::CallLayout), _) => s.call_here().map(|call| call::layout_menu(call, &p)).into_iter().collect(),
         (Some(Popover::MemberMenu { user_id, submenu }), Some(account)) => {
-            members::menu(s, account, user_id, *submenu, &p)
+            members::menu(s, account, user_id, *submenu, &format!("member-{user_id}"), None, &p)
+        }
+        (Some(Popover::ReadReceipts { key, event_id, member, .. }), Some(account)) => {
+            readers::panels(s, account, key, event_id, member.as_ref(), &p)
         }
         (Some(Popover::MessageMenu { key, event_id, at }), _) => {
             let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);

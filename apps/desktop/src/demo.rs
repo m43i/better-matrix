@@ -935,3 +935,45 @@ pub fn pinned_messages(s: &mut State) {
     s.accounts.set_pins(&account, DEMO_THREAD.0.into(), pins);
     s.select_room(DEMO_THREAD.0);
 }
+
+/// Read positions with overflow, missing timestamps and the existing member menu.
+pub fn read_receipts(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    let account = AccountId::new(ADA);
+    let key = matrix_core::TimelineKey::room(DEMO_THREAD.0);
+    let message = Message {
+        event_id: "$read-demo".into(),
+        sender_id: ADA.into(),
+        sender_name: "Ada Lovelace".into(),
+        timestamp_ms: DEMO_DAY_MS + 13 * 3_600_000,
+        content: text("The new build is ready. Let me know what you think!"),
+        read_receipts: [
+            "@kai:example.org",
+            "@grace:example.org",
+            "@alan:example.org",
+            "@mira:example.org",
+            "@lin:example.org",
+            "@sam:example.org",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, id)| matrix_core::ReadReceipt {
+            user_id: id.into(),
+            timestamp_ms: (index != 5).then_some(DEMO_DAY_MS + 13 * 3_600_000 - index as u64 * 60_000),
+        })
+        .collect(),
+        ..Message::default()
+    };
+    apply(
+        s,
+        Event::TimelineChanged {
+            account,
+            key,
+            diffs: vec![matrix_core::TimelineDiff::PushBack(matrix_core::TimelineEntry {
+                id: "read-demo".into(),
+                kind: matrix_core::EntryKind::Message(Box::new(message)),
+            })],
+        },
+    );
+}

@@ -272,6 +272,8 @@
   "members.verified": "Verified",
   "message.deleted": "This message was deleted.",
   "message.edited": "(edited)",
+  "message.seen_by.one": "Seen by {{count}} person",
+  "message.seen_by.other": "Seen by {{count}} people",
   "message.sending": "Sending…",
   "message.undecryptable": "Waiting for this message's encryption keys…",
   "notice.account": "{{account}}: {{error}}",

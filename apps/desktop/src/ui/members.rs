@@ -196,10 +196,19 @@ fn member_row(member: &RoomMember, me: bool, media: &crate::state::MediaCache, p
 }
 
 /// What can be done with a member, beside their row, and its open submenu.
-pub fn menu(s: &State, account: &AccountData, user_id: &str, submenu: Option<MemberSubmenu>, p: &Palette) -> Vec<El> {
+pub fn menu(
+    s: &State,
+    account: &AccountData,
+    user_id: &str,
+    submenu: Option<MemberSubmenu>,
+    anchor: &str,
+    fallback: Option<&matrix_core::Person>,
+    p: &Palette,
+) -> Vec<El> {
     let Some(room) = s.active_room_id().and_then(|id| account.room(id)) else { return Vec::new() };
     let members: Option<&Members> = account.members.get(&room.room_id);
-    let Some(member) = members.and_then(|members| members.people.iter().find(|m| m.person.id == user_id)) else {
+    let member = members.and_then(|members| members.people.iter().find(|m| m.person.id == user_id));
+    let Some(person) = member.map(|member| &member.person).or(fallback) else {
         return Vec::new();
     };
     // Calls go through the direct chat with them: offered where it allows them, or where a new
@@ -210,7 +219,7 @@ pub fn menu(s: &State, account: &AccountData, user_id: &str, submenu: Option<Mem
     let mut panel = popover_panel(p)
         .key("member-menu")
         .w(260.0)
-        .child(text(member.person.name.clone()).font(font::SECTION).color(p.text_muted).px(12.0).py(6.0).truncate())
+        .child(text(person.name.clone()).font(font::SECTION).color(p.text_muted).px(12.0).py(6.0).truncate())
         .child({
             let id = id.clone();
             menu_action(&icons::CHAT, t!("members.chat"), Tone::Normal, p)
@@ -237,9 +246,11 @@ pub fn menu(s: &State, account: &AccountData, user_id: &str, submenu: Option<Mem
     );
     let roles: Vec<MemberRole> = [MemberRole::Admin, MemberRole::Moderator, MemberRole::Member]
         .into_iter()
-        .filter(|role| members.is_some_and(|members| members.may(Moderation::Role(*role), member)))
+        .filter(|role| {
+            member.is_some_and(|member| members.is_some_and(|members| members.may(Moderation::Role(*role), member)))
+        })
         .collect();
-    let may = |action| members.is_some_and(|members| members.may(action, member));
+    let may = |action| member.is_some_and(|member| members.is_some_and(|members| members.may(action, member)));
     if !roles.is_empty() || may(Moderation::Kick) || may(Moderation::Ban) {
         panel = panel.child(divider(p));
     }
@@ -263,10 +274,14 @@ pub fn menu(s: &State, account: &AccountData, user_id: &str, submenu: Option<Mem
             );
         }
     }
-    let mut panels = vec![col().child(panel).anchored(format!("member-{user_id}"), Side::Left, Align::Start, 6.0)];
+    let mut panels = vec![col().child(panel).anchored(anchor.to_owned(), Side::Left, Align::Start, 6.0)];
     match submenu {
         Some(MemberSubmenu::Invite) => panels.push(invite_menu(account, &room.room_id, user_id, p)),
-        Some(MemberSubmenu::Role) => panels.push(role_menu(member, &roles, p)),
+        Some(MemberSubmenu::Role) => {
+            if let Some(member) = member {
+                panels.push(role_menu(member, &roles, p));
+            }
+        }
         None => {}
     }
     panels

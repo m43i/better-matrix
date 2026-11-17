@@ -314,6 +314,16 @@ fn spec() -> AppSpec<State> {
                     &mut rune::Tx::default(),
                 );
             }),
+            ("demo-read-receipts", demo::read_receipts),
+            ("demo-readers", |s| {
+                demo::read_receipts(s);
+                s.toggle_readers(&matrix_core::TimelineKey::room(demo::DEMO_THREAD.0), "$read-demo");
+            }),
+            ("demo-reader-menu", |s| {
+                demo::read_receipts(s);
+                s.toggle_readers(&matrix_core::TimelineKey::room(demo::DEMO_THREAD.0), "$read-demo");
+                s.toggle_reader_menu("@kai:example.org");
+            }),
             ("demo-members", |s| {
                 demo::seed(s);
                 s.select_room(demo::DEMO_THREAD.0);

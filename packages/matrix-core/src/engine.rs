@@ -3419,3 +3419,6 @@ mod tests {
         assert!(!format!("{request:?}").contains("hunter2"));
     }
 }
+#[cfg(test)]
+#[path = "read_receipts_tests.rs"]
+mod read_receipts_tests;

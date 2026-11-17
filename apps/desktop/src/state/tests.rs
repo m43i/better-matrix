@@ -3723,3 +3723,34 @@ fn changing_pins_should_refresh_the_open_pinned_list() {
             .any(|c| matches!(c, Command::ListPinnedMessages { room_id, .. } if room_id == "!one:x"))
     );
 }
+
+#[test]
+fn opening_a_read_indicator_should_request_the_complete_member_list() {
+    let (mut s, mut commands) = state();
+    crate::demo::read_receipts(&mut s);
+    drain(&mut commands);
+    s.toggle_readers(&TimelineKey::room(crate::demo::DEMO_THREAD.0), "$read-demo");
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(command, Command::ListMembers { room_id, all: true, .. } if room_id == crate::demo::DEMO_THREAD.0)));
+}
+
+#[test]
+fn thread_read_indicators_should_stay_hidden_until_the_sdk_distinguishes_threads() {
+    let (mut s, _) = state();
+    crate::demo::read_receipts(&mut s);
+    s.open_thread("$read-demo");
+    assert!(
+        !s.active_account().unwrap().readers(&TimelineKey::room(crate::demo::DEMO_THREAD.0), "$read-demo").is_empty()
+    );
+    s.toggle_readers(&TimelineKey::thread(crate::demo::DEMO_THREAD.0, "$read-demo"), "$read-demo");
+    assert!(s.popover.is_none());
+}
+
+#[test]
+fn read_indicator_profiles_should_fall_back_to_the_user_id() {
+    let (mut s, _) = state();
+    crate::demo::read_receipts(&mut s);
+    assert_eq!(
+        s.active_account().unwrap().reader(crate::demo::DEMO_THREAD.0, "@unknown:example.org"),
+        matrix_core::Person { id: "@unknown:example.org".into(), name: "@unknown:example.org".into(), avatar: None }
+    );
+}

@@ -99,6 +99,10 @@ one message with its formatting pre-parsed. See [ADR 0006](adr/0006-timelines.md
 **Reaction**
 : An emoji added to a message; the same emoji from several people is counted on one chip.
 
+**Read indicator**
+: The small avatar stack at a message's lower right showing whose latest exposed read position
+is there. Opens the reader list with receipt times; selecting a reader opens the member menu.
+
 **Message actions**
 : On phones, the sheet a long press on a message opens: quick reactions, reply, reply in thread,
 forward, edit, copy link, pin/unpin, copy text, translate, end poll, share/save and delete.

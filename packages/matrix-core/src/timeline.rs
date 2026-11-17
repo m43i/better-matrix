@@ -108,7 +108,7 @@ fn card_of(content: &TimelineItemContent) -> Option<CallCard> {
 
 pub(crate) fn message(event: &EventTimelineItem, me: &UserId) -> Option<Message> {
     if let Some(card) = call_card(event) {
-        return Some(Message { content: MessageContent::Call(card), ..base_message(event) });
+        return Some(Message { content: MessageContent::Call(card), ..base_message(event, me) });
     }
     let TimelineItemContent::MsgLike(MsgLikeContent { kind, reactions, in_reply_to, thread_summary, .. }) =
         event.content()
@@ -163,11 +163,21 @@ pub(crate) fn message(event: &EventTimelineItem, me: &UserId) -> Option<Message>
     });
     let editable = event.is_own()
         && matches!(kind, MsgLikeKind::Message(message) if matches!(message.msgtype(), MessageType::Text(_)));
-    Some(Message { content, edited, editable, reactions, reply_to, thread, ..base_message(event) })
+    Some(Message { content, edited, editable, reactions, reply_to, thread, ..base_message(event, me) })
 }
 
 /// What every message has: who sent it and when. Empty content, no reactions, no reply.
-fn base_message(event: &EventTimelineItem) -> Message {
+fn base_message(event: &EventTimelineItem, me: &UserId) -> Message {
+    let mut read_receipts: Vec<_> = event
+        .read_receipts()
+        .iter()
+        .filter(|(user, _)| user.as_str() != me.as_str())
+        .map(|(user, receipt)| crate::model::ReadReceipt {
+            user_id: user.to_string(),
+            timestamp_ms: receipt.ts.map(|ts| u64::from(ts.0)),
+        })
+        .collect();
+    read_receipts.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms).then_with(|| a.user_id.cmp(&b.user_id)));
     Message {
         event_id: event.event_id().map_or_else(|| format!("local:{:?}", event.identifier()), ToString::to_string),
         sender_id: event.sender().to_string(),
@@ -182,6 +192,7 @@ fn base_message(event: &EventTimelineItem) -> Message {
         pending: event.is_local_echo(),
         timestamp_ms: u64::from(event.timestamp().0),
         reactions: Vec::new(),
+        read_receipts,
         reply_to: None,
         thread: None,
     }

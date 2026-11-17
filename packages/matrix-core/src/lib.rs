@@ -52,8 +52,8 @@ pub use engine::{
 pub use model::{
     AccountId, AccountSummary, Attachment, AttachmentKind, CallCard, EntryKind, HistoryVisibility, Invitation,
     LoginMethods, MediaRef, MediaSize, Message, MessageContent, Notification, NotificationMode, Outgoing, Password,
-    Person, Poll, PollAnswer, PublicRoom, PushContent, PushTarget, Pusher, Quote, Reaction, RoomChange, RoomEvent,
-    RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary, ThreadSummary, TimelineDiff, TimelineEntry,
+    Person, Poll, PollAnswer, PublicRoom, PushContent, PushTarget, Pusher, Quote, Reaction, ReadReceipt, RoomChange,
+    RoomEvent, RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary, ThreadSummary, TimelineDiff, TimelineEntry,
     TimelineKey, Upload,
 };
 

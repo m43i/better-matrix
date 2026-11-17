@@ -37,6 +37,7 @@ pub struct Context<'a> {
     pub key: &'a TimelineKey,
     pub room: &'a RoomSummary,
     pub media: &'a MediaCache,
+    pub data: &'a AccountData,
     pub gifs: &'a GifCache,
     pub show_gifs: bool,
     /// Links' preview cards, when they show.
@@ -59,6 +60,7 @@ impl<'a> Context<'a> {
             key,
             room,
             media: &s.media,
+            data,
             gifs: &s.gifs,
             show_gifs: s.settings.show_link_gifs,
             link_previews: s.settings.show_link_previews.then_some(&s.link_previews),
@@ -618,6 +620,10 @@ fn message_row(
     }
     if let (true, Some(thread), false) = (interactive, &message.thread, cx.in_thread()) {
         body = body.child(thread_link(&message.event_id, thread, cx.media, p));
+    }
+
+    if !cx.in_thread() && !message.pending && !message.read_receipts.is_empty() {
+        body = body.child(super::readers::indicator(cx.data, cx.key, message, cx.media, p));
     }
 
     let mut status = Vec::new();
