@@ -45,7 +45,8 @@ export function useShellSearch(account: AccountData | undefined): ShellSearchVie
     bar,
     results:
       account && term.trim() !== '' ? (
-        <SearchResults account={account} term={term} onPicked={clear} />
+        // One search per account: switching accounts starts its directory search afresh.
+        <SearchResults key={account.summary.id} account={account} term={term} onPicked={clear} />
       ) : null,
   };
 }

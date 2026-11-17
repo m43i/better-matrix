@@ -4,8 +4,8 @@
 // the scrim, the back button or a pick closes it.
 
 import * as Haptics from 'expo-haptics';
-import { type Href, router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { type Href, router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   FadeIn,
@@ -29,6 +29,9 @@ export function CreateFab() {
   const palette = usePalette();
   const account = useStore(activeAccount);
   const [open, setOpen] = useState(false);
+
+  // Leaving the tab closes the menu, so a hidden tab never holds an open menu (or Back).
+  useFocusEffect(useCallback(() => () => setOpen(false), []));
 
   // Back closes the menu before it leaves the screen.
   useEffect(() => {
