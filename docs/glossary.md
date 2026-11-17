@@ -61,6 +61,17 @@ unjoined ones with the most members; More shows the full list.
 **Search**
 : The field in the desktop's top bar, and under each tab's title on phones: the account's rooms,
 direct chats and spaces by name, people from the user directory, and a **typed link** to open.
+Results have sections, with **message hits** from this device beneath the people and destinations.
+Names and message excerpts highlight the characters matching the fuzzy query.
+
+**Message hit**
+: A locally stored, decrypted message matching search: its room, sender, date and an excerpt
+with matching characters highlighted (`MessageHit`). Selecting it opens its message or thread.
+
+**Search usage**
+: This device's per-account frequency counts (`SearchUsage`): room opens and sends, direct-chat
+peers and explicit reply recipients. They rank matching rooms, people and message hits within
+sections, survive restarts, and never sync to the homeserver.
 
 **Typed link**
 : What a search reads as a link rather than a name: a permalink, or a bare room alias, room ID

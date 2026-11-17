@@ -13,6 +13,7 @@ import type { MediaSize } from "./MediaSize";
 import type { MediaToggle } from "./MediaToggle";
 import type { Members } from "./Members";
 import type { Message } from "./Message";
+import type { MessageHit } from "./MessageHit";
 import type { Notification } from "./Notification";
 import type { Password } from "./Password";
 import type { PendingContact } from "./PendingContact";
@@ -22,6 +23,7 @@ import type { PushContent } from "./PushContent";
 import type { RequestId } from "./RequestId";
 import type { RoomList } from "./RoomList";
 import type { RoomPreview } from "./RoomPreview";
+import type { SearchUsage } from "./SearchUsage";
 import type { Security } from "./Security";
 import type { Session } from "./Session";
 import type { SharedFile } from "./SharedFile";
@@ -210,7 +212,23 @@ account: AccountId,
 /**
  * The room's ID.
  */
-room_id: string, } } | { "type": "PeopleFound", "data": { 
+room_id: string, } } | { "type": "SearchUsage", "data": { 
+/**
+ * The account whose search sections use these counts.
+ */
+account: AccountId, 
+/**
+ * Open and send frequency, never synced to the homeserver.
+ */
+usage: SearchUsage, } } | { "type": "MessagesFound", "data": { 
+/**
+ * The search being answered.
+ */
+request: RequestId, 
+/**
+ * Ranked excerpts and their match highlights.
+ */
+messages: Array<MessageHit>, } } | { "type": "PeopleFound", "data": { 
 /**
  * The search it answers.
  */

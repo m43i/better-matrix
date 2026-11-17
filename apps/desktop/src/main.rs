@@ -271,12 +271,19 @@ fn spec() -> AppSpec<State> {
                 s.open_settings();
                 s.show_settings_section(SettingsSection::Profile);
             }),
-            ("demo-search", |s| {
-                demo::seed(s);
-                s.search.field.insert("gr");
-                let now = std::time::Instant::now();
-                s.search_people(now);
-                s.search_people(now + state::SEARCH_PAUSE);
+            ("demo-search", demo::search),
+            ("demo-search-ranked", |s| {
+                demo::search(s);
+                s.apply(
+                    matrix_core::Event::SearchUsage {
+                        account: matrix_core::AccountId::new(demo::ADA),
+                        usage: matrix_core::SearchUsage {
+                            rooms: std::collections::BTreeMap::from([("!design:example.org".into(), 20)]),
+                            ..matrix_core::SearchUsage::default()
+                        },
+                    },
+                    &mut rune::Tx::default(),
+                );
             }),
             ("demo-members", |s| {
                 demo::seed(s);

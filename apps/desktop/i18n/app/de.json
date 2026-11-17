@@ -556,5 +556,8 @@
   "verify.match": "Sie stimmen überein",
   "verify.mismatch": "Sie stimmen nicht überein",
   "verify.title": "Diese Sitzung verifizieren",
-  "verify.waiting": "Nimm die Anfrage in deiner anderen Sitzung an."
+  "verify.waiting": "Nimm die Anfrage in deiner anderen Sitzung an.",
+  "search.messages": "Nachrichten",
+  "search.messages_failed": "Nachrichten auf diesem Gerät konnten nicht durchsucht werden. Bitte erneut eingeben.",
+  "search.message_unavailable": "Diese Nachricht ist nicht mehr verfügbar."
 }

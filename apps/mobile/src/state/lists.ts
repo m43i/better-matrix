@@ -3,12 +3,15 @@
 
 import type {
   Message,
+  MessageHit,
+  SearchUsage,
   Person,
   RoomSummary,
   SpaceSummary,
 } from '@better-matrix/matrix-native/types';
 
 import { locale, t } from '../i18n';
+import { fuzzyMatch } from './search';
 import { byRecency } from './sections';
 import { type Permalink, parseTyped } from './permalinks';
 import type { AccountData } from './types';
@@ -162,6 +165,7 @@ export interface SearchResults extends JumpResults {
   link: Permalink | null;
   /** People from the user directory, never the user. */
   people: Person[];
+  messages: MessageHit[];
 }
 
 /** What the search lists for `term`: the link it names, the account's own, then `found` people. */
@@ -170,20 +174,63 @@ export function searchResults(
   term: string,
   found: readonly Person[],
   now: number,
+  messages: MessageHit[] = [],
 ): SearchResults {
   const me = account.summary.id;
 
+  const recency = new Map(byRecency(account, account.rooms, now).map((r, i) => [r.room_id, i]));
+
+  const ranked = <T extends { name: string; room_id: string }>(items: readonly T[]): T[] =>
+    items
+      .flatMap((item) => {
+        const match = fuzzyMatch(item.name, term);
+
+        return match ? [{ item, rank: match.rank }] : [];
+      })
+      .sort(
+        (a, b) =>
+          (account.searchUsage.rooms[b.item.room_id] ?? 0) -
+            (account.searchUsage.rooms[a.item.room_id] ?? 0) ||
+          a.rank - b.rank ||
+          (recency.get(a.item.room_id) ?? 0) - (recency.get(b.item.room_id) ?? 0),
+      )
+      .slice(0, 6)
+      .map(({ item }) => item);
+
   return {
     link: parseTyped(term),
-    ...jumpTo(account, term, now),
-    people: found.filter((person) => person.id !== me),
+    rooms: ranked(account.rooms.filter((r) => r.kind === 'Group')),
+    direct: ranked(account.rooms.filter((r) => r.kind === 'Direct')),
+    spaces: ranked(account.spaces),
+    people: found
+      .filter((person) => person.id !== me)
+      .sort(
+        (a, b) =>
+          Number(b.id.toLowerCase() === term.trim().toLowerCase()) -
+            Number(a.id.toLowerCase() === term.trim().toLowerCase()) ||
+          (account.searchUsage.people[b.id] ?? 0) - (account.searchUsage.people[a.id] ?? 0),
+      )
+      .slice(0, 6),
+    messages: messages
+      .filter((hit) => account.rooms.some((r) => r.room_id === hit.room_id))
+      .sort((a, b) => messageUsage(account.searchUsage, b) - messageUsage(account.searchUsage, a)),
   };
+}
+
+/** The same room-plus-person score used by matrix-core's bounded message search. */
+function messageUsage(usage: SearchUsage, hit: MessageHit): number {
+  return (usage.rooms[hit.room_id] ?? 0) + (usage.people[hit.sender] ?? 0);
 }
 
 /** Whether the search found anything to list. */
 export function foundAny(results: SearchResults): boolean {
   return (
     results.link !== null ||
-    results.rooms.length + results.direct.length + results.spaces.length + results.people.length > 0
+    results.rooms.length +
+      results.direct.length +
+      results.spaces.length +
+      results.people.length +
+      results.messages.length >
+      0
   );
 }

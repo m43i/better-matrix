@@ -412,6 +412,14 @@ account: AccountId,
 /**
  * A name or user ID, or part of one.
  */
+term: string, } } | { "type": "SearchMessages", "data": { 
+/**
+ * The account whose history to search.
+ */
+account: AccountId, 
+/**
+ * Fuzzy search terms.
+ */
 term: string, } } | { "type": "SuggestPeople", "data": AccountId } | { "type": "ListPublicRooms", "data": { 
 /**
  * Whose homeserver.

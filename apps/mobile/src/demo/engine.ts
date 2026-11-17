@@ -8,11 +8,13 @@ import type {
   Command,
   Message,
   MessageContent,
+  MessageHit,
   Outgoing,
   RequestId,
   RoomPreview,
 } from '@better-matrix/matrix-native/types';
 
+import { fuzzyMatch } from '../state/search';
 import {
   DEMO_DAY_MS,
   DEMO_LINKED_ROOM,
@@ -20,6 +22,7 @@ import {
   demoMembers,
   demoSessions,
   demoThreads,
+  seedEvents,
   GENERAL,
   GRACE,
   KAI,
@@ -85,6 +88,55 @@ export function answer(
       ];
     case 'ListSessions':
       return [{ type: 'Sessions', data: { account: command.data, sessions: demoSessions() } }];
+    case 'SearchMessages': {
+      const messages = new Map<string, { hit: MessageHit; rank: number }>();
+
+      for (const event of seedEvents()) {
+        if (event.type !== 'TimelineChanged' || event.data.account !== command.data.account)
+          continue;
+
+        for (const diff of event.data.diffs) {
+          if (diff.type !== 'Reset') continue;
+
+          for (const entry of diff.data) {
+            if (entry.kind.type !== 'Message') continue;
+            const message = entry.kind.data;
+
+            if (message.content.type !== 'Text') continue;
+            const body = message.content.data.body.replace(/\s+/g, ' ').trim();
+            const match = fuzzyMatch(body, command.data.term);
+
+            if (!match) continue;
+            messages.set(message.event_id, {
+              rank: match.rank,
+              hit: {
+                room_id: event.data.key.room_id,
+                event_id: message.event_id,
+                thread: event.data.key.thread,
+                sender: message.sender_id,
+                timestamp_ms: message.timestamp_ms,
+                body,
+                highlights: match.positions,
+              },
+            });
+          }
+        }
+      }
+
+      return [
+        {
+          type: 'MessagesFound',
+          data: {
+            request,
+            messages: [...messages.values()]
+              .sort((a, b) => a.rank - b.rank || b.hit.timestamp_ms - a.hit.timestamp_ms)
+              .slice(0, 30)
+              .map(({ hit }) => hit),
+          },
+        },
+      ];
+    }
+
     case 'SuggestPeople':
     case 'SearchPeople': {
       const term = command.type === 'SearchPeople' ? command.data.term.toLowerCase() : '';

@@ -26,13 +26,19 @@ export const routes = {
     pathname: '/room-menu',
     params: section ? { account, section } : { account },
   }),
-  room: (account: AccountId, roomId: string, eventId?: string): Href => ({
+  room: (account: AccountId, roomId: string, eventId?: string, localTarget = false): Href => ({
     pathname: '/room/[account]/[roomId]',
-    params: eventId ? { account, roomId, eventId } : { account, roomId },
+    params: messageParams(account, roomId, eventId, localTarget),
   }),
-  thread: (account: AccountId, roomId: string, root: string): Href => ({
+  thread: (
+    account: AccountId,
+    roomId: string,
+    root: string,
+    eventId?: string,
+    localTarget = false,
+  ): Href => ({
     pathname: '/thread/[account]/[roomId]/[root]',
-    params: { account, roomId, root },
+    params: { ...messageParams(account, roomId, eventId, localTarget), root },
   }),
   /** The long-press sheet of one message; `thread` when the message is in a thread's timeline. */
   messageActions: (account: AccountId, roomId: string, eventId: string, thread?: string): Href => ({
@@ -123,3 +129,25 @@ export const routes = {
     params: account ? { uri, account } : { uri },
   }),
 };
+
+type MessageParams = {
+  account: AccountId;
+  roomId: string;
+  eventId?: string;
+  localTarget?: string;
+};
+
+function messageParams(
+  account: AccountId,
+  roomId: string,
+  eventId?: string,
+  localTarget = false,
+): MessageParams {
+  const params: MessageParams = { account, roomId };
+
+  if (eventId) params.eventId = eventId;
+
+  if (localTarget) params.localTarget = '1';
+
+  return params;
+}

@@ -27,6 +27,7 @@ import {
   DM_KAI,
   GENERAL,
   GRACE,
+  KAI,
   ring,
   SCREENSHOT,
   seedEvents,
@@ -55,6 +56,18 @@ const general = (store: Store) => setScope(store, ADA, { space: WORK_SPACE });
 
 export const scenes = {
   home: { about: 'Home: sections, unread rooms, direct messages' },
+  'search-ranked': {
+    about: 'Search: usage favors design and Kai; try g for rooms or a for people',
+    events: [
+      {
+        type: 'SearchUsage',
+        data: {
+          account: ADA,
+          usage: { rooms: { [DESIGN]: 20, [GENERAL]: 2 }, people: { [KAI]: 30 } },
+        },
+      },
+    ],
+  },
   'home-light': { about: 'Home in the light appearance', settings: { appearance: 'light' } },
   'home-dark': { about: 'Home in the dark appearance', settings: { appearance: 'dark' } },
   space: { about: 'A space in scope', setup: general },

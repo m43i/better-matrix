@@ -24,10 +24,11 @@ import { Timeline } from '../../../ui/timeline/Timeline';
 import { TypingLine } from '../../../ui/timeline/TypingLine';
 
 export default function RoomScreen() {
-  const { account, roomId, eventId } = useLocalSearchParams<{
+  const { account, roomId, eventId, localTarget } = useLocalSearchParams<{
     account: string;
     roomId: string;
     eventId?: string;
+    localTarget?: string;
   }>();
 
   const palette = usePalette();
@@ -83,7 +84,12 @@ export default function RoomScreen() {
         composer={<Composer account={account} timelineKey={key} roomName={inlineName(room)} />}
       >
         <CompactCall account={account} roomId={roomId} />
-        <Timeline account={account} timelineKey={key} target={eventId ?? null} />
+        <Timeline
+          localTarget={localTarget === '1'}
+          account={account}
+          timelineKey={key}
+          target={eventId ?? null}
+        />
         <TypingLine account={account} roomId={roomId} />
       </Conversation>
     </>

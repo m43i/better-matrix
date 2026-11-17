@@ -7,9 +7,11 @@ use rune::{Align, Color, El, ScrollSpec, Side, col, el, icon, row, text, text_in
 use super::components::{ButtonKind, button, dialog, media_avatar, popover_panel};
 use super::icons;
 use super::room::display_name;
+use super::search::{highlighted, highlights};
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf};
-use crate::state::{AccountData, MediaCache, State, matches};
+use crate::state::{AccountData, MediaCache, MessageSearchStatus, State};
+use matrix_core::search::fuzzy_match;
 
 /// The search field's key, which its results anchor to.
 const SEARCH: &str = "top-search";
@@ -58,7 +60,7 @@ pub fn top_bar(s: &State, account: &AccountData, p: &Palette) -> El {
 }
 
 /// One result or member: a picture, a name, and a line under it.
-fn person_row(key: String, person: &Person, media: &MediaCache, p: &Palette) -> El {
+fn person_row(key: String, person: &Person, media: &MediaCache, p: &Palette, query: &str) -> El {
     row()
         .key(key)
         .w_full()
@@ -75,8 +77,8 @@ fn person_row(key: String, person: &Person, media: &MediaCache, p: &Palette) -> 
             col()
                 .grow(1.0)
                 .min_w(0.0)
-                .child(text(person.name.clone()).font(font::BODY).color(p.text).truncate())
-                .child(text(person.id.clone()).font(font::META).color(p.text_muted).truncate()),
+                .child(highlighted(&person.name, query, p))
+                .child(highlighted(&person.id, query, p).font(font::META).color(p.text_muted)),
         )
 }
 
@@ -139,12 +141,19 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette) -> El {
             .role("button")
             .cursor(rune::Cursor::Pointer)
             .child(mark)
-            .child(text(display_name(room)).font(font::BODY).color(p.text).grow(1.0).truncate())
+            .child(highlighted(&display_name(room), query, p).grow(1.0))
             .on_press_tx(crate::state::navigate(move |s| s.open_found_room(&id)))
     };
     for (kind, title) in [(RoomKind::Group, t!("search.rooms")), (RoomKind::Direct, t!("search.direct"))] {
-        let found: Vec<&RoomSummary> =
-            account.rooms.iter().filter(|room| room.kind == kind && matches(&room.name, query)).take(RESULTS).collect();
+        let mut found: Vec<&RoomSummary> =
+            account.rooms.iter().filter(|room| room.kind == kind && fuzzy_match(&room.name, query).is_some()).collect();
+        found.sort_by_key(|room| {
+            (
+                std::cmp::Reverse(account.search_usage.room(&room.room_id)),
+                fuzzy_match(&room.name, query).map(|matched| matched.rank),
+            )
+        });
+        found.truncate(RESULTS);
         if !found.is_empty() {
             any = true;
             list = list.child(section(title, p));
@@ -153,7 +162,9 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette) -> El {
             }
         }
     }
-    let spaces: Vec<_> = account.spaces.iter().filter(|space| matches(&space.name, query)).take(RESULTS).collect();
+    let mut spaces: Vec<_> = account.spaces.iter().filter(|space| fuzzy_match(&space.name, query).is_some()).collect();
+    spaces.sort_by_key(|space| fuzzy_match(&space.name, query).map(|matched| matched.rank));
+    spaces.truncate(RESULTS);
     if !spaces.is_empty() {
         any = true;
         list = list.child(section(t!("search.spaces"), p));
@@ -165,22 +176,75 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette) -> El {
                     &Person { id: space.room_id.clone(), name: space.name.clone(), avatar: space.avatar.clone() },
                     &s.media,
                     p,
+                    query,
                 )
                 .on_press_tx(crate::state::navigate(move |s| s.open_found_space(&id))),
             );
         }
     }
     let me = account.summary.id.as_str();
-    let people: Vec<&Person> = s.search.people.iter().filter(|person| person.id != me).take(RESULTS).collect();
+    let mut people: Vec<&Person> = s.search.people.iter().filter(|person| person.id != me).collect();
+    people.sort_by_key(|person| {
+        (!person.id.eq_ignore_ascii_case(query), std::cmp::Reverse(account.search_usage.person(&person.id)))
+    });
+    people.truncate(RESULTS);
     if !people.is_empty() {
         any = true;
         list = list.child(section(t!("search.people"), p));
         for person in people {
             let id = person.id.clone();
             list = list.child(
-                person_row(format!("found-person-{id}"), person, &s.media, p)
+                person_row(format!("found-person-{id}"), person, &s.media, p, query)
                     .on_press(move |s: &mut State| s.open_direct_chat(&id)),
             );
+        }
+    }
+    let failed = s.search.message_status == MessageSearchStatus::Failed;
+    let searching = s.search.message_request().is_some();
+    if !s.search.messages.is_empty() || searching || failed {
+        any = true;
+        list = list.child(section(t!("search.messages"), p));
+        let mut messages: Vec<_> =
+            s.search.messages.iter().filter(|hit| account.room(&hit.room_id).is_some()).collect();
+        messages.sort_by_key(|hit| std::cmp::Reverse(account.search_usage.message(&hit.room_id, &hit.sender)));
+        for hit in messages {
+            let hit = hit.clone();
+            let room = account.room(&hit.room_id).map_or_else(|| hit.room_id.clone(), display_name);
+            let sender = account
+                .members
+                .get(&hit.room_id)
+                .and_then(|members| members.people.iter().find(|m| m.person.id == hit.sender))
+                .map_or(hit.sender.as_str(), |m| m.person.name.as_str());
+            let meta = format!(
+                "{room} · {sender} · {}",
+                super::timeline::date_label(
+                    super::components::local_ms(hit.timestamp_ms),
+                    super::components::local_ms(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_millis() as u64)
+                    )
+                )
+            );
+            list = list.child(
+                col()
+                    .key(format!("found-message-{}-{}", hit.room_id, hit.event_id))
+                    .w_full()
+                    .px(10.0)
+                    .py(8.0)
+                    .gap(3.0)
+                    .radius(6.0)
+                    .hover(p.hover)
+                    .role("button")
+                    .cursor(rune::Cursor::Pointer)
+                    .child(text(meta).font(font::META).color(p.text_muted).truncate())
+                    .child(highlights(&hit.body, &hit.highlights, p))
+                    .on_press_tx(crate::state::navigate(move |s| s.open_found_message(&hit))),
+            );
+        }
+        if searching || failed {
+            let label = if failed { t!("search.messages_failed") } else { t!("search.searching") };
+            list = list.child(text(label).font(font::META).color(p.text_muted).px(10.0).py(6.0));
         }
     }
     if !any {
@@ -261,7 +325,9 @@ pub fn invite_dialog(s: &State, account: &AccountData, room_id: &str, invited: &
                 .key(format!("invite-{id}"))
                 .on_press(move |s: &mut State| s.invite(&id)),
         };
-        list = list.child(person_row(format!("invitee-{}", person.id), person, &s.media, p).child(trailing));
+        list = list.child(
+            person_row(format!("invitee-{}", person.id), person, &s.media, p, s.invite_search.query()).child(trailing),
+        );
     }
     let content = col()
         .w_full()

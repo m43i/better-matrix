@@ -37,7 +37,10 @@ Date: 2026-11-16
   - _Search:_ under each tab's title, as the desktop's top bar: rooms, direct chats and spaces
     by name, then people from the user directory, listed in the tab's place while something is
     typed (`ui/shell/SearchResults`, from the pure `searchResults`), and the tab's list behind it
-    otherwise. A pasted invitation link or a typed address (`#room:server`, `@user:server`,
+    otherwise. Messages stored on this device form the last section (`SearchMessages`, ADR
+    0008); names and message excerpts highlight fuzzy matches. Per-account `SearchUsage` from
+    the engine ranks frequently used rooms, people and messages within each section. A result opens at its event,
+    including a reply inside its thread. A pasted invitation link or a typed address (`#room:server`, `@user:server`,
     `!room`) is offered first as a link to open, and the search key opens it at once
     (`parseTyped`, [0008](0008-people-and-rooms.md)). iOS uses the header's own search bar,
     stacked under the title (`placement="stacked"`); Android has no header search bar there, so

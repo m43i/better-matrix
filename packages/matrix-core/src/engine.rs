@@ -381,6 +381,14 @@ pub enum Command {
         /// A name or user ID, or part of one.
         term: String,
     },
+    /// Search this account's locally stored messages without a server request; answered by
+    /// [`Event::MessagesFound`]. Empty text returns no hits; at most 30 are returned.
+    SearchMessages {
+        /// The account whose history to search.
+        account: AccountId,
+        /// Fuzzy search terms.
+        term: String,
+    },
     /// Suggest people to start a chat with; answered by [`Event::PeopleFound`].
     SuggestPeople(AccountId),
     /// List every public room under a space, ranked by member count.
@@ -742,6 +750,20 @@ pub enum Event {
         account: AccountId,
         /// The room's ID.
         room_id: String,
+    },
+    /// This account's device-local interaction counts, loaded at start and updated on use.
+    SearchUsage {
+        /// The account whose search sections use these counts.
+        account: AccountId,
+        /// Open and send frequency, never synced to the homeserver.
+        usage: crate::SearchUsage,
+    },
+    /// Locally stored messages found for [`Command::SearchMessages`].
+    MessagesFound {
+        /// The search being answered.
+        request: RequestId,
+        /// Ranked excerpts and their match highlights.
+        messages: Vec<crate::MessageHit>,
     },
     /// People found for [`Command::SearchPeople`].
     PeopleFound {
@@ -1118,6 +1140,7 @@ impl Engine {
 
 struct Running {
     account: Account,
+    usage: crate::search::Usage,
     background: Vec<AbortHandle>,
     flows: crate::security::Flows,
     timelines: HashMap<TimelineKey, (Arc<matrix_sdk_ui::timeline::Timeline>, TimelineWatch)>,
@@ -1665,6 +1688,12 @@ impl State {
             Command::OpenTimeline { account: id, key } => {
                 let account = self.account(&id);
                 let (warm, fetch_keys) = self.accounts.get_mut(&id).map_or((None, false), |running| {
+                    if key.thread.is_none()
+                        && !running.timelines.contains_key(&key)
+                        && !running.opening.contains_key(&key)
+                    {
+                        running.usage.room(&running.account, &key.room_id, 1, None);
+                    }
                     running.opening.insert(key.clone(), request);
                     let fetch_keys = key.thread.is_none() && running.keys_fetched.insert(key.room_id.clone());
                     (running.take_warm(&key), fetch_keys)
@@ -1896,10 +1925,28 @@ impl State {
                 })
             }
             Command::SearchPeople { account, term } => {
+                let usage = self.accounts.get(&account).map(|running| running.usage.clone());
                 let account = self.account(&account);
                 Box::pin(async move {
-                    let people = account?.search_people(&term).await?;
+                    let usage = match usage {
+                        Some(usage) => usage.snapshot().await,
+                        None => crate::SearchUsage::default(),
+                    };
+                    let people = account?.search_people_ranked(&term, &usage).await?;
                     sink.emit(Event::PeopleFound { request, people });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::SearchMessages { account, term } => {
+                let usage = self.accounts.get(&account).map(|running| running.usage.clone());
+                let account = self.account(&account);
+                Box::pin(async move {
+                    let usage = match usage {
+                        Some(usage) => usage.snapshot().await,
+                        None => crate::SearchUsage::default(),
+                    };
+                    let messages = account?.search_messages(&term, &usage).await?;
+                    sink.emit(Event::MessagesFound { request, messages });
                     Ok(Outcome::Done)
                 })
             }
@@ -2119,16 +2166,22 @@ impl State {
                 })
             }
             Command::Send { account, key, reply_to, message } => {
+                let usage = self.accounts.get(&account).map(|running| running.usage.clone());
                 let (account, timeline) = (self.account(&account), self.open_timeline(&account, &key));
                 Box::pin(async move {
+                    let account = account?;
+                    let replied_to = reply_to.clone();
                     match timeline {
                         // Through the timeline: replies and thread relations come out right, and
                         // the message shows at once as pending.
                         Ok(timeline) => send_in(&timeline, reply_to, &message).await?,
                         Err(_) if key.thread.is_none() && reply_to.is_none() => {
-                            account?.send(&key.room_id, &message).await?;
+                            account.send(&key.room_id, &message).await?;
                         }
                         Err(error) => return Err(error),
+                    }
+                    if let Some(usage) = usage {
+                        usage.room(&account, &key.room_id, 3, replied_to);
                     }
                     Ok(Outcome::Done)
                 })
@@ -2270,9 +2323,11 @@ impl State {
                         );
                     })
                 };
-                let background = vec![tokens.abort_handle(), started.abort_handle()];
+                let (usage, usage_worker) = crate::search::Usage::start(account.clone(), Arc::clone(&self.sink));
+                let background = vec![tokens.abort_handle(), started.abort_handle(), usage_worker];
                 let running = Running {
                     account,
+                    usage,
                     background,
                     flows,
                     timelines: HashMap::new(),

@@ -509,6 +509,7 @@ pub struct AccountData {
     pub typing: HashMap<String, Vec<matrix_core::Person>>,
     /// How the user arranged the sidebar.
     pub sidebar: matrix_core::SidebarLayout,
+    pub search_usage: matrix_core::SearchUsage,
     /// Whether `sidebar` is the saved layout yet, rather than the empty one before it is read.
     pub sidebar_loaded: bool,
 }
@@ -546,6 +547,7 @@ impl AccountData {
             files: HashMap::new(),
             typing: HashMap::new(),
             sidebar: matrix_core::SidebarLayout::default(),
+            search_usage: matrix_core::SearchUsage::default(),
             sidebar_loaded: false,
         }
     }
@@ -746,6 +748,12 @@ impl Accounts {
 
     pub fn remove(&mut self, id: &AccountId) {
         self.list.retain(|account| &account.summary.id != id);
+    }
+
+    pub fn set_search_usage(&mut self, id: &AccountId, usage: matrix_core::SearchUsage) {
+        if let Some(account) = self.get_mut(id) {
+            account.search_usage = usage;
+        }
     }
 
     pub fn set_room_list(&mut self, id: &AccountId, list: RoomList) {

@@ -20,10 +20,12 @@ import { Conversation } from '../../../../ui/timeline/Conversation';
 import { Timeline } from '../../../../ui/timeline/Timeline';
 
 export default function ThreadScreen() {
-  const { account, roomId, root } = useLocalSearchParams<{
+  const { account, roomId, root, eventId, localTarget } = useLocalSearchParams<{
     account: string;
     roomId: string;
     root: string;
+    eventId?: string;
+    localTarget?: string;
   }>();
 
   const palette = usePalette();
@@ -62,7 +64,13 @@ export default function ThreadScreen() {
       <Conversation
         composer={<Composer account={account} timelineKey={key} roomName={inlineName(room)} />}
       >
-        <Timeline account={account} timelineKey={key} root={rootMessage} />
+        <Timeline
+          localTarget={localTarget === '1'}
+          target={eventId ?? null}
+          account={account}
+          timelineKey={key}
+          root={rootMessage}
+        />
       </Conversation>
     </>
   );

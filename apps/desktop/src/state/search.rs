@@ -3,12 +3,21 @@
 
 use std::time::{Duration, Instant};
 
-use matrix_core::{Person, RequestId};
+use matrix_core::{MessageHit, Person, RequestId};
 use rune::TextEdit;
 
 /// How long the text must rest before it is searched: a word typed letter by letter is one
 /// search, not one per letter.
 pub const SEARCH_PAUSE: Duration = Duration::from_millis(300);
+
+/// The local history search can finish independently of the user directory.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub enum MessageSearchStatus {
+    #[default]
+    Ready,
+    Searching(RequestId),
+    Failed,
+}
 
 /// A query for the user directory as it is typed. A search goes out once the text rests for
 /// [`SEARCH_PAUSE`] (the state's `poll` sends it); only the answer to the latest counts.
@@ -23,6 +32,8 @@ pub struct PeopleSearch {
     /// The search on its way, if any.
     pub request: Option<RequestId>,
     pub people: Vec<Person>,
+    pub messages: Vec<MessageHit>,
+    pub message_status: MessageSearchStatus,
 }
 
 impl Default for PeopleSearch {
@@ -33,6 +44,8 @@ impl Default for PeopleSearch {
             resting: None,
             request: None,
             people: Vec::new(),
+            messages: Vec::new(),
+            message_status: MessageSearchStatus::Ready,
         }
     }
 }
@@ -47,6 +60,8 @@ impl PeopleSearch {
             self.resting = None;
             return None;
         }
+        self.messages.clear();
+        self.message_status = MessageSearchStatus::Ready;
         if text.is_empty() {
             self.searched = Some(String::new());
             self.resting = None;
@@ -83,9 +98,95 @@ impl PeopleSearch {
         }
     }
 
+    pub fn messages_found(&mut self, request: RequestId, messages: Vec<MessageHit>) {
+        if self.message_request() == Some(request) && self.searched.as_deref() == Some(self.query()) {
+            self.messages = messages;
+        }
+    }
+
+    pub fn message_request(&self) -> Option<RequestId> {
+        match self.message_status {
+            MessageSearchStatus::Searching(request) => Some(request),
+            _ => None,
+        }
+    }
+
+    pub fn finished(&mut self, request: RequestId, failed: bool) {
+        if self.message_request() == Some(request) {
+            self.message_status = if failed { MessageSearchStatus::Failed } else { MessageSearchStatus::Ready };
+        }
+        if self.request == Some(request) {
+            self.request = None;
+        }
+    }
+
     /// The trimmed query.
     pub fn query(&self) -> &str {
         self.field.text.trim()
+    }
+}
+
+/// A message picked in search, waiting for its timeline and history to arrive.
+#[derive(Debug)]
+pub struct MessageJump {
+    pub account: matrix_core::AccountId,
+    pub key: matrix_core::TimelineKey,
+    pub event_id: String,
+}
+
+impl super::State {
+    pub fn open_found_message(&mut self, hit: &MessageHit) {
+        let Some(account) = self.nav.account.clone() else { return };
+        self.message_jump = Some(MessageJump {
+            account,
+            key: matrix_core::TimelineKey { room_id: hit.room_id.clone(), thread: hit.thread.clone() },
+            event_id: hit.event_id.clone(),
+        });
+        self.open_found_room(&hit.room_id);
+        if let Some(root) = &hit.thread {
+            self.open_thread(root);
+        }
+    }
+
+    pub fn position_message(&mut self, tx: &mut rune::Tx) -> bool {
+        let Some(jump) = &self.message_jump else { return false };
+        if self.nav.account.as_ref() != Some(&jump.account)
+            || self.active_room_id() != Some(jump.key.room_id.as_str())
+            || !self.open_timelines.contains(&(jump.account.clone(), jump.key.clone()))
+        {
+            self.message_jump = None;
+            return false;
+        }
+        if !self.timelines_ready.contains(&(jump.account.clone(), jump.key.clone())) {
+            return false;
+        }
+        let Some(timeline) = self.accounts.get(&jump.account).and_then(|a| a.timeline(&jump.key)) else { return false };
+        if let Some(entry) = timeline.entries.iter().find(|entry| {
+            matches!(&entry.kind,
+            super::EntryView::Message(item) if item.message.event_id == jump.event_id)
+        }) {
+            let prefix = if jump.key.thread.is_some() { "thread-msg" } else { "msg" };
+            tx.scroll_into_view(format!("{prefix}-{}", entry.id));
+            self.message_jump = None;
+            return true;
+        }
+        if timeline.loading || timeline.history_error.is_some() {
+            return false;
+        }
+        if timeline.reached_start {
+            self.message_jump = None;
+            self.notice = Some(crate::i18n::t!("search.message_unavailable").to_owned());
+            return true;
+        }
+        let (account, key) = (jump.account.clone(), jump.key.clone());
+        if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
+            timeline.loading = true;
+        }
+        self.dispatch(
+            matrix_core::Command::LoadOlder { account: account.clone(), key: key.clone() },
+            super::Purpose::History { account, key },
+        );
+        true
     }
 }
 

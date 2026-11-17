@@ -556,5 +556,8 @@
   "verify.match": "They match",
   "verify.mismatch": "They don't match",
   "verify.title": "Verify this session",
-  "verify.waiting": "Accept the request on your other session."
+  "verify.waiting": "Accept the request on your other session.",
+  "search.messages": "Messages",
+  "search.messages_failed": "Couldn't search messages on this device. Try typing again.",
+  "search.message_unavailable": "This message is no longer available."
 }

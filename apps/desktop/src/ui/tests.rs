@@ -266,3 +266,57 @@ fn a_pasted_address_should_be_offered_in_the_search_and_open_its_link_dialog() {
     assert!(matches!(rt.state.modal, Some(crate::state::Modal::Link(_))));
     assert_eq!(rt.state.search.query(), "");
 }
+
+#[test]
+fn search_should_list_messages_below_people_and_destinations() {
+    let rt = runtime(demo::search);
+    let keys: Vec<_> = rt.elements().into_iter().filter_map(|e| e.key).collect();
+    let person = keys.iter().position(|key| key == "found-person-@grace:example.org").unwrap();
+    let message = keys.iter().position(|key| key.starts_with("found-message-")).unwrap();
+    assert!(message > person);
+}
+
+#[test]
+fn pressing_a_message_hit_should_open_its_room_and_clear_search() {
+    let mut rt = runtime(demo::search);
+    let hit = rt.state.search.messages[0].clone();
+    press(&mut rt, &format!("found-message-{}-{}", hit.room_id, hit.event_id));
+    assert_eq!(rt.state.active_room_id(), Some(hit.room_id.as_str()));
+    assert!(rt.state.search.query().is_empty());
+}
+
+#[test]
+fn a_frequently_used_room_should_survive_the_search_result_limit() {
+    let rt = runtime(|s| {
+        demo::search(s);
+        let account = s.accounts.get(&matrix_core::AccountId::new(demo::ADA)).unwrap();
+        let template = account.rooms[0].clone();
+        let rooms = (0..8)
+            .map(|i| matrix_core::RoomSummary {
+                room_id: format!("!result-{i}:example.org"),
+                name: format!("Group {i}"),
+                ..template.clone()
+            })
+            .collect();
+        s.apply(
+            matrix_core::Event::RoomsUpdated {
+                account: matrix_core::AccountId::new(demo::ADA),
+                list: matrix_core::RoomList { rooms, spaces: Vec::new(), invitations: Vec::new() },
+            },
+            &mut rune::Tx::default(),
+        );
+        s.apply(
+            matrix_core::Event::SearchUsage {
+                account: matrix_core::AccountId::new(demo::ADA),
+                usage: matrix_core::SearchUsage {
+                    rooms: std::collections::BTreeMap::from([("!result-7:example.org".into(), 20)]),
+                    ..matrix_core::SearchUsage::default()
+                },
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let room_keys: Vec<_> =
+        rt.elements().into_iter().filter_map(|e| e.key).filter(|k| k.starts_with("found-room-")).collect();
+    assert_eq!(room_keys[0], "found-room-!result-7:example.org");
+}

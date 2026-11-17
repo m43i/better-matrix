@@ -222,6 +222,8 @@ export function ListSection({
  */
 export function ListRow({
   title,
+  titleContent,
+  subtitleContent,
   subtitle,
   icon,
   leading,
@@ -234,7 +236,9 @@ export function ListRow({
   testID,
 }: {
   title: string;
+  titleContent?: ReactNode;
   subtitle?: string;
+  subtitleContent?: ReactNode;
   icon?: IconName;
   leading?: ReactNode;
   value?: string;
@@ -256,11 +260,11 @@ export function ListRow({
         ) : null)}
       <View style={styles.rowText}>
         <Text style={[font.body, { color }]} numberOfLines={1}>
-          {title}
+          {titleContent ?? title}
         </Text>
-        {subtitle ? (
+        {subtitle || subtitleContent ? (
           <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={2}>
-            {subtitle}
+            {subtitleContent ?? subtitle}
           </Text>
         ) : null}
       </View>

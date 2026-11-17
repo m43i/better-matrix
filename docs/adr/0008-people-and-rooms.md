@@ -38,9 +38,37 @@ Date: 2026-11-14
   the profile picture. A new use is a `PickFor` variant.
 - **Search:**
   - A typed link or address comes first (Typed links, below), then the top bar matches rooms,
-    direct chats and spaces on this device when every typed word
-    starts a word of the name (`state::matches`), and people in the user directory
-    (`Command::SearchPeople`).
+    direct chats and spaces on this device with case-insensitive fuzzy matching, and people in
+    the user directory (`Command::SearchPeople`). Each kind has its own section (up to six
+    entries), followed by Messages. Names and excerpts highlight the matched characters, as in
+    fzf; consecutive characters and word starts rank ahead of scattered matches when usage ties.
+  - **Internal ranking:** within each section, frequently used rooms and people come first.
+    `SearchUsage` belongs to one account on this device, loaded from the SDK's custom state
+    store at startup and reported as `Event::SearchUsage`. An actual main-timeline open adds
+    one to its room and direct-chat peers; an accepted send adds three. Explicit replies also
+    count for their original sender, looked up only in the event cache. Repeated commands for
+    an already open/opening timeline and thread opens do not count as another room visit.
+    A per-account worker owns the counters, accepts interactions through a channel and
+    serializes persistence; snapshot requests go through the same queue, so searches see all
+    earlier interactions and await initialization without holding up the engine actor. No usage goes to the homeserver. Counts begin learning with
+    this feature and survive app restarts.
+    Message preference is the sum of room and sender counts, before fuzzy quality and recency,
+    applied before retaining the best 30 hits. Room and people preference is also applied
+    before the six-entry UI limit (and before the directory's 20-entry limit). A typed full
+    user ID stays first; frequency ties keep existing relevance/federation order.
+  - `Command::SearchMessages` → `Event::MessagesFound` searches only the active account's joined
+    rooms in the SDK's persistent event cache, including closed rooms and thread-only events.
+    It never requests history or uses server search, and stores no extra plaintext index.
+    Parsing and matching run on the blocking pool, outside the UI and engine actor. The cache
+    lock is released per room before matching. Edits replace original text, redactions remove
+    it, and undecrypted events are excluded. At most 30 hits, by usage then match quality and recency,
+    carry a bounded excerpt and Unicode scalar offsets for both renderers.
+  - Local message searches share the field's 300 ms pause but run independently of the user
+    directory; a slow or failed directory doesn't delay local results. Changing text cancels
+    the previous message request and clears its hits; an obsolete answer or an answer for an
+    account no longer shown is ignored. Failures show in the search and typing again retries.
+    Selecting a message opens its room or thread and scrolls to its event, loading older
+    history if necessary.
   - `PeopleSearch` serves the top bar, new-chat search and invite dialog. It sends from `poll`
     once the text rests 300 ms (`SEARCH_PAUSE`) and keeps only the latest answer; changing the
     text drops the search in flight. Emptying the text clears results at once.

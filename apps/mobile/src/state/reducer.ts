@@ -86,6 +86,7 @@ function newAccount(summary: AccountSummary): AccountData {
     threads: {},
     files: {},
     sidebar: EMPTY_LAYOUT,
+    searchUsage: { rooms: {}, people: {} },
     sidebarLoaded: false,
   };
 }
@@ -393,11 +394,17 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
 
     case 'CallDevices':
       return { ...state, call: { ...state.call, devices: event.data } };
+    case 'SearchUsage':
+      return updateAccount(state, event.data.account, (a) => ({
+        ...a,
+        searchUsage: event.data.usage,
+      }));
     // Answers to one request: the store hands them to whoever sent it (requests.ts).
     case 'Finished':
     case 'HomeserverDiscovered':
     case 'OpenUrl':
     case 'ContactCodeSent':
+    case 'MessagesFound':
     case 'PeopleFound':
     case 'DirectChat':
     case 'PublicRooms':

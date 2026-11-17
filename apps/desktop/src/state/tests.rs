@@ -1264,7 +1264,9 @@ fn typing_a_search_should_look_up_people_and_show_results() {
     drain(&mut commands);
     s.search.field.insert("ada");
     rest_search(&mut s);
-    assert!(matches!(commands.try_next(), Some((_, Command::SearchPeople { term, .. })) if term == "ada"));
+    assert!(
+        all_commands(&mut commands).iter().any(|c| matches!(c, Command::SearchPeople { term, .. } if term == "ada"))
+    );
     assert_eq!(s.popover, Some(Popover::Search));
 }
 
@@ -3253,4 +3255,82 @@ fn keeping_an_edit_should_replace_one_of_the_message_kept_from_its_thread() {
     s.select_room("!two:x");
     let kept: Vec<&str> = s.set_aside.iter().map(|edit| edit.body.as_str()).collect();
     assert_eq!(kept, ["helo?"]);
+}
+
+#[test]
+fn typing_a_search_should_also_search_only_the_active_accounts_messages() {
+    let (mut s, mut commands) = state();
+    let account = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &account, &["!one:x"], Vec::new());
+    drain(&mut commands);
+    s.search.field.insert("device");
+    rest_search(&mut s);
+    assert!(all_commands(&mut commands).iter().any(
+        |c| matches!(c, Command::SearchMessages { account: owner, term } if owner == &account && term == "device")
+    ));
+}
+
+#[test]
+fn an_obsolete_message_search_should_not_fill_a_new_query() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.search.field.insert("device");
+    rest_search(&mut s);
+    let request = s.search.message_request().unwrap();
+    s.search.field = TextEdit::new("other");
+    s.search.messages_found(request, vec![message_hit()]);
+    assert!(s.search.messages.is_empty());
+}
+
+#[test]
+fn a_failed_message_search_should_finish_its_loading_state() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.search.field.insert("device");
+    rest_search(&mut s);
+    let request = s.search.message_request().unwrap();
+    apply(&mut s, Event::Finished { request, result: Err("store unavailable".into()) });
+    assert!(s.search.message_status == MessageSearchStatus::Failed);
+}
+
+fn message_hit() -> matrix_core::MessageHit {
+    matrix_core::MessageHit {
+        room_id: "!one:x".into(),
+        event_id: "$hit".into(),
+        thread: None,
+        sender: "@a:example.org".into(),
+        timestamp_ms: 10,
+        body: "hello device".into(),
+        highlights: vec![6, 7, 8, 9, 10, 11],
+    }
+}
+
+#[test]
+fn picking_a_thread_message_should_open_its_thread() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    let hit = matrix_core::MessageHit { thread: Some("$root".into()), ..message_hit() };
+    s.open_found_message(&hit);
+    assert_eq!(s.message_jump.as_ref().map(|jump| &jump.key), Some(&TimelineKey::thread("!one:x", "$root")));
+}
+
+#[test]
+fn search_usage_should_stay_with_its_own_account() {
+    let (mut s, _) = state();
+    let a = AccountId::new("@a:example.org");
+    let b = AccountId::new("@b:example.org");
+    with_rooms(&mut s, &a, &["!one:x"], Vec::new());
+    with_rooms(&mut s, &b, &["!one:x"], Vec::new());
+    let usage = matrix_core::SearchUsage {
+        rooms: std::collections::BTreeMap::from([("!one:x".into(), 8)]),
+        ..matrix_core::SearchUsage::default()
+    };
+    apply(&mut s, Event::SearchUsage { account: a.clone(), usage });
+    assert_eq!(
+        (
+            s.accounts.get(&a).unwrap().search_usage.room("!one:x"),
+            s.accounts.get(&b).unwrap().search_usage.room("!one:x")
+        ),
+        (8, 0)
+    );
 }

@@ -134,3 +134,80 @@ describe('searchResults', () => {
   it('a term matching nothing should find nothing', () =>
     expect(foundAny(searchResults(accountWith([]), 'zzz', [], NOW))).toBe(false));
 });
+
+describe('search interaction ranking', () => {
+  it('should put a frequently used matching room before a closer unused name', () => {
+    const account = accountWith([
+      roomSummary('!new', 'General'),
+      roomSummary('!used', 'General archive'),
+    ]);
+
+    account.searchUsage = { rooms: { '!used': 10 }, people: {} };
+    expect(searchResults(account, 'general', [], NOW).rooms.map((r) => r.room_id)).toEqual([
+      '!used',
+      '!new',
+    ]);
+  });
+
+  it('should rank frequently contacted people before the directory order', () => {
+    const account = accountWith([]);
+    account.searchUsage = { rooms: {}, people: { [GRACE]: 12 } };
+    expect(
+      searchResults(
+        account,
+        'a',
+        [person('@alan:example.org', 'Alan'), person(GRACE, 'Grace')],
+        NOW,
+      ).people.map((p) => p.id),
+    ).toEqual([GRACE, '@alan:example.org']);
+  });
+
+  it('should keep an explicitly typed user ahead of frequent contacts', () => {
+    const account = accountWith([]);
+    account.searchUsage = { rooms: {}, people: { [GRACE]: 12 } };
+    expect(
+      searchResults(
+        account,
+        '@alan:example.org',
+        [person(GRACE, 'Grace'), person('@alan:example.org', 'Alan')],
+        NOW,
+      ).people[0]!.id,
+    ).toBe('@alan:example.org');
+  });
+
+  it('should prefer messages from frequently used rooms or frequently contacted senders', () => {
+    const account = accountWith([roomSummary('!new'), roomSummary('!used')]);
+    account.searchUsage = { rooms: { '!used': 10 }, people: { [GRACE]: 20 } };
+
+    const hit = {
+      room_id: '!new',
+      event_id: '$new',
+      thread: null,
+      sender: '@alan:example.org',
+      timestamp_ms: NOW,
+      body: 'release',
+      highlights: [0],
+    };
+
+    const hits = [
+      hit,
+      { ...hit, room_id: '!used', event_id: '$room' },
+      { ...hit, sender: GRACE, event_id: '$person' },
+    ];
+
+    expect(
+      searchResults(account, 'release', [], NOW, hits).messages.map((h) => h.event_id),
+    ).toEqual(['$person', '$room', '$new']);
+  });
+});
+
+it('search usage events should only update their own account', () => {
+  const state = signedIn(ADA, GRACE);
+
+  const next = apply(state, {
+    type: 'SearchUsage',
+    data: { account: ADA, usage: { rooms: { '!room': 8 }, people: {} } },
+  });
+
+  expect(next.accounts.map((a) => a.searchUsage.rooms['!room'] ?? 0)).toEqual([8, 0]);
+});

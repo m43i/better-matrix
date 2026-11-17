@@ -259,6 +259,14 @@ impl Account {
     /// People matching `term`, by name or ID: the homeserver's user directory, and a typed user
     /// ID from any server (even when the directory doesn't know it). Ranked by [`rank`].
     pub async fn search_people(&self, term: &str) -> Result<Vec<Person>, Error> {
+        self.search_people_ranked(term, &crate::SearchUsage::default()).await
+    }
+
+    pub(crate) async fn search_people_ranked(
+        &self,
+        term: &str,
+        usage: &crate::SearchUsage,
+    ) -> Result<Vec<Person>, Error> {
         /// Enough to pick from without scrolling far.
         const LIMIT: usize = 20;
         /// Asked of the directory: more than shown, so that a page of people on other servers
@@ -286,6 +294,8 @@ impl Account {
             people.push(self.profile_of(&user).await);
         }
         rank(&mut people, term, self.user_id()?.server_name().as_str());
+        people
+            .sort_by_key(|person| (!person.id.eq_ignore_ascii_case(term), std::cmp::Reverse(usage.person(&person.id))));
         people.truncate(LIMIT);
         Ok(people)
     }

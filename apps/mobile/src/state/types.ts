@@ -4,6 +4,7 @@
 
 import type {
   AccountId,
+  SearchUsage,
   AccountSummary,
   CallDevices,
   CallEnd,
@@ -86,6 +87,7 @@ export interface AccountData {
   threads: Record<string, ThreadInfo[]>;
   files: Record<string, SharedFile[]>;
   sidebar: SidebarLayout;
+  searchUsage: SearchUsage;
   sidebarLoaded: boolean;
 }
 

@@ -3,7 +3,7 @@
 // `#room:server`), the account's rooms, direct chats and spaces by name, then people from the
 // user directory. Picking one empties the search (`onPicked`).
 
-import type { Person } from '@better-matrix/matrix-native/types';
+import type { MessageHit, Person } from '@better-matrix/matrix-native/types';
 import { router } from 'expo-router';
 import { useEffect, useMemo } from 'react';
 import { SectionList, StyleSheet, Text } from 'react-native';
@@ -12,7 +12,7 @@ import { t } from '../../i18n';
 import { routes } from '../../routes';
 import { setScope } from '../../state/actions/core';
 import { openDirectChat } from '../../state/actions/people';
-import { foundAny, searchResults } from '../../state/lists';
+import { foundAny, listTime, searchResults } from '../../state/lists';
 import { busy } from '../../state/people';
 import { type Permalink, permalinkUri } from '../../state/permalinks';
 import { useAppStore } from '../../state/react';
@@ -25,13 +25,16 @@ import { openPermalink } from '../links/open';
 import { usePeopleSearch } from '../people/usePeopleSearch';
 import { usePalette } from '../theme';
 import { RoomRow } from './RoomRow';
+import { SearchHighlight } from './SearchHighlight';
+import { useMessageSearch } from './useMessageSearch';
 import { useNow } from './useNow';
 
 type Item =
   | { kind: 'link'; link: Permalink }
   | { kind: 'room'; room: AccountData['rooms'][number] }
   | { kind: 'space'; space: AccountData['spaces'][number] }
-  | { kind: 'person'; person: Person };
+  | { kind: 'person'; person: Person }
+  | { kind: 'message'; hit: MessageHit };
 
 interface Section {
   key: string;
@@ -55,11 +58,12 @@ export function SearchResults({
   const id = account.summary.id;
   // Only what is typed is searched: the tab's list shows while nothing is.
   const [people, type] = usePeopleSearch(id, false);
+  const messages = useMessageSearch(id, term);
   useEffect(() => type(term), [term, type]);
 
   const results = useMemo(
-    () => searchResults(account, term, people.people, now),
-    [account, term, people.people, now],
+    () => searchResults(account, term, people.people, now, messages.messages),
+    [account, term, people.people, now, messages.messages],
   );
 
   const sections = useMemo(() => {
@@ -89,10 +93,18 @@ export function SearchResults({
         title: t('search.people'),
         data: results.people.map((person) => ({ kind: 'person', person })),
       },
+      {
+        key: 'messages',
+        title: t('search.messages'),
+        data: results.messages.map((hit) => ({ kind: 'message', hit })),
+      },
     ];
 
     return all.filter((section) => section.data.length > 0);
   }, [results]);
+
+  const loading = busy(people) || messages.status === 'waiting' || messages.status === 'searching';
+  const any = foundAny(results);
 
   const chat = (userId: string) => {
     onPicked();
@@ -122,6 +134,7 @@ export function SearchResults({
           <RoomRow
             account={id}
             room={item.room}
+            query={term}
             last={lastMessage(account, item.room.room_id)}
             now={now}
             onPress={() => {
@@ -135,6 +148,7 @@ export function SearchResults({
           <ListRow
             testID={`search-space-${item.space.room_id}`}
             title={item.space.name}
+            titleContent={<SearchHighlight text={item.space.name} query={term} />}
             leading={
               <Avatar
                 account={id}
@@ -151,12 +165,41 @@ export function SearchResults({
             }}
           />
         );
+      case 'message': {
+        const hit = item.hit;
+        const room = account.rooms.find((r) => r.room_id === hit.room_id);
+
+        const sender =
+          account.members[hit.room_id]?.people.find((m) => m.person.id === hit.sender)?.person
+            .name ?? hit.sender;
+
+        return (
+          <ListRow
+            testID={`search-message-${hit.event_id}`}
+            title={hit.body}
+            titleContent={<SearchHighlight text={hit.body} positions={hit.highlights} />}
+            subtitle={`${room?.name ?? hit.room_id} · ${sender} · ${listTime(hit.timestamp_ms, now)}`}
+            onPress={() => {
+              onPicked();
+
+              if (hit.thread)
+                router.push(routes.thread(id, hit.room_id, hit.thread, hit.event_id, true));
+              else router.push(routes.room(id, hit.room_id, hit.event_id, true));
+            }}
+          />
+        );
+      }
+
       case 'person':
         return (
           <ListRow
             testID={`search-person-${item.person.id}`}
             title={item.person.name || item.person.id}
+            titleContent={
+              <SearchHighlight text={item.person.name || item.person.id} query={term} />
+            }
             subtitle={item.person.id}
+            subtitleContent={<SearchHighlight text={item.person.id} query={term} />}
             leading={
               <Avatar
                 account={id}
@@ -177,6 +220,7 @@ export function SearchResults({
       testID="search-results"
       style={styles.fill}
       contentInsetAdjustmentBehavior="automatic"
+      contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       sections={sections}
@@ -189,15 +233,33 @@ export function SearchResults({
             return item.room.room_id;
           case 'space':
             return item.space.room_id;
+          case 'message':
+            return `message-${item.hit.room_id}-${item.hit.event_id}`;
           case 'person':
             return `person-${item.person.id}`;
         }
       }}
+      ListFooterComponent={
+        any &&
+        (messages.status === 'failed' ||
+          messages.status === 'searching' ||
+          messages.status === 'waiting') ? (
+          <Text style={[font.meta, styles.title, { color: palette.textMuted }]}>
+            {messages.status === 'failed' ? t('search.messages_failed') : t('search.searching')}
+          </Text>
+        ) : undefined
+      }
       ListEmptyComponent={
-        foundAny(results) ? undefined : (
+        any ? undefined : (
           <EmptyState
-            loading={busy(people)}
-            title={busy(people) ? t('search.searching') : t('search.nothing')}
+            loading={loading}
+            title={
+              loading
+                ? t('search.searching')
+                : messages.status === 'failed'
+                  ? t('search.messages_failed')
+                  : t('search.nothing')
+            }
           />
         )
       }
@@ -213,5 +275,6 @@ export function SearchResults({
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  content: { paddingBottom: 96 },
   title: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 6 },
 });

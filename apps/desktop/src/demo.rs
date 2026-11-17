@@ -792,3 +792,40 @@ pub fn link_person(s: &mut State) {
         s.apply(event, &mut rune::Tx::default());
     }
 }
+
+/// Search results with the same match in a room, person and locally stored message.
+pub fn search(s: &mut State) {
+    seed(s);
+    s.search.field = rune::TextEdit::new("gr");
+    let now = std::time::Instant::now();
+    s.search_people(now);
+    s.search_people(now + crate::state::SEARCH_PAUSE);
+    s.search.people =
+        vec![matrix_core::Person { id: "@grace:example.org".into(), name: "Grace Hopper".into(), avatar: None }];
+    let mut hits: Vec<_> = work()
+        .rooms
+        .into_iter()
+        .flat_map(|(room, messages)| {
+            messages.into_iter().filter_map(move |message| {
+                let body = message.content.plain().split_whitespace().collect::<Vec<_>>().join(" ");
+                let matched = matrix_core::search::fuzzy_match(&body, "gr")?;
+                Some((
+                    matched.rank,
+                    matrix_core::MessageHit {
+                        room_id: room.room_id.clone(),
+                        event_id: message.event_id,
+                        thread: None,
+                        sender: message.sender_name,
+                        timestamp_ms: message.timestamp_ms,
+                        body,
+                        highlights: matched.positions,
+                    },
+                ))
+            })
+        })
+        .collect();
+    hits.sort_by(|(a, x), (b, y)| a.cmp(b).then(y.timestamp_ms.cmp(&x.timestamp_ms)));
+    s.search.messages = hits.into_iter().take(30).map(|(_, hit)| hit).collect();
+    s.search.message_status = crate::state::MessageSearchStatus::Ready;
+    s.search.request = None;
+}

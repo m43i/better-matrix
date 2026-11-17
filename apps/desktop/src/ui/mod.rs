@@ -21,6 +21,7 @@ mod rail;
 mod room;
 mod room_discovery;
 mod room_menu;
+mod search;
 mod security;
 mod settings;
 mod sidebar;

@@ -17,6 +17,7 @@ import { Avatar } from '../Avatar';
 import { Badge, Touchable } from '../components';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
+import { SearchHighlight } from './SearchHighlight';
 
 /** The leading picture of a compact row, as large as a line of text (the desktop's 18). */
 const COMPACT_AVATAR = 22;
@@ -30,6 +31,7 @@ export const RoomRow = memo(function RoomRow({
   last,
   now,
   detailed = false,
+  query,
   onPress,
 }: {
   account: AccountId;
@@ -40,6 +42,7 @@ export const RoomRow = memo(function RoomRow({
   now: number;
   /** Show the latest message and its time under the name. */
   detailed?: boolean;
+  query?: string;
   /** Instead of opening the room (the search screen closes itself first). */
   onPress?: () => void;
 }) {
@@ -64,7 +67,7 @@ export const RoomRow = memo(function RoomRow({
       style={[attention ? font.navStrong : font.nav, styles.name, { color: nameColor }]}
       numberOfLines={1}
     >
-      {room.name}
+      {query ? <SearchHighlight text={room.name} query={query} /> : room.name}
     </Text>
   );
 
