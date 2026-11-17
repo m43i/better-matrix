@@ -149,9 +149,9 @@ scripts/              Bun scripts
 
 ### Contributing
 
-Issues and pull requests are welcome. Pick a template when you open an issue, or start blank. Pull
-requests get a label for the release notes (`feature`, `enhancement`, `bug`, …); CI lints and tests
-each one.
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started,
+the required pull request title format, and labels. Please follow our
+[Code of Conduct](CODE_OF_CONDUCT.md) in all project spaces.
 
 ### Releasing
 

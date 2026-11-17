@@ -8,6 +8,7 @@
 
 ## Checklist
 
+- [ ] Title follows `type(module): short description`
 - [ ] `bun run lint` and `bun run test` pass
 - [ ] New user-facing text is in the `en`, `de` and `fr` catalogs
 - [ ] The area's ADR (and the glossary, for a new term) is updated
