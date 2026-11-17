@@ -27,7 +27,7 @@ import {
 } from 'react-native';
 
 import { t } from '../../i18n';
-import { loadOlder, markRead, mayMarkFullyRead } from '../../state/actions/core';
+import { loadOlder, markRead, mayMarkFullyRead, visitRoom } from '../../state/actions/core';
 import { releaseTimeline, retainTimeline } from '../../state/actions/timeline';
 import { clearFocused, setFocused } from '../../state/focus';
 import {
@@ -164,6 +164,7 @@ export function Timeline({
 
   // The engine follows the timeline while a screen shows it (sheets over it act on it too).
   useEffect(() => {
+    if (timelineKey.thread === null) visitRoom(store, account, timelineKey.room_id);
     retainTimeline(store, account, timelineKey);
 
     return () => releaseTimeline(store, account, timelineKey);

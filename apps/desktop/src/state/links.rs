@@ -9,7 +9,7 @@
 
 use matrix_core::{AccountId, Command, LinkTarget, Permalink, Person, RequestId, RoomPreview};
 
-use super::{Modal, PeopleSearch, Purpose, Scope, Screen, State};
+use super::{Modal, Purpose, Scope, Screen, State};
 use crate::i18n::{t, tf};
 
 /// The link dialog: what the link names, the account it acts for, and where it stands.
@@ -65,7 +65,7 @@ impl State {
     /// link. Anything else stays a search.
     pub fn open_typed_link(&mut self, text: &str) {
         let Some(permalink) = Permalink::parse_typed(text) else { return };
-        self.search = PeopleSearch::default();
+        self.reset_search();
         self.follow(permalink);
     }
 

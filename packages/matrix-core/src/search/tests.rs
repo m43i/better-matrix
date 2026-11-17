@@ -15,7 +15,11 @@ fn message(id: &str, text: &str) -> Value {
 fn fuzzy_matches_should_follow_the_shared_unicode_vectors() {
     let cases: Vec<Value> = serde_json::from_str(include_str!("matches.json")).unwrap();
     for case in cases {
-        let actual = fuzzy_match(case["text"].as_str().unwrap(), case["query"].as_str().unwrap()).map(|m| m.positions);
+        let matched = fuzzy_match(case["text"].as_str().unwrap(), case["query"].as_str().unwrap());
+        if let Some(rank) = case["rank"].as_u64() {
+            assert_eq!(matched.as_ref().unwrap().rank, rank as usize, "{case}");
+        }
+        let actual = matched.map(|m| m.positions);
         let expected: Option<Vec<usize>> = serde_json::from_value(case["positions"].clone()).unwrap();
         assert_eq!(actual, expected, "{case}");
     }

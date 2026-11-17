@@ -529,6 +529,8 @@ pub struct Nav {
     /// The thread open beside the room, by its root event, per account.
     threads: HashMap<AccountId, String>,
     pub adding_account: bool,
+    /// The shown room whose visit has been recorded, independent of subscription retries.
+    visited: Option<(AccountId, String)>,
 }
 
 #[derive(Debug)]
@@ -896,7 +898,7 @@ impl State {
                 self.nav.rooms.remove(&id);
                 self.nav.scopes.remove(&id);
                 if self.nav.account.as_ref() == Some(&id) {
-                    self.search = PeopleSearch::default();
+                    self.reset_search();
                     self.nav.account = self.accounts.iter().next().map(|account| account.summary.id.clone());
                 }
                 self.open_timelines.retain(|(account, _)| *account != id);
@@ -1581,6 +1583,13 @@ impl State {
             shown.push((account.clone(), TimelineKey::room(room_id)));
             if let Some(root) = self.active_thread() {
                 shown.push((account.clone(), TimelineKey::thread(room_id, root)));
+            }
+        }
+        let visiting = shown.first().map(|(account, key)| (account.clone(), key.room_id.clone()));
+        if self.nav.visited != visiting {
+            self.nav.visited = visiting.clone();
+            if let Some((account, room_id)) = visiting {
+                self.engine.send(Command::VisitRoom { account, room_id });
             }
         }
         if self.open_timelines.first() != shown.first() {
@@ -2460,7 +2469,7 @@ impl State {
     pub fn open_direct_chat(&mut self, user_id: &str) {
         let Some(account) = self.nav.account.clone() else { return };
         self.popover = None;
-        self.search = PeopleSearch::default();
+        self.reset_search();
         self.chat_search = PeopleSearch::default();
         let purpose = Purpose::DirectChat(account.clone());
         self.dispatch(Command::OpenDirectChat { account, user_id: user_id.to_owned() }, purpose);
@@ -2470,14 +2479,14 @@ impl State {
     pub fn open_found_room(&mut self, room_id: &str) {
         let Some(account) = self.nav.account.clone() else { return };
         self.popover = None;
-        self.search = PeopleSearch::default();
+        self.reset_search();
         self.open_room(&account, room_id);
     }
 
     /// A space picked in the top bar's search.
     pub fn open_found_space(&mut self, space_id: &str) {
         self.popover = None;
-        self.search = PeopleSearch::default();
+        self.reset_search();
         self.select_scope(Scope::Space(space_id.to_owned()));
     }
 
@@ -2588,7 +2597,7 @@ impl State {
     pub fn select_account(&mut self, id: &AccountId) {
         if self.accounts.get(id).is_some() {
             if self.nav.account.as_ref() != Some(id) {
-                self.search = PeopleSearch::default();
+                self.reset_search();
             }
             self.nav.account = Some(id.clone());
             self.nav.adding_account = false;

@@ -135,6 +135,14 @@ pub struct MessageJump {
 }
 
 impl super::State {
+    /// Drop results and stop their local history scan when a search is left.
+    pub fn reset_search(&mut self) {
+        if let Some(request) = self.search.message_request() {
+            self.engine.send(matrix_core::Command::Cancel(request));
+        }
+        self.search = PeopleSearch::default();
+    }
+
     pub fn open_found_message(&mut self, hit: &MessageHit) {
         let Some(account) = self.nav.account.clone() else { return };
         self.message_jump = Some(MessageJump {

@@ -320,3 +320,48 @@ fn a_frequently_used_room_should_survive_the_search_result_limit() {
         rt.elements().into_iter().filter_map(|e| e.key).filter(|k| k.starts_with("found-room-")).collect();
     assert_eq!(room_keys[0], "found-room-!result-7:example.org");
 }
+
+#[test]
+fn a_message_hit_should_scroll_an_offscreen_row_into_view() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        let entries = (0..80)
+            .map(|i| TimelineEntry {
+                id: format!("search-row-{i}"),
+                kind: EntryKind::Message(Box::new(matrix_core::Message {
+                    event_id: format!("$search-{i}"),
+                    sender_id: "@grace:example.org".into(),
+                    sender_name: "Grace".into(),
+                    content: matrix_core::MessageContent::Text { body: format!("Message {i}"), html: None },
+                    timestamp_ms: demo::DEMO_DAY_MS + i * 600_000,
+                    ..matrix_core::Message::default()
+                })),
+            })
+            .collect();
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::Reset(entries)],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    rt.update(|s, _| {
+        s.open_found_message(&matrix_core::MessageHit {
+            room_id: demo::DEMO_THREAD.0.into(),
+            event_id: "$search-0".into(),
+            thread: None,
+            sender: "@grace:example.org".into(),
+            timestamp_ms: demo::DEMO_DAY_MS,
+            body: "Message 0".into(),
+            highlights: vec![0],
+        })
+    });
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    let viewport = rt.presented("timeline").unwrap().0;
+    let row = rt.presented("msg-search-row-0").expect("the matching row should be mounted").0;
+    assert!(row[1] + row[3] > viewport[1] && row[1] < viewport[1] + viewport[3]);
+}

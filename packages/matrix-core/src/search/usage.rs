@@ -73,11 +73,11 @@ impl Usage {
     pub fn start(account: Account, sink: Arc<dyn EventSink>) -> (Self, tokio::task::AbortHandle) {
         let (send, mut receive) = mpsc::unbounded_channel::<UsageCommand>();
         let worker = tokio::spawn(async move {
-            let mut usage = match load(&account).await {
-                Ok(usage) => usage,
+            let (mut usage, writable) = match load(&account).await {
+                Ok(usage) => (usage, true),
                 Err(error) => {
                     eprintln!("matrix-engine: could not read search usage: {error}");
-                    SearchUsage::default()
+                    (SearchUsage::default(), false)
                 }
             };
             sink.emit(Event::SearchUsage { account: account.id().clone(), usage: usage.clone() });
@@ -98,7 +98,7 @@ impl Usage {
                 }
                 usage.record(interaction);
                 sink.emit(Event::SearchUsage { account: account.id().clone(), usage: usage.clone() });
-                if let Err(error) = save(&account, &usage).await {
+                if writable && let Err(error) = save(&account, &usage).await {
                     eprintln!("matrix-engine: could not save search usage: {error}");
                 }
             }

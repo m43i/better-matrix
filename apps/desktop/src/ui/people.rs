@@ -145,30 +145,33 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette) -> El {
             .on_press_tx(crate::state::navigate(move |s| s.open_found_room(&id)))
     };
     for (kind, title) in [(RoomKind::Group, t!("search.rooms")), (RoomKind::Direct, t!("search.direct"))] {
-        let mut found: Vec<&RoomSummary> =
-            account.rooms.iter().filter(|room| room.kind == kind && fuzzy_match(&room.name, query).is_some()).collect();
-        found.sort_by_key(|room| {
-            (
-                std::cmp::Reverse(account.search_usage.room(&room.room_id)),
-                fuzzy_match(&room.name, query).map(|matched| matched.rank),
-            )
-        });
+        let mut found: Vec<_> = account
+            .rooms
+            .iter()
+            .filter(|room| room.kind == kind)
+            .filter_map(|room| fuzzy_match(&room.name, query).map(|matched| (room, matched.rank)))
+            .collect();
+        found.sort_by_key(|(room, rank)| (std::cmp::Reverse(account.search_usage.room(&room.room_id)), *rank));
         found.truncate(RESULTS);
         if !found.is_empty() {
             any = true;
             list = list.child(section(title, p));
-            for room in found {
+            for (room, _) in found {
                 list = list.child(room_row(room));
             }
         }
     }
-    let mut spaces: Vec<_> = account.spaces.iter().filter(|space| fuzzy_match(&space.name, query).is_some()).collect();
-    spaces.sort_by_key(|space| fuzzy_match(&space.name, query).map(|matched| matched.rank));
+    let mut spaces: Vec<_> = account
+        .spaces
+        .iter()
+        .filter_map(|space| fuzzy_match(&space.name, query).map(|matched| (space, matched.rank)))
+        .collect();
+    spaces.sort_by_key(|(_, rank)| *rank);
     spaces.truncate(RESULTS);
     if !spaces.is_empty() {
         any = true;
         list = list.child(section(t!("search.spaces"), p));
-        for space in spaces {
+        for (space, _) in spaces {
             let id = space.room_id.clone();
             list = list.child(
                 person_row(

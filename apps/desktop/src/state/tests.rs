@@ -529,7 +529,10 @@ fn a_timeline_that_failed_to_open_should_open_again_on_retry() {
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
     drain(&mut commands);
     s.select_room("!one:x");
-    let (request, _) = commands.try_next().unwrap();
+    let request = drain(&mut commands)
+        .into_iter()
+        .find_map(|(request, command)| matches!(command, Command::OpenTimeline { .. }).then_some(request))
+        .unwrap();
     apply(&mut s, Event::Finished { request, result: Err("timeline closed".into()) });
     s.retry_history(&TimelineKey::room("!one:x"));
     assert!(matches!(&open_commands(&mut commands)[..], [Command::OpenTimeline { .. }]));
@@ -3333,4 +3336,142 @@ fn search_usage_should_stay_with_its_own_account() {
         ),
         (8, 0)
     );
+}
+
+#[test]
+fn leaving_a_search_should_cancel_its_message_request() {
+    let leave: &[fn(&mut State)] = &[
+        |s| s.open_found_room("!one:x"),
+        |s| s.open_found_space("!space:x"),
+        |s| s.open_direct_chat("@grace:example.org"),
+        |s| s.open_typed_link("#rust:matrix.org"),
+        |s| s.select_account(&AccountId::new("@b:example.org")),
+        |s| apply(s, Event::AccountRemoved(AccountId::new("@a:example.org"))),
+    ];
+    for leave in leave {
+        let (mut s, mut commands) = state();
+        with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+        with_rooms(&mut s, &AccountId::new("@b:example.org"), &[], Vec::new());
+        s.search.field.insert("device");
+        rest_search(&mut s);
+        let request = s.search.message_request().unwrap();
+        drain(&mut commands);
+        leave(&mut s);
+        assert!(
+            all_commands(&mut commands)
+                .iter()
+                .any(|c| matches!(c, Command::Cancel(cancelled) if *cancelled == request))
+        );
+    }
+}
+
+#[test]
+fn a_room_being_shown_should_record_one_visit_before_its_timeline_opens() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    s.select_room("!one:x");
+    s.select_room("!one:x");
+    assert_eq!(all_commands(&mut commands).iter().filter(|c| matches!(c, Command::VisitRoom { .. })).count(), 1);
+}
+
+fn looking_for_message() -> (State, DetachedCommands) {
+    let (mut s, mut commands) = scrolled_room();
+    let account = AccountId::new("@a:example.org");
+    let key = TimelineKey::room("!one:x");
+    apply(&mut s, Event::TimelineChanged { account, key, diffs: vec![matrix_core::TimelineDiff::Reset(Vec::new())] });
+    s.open_found_message(&message_hit());
+    drain(&mut commands);
+    (s, commands)
+}
+
+#[test]
+fn finding_an_older_message_should_wait_for_each_history_page() {
+    let (mut s, mut commands) = looking_for_message();
+    s.position_message(&mut Tx::default());
+    s.position_message(&mut Tx::default());
+    assert_eq!(all_commands(&mut commands).iter().filter(|c| matches!(c, Command::LoadOlder { .. })).count(), 1);
+}
+
+#[test]
+fn finding_an_older_message_should_pause_after_a_history_error() {
+    let (mut s, mut commands) = looking_for_message();
+    apply(
+        &mut s,
+        Event::HistoryFailed {
+            account: AccountId::new("@a:example.org"),
+            key: TimelineKey::room("!one:x"),
+            error: "offline".into(),
+        },
+    );
+    s.position_message(&mut Tx::default());
+    assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::LoadOlder { .. })));
+}
+
+#[test]
+fn exhausting_history_should_report_that_the_message_is_unavailable() {
+    let (mut s, _) = looking_for_message();
+    apply(
+        &mut s,
+        Event::HistoryLoaded {
+            account: AccountId::new("@a:example.org"),
+            key: TimelineKey::room("!one:x"),
+            reached_start: true,
+        },
+    );
+    s.position_message(&mut Tx::default());
+    assert!(s.message_jump.is_none() && s.notice.as_deref() == Some(t!("search.message_unavailable")));
+}
+
+#[test]
+fn navigating_away_should_stop_looking_for_the_message() {
+    let (mut s, mut commands) = looking_for_message();
+    s.show_overview();
+    s.position_message(&mut Tx::default());
+    assert!(s.message_jump.is_none());
+    assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::LoadOlder { .. })));
+}
+
+#[test]
+fn looking_for_a_message_should_not_mark_the_newest_message_read() {
+    let (mut s, mut commands) = looking_for_message();
+    let account = AccountId::new("@a:example.org");
+    let key = TimelineKey::room("!one:x");
+    s.accounts.timeline_mut(&account, &key).unwrap().read_up_to = Some("$newest".into());
+    s.mark_timeline_read(account, key);
+    assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::MarkRead { .. })));
+}
+
+#[test]
+fn loading_the_matching_message_should_finish_the_jump() {
+    let (mut s, _) = looking_for_message();
+    let entry = matrix_core::TimelineEntry {
+        id: "stable-row-id".into(),
+        kind: matrix_core::EntryKind::Message(Box::new(Message { event_id: "$hit".into(), ..Message::default() })),
+    };
+    apply(
+        &mut s,
+        Event::TimelineChanged {
+            account: AccountId::new("@a:example.org"),
+            key: TimelineKey::room("!one:x"),
+            diffs: vec![matrix_core::TimelineDiff::PushFront(entry)],
+        },
+    );
+    s.position_message(&mut Tx::default());
+    assert!(s.message_jump.is_none());
+}
+
+#[test]
+fn retrying_a_timeline_subscription_should_not_record_another_room_visit() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    s.select_room("!one:x");
+    let request = drain(&mut commands)
+        .into_iter()
+        .find_map(|(request, command)| matches!(command, Command::OpenTimeline { .. }).then_some(request))
+        .unwrap();
+    apply(&mut s, Event::Finished { request, result: Err("timeline closed".into()) });
+    s.retry_history(&TimelineKey::room("!one:x"));
+    assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::VisitRoom { .. })));
 }

@@ -1,6 +1,6 @@
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 
-import { loadOlder, markRead, openTimeline } from '../core';
+import { loadOlder, markRead, openTimeline, visitRoom } from '../core';
 import { timeline } from '../../selectors';
 import { Store } from '../../store';
 import { ADA, summary } from '../../../test/fixtures';
@@ -99,4 +99,12 @@ describe('loadOlder', () => {
     loadOlder(store, ADA, room);
     expect(sent.filter((s) => s.command.type === 'LoadOlder')).toHaveLength(2);
   });
+});
+
+it('showing a room should record a visit independently of its timeline subscription', () => {
+  const { store, sent } = setup();
+  visitRoom(store, ADA, room.room_id);
+  expect(sent.map((s) => s.command)).toEqual([
+    { type: 'VisitRoom', data: { account: ADA, room_id: room.room_id } },
+  ]);
 });

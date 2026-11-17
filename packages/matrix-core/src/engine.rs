@@ -202,6 +202,13 @@ pub enum Command {
         /// Which timeline.
         key: TimelineKey,
     },
+    /// Record a room being shown to the user. Background timeline subscriptions do not count.
+    VisitRoom {
+        /// The account viewing it.
+        account: AccountId,
+        /// The room shown (opening a thread does not count again).
+        room_id: String,
+    },
     /// Stop following a timeline.
     CloseTimeline {
         /// Whose room.
@@ -1685,15 +1692,20 @@ impl State {
                 self.sink.emit(Event::Finished { request, result: Ok(()) });
                 return;
             }
+            Command::VisitRoom { account, room_id } => {
+                let usage = self.accounts.get(&account).map(|running| running.usage.clone());
+                let account = self.account(&account);
+                Box::pin(async move {
+                    let account = account?;
+                    if let Some(usage) = usage {
+                        usage.room(&account, &room_id, 1, None);
+                    }
+                    Ok(Outcome::Done)
+                })
+            }
             Command::OpenTimeline { account: id, key } => {
                 let account = self.account(&id);
                 let (warm, fetch_keys) = self.accounts.get_mut(&id).map_or((None, false), |running| {
-                    if key.thread.is_none()
-                        && !running.timelines.contains_key(&key)
-                        && !running.opening.contains_key(&key)
-                    {
-                        running.usage.room(&running.account, &key.room_id, 1, None);
-                    }
                     running.opening.insert(key.clone(), request);
                     let fetch_keys = key.thread.is_none() && running.keys_fetched.insert(key.room_id.clone());
                     (running.take_warm(&key), fetch_keys)

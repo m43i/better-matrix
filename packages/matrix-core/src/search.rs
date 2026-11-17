@@ -47,7 +47,7 @@ pub fn fuzzy_match(text: &str, query: &str) -> Option<FuzzyMatch> {
     let chars: Vec<char> = text.chars().collect();
     // Keep an original position for every folded character (lowercase can expand one scalar).
     let folded: Vec<(char, usize)> =
-        chars.iter().enumerate().flat_map(|(i, c)| c.to_lowercase().map(move |c| (c, i))).collect();
+        chars.iter().enumerate().flat_map(|(i, c)| fold(*c).map(move |c| (c, i))).collect();
     let mut occurrences: HashMap<char, Vec<usize>> = HashMap::new();
     for (i, &(c, _)) in folded.iter().enumerate() {
         occurrences.entry(c).or_default().push(i);
@@ -55,7 +55,7 @@ pub fn fuzzy_match(text: &str, query: &str) -> Option<FuzzyMatch> {
     let mut positions = BTreeSet::new();
     let mut rank = 0;
     for term in query.split_whitespace() {
-        let needle: Vec<char> = term.to_lowercase().chars().collect();
+        let needle: Vec<char> = term.chars().flat_map(fold).collect();
         let mut best: Option<(usize, Vec<usize>)> = None;
         if needle.iter().any(|c| !occurrences.contains_key(c)) {
             return None;
@@ -91,6 +91,10 @@ pub fn fuzzy_match(text: &str, query: &str) -> Option<FuzzyMatch> {
         positions.extend(found);
     }
     Some(FuzzyMatch { positions: positions.into_iter().collect(), rank })
+}
+
+fn fold(c: char) -> impl Iterator<Item = char> {
+    c.to_lowercase().map(|c| if c == 'ς' { 'σ' } else { c })
 }
 
 impl Account {

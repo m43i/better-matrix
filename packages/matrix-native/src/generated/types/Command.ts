@@ -210,7 +210,15 @@ account: AccountId,
 /**
  * Which timeline.
  */
-key: TimelineKey, } } | { "type": "CloseTimeline", "data": { 
+key: TimelineKey, } } | { "type": "VisitRoom", "data": { 
+/**
+ * The account viewing it.
+ */
+account: AccountId, 
+/**
+ * The room shown (opening a thread does not count again).
+ */
+room_id: string, } } | { "type": "CloseTimeline", "data": { 
 /**
  * Whose room.
  */

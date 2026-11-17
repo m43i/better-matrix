@@ -65,6 +65,11 @@ export function openTimeline(store: Store, account: AccountId, key: TimelineKey)
   );
 }
 
+/** A room screen is being shown; background subscriptions never record a visit. */
+export function visitRoom(store: Store, account: AccountId, roomId: string): void {
+  store.send({ type: 'VisitRoom', data: { account, room_id: roomId } }, { quiet: true });
+}
+
 /** Stops following a timeline; the engine keeps it warm, the store keeps its entries. */
 export function closeTimeline(store: Store, account: AccountId, key: TimelineKey): void {
   store.send({ type: 'CloseTimeline', data: { account, key } }, { quiet: true });

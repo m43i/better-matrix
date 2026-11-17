@@ -166,6 +166,7 @@ describe('room actions', () => {
   it('marking a room read should open its main timeline, mark it and close it again', async () => {
     const { store, sent, finish } = setUp();
     const done = markRoomRead(store, ADA, '!a');
+    expect(ofType(sent, 'VisitRoom')).toEqual([]);
     finish(sent.find((s) => s.command.type === 'OpenTimeline')!.request);
     await settled();
     expect(ofType(sent, 'MarkRead')[0]!.data).toMatchObject({

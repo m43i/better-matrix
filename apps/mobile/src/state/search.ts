@@ -7,7 +7,7 @@ export interface FuzzyMatch {
 
 export function fuzzyMatch(text: string, query: string): FuzzyMatch | null {
   const chars = Array.from(text);
-  const folded = chars.flatMap((c, i) => Array.from(c.toLowerCase(), (c) => ({ c, i })));
+  const folded = chars.flatMap((c, i) => fold(c).map((c) => ({ c, i })));
   const occurrences = new Map<string, number[]>();
   folded.forEach(({ c }, i) => {
     const indices = occurrences.get(c) ?? [];
@@ -18,7 +18,7 @@ export function fuzzyMatch(text: string, query: string): FuzzyMatch | null {
   let rank = 0;
 
   for (const term of query.trim().split(/\s+/).filter(Boolean)) {
-    const needle = Array.from(term.toLowerCase());
+    const needle = Array.from(term).flatMap(fold);
     let best: FuzzyMatch | null = null;
 
     if (needle.some((c) => !occurrences.has(c))) return null;
@@ -50,7 +50,7 @@ export function fuzzyMatch(text: string, query: string): FuzzyMatch | null {
       const first = found[0] ?? 0;
       const last = found[found.length - 1] ?? first;
       const gaps = Math.max(0, last - first + 1 - needle.length);
-      const boundary = first === 0 || !/[\p{L}\p{N}]/u.test(chars[first - 1] ?? '');
+      const boundary = first === 0 || !/[\p{Alphabetic}\p{N}]/u.test(chars[first - 1] ?? '');
       const score = gaps * 100 + (boundary ? 0 : 10) + first;
 
       if (best === null || score < best.rank) best = { positions: found, rank: score };
@@ -64,4 +64,8 @@ export function fuzzyMatch(text: string, query: string): FuzzyMatch | null {
   }
 
   return { positions: [...positions].sort((a, b) => a - b), rank };
+}
+
+function fold(char: string): string[] {
+  return Array.from(char.toLowerCase(), (c) => (c === 'ς' ? 'σ' : c));
 }

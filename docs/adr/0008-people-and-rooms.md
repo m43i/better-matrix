@@ -45,13 +45,15 @@ Date: 2026-11-14
   - **Internal ranking:** within each section, frequently used rooms and people come first.
     `SearchUsage` belongs to one account on this device, loaded from the SDK's custom state
     store at startup and reported as `Event::SearchUsage`. An actual main-timeline open adds
-    one to its room and direct-chat peers; an accepted send adds three. Explicit replies also
+    one to its room and direct-chat peers (`Command::VisitRoom`, sent when a main timeline is
+    shown); background subscriptions such as Mark as read never count. An accepted send adds three. Explicit replies also
     count for their original sender, looked up only in the event cache. Repeated commands for
-    an already open/opening timeline and thread opens do not count as another room visit.
+    an already shown room and thread opens do not count as another room visit.
     A per-account worker owns the counters, accepts interactions through a channel and
     serializes persistence; snapshot requests go through the same queue, so searches see all
     earlier interactions and await initialization without holding up the engine actor. No usage goes to the homeserver. Counts begin learning with
-    this feature and survive app restarts.
+    this feature and survive app restarts. If saved usage cannot be read, that session keeps
+    new counts in memory and skips writes, preserving the saved data for the next launch.
     Message preference is the sum of room and sender counts, before fuzzy quality and recency,
     applied before retaining the best 30 hits. Room and people preference is also applied
     before the six-entry UI limit (and before the directory's 20-entry limit). A typed full

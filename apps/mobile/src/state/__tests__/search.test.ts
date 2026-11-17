@@ -3,8 +3,11 @@ import { fuzzyMatch } from '../search';
 
 it.each(vectors)(
   'should highlight $query in $text using the shared Unicode positions',
-  ({ text, query, positions }) => {
-    expect(fuzzyMatch(text, query)?.positions ?? null).toEqual(positions);
+  ({ text, query, positions, rank }) => {
+    const match = fuzzyMatch(text, query);
+    expect(match?.positions ?? null).toEqual(positions);
+
+    if (rank !== undefined) expect(match?.rank).toBe(rank);
   },
 );
 

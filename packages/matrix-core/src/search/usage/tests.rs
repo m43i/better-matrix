@@ -94,3 +94,15 @@ async fn replying_should_count_the_original_sender_without_a_request() {
     assert_eq!(tracker.snapshot().await.person("@b:example.org"), 3);
     worker.abort();
 }
+
+#[tokio::test]
+async fn an_unreadable_saved_history_should_not_be_overwritten_with_session_counts() {
+    let account = Account::for_test("http://127.0.0.1:1").await;
+    let unreadable = b"unreadable saved history".to_vec();
+    account.client().state_store().set_custom_value_no_read(KEY, unreadable.clone()).await.unwrap();
+    let (tracker, worker) = Usage::start(account.clone(), Arc::new(|_| {}));
+    tracker.send.send(UsageCommand::Interact(interaction("!room:example.org", "@grace:example.org", 3))).unwrap();
+    assert_eq!(tracker.snapshot().await.room("!room:example.org"), 3);
+    assert_eq!(account.client().state_store().get_custom_value(KEY).await.unwrap(), Some(unreadable));
+    worker.abort();
+}
