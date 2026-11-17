@@ -154,7 +154,14 @@ Date: 2026-11-14
 - **Making rooms** (`Command::CreateRoom`, `CreateSpace`, `RenameRoom`):
   - Rooms are private and encrypted. One made in a space is linked both ways.
   - The sidebar header's "+" offers a new section, a room in a space where
-    `SpaceSummary::can_add_rooms`, or a room or space from Home.
+    `SpaceSummary::can_add_rooms`, or a room from Home.
+  - On desktop, the rail's "+" after the last space opens the new-space form from any scope,
+    including when the account has no spaces yet. It requires an active signed-in account.
+    Creating a top-level space has no existing space's power-level requirement, and Matrix's
+    [capabilities API](https://spec.matrix.org/latest/client-server-api/#capabilities-negotiation)
+    exposes no creation permission. Homeserver restrictions are enforced by `CreateSpace` and
+    reported through the usual failure notice; `can_add_rooms` only governs linking rooms to
+    an existing space.
   - Right-clicking a space on the rail offers rename (`can_rename`) and leave. Matrix can't
     delete a space for everyone.
 - **Permalinks** (`matrix_core::Permalink`, `permalinks.rs`) read matrix.to links (encoded or

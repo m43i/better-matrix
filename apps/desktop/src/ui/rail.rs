@@ -1,9 +1,9 @@
 //! The rail on the far left: Home and the active account's spaces at the top, the signed-in
 //! user at the bottom, which opens the account menu. Home stays first; the spaces follow in the
-//! user's order, and dragging one moves it among them.
+//! user's order, and dragging one moves it among them. The plus after them creates a space.
 
 use crate::i18n::{t, tf};
-use rune::{El, col, el, icon};
+use rune::{El, ScrollSpec, col, el, icon};
 
 use super::components::{account_avatar, media_avatar, unread_dot};
 use super::icons;
@@ -12,11 +12,15 @@ use crate::state::{AccountData, Dragged, DropTarget, Popover, Scope, State, orde
 
 const WIDTH: f32 = 68.0;
 const TILE: f32 = 38.0;
+const GAP: f32 = 12.0;
+const EDGE: f32 = 16.0;
+const ACTION_GAP: f32 = 16.0;
+const BLUR_EDGE: f32 = 32.0;
 /// The key the account menu anchors to.
 pub const ACCOUNT_BUTTON: &str = "account-button";
 
 pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
-    let mut scopes = col().w_full().gap(12.0).items_center();
+    let mut scopes = col().w_full().gap(GAP).items_center();
     if let Some(account) = account {
         let current = s.active_scope();
         let home = el()
@@ -60,6 +64,38 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
         if matches!(target, Some(DropTarget::Space { index }) if *index >= place) {
             scopes = scopes.child(line());
         }
+        scopes = scopes.child(
+            el().key("rail-space-actions")
+                .w_full()
+                .h(TILE)
+                .center()
+                .sticky_bottom(TILE + ACTION_GAP + EDGE)
+                .child(
+                    el().key("rail-space-blur")
+                        .pin(Some(0.0), Some(-BLUR_EDGE), Some(0.0), None)
+                        .h(BLUR_EDGE + TILE * 2.0 + ACTION_GAP + EDGE)
+                        .clip_fade(0.0, BLUR_EDGE, 0.0, 0.0)
+                        .stuck_reveal(8.0)
+                        .child(el().w_full().h_full().backdrop_blur(8.0).linear_gradient(
+                            std::f32::consts::PI,
+                            [(0.0, p.rail_bg.alpha(0.0)), (0.25, p.rail_bg.alpha(0.95)), (1.0, p.rail_bg)],
+                        )),
+                )
+                .child(
+                    el().key("rail-create-space")
+                        .size(TILE, TILE)
+                        .radius(TILE * 0.22)
+                        .center()
+                        .hover(p.sidebar_hover)
+                        .role("button")
+                        .cursor(rune::Cursor::Pointer)
+                        .label(t!("create.space"))
+                        .help(t!("create.space"))
+                        .focusable(true)
+                        .child(icon(&icons::PLUS, 20.0).color(p.sidebar_text))
+                        .on_press(|s: &mut State| s.open_room_form(crate::state::RoomForm::NewSpace)),
+                ),
+        );
     }
 
     let mut me = el().key(ACCOUNT_BUTTON).size(TILE, TILE);
@@ -78,16 +114,20 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
         }
     }
 
-    col()
-        .key("rail")
+    el().key("rail")
         .w(WIDTH)
         .h_full()
-        .pt(16.0)
-        .pb(16.0)
         .fill(p.rail_bg)
-        .items_center()
-        .child(scopes.grow(1.0))
-        .child(me)
+        .child(
+            col()
+                .key("rail-scopes")
+                .w_full()
+                .h_full()
+                .py(EDGE)
+                .scroll(ScrollSpec { stick_bottom: false })
+                .child(scopes.pb(TILE + ACTION_GAP + EDGE)),
+        )
+        .child(me.pin(Some((WIDTH - TILE) / 2.0), None, None, Some(EDGE)))
 }
 
 /// The ring around the selected entry and the open account button: a thin line in the accent

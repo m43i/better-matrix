@@ -15,6 +15,22 @@ use crate::state::{Format, SignInStep, State};
 
 pub const WORK_SPACE: &str = "!engines:example.org";
 
+/// An overflowing rail, for checking spaces scrolling behind its bottom actions.
+pub fn many_spaces(s: &mut State) {
+    seed(s);
+    let Some(account) = s.active_account() else { return };
+    let id = account.summary.id.clone();
+    let rooms = account.rooms.clone();
+    let spaces = (0..20)
+        .map(|index| SpaceSummary {
+            room_id: format!("!space-{index}:example.org"),
+            name: format!("Space {index:02}"),
+            ..Default::default()
+        })
+        .collect();
+    apply(s, Event::RoomsUpdated { account: id, list: RoomList { rooms, spaces, ..Default::default() } });
+}
+
 const GRACE: &str = "@grace:example.org";
 const ALAN: &str = "@alan:example.org";
 pub const ADA: &str = "@ada:example.org";

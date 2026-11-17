@@ -413,6 +413,7 @@ fn spec() -> AppSpec<State> {
                     target: Some(state::DropTarget::Space { index: 0 }),
                 });
             }),
+            ("demo-many-spaces", demo::many_spaces),
             ("demo-create-menu", |s| {
                 demo::seed(s);
                 s.toggle_popover(Popover::CreateMenu);

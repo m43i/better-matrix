@@ -15,7 +15,7 @@ add an account, settings, sign out. On phones, the sheet the avatar at the heade
 
 **Rail**
 : The narrow column on the far left: Home and the active account's spaces in the user's order,
-then the account avatar at the bottom.
+then "+" to create a space, with the account avatar at the bottom.
 
 **Scope**
 : What the sidebar lists: **Home** or one **space**. Each account remembers its own.
@@ -78,8 +78,9 @@ sections, survive restarts, and never sync to the homeserver.
 or user ID (`#rust:matrix.org`), as people paste invitations (`Permalink::parse_typed`).
 
 **Create menu**
-: What can be made here: a chat, a room, a space, a section. The sidebar's "+" on the desktop;
-on phones, the floating button on Android and the "+" in iOS's tab bar.
+: What can be made here: a room or section under the sidebar's "+" on desktop (spaces use the
+rail's "+"); on phones, a chat, room, space or section under Android's floating button or the
+"+" in iOS's tab bar.
 
 **Timeline**
 : A room's messages, oldest first, with date dividers, the "New" marker and the start of visible

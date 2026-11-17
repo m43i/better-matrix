@@ -388,8 +388,8 @@ pub fn new_chat_panel(s: &State, account: &AccountData, p: &Palette) -> El {
     col().child(panel).anchored(NEW_CHAT, rune::Side::Bottom, rune::Align::Start, 6.0)
 }
 
-/// What can be made here: a section always; a room inside a space the user may add rooms to;
-/// a space from Home.
+/// What can be made here: a section always; a room from Home or inside a space the user may
+/// add rooms to. Spaces are created from the rail.
 pub fn create_menu(s: &State, account: &AccountData, p: &Palette) -> El {
     use super::components::{Tone, menu_action};
     let mut panel = super::components::popover_panel(p).key("create-menu").w(220.0).child(
@@ -414,11 +414,6 @@ pub fn create_menu(s: &State, account: &AccountData, p: &Palette) -> El {
                 menu_action(&icons::PLUS, t!("create.room"), Tone::Normal, p)
                     .key("create-room")
                     .on_press(|s: &mut State| s.open_room_form(crate::state::RoomForm::NewRoom { space: None })),
-            );
-            panel = panel.child(
-                menu_action(&icons::HOME, t!("create.space"), Tone::Normal, p)
-                    .key("create-space")
-                    .on_press(|s: &mut State| s.open_room_form(crate::state::RoomForm::NewSpace)),
             );
         }
     }

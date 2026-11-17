@@ -13,8 +13,10 @@ Date: 2026-11-14
 
 ## Decision
 
-- **Rail:** Home, then the active account's spaces. The user's avatar at the bottom opens the
-  account menu.
+- **Rail:** Home, then the active account's spaces, then "+" to create a space (see
+  [0008](0008-people-and-rooms.md)). With many spaces, the plus stays above the user's avatar
+  at the bottom; spaces scroll behind them through a blurred transition. With short lists,
+  the plus follows the last space. The avatar opens the account menu.
 - **Scope:** what the sidebar lists, filtered in one place (`AccountData::rooms_in`).
   - Home: every direct chat, and the rooms in no space.
   - A space: its rooms, subspaces included (cycle-safe), and direct chats with its members.

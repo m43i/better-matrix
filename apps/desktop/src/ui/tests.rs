@@ -27,6 +27,96 @@ fn press(rt: &mut Runtime<State>, key: &str) {
 }
 
 #[test]
+fn space_creation_should_follow_the_last_space_in_the_rail() {
+    let rt = runtime(|_| {});
+    let add = rt.presented("rail-create-space").expect("the new-space button").0;
+    let account = rt.state.active_account().unwrap();
+    let last = crate::state::ordered_spaces(&account.spaces, &account.sidebar).pop().unwrap();
+    let space = rt.presented(&format!("scope-{}", last.room_id)).unwrap().0;
+    assert!(add[1] >= space[1] + space[3], "the plus must follow the last space");
+}
+
+#[test]
+fn space_creation_should_be_available_before_joining_any_spaces() {
+    let rt = runtime(|s| {
+        let account = s.nav.account.clone().unwrap();
+        s.accounts.set_room_list(&account, matrix_core::RoomList::default());
+    });
+    assert!(rt.find("rail-create-space").is_some());
+}
+
+#[test]
+fn space_creation_should_stay_reachable_with_many_spaces() {
+    let mut rt = runtime(demo::many_spaces);
+    let avatar = rt.presented("account-button").unwrap().0;
+    rt.wheel(34.0, 300.0, 2000.0);
+    rt.frame(1.0 / 60.0);
+    let add = rt.presented("rail-create-space").unwrap().0;
+    let first = rt.presented("scope-!space-0:example.org").unwrap().0;
+    assert!(rt.presented("rail-space-blur").unwrap().1 > 0.99, "spaces must scroll behind the blur");
+    assert!(rt.instances.iter().any(|instance| instance.params[1] == rune::render::KIND_BACKDROP_BLUR));
+    rt.wheel(34.0, 300.0, -2000.0);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.presented("scope-!space-0:example.org").unwrap().0[1] < first[1], "spaces must scroll");
+    assert_eq!(rt.presented("rail-create-space").unwrap().0, add, "the plus must stay fixed");
+    assert!(add[1] >= 0.0 && add[1] + add[3] <= avatar[1], "the plus must fit above the avatar");
+    assert!((avatar[1] - add[1] - add[3] - 16.0).abs() < 0.5, "the actions need a clear gap");
+    assert_eq!(rt.presented("account-button").unwrap().0, avatar, "the avatar must stay fixed");
+    press(&mut rt, "rail-create-space");
+    assert!(matches!(
+        rt.state.modal,
+        Some(crate::state::Modal::RoomForm { form: crate::state::RoomForm::NewSpace, .. })
+    ));
+}
+
+#[test]
+fn space_creation_should_require_an_active_account() {
+    let rt = runtime(|s| s.nav.account = None);
+    assert!(rt.find("rail-create-space").is_none());
+}
+
+#[test]
+fn space_creation_should_open_the_same_form_from_home_and_a_space() {
+    for scope in [crate::state::Scope::Home, crate::state::Scope::Space(demo::WORK_SPACE.into())] {
+        let mut rt = runtime(|s| s.select_scope(scope));
+        press(&mut rt, "rail-create-space");
+        assert!(matches!(
+            rt.state.modal,
+            Some(crate::state::Modal::RoomForm { form: crate::state::RoomForm::NewSpace, .. })
+        ));
+    }
+}
+
+#[test]
+fn space_creation_should_not_require_managing_an_existing_space() {
+    let mut rt = runtime(|s| {
+        let account = s.active_account().unwrap();
+        let id = account.summary.id.clone();
+        let mut spaces = account.spaces.clone();
+        for space in &mut spaces {
+            space.can_add_rooms = false;
+            space.can_rename = false;
+        }
+        s.accounts.set_room_list(&id, matrix_core::RoomList { spaces, ..Default::default() });
+        s.select_scope(crate::state::Scope::Space(demo::WORK_SPACE.into()));
+    });
+    press(&mut rt, "rail-create-space");
+    assert!(matches!(
+        rt.state.modal,
+        Some(crate::state::Modal::RoomForm { form: crate::state::RoomForm::NewSpace, .. })
+    ));
+}
+
+#[test]
+fn space_creation_should_be_absent_from_the_sidebar_create_menu() {
+    let mut rt = runtime(|s| s.select_scope(crate::state::Scope::Home));
+    press(&mut rt, "sidebar-create");
+    assert!(rt.find("create-menu").is_some());
+    assert!(rt.find("create-space").is_none());
+    assert!(rt.find("create-room").is_some());
+}
+
+#[test]
 fn switching_settings_sections_should_land_the_new_content_at_once() {
     let mut rt = runtime(State::open_settings);
     press(&mut rt, "settings-info");
