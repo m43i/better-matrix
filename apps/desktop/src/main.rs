@@ -301,6 +301,14 @@ fn spec() -> AppSpec<State> {
                 s.show_settings_section(SettingsSection::Profile);
             }),
             ("demo-search", demo::search),
+            ("demo-search-empty", |s| {
+                demo::seed(s);
+                s.open_search();
+            }),
+            ("demo-search-rooms", |s| {
+                demo::search(s);
+                s.search.filter = state::SearchFilter::Rooms;
+            }),
             ("demo-search-ranked", |s| {
                 demo::search(s);
                 s.apply(
@@ -485,9 +493,18 @@ fn spec() -> AppSpec<State> {
 }
 
 /// Window-wide keys the focused element left unhandled.
-fn on_key(s: &mut State, key: &KeyEvent, _: &mut Tx) -> bool {
+fn on_key(s: &mut State, key: &KeyEvent, tx: &mut Tx) -> bool {
+    if rune::Keybind::new("mod+k").matches_tx(key, tx)
+        && s.screen() == state::Screen::Chat
+        && s.nav.account.is_some()
+        && s.modal.is_none()
+        && s.preview.is_none()
+    {
+        s.open_search();
+        return true;
+    }
     match key.key {
-        Key::Escape if s.popover.is_some() => {
+        Key::Escape if matches!(s.popover, Some(Popover::Select(_) | Popover::AttachmentMenu { .. })) => {
             s.close_popover();
             true
         }
@@ -497,6 +514,10 @@ fn on_key(s: &mut State, key: &KeyEvent, _: &mut Tx) -> bool {
         }
         Key::Escape if s.modal.is_some() => {
             s.close_modal();
+            true
+        }
+        Key::Escape if s.popover.is_some() => {
+            s.close_popover();
             true
         }
         _ => false,

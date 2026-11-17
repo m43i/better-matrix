@@ -98,6 +98,10 @@ Date: 2026-11-14
   - The engine re-reads rooms on the SDK's room-info updates, so badges follow its counts.
 - **Settings:** a modal in sections (`SettingsSection`). Device settings go to a prefs file off
   the UI thread; account settings live on the homeserver.
+  - Every desktop dialog uses the shared modal layer's Rune focus trap and Escape dismissal.
+    Attachment previews and selects above a dialog have their own traps; Escape dismisses
+    the topmost overlay first. Popover fields (search, new chat and emoji) intercept Escape
+    before the text editor consumes it to blur; the window handles Escape for other popovers.
   - The section content uses `instant_changes`: switching sections replaces it immediately,
     without morphing unrelated controls. Each section's content has its own stable key, so
     Rune does not reuse an unrelated control's colour tracks at the same position in the tree:

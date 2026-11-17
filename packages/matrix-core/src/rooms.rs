@@ -94,7 +94,78 @@ fn servers(via: &[String]) -> Vec<OwnedServerName> {
     via.iter().filter_map(|server| ServerName::parse(server).ok()).collect()
 }
 
+/// Which destinations to find in a homeserver's public directory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub enum DirectoryKind {
+    /// Public conversations.
+    Rooms,
+    /// Public spaces.
+    Spaces,
+}
+
 impl Account {
+    /// Search the account's homeserver directory, keeping at most 20 public destinations.
+    /// Separate room-type requests keep popular rooms from crowding out spaces. Read at most
+    /// six pages when a server ignores the type filter; never enumerate the whole directory.
+    pub async fn search_directory(&self, term: &str, kind: DirectoryKind) -> Result<Vec<RoomPreview>, Error> {
+        use matrix_sdk::ruma::api::client::directory::get_public_rooms_filtered::v3::Request;
+        use matrix_sdk::ruma::directory::RoomTypeFilter;
+        use matrix_sdk::ruma::room::JoinRuleKind;
+        use std::collections::HashSet;
+
+        let term = term.trim();
+        if term.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut since = None;
+        let mut tokens = HashSet::new();
+        let mut seen = HashSet::new();
+        let mut found = Vec::new();
+        for _ in 0..6 {
+            let mut request = Request::new();
+            request.limit = Some(50u16.into());
+            request.since = since;
+            request.filter.generic_search_term = Some(term.to_owned());
+            request.filter.room_types = vec![match kind {
+                DirectoryKind::Rooms => RoomTypeFilter::Default,
+                DirectoryKind::Spaces => RoomTypeFilter::Space,
+            }];
+            let response = self.client().send(request).await?;
+            for room in response.chunk {
+                let space = room.room_type == Some(RoomType::Space);
+                if space != (kind == DirectoryKind::Spaces)
+                    || room.join_rule != JoinRuleKind::Public
+                    || !seen.insert(room.room_id.clone())
+                {
+                    continue;
+                }
+                let state = self.client().get_room(&room.room_id).map(|room| room.state());
+                found.push(RoomPreview {
+                    room_id: room.room_id.to_string(),
+                    alias: room.canonical_alias.map(|alias| alias.to_string()),
+                    name: room.name.filter(|name| !name.trim().is_empty()),
+                    topic: room.topic.filter(|topic| !topic.trim().is_empty()),
+                    avatar: room.avatar_url.and_then(crate::convert::avatar),
+                    member_count: room.num_joined_members.into(),
+                    join_rule: Some(JoinRule::Public),
+                    space,
+                    joined: state == Some(matrix_sdk::RoomState::Joined),
+                    invited: state == Some(matrix_sdk::RoomState::Invited),
+                });
+                if found.len() == 20 {
+                    return Ok(found);
+                }
+            }
+            since = response.next_batch;
+            let Some(token) = &since else { break };
+            if !tokens.insert(token.clone()) {
+                return Err(Error::RepeatedPaginationToken { resource: "public directory".into() });
+            }
+        }
+        Ok(found)
+    }
+
     /// Public rooms anywhere under a space, with all hierarchy pages included before ranking.
     pub async fn public_rooms(&self, space: &str) -> Result<Vec<crate::PublicRoom>, Error> {
         use matrix_sdk::ruma::api::client::space::get_hierarchy::v1::Request;

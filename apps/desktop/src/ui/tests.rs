@@ -897,3 +897,74 @@ fn a_reader_timestamp_should_include_its_localized_day() {
     assert!(label.contains(", "));
     assert!(rt.elements().iter().any(|element| element.text.as_deref() == Some(label.as_str())));
 }
+
+#[test]
+fn every_demo_dialog_should_close_on_escape_even_when_a_field_is_focused() {
+    let mut checked = 0;
+    for (name, scene) in crate::spec().scenes {
+        let mut state = State::detached();
+        scene(&mut state);
+        if state.modal.is_none() {
+            continue;
+        }
+        state.popover = None;
+        state.preview = None;
+        let mut rt = Runtime::new(state, super::view, (1200.0, 760.0), Env::new(true, 1.0));
+        rt.on_key = Some(crate::on_key);
+        rt.frame(0.0);
+        rt.key(rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() });
+        rt.frame(0.0);
+        assert!(rt.state.modal.is_none(), "{name} should close on Escape");
+        checked += 1;
+    }
+    assert!(checked >= 20, "exercise the app’s different dialog kinds");
+}
+
+#[test]
+fn escape_should_close_a_settings_select_before_its_dialog() {
+    let mut rt = runtime(|s| s.show_settings_section(SettingsSection::General));
+    rt.on_key = Some(crate::on_key);
+    press(&mut rt, "select-language");
+    assert!(rt.state.popover.is_some());
+    rt.key(rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() });
+    rt.frame(0.0);
+    assert!(rt.state.popover.is_none());
+    assert!(rt.state.modal.is_some());
+    rt.key(rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() });
+    rt.frame(0.0);
+    assert!(rt.state.modal.is_none());
+}
+
+#[test]
+fn escape_should_close_an_attachment_preview_before_the_dialog_beneath_it() {
+    use crate::state::{DocumentStatus, ImageStatus, Preview, PreviewContent};
+    use matrix_core::{Attachment, AttachmentKind, MediaRef};
+
+    for document in [false, true] {
+        let mut rt = runtime(|s| {
+            s.show_settings_section(SettingsSection::General);
+            s.preview = Some(Preview {
+                account: AccountId::new(demo::ADA),
+                attachment: Attachment {
+                    kind: if document { AttachmentKind::File } else { AttachmentKind::Image },
+                    name: if document { "notes.pdf" } else { "photo.png" }.into(),
+                    size: None,
+                    media: None,
+                    thumbnail: None,
+                    dimensions: None,
+                },
+                media: MediaRef::opaque("preview"),
+                content: if document {
+                    PreviewContent::Document { pages: Vec::new(), status: DocumentStatus::Downloading }
+                } else {
+                    PreviewContent::Image { thumbnail: None, status: ImageStatus::Downloading }
+                },
+            });
+        });
+        rt.on_key = Some(crate::on_key);
+        rt.key(rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() });
+        rt.frame(0.0);
+        assert!(rt.state.preview.is_none());
+        assert!(rt.state.modal.is_some());
+    }
+}

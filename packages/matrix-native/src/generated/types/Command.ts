@@ -4,6 +4,7 @@ import type { AccountPage } from "./AccountPage";
 import type { ContactDetail } from "./ContactDetail";
 import type { ContactKind } from "./ContactKind";
 import type { DeviceKind } from "./DeviceKind";
+import type { DirectoryKind } from "./DirectoryKind";
 import type { LoginRequest } from "./LoginRequest";
 import type { MediaRef } from "./MediaRef";
 import type { MediaSize } from "./MediaSize";
@@ -460,7 +461,19 @@ account: AccountId,
 /**
  * A name or user ID, or part of one.
  */
-term: string, } } | { "type": "SearchMessages", "data": { 
+term: string, } } | { "type": "SearchDirectory", "data": { 
+/**
+ * Whose homeserver to search.
+ */
+account: AccountId, 
+/**
+ * Part of a name, alias or topic. Empty text returns no results.
+ */
+term: string, 
+/**
+ * Rooms or spaces, with separate result limits.
+ */
+kind: DirectoryKind, } } | { "type": "SearchMessages", "data": { 
 /**
  * The account whose history to search.
  */

@@ -49,8 +49,8 @@ was invited to. Its counter stays while collapsed. Home also lists invitations; 
 a preview with Accept and Decline.
 
 **Public rooms**
-: Rooms anyone may join, discovered through a space's hierarchy. Its Overview suggests the
-unjoined ones with the most members; More shows the full list.
+: Rooms anyone may join, discovered through the homeserver’s public directory or a space’s
+hierarchy. Its Overview suggests the unjoined ones with the most members; More shows the full list.
 
 **Sidebar**
 : The column listing the rooms and direct chats of the current scope.
@@ -61,6 +61,8 @@ unjoined ones with the most members; More shows the full list.
 **Search**
 : The field in the desktop's top bar, and under each tab's title on phones: the account's rooms,
 direct chats and spaces by name, people from the user directory, and a **typed link** to open.
+The desktop also searches public rooms and spaces from the homeserver’s directory. Its filter
+row narrows search to spaces, rooms (including direct chats), people or messages; no filter searches all.
 Results have sections, with **message hits** from this device beneath the people and destinations.
 Names and message excerpts highlight the characters matching the fuzzy query.
 

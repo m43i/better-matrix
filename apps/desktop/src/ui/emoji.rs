@@ -103,6 +103,7 @@ pub fn picker(s: &State, chosen_for: &EmojiFor, anchor: String, p: &Palette) -> 
         .color(p.text)
         .grow(1.0)
         .on_edit(|s: &mut State| &mut s.emoji_search)
+        .on_input_key(State::popover_input_key)
         // Enter picks the first match.
         .on_submit(move |s: &mut State, _| {
             if let Some(emoji) = first {

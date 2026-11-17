@@ -420,6 +420,15 @@ pub enum Command {
         /// A name or user ID, or part of one.
         term: String,
     },
+    /// Search the homeserver's public directory; answered by [`Event::DirectoryFound`].
+    SearchDirectory {
+        /// Whose homeserver to search.
+        account: AccountId,
+        /// Part of a name, alias or topic. Empty text returns no results.
+        term: String,
+        /// Rooms or spaces, with separate result limits.
+        kind: crate::DirectoryKind,
+    },
     /// Search this account's locally stored messages without a server request; answered by
     /// [`Event::MessagesFound`]. Empty text returns no hits; at most 30 are returned.
     SearchMessages {
@@ -810,6 +819,13 @@ pub enum Event {
         request: RequestId,
         /// Who matched.
         people: Vec<crate::Person>,
+    },
+    /// Public destinations found for [`Command::SearchDirectory`].
+    DirectoryFound {
+        /// The search being answered.
+        request: RequestId,
+        /// Up to 20 rooms or spaces in the directory's relevance order.
+        rooms: Vec<crate::RoomPreview>,
     },
     /// Public rooms in a space, for [`Command::ListPublicRooms`].
     PublicRooms {
@@ -2027,6 +2043,14 @@ impl State {
                     };
                     let people = account?.search_people_ranked(&term, &usage).await?;
                     sink.emit(Event::PeopleFound { request, people });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::SearchDirectory { account, term, kind } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    let rooms = account?.search_directory(&term, kind).await?;
+                    sink.emit(Event::DirectoryFound { request, rooms });
                     Ok(Outcome::Done)
                 })
             }

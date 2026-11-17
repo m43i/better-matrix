@@ -64,7 +64,7 @@ pub use history::{PinnedMessage, SharedFile, ThreadInfo};
 pub use people::{MemberRole, Members, Moderation, Presence, RoomMember};
 pub use permalinks::{LinkAction, LinkTarget, Permalink};
 pub use profile::{AccountPage, ContactDetail, ContactKind, Contacts, PendingContact};
-pub use rooms::{JoinRule, RoomPreview};
+pub use rooms::{DirectoryKind, JoinRule, RoomPreview};
 pub use search::{MessageHit, SearchUsage};
 pub use secrets::{FileSecrets, MemorySecrets, SecretError, SecretStore};
 pub use security::{RecoveryStatus, SasEmoji, Security, Session, VerificationStep};

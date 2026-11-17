@@ -345,7 +345,8 @@ pub fn new_chat_panel(s: &State, account: &AccountData, p: &Palette) -> El {
         .fill(p.bg)
         .border(1.0, p.divider)
         .autofocus()
-        .on_edit(|s: &mut State| &mut s.chat_search.field);
+        .on_edit(|s: &mut State| &mut s.chat_search.field)
+        .on_input_key(State::popover_input_key);
     let me = account.summary.id.as_str();
     let mut list = col().w_full();
     if s.chat_search.query().is_empty() && !s.chat_search.people.is_empty() {

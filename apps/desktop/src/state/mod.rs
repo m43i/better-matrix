@@ -62,7 +62,7 @@ pub use preview::{DocumentStatus, ImageStatus, Opens, Preview, PreviewContent, r
 pub use profile::{ContactStep, ProfileForm};
 pub use readers::{READER_FACES, ReaderMenu};
 pub use room_discovery::Directory;
-pub use search::{MessageSearchStatus, PeopleSearch, SEARCH_PAUSE, matches};
+pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches};
 pub use sections::{DIRECT, INVITATIONS, ROOMS, SectionView, is_builtin, ordered_spaces, sections};
 pub use settings::{Appearance, Settings, SettingsSection, Zoom};
 pub use sign_in::{SignInForm, SignInStep};
@@ -507,6 +507,8 @@ enum Purpose {
     SidePanel(AccountId, String, SidePanel),
     /// A local message search.
     MessageSearch,
+    /// A public room or space directory search; errors stay in the search panel.
+    DirectorySearch,
     /// A user-directory search; failures leave the results as they were.
     People,
     /// Inviting someone.
@@ -1138,6 +1140,10 @@ impl State {
             Event::MessagesFound { request, messages } => {
                 self.search.messages_found(request, messages);
             }
+            Event::DirectoryFound { request, rooms } => {
+                self.search.directory_found(request, rooms);
+                self.request_avatars();
+            }
             Event::PeopleFound { request, people } => {
                 self.link_person_found(request, &people);
                 self.search.found(request, people.clone());
@@ -1630,6 +1636,7 @@ impl State {
             }
             Purpose::Members { .. }
             | Purpose::MessageSearch
+            | Purpose::DirectorySearch
             | Purpose::People
             | Purpose::Read
             | Purpose::Typing
@@ -2202,6 +2209,17 @@ impl State {
             let found = [&self.search, &self.invite_search, &self.chat_search]
                 .into_iter()
                 .flat_map(|search| search.people.iter().filter_map(|person| person.avatar.clone()));
+            let public = [&self.search.public_rooms, &self.search.public_spaces]
+                .into_iter()
+                .filter(|_| self.popover == Some(Popover::Search))
+                .flat_map(|source| {
+                    source
+                        .rooms
+                        .iter()
+                        .filter(|room| account.room(&room.room_id).is_none() && account.space(&room.room_id).is_none())
+                        .take(6)
+                        .filter_map(|room| room.avatar.clone())
+                });
             wanted.extend(
                 rooms
                     .chain(spaces)
@@ -2210,6 +2228,7 @@ impl State {
                     .chain(pins)
                     .chain(typing)
                     .chain(found)
+                    .chain(public)
                     .map(|media| (id.clone(), media)),
             );
         }
@@ -2526,24 +2545,7 @@ impl State {
     /// results opened or closed.
     pub fn search_people(&mut self, now: std::time::Instant) -> bool {
         let Some(account) = self.nav.account.clone() else { return false };
-        let popover = self.popover.clone();
-        let previous = self.search.message_request();
-        let due = self.search.due(now);
-        if let Some(request) = previous
-            && previous != self.search.message_request()
-        {
-            self.engine.send(Command::Cancel(request));
-        }
-        if let Some(term) = due {
-            let messages = Command::SearchMessages { account: account.clone(), term: term.clone() };
-            self.search.message_status =
-                MessageSearchStatus::Searching(self.dispatch(messages, Purpose::MessageSearch));
-            let command = Command::SearchPeople { account: account.clone(), term };
-            self.search.request = Some(self.dispatch(command, Purpose::People));
-            self.popover = Some(Popover::Search);
-        } else if self.search.query().is_empty() && self.popover == Some(Popover::Search) {
-            self.popover = None;
-        }
+        let changed = self.search_destinations(now, &account);
         if let Some(term) = self.invite_search.due(now) {
             let request = self.dispatch(Command::SearchPeople { account: account.clone(), term }, Purpose::People);
             self.invite_search.request = Some(request);
@@ -2552,7 +2554,7 @@ impl State {
             let request = self.dispatch(Command::SearchPeople { account, term }, Purpose::People);
             self.chat_search.request = Some(request);
         }
-        self.popover != popover
+        changed
     }
 
     /// Opens the invite dialog for the open room.
@@ -2974,6 +2976,17 @@ impl State {
 
     pub fn close_popover(&mut self) {
         self.popover = None;
+    }
+
+    /// A popover's field must dismiss before the editor consumes Escape to blur itself.
+    pub fn popover_input_key(&mut self, key: &rune::KeyEvent, tx: &mut Tx) -> bool {
+        if key.key == rune::Key::Escape && self.popover.is_some() {
+            self.close_popover();
+            tx.blur();
+            true
+        } else {
+            false
+        }
     }
 
     /// Opens a room's context menu, or closes it when it is already open.

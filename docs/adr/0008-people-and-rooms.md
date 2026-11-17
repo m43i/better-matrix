@@ -37,6 +37,19 @@ Date: 2026-11-14
 - **File dialog:** `Shell::pick_files(PickFor)` and `State::files_picked` serve attachments and
   the profile picture. A new use is a `PickFor` variant.
 - **Search:**
+  - The desktop opens search on a field press or the in-application `mod+k` shortcut (Ctrl+K,
+    Command+K on macOS). Filters for Spaces, Rooms, People and Messages stay above the scrolling
+    results, including before typing. No filter searches all kinds in separate sections; one
+    selected filter limits both results and requests. Selecting it again or removing its field
+    chip clears it. Rooms includes direct chats. Emptying the query keeps the filter row open.
+  - `Command::SearchDirectory` → `Event::DirectoryFound` searches the active account's homeserver
+    public directory by name, alias and topic. Rooms and spaces use separate type-filtered
+    requests so popular rooms cannot crowd out spaces; each returns at most 20 destinations
+    (at most six pages, with repeated-token protection). The UI omits joined destinations from
+    the public sections. Selecting a result opens the existing room preview and Join flow for
+    this account, using its homeserver as a `via` server, without joining on selection.
+    Each source runs independently after the 300 ms pause, reports failures in its section,
+    and ignores obsolete responses. Changing query, filter or account cancels old requests.
   - A typed link or address comes first (Typed links, below), then the top bar matches rooms,
     direct chats and spaces on this device with case-insensitive fuzzy matching, and people in
     the user directory (`Command::SearchPeople`). Each kind has its own section (up to six

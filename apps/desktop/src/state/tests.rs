@@ -1428,6 +1428,7 @@ fn opening_a_room_should_list_its_members() {
 
 /// Lets what was typed in the searches rest long enough to be searched.
 fn rest_search(s: &mut State) {
+    s.open_search();
     let now = std::time::Instant::now();
     s.search_people(now);
     s.search_people(now + search::SEARCH_PAUSE);
@@ -1447,14 +1448,14 @@ fn typing_a_search_should_look_up_people_and_show_results() {
 }
 
 #[test]
-fn clearing_the_search_should_close_its_results() {
+fn clearing_the_search_should_keep_its_filters_available() {
     let (mut s, _) = state();
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
     s.search.field.insert("ada");
     rest_search(&mut s);
     s.search.field = TextEdit::new("");
     s.poll(&mut Tx::default());
-    assert!(s.popover.is_none());
+    assert_eq!(s.popover, Some(Popover::Search));
 }
 
 #[test]
@@ -3494,7 +3495,7 @@ fn a_failed_message_search_should_finish_its_loading_state() {
     rest_search(&mut s);
     let request = s.search.message_request().unwrap();
     apply(&mut s, Event::Finished { request, result: Err("store unavailable".into()) });
-    assert!(s.search.message_status == MessageSearchStatus::Failed);
+    assert!(s.search.message_status == SearchStatus::Failed);
 }
 
 fn message_hit() -> matrix_core::MessageHit {
@@ -3753,4 +3754,157 @@ fn read_indicator_profiles_should_fall_back_to_the_user_id() {
         s.active_account().unwrap().reader(crate::demo::DEMO_THREAD.0, "@unknown:example.org"),
         matrix_core::Person { id: "@unknown:example.org".into(), name: "@unknown:example.org".into(), avatar: None }
     );
+}
+#[test]
+fn an_unfiltered_search_should_request_each_source_for_the_active_account() {
+    let (mut s, mut commands) = state();
+    let account = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &account, &[], Vec::new());
+    drain(&mut commands);
+    s.search.field.insert("rust");
+    rest_search(&mut s);
+    let searches: Vec<_> = all_commands(&mut commands)
+        .into_iter()
+        .filter(|c| {
+            matches!(c, Command::SearchPeople { .. } | Command::SearchMessages { .. } | Command::SearchDirectory { .. })
+        })
+        .collect();
+    assert_eq!(
+        searches,
+        vec![
+            Command::SearchMessages { account: account.clone(), term: "rust".into() },
+            Command::SearchPeople { account: account.clone(), term: "rust".into() },
+            Command::SearchDirectory {
+                account: account.clone(),
+                term: "rust".into(),
+                kind: matrix_core::DirectoryKind::Rooms
+            },
+            Command::SearchDirectory { account, term: "rust".into(), kind: matrix_core::DirectoryKind::Spaces },
+        ]
+    );
+}
+
+#[test]
+fn a_filter_should_only_search_its_selected_source() {
+    for (filter, command) in [
+        (
+            SearchFilter::Spaces,
+            Command::SearchDirectory {
+                account: AccountId::new("@a:example.org"),
+                term: "rust".into(),
+                kind: matrix_core::DirectoryKind::Spaces,
+            },
+        ),
+        (
+            SearchFilter::Rooms,
+            Command::SearchDirectory {
+                account: AccountId::new("@a:example.org"),
+                term: "rust".into(),
+                kind: matrix_core::DirectoryKind::Rooms,
+            },
+        ),
+        (
+            SearchFilter::People,
+            Command::SearchPeople { account: AccountId::new("@a:example.org"), term: "rust".into() },
+        ),
+        (
+            SearchFilter::Messages,
+            Command::SearchMessages { account: AccountId::new("@a:example.org"), term: "rust".into() },
+        ),
+    ] {
+        let (mut s, mut commands) = state();
+        with_rooms(&mut s, &AccountId::new("@a:example.org"), &[], Vec::new());
+        s.search.field.insert("rust");
+        s.select_search_filter(filter);
+        drain(&mut commands);
+        rest_search(&mut s);
+        assert_eq!(all_commands(&mut commands), [command]);
+    }
+}
+
+#[test]
+fn changing_filters_should_cancel_requests_and_ignore_their_answers() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &[], Vec::new());
+    s.search.field.insert("rust");
+    rest_search(&mut s);
+    let old = s.search.requests();
+    let directory = s.search.public_spaces.status.request().unwrap();
+    drain(&mut commands);
+    s.select_search_filter(SearchFilter::People);
+    apply(&mut s, Event::DirectoryFound { request: directory, rooms: vec![directory_room(true)] });
+    assert!(s.search.public_spaces.rooms.is_empty());
+    assert_eq!(all_commands(&mut commands), old.into_iter().map(Command::Cancel).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_directory_response_for_changed_text_should_be_ignored_before_the_next_poll() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &[], Vec::new());
+    s.search.field.insert("rust");
+    rest_search(&mut s);
+    let request = s.search.public_rooms.status.request().unwrap();
+    s.search.field = TextEdit::new("other");
+    apply(&mut s, Event::DirectoryFound { request, rooms: vec![directory_room(false)] });
+    assert!(s.search.public_rooms.rooms.is_empty());
+}
+
+#[test]
+fn a_directory_failure_should_finish_only_its_own_source() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &[], Vec::new());
+    s.search.field.insert("rust");
+    rest_search(&mut s);
+    let request = s.search.public_rooms.status.request().unwrap();
+    apply(&mut s, Event::Finished { request, result: Err("unavailable".into()) });
+    assert_eq!(s.search.public_rooms.status, SearchStatus::Failed);
+    assert!(s.search.public_spaces.status.request().is_some());
+    assert!(s.search.message_request().is_some());
+}
+
+fn directory_room(space: bool) -> matrix_core::RoomPreview {
+    matrix_core::RoomPreview {
+        room_id: "!public:example.org".into(),
+        alias: Some("#public:example.org".into()),
+        name: Some("Public".into()),
+        topic: None,
+        avatar: None,
+        member_count: 80,
+        join_rule: Some(matrix_core::JoinRule::Public),
+        space,
+        joined: false,
+        invited: false,
+    }
+}
+
+#[test]
+fn picking_a_directory_result_should_preview_it_for_the_search_account_without_joining() {
+    let (mut s, mut commands) = state();
+    let account = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &account, &[], Vec::new());
+    drain(&mut commands);
+    s.open_directory_result(&directory_room(true));
+    assert!(all_commands(&mut commands).is_empty());
+    let Some(Modal::Link(dialog)) = s.modal else { panic!("expected room preview") };
+    assert_eq!(dialog.account, account);
+    assert_eq!(dialog.link.via, ["example.org"]);
+    assert!(matches!(dialog.step, LinkStep::Preview(room) if room.space));
+}
+
+#[test]
+fn directory_results_should_request_their_avatar_as_soon_as_they_arrive() {
+    let (mut s, mut commands) = state();
+    s.media.attach(Arc::new(|| {}));
+    let account = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &account, &[], Vec::new());
+    s.search.field.insert("public");
+    rest_search(&mut s);
+    let request = s.search.public_rooms.status.request().unwrap();
+    drain(&mut commands);
+    let avatar = matrix_core::MediaRef::opaque("public-avatar");
+    let room = matrix_core::RoomPreview { avatar: Some(avatar.clone()), ..directory_room(false) };
+    apply(&mut s, Event::DirectoryFound { request, rooms: vec![room] });
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(command,
+        Command::FetchMedia { account: owner, media, size } if owner == &account && media == &avatar && size == &AVATAR_SIZE
+    )));
 }

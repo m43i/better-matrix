@@ -872,6 +872,7 @@ pub fn link_person(s: &mut State) {
 pub fn search(s: &mut State) {
     seed(s);
     s.search.field = rune::TextEdit::new("gr");
+    s.open_search();
     let now = std::time::Instant::now();
     s.search_people(now);
     s.search_people(now + crate::state::SEARCH_PAUSE);
@@ -901,8 +902,26 @@ pub fn search(s: &mut State) {
         .collect();
     hits.sort_by(|(a, x), (b, y)| a.cmp(b).then(y.timestamp_ms.cmp(&x.timestamp_ms)));
     s.search.messages = hits.into_iter().take(30).map(|(_, hit)| hit).collect();
-    s.search.message_status = crate::state::MessageSearchStatus::Ready;
+    s.search.message_status = crate::state::SearchStatus::Ready;
     s.search.request = None;
+    for space in [false, true] {
+        let kind = if space { matrix_core::DirectoryKind::Spaces } else { matrix_core::DirectoryKind::Rooms };
+        let suffix = if space { "space" } else { "room" };
+        let source = s.search.directory_mut(kind);
+        source.status = crate::state::SearchStatus::Ready;
+        source.rooms = vec![matrix_core::RoomPreview {
+            room_id: format!("!public-{suffix}:example.org"),
+            alias: Some(format!("#graphics-{suffix}:example.org")),
+            name: Some(if space { "Graphics community" } else { "Graphics and design" }.into()),
+            topic: Some("A place to share graphics and ideas".into()),
+            avatar: None,
+            member_count: if space { 1200 } else { 340 },
+            join_rule: Some(matrix_core::JoinRule::Public),
+            space,
+            joined: false,
+            invited: false,
+        }];
+    }
 }
 
 /// Pinned messages with both a timeline marker and a shared preview list.

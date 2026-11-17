@@ -3,20 +3,58 @@
 
 use std::time::{Duration, Instant};
 
-use matrix_core::{MessageHit, Person, RequestId};
+use matrix_core::{DirectoryKind, MessageHit, Person, RequestId, RoomPreview};
 use rune::TextEdit;
 
 /// How long the text must rest before it is searched: a word typed letter by letter is one
 /// search, not one per letter.
 pub const SEARCH_PAUSE: Duration = Duration::from_millis(300);
 
-/// The local history search can finish independently of the user directory.
+/// Each search source finishes independently.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub enum MessageSearchStatus {
+pub enum SearchStatus {
     #[default]
     Ready,
     Searching(RequestId),
     Failed,
+}
+
+impl SearchStatus {
+    pub fn request(&self) -> Option<RequestId> {
+        match self {
+            Self::Searching(request) => Some(*request),
+            _ => None,
+        }
+    }
+
+    fn finished(&mut self, request: RequestId, failed: bool) {
+        if self.request() == Some(request) {
+            *self = if failed { Self::Failed } else { Self::Ready };
+        }
+    }
+}
+
+/// No selected filter searches every category in its own section.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SearchFilter {
+    #[default]
+    All,
+    Spaces,
+    Rooms,
+    People,
+    Messages,
+}
+
+impl SearchFilter {
+    pub fn includes(self, kind: Self) -> bool {
+        self == Self::All || self == kind
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct DirectorySearch {
+    pub rooms: Vec<RoomPreview>,
+    pub status: SearchStatus,
 }
 
 /// A query for the user directory as it is typed. A search goes out once the text rests for
@@ -33,7 +71,10 @@ pub struct PeopleSearch {
     pub request: Option<RequestId>,
     pub people: Vec<Person>,
     pub messages: Vec<MessageHit>,
-    pub message_status: MessageSearchStatus,
+    pub message_status: SearchStatus,
+    pub filter: SearchFilter,
+    pub public_rooms: DirectorySearch,
+    pub public_spaces: DirectorySearch,
 }
 
 impl Default for PeopleSearch {
@@ -45,7 +86,10 @@ impl Default for PeopleSearch {
             request: None,
             people: Vec::new(),
             messages: Vec::new(),
-            message_status: MessageSearchStatus::Ready,
+            message_status: SearchStatus::Ready,
+            filter: SearchFilter::All,
+            public_rooms: DirectorySearch::default(),
+            public_spaces: DirectorySearch::default(),
         }
     }
 }
@@ -61,7 +105,9 @@ impl PeopleSearch {
             return None;
         }
         self.messages.clear();
-        self.message_status = MessageSearchStatus::Ready;
+        self.message_status = SearchStatus::Ready;
+        self.public_rooms = DirectorySearch::default();
+        self.public_spaces = DirectorySearch::default();
         if text.is_empty() {
             self.searched = Some(String::new());
             self.resting = None;
@@ -76,6 +122,7 @@ impl PeopleSearch {
                 // The text moved on: an answer to the last search no longer fits it, and going
                 // back to that text searches again.
                 self.request = None;
+                self.people.clear();
                 self.searched = None;
                 self.resting = Some((text.to_owned(), now));
                 return None;
@@ -93,7 +140,7 @@ impl PeopleSearch {
 
     /// The people found by `request`, if it is still the latest search.
     pub fn found(&mut self, request: RequestId, people: Vec<Person>) {
-        if self.request == Some(request) {
+        if self.request == Some(request) && self.searched.as_deref() == Some(self.query()) {
             self.people = people;
         }
     }
@@ -105,16 +152,46 @@ impl PeopleSearch {
     }
 
     pub fn message_request(&self) -> Option<RequestId> {
-        match self.message_status {
-            MessageSearchStatus::Searching(request) => Some(request),
-            _ => None,
+        self.message_status.request()
+    }
+
+    pub fn directory(&self, kind: DirectoryKind) -> &DirectorySearch {
+        match kind {
+            DirectoryKind::Rooms => &self.public_rooms,
+            DirectoryKind::Spaces => &self.public_spaces,
         }
     }
 
-    pub fn finished(&mut self, request: RequestId, failed: bool) {
-        if self.message_request() == Some(request) {
-            self.message_status = if failed { MessageSearchStatus::Failed } else { MessageSearchStatus::Ready };
+    pub fn directory_mut(&mut self, kind: DirectoryKind) -> &mut DirectorySearch {
+        match kind {
+            DirectoryKind::Rooms => &mut self.public_rooms,
+            DirectoryKind::Spaces => &mut self.public_spaces,
         }
+    }
+
+    pub fn directory_found(&mut self, request: RequestId, rooms: Vec<RoomPreview>) {
+        if self.searched.as_deref() != Some(self.query()) {
+            return;
+        }
+        for source in [&mut self.public_rooms, &mut self.public_spaces] {
+            if source.status.request() == Some(request) {
+                source.rooms = rooms;
+                break;
+            }
+        }
+    }
+
+    pub fn requests(&self) -> Vec<RequestId> {
+        [self.request, self.message_request(), self.public_rooms.status.request(), self.public_spaces.status.request()]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
+    pub fn finished(&mut self, request: RequestId, failed: bool) {
+        self.message_status.finished(request, failed);
+        self.public_rooms.status.finished(request, failed);
+        self.public_spaces.status.finished(request, failed);
         if self.request == Some(request) {
             self.request = None;
         }
@@ -123,6 +200,10 @@ impl PeopleSearch {
     /// The trimmed query.
     pub fn query(&self) -> &str {
         self.field.text.trim()
+    }
+
+    pub fn waiting(&self) -> bool {
+        !self.query().is_empty() && self.searched.as_deref() != Some(self.query())
     }
 }
 
@@ -135,12 +216,100 @@ pub struct MessageJump {
 }
 
 impl super::State {
+    pub fn open_search(&mut self) {
+        if self.screen() == super::Screen::Chat
+            && self.nav.account.is_some()
+            && self.modal.is_none()
+            && self.preview.is_none()
+        {
+            self.popover = Some(super::Popover::Search);
+            self.search.field.focused = true;
+        }
+    }
+
+    pub fn open_directory_result(&mut self, room: &RoomPreview) {
+        use super::{LinkDialog, LinkStep, Modal};
+        use matrix_core::{LinkTarget, Permalink};
+
+        let Some(account) = self.nav.account.clone() else { return };
+        if let Some(data) = self.accounts.get(&account) {
+            if data.space(&room.room_id).is_some() {
+                self.open_found_space(&room.room_id);
+                return;
+            }
+            if data.room(&room.room_id).is_some() {
+                self.open_found_room(&room.room_id);
+                return;
+            }
+        }
+        let via = account.as_str().split_once(':').map(|(_, server)| server.to_owned()).into_iter().collect();
+        let link =
+            Permalink { target: LinkTarget::Room { room: room.room_id.clone(), event: None }, via, action: None };
+        self.reset_search();
+        self.popover = None;
+        self.modal = Some(Modal::Link(LinkDialog {
+            link,
+            account,
+            chosen: true,
+            step: LinkStep::Preview(Box::new(room.clone())),
+        }));
+    }
+
+    pub(super) fn search_destinations(&mut self, now: Instant, account: &matrix_core::AccountId) -> bool {
+        use super::Purpose;
+        use matrix_core::Command;
+
+        let popover = self.popover.clone();
+        if self.search.field.focused && self.popover.is_none() {
+            self.open_search();
+        }
+        let previous = self.search.requests();
+        let due = self.search.due(now);
+        let current = self.search.requests();
+        for request in previous {
+            if !current.contains(&request) {
+                self.engine.send(Command::Cancel(request));
+            }
+        }
+        let Some(term) = due else { return self.popover != popover };
+        let filter = self.search.filter;
+        if filter.includes(SearchFilter::Messages) {
+            let command = Command::SearchMessages { account: account.clone(), term: term.clone() };
+            self.search.message_status = SearchStatus::Searching(self.dispatch(command, Purpose::MessageSearch));
+        }
+        if filter.includes(SearchFilter::People) {
+            let command = Command::SearchPeople { account: account.clone(), term: term.clone() };
+            self.search.request = Some(self.dispatch(command, Purpose::People));
+        }
+        for (category, kind) in
+            [(SearchFilter::Rooms, DirectoryKind::Rooms), (SearchFilter::Spaces, DirectoryKind::Spaces)]
+        {
+            if filter.includes(category) {
+                let command = Command::SearchDirectory { account: account.clone(), term: term.clone(), kind };
+                let request = self.dispatch(command, Purpose::DirectorySearch);
+                self.search.directory_mut(kind).status = SearchStatus::Searching(request);
+            }
+        }
+        self.popover != popover
+    }
+
     /// Drop results and stop their local history scan when a search is left.
     pub fn reset_search(&mut self) {
-        if let Some(request) = self.search.message_request() {
+        for request in self.search.requests() {
             self.engine.send(matrix_core::Command::Cancel(request));
         }
         self.search = PeopleSearch::default();
+    }
+
+    pub fn select_search_filter(&mut self, filter: SearchFilter) {
+        let selected = if self.search.filter == filter { SearchFilter::All } else { filter };
+        for request in self.search.requests() {
+            self.engine.send(matrix_core::Command::Cancel(request));
+        }
+        let mut field = std::mem::take(&mut self.search.field);
+        field.focused = true;
+        self.search = PeopleSearch { field, filter: selected, searched: None, ..PeopleSearch::default() };
+        self.popover = Some(super::Popover::Search);
     }
 
     pub fn open_found_message(&mut self, hit: &MessageHit) {
@@ -288,5 +457,17 @@ mod tests {
         search.field = TextEdit::new("ad");
         search.due(now + SEARCH_PAUSE);
         assert_eq!(typed(&mut search, "ada", now + SEARCH_PAUSE * 2).as_deref(), Some("ada"));
+    }
+
+    #[test]
+    fn typing_should_wait_until_the_query_has_been_searched() {
+        let mut search = PeopleSearch::default();
+        search.field.insert("no local match");
+        assert!(search.waiting());
+        let now = Instant::now();
+        search.due(now);
+        assert!(search.waiting());
+        search.due(now + SEARCH_PAUSE);
+        assert!(!search.waiting());
     }
 }

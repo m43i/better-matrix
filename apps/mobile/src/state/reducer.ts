@@ -412,6 +412,7 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'ContactCodeSent':
     case 'MessagesFound':
     case 'PeopleFound':
+    case 'DirectoryFound':
     case 'DirectChat':
     case 'PublicRooms':
     case 'RoomCreated':

@@ -237,7 +237,15 @@ request: RequestId,
 /**
  * Who matched.
  */
-people: Array<Person>, } } | { "type": "PublicRooms", "data": { 
+people: Array<Person>, } } | { "type": "DirectoryFound", "data": { 
+/**
+ * The search being answered.
+ */
+request: RequestId, 
+/**
+ * Up to 20 rooms or spaces in the directory's relevance order.
+ */
+rooms: Array<RoomPreview>, } } | { "type": "PublicRooms", "data": { 
 /**
  * The command this answers.
  */

@@ -81,7 +81,9 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         (Some(Popover::RoomMenu { room_id, notifications }), Some(account)) => {
             room_menu::room_menu(account, room_id, *notifications, &p)
         }
-        (Some(Popover::Search), Some(account)) => vec![people::search_results(s, account, &p)],
+        (Some(Popover::Search), Some(account)) => {
+            vec![search::search_results(s, account, &p, cx.layout_size("root").unwrap_or([1200.0, 760.0]))]
+        }
         (Some(Popover::SectionMenu(id)), Some(account)) => vec![sidebar::section_menu(s, account, id, &p)],
         (Some(Popover::NewChat), Some(account)) => vec![sidebar::new_chat_panel(s, account, &p)],
         (Some(Popover::CreateMenu), Some(account)) => vec![sidebar::create_menu(s, account, &p)],
@@ -116,7 +118,14 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         _ => None,
     };
     if !panels.is_empty() {
-        root = root.child(scrim()).children(panels);
+        let backdrop = if s.popover == Some(Popover::Search) {
+            // Keep the field and its removable filter chip clickable above the backdrop.
+            let height = cx.layout_size("root").unwrap_or([1200.0, 760.0])[1];
+            scrim().absolute(0.0, 44.0).h((height - 44.0).max(0.0))
+        } else {
+            scrim()
+        };
+        root = root.child(backdrop).children(panels);
     }
     let dialog = match &s.modal {
         Some(Modal::SignIn) => {
@@ -154,12 +163,13 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
                 .w_full()
                 .h_full()
                 .center()
+                .modal(false, State::close_modal)
                 .child(settings::backdrop())
                 .child(dialog.max_h((window[1] - 48.0).max(200.0))),
         );
     }
     if let Some(select) = select {
-        root = root.child(scrim()).child(select);
+        root = root.child(scrim()).child(select.modal(true, State::close_popover));
     }
     if let Some(preview) = preview {
         root = root.child(preview);

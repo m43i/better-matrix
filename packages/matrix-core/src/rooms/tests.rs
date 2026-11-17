@@ -37,6 +37,76 @@ async fn a_repeated_hierarchy_token_should_fail_instead_of_looping() {
     assert!(matches!(account.public_rooms("!space:example.org").await, Err(Error::RepeatedPaginationToken { .. })));
 }
 
+fn directory_response() -> serde_json::Value {
+    json!({"chunk":[
+        {"room_id":"!room:example.org","name":"Rust","canonical_alias":"#rust:example.org","num_joined_members":80,"world_readable":false,"guest_can_join":false,"join_rule":"public"},
+        {"room_id":"!space:example.org","name":"Rust community","room_type":"m.space","num_joined_members":100,"world_readable":false,"guest_can_join":false,"join_rule":"public"},
+        {"room_id":"!private:example.org","name":"Rust private","num_joined_members":2,"world_readable":false,"guest_can_join":false,"join_rule":"invite"}
+    ]})
+}
+
+#[tokio::test]
+async fn a_room_search_should_query_the_homeserver_directory_and_exclude_spaces_and_private_rooms() {
+    let server = crate::test_server::Server::new(|request| {
+        if !request.contains("/publicRooms") {
+            return json!({});
+        }
+        assert!(request.starts_with("POST /_matrix/client/v3/publicRooms"));
+        let body: serde_json::Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["filter"], json!({"generic_search_term":"Rust", "room_types":[null]}));
+        directory_response()
+    });
+    let account = Account::for_test(&server.url()).await;
+    let rooms = account.search_directory(" Rust ", DirectoryKind::Rooms).await.unwrap();
+    assert_eq!(rooms.iter().map(|room| room.room_id.as_str()).collect::<Vec<_>>(), ["!room:example.org"]);
+    assert_eq!(rooms[0].alias.as_deref(), Some("#rust:example.org"));
+}
+
+#[tokio::test]
+async fn a_space_search_should_request_spaces_even_when_the_server_ignores_the_type_filter() {
+    let server = crate::test_server::Server::new(|request| {
+        if !request.contains("/publicRooms") {
+            return json!({});
+        }
+        assert!(request.starts_with("POST /_matrix/client/v3/publicRooms"));
+        let body: serde_json::Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["filter"]["room_types"], json!(["m.space"]));
+        directory_response()
+    });
+    let account = Account::for_test(&server.url()).await;
+    let rooms = account.search_directory("Rust", DirectoryKind::Spaces).await.unwrap();
+    assert_eq!(rooms.iter().map(|room| room.room_id.as_str()).collect::<Vec<_>>(), ["!space:example.org"]);
+}
+
+#[tokio::test]
+async fn directory_search_should_follow_later_pages_when_the_first_has_no_matching_type() {
+    let server = crate::test_server::Server::new(|request| {
+        if request.contains("\"since\":\"second\"") {
+            return directory_response();
+        }
+        json!({"next_batch":"second", "chunk":[]})
+    });
+    let account = Account::for_test(&server.url()).await;
+    assert_eq!(account.search_directory("Rust", DirectoryKind::Spaces).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_repeated_directory_token_should_fail_instead_of_looping() {
+    let server = crate::test_server::Server::new(|_| json!({"next_batch":"same","chunk":[]}));
+    let account = Account::for_test(&server.url()).await;
+    assert!(matches!(
+        account.search_directory("Rust", DirectoryKind::Spaces).await,
+        Err(Error::RepeatedPaginationToken { .. })
+    ));
+}
+
+#[tokio::test]
+async fn an_empty_directory_search_should_make_no_request() {
+    let server = crate::test_server::Server::new(|_| panic!("empty search must not request the directory"));
+    let account = Account::for_test(&server.url()).await;
+    assert!(account.search_directory("  ", DirectoryKind::Rooms).await.unwrap().is_empty());
+}
+
 // Room previews (permalinks).
 
 fn sdk_preview() -> matrix_sdk::room_preview::RoomPreview {

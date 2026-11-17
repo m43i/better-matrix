@@ -17,6 +17,7 @@ export type { ContactDetail } from "./ContactDetail";
 export type { ContactKind } from "./ContactKind";
 export type { Contacts } from "./Contacts";
 export type { DeviceKind } from "./DeviceKind";
+export type { DirectoryKind } from "./DirectoryKind";
 export type { EntryKind } from "./EntryKind";
 export type { Event } from "./Event";
 export type { HistoryVisibility } from "./HistoryVisibility";
