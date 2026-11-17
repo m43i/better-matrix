@@ -61,6 +61,26 @@ fn a_missing_file_should_not_start_an_attachment_action() {
 }
 
 #[test]
+fn opening_an_executable_attachment_should_not_launch_it_directly() {
+    let (mut s, mut commands) = state();
+    for name in [
+        "invoice.pdf.exe",
+        "SETUP.EXE ",
+        "install.msi",
+        "start.command",
+        "script.sh",
+        "link.lnk",
+        "launcher.desktop",
+        "program.AppImage",
+        "unknown.bin",
+    ] {
+        let file = Attachment { name: name.into(), kind: AttachmentKind::File, ..image() };
+        s.act_on_attachment(AccountId::new("@ada:example.org"), &file, AttachmentAction::Open);
+        assert!(commands.try_next().is_none(), "{name} should stay available through Download only");
+    }
+}
+
+#[test]
 fn closing_a_preview_should_dismiss_its_context_menu() {
     let (mut s, _) = state();
     crate::demo::seed(&mut s);

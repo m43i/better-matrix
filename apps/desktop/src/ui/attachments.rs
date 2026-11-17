@@ -6,16 +6,17 @@ use rune::{El, col};
 use super::components::{Tone, menu_action, popover_panel};
 use super::{icons, theme::Palette};
 use crate::i18n::t;
-use crate::state::{AttachmentAction, State};
+use crate::state::{AttachmentAction, State, can_open_attachment};
 
 pub fn actions(account: &AccountId, file: &Attachment, p: &Palette) -> Vec<El> {
     if file.media.is_none() {
         return Vec::new();
     }
-    let mut actions = vec![
-        (AttachmentAction::Open, &icons::EXTERNAL, t!("attachment.open"), "attachment-open"),
-        (AttachmentAction::Download, &icons::DOWNLOAD, t!("preview.download"), "attachment-download"),
-    ];
+    let mut actions =
+        vec![(AttachmentAction::Download, &icons::DOWNLOAD, t!("preview.download"), "attachment-download")];
+    if can_open_attachment(file) {
+        actions.insert(0, (AttachmentAction::Open, &icons::EXTERNAL, t!("attachment.open"), "attachment-open"));
+    }
     if file.kind == AttachmentKind::Image {
         actions.insert(
             0,

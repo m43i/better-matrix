@@ -156,8 +156,12 @@ screenshots, voice memos, and images and PDFs that open large.
 - **Attachment actions:** `AttachmentAction` flows through `State::act_on_attachment`. Copy
   image fetches the original, converts it to a clipboard PNG on a worker, then writes through
   Rune. Open saves the original to a unique path in the private scratch folder, then asks the
-  OS default application on a worker; the file lives until the app exits. Download uses the
-  save dialog. Fetch, conversion and open failures become notices.
+  OS default application on a worker; the file lives until the app exits. Open is available
+  only for recognized document, media and archive extensions, checked in both the menu and
+  the state action; executables, scripts and unknown types stay available through Download.
+  Edits made to an opened scratch copy are temporary too: Download is the path for keeping a
+  file and edits to it. Download uses the save dialog. Fetch, conversion and open failures
+  become notices.
 - **Download:** the save dialog (rfd) runs on a worker; `Command::SaveMedia` downloads the
   original and writes it in the engine.
 - **Pointer cursors** mark whatever a press acts on: components with a button, menu, radio or

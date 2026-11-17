@@ -211,8 +211,14 @@ function Card({
       onLongPress={onLongPress}
       delayLongPress={350}
       disabled={busy}
-      accessibilityRole="button"
+      accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={attachment.name}
+      accessibilityActions={
+        onLongPress ? [{ name: 'longpress', label: t('actions.more') }] : undefined
+      }
+      onAccessibilityAction={(event) => {
+        if (event.nativeEvent.actionName === 'longpress') onLongPress?.();
+      }}
       android_ripple={{ color: palette.hover }}
       style={style}
     >

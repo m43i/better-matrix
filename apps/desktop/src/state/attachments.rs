@@ -4,6 +4,73 @@ use matrix_core::{AccountId, Attachment, AttachmentKind, Command, MediaSize};
 
 use super::{Purpose, State};
 
+/// Documents, media and archives the system may view; programs and unknown formats are downloaded instead.
+pub fn can_open_attachment(file: &Attachment) -> bool {
+    if file.media.is_none() {
+        return false;
+    }
+    let name = file.name.trim_end_matches(['.', ' ']);
+    let Some(extension) = std::path::Path::new(name).extension().and_then(|extension| extension.to_str()) else {
+        return false;
+    };
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "pdf"
+            | "txt"
+            | "md"
+            | "rtf"
+            | "csv"
+            | "tsv"
+            | "doc"
+            | "docx"
+            | "odt"
+            | "xls"
+            | "xlsx"
+            | "ods"
+            | "ppt"
+            | "pptx"
+            | "odp"
+            | "pages"
+            | "numbers"
+            | "key"
+            | "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "bmp"
+            | "ico"
+            | "svg"
+            | "avif"
+            | "heic"
+            | "heif"
+            | "tif"
+            | "tiff"
+            | "mp4"
+            | "m4v"
+            | "mov"
+            | "mkv"
+            | "webm"
+            | "avi"
+            | "mpg"
+            | "mpeg"
+            | "mp3"
+            | "m4a"
+            | "aac"
+            | "ogg"
+            | "oga"
+            | "opus"
+            | "wav"
+            | "flac"
+            | "zip"
+            | "7z"
+            | "tar"
+            | "gz"
+            | "bz2"
+            | "xz"
+    )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttachmentAction {
     CopyImage,
@@ -21,10 +88,11 @@ impl State {
             }
             AttachmentAction::CopyImage => {}
             AttachmentAction::Download => self.download(account, media, &file.name),
-            AttachmentAction::Open => {
+            AttachmentAction::Open if can_open_attachment(file) => {
                 let path = self.shell.attachment_path(&file.name);
                 self.dispatch(Command::SaveMedia { account, media, path: path.clone() }, Purpose::OpenFile(path));
             }
+            AttachmentAction::Open => {}
         }
     }
 }

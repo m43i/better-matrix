@@ -47,7 +47,7 @@ use rune::{TextEdit, Tx};
 
 pub use accounts::READ_MARKER_FADE;
 pub use accounts::{AccountData, Accounts, EntryView, RoomTimeline, Scope, TimelineItem, now_ms, wants_attention};
-pub use attachments::AttachmentAction;
+pub use attachments::{AttachmentAction, can_open_attachment};
 pub use call::Call;
 pub use call_layout::{CallLayout, CallTile};
 pub use composer::{Composer, EditTarget, Format, ReplyTarget, VoiceMemo};
@@ -2674,8 +2674,8 @@ impl State {
     /// Saves the previewed file where the user picks.
     pub fn download_preview(&mut self) {
         let Some(preview) = &self.preview else { return };
-        let (account, media, name) = (preview.account.clone(), preview.media.clone(), preview.attachment.name.clone());
-        self.download(account, media, &name);
+        let (account, file) = (preview.account.clone(), preview.attachment.clone());
+        self.act_on_attachment(account, &file, AttachmentAction::Download);
     }
 
     /// Asks where to save a file, then saves it there.

@@ -678,6 +678,33 @@ fn a_document_preview_should_offer_open_and_download_without_copy_image() {
 }
 
 #[test]
+fn an_executable_attachment_menu_should_offer_download_without_open() {
+    let file = matrix_core::Attachment {
+        kind: matrix_core::AttachmentKind::File,
+        name: "invoice.pdf.exe".into(),
+        media: Some(matrix_core::MediaRef::opaque("executable")),
+        thumbnail: None,
+        dimensions: None,
+        size: None,
+    };
+    let mut rt = Runtime::new(
+        file,
+        |file, _| {
+            rune::col().w_full().h_full().children(super::attachments::actions(
+                &AccountId::new(demo::ADA),
+                file,
+                &super::theme::palette(true),
+            ))
+        },
+        (400.0, 200.0),
+        Env::new(true, 1.0),
+    );
+    rt.frame(0.0);
+    assert!(rt.find("attachment-download").is_some());
+    assert!(rt.find("attachment-open").is_none());
+}
+
+#[test]
 fn room_info_should_open_the_shared_pinned_messages() {
     let mut rt = runtime(|s| {
         demo::pinned_messages(s);

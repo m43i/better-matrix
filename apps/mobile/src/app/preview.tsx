@@ -237,6 +237,7 @@ function Zoomable({
   });
 
   const longPress = useLongPressGesture({
+    numberOfPointers: 1,
     minDuration: 350,
     runOnJS: true,
     onActivate: onLongPress,
