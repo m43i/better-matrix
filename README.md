@@ -38,12 +38,16 @@ a native app instead of a web page in Electron:
 | Accounts in one window           | As many as you like, side by side | One (a second needs a profile)  |
 | Built with                       | Rust, drawn on the GPU            | Electron (Chromium and Node.js) |
 | Processes                        | 1                                 | 8                               |
-| Memory (PSS, shared pages split) | 104 MiB                           | 280 MiB                         |
+| Memory as system monitors add it | 136 MiB                           | 682 MiB                         |
+| Memory with shared pages once    | 104 MiB                           | 275 MiB                         |
 | CPU while idle                   | 0.03%                             | 0.17%                           |
 
 Measured on one Linux machine (Wayland, Element Desktop 1.12.25 on Electron 43), each app open and
-idle, summed over all its processes for 30 seconds. A snapshot, not a controlled benchmark: memory
-grows with the rooms an app has loaded.
+idle, summed over all its processes for 30 seconds. System monitors add up each process's resident
+memory (RSS); Element's processes share their Electron runtime, so that counts it once per process.
+Counting shared pages once (PSS) is closer to what an app costs. Element's memory moves with what
+it has loaded: earlier the same day, the same instance used 988 MiB and 550 MiB. A snapshot, not a
+controlled benchmark.
 
 ## Install
 
