@@ -10,7 +10,7 @@ use super::icons;
 use super::theme::Palette;
 use crate::state::{AccountData, Dragged, DropTarget, Popover, Scope, State, ordered_spaces};
 
-const WIDTH: f32 = 68.0;
+pub const WIDTH: f32 = 68.0;
 const TILE: f32 = 38.0;
 const GAP: f32 = 12.0;
 const EDGE: f32 = 16.0;

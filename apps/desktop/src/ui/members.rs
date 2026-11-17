@@ -15,8 +15,6 @@ use super::theme::{Palette, font};
 use crate::i18n::{t, tf};
 use crate::state::{AccountData, MemberSubmenu, State, matches};
 
-/// The panel's width.
-pub const WIDTH: f32 = 320.0;
 /// A member row's height, for the list's estimate.
 const ROW: f32 = 52.0;
 /// The submenu rows' keys, which their submenus anchor to.
@@ -140,7 +138,7 @@ pub fn panel(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
     };
     col()
         .key("members-panel")
-        .w(WIDTH)
+        .w_full()
         .h_full()
         .fill(p.bg)
         .border_sides([0.0, 0.0, 0.0, 1.0], p.divider)

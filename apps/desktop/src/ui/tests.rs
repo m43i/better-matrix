@@ -6,7 +6,7 @@ use crate::{
     state::{SettingsSection, SidePanel, State},
 };
 
-fn runtime(scene: impl FnOnce(&mut State)) -> Runtime<State> {
+pub(super) fn runtime(scene: impl FnOnce(&mut State)) -> Runtime<State> {
     let mut state = State::detached();
     demo::seed(&mut state);
     scene(&mut state);
@@ -19,7 +19,7 @@ fn runtime(scene: impl FnOnce(&mut State)) -> Runtime<State> {
     rt
 }
 
-fn press(rt: &mut Runtime<State>, key: &str) {
+pub(super) fn press(rt: &mut Runtime<State>, key: &str) {
     let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
     rt.pointer_down(x, y);
     rt.pointer_up(x, y);

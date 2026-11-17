@@ -11,9 +11,6 @@ use super::theme::{Palette, font};
 use crate::i18n::{t, tp};
 use crate::state::{AccountData, SidePanel, State};
 
-/// The panels' width, the member list's too.
-pub const WIDTH: f32 = super::members::WIDTH;
-
 /// A panel's frame: a title and a close button, then its content, which scrolls, and a footer
 /// that stays at the bottom.
 fn frame(key: &str, title: &str, content: El, footer: Option<El>, p: &Palette) -> El {
@@ -32,7 +29,7 @@ fn frame(key: &str, title: &str, content: El, footer: Option<El>, p: &Palette) -
         );
     col()
         .key(key.to_owned())
-        .w(WIDTH)
+        .w_full()
         .h_full()
         .fill(p.bg)
         .border_sides([0.0, 0.0, 0.0, 1.0], p.divider)

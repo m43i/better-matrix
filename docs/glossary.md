@@ -55,6 +55,10 @@ hierarchy. Its Overview suggests the unjoined ones with the most members; More s
 **Sidebar**
 : The column listing the rooms and direct chats of the current scope.
 
+**Resize handle**
+: The draggable inner edge of the desktop's sidebar, side panel or thread. Its horizontal
+resize cursor marks where to change the width, within limits that keep the panes readable.
+
 **Space picker**
 : On phones, the sheet Home's title opens: Home and the account's spaces, the desktop's rail.
 

@@ -36,6 +36,7 @@ screenshots, voice memos, and images and PDFs that open large.
     hand can leave the caret off screen.
   - The field comes first. A bottom bar holds attach, emoji, `Aa`, voice memo and poll, with send at
     the right. The formatting toolbar shows only while `Aa` is on.
+    Formatting and recording controls wrap inside a narrow pane so resizing keeps them reachable.
   - Both bars `preserve_focus_on_press` and their buttons don't take focus, so formatting and
     emoji go where the caret is.
   - B with nothing selected arms bold for what is typed next. B on a selection marks exactly

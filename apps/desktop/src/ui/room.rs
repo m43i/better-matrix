@@ -11,9 +11,9 @@ use super::theme::{Palette, font};
 use super::thread::thread_panel;
 use super::timeline::{Context, timeline};
 use crate::i18n::{t, tf};
-use crate::state::{AccountData, ComposerTarget, EmojiFor, Popover, SidePanel, State};
+use crate::state::{AccountData, ComposerTarget, EmojiFor, PaneLayout, Popover, SidePanel, State};
 
-pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<State>) -> El {
+pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<State>, layout: &PaneLayout) -> El {
     let Some(room) = s.active_room_id().and_then(|id| account.room(id)) else {
         return super::overview::overview(s, account, p);
     };
@@ -85,19 +85,16 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
     let main = main
         .on_drop_files(|s: &mut State, files, _| s.attach_files_to(ComposerTarget::Room, files))
         .on_drop_hover(|s: &mut State, over, _| s.drop_hover = over);
-    let mut pane = row().grow(1.0).h_full().min_w(0.0).child(main);
-    pane = match s.side {
-        Some(SidePanel::Info) => pane.child(super::info::overview(s, room, p)),
-        Some(SidePanel::Members) => pane.child(super::members::panel(s, account, room, p)),
-        Some(SidePanel::Threads) => pane.child(super::info::threads(account, room, p)),
-        Some(SidePanel::Pins) => pane.child(super::info::pins(s, account, room, p)),
-        Some(SidePanel::Files) => pane.child(super::info::files(account, room, p)),
-        None => match s.active_thread() {
-            Some(root) => pane.child(thread_panel(s, account, room, root, p, ui)),
-            None => pane,
-        },
+    let pane = row().grow(1.0).h_full().min_w(0.0).child(main);
+    let panel = match s.side {
+        Some(SidePanel::Info) => Some(super::info::overview(s, room, p)),
+        Some(SidePanel::Members) => Some(super::members::panel(s, account, room, p)),
+        Some(SidePanel::Threads) => Some(super::info::threads(account, room, p)),
+        Some(SidePanel::Pins) => Some(super::info::pins(s, account, room, p)),
+        Some(SidePanel::Files) => Some(super::info::files(account, room, p)),
+        None => s.active_thread().map(|root| thread_panel(s, account, room, root, p, ui)),
     };
-    pane
+    pane.children(panel.zip(layout.right).map(|(panel, (which, size))| super::panes::resizable(panel, which, size, p)))
 }
 
 /// The event whose reaction picker is open in this timeline, for keeping its toolbar shown.

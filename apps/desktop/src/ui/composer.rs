@@ -250,8 +250,15 @@ fn bar_button(glyph: &'static rune::Icon, label: &str, active: bool, p: &Palette
 }
 
 fn toolbar(s: &State, target: ComposerTarget, p: &Palette) -> El {
-    let mut bar =
-        row().key(key(target, "format-bar")).w_full().px(6.0).pt(6.0).gap(2.0).center_y().preserve_focus_on_press(true);
+    let mut bar = row()
+        .key(key(target, "format-bar"))
+        .w_full()
+        .px(6.0)
+        .pt(6.0)
+        .gap(2.0)
+        .flex_wrap()
+        .center_y()
+        .preserve_focus_on_press(true);
     for format in Format::ALL {
         if format.starts_group() {
             bar = bar.child(el().w(1.0).h(18.0).mx(4.0).fill(p.divider));
@@ -489,6 +496,7 @@ fn recording(target: ComposerTarget, memo: &crate::state::VoiceMemo, p: &Palette
     row()
         .key(key(target, "voice-recording"))
         .w_full()
+        .flex_wrap()
         .px(14.0)
         .py(14.0)
         .gap(10.0)

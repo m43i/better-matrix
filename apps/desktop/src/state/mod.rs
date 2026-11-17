@@ -20,6 +20,7 @@ mod links;
 mod media;
 mod message_actions;
 mod navigation;
+mod panes;
 mod poll;
 mod preview;
 mod profile;
@@ -57,6 +58,7 @@ pub use link_previews::LinkPreviews;
 pub use links::{LinkDialog, LinkStep};
 pub use media::MediaCache;
 pub use navigation::{navigate, navigate_now};
+pub use panes::{Pane, PaneLayout, PaneSize, PaneWidths};
 pub use poll::{MAX_ANSWERS, PollForm};
 pub use preview::{DocumentStatus, ImageStatus, Opens, Preview, PreviewContent, render_document};
 pub use profile::{ContactStep, ProfileForm};
@@ -639,6 +641,8 @@ pub struct State {
     set_aside: Vec<composer::Edit>,
     /// The panel beside the open room.
     pub side: Option<SidePanel>,
+    /// Widths shared across rooms and accounts for this window.
+    pub panes: PaneWidths,
     /// The room and panel the side panel's list was last asked for.
     side_loaded: Option<(AccountId, String, SidePanel)>,
     /// What the member list is filtered by.
@@ -723,6 +727,7 @@ impl State {
             poll_form: PollForm::default(),
             set_aside: Vec::new(),
             side: None,
+            panes: PaneWidths::default(),
             side_loaded: None,
             member_search: TextEdit::default(),
             call: None,

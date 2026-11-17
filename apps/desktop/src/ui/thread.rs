@@ -13,8 +13,6 @@ use super::timeline::{Context, timeline};
 use crate::i18n::t;
 use crate::state::{AccountData, ComposerTarget, State};
 
-const WIDTH: f32 = 420.0;
-
 pub fn thread_panel(
     s: &State,
     account: &AccountData,
@@ -52,7 +50,7 @@ pub fn thread_panel(
         .map(|memo| super::composer::voice_water(ComposerTarget::Thread, memo, "thread-voice-water"));
     col()
         .key("thread-panel")
-        .w(WIDTH)
+        .w_full()
         .h_full()
         .fill(p.bg)
         .border_sides([0.0, 0.0, 0.0, 1.0], p.divider)

@@ -11,7 +11,6 @@ use crate::state::{
     AccountData, Dragged, DropTarget, Popover, ROOMS, Scope, SectionView, State, is_builtin, sections, wants_attention,
 };
 
-const WIDTH: f32 = 260.0;
 /// The new-chat button's key, which its search anchors to.
 const NEW_CHAT: &str = "sidebar-new-chat";
 /// The create button's key, which its menu anchors to.
@@ -125,7 +124,7 @@ pub fn sidebar(s: &State, account: &AccountData, p: &Palette) -> El {
 
     col()
         .key("sidebar")
-        .w(WIDTH)
+        .w_full()
         .h_full()
         .fill(p.sidebar_bg)
         .border_sides([0.0, 1.0, 0.0, 0.0], p.sidebar_divider)

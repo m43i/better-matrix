@@ -16,6 +16,7 @@ mod members;
 mod message_actions;
 mod message_text;
 mod overview;
+mod panes;
 mod people;
 mod poll;
 mod preview;
@@ -39,7 +40,7 @@ mod tests;
 use crate::i18n::t;
 use rune::{Color, Cx, El, col, el, row, text};
 
-use crate::state::{EmojiFor, Modal, Popover, Screen, State};
+use crate::state::{EmojiFor, Modal, Pane, Popover, Screen, State};
 use theme::{Palette, font, palette};
 
 pub fn view(s: &State, cx: &mut Cx<State>) -> El {
@@ -48,13 +49,25 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     s.reduced_motion.set(cx.is_reduced_motion());
     let p = palette(s.dark(cx.system_dark()));
     let account = s.active_account();
+    let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
+    let right = account.and_then(|account| {
+        s.active_room_id().and_then(|id| account.room(id))?;
+        if s.side.is_some() { Some(Pane::SidePanel) } else { s.active_thread().map(|_| Pane::Thread) }
+    });
+    let layout = s.panes.layout(
+        window[0] - if s.accounts.is_empty() { 0.0 } else { rail::WIDTH },
+        !s.call_here().is_some_and(|call| call.hide_sidebar),
+        right,
+    );
     let content = match (s.screen(), account) {
         (Screen::Chat, Some(account)) => row()
             .grow(1.0)
             .h_full()
             .min_w(0.0)
-            .children((!s.call_here().is_some_and(|call| call.hide_sidebar)).then(|| sidebar::sidebar(s, account, &p)))
-            .child(room::room_pane(s, account, &p, cx)),
+            .children(
+                layout.sidebar.map(|size| panes::resizable(sidebar::sidebar(s, account, &p), Pane::Sidebar, size, &p)),
+            )
+            .child(room::room_pane(s, account, &p, cx, &layout)),
         (Screen::Chat, None) => room::empty_state(t!("room.pick_account"), &p),
         (Screen::SignIn, _) => {
             let front = sign_in::sign_in(s, &p);

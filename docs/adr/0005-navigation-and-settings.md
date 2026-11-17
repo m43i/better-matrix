@@ -67,6 +67,19 @@ Date: 2026-11-14
     that moves no more than 4 points stays a press. Sections reorder but never nest.
 - **Sidebar header:** the scope's name, a new direct chat button, and "+" (see
   [0008](0008-people-and-rooms.md)).
+- **Desktop pane widths:** the sidebar's right edge and the side panel's or thread's left
+  edge are six-point drag handles with the column-resize cursor. Arrow keys adjust a focused
+  handle by ten points; Home and End choose its limits. Escape or losing window focus cancels
+  a drag and restores the previous width.
+  - `PaneWidths` keeps preferred widths for the window's session, across rooms and accounts:
+    sidebar 260, side panel 320, thread 420 points. The rail stays fixed at 68.
+  - The sidebar stays between 220 and 420 points; right-hand panels between 300 and 640.
+    `PaneLayout` caps them further to reserve 320 points for the conversation. Opening a
+    right-hand panel in a window too narrow for all three temporarily hides the sidebar;
+    closing the panel or widening the window restores it. A call can still hide it explicitly.
+  - Layout uses zoomed points from `Cx::layout_size`. Under extreme zoom, panel readability
+    takes precedence over the conversation's reserve; no pane exceeds the available width.
+    Window resizing never overwrites preferred widths, so widening restores them.
 - **Sidebar layout:** a `SidebarLayout` in the account data event `chat.bettermatrix.sidebar`.
   - Per scope: collapsed sections, the user's sections and their rooms, and section order.
   - For the account: the spaces' order on the rail (`SidebarLayout::spaces`). Home stays first;
