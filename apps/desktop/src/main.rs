@@ -441,6 +441,19 @@ fn spec() -> AppSpec<State> {
                 });
             }),
             ("demo-many-spaces", demo::many_spaces),
+            ("demo-update", |s| {
+                demo::seed(s);
+                s.update_found(demo::update());
+            }),
+            ("demo-update-many-spaces", |s| {
+                demo::many_spaces(s);
+                s.update_found(demo::update());
+            }),
+            ("demo-updating", |s| {
+                demo::many_spaces(s);
+                s.update_found(demo::update());
+                s.install_update();
+            }),
             ("demo-create-menu", |s| {
                 demo::seed(s);
                 s.toggle_popover(Popover::CreateMenu);

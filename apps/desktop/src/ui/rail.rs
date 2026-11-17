@@ -8,7 +8,7 @@ use rune::{El, ScrollSpec, col, el, icon};
 use super::components::{account_avatar, media_avatar, unread_dot};
 use super::icons;
 use super::theme::Palette;
-use crate::state::{AccountData, Dragged, DropTarget, Popover, Scope, State, ordered_spaces};
+use crate::state::{AccountData, Dragged, DropTarget, Popover, Scope, State, Update, ordered_spaces};
 
 pub const WIDTH: f32 = 68.0;
 const TILE: f32 = 38.0;
@@ -20,6 +20,8 @@ const BLUR_EDGE: f32 = 32.0;
 pub const ACCOUNT_BUTTON: &str = "account-button";
 
 pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
+    let update = s.update.release();
+    let bottom = TILE + ACTION_GAP + EDGE + if update.is_some() { TILE + ACTION_GAP } else { 0.0 };
     let mut scopes = col().w_full().gap(GAP).items_center();
     if let Some(account) = account {
         let current = s.active_scope();
@@ -69,11 +71,11 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
                 .w_full()
                 .h(TILE)
                 .center()
-                .sticky_bottom(TILE + ACTION_GAP + EDGE)
+                .sticky_bottom(bottom)
                 .child(
                     el().key("rail-space-blur")
                         .pin(Some(0.0), Some(-BLUR_EDGE), Some(0.0), None)
-                        .h(BLUR_EDGE + TILE * 2.0 + ACTION_GAP + EDGE)
+                        .h(BLUR_EDGE + TILE + bottom)
                         .clip_fade(0.0, BLUR_EDGE, 0.0, 0.0)
                         .stuck_reveal(8.0)
                         .child(el().w_full().h_full().backdrop_blur(8.0).linear_gradient(
@@ -114,7 +116,8 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
         }
     }
 
-    el().key("rail")
+    let mut rail = el()
+        .key("rail")
         .w(WIDTH)
         .h_full()
         .fill(p.rail_bg)
@@ -125,9 +128,35 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
                 .h_full()
                 .py(EDGE)
                 .scroll(ScrollSpec { stick_bottom: false })
-                .child(scopes.pb(TILE + ACTION_GAP + EDGE)),
+                .child(scopes.pb(bottom)),
         )
-        .child(me.pin(Some((WIDTH - TILE) / 2.0), None, None, Some(EDGE)))
+        .child(me.pin(Some((WIDTH - TILE) / 2.0), None, None, Some(EDGE)));
+    if let Some(release) = update {
+        let installing = matches!(s.update, Update::Installing(_));
+        let label = if installing {
+            t!("update.installing").to_owned()
+        } else {
+            tf!("update.install", version = release.version)
+        };
+        rail = rail.child(
+            el().key("rail-update")
+                .size(TILE, TILE)
+                .pin(Some((WIDTH - TILE) / 2.0), None, None, Some(EDGE + TILE + ACTION_GAP))
+                .radius(TILE * 0.22)
+                .center()
+                .fill(p.accent.alpha(0.15))
+                .hover(p.sidebar_hover)
+                .role("button")
+                .cursor(rune::Cursor::Pointer)
+                .label(label.clone())
+                .help(label)
+                .focusable(true)
+                .disabled(installing)
+                .child(icon(if installing { &icons::PACKAGE } else { &icons::UPDATE }, 20.0).color(p.accent))
+                .on_press(State::install_update),
+        );
+    }
+    rail
 }
 
 /// The ring around the selected entry and the open account button: a thin line in the accent

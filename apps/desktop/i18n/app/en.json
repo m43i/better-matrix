@@ -590,5 +590,9 @@
   "attachment.copy_image": "Copy image",
   "notice.copy_image": "Could not copy the image: {{error}}",
   "notice.open_attachment": "Could not open the attachment: {{error}}",
-  "attachment.copy_too_large": "The image exceeds clipboard limits."
+  "attachment.copy_too_large": "The image exceeds clipboard limits.",
+  "update.install": "Update to {{version}} and restart",
+  "update.installing": "Downloading update… The app will restart when ready.",
+  "update.failed": "Could not update Better Matrix: {{error}}. Try the update button again, or install the latest release manually.",
+  "update.incomplete": "The previous update did not complete. Try the update button again, or install the latest release manually."
 }

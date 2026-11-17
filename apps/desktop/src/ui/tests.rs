@@ -1038,3 +1038,53 @@ fn large_room_view_build_timing() {
     batches.sort_by(f64::total_cmp);
     eprintln!("view build + frame: median {:.3} ms, best {:.3} ms", batches[5], batches[0]);
 }
+
+#[test]
+fn the_update_icon_should_be_absent_without_an_available_release() {
+    let rt = runtime(|_| {});
+    assert!(rt.find("rail-update").is_none());
+}
+
+#[test]
+fn an_update_should_appear_directly_above_the_avatar() {
+    let rt = runtime(|s| s.update_found(demo::update()));
+    let update = rt.presented("rail-update").unwrap().0;
+    let avatar = rt.presented("account-button").unwrap().0;
+    assert!((avatar[1] - update[1] - update[3] - 16.0).abs() < 0.5);
+}
+
+#[test]
+fn a_long_rail_should_keep_plus_update_and_avatar_in_order() {
+    let mut rt = runtime(|s| {
+        demo::many_spaces(s);
+        s.update_found(demo::update());
+    });
+    let add = rt.presented("rail-create-space").unwrap().0;
+    let update = rt.presented("rail-update").unwrap().0;
+    let avatar = rt.presented("account-button").unwrap().0;
+    assert!((update[1] - add[1] - add[3] - 16.0).abs() < 0.5);
+    assert!((avatar[1] - update[1] - update[3] - 16.0).abs() < 0.5);
+    rt.wheel(34.0, 300.0, -2000.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.presented("rail-create-space").unwrap().0, add);
+    assert_eq!(rt.presented("rail-update").unwrap().0, update);
+    assert_eq!(rt.presented("account-button").unwrap().0, avatar);
+}
+
+#[test]
+fn clicking_the_rail_update_should_start_installation() {
+    let mut rt = runtime(|s| s.update_found(demo::update()));
+    press(&mut rt, "rail-update");
+    assert!(matches!(rt.state.update, crate::state::Update::Installing(_)));
+}
+
+#[test]
+fn an_update_failure_should_keep_the_rail_action_available() {
+    let mut rt = runtime(|s| {
+        s.update_found(demo::update());
+        s.install_update();
+        s.update_failed("offline".into());
+    });
+    press(&mut rt, "rail-update");
+    assert!(matches!(rt.state.update, crate::state::Update::Installing(_)));
+}

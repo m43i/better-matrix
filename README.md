@@ -101,7 +101,12 @@ menu and opens `matrix:` links with it. Windows may show a SmartScreen warning f
 
 ### Updating and removing
 
-Run the install line again to update; your accounts, history and keys stay where they are. To remove
+On macOS and Windows, the app checks for a newer stable release on startup and every hour.
+When one is available, an update icon appears above your avatar in the rail. Click it to download,
+install and restart. The app never installs an update automatically. The install folder must be
+writable; on macOS, run the app from Applications rather than the disk image. Your accounts,
+history and keys stay where they are. See [the update icon in a scrolling rail](docs/self-update.png).
+You can also run the install line again to update. To remove
 the app, uninstall the package (`sudo apt remove better-matrix`, `sudo dnf remove better-matrix`,
 `sudo pacman -R better-matrix`, or `sudo pacman -R better-matrix-bin` after a `PKGBUILD` install), or
 delete the AppImage, the app in Applications, or the `Better Matrix` folder, Start menu entry and

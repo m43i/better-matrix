@@ -57,18 +57,18 @@ type(module): short description
 Use a lowercase type and a module that identifies the affected area, such as `desktop`, `mobile`,
 `matrix-core`, or `docs`. Common types are:
 
-| Type       | Use for                                        |
-| ---------- | ---------------------------------------------- |
-| `fix`      | Bug fixes                                      |
-| `feat`     | New features                                   |
-| `perf`     | Performance improvements                       |
-| `refactor` | Code restructuring without changing behaviour  |
-| `docs`     | Documentation                                  |
-| `test`     | Adding or improving tests                      |
-| `build`    | Build tooling or packaging                     |
-| `ci`       | Continuous integration and release workflows   |
+| Type       | Use for                                         |
+| ---------- | ----------------------------------------------- |
+| `fix`      | Bug fixes                                       |
+| `feat`     | New features                                    |
+| `perf`     | Performance improvements                        |
+| `refactor` | Code restructuring without changing behaviour   |
+| `docs`     | Documentation                                   |
+| `test`     | Adding or improving tests                       |
+| `build`    | Build tooling or packaging                      |
+| `ci`       | Continuous integration and release workflows    |
 | `chore`    | Other maintenance, including dependency updates |
-| `style`    | Formatting changes without changing behaviour  |
+| `style`    | Formatting changes without changing behaviour   |
 | `revert`   | Reverting an earlier change                     |
 
 Examples:

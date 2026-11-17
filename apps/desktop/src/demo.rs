@@ -996,3 +996,12 @@ pub fn read_receipts(s: &mut State) {
         },
     );
 }
+
+/// A newer release offered in the rail, without network or installation in demo scenes.
+pub fn update() -> crate::platform::updates::Release {
+    crate::platform::updates::Release {
+        version: "0.1.0".into(),
+        asset_id: 42,
+        digest: format!("sha256:{}", "a".repeat(64)),
+    }
+}

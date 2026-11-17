@@ -34,6 +34,11 @@ included) and the direct chats with its members.
 : A conversation with one or a few people, marked direct by the account. Listed under "Direct
 messages".
 
+**Self-update**
+: A newer desktop release offered by an icon above the rail's account avatar. The app checks
+at startup and hourly; only clicking the icon downloads, replaces the install and restarts it.
+Available for installed macOS and Windows release builds.
+
 **Overview**
 : The main pane when no room is open: the scope's greeting or size, its unread rooms and recent
 conversations.

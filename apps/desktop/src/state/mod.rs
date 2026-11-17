@@ -34,6 +34,7 @@ mod sections;
 mod settings;
 mod sign_in;
 mod typing;
+mod updates;
 mod water;
 
 use std::collections::{HashMap, HashSet};
@@ -69,6 +70,7 @@ pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches
 pub use sections::{DIRECT, INVITATIONS, ROOMS, SectionView, is_builtin, ordered_spaces, sections};
 pub use settings::{Appearance, Settings, SettingsSection, Zoom};
 pub use sign_in::{SignInForm, SignInStep};
+pub use updates::Update;
 pub use water::WATER_HEIGHT;
 
 use crate::i18n::{Language, t, tf};
@@ -659,6 +661,8 @@ pub struct State {
     pub settings: Settings,
     /// Whether Settings → Info shows the full third-party list.
     pub third_party_shown: bool,
+    /// A newer desktop release, offered until the user chooses to install it.
+    pub update: Update,
     /// A file drag is over the room, for the drop highlight.
     pub drop_hover: bool,
     /// Whether the window has keyboard focus; notifications for the open room are skipped then.
@@ -738,6 +742,7 @@ impl State {
             ring_sound: None,
             call_devices: None,
             third_party_shown: false,
+            update: Update::default(),
             settings,
             drop_hover: false,
             window_focused: true,

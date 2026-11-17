@@ -8,6 +8,7 @@ pub mod launch;
 mod notify;
 mod secrets;
 pub mod sound;
+pub mod updates;
 
 #[cfg(test)]
 mod tests;
@@ -26,6 +27,7 @@ use crate::state::{Appearance, Settings, State, Zoom};
 /// The OS services the app uses, or inert stand-ins when headless.
 pub struct Shell {
     app: Option<AppHandle<State>>,
+    updates: Option<std::sync::mpsc::Sender<updates::Release>>,
     notifier: Box<dyn notify::Notifier>,
     prefs: Arc<Mutex<Prefs>>,
     /// Counts document renders: a render keeps going while it is the latest and not stopped.
@@ -51,6 +53,7 @@ impl Shell {
     pub fn native(app: AppHandle<State>, prefs: Prefs, scratch: std::path::PathBuf) -> Self {
         let notifier = notify::system(app.clone());
         Self {
+            updates: updates::start(app.clone(), scratch.with_file_name("updates")),
             app: Some(app),
             notifier,
             prefs: Arc::new(Mutex::new(prefs)),
@@ -65,6 +68,7 @@ impl Shell {
     pub fn headless() -> Self {
         Self {
             app: None,
+            updates: None,
             notifier: Box::new(notify::Silent),
             prefs: Arc::new(Mutex::new(Prefs::memory())),
             document: Arc::default(),
@@ -82,6 +86,7 @@ impl Shell {
         (
             Self {
                 app: None,
+                updates: None,
                 notifier: Box::new(notify::Recording(posted.clone())),
                 prefs,
                 document: Arc::default(),

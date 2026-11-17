@@ -590,5 +590,9 @@
   "attachment.copy_image": "Bild kopieren",
   "notice.copy_image": "Das Bild konnte nicht kopiert werden: {{error}}",
   "notice.open_attachment": "Der Anhang konnte nicht geöffnet werden: {{error}}",
-  "attachment.copy_too_large": "Das Bild überschreitet die Größenbeschränkung der Zwischenablage."
+  "attachment.copy_too_large": "Das Bild überschreitet die Größenbeschränkung der Zwischenablage.",
+  "update.install": "Auf {{version}} aktualisieren und neu starten",
+  "update.installing": "Update wird heruntergeladen… Die App startet neu, sobald es bereit ist.",
+  "update.failed": "Better Matrix konnte nicht aktualisiert werden: {{error}}. Versuche es erneut über die Update-Schaltfläche oder installiere die neueste Version manuell.",
+  "update.incomplete": "Das letzte Update wurde nicht abgeschlossen. Versuche es erneut über die Update-Schaltfläche oder installiere die neueste Version manuell."
 }

@@ -23,6 +23,8 @@ done
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/better-matrix.icns"
 
 codesign --force --deep --sign - "$app"
+# Self-updates replace the complete signed bundle; ditto preserves its metadata.
+ditto -c -k --sequesterRsrc --keepParent "$app" dist/out/better-matrix-macos-arm64.zip
 ln -sfn /Applications dist/dmg/Applications
 # hdiutil fails now and then on hosted runners ("Resource busy"): a few tries.
 for try in 1 2 3; do

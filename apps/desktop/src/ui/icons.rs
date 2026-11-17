@@ -40,6 +40,7 @@ icons! {
     VIDEO = "video": r#"<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-3v10l-6-3z"/>"#;
     AUDIO = "audio": r#"<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>"#;
     HOME = "home": r#"<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>"#;
+    UPDATE = "update": r#"<path d="M20 7a9 9 0 1 0 1 9M20 3v5h-5M12 17V9M9 12l3-3 3 3"/>"#;
     PLUS = "plus": r#"<path d="M12 5v14M5 12h14"/>"#;
     CHECK = "check": r#"<path d="M20 6 9 17l-5-5"/>"#;
     SIGN_OUT = "sign-out": r#"<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>"#;

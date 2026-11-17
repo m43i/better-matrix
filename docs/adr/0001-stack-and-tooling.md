@@ -101,6 +101,24 @@ Date: 2026-11-14
   - Release notes come from the merged pull requests, grouped by label (`.github/release.yml`;
     the labels are in `.github/labels.yml`). The packaging lives in `packaging/`, runnable
     locally.
+- **Desktop self-updates** (macOS arm64 and Windows x86_64 release builds):
+  - A shell worker checks GitHub's latest stable release at startup and hourly. Offline checks
+    are quiet; prereleases, equal/older versions and releases without a matching archive and
+    SHA-256 digest are ignored. SemVer precedence decides what is newer.
+  - Discovery only offers an update. Clicking the rail's update icon downloads the immutable
+    asset ID over HTTPS and verifies GitHub's SHA-256 digest before extracting it. This trusts
+    the repository's release permissions and GitHub HTTPS; it is not a separate signing key.
+  - Stage beside the install so permissions and disk failures are reported before quitting.
+    macOS publishes a ditto ZIP of the complete ad-hoc-signed bundle as well as the DMG, and
+    verifies its code signature. Windows extracts only `better-matrix.exe` from the existing ZIP.
+  - A native script helper acknowledges startup, waits for process exit (the engine shuts
+    down and releases the single-instance lock normally), moves the previous install aside,
+    replaces it and relaunches. It restores the backup if replacement/relaunch fails and
+    reports the error on the next launch. Paths are arguments, never generated script source.
+  - Development/headless builds and Linux do not self-update. Linux remains package-managed.
+    The install directory must be writable; there is no elevation flow. macOS must run from an
+    installed `.app`, not a standalone executable or read-only disk image. Ad-hoc signing's
+    existing macOS permission prompts still apply.
 - **`matrix:` links and one process** (desktop):
   - The installs claim the `matrix` scheme: the Linux desktop entry (`packaging/linux`, and
     `bun run install:linux`) has `MimeType=x-scheme-handler/matrix;` and `Exec=… %u`; the macOS

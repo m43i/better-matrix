@@ -32,6 +32,36 @@ env:
   CARGO_PROFILE_TEST_DEBUG: 0
 
 jobs:
+  update-helpers:
+    name: Update helpers (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [macos-26, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Test replacement, restart and rollback (Windows)
+        if: runner.os == 'Windows'
+        run: python -m unittest discover -s .github/scripts -p test_update_helpers.py -v
+      - name: Test replacement, restart and rollback (macOS)
+        if: runner.os == 'macOS'
+        run: python3 -m unittest discover -s .github/scripts -p test_update_helpers.py -v
+      - name: Check macOS update archive
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p target/release
+          printf 'int main(void) { return 0; }' | clang -x c -o target/release/better-matrix -
+          packaging/macos/package.sh 0.0.0
+          ditto -x -k dist/out/better-matrix-macos-arm64.zip dist/check
+          codesign --verify --deep --strict 'dist/check/Better Matrix.app'
+          test -f 'dist/check/Better Matrix.app/Contents/Resources/better-matrix.icns'
+          test -f 'dist/check/Better Matrix.app/Contents/Info.plist'
+          test -x 'dist/check/Better Matrix.app/Contents/MacOS/better-matrix'
+
   test:
     name: Lint and test
     runs-on: ubuntu-26.04
