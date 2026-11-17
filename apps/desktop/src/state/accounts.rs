@@ -188,8 +188,11 @@ pub struct RoomTimeline {
     pub revision: u64,
     /// Each sender's latest name and picture, for read indicators, at the revision it was
     /// built for.
-    senders: std::sync::Mutex<Option<(u64, std::sync::Arc<HashMap<String, matrix_core::Person>>)>>,
+    senders: std::sync::Mutex<Option<(u64, SenderIndex)>>,
 }
+
+/// Senders by user ID, as [`RoomTimeline::sender`] keeps them.
+type SenderIndex = std::sync::Arc<HashMap<String, matrix_core::Person>>;
 
 /// Which entries of a timeline its view shows (plus a margin), as it last reported: their
 /// range at the timeline's `revision` then, and their IDs, which outlive changes to the range.
