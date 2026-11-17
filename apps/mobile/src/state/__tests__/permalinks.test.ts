@@ -1,5 +1,6 @@
 import vectors from '../../../../../packages/matrix-core/src/permalinks.json';
-import { isPermalink, parsePermalink } from '../permalinks';
+import typedVectors from '../../../../../packages/matrix-core/src/typed_links.json';
+import { isPermalink, parsePermalink, parseTyped, permalinkUri } from '../permalinks';
 
 describe('parsePermalink', () => {
   // The engine's parser is tested against the same vectors (packages/matrix-core/src/permalinks.rs).
@@ -19,4 +20,29 @@ describe('isPermalink', () => {
     expect(isPermalink('https://example.org/#/@alice:example.org')).toBe(false));
   it('should take a matrix.to link for one', () =>
     expect(isPermalink('https://matrix.to/#/#rust:matrix.org')).toBe(true));
+});
+
+describe('parseTyped', () => {
+  // The engine reads typed links against the same vectors (`Permalink::parse_typed`).
+  it.each(typedVectors.map((v) => [v.text, v.parsed] as const))(
+    'should read %j as the engine does',
+    (text, parsed) => {
+      expect(parseTyped(text)).toEqual(parsed);
+    },
+  );
+});
+
+describe('permalinkUri', () => {
+  const links = vectors.flatMap((v) => {
+    const link = parsePermalink(v.link);
+
+    return link === null ? [] : [link];
+  });
+
+  it.each(links.map((link) => [permalinkUri(link), link] as const))(
+    'should read %j back as the link it was written from',
+    (uri, link) => {
+      expect(parsePermalink(uri)).toEqual(link);
+    },
+  );
 });

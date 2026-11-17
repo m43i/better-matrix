@@ -38,7 +38,7 @@ import type { Store } from '../../state/store';
 import { useAppStore, useStore } from '../../state/react';
 import { account as accountOf } from '../../state/selectors';
 import { font } from '../../theme/palette';
-import { Avatar } from '../Avatar';
+import { Avatar, avatarRadius } from '../Avatar';
 import { IconButton } from '../components';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
@@ -249,6 +249,9 @@ function VideoTile({
   );
 }
 
+/** How far the speaking ring sits outside the face: its padding and border. */
+const RING_INSET = 6;
+
 /** A voice call's face, with a ring while they speak. */
 function VoiceTile({
   info,
@@ -277,7 +280,8 @@ function VoiceTile({
       <View
         style={[
           styles.faceRing,
-          { borderRadius: size / 2 + 6 },
+          // The avatar's own corners, grown by the ring's padding and border so they run parallel.
+          { borderRadius: avatarRadius(size) + RING_INSET },
           speaking
             ? {
                 borderColor: palette.accent,
@@ -501,7 +505,12 @@ const styles = StyleSheet.create({
     borderWidth: 2.5,
   },
   face: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  faceRing: { borderWidth: 3, padding: 3, shadowRadius: 22, shadowOffset: { width: 0, height: 0 } },
+  faceRing: {
+    borderWidth: 3,
+    padding: RING_INSET - 3,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 0 },
+  },
   faceName: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   divider: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
   paging: {

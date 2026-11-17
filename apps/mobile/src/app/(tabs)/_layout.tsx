@@ -1,10 +1,12 @@
 // The tab bar, the platform's own (UITabBar on iOS, Material's bottom navigation on Android):
-// Home, Direct messages, and the account on screen. The account tab opens the account menu
-// (switch or add an account, settings, sign out) instead of a screen: it is `disabled`, which
-// keeps the bar from selecting it but still reports the press. Its label is the account's name;
-// on iOS its icon is the account's picture when it has one (drawn as is), elsewhere the system's
-// profile icon, since Android's bar tints every icon to one colour. Notifications are behind the
-// bell in Home's header, creating things behind its "+".
+// Home and Direct messages. The account is the avatar at the right of each tab's header
+// (`ui/shell/TabHeader`), and the search sits under each tab's title.
+//
+// On iOS the bar also holds "+", which opens the create sheet instead of a screen: it is
+// `disabled`, which keeps the bar from selecting it but still reports the press. iOS 27 sets it
+// on its own surface beside the tabs (`prominent`), iOS 26.1 in the search tab's separated place
+// (`role="search"`, its search never activated), and older iOS shows it as a third tab. Android
+// has no such tab: a floating button over each tab's list opens the same menu (`CreateFab`).
 
 import { router } from 'expo-router';
 import { NativeTabs } from 'expo-router/native-tabs';
@@ -12,28 +14,14 @@ import { Platform } from 'react-native';
 
 import { t } from '../../i18n';
 import { routes } from '../../routes';
-import { useStore } from '../../state/react';
-import { hasUnread } from '../../state/sections';
-import { activeAccount } from '../../state/selectors';
-import { AVATAR_SIZE, useMedia } from '../../ui/media';
+import { createTab } from '../../ui/shell/create';
 import { usePalette } from '../../ui/theme';
+
+/** Fixed for the app's run: a tab's `role` must not change after it renders. */
+const CREATE_TAB = createTab(Platform.OS, Platform.Version);
 
 export default function TabsLayout() {
   const palette = usePalette();
-  const summary = useStore((s) => activeAccount(s)?.summary);
-
-  // Another account has something new: a dot on the account tab, as the desktop's rail shows.
-  const othersUnread = useStore((s) =>
-    s.accounts.some((a) => a.summary.id !== s.active && hasUnread(a, 'home')),
-  );
-
-  const picture = useMedia(
-    summary?.id ?? null,
-    Platform.OS === 'ios' ? summary?.avatar : null,
-    AVATAR_SIZE,
-  );
-
-  const name = summary ? summary.display_name || summary.id : t('mobile.tabs.you');
 
   return (
     <NativeTabs
@@ -59,19 +47,18 @@ export default function TabsLayout() {
         />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger
-        name="you"
+        name="new"
+        hidden={CREATE_TAB === 'none'}
         disabled
-        accessibilityLabel={t('mobile.shell.account_menu', { name })}
-        listeners={{ tabPress: () => router.push(routes.accountMenu()) }}
+        role={CREATE_TAB === 'separate' ? 'search' : undefined}
+        disableAutomaticSearchActivation={CREATE_TAB === 'separate' ? true : undefined}
+        prominent={CREATE_TAB === 'prominent'}
+        testID="tab-create"
+        accessibilityLabel={t('create.menu')}
+        listeners={{ tabPress: () => router.push(routes.create()) }}
       >
-        <NativeTabs.Trigger.Label>{name}</NativeTabs.Trigger.Label>
-        {picture ? (
-          <NativeTabs.Trigger.Icon src={{ uri: picture }} renderingMode="original" />
-        ) : (
-          <NativeTabs.Trigger.Icon sf="person.crop.circle" md="account_circle" />
-        )}
-        {/* A badge without text is a dot (patches/expo-router: Material's small dot on Android). */}
-        <NativeTabs.Trigger.Badge hidden={!othersUnread} />
+        <NativeTabs.Trigger.Label>{t('create.menu')}</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="plus" md="add" />
       </NativeTabs.Trigger>
     </NativeTabs>
   );

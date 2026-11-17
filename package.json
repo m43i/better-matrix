@@ -37,8 +37,5 @@
     "oxlint": "1.94.0",
     "turbo": "2.11.11"
   },
-  "packageManager": "bun@1.4.4",
-  "patchedDependencies": {
-    "expo-router@58.0.31": "patches/expo-router@58.0.31.patch"
-  }
+  "packageManager": "bun@1.4.4"
 }

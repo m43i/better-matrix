@@ -23,25 +23,40 @@ Date: 2026-11-16
   pickers, the camera roll, audio, video, notifications, the keychain and secure browser
   sessions. Native folders are generated (`expo prebuild`) and not committed; native settings go
   in `app.json` and config plugins.
-- **Navigation:** the platform's tab bar holds Home, Direct messages and the account on screen,
-  labelled with its name: its picture on iOS (drawn untinted), the system's profile icon on
-  Android, whose bar tints every icon to one colour. Tapping it opens the **account menu** sheet
-  (switch or add an account, settings, sign out) instead of a screen: the tab is `disabled`,
-  which keeps the bar from selecting it but still reports the press. A dot on it says another
-  account has something new: Expo Router sends a textless badge as a space, which Android draws
-  as a full-size badge, so `patches/expo-router@*.patch` sends an empty one there (Material's
-  small dot); drop the patch once Expo Router does it itself. Material's dot is 6 dp, too small
-  beside the bar's icons, and react-native-screens themes the bar itself, so
-  `plugins/withBadgeSize.js` overrides Material's `m3_badge_size` resource to 10 dp. Each tab is a folder with its own
-  native stack (`ui/shell/TabStack`) for its header; everything opened from a tab (rooms,
-  sheets, modals) is declared on the root stack and covers the tabs. Home's title is the scope
-  with a chevron, opening the **space picker** (the desktop's rail); its header holds the bell
-  (Activity, with how many notifications are new) and the create menu. Header buttons and menus
-  are `Stack.Toolbar` items; Android needs their icons as images, so the Material Symbol is drawn
-  to one (`ui/shell/toolbarIcon`). Room lists are as compact as the desktop's sidebar (`#` for
-  rooms, a small avatar for direct chats); the DMs tab adds the latest message. Every avatar is
-  the desktop's rounded square. Dragging rooms between sections becomes the room's long-press
-  sheet, which edits the same `SidebarLayout`.
+- **Navigation:** the platform's tab bar holds Home and Direct messages. Each tab is a folder
+  with its own native stack (`ui/shell/TabStack`) for its header; everything opened from a tab
+  (rooms, sheets, modals) is declared on the root stack and covers the tabs.
+  - _Header:_ the account on screen is its picture at the header's right (`ui/shell/TabHeader`;
+    on iOS a `Stack.Toolbar.View` without the shared glass background; on Android one row with
+    the title, since the native stack lays a custom title across the whole bar and a right item
+    lands at its start), on every phone, opening the
+    **account menu** sheet (switch or add an account, settings, sign out); a dot on it says
+    another account has something new. Home's title is the scope with a chevron, opening the
+    **space picker** (the desktop's rail). There is no notification list: the system shows
+    notifications, and the header has no bell.
+  - _Search:_ under each tab's title, as the desktop's top bar: rooms, direct chats and spaces
+    by name, then people from the user directory, listed in the tab's place while something is
+    typed (`ui/shell/SearchResults`, from the pure `searchResults`), and the tab's list behind it
+    otherwise. A pasted invitation link or a typed address (`#room:server`, `@user:server`,
+    `!room`) is offered first as a link to open, and the search key opens it at once
+    (`parseTyped`, [0008](0008-people-and-rooms.md)). iOS uses the header's own search bar,
+    stacked under the title (`placement="stacked"`); Android has no header search bar there, so
+    a Material-style field sits under the header at the top of the tab
+    (`ui/shell/ShellSearch.android.tsx`).
+  - _Create:_ the desktop's create menu (a chat, a room where the scope allows, a space from
+    Home, a section; `state/create.ts`) lives at the bottom. Android shows Material 3's floating
+    action button menu at each tab's bottom right (`ui/shell/CreateFab.android.tsx`): labelled
+    buttons above the button, which turns into a close button over a scrim. iOS puts "+" in the
+    tab bar, `disabled` (the bar never selects it but still reports the press) and opening the
+    create sheet (`app/create.tsx`): iOS 27 sets it on its own surface (`prominent`), iOS 26.1
+    in the search tab's separated place (`role="search"` with its search never activated, the
+    only way to set a tab apart there), and older iOS shows it as a third tab
+    (`ui/shell/create.ts`'s `createTab`).
+  - Header buttons and menus elsewhere are `Stack.Toolbar` items; Android needs their icons as
+    images, so the Material Symbol is drawn to one (`ui/shell/toolbarIcon`). Room lists are as
+    compact as the desktop's sidebar (`#` for rooms, a small avatar for direct chats); the DMs
+    tab adds the latest message. Every avatar is the desktop's rounded square. Dragging rooms
+    between sections becomes the room's long-press sheet, which edits the same `SidebarLayout`.
 - **The engine is `matrix-core`, unchanged in shape.** `packages/matrix-ffi` wraps it in one
   UniFFI object, `Bridge`; `uniffi-bindgen-react-native` (ubrn) builds it for Android
   (`cargo ndk`, arm64 and x86_64) and iOS and generates a JSI turbo module
@@ -82,9 +97,25 @@ Date: 2026-11-16
 - **Design:** the desktop's palette roles (`ui/theme.rs`) as sRGB in `src/theme/palette.ts`,
   its type scale and identity colours; icons are SF Symbols on iOS and Material Symbols on
   Android through one name table (`src/ui/icons.tsx`) mirroring the desktop's icon set.
+- **Each platform's own conventions,** decided in the shared components so screens don't branch:
+  - _Headers:_ iOS tints buttons and the back chevron with the accent; Android draws the
+    Material back arrow and actions in the text colour (`headerTint`), and titles sit at the
+    start. A modal leaves by Cancel (or Done, at the right) on iOS and by a close icon at the left
+    on Android (`ui/HeaderButtons`).
+  - _Lists:_ iOS's inset grouped sections (an upper-case caption over a rounded card), a
+    disclosure chevron on rows that open something, a checkmark on the chosen row; Android's
+    flat Material sections (a caption in the accent), no chevrons, radio buttons
+    (`ListSection`, `ListRow`).
+  - _Switches:_ UISwitch on iOS, Material 3's Compose switch on Android (`ui/Toggle`), since
+    React Native's Android switch is Material 2's.
 - **Translations:** the desktop's catalogs are reused as they are, with a mobile catalog per
   area of the app layered on top (`src/i18n/mobile/<area>.<locale>.json`); a test fails when
   German or French lacks a mobile key or a placeholder.
+- **The composer is one row:** + then the text field then the mic (send once there is something
+  to send). The field grows with its text to about six lines, then scrolls, as the desktop's
+  does. + opens every other option in the keyboard's place (photos and videos, camera, files,
+  poll, formatting, emoji); formatting, once picked, puts the toolbar above the row until it is
+  closed.
 - **The composer writes formatting as markers.** The native text field holds plain text;
   `Format`s insert and remove markdown-style markers (`**bold**`, `_italic_`, `~~strike~~`,
   `` `code` ``, `[text](url)`, `- `/`1. ` lists, `> ` quotes, ``` fences), and lists and quotes

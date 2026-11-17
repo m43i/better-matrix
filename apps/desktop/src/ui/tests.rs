@@ -219,3 +219,14 @@ fn unread_timeline(s: &mut State) {
         &mut rune::Tx::default(),
     );
 }
+
+#[test]
+fn a_pasted_address_should_be_offered_in_the_search_and_open_its_link_dialog() {
+    let mut rt = runtime(|s| {
+        s.search.field = rune::TextEdit::new("#rust:matrix.org");
+        s.popover = Some(crate::state::Popover::Search);
+    });
+    press(&mut rt, "found-link");
+    assert!(matches!(rt.state.modal, Some(crate::state::Modal::Link(_))));
+    assert_eq!(rt.state.search.query(), "");
+}

@@ -1,0 +1,60 @@
+[
+  {
+    "text": "https://matrix.to/#/#rust:matrix.org?via=matrix.org",
+    "parsed": {
+      "kind": "room",
+      "id": "#rust:matrix.org",
+      "event": null,
+      "via": ["matrix.org"],
+      "action": null
+    }
+  },
+  {
+    "text": "matrix:u/alice:example.org?action=chat",
+    "parsed": {
+      "kind": "user",
+      "id": "@alice:example.org",
+      "event": null,
+      "via": [],
+      "action": "chat"
+    }
+  },
+  {
+    "text": "matrix.to/#/#rust:matrix.org",
+    "parsed": { "kind": "room", "id": "#rust:matrix.org", "event": null, "via": [], "action": null }
+  },
+  {
+    "text": "  #rust:matrix.org ",
+    "parsed": { "kind": "room", "id": "#rust:matrix.org", "event": null, "via": [], "action": null }
+  },
+  {
+    "text": "!abc:example.org",
+    "parsed": { "kind": "room", "id": "!abc:example.org", "event": null, "via": [], "action": null }
+  },
+  {
+    "text": "!WBJ3uVKfrIu0kTEmRcLNZTfjgDvmeCAGnsiKDBxdIa8",
+    "parsed": {
+      "kind": "room",
+      "id": "!WBJ3uVKfrIu0kTEmRcLNZTfjgDvmeCAGnsiKDBxdIa8",
+      "event": null,
+      "via": [],
+      "action": null
+    }
+  },
+  {
+    "text": "@alice:example.org",
+    "parsed": {
+      "kind": "user",
+      "id": "@alice:example.org",
+      "event": null,
+      "via": [],
+      "action": null
+    }
+  },
+  { "text": "#rust", "parsed": null },
+  { "text": "@alice", "parsed": null },
+  { "text": "#rust matrix.org", "parsed": null },
+  { "text": "rust", "parsed": null },
+  { "text": "", "parsed": null },
+  { "text": "https://example.org/#/@alice:example.org", "parsed": null }
+]

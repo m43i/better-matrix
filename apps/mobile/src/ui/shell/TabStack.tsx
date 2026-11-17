@@ -3,7 +3,7 @@
 
 import { Stack } from 'expo-router';
 
-import { usePalette } from '../theme';
+import { headerTint, usePalette } from '../theme';
 
 export function TabStack() {
   const palette = usePalette();
@@ -11,7 +11,7 @@ export function TabStack() {
   return (
     <Stack
       screenOptions={{
-        headerTintColor: palette.accent,
+        headerTintColor: headerTint(palette),
         headerTitleStyle: { color: palette.text },
         headerStyle: { backgroundColor: palette.bg },
         contentStyle: { backgroundColor: palette.bg },

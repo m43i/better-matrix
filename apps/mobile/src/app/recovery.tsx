@@ -13,6 +13,7 @@ import { recover } from '../state/actions/security';
 import { useAppStore } from '../state/react';
 import { font } from '../theme/palette';
 import { Button, TextField } from '../ui/components';
+import { HeaderCancel } from '../ui/HeaderButtons';
 import { Icon } from '../ui/icons';
 import { usePalette } from '../ui/theme';
 
@@ -43,14 +44,7 @@ export default function RecoveryScreen() {
         options={{
           title: t('recovery.enter_title'),
           headerShown: true,
-          headerLeft: () => (
-            <Button
-              testID="recovery-cancel"
-              title={t('common.cancel')}
-              kind="plain"
-              onPress={() => router.back()}
-            />
-          ),
+          headerLeft: () => <HeaderCancel onPress={() => router.back()} testID="recovery-cancel" />,
         }}
       />
       <KeyboardAwareScrollView

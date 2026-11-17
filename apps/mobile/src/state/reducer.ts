@@ -17,9 +17,6 @@ import { DEFAULT_SETTINGS, type Settings } from './settings';
 import { applyDiffs, timelineId } from './timeline';
 import type { AccountData, State, Timeline } from './types';
 
-/** How many notifications the Activity tab keeps. */
-export const ACTIVITY_KEPT = 200;
-
 /** A fetched rendition's key in `State.media`. */
 export function mediaKey(media: MediaRef, size: MediaSize): string {
   return size.type === 'Original'
@@ -53,8 +50,6 @@ export function initialState(settings: Settings = DEFAULT_SETTINGS): State {
     },
     verifications: [],
     recoveryKey: null,
-    activity: [],
-    activityUnseen: 0,
     notices: [],
     composers: {},
     recentEmoji: [],
@@ -338,11 +333,8 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'GifFile':
       return { ...state, gifs: { ...state.gifs, [event.data.url]: event.data.path } };
     case 'Notification':
-      return {
-        ...state,
-        activity: [event.data, ...state.activity].slice(0, ACTIVITY_KEPT),
-        activityUnseen: Math.min(state.activityUnseen + 1, ACTIVITY_KEPT),
-      };
+      // Shown by the system (`engine/notifications.ts`); the app keeps no list of them.
+      return state;
     case 'AccountError':
       // A saved account that failed to restore is no longer restoring.
       return addNotice(

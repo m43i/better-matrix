@@ -10,6 +10,11 @@ import { initials } from './initials';
 import { AVATAR_SIZE, useMedia } from './media';
 import { usePalette } from './theme';
 
+/** An avatar's corner radius: everyone and everything is a rounded square, as on the desktop. */
+export function avatarRadius(size: number): number {
+  return size * 0.22;
+}
+
 export function Avatar({
   account,
   id,
@@ -29,8 +34,7 @@ export function Avatar({
 }) {
   const palette = usePalette();
   const uri = useMedia(account, media, AVATAR_SIZE);
-  // Everyone and everything is a rounded square, as the desktop draws avatars.
-  const radius = size * 0.22;
+  const radius = avatarRadius(size);
 
   return (
     <View style={{ width: size, height: size }}>

@@ -1,5 +1,6 @@
-// What + opens below the composer, in the keyboard's place, as Slack's does: the photo
-// library, the camera, files, and a poll.
+// What + opens below the composer, in the keyboard's place, as Slack's does: every option the
+// minimal composer row leaves out. The photo library, the camera, files, a poll, the formatting
+// toolbar and the emoji picker.
 
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -8,13 +9,15 @@ import { font } from '../../theme/palette';
 import { Icon, type IconName } from '../icons';
 import { usePalette } from '../theme';
 
-export type TrayChoice = 'library' | 'camera' | 'files' | 'poll';
+export type TrayChoice = 'library' | 'camera' | 'files' | 'poll' | 'format' | 'emoji';
 
 const CHOICES: ReadonlyArray<{ id: TrayChoice; icon: IconName; label: Key }> = [
   { id: 'library', icon: 'library', label: 'mobile.composer.library' },
   { id: 'camera', icon: 'camera', label: 'mobile.composer.camera' },
   { id: 'files', icon: 'folder', label: 'mobile.composer.files' },
   { id: 'poll', icon: 'poll', label: 'mobile.composer.poll' },
+  { id: 'format', icon: 'textFormat', label: 'composer.formatting' },
+  { id: 'emoji', icon: 'smile', label: 'composer.emoji' },
 ];
 
 export function AttachTray({ onChoose }: { onChoose: (choice: TrayChoice) => void }) {
@@ -50,13 +53,15 @@ export function AttachTray({ onChoose }: { onChoose: (choice: TrayChoice) => voi
 }
 
 const styles = StyleSheet.create({
+  // Three to a row: two rows of three, whatever the phone's width.
   tray: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexWrap: 'wrap',
+    rowGap: 16,
     paddingHorizontal: 12,
     paddingVertical: 16,
   },
-  choice: { width: 76, alignItems: 'center', gap: 6 },
+  choice: { width: '33.33%', alignItems: 'center', gap: 6 },
   circle: {
     width: 56,
     height: 56,

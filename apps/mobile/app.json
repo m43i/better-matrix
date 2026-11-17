@@ -91,7 +91,6 @@
       ],
       "expo-notifications",
       "expo-asset",
-      "./plugins/withBadgeSize",
       [
         "./plugins/withPush",
         {

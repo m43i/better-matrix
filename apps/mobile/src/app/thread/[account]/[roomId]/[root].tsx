@@ -4,7 +4,7 @@
 
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../../../i18n';
 import { findMessage } from '../../../../state/messages';
@@ -70,5 +70,6 @@ export default function ThreadScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  title: { alignItems: 'center', maxWidth: 240 },
+  // Centred under iOS's title bar; at the start, as Material's top app bar puts titles.
+  title: { alignItems: Platform.OS === 'android' ? 'flex-start' : 'center', maxWidth: 240 },
 });

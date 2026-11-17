@@ -37,7 +37,8 @@ Date: 2026-11-14
 - **File dialog:** `Shell::pick_files(PickFor)` and `State::files_picked` serve attachments and
   the profile picture. A new use is a `PickFor` variant.
 - **Search:**
-  - The top bar matches rooms, direct chats and spaces on this device when every typed word
+  - A typed link or address comes first (Typed links, below), then the top bar matches rooms,
+    direct chats and spaces on this device when every typed word
     starts a word of the name (`state::matches`), and people in the user directory
     (`Command::SearchPeople`).
   - `PeopleSearch` serves the top bar, new-chat search and invite dialog. It sends from `poll`
@@ -133,6 +134,13 @@ Date: 2026-11-14
   same parser in TypeScript (`apps/mobile/src/state/permalinks.ts`); both run the shared vectors
   in `packages/matrix-core/src/permalinks.json`, so a link reads the same in every app. A new
   case is a new vector.
+- **Typed links:** search fields also read what is pasted or typed as a link
+  (`Permalink::parse_typed`, `parseTyped` in TypeScript, vectors in `typed_links.json`): a
+  permalink, a matrix.to link without its scheme, or a bare room alias, room ID or user ID. A
+  name never reads as one (an alias or user ID needs its server, and nothing may hold a space).
+  The desktop's top bar and the phones' search list it first ("Open #rust:matrix.org") and open
+  it on Enter (or the search key) as any permalink; phones hand it to the link screen as a
+  `matrix:` URI (`permalinkUri`).
 - **Where a link goes:** a room ID an account has joined opens at once (the account the link was
   clicked in first, then the one on screen, then any); a space opens as that account's scope,
   as it does when one is joined from its preview. Anything else looks the room up for one

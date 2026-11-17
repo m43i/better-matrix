@@ -1,7 +1,7 @@
 //! Finding and gathering people: the top bar with its search, the open room's member list and
 //! info, and the invite dialog.
 
-use matrix_core::{Person, RoomKind, RoomSummary};
+use matrix_core::{LinkTarget, Permalink, Person, RoomKind, RoomSummary};
 use rune::{Align, Color, El, ScrollSpec, Side, col, el, icon, row, text, text_input};
 
 use super::components::{ButtonKind, button, dialog, media_avatar, popover_panel};
@@ -28,7 +28,12 @@ pub fn top_bar(s: &State, account: &AccountData, p: &Palette) -> El {
         .placeholder(tf!("search.placeholder", account = account.summary.display_name), p.sidebar_text_muted)
         .color(p.sidebar_text)
         .grow(1.0)
-        .on_edit(|s: &mut State| &mut s.search.field);
+        .on_edit(|s: &mut State| &mut s.search.field)
+        // Enter opens a pasted invitation link or a typed address.
+        .on_submit(|s: &mut State, tx| {
+            let typed = s.search.query().to_owned();
+            crate::state::navigate_now(s, tx, |s| s.open_typed_link(&typed));
+        });
     let search = row()
         .w_full()
         .max_w(640.0)
@@ -79,12 +84,37 @@ fn section(title: &str, p: &Palette) -> El {
     text(title.to_owned()).font(font::SECTION).color(p.text_muted).px(10.0).pt(8.0).pb(4.0)
 }
 
-/// The search's results under the field: rooms, direct chats and spaces on this device, then
-/// people from the user directory.
+/// The search's results under the field: a typed link or address to open, rooms, direct chats
+/// and spaces on this device, then people from the user directory.
 pub fn search_results(s: &State, account: &AccountData, p: &Palette) -> El {
     let query = s.search.query();
     let mut list = col().w_full().px(6.0).pb(6.0);
     let mut any = false;
+    if let Some(link) = Permalink::parse_typed(query) {
+        any = true;
+        let target = match link.target {
+            LinkTarget::User(id) | LinkTarget::Room { room: id, .. } => id,
+        };
+        let typed = query.to_owned();
+        list = list.child(section(t!("search.link"), p)).child(
+            row()
+                .key("found-link")
+                .w_full()
+                .px(10.0)
+                .py(6.0)
+                .gap(10.0)
+                .center_y()
+                .radius(6.0)
+                .hover(p.hover.alpha(p.hover.a * 2.0))
+                .role("button")
+                .cursor(rune::Cursor::Pointer)
+                .child(el().size(28.0, 28.0).center().child(icon(&icons::LINK, 16.0).color(p.text_muted)))
+                .child(
+                    text(tf!("search.open_link", target = target)).font(font::BODY).color(p.text).grow(1.0).truncate(),
+                )
+                .on_press_tx(crate::state::navigate(move |s| s.open_typed_link(&typed))),
+        );
+    }
     let room_row = |room: &RoomSummary| {
         let id = room.room_id.clone();
         let mark = match room.kind {

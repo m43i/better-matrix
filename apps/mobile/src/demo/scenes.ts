@@ -59,13 +59,12 @@ export const scenes = {
   'home-dark': { about: 'Home in the dark appearance', settings: { appearance: 'dark' } },
   space: { about: 'A space in scope', setup: general },
   dms: { about: 'The direct messages tab', routes: ['/dms'] },
-  activity: { about: 'Notifications, from the bell', routes: [routes.activity()] },
   'account-menu': {
-    about: 'The account menu, from the avatar in the tab bar',
+    about: 'The account menu, from the avatar in the header',
     routes: [routes.accountMenu()],
   },
   spaces: { about: 'The space picker, from Home’s title', routes: [routes.spaces()] },
-  search: { about: 'Jump to a room', routes: [routes.search()] },
+  create: { about: 'The create sheet, from the + in the tab bar', routes: [routes.create()] },
   invitation: {
     about: 'An invitation to accept or decline',
     routes: [routes.invitation(ADA, DESIGN_INVITE)],

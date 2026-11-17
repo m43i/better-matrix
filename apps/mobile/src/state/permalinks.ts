@@ -36,6 +36,48 @@ export function parsePermalink(link: string): Permalink | null {
   return matrixTo(fragment.startsWith('/') ? fragment.slice(1) : fragment);
 }
 
+/**
+ * Reads what someone typed or pasted into a search as a link (the engine's
+ * `Permalink::parse_typed`): a permalink, a matrix.to link without its scheme, or a bare room
+ * alias, room ID or user ID. `null` for anything else, so a name being searched for never reads
+ * as one.
+ */
+export function parseTyped(text: string): Permalink | null {
+  const trimmed = text.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, '');
+  const link = parsePermalink(trimmed);
+
+  if (link !== null) return link;
+
+  if (stripPrefix(trimmed, 'matrix.to') !== null) return parsePermalink(`https://${trimmed}`);
+  const bare = { event: null, via: [], action: null };
+
+  if (isId(trimmed, '@', true)) return { kind: 'user', id: trimmed, ...bare };
+
+  if (isId(trimmed, '#', true) || isId(trimmed, '!', false))
+    return { kind: 'room', id: trimmed, ...bare };
+
+  return null;
+}
+
+/**
+ * `link` written as a `matrix:` URI, which reads back as the same link: how a typed link reaches
+ * the link screen, which takes a URI.
+ */
+export function permalinkUri(link: Permalink): string {
+  const sigil = link.id.charAt(0);
+  const kind = link.kind === 'user' ? 'u' : sigil === '#' ? 'r' : 'roomid';
+  let uri = `matrix:${kind}/${encodeURIComponent(link.id.slice(1))}`;
+
+  if (link.event !== null) uri += `/e/${encodeURIComponent(link.event.slice(1))}`;
+
+  const query = [
+    ...link.via.map((server) => `via=${encodeURIComponent(server)}`),
+    ...(link.action === null ? [] : [`action=${link.action}`]),
+  ];
+
+  return query.length > 0 ? `${uri}?${query.join('&')}` : uri;
+}
+
 /** Whether `link` is a permalink, which opens in the app rather than the browser. */
 export function isPermalink(link: string): boolean {
   return parsePermalink(link) !== null;

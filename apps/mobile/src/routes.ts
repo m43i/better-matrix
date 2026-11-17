@@ -11,13 +11,12 @@ export const routes = {
     pathname: '/sign-in',
     params: resume ? { resume } : {},
   }),
-  /** The account menu, from the avatar in the tab bar: switch or add accounts, settings. */
+  /** The account menu, from the avatar in the header: switch or add accounts, settings. */
   accountMenu: (): Href => '/account-menu',
   /** Home and the spaces of the account on screen, from Home's title. */
   spaces: (): Href => '/spaces',
-  /** Notifications, from the bell in Home's header. */
-  activity: (): Href => '/activity',
-  search: (): Href => '/search',
+  /** What can be made here (a chat, room, space or section), from the "+" in iOS's tab bar. */
+  create: (): Href => '/create',
   roomMenu: (account: AccountId, roomId: string): Href => ({
     pathname: '/room-menu',
     params: { account, roomId },

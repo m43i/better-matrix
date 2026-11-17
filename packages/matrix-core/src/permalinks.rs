@@ -9,6 +9,10 @@
 //!   `matrix:r/rust:matrix.org`, `matrix:roomid/abc:example.org[/e/<event>]`, with the sigils left
 //!   out and each segment URL-encoded, plus `?via=` and `?action=join|chat`.
 //!
+//! Search fields also take a **typed link** ([`Permalink::parse_typed`]): a permalink, one
+//! without its `https://`, or a bare ID (`#rust:matrix.org`, `!abc:example.org`,
+//! `@alice:example.org`), as people paste invitations and room addresses.
+//!
 //! The mobile app reads the same links in TypeScript (`apps/mobile/src/state/permalinks.ts`),
 //! because it must route a link before the engine could answer. Both are tested against one set
 //! of vectors, `permalinks.json` beside this file, so they can't drift apart.
@@ -72,6 +76,34 @@ impl Permalink {
         let rest = rest.strip_prefix('/').unwrap_or(rest);
         let fragment = rest.strip_prefix('#')?;
         matrix_to(fragment.strip_prefix('/').unwrap_or(fragment))
+    }
+
+    /// Reads what someone typed or pasted into a search as a link: a permalink, a matrix.to link
+    /// without its scheme, or a bare room alias, room ID or user ID. `None` for anything else, so
+    /// a name being searched for never reads as one.
+    ///
+    /// ```
+    /// use matrix_core::permalinks::{LinkTarget, Permalink};
+    /// let link = Permalink::parse_typed("#rust:matrix.org").unwrap();
+    /// assert_eq!(link.target, LinkTarget::Room { room: "#rust:matrix.org".into(), event: None });
+    /// assert!(Permalink::parse_typed("rust").is_none());
+    /// ```
+    pub fn parse_typed(text: &str) -> Option<Self> {
+        let text = text.trim_matches(|c: char| c.is_ascii_whitespace());
+        if let Some(link) = Self::parse(text) {
+            return Some(link);
+        }
+        if strip_prefix_ignoring_case(text, "matrix.to").is_some() {
+            return Self::parse(&format!("https://{text}"));
+        }
+        let target = if is_id(text, '@', true) {
+            LinkTarget::User(text.to_owned())
+        } else if is_id(text, '#', true) || is_id(text, '!', false) {
+            LinkTarget::Room { room: text.to_owned(), event: None }
+        } else {
+            return None;
+        };
+        Some(Permalink { target, via: Vec::new(), action: None })
     }
 
     /// Whether `link` is a permalink: what decides where a link in a message opens.
@@ -223,6 +255,19 @@ mod tests {
             let link = vector["link"].as_str().expect("a link");
             let parsed = Permalink::parse(link).as_ref().map(shape).unwrap_or(Value::Null);
             assert_eq!(parsed, vector["parsed"], "{link}");
+        }
+    }
+
+    /// What search fields read as links, shared with the mobile app's parser too.
+    const TYPED: &str = include_str!("typed_links.json");
+
+    #[test]
+    fn every_shared_typed_vector_should_parse_as_written() {
+        let vectors: Vec<Value> = serde_json::from_str(TYPED).expect("the vectors are JSON");
+        for vector in vectors {
+            let text = vector["text"].as_str().expect("a text");
+            let parsed = Permalink::parse_typed(text).as_ref().map(shape).unwrap_or(Value::Null);
+            assert_eq!(parsed, vector["parsed"], "{text}");
         }
     }
 

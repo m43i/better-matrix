@@ -14,7 +14,6 @@ import type {
   LinkPreview,
   Members,
   Message,
-  Notification,
   Person,
   RoomSummary,
   Security,
@@ -141,10 +140,6 @@ export interface State {
   verifications: Verification[];
   /** A recovery key to show once, right after it was made. */
   recoveryKey: { account: AccountId; key: string } | null;
-  /** The newest notifications, newest first: the Activity tab. */
-  activity: Notification[];
-  /** How many of them came since Activity was last opened: the bell's badge. */
-  activityUnseen: number;
   notices: Notice[];
   /** Each timeline's composer, by `composerId`. */
   composers: Record<string, ComposerState>;

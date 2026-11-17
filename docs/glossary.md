@@ -11,7 +11,7 @@ each has its own client, store and sync loop. `AccountId` in code.
 
 **Account menu**
 : The popover opened from the signed-in user's avatar at the bottom of the rail: switch account,
-add an account, settings, sign out. On phones, the sheet the avatar in the tab bar opens.
+add an account, settings, sign out. On phones, the sheet the avatar at the header's right opens.
 
 **Rail**
 : The narrow column on the far left: Home and the active account's spaces in the user's order,
@@ -58,12 +58,17 @@ unjoined ones with the most members; More shows the full list.
 **Space picker**
 : On phones, the sheet Home's title opens: Home and the account's spaces, the desktop's rail.
 
-**Jump to**
-: On phones, the search at the top of Home: the account's rooms, direct chats and spaces by name.
+**Search**
+: The field in the desktop's top bar, and under each tab's title on phones: the account's rooms,
+direct chats and spaces by name, people from the user directory, and a **typed link** to open.
 
-**Activity**
-: On phones, the screen behind the bell in Home's header, listing what notified the user
-(`Event::Notification`), newest first, for every account.
+**Typed link**
+: What a search reads as a link rather than a name: a permalink, or a bare room alias, room ID
+or user ID (`#rust:matrix.org`), as people paste invitations (`Permalink::parse_typed`).
+
+**Create menu**
+: What can be made here: a chat, a room, a space, a section. The sidebar's "+" on the desktop;
+on phones, the floating button on Android and the "+" in iOS's tab bar.
 
 **Timeline**
 : A room's messages, oldest first, with date dividers, the "New" marker and the start of visible

@@ -4,7 +4,7 @@
 
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 import { t } from '../i18n';
@@ -21,43 +21,8 @@ import {
 import { useAppStore } from '../state/react';
 import { font } from '../theme/palette';
 import { Button, IconButton, ListRow, ListSection, TextField } from '../ui/components';
+import { HeaderButton, HeaderCancel } from '../ui/HeaderButtons';
 import { usePalette } from '../ui/theme';
-
-function HeaderButton({
-  title,
-  onPress,
-  disabled = false,
-  strong = false,
-  testID,
-}: {
-  title: string;
-  onPress: () => void;
-  disabled?: boolean;
-  strong?: boolean;
-  testID: string;
-}) {
-  const palette = usePalette();
-
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      hitSlop={8}
-      testID={testID}
-    >
-      <Text
-        style={[
-          strong ? font.bodyStrong : font.body,
-          { color: palette.accent, opacity: disabled ? 0.4 : 1 },
-        ]}
-      >
-        {title}
-      </Text>
-    </Pressable>
-  );
-}
 
 export default function NewPollScreen() {
   const { account, roomId, thread } = useLocalSearchParams<{
@@ -81,13 +46,7 @@ export default function NewPollScreen() {
       <Stack.Screen
         options={{
           title: t('poll.title'),
-          headerLeft: () => (
-            <HeaderButton
-              title={t('common.cancel')}
-              onPress={() => router.back()}
-              testID="poll-cancel"
-            />
-          ),
+          headerLeft: () => <HeaderCancel onPress={() => router.back()} testID="poll-cancel" />,
           headerRight: () => (
             <HeaderButton
               title={t('poll.create')}

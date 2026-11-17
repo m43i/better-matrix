@@ -1,15 +1,16 @@
-import type { Notification, RoomSummary } from '@better-matrix/matrix-native/types';
+import type { RoomSummary } from '@better-matrix/matrix-native/types';
 
 import {
   ADA,
   GRACE,
   message,
+  person,
   roomSummary,
   spaceSummary,
   summary,
   withContent,
 } from '../../test/fixtures';
-import { activityRows, jumpTo, listTime, messageText, previewLine } from '../lists';
+import { foundAny, jumpTo, listTime, messageText, previewLine, searchResults } from '../lists';
 import { apply, initialState } from '../reducer';
 import type { AccountData, State } from '../types';
 
@@ -32,10 +33,6 @@ function accountWith(
   });
 
   return state.accounts[0]!;
-}
-
-function notification(account: string, event_id: string, room_id = '!a'): Notification {
-  return { account, room_id, room_name: 'Room', event_id, sender_name: 'Grace', body: 'hi' };
 }
 
 describe('messageText', () => {
@@ -118,23 +115,22 @@ describe('jumpTo', () => {
   });
 });
 
-describe('activityRows', () => {
-  it('a single account should not label its rows', () => {
-    const state = { ...signedIn(ADA), activity: [notification(ADA, '$1')] };
-    expect(activityRows(state)[0]!.accountLabel).toBeNull();
+describe('searchResults', () => {
+  it('a pasted address should be offered as a link', () => {
+    const results = searchResults(accountWith([]), ' #rust:matrix.org ', [], NOW);
+    expect(results.link?.id).toBe('#rust:matrix.org');
   });
 
-  it('several accounts should label each row with its account', () => {
-    const state = { ...signedIn(ADA, GRACE), activity: [notification(GRACE, '$1')] };
-    expect(activityRows(state)[0]!.accountLabel).toBe('Grace');
+  it('a name should not be read as a link', () =>
+    expect(searchResults(accountWith([]), 'rust', [], NOW).link).toBeNull());
+
+  it('the user should not be among the people found', () => {
+    const found = [person(ADA, 'Ada'), person(GRACE, 'Grace')];
+    expect(searchResults(accountWith([]), 'a', found, NOW).people.map((p) => p.id)).toEqual([
+      GRACE,
+    ]);
   });
 
-  it('notifications of an account signed out since should be left out', () => {
-    const state = {
-      ...signedIn(ADA),
-      activity: [notification(GRACE, '$1'), notification(ADA, '$2')],
-    };
-
-    expect(activityRows(state).map((r) => r.notification.event_id)).toEqual(['$2']);
-  });
+  it('a term matching nothing should find nothing', () =>
+    expect(foundAny(searchResults(accountWith([]), 'zzz', [], NOW))).toBe(false));
 });

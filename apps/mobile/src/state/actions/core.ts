@@ -149,11 +149,6 @@ export function fetchGif(store: Store, url: string): void {
   store.fetchOnce(`gif:${url}`, { type: 'FetchGif', data: { url } });
 }
 
-/** Activity was opened: the bell's badge starts again from nothing. */
-export function markActivitySeen(store: Store): void {
-  store.update((s): State => (s.activityUnseen === 0 ? s : { ...s, activityUnseen: 0 }));
-}
-
 /** Forgets a notice once it was shown. */
 export function dismissNotice(store: Store, id: number): void {
   store.update((s): State => ({ ...s, notices: s.notices.filter((n) => n.id !== id) }));

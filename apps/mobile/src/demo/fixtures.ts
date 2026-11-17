@@ -683,52 +683,6 @@ export function seedEvents(): EngineEvent[] {
     { type: 'Sessions', data: { account: ADA, sessions: demoSessions() } },
     { type: 'Threads', data: { account: ADA, room_id: GENERAL, threads: demoThreads() } },
     { type: 'Files', data: { account: ADA, room_id: GENERAL, files: demoFiles() } },
-    ...activityEvents(),
-  ];
-}
-
-/** Mentions and messages for the Activity tab. */
-function activityEvents(): EngineEvent[] {
-  const notification = (
-    roomId: string,
-    roomName: string,
-    eventId: string,
-    sender: string,
-    body: string,
-  ): EngineEvent => ({
-    type: 'Notification',
-    data: {
-      account: ADA,
-      room_id: roomId,
-      room_name: roomName,
-      event_id: eventId,
-      sender_name: sender,
-      body,
-    },
-  });
-
-  return [
-    notification(
-      GENERAL,
-      'general',
-      `$demo-${ALAN}-8`,
-      'Alan Turing',
-      `The release notes are up: ${RELEASE_NOTES}`,
-    ),
-    notification(
-      DM_GRACE,
-      'Grace Hopper',
-      `$demo-${GRACE}-2`,
-      'Grace Hopper',
-      'It drops the room list after a reconnect.',
-    ),
-    notification(
-      '!releases:example.org',
-      'releases',
-      `$demo-${ALAN}-0`,
-      'Alan Turing',
-      '@ada can you sign off 0.2.0?',
-    ),
   ];
 }
 

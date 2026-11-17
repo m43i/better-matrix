@@ -9,7 +9,6 @@ import {
   Pressable,
   type PressableProps,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   type TextInputProps,
@@ -20,6 +19,10 @@ import {
 import { font } from '../theme/palette';
 import { Icon, type IconName } from './icons';
 import { usePalette } from './theme';
+import { Toggle } from './Toggle';
+
+/** Android draws Material's forms where iOS draws its own (list sections, choices). */
+const ANDROID = Platform.OS === 'android';
 
 /** A pressable surface with the platform's press feedback. */
 export function Touchable({
@@ -162,7 +165,10 @@ export function Badge({ count, mention = false }: { count: number; mention?: boo
   );
 }
 
-/** A group of rows, as iOS's grouped lists and Android's settings sections draw them. */
+/**
+ * A group of rows: iOS's inset grouped list (an upper-case caption over a rounded card), or
+ * Material's list section on Android (a caption in the accent colour over flat, full-width rows).
+ */
 export function ListSection({
   title,
   footer,
@@ -177,15 +183,25 @@ export function ListSection({
   return (
     <View style={styles.section}>
       {title ? (
-        <Text style={[styles.sectionTitle, font.section, { color: palette.textMuted }]}>
-          {title.toUpperCase()}
+        <Text
+          style={[
+            styles.sectionTitle,
+            font.section,
+            { color: ANDROID ? palette.accent : palette.textMuted },
+          ]}
+        >
+          {ANDROID ? title : title.toUpperCase()}
         </Text>
       ) : null}
       <View
-        style={[
-          styles.sectionBody,
-          { backgroundColor: palette.surface, borderColor: palette.divider },
-        ]}
+        style={
+          ANDROID
+            ? null
+            : [
+                styles.sectionBody,
+                { backgroundColor: palette.surface, borderColor: palette.divider },
+              ]
+        }
       >
         {children}
       </View>
@@ -198,7 +214,12 @@ export function ListSection({
   );
 }
 
-/** One row of a list: an icon or avatar, a title and subtitle, and a value, switch or chevron. */
+/**
+ * One row of a list: an icon or avatar, a title and subtitle, and a value, switch or chevron. The
+ * chevron is iOS's disclosure indicator; Material lists have none, so Android never draws it. A
+ * row of a single choice (`selected` given) shows iOS's checkmark when chosen, or Material's
+ * radio button on Android.
+ */
 export function ListRow({
   title,
   subtitle,
@@ -206,10 +227,10 @@ export function ListRow({
   leading,
   value,
   onPress,
-  chevron = onPress !== undefined,
+  chevron = onPress !== undefined && Platform.OS === 'ios',
   toggle,
   danger = false,
-  selected = false,
+  selected,
   testID,
 }: {
   title: string;
@@ -244,16 +265,19 @@ export function ListRow({
         ) : null}
       </View>
       {value ? <Text style={[font.body, { color: palette.textMuted }]}>{value}</Text> : null}
-      {selected ? <Icon name="check" size={20} color={palette.accent} /> : null}
-      {toggle ? (
-        <Switch
-          value={toggle.value}
-          onValueChange={toggle.onChange}
-          trackColor={{ true: palette.accent, false: palette.divider }}
-          accessibilityLabel={title}
+      {ANDROID && selected !== undefined ? (
+        <Icon
+          name={selected ? 'choiceOn' : 'choice'}
+          size={22}
+          color={selected ? palette.accent : palette.textMuted}
         />
+      ) : selected ? (
+        <Icon name="check" size={20} color={palette.accent} />
       ) : null}
-      {chevron && !toggle ? <Icon name="chevronRight" size={16} color={palette.textMuted} /> : null}
+      {toggle ? <Toggle value={toggle.value} onChange={toggle.onChange} label={title} /> : null}
+      {chevron && !toggle && Platform.OS === 'ios' ? (
+        <Icon name="chevronRight" size={16} color={palette.textMuted} />
+      ) : null}
     </View>
   );
 
@@ -378,10 +402,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  section: { marginTop: 22, marginHorizontal: 16 },
-  sectionTitle: { marginLeft: 16, marginBottom: 6 },
+  section: { marginTop: 22, marginHorizontal: ANDROID ? 0 : 16 },
+  sectionTitle: { marginLeft: ANDROID ? 18 : 16, marginBottom: ANDROID ? 2 : 6 },
   sectionBody: { borderRadius: 12, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
-  sectionFooter: { marginHorizontal: 16, marginTop: 6 },
+  sectionFooter: { marginHorizontal: ANDROID ? 18 : 16, marginTop: 6 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

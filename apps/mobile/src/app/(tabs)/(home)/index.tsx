@@ -1,10 +1,11 @@
-// Home: the desktop's sidebar as Slack's mobile app lays it out. The title is the scope (Home or
-// a space) and opens the space picker; the header's buttons are the bell (Activity) and the
-// create menu. Under "Jump to…" and the banners: the conversations wanting attention, then the
-// scope's sections, in rows as compact as the desktop's.
+// Home: the desktop's sidebar as Slack's mobile app lays it out. The header holds the account's
+// picture (the account menu) and the scope as title (Home or a space, opening the space picker),
+// with the search under it; what it finds takes the list's place while something is typed.
+// Under the banners: the conversations wanting attention, then the scope's sections, in rows as
+// compact as the desktop's. Android's floating button opens the create menu.
 
 import type { Invitation, RoomSummary } from '@better-matrix/matrix-native/types';
-import { router, Stack } from 'expo-router';
+import { router } from 'expo-router';
 import { useMemo } from 'react';
 import { SectionList, StyleSheet, Text, View } from 'react-native';
 
@@ -32,13 +33,14 @@ import { SecurityBanner } from '../../../ui/accounts/SecurityBanner';
 import { CallBar } from '../../../ui/call/CallBar';
 import { EmptyState, Touchable } from '../../../ui/components';
 import { Icon } from '../../../ui/icons';
-import { CreateMenu } from '../../../ui/shell/CreateMenu';
+import { CreateFab } from '../../../ui/shell/CreateFab';
 import { InvitationRow } from '../../../ui/shell/InvitationRow';
-import { JumpTo } from '../../../ui/shell/JumpTo';
 import { ScopeTitle } from '../../../ui/shell/ScopeTitle';
 import { RoomRow } from '../../../ui/shell/RoomRow';
 import { useNow } from '../../../ui/shell/useNow';
 import { SectionHeader } from '../../../ui/shell/SectionHeader';
+import { TabHeader } from '../../../ui/shell/TabHeader';
+import { useShellSearch } from '../../../ui/shell/useShellSearch';
 import { usePalette } from '../../../ui/theme';
 
 /** The group of conversations wanting attention, above the sections; collapsible like them. */
@@ -125,6 +127,7 @@ export default function HomeScreen() {
   });
 
   useNotificationOpener();
+  const search = useShellSearch(account);
   const now = useNow();
   const list = useMemo(() => (account ? listSections(account, now) : []), [account, now]);
 
@@ -142,77 +145,76 @@ export default function HomeScreen() {
       <EndedSessions />
       <SecurityBanner />
       <CallBar />
-      <JumpTo />
     </View>
   );
 
   return (
     <>
-      <Stack.Screen
-        options={{ title, headerTitle: () => <ScopeTitle title={title} unread={elsewhere} /> }}
-      />
-      <CreateMenu account={id} scope={scope} />
-      {!account.roomsLoaded ? (
-        <View style={styles.fill}>
-          {header}
-          <EmptyState loading title={t('sidebar.syncing')} />
-        </View>
-      ) : (
-        <SectionList
-          testID="room-list"
-          style={styles.fill}
-          contentInsetAdjustmentBehavior="automatic"
-          sections={list}
-          keyExtractor={(room, index) => `${room.room_id}-${index}`}
-          stickySectionHeadersEnabled={false}
-          ListHeaderComponent={header}
-          ListEmptyComponent={<EmptyState icon="chat" title={t('sidebar.empty')} />}
-          renderSectionHeader={({ section }) => (
-            <SectionHeader
-              id={section.id}
-              title={section.title}
-              collapsed={section.collapsed}
-              count={section.attention}
-              onToggle={() => toggleSection(store, id, scope, section.id)}
-              onMenu={
-                section.id === INVITATIONS
-                  ? undefined
-                  : () => router.push(routes.sectionMenu(id, section.id))
-              }
-            />
-          )}
-          renderSectionFooter={({ section }) =>
-            section.own && !section.collapsed && section.data.length === 0 ? (
-              <Text style={[font.meta, styles.hint, { color: palette.textMuted }]}>
-                {t('mobile.shell.section_empty')}
-              </Text>
-            ) : null
-          }
-          renderItem={({ item }) =>
-            isInvitation(item) ? (
-              <InvitationRow account={id} invitation={item} />
-            ) : (
-              <RoomRow
-                account={id}
-                room={item}
-                last={lastMessage(account, item.room_id)}
-                now={now}
+      <TabHeader title={title} titleView={<ScopeTitle title={title} unread={elsewhere} />} />
+      {search.bar}
+      {search.results ??
+        (!account.roomsLoaded ? (
+          <View style={styles.fill}>
+            {header}
+            <EmptyState loading title={t('sidebar.syncing')} />
+          </View>
+        ) : (
+          <SectionList
+            testID="room-list"
+            style={styles.fill}
+            contentInsetAdjustmentBehavior="automatic"
+            sections={list}
+            keyExtractor={(room, index) => `${room.room_id}-${index}`}
+            stickySectionHeadersEnabled={false}
+            ListHeaderComponent={header}
+            ListEmptyComponent={<EmptyState icon="chat" title={t('sidebar.empty')} />}
+            renderSectionHeader={({ section }) => (
+              <SectionHeader
+                id={section.id}
+                title={section.title}
+                collapsed={section.collapsed}
+                count={section.attention}
+                onToggle={() => toggleSection(store, id, scope, section.id)}
+                onMenu={
+                  section.id === INVITATIONS
+                    ? undefined
+                    : () => router.push(routes.sectionMenu(id, section.id))
+                }
               />
-            )
-          }
-          ListFooterComponent={
-            <Touchable
-              testID="add-section"
-              accessibilityRole="button"
-              onPress={() => router.push(routes.sectionMenu(id))}
-              style={styles.addSection}
-            >
-              <Icon name="plus" size={16} color={palette.textMuted} />
-              <Text style={[font.nav, { color: palette.textMuted }]}>{t('sections.new')}</Text>
-            </Touchable>
-          }
-        />
-      )}
+            )}
+            renderSectionFooter={({ section }) =>
+              section.own && !section.collapsed && section.data.length === 0 ? (
+                <Text style={[font.meta, styles.hint, { color: palette.textMuted }]}>
+                  {t('mobile.shell.section_empty')}
+                </Text>
+              ) : null
+            }
+            renderItem={({ item }) =>
+              isInvitation(item) ? (
+                <InvitationRow account={id} invitation={item} />
+              ) : (
+                <RoomRow
+                  account={id}
+                  room={item}
+                  last={lastMessage(account, item.room_id)}
+                  now={now}
+                />
+              )
+            }
+            ListFooterComponent={
+              <Touchable
+                testID="add-section"
+                accessibilityRole="button"
+                onPress={() => router.push(routes.sectionMenu(id))}
+                style={styles.addSection}
+              >
+                <Icon name="plus" size={16} color={palette.textMuted} />
+                <Text style={[font.nav, { color: palette.textMuted }]}>{t('sections.new')}</Text>
+              </Touchable>
+            }
+          />
+        ))}
+      <CreateFab />
     </>
   );
 }

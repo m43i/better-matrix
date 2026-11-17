@@ -175,24 +175,6 @@ describe('apply', () => {
     expect(state.verifications).toEqual([{ account: ADA, flowId: 'f', step: { type: 'Done' } }]);
   });
 
-  it('should count notifications not seen yet', () => {
-    const notification = {
-      account: ADA,
-      room_id: '!a:x',
-      room_name: 'a',
-      event_id: '$1',
-      sender_name: 'Grace',
-      body: 'hi',
-    };
-
-    const state = apply(apply(initialState(), { type: 'Notification', data: notification }), {
-      type: 'Notification',
-      data: notification,
-    });
-
-    expect(state.activityUnseen).toBe(2);
-  });
-
   it('should keep a room read boundary that is outside loaded history as unresolved', () => {
     const state = apply(signedIn(ADA), {
       type: 'ReadBoundary',

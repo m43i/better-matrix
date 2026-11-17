@@ -1,5 +1,5 @@
-// An account's avatar, and a dot over a tile's corner when there is something new (the tab
-// bar's account, the account menu, the space picker).
+// An account's avatar, and a dot over a tile's corner when there is something new (the header's
+// profile button, the account menu, the space picker).
 
 import type { AccountSummary } from '@better-matrix/matrix-native/types';
 import type { ReactNode } from 'react';

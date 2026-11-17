@@ -9,7 +9,7 @@
 
 use matrix_core::{AccountId, Command, LinkTarget, Permalink, Person, RequestId, RoomPreview};
 
-use super::{Modal, Purpose, Scope, Screen, State};
+use super::{Modal, PeopleSearch, Purpose, Scope, Screen, State};
 use crate::i18n::{t, tf};
 
 /// The link dialog: what the link names, the account it acts for, and where it stands.
@@ -57,6 +57,15 @@ impl State {
             self.notice = Some(t!("link.invalid").to_owned());
             return;
         };
+        self.follow(permalink);
+    }
+
+    /// Opens a link or address typed or pasted into the top bar's search
+    /// ([`Permalink::parse_typed`]): `#rust:matrix.org`, a user ID, an invitation's matrix.to
+    /// link. Anything else stays a search.
+    pub fn open_typed_link(&mut self, text: &str) {
+        let Some(permalink) = Permalink::parse_typed(text) else { return };
+        self.search = PeopleSearch::default();
         self.follow(permalink);
     }
 
@@ -399,6 +408,34 @@ mod tests {
         signed_in(&mut s, ADA, &["!lab:example.org"]);
         s.open_permalink("https://matrix.to/#/!lab:example.org/$event");
         assert_eq!((s.active_room_id(), s.modal.is_none()), (Some("!lab:example.org"), true));
+    }
+
+    #[test]
+    fn a_typed_alias_should_ask_for_its_rooms_preview() {
+        let (mut s, mut sent) = state();
+        signed_in(&mut s, ADA, &[]);
+        commands(&mut sent);
+        s.open_typed_link(" #rust:matrix.org ");
+        let sent = commands(&mut sent);
+        assert!(matches!(sent.as_slice(), [(_, Command::PreviewRoom { room, .. })] if room == "#rust:matrix.org"));
+    }
+
+    #[test]
+    fn a_typed_room_id_of_a_joined_room_should_open_it_and_clear_the_search() {
+        let (mut s, _) = state();
+        signed_in(&mut s, ADA, &["!lab:example.org"]);
+        s.search.field = rune::TextEdit::new("!lab:example.org");
+        s.open_typed_link("!lab:example.org");
+        assert_eq!((s.active_room_id(), s.search.query()), (Some("!lab:example.org"), ""));
+    }
+
+    #[test]
+    fn a_typed_name_should_stay_a_search() {
+        let (mut s, _) = state();
+        signed_in(&mut s, ADA, &[]);
+        s.search.field = rune::TextEdit::new("rust");
+        s.open_typed_link("rust");
+        assert_eq!((s.modal.is_none(), s.search.query()), (true, "rust"));
     }
 
     #[test]

@@ -1,9 +1,11 @@
-// The composer under a room's or thread's timeline, laid out like Slack's on phones: a reply or
-// edit line, pending attachments, the growing native text field, and a bar below it with +
-// (photos, camera, files, poll), Aa (the formatting toolbar), emoji, and at the right the mic,
-// or send once there is something to send. The screen around it (`ui/timeline/Conversation`)
-// keeps it above the keyboard and the home indicator. The draft lives in the store per
-// timeline, so it survives leaving the room; typing notices follow its changes.
+// The composer under a room's or thread's timeline: a reply or edit line and pending attachments
+// above one minimal row, + then the text field then the mic (or send once there is something to
+// send). The field grows with its text up to a few lines, as the desktop's does. + opens every
+// other option in the keyboard's place (photos, camera, files, poll, formatting, emoji); the
+// formatting toolbar, once picked, sits above the row until it is closed. The screen around it
+// (`ui/timeline/Conversation`) keeps it above the keyboard and the home indicator. The draft
+// lives in the store per timeline, so it survives leaving the room; typing notices follow its
+// changes.
 
 import type { AccountId, TimelineKey } from '@better-matrix/matrix-native/types';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -66,7 +68,7 @@ export interface ComposerProps {
   roomName: string;
 }
 
-/** What shows besides the field: nothing, the formatting toolbar, link entry, or the + tray. */
+/** What shows besides the row: nothing, the formatting toolbar, link entry, or the + tray. */
 type Tool =
   | { type: 'none' }
   | { type: 'format' }
@@ -226,6 +228,11 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
     }
   };
 
+  const openEmoji = () => {
+    setSelection(store, account, timelineKey, selection.current);
+    router.push(routes.emoji(account, roomId, thread ? { thread } : {}));
+  };
+
   const choose = (choice: TrayChoice) => {
     switch (choice) {
       case 'library':
@@ -241,12 +248,15 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
         setTool(NONE);
         router.push(routes.newPoll(account, roomId, thread ?? undefined));
         break;
+      case 'format':
+        setTool({ type: 'format' });
+        field.current?.focus();
+        break;
+      case 'emoji':
+        setTool(NONE);
+        openEmoji();
+        break;
     }
-  };
-
-  const openEmoji = () => {
-    setSelection(store, account, timelineKey, selection.current);
-    router.push(routes.emoji(account, roomId, thread ? { thread } : {}));
   };
 
   const toggleTray = () => {
@@ -379,37 +389,23 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
           />
         </View>
       ) : null}
-      {recording ? (
-        <View style={styles.recording} testID="composer-recording" accessibilityLiveRegion="polite">
-          <View style={[styles.dot, { backgroundColor: palette.danger }]} />
-          <Text style={[font.bodyStrong, { color: palette.text, fontVariant: ['tabular-nums'] }]}>
-            {formatDuration(voice.elapsed)}
-          </Text>
-          <Text style={[font.meta, { color: palette.textMuted, flex: 1 }]} numberOfLines={1}>
-            {held ? t('mobile.composer.release_to_send') : t('composer.recording')}
-          </Text>
+      {(tool.type === 'format' || tool.type === 'link') && !recording ? (
+        <View style={styles.formatBar}>
+          <IconButton
+            icon="textFormat"
+            label={t('composer.formatting')}
+            onPress={() => setTool(NONE)}
+            size={36}
+            color={palette.accent}
+            background={palette.hover}
+            testID="composer-format"
+          />
+          <View style={styles.formats}>
+            <FormatBar active={activeBlocks(text, caret)} onFormat={format} />
+          </View>
         </View>
-      ) : (
-        <TextInput
-          ref={field}
-          testID="composer-input"
-          value={text}
-          onChangeText={onChangeText}
-          onSelectionChange={onSelectionChange}
-          onFocus={() => {
-            if (tool.type === 'attach') setTool(NONE);
-          }}
-          placeholder={placeholder}
-          placeholderTextColor={palette.textMuted}
-          selectionColor={palette.accent}
-          accessibilityLabel={placeholder}
-          multiline
-          scrollEnabled
-          textAlignVertical="top"
-          style={[font.body, styles.input, { color: palette.text }]}
-        />
-      )}
-      <View style={styles.bar}>
+      ) : null}
+      <View style={styles.row}>
         {recording ? (
           <IconButton
             icon="trash"
@@ -419,52 +415,55 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
             color={palette.danger}
             testID="composer-voice-cancel"
           />
-        ) : tool.type === 'format' || tool.type === 'link' ? (
-          <>
-            <IconButton
-              icon="textFormat"
-              label={t('composer.formatting')}
-              onPress={() => setTool(NONE)}
-              size={36}
-              color={palette.accent}
-              background={palette.hover}
-              testID="composer-format"
-            />
-            <View style={styles.formats}>
-              <FormatBar active={activeBlocks(text, caret)} onFormat={format} />
-            </View>
-          </>
         ) : (
-          <>
-            <IconButton
-              icon={tool.type === 'attach' ? 'close' : 'plus'}
-              label={tool.type === 'attach' ? t('common.close') : t('composer.attach')}
-              onPress={toggleTray}
-              size={36}
-              color={palette.text}
-              background={palette.surface}
-              testID="composer-attach"
-            />
-            <IconButton
-              icon="textFormat"
-              label={t('composer.formatting')}
-              onPress={() => setTool({ type: 'format' })}
-              size={36}
-              color={palette.textMuted}
-              testID="composer-format"
-            />
-            <IconButton
-              icon="smile"
-              label={t('composer.emoji')}
-              onPress={openEmoji}
-              size={36}
-              color={palette.textMuted}
-              testID="composer-emoji"
-            />
-            <View style={styles.spacer} />
-          </>
+          <IconButton
+            icon={tool.type === 'attach' ? 'close' : 'plus'}
+            label={tool.type === 'attach' ? t('common.close') : t('composer.attach')}
+            onPress={toggleTray}
+            size={36}
+            color={palette.text}
+            background={palette.surface}
+            testID="composer-attach"
+          />
         )}
-        {recording ? <View style={styles.spacer} /> : null}
+        <View style={[styles.field, { backgroundColor: palette.surface }]}>
+          {recording ? (
+            <View
+              style={styles.recording}
+              testID="composer-recording"
+              accessibilityLiveRegion="polite"
+            >
+              <View style={[styles.dot, { backgroundColor: palette.danger }]} />
+              <Text
+                style={[font.bodyStrong, { color: palette.text, fontVariant: ['tabular-nums'] }]}
+              >
+                {formatDuration(voice.elapsed)}
+              </Text>
+              <Text style={[font.meta, { color: palette.textMuted, flex: 1 }]} numberOfLines={1}>
+                {held ? t('mobile.composer.release_to_send') : t('composer.recording')}
+              </Text>
+            </View>
+          ) : (
+            <TextInput
+              ref={field}
+              testID="composer-input"
+              value={text}
+              onChangeText={onChangeText}
+              onSelectionChange={onSelectionChange}
+              onFocus={() => {
+                if (tool.type === 'attach') setTool(NONE);
+              }}
+              placeholder={placeholder}
+              placeholderTextColor={palette.textMuted}
+              selectionColor={palette.accent}
+              accessibilityLabel={placeholder}
+              multiline
+              scrollEnabled
+              textAlignVertical="top"
+              style={[font.body, styles.input, { color: palette.text }]}
+            />
+          )}
+        </View>
         <Pressable
           testID="composer-action"
           accessibilityRole="button"
@@ -500,39 +499,55 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
   );
 }
 
+/** The field's height for one line, and the most it grows to before it scrolls (about six lines). */
+const FIELD_MIN = 36;
+
+const FIELD_MAX = 140;
+
 const styles = StyleSheet.create({
-  composer: { borderTopWidth: StyleSheet.hairlineWidth },
-  input: { minHeight: 44, maxHeight: 160, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
+  composer: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 6 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingBottom: 6,
+  },
+  field: { flex: 1, minHeight: FIELD_MIN, borderRadius: FIELD_MIN / 2, justifyContent: 'center' },
+  input: {
+    minHeight: FIELD_MIN,
+    maxHeight: FIELD_MAX,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
   link: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     marginHorizontal: 12,
-    marginTop: 8,
+    marginBottom: 6,
     paddingLeft: 10,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,
   },
   linkInput: { flex: 1, paddingVertical: 8 },
+  formatBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingBottom: 6,
+  },
+  formats: { flex: 1 },
   recording: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    minHeight: 44,
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    minHeight: FIELD_MIN,
+    paddingHorizontal: 14,
   },
   dot: { width: 10, height: 10, borderRadius: 5 },
-  bar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingBottom: 6,
-    minHeight: 44,
-  },
-  formats: { flex: 1 },
-  spacer: { flex: 1 },
   action: {
     width: 36,
     height: 36,

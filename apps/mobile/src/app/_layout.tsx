@@ -28,7 +28,7 @@ import { VerificationPrompt } from '../ui/accounts/VerificationPrompt';
 import { Rings } from '../ui/call/Rings';
 import { LinkOpener } from '../ui/links/LinkOpener';
 import { Notices } from '../ui/Notices';
-import { usePalette } from '../ui/theme';
+import { headerTint, usePalette } from '../ui/theme';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -79,7 +79,7 @@ function Routes({ scene }: { scene: SceneName | null }) {
       <StatusBar style={palette.dark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
-          headerTintColor: palette.accent,
+          headerTintColor: headerTint(palette),
           headerTitleStyle: { color: palette.text },
           headerStyle: { backgroundColor: palette.bg },
           contentStyle: { backgroundColor: palette.bg },
@@ -91,9 +91,8 @@ function Routes({ scene }: { scene: SceneName | null }) {
           <Stack.Screen name="room/[account]/[roomId]" />
           <Stack.Screen name="thread/[account]/[roomId]/[root]" />
           <Stack.Screen name="room-info/[account]/[roomId]" />
-          <Stack.Screen name="search" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="activity" />
           <Stack.Screen name="account-menu" options={fittedSheet} />
+          <Stack.Screen name="create" options={fittedSheet} />
           <Stack.Screen name="spaces" options={sheet} />
           <Stack.Screen name="room-menu" options={fittedSheet} />
           <Stack.Screen name="invitation" options={fittedSheet} />

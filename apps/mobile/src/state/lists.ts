@@ -1,17 +1,17 @@
-// What the shell's lists show besides sections: a conversation's preview line and time, the
-// rooms "Jump to…" finds, and the Activity tab's rows. Pure, so every list derives them alike.
+// What the shell's lists show besides sections: a conversation's preview line and time, and what
+// the search under each tab's title finds. Pure, so every list derives them alike.
 
 import type {
-  AccountId,
   Message,
-  Notification,
+  Person,
   RoomSummary,
   SpaceSummary,
 } from '@better-matrix/matrix-native/types';
 
 import { locale, t } from '../i18n';
 import { byRecency } from './sections';
-import type { AccountData, State } from './types';
+import { type Permalink, parseTyped } from './permalinks';
+import type { AccountData } from './types';
 
 /** A message as one line of plain text, as the desktop's overview shows it. */
 export function messageText(message: Message): string {
@@ -156,32 +156,34 @@ export function jumpTo(
   };
 }
 
-/** One row of the Activity tab. */
-export interface ActivityRow {
-  notification: Notification;
-  /** The room as the list knows it, for its picture and kind. */
-  room: RoomSummary | undefined;
-  /** The account's name, when several are signed in. */
-  accountLabel: string | null;
+/** What the search finds for a typed term, in the order it lists them (the desktop's top bar). */
+export interface SearchResults extends JumpResults {
+  /** The term read as a link or address to open (a pasted invitation, `#room:server`). */
+  link: Permalink | null;
+  /** People from the user directory, never the user. */
+  people: Person[];
 }
 
-/** The Activity tab: every account's notifications, newest first, labelled when there are several. */
-export function activityRows(state: Pick<State, 'activity' | 'accounts'>): ActivityRow[] {
-  const several = state.accounts.length > 1;
-  const byAccount = new Map<AccountId, AccountData>(state.accounts.map((a) => [a.summary.id, a]));
+/** What the search lists for `term`: the link it names, the account's own, then `found` people. */
+export function searchResults(
+  account: AccountData,
+  term: string,
+  found: readonly Person[],
+  now: number,
+): SearchResults {
+  const me = account.summary.id;
 
-  return state.activity.flatMap((notification) => {
-    const account = byAccount.get(notification.account);
+  return {
+    link: parseTyped(term),
+    ...jumpTo(account, term, now),
+    people: found.filter((person) => person.id !== me),
+  };
+}
 
-    // Notifications of an account signed out since are gone with it.
-    if (!account) return [];
-
-    return [
-      {
-        notification,
-        room: account.rooms.find((r) => r.room_id === notification.room_id),
-        accountLabel: several ? account.summary.display_name || account.summary.id : null,
-      },
-    ];
-  });
+/** Whether the search found anything to list. */
+export function foundAny(results: SearchResults): boolean {
+  return (
+    results.link !== null ||
+    results.rooms.length + results.direct.length + results.spaces.length + results.people.length > 0
+  );
 }

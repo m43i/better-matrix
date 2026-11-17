@@ -34,6 +34,8 @@ export const icons = {
   at: { ios: 'at', android: 'alternate_email' },
   chevronRight: { ios: 'chevron.right', android: 'chevron_right' },
   chevronLeft: { ios: 'chevron.left', android: 'chevron_left' },
+  /** Going back in a header: iOS's chevron, Material's arrow. */
+  back: { ios: 'chevron.left', android: 'arrow_back' },
   chevronDown: { ios: 'chevron.down', android: 'expand_more' },
   leave: { ios: 'rectangle.portrait.and.arrow.right', android: 'logout' },
   trash: { ios: 'trash', android: 'delete' },
@@ -79,6 +81,9 @@ export const icons = {
   hash: { ios: 'number', android: 'tag' },
   radio: { ios: 'circle', android: 'radio_button_unchecked' },
   radioOn: { ios: 'checkmark.circle.fill', android: 'check_circle' },
+  /** A single choice in a list on Android: Material's radio button. */
+  choice: { ios: 'circle', android: 'radio_button_unchecked' },
+  choiceOn: { ios: 'checkmark.circle.fill', android: 'radio_button_checked' },
   compose: { ios: 'square.and.pencil', android: 'edit_square' },
   markRead: { ios: 'checkmark.message', android: 'mark_chat_read' },
   folder: { ios: 'folder', android: 'folder' },
