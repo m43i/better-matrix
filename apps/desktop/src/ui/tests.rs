@@ -847,14 +847,8 @@ fn messages_without_exposed_receipts_should_have_no_read_indicator() {
 fn reader_lists_should_not_invent_a_timestamp_for_a_receipt_without_one() {
     let mut rt = readers_runtime();
     open_readers(&mut rt);
-    let row = rt.presented("reader-@sam:example.org").unwrap().0;
-    let texts: Vec<_> = rt
-        .elements()
-        .into_iter()
-        .filter(|e| e.rect[1] >= row[1] && e.rect[1] < row[1] + row[3])
-        .filter_map(|e| e.text)
-        .collect();
-    assert!(!texts.iter().any(|text| text.contains(':') && !text.starts_with('@')));
+    assert!(rt.find("reader-@sam:example.org").is_some());
+    assert!(rt.find("reader-time-@sam:example.org").is_none());
 }
 
 #[test]

@@ -70,6 +70,7 @@ pub fn panels(
     let list = col()
         .key("readers-list")
         .w_full()
+        .growth(rune::GrowthSpec::default())
         .virtual_rows(
             readers.len(),
             ROW,
@@ -95,7 +96,12 @@ pub fn panels(
                     .gap(2.0)
                     .child(text(person.name.clone()).font(font::BODY).color(palette.text).truncate());
                 if let Some(at) = receipt.timestamp_ms {
-                    details = details.child(text(when(at)).font(font::META).color(palette.text_muted));
+                    details = details.child(
+                        text(when(at))
+                            .key(format!("reader-time-{}", person.id))
+                            .font(font::META)
+                            .color(palette.text_muted),
+                    );
                 }
                 let user_id = person.id.clone();
                 row()
