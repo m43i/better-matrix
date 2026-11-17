@@ -157,6 +157,8 @@ function room(
     call: { via: 'Rtc', participants: [] },
     activity_ms: null,
     encrypted: true,
+    pinned: id === GENERAL ? [DEMO_THREAD.root] : [],
+    can_pin: true,
     can_rename: true,
   };
 }

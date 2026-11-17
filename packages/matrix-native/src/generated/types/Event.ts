@@ -18,6 +18,7 @@ import type { Notification } from "./Notification";
 import type { Password } from "./Password";
 import type { PendingContact } from "./PendingContact";
 import type { Person } from "./Person";
+import type { PinnedMessage } from "./PinnedMessage";
 import type { PublicRoom } from "./PublicRoom";
 import type { PushContent } from "./PushContent";
 import type { RequestId } from "./RequestId";
@@ -360,7 +361,19 @@ call: number,
 /**
  * Why.
  */
-reason: CallEnd, } } | { "type": "CallLevels", "data": Array<[string, number]> } | { "type": "CallMediaFailed", "data": string } | { "type": "CallMediaStopped", "data": MediaToggle } | { "type": "IncomingCall", "data": IncomingCall } | { "type": "Threads", "data": { 
+reason: CallEnd, } } | { "type": "CallLevels", "data": Array<[string, number]> } | { "type": "CallMediaFailed", "data": string } | { "type": "CallMediaStopped", "data": MediaToggle } | { "type": "IncomingCall", "data": IncomingCall } | { "type": "PinnedMessages", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room's ID.
+ */
+room_id: string, 
+/**
+ * Previews in pin order, including unavailable placeholders.
+ */
+messages: Array<PinnedMessage>, } } | { "type": "Threads", "data": { 
 /**
  * Whose room.
  */

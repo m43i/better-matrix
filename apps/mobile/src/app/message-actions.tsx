@@ -4,14 +4,15 @@
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { t } from '../i18n';
+import { locale, t } from '../i18n';
+import { setPinned, messageLink, translationUrl } from '../state/actions/message-actions';
 import { deleteMessage, react } from '../state/actions/timeline';
 import { startEdit, startReply } from '../state/composer';
 import { editText, findMessage, messageActions, messageText } from '../state/messages';
 import { useAppStore, useStore } from '../state/react';
-import { timeline } from '../state/selectors';
+import { room, timeline } from '../state/selectors';
 import { roomKey, threadKey } from '../state/timeline';
 import { routes } from '../routes';
 import { Divider, EmptyState, ListRow } from '../ui/components';
@@ -40,6 +41,7 @@ export default function MessageActionsScreen() {
   );
 
   const message = useStore((s) => findMessage(timeline(s, account, key).entries, eventId));
+  const summary = useStore((s) => room(s, account, roomId));
   const [busy, setBusy] = useState<'save' | 'share' | null>(null);
 
   if (!message) {
@@ -50,10 +52,25 @@ export default function MessageActionsScreen() {
     );
   }
 
-  const can = messageActions(message, account, thread !== undefined);
+  const can = messageActions(message, account, thread !== undefined, summary?.can_pin);
   const text = messageText(message);
   const attachment = message.content.type === 'Attachment' ? message.content.data : null;
   const close = () => router.back();
+  const pinned = summary?.pinned.includes(eventId) ?? false;
+
+  const translate = () =>
+    Alert.alert(t('actions.translate'), t('message.translate_explanation'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('actions.translate'),
+        onPress: () => {
+          if (text === null) return;
+          void Linking.openURL(translationUrl(text, locale()))
+            .then(close)
+            .catch((error: Error) => Alert.alert(t('actions.translate'), String(error)));
+        },
+      },
+    ]);
 
   const reactWith = (emoji: string) => {
     react(store, account, key, message.event_id, emoji);
@@ -161,16 +178,13 @@ export default function MessageActionsScreen() {
             }}
           />
         ) : null}
-        {can.copy && text !== null ? (
+        {can.forward ? (
           <ListRow
-            icon="copy"
-            title={t('mobile.conversation.copy')}
+            icon="forward"
+            title={t('actions.forward')}
             chevron={false}
-            testID="message-actions-copy"
-            onPress={() => {
-              void Clipboard.setStringAsync(text);
-              close();
-            }}
+            testID="message-actions-forward"
+            onPress={() => router.replace(routes.forward(account, roomId, eventId, thread))}
           />
         ) : null}
         {can.edit ? (
@@ -183,6 +197,52 @@ export default function MessageActionsScreen() {
               startEdit(store, account, key, message, editText(message));
               close();
             }}
+          />
+        ) : null}
+        <Divider inset={52} />
+        {can.link ? (
+          <ListRow
+            icon="link"
+            title={t('actions.copy_link')}
+            chevron={false}
+            testID="message-actions-copy-link"
+            onPress={() => {
+              void Clipboard.setStringAsync(messageLink(roomId, eventId, account));
+              close();
+            }}
+          />
+        ) : null}
+        {can.pin ? (
+          <ListRow
+            icon="pin"
+            title={t(pinned ? 'actions.unpin' : 'actions.pin')}
+            chevron={false}
+            testID="message-actions-pin"
+            onPress={() => {
+              setPinned(store, account, roomId, eventId, !pinned);
+              close();
+            }}
+          />
+        ) : null}
+        {can.copy && text !== null ? (
+          <ListRow
+            icon="copy"
+            title={t('actions.copy_text')}
+            chevron={false}
+            testID="message-actions-copy"
+            onPress={() => {
+              void Clipboard.setStringAsync(text);
+              close();
+            }}
+          />
+        ) : null}
+        {can.translate ? (
+          <ListRow
+            icon="translate"
+            title={t('actions.translate')}
+            chevron={false}
+            testID="message-actions-translate"
+            onPress={translate}
           />
         ) : null}
         {can.file && attachment ? (

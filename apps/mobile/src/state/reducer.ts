@@ -85,6 +85,7 @@ function newAccount(summary: AccountSummary): AccountData {
     members: {},
     threads: {},
     files: {},
+    pins: {},
     sidebar: EMPTY_LAYOUT,
     searchUsage: { rooms: {}, people: {} },
     sidebarLoaded: false,
@@ -293,6 +294,11 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
       return updateAccount(state, event.data.account, (a) => ({
         ...a,
         threads: { ...a.threads, [event.data.room_id]: event.data.threads },
+      }));
+    case 'PinnedMessages':
+      return updateAccount(state, event.data.account, (a) => ({
+        ...a,
+        pins: { ...a.pins, [event.data.room_id]: event.data.messages },
       }));
     case 'Files':
       return updateAccount(state, event.data.account, (a) => ({

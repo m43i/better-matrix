@@ -115,6 +115,38 @@ pub enum Command {
         /// The message's event ID.
         event_id: String,
     },
+    /// Forward a text or attachment message from an open timeline to another joined room.
+    /// Preserves its latest content and formatting, but removes reply, thread and edit relations.
+    Forward {
+        /// The account forwarding the message (source and destination use this account).
+        account: AccountId,
+        /// The open source timeline.
+        key: TimelineKey,
+        /// The source message's server event ID.
+        event_id: String,
+        /// The destination room.
+        room_id: String,
+    },
+    /// Pin or unpin a message for everyone in a room; requires the room's pin permission.
+    /// Updated room summaries follow through sync.
+    SetPinned {
+        /// The account changing the pins.
+        account: AccountId,
+        /// The room containing the message.
+        room_id: String,
+        /// The message's server event ID.
+        event_id: String,
+        /// Pin when true, unpin when false.
+        pinned: bool,
+    },
+    /// Fetch all pinned message previews, including messages outside loaded history.
+    /// Answered by [`Event::PinnedMessages`]; inaccessible events retain a placeholder.
+    ListPinnedMessages {
+        /// Whose room.
+        account: AccountId,
+        /// The room's ID.
+        room_id: String,
+    },
     /// Vote in a poll: `answers` replace the account's earlier vote; none takes it back.
     VotePoll {
         /// The voting account.
@@ -907,6 +939,15 @@ pub enum Event {
     CallMediaStopped(crate::calls::MediaToggle),
     /// A call rings for the user.
     IncomingCall(Box<crate::calls::IncomingCall>),
+    /// Pinned message previews for a room.
+    PinnedMessages {
+        /// Whose room.
+        account: AccountId,
+        /// The room's ID.
+        room_id: String,
+        /// Previews in pin order, including unavailable placeholders.
+        messages: Vec<crate::PinnedMessage>,
+    },
     /// A room's threads, for [`Command::ListThreads`].
     Threads {
         /// Whose room.
@@ -1763,6 +1804,46 @@ impl State {
                         &event_id,
                     )?);
                     timeline?.redact(&item, None).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::Forward { account, key, event_id, room_id } => {
+                let timeline = self.open_timeline(&account, &key);
+                let account = self.account(&account);
+                Box::pin(async move {
+                    let event_id = matrix_sdk::ruma::EventId::parse(event_id)?;
+                    let item = timeline?.item_by_event_id(&event_id).await.ok_or(Error::MessageUnavailable)?;
+                    if !matches!(
+                        item.content(),
+                        matrix_sdk_ui::timeline::TimelineItemContent::MsgLike(
+                            matrix_sdk_ui::timeline::MsgLikeContent {
+                                kind: matrix_sdk_ui::timeline::MsgLikeKind::Message(_),
+                                ..
+                            }
+                        )
+                    ) {
+                        return Err(Error::MessageUnavailable);
+                    }
+                    let raw = item.latest_json().ok_or(Error::MessageUnavailable)?;
+                    let event: serde_json::Value =
+                        raw.deserialize_as_unchecked().map_err(|_| Error::MessageUnavailable)?;
+                    let content = crate::history::forward_content(&event).ok_or(Error::MessageUnavailable)?;
+                    account?.forward_message(&room_id, content).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::SetPinned { account, room_id, event_id, pinned } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    account?.set_pinned(&room_id, &event_id, pinned).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ListPinnedMessages { account: id, room_id } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let messages = account?.pinned_messages(&room_id).await?;
+                    sink.emit(Event::PinnedMessages { account: id, room_id, messages });
                     Ok(Outcome::Done)
                 })
             }

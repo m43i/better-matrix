@@ -47,6 +47,8 @@ fn room(room_id: &str) -> RoomSummary {
         activity_ms: None,
         encrypted: false,
         can_rename: true,
+        pinned: Vec::new(),
+        can_pin: true,
     }
 }
 
@@ -3474,4 +3476,51 @@ fn retrying_a_timeline_subscription_should_not_record_another_room_visit() {
     apply(&mut s, Event::Finished { request, result: Err("timeline closed".into()) });
     s.retry_history(&TimelineKey::room("!one:x"));
     assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::VisitRoom { .. })));
+}
+
+#[test]
+fn a_failed_forward_should_keep_the_destination_picker_available() {
+    let (mut s, mut commands) = state();
+    signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    drain(&mut commands);
+    s.start_forward(TimelineKey::thread("!one:x", "$root"), "$reply".into());
+    s.forward_to("!other:x".into());
+    let (request, command) = commands.try_next().expect("forward command");
+    assert!(
+        matches!(command, Command::Forward { key, event_id, room_id, .. } if key.thread.as_deref() == Some("$root") && event_id == "$reply" && room_id == "!other:x")
+    );
+    apply(&mut s, Event::Finished { request, result: Err("forbidden".into()) });
+    assert!(matches!(s.modal, Some(Modal::Forward { sending: None, .. })));
+}
+
+#[test]
+fn an_earlier_forward_should_not_close_a_later_destination_picker() {
+    let (mut s, mut commands) = state();
+    signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    drain(&mut commands);
+    s.start_forward(TimelineKey::room("!one:x"), "$old".into());
+    s.forward_to("!other:x".into());
+    let (request, _) = commands.try_next().expect("forward command");
+    s.start_forward(TimelineKey::room("!one:x"), "$new".into());
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    assert!(matches!(s.modal, Some(Modal::Forward { event_id, .. }) if event_id == "$new"));
+}
+
+#[test]
+fn changing_pins_should_refresh_the_open_pinned_list() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    s.show_side(SidePanel::Pins);
+    drain(&mut commands);
+    let data = s.accounts.get(&id).expect("account");
+    let (mut rooms, spaces) = (data.rooms.clone(), data.spaces.clone());
+    rooms.iter_mut().find(|r| r.room_id == "!one:x").expect("room").pinned.push("$new".into());
+    apply(&mut s, Event::RoomsUpdated { account: id, list: RoomList { rooms, spaces, invitations: Vec::new() } });
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::ListPinnedMessages { room_id, .. } if room_id == "!one:x"))
+    );
 }

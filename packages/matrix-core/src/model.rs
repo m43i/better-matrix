@@ -107,6 +107,10 @@ pub struct RoomSummary {
     pub encrypted: bool,
     /// Whether the user may rename the room.
     pub can_rename: bool,
+    /// Event IDs pinned in this room, in server order.
+    pub pinned: Vec<String>,
+    /// Whether the user may change the room's pinned messages.
+    pub can_pin: bool,
 }
 
 /// Who can read a room's messages from before they joined, by the room's settings. The server

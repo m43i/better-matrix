@@ -60,7 +60,7 @@ pub use model::{
 /// How many messages a timeline page holds: what a room shows when it opens, and what each
 /// scroll to the top loads. About a screen and a half at the desktop's density.
 pub const HISTORY_PAGE: u16 = 30;
-pub use history::{SharedFile, ThreadInfo};
+pub use history::{PinnedMessage, SharedFile, ThreadInfo};
 pub use people::{MemberRole, Members, Moderation, Presence, RoomMember};
 pub use permalinks::{LinkAction, LinkTarget, Permalink};
 pub use profile::{AccountPage, ContactDetail, ContactKind, Contacts, PendingContact};
@@ -77,6 +77,9 @@ pub const DEVICE_DISPLAY_NAME: &str = "Better Matrix";
 /// Everything that can go wrong in the core.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// A message is gone, unreadable, or unsupported for this action.
+    #[error("the message is no longer available for this action")]
+    MessageUnavailable,
     /// The client could not be configured, e.g. an unreachable or invalid homeserver.
     #[error("could not set up the Matrix client: {0}")]
     Build(#[from] matrix_sdk::ClientBuildError),

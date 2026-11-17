@@ -10,6 +10,7 @@ import type {
   MessageContent,
   MessageHit,
   Outgoing,
+  RoomList,
   RequestId,
   RoomPreview,
 } from '@better-matrix/matrix-native/types';
@@ -24,6 +25,8 @@ import {
   demoThreads,
   seedEvents,
   GENERAL,
+  DEMO_THREAD,
+  seedEvents,
   GRACE,
   KAI,
 } from './fixtures';
@@ -61,6 +64,27 @@ export function answer(
             account: command.data.account,
             room_id: command.data.room_id,
             members: demoMembers(),
+          },
+        },
+      ];
+    case 'ListPinnedMessages':
+      return [
+        {
+          type: 'PinnedMessages',
+          data: {
+            account: command.data.account,
+            room_id: command.data.room_id,
+            messages:
+              command.data.room_id === GENERAL
+                ? [
+                    {
+                      event_id: DEMO_THREAD.root,
+                      sender_name: 'Alan Turing',
+                      body: 'Cross-signing verification passes on Linux, macOS and Windows.',
+                      thread: null,
+                    },
+                  ]
+                : [],
           },
         },
       ];
@@ -316,6 +340,11 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
     },
   });
 
+  const lists = new Map<string, RoomList>();
+  engine.subscribe((event) => {
+    if (event.type === 'RoomsUpdated') lists.set(event.data.account, event.data.list);
+  });
+
   const finish = (request: RequestId, error?: string) =>
     engine.emit({
       type: 'Finished',
@@ -323,6 +352,83 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
     });
 
   async function respond(command: Command, request: RequestId) {
+    if (command.type === 'SetPinned') {
+      const { account, room_id: roomId, event_id: eventId, pinned } = command.data;
+      const list = lists.get(account);
+
+      if (list)
+        engine.emit({
+          type: 'RoomsUpdated',
+          data: {
+            account,
+            list: {
+              ...list,
+              rooms: list.rooms.map((r) =>
+                r.room_id === roomId
+                  ? {
+                      ...r,
+                      pinned: pinned
+                        ? [...new Set([...r.pinned, eventId])]
+                        : r.pinned.filter((id) => id !== eventId),
+                    }
+                  : r,
+              ),
+            },
+          },
+        });
+      finish(request);
+
+      return;
+    }
+
+    if (command.type === 'Forward') {
+      const { account, key, event_id: eventId, room_id: roomId } = command.data;
+
+      const source = seedEvents()
+        .flatMap((event) =>
+          event.type === 'TimelineChanged' &&
+          event.data.account === account &&
+          event.data.key.room_id === key.room_id
+            ? event.data.diffs.flatMap((diff) => (diff.type === 'Reset' ? diff.data : []))
+            : [],
+        )
+        .find((entry) => entry.kind.type === 'Message' && entry.kind.data.event_id === eventId);
+
+      if (source?.kind.type !== 'Message') {
+        finish(request, 'message unavailable');
+
+        return;
+      }
+
+      const message = {
+        ...source.kind.data,
+        event_id: `$forward-${request}`,
+        sender_id: account,
+        sender_name: 'Ada Lovelace',
+        reply_to: null,
+        thread: null,
+        reactions: [],
+        editable: source.kind.data.content.type === 'Text',
+      };
+
+      engine.emit({
+        type: 'TimelineChanged',
+        data: {
+          account,
+          key: { room_id: roomId, thread: null },
+          diffs: [
+            {
+              type: 'PushBack',
+              data: { id: message.event_id, kind: { type: 'Message', data: message } },
+            },
+          ],
+        },
+      });
+      finish(request);
+
+      return;
+    }
+
     if (command.type === 'FetchMedia') {
       const path = await resolveMedia(command.data.media).catch(() => null);
 

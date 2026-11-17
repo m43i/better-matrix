@@ -97,6 +97,8 @@ function Routes({ scene }: { scene: SceneName | null }) {
           <Stack.Screen name="room-menu" options={fittedSheet} />
           <Stack.Screen name="invitation" options={fittedSheet} />
           <Stack.Screen name="message-actions" options={sheet} />
+          <Stack.Screen name="forward-message" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="pinned-messages" />
           <Stack.Screen name="emoji" options={sheet} />
           <Stack.Screen name="member" options={fittedSheet} />
           <Stack.Screen name="link" options={fittedSheet} />

@@ -505,6 +505,8 @@ pub struct AccountData {
     pub threads: HashMap<String, Vec<matrix_core::ThreadInfo>>,
     /// The files shared in rooms, by room ID, once listed for the info panel.
     pub files: HashMap<String, Vec<matrix_core::SharedFile>>,
+    pub pins: HashMap<String, Vec<matrix_core::PinnedMessage>>,
+    pub pin_errors: HashMap<String, String>,
     /// Who is typing, by room ID, in the rooms whose timelines are open.
     pub typing: HashMap<String, Vec<matrix_core::Person>>,
     /// How the user arranged the sidebar.
@@ -545,6 +547,8 @@ impl AccountData {
             stale_members: HashSet::new(),
             threads: HashMap::new(),
             files: HashMap::new(),
+            pins: HashMap::new(),
+            pin_errors: HashMap::new(),
             typing: HashMap::new(),
             sidebar: matrix_core::SidebarLayout::default(),
             search_usage: matrix_core::SearchUsage::default(),
@@ -856,6 +860,19 @@ impl Accounts {
         true
     }
 
+    pub fn pins_failed(&mut self, id: &AccountId, room_id: String, error: String) {
+        if let Some(account) = self.get_mut(id) {
+            account.pin_errors.insert(room_id, error);
+        }
+    }
+
+    pub fn set_pins(&mut self, id: &AccountId, room_id: String, messages: Vec<matrix_core::PinnedMessage>) {
+        if let Some(account) = self.get_mut(id) {
+            account.pin_errors.remove(&room_id);
+            account.pins.insert(room_id, messages);
+        }
+    }
+
     pub fn set_threads(&mut self, id: &AccountId, room_id: String, threads: Vec<matrix_core::ThreadInfo>) {
         if let Some(account) = self.get_mut(id) {
             account.threads.insert(room_id, threads);
@@ -1071,6 +1088,8 @@ mod tests {
             activity_ms: None,
             encrypted: false,
             can_rename: false,
+            pinned: Vec::new(),
+            can_pin: true,
         }
     }
 

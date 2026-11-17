@@ -512,6 +512,8 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
         activity_ms: None,
         encrypted: true,
         can_rename: true,
+        pinned: Vec::new(),
+        can_pin: true,
     }
 }
 
@@ -828,4 +830,27 @@ pub fn search(s: &mut State) {
     s.search.messages = hits.into_iter().take(30).map(|(_, hit)| hit).collect();
     s.search.message_status = crate::state::MessageSearchStatus::Ready;
     s.search.request = None;
+}
+
+/// Pinned messages with both a timeline marker and a shared preview list.
+pub fn pinned_messages(s: &mut State) {
+    seed(s);
+    let account = AccountId::new(ADA);
+    let Some(data) = s.accounts.get(&account) else { return };
+    let (mut rooms, spaces) = (data.rooms.clone(), data.spaces.clone());
+    if let Some(room) = rooms.iter_mut().find(|r| r.room_id == DEMO_THREAD.0) {
+        room.pinned = vec![DEMO_THREAD.1.into()];
+    }
+    s.accounts.set_room_list(&account, matrix_core::RoomList { rooms, spaces, invitations: Vec::new() });
+    s.accounts.set_pins(
+        &account,
+        DEMO_THREAD.0.into(),
+        vec![matrix_core::PinnedMessage {
+            event_id: DEMO_THREAD.1.into(),
+            sender_name: "Alan Turing".into(),
+            body: Some("Cross-signing verification passes on Linux, macOS and Windows.".into()),
+            thread: None,
+        }],
+    );
+    s.select_room(DEMO_THREAD.0);
 }

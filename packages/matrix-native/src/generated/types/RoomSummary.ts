@@ -78,4 +78,12 @@ encrypted: boolean,
 /**
  * Whether the user may rename the room.
  */
-can_rename: boolean, };
+can_rename: boolean, 
+/**
+ * Event IDs pinned in this room, in server order.
+ */
+pinned: Array<string>, 
+/**
+ * Whether the user may change the room's pinned messages.
+ */
+can_pin: boolean, };

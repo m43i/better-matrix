@@ -45,6 +45,14 @@ export const routes = {
     pathname: '/message-actions',
     params: thread ? { account, roomId, eventId, thread } : { account, roomId, eventId },
   }),
+  forward: (account: AccountId, roomId: string, eventId: string, thread?: string): Href => ({
+    pathname: '/forward-message',
+    params: thread ? { account, roomId, eventId, thread } : { account, roomId, eventId },
+  }),
+  pins: (account: AccountId, roomId: string): Href => ({
+    pathname: '/pinned-messages',
+    params: { account, roomId },
+  }),
   /** Full-screen attachment preview of a message's attachment. */
   preview: (account: AccountId, roomId: string, eventId: string, thread?: string): Href => ({
     pathname: '/preview',

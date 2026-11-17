@@ -303,6 +303,17 @@ pub(crate) fn http_client() -> Result<reqwest::Client, Error> {
         .map_err(|e| Error::Link { url: String::new(), reason: e.to_string() })
 }
 
+/// Opens Google Translate with this text and target language. Apps ask before sharing text.
+pub fn translation_url(body: &str, language: &str) -> String {
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("sl", "auto")
+        .append_pair("tl", language)
+        .append_pair("text", body)
+        .append_pair("op", "translate")
+        .finish();
+    format!("https://translate.google.com/?{query}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -5,7 +5,7 @@
 use matrix_core::{AttachmentKind, RoomKind, RoomSummary};
 use rune::{El, ScrollSpec, col, el, icon, row, text};
 
-use super::components::{divider, icon_button, media_avatar};
+use super::components::{ButtonKind, button, divider, icon_button, media_avatar};
 use super::icons;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tp};
@@ -106,6 +106,10 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .child(
             link_row(&icons::THREAD, t!("info.threads"), None, "info-threads", p)
                 .on_press(|s: &mut State| s.show_side(SidePanel::Threads)),
+        )
+        .child(
+            link_row(&icons::PIN, t!("info.pins"), Some(room.pinned.len().to_string()), "info-pins", p)
+                .on_press(|s: &mut State| s.show_side(SidePanel::Pins)),
         )
         .child(
             link_row(&icons::FILE, t!("info.files"), None, "info-files", p)
@@ -212,4 +216,68 @@ pub fn files(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
         }),
     };
     frame("files-panel", t!("info.files"), list, None, p)
+}
+
+/// Shared pins, independent of how far the room's timeline has been paged.
+pub fn pins(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
+    let mut list = col().w_full().px(12.0).py(12.0).gap(10.0);
+    if let Some(error) = account.pin_errors.get(&room.room_id) {
+        list = list.child(text(error.clone()).font(font::BODY).color(p.danger).wrap()).child(
+            button(t!("info.pins_retry"), ButtonKind::Secondary, true, p)
+                .key("pins-retry")
+                .on_press(|s: &mut State| s.show_side(SidePanel::Pins)),
+        );
+    }
+    match account.pins.get(&room.room_id) {
+        None if account.pin_errors.contains_key(&room.room_id) => {}
+        None => list = list.child(text(t!("info.loading")).font(font::BODY).color(p.text_muted)),
+        Some(pins) => {
+            if room.pinned.is_empty() {
+                list = list.child(text(t!("info.no_pins")).font(font::BODY).color(p.text_muted).wrap());
+            }
+            for pin in pins.iter().filter(|pin| room.pinned.contains(&pin.event_id)) {
+                let root = pin.thread.as_ref().unwrap_or(&pin.event_id).clone();
+                let (key, id) = (matrix_core::TimelineKey::room(&room.room_id), pin.event_id.clone());
+                let mut card = col()
+                    .key(format!("pinned-{}", pin.event_id))
+                    .w_full()
+                    .px(12.0)
+                    .py(12.0)
+                    .gap(8.0)
+                    .radius(8.0)
+                    .fill(p.accent.alpha(0.06))
+                    .border(1.0, p.accent.alpha(0.2))
+                    .child(
+                        row()
+                            .gap(6.0)
+                            .center_y()
+                            .child(icon(&icons::PIN, 14.0).color(p.accent))
+                            .child(text(pin.sender_name.clone()).font(font::BODY_STRONG).color(p.text).truncate()),
+                    )
+                    .child(
+                        text(pin.body.clone().unwrap_or_else(|| t!("message.unavailable").to_owned()))
+                            .font(font::BODY)
+                            .color(p.text)
+                            .max_lines(4)
+                            .wrap(),
+                    );
+                if pin.body.is_some() {
+                    card = card.child(
+                        button(t!("message.open"), ButtonKind::Secondary, true, p)
+                            .key(format!("pinned-open-{}", pin.event_id))
+                            .on_press(move |s: &mut State| s.open_listed_thread(&root)),
+                    );
+                }
+                if room.can_pin {
+                    card = card.child(
+                        button(t!("actions.unpin"), ButtonKind::Link, true, p)
+                            .key(format!("pinned-unpin-{}", pin.event_id))
+                            .on_press(move |s: &mut State| s.set_message_pinned(&key, &id, false)),
+                    );
+                }
+                list = list.child(card);
+            }
+        }
+    }
+    frame("pins-panel", t!("info.pins"), list, None, p)
 }

@@ -9,6 +9,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { t } from '../../i18n';
 import { cardLink, prepare } from '../../state/messages';
 import { useStore } from '../../state/react';
+import { room as roomOf } from '../../state/selectors';
+import { Icon } from '../icons';
 import { clockTime } from '../../state/timelineText';
 import { font, identityColor } from '../../theme/palette';
 import { Avatar } from '../Avatar';
@@ -38,9 +40,14 @@ export const MessageRow = memo(function MessageRow({
   highlighted,
 }: MessageRowProps) {
   const palette = usePalette();
-  const { account, thread, openActions } = useTimelineContext();
+  const { account, timelineKey, thread, openActions } = useTimelineContext();
   const showGifs = useStore((s) => s.settings.showLinkGifs);
   const showPreviews = useStore((s) => s.settings.showLinkPreviews);
+
+  const pinned = useStore(
+    (s) => roomOf(s, account, timelineKey.room_id)?.pinned.includes(message.event_id) ?? false,
+  );
+
   const item = prepare(message);
   const gif = showGifs && item.gif ? item.gif : null;
   const link = showPreviews ? cardLink(item, showGifs) : null;
@@ -61,6 +68,14 @@ export const MessageRow = memo(function MessageRow({
       style={[
         styles.row,
         { paddingTop: continues ? 2 : 10, opacity: message.pending ? 0.6 : 1 },
+        pinned
+          ? {
+              borderLeftWidth: 3,
+              borderLeftColor: palette.accent,
+              paddingLeft: 13,
+              backgroundColor: `${palette.accent}0F`,
+            }
+          : null,
         highlighted ? { backgroundColor: `${palette.accent}26` } : null,
       ]}
     >
@@ -76,6 +91,12 @@ export const MessageRow = memo(function MessageRow({
         )}
       </View>
       <View style={styles.content}>
+        {pinned ? (
+          <View style={[styles.meta, { gap: 4 }]}>
+            <Icon name="pin" size={12} color={palette.accent} />
+            <Text style={[font.meta, { color: palette.accent }]}>{t('message.pinned')}</Text>
+          </View>
+        ) : null}
         {continues ? null : (
           <View style={styles.meta}>
             <Text

@@ -16,6 +16,7 @@ import type {
   Members,
   Message,
   Person,
+  PinnedMessage,
   RoomSummary,
   Security,
   Session,
@@ -86,6 +87,7 @@ export interface AccountData {
   members: Record<string, Members>;
   threads: Record<string, ThreadInfo[]>;
   files: Record<string, SharedFile[]>;
+  pins: Record<string, PinnedMessage[]>;
   sidebar: SidebarLayout;
   searchUsage: SearchUsage;
   sidebarLoaded: boolean;

@@ -85,7 +85,7 @@ see who is typing there.
   persists it, retries offline and resumes after a restart.
 - **Editing and deleting:** the user's own text messages can be edited (`Command::Edit`, through the
   timeline's `edit`) and any of their messages deleted (`Command::Redact`), from the menu under the
-  hover toolbar's ⋮ (`Popover::MessageMenu`), which only the user's own messages have; deleting asks
+  hover toolbar's ⋮ or right-click menu (`Popover::MessageMenu`), available on every sent message; deleting asks
   first (`Confirm::DeleteMessage`). Up in an empty composer edits the user's newest plain text
   message there (`Message::editable`: the user's own `m.text`; emotes, notices and files keep what
   they are). The composer then holds the message (`Composer::editing`: the account, timeline and
@@ -104,6 +104,23 @@ see who is typing there.
   (`ComposerState.kept`, `refusedEdit`): it takes the free field at once, setting aside what
   was typed since, or waits for the edit holding the field to end; a refusal of an edit older
   than the newest sent of the same message is ignored. A failed delete has its own notice.
+- **Message utilities:** More and right-click use the same menu on desktop; long press opens
+  the corresponding phone sheet. Conversation actions (reply, thread, forward, edit) come first,
+  followed by copy link, pin/unpin, copy text and translate; deletion stays last and separate.
+  Permissions, local echoes and content type determine availability. Calls keep their own controls.
+  `Command::Forward` reads the open timeline's latest event JSON (including edits), strips source
+  relations, and sends the text or attachment through the chosen room on the same account.
+  Message links use matrix.to with an account-server routing hint, including v12 room IDs.
+  Translate opens Google Translate in the browser targeting the app language, after confirmation
+  that its text will be shared with Google. It is offered for text only.
+- **Pins:** `RoomSummary::{pinned, can_pin}` come from room state and power levels.
+  `Command::SetPinned` uses SDK pin/unpin so existing pins are preserved; server sync updates
+  both apps. Pinned rows show a pin label, accent border and subtle background. Room info leads
+  to Pinned messages (`SidePanel::Pins` on desktop, a native stack screen on phones).
+  `ListPinnedMessages` fetches previews independently of loaded history; unreadable events retain
+  a placeholder with unpin available to authorized members. Lists refresh when pin IDs change,
+  preserve cached content on failure and offer retry. Opening a desktop pin shows it as a thread
+  root (or its containing thread); phones jump to the message in the room, or open its thread.
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
     reaction's count and whether the user is among them. The picker offers quick reactions,

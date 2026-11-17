@@ -559,5 +559,22 @@
   "verify.waiting": "Acceptez la demande sur votre autre session.",
   "search.messages": "Messages",
   "search.messages_failed": "Impossible de rechercher les messages sur cet appareil. Réessayez en saisissant du texte.",
-  "search.message_unavailable": "Ce message n’est plus disponible."
+  "search.message_unavailable": "Ce message n’est plus disponible.",
+  "actions.forward": "Transférer…",
+  "actions.copy_link": "Copier le lien du message",
+  "actions.pin": "Épingler le message",
+  "actions.unpin": "Désépingler le message",
+  "actions.copy_text": "Copier le texte",
+  "actions.translate": "Traduire…",
+  "info.pins": "Messages épinglés",
+  "info.no_pins": "Aucun message épinglé. Épinglez un message pour que tout le monde le retrouve ici.",
+  "message.pinned": "Épinglé",
+  "message.unavailable": "Ce message est indisponible.",
+  "message.open": "Ouvrir le message",
+  "message.find_room": "Rechercher une conversation",
+  "message.no_rooms": "Aucune conversation trouvée.",
+  "message.translate_explanation": "Ouvrir Google Traduction ? Le texte du message sera partagé avec Google pour le traduire dans la langue de votre application.",
+  "notice.message_action": "Impossible d’effectuer cette action sur le message : {{error}}",
+  "message.forwarded": "Message transféré.",
+  "info.pins_retry": "Réessayer"
 }

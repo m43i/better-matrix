@@ -559,5 +559,22 @@
   "verify.waiting": "Nimm die Anfrage in deiner anderen Sitzung an.",
   "search.messages": "Nachrichten",
   "search.messages_failed": "Nachrichten auf diesem Gerät konnten nicht durchsucht werden. Bitte erneut eingeben.",
-  "search.message_unavailable": "Diese Nachricht ist nicht mehr verfügbar."
+  "search.message_unavailable": "Diese Nachricht ist nicht mehr verfügbar.",
+  "actions.forward": "Weiterleiten…",
+  "actions.copy_link": "Link zur Nachricht kopieren",
+  "actions.pin": "Nachricht anheften",
+  "actions.unpin": "Nachricht lösen",
+  "actions.copy_text": "Text kopieren",
+  "actions.translate": "Übersetzen…",
+  "info.pins": "Angeheftete Nachrichten",
+  "info.no_pins": "Noch keine angehefteten Nachrichten. Hefte eine Nachricht an, damit alle sie hier finden.",
+  "message.pinned": "Angeheftet",
+  "message.unavailable": "Diese Nachricht ist nicht verfügbar.",
+  "message.open": "Nachricht öffnen",
+  "message.find_room": "Unterhaltung suchen",
+  "message.no_rooms": "Keine Unterhaltungen gefunden.",
+  "message.translate_explanation": "Google Übersetzer öffnen? Der Nachrichtentext wird mit Google geteilt und in deine App-Sprache übersetzt.",
+  "notice.message_action": "Nachrichtenaktion fehlgeschlagen: {{error}}",
+  "message.forwarded": "Nachricht weitergeleitet.",
+  "info.pins_retry": "Erneut versuchen"
 }

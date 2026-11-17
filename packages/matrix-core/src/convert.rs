@@ -76,6 +76,10 @@ pub(crate) async fn room_summary(room: &Room, settings: &NotificationSettings, r
         activity_ms: room.latest_event_timestamp().map(|at| at.get().into()),
         encrypted: room.encryption_state().is_encrypted(),
         can_rename: may_rename(room).await,
+        pinned: room.pinned_event_ids().unwrap_or_default().iter().map(ToString::to_string).collect(),
+        can_pin: room.power_levels().await.is_ok_and(|power| {
+            power.user_can_send_state(room.own_user_id(), matrix_sdk::ruma::events::StateEventType::RoomPinnedEvents)
+        }),
     }
 }
 

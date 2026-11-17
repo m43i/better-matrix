@@ -29,6 +29,22 @@ fn spec() -> AppSpec<State> {
         min_size: Some((720.0, 480.0)),
         scenes: &[
             ("demo", demo::seed),
+            ("demo-pins", |s| {
+                demo::pinned_messages(s);
+                s.show_side(state::SidePanel::Pins);
+            }),
+            ("demo-message-menu", |s| {
+                demo::pinned_messages(s);
+                s.popover = Some(state::Popover::MessageMenu {
+                    key: matrix_core::TimelineKey::room(demo::DEMO_THREAD.0),
+                    event_id: demo::DEMO_THREAD.1.into(),
+                    at: Some((600, 280)),
+                });
+            }),
+            ("demo-forward", |s| {
+                demo::seed(s);
+                s.start_forward(matrix_core::TimelineKey::room(demo::DEMO_THREAD.0), demo::DEMO_THREAD.1.into());
+            }),
             ("demo-unread", demo::unread),
             ("demo-invitation", demo::invitation),
             ("demo-discovery", demo::discovery),
@@ -1202,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_users_own_messages_should_have_a_more_menu() {
+    fn every_sent_message_should_have_a_more_menu() {
         let rt = runtime(|s| {
             demo::seed(s);
             s.select_room("!dm-grace:example.org");
@@ -1222,7 +1238,7 @@ mod tests {
             ]);
         });
         assert!(rt.find("more-$own-text").is_some());
-        assert!(rt.find("more-$demo-@grace:example.org-1").is_none());
+        assert!(rt.find("more-$demo-@grace:example.org-1").is_some());
     }
 
     #[test]

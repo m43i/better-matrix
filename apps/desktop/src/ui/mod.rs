@@ -12,6 +12,7 @@ mod icons;
 mod info;
 mod link;
 mod members;
+mod message_actions;
 mod message_text;
 mod overview;
 mod people;
@@ -88,7 +89,10 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         (Some(Popover::MemberMenu { user_id, submenu }), Some(account)) => {
             members::menu(s, account, user_id, *submenu, &p)
         }
-        (Some(Popover::MessageMenu { key, event_id }), _) => timeline::message_menu(s, key, event_id, &p),
+        (Some(Popover::MessageMenu { key, event_id, at }), _) => {
+            let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
+            message_actions::menu(s, key, event_id, *at, window, &p)
+        }
         (Some(Popover::Emoji(chosen_for)), _) => {
             let anchor = match chosen_for {
                 EmojiFor::Reaction { key, event_id } => match key.thread {
@@ -116,6 +120,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             Some(settings::settings(s, *section, window, &p))
         }
         Some(Modal::Confirm(action)) => Some(confirm::confirm(action, &p)),
+        Some(Modal::Forward { .. } | Modal::Translate(_)) => message_actions::dialog(s, &p),
         Some(Modal::Poll) => Some(poll::form(s, &p)),
         Some(Modal::Link(dialog)) => Some(link::link_dialog(s, dialog, &p)),
         Some(Modal::Invite { room_id, invited, .. }) => {

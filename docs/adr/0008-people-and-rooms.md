@@ -85,10 +85,10 @@ Date: 2026-11-14
     server, even when the directory doesn't know it or fails; the invite dialog, new-chat search
     and top bar all get it this way.
 - **Side panel:** beside the open room, in the thread's place, one of `SidePanel::{Info,
-  Members, Threads, Files}` (`State::side`; opening a thread closes it, opening it closes the
+  Members, Threads, Files, Pins}` (`State::side`; opening a thread closes it, opening it closes the
   thread). Each has a title and a close button, no back arrow.
   - Info (the header's info button): the room's picture, name and topic, rows leading to the
-    members, threads and files, and leave room (or delete chat).
+    members, pinned messages, threads and files, and leave room (or delete chat).
   - Threads: the server's thread list (`Command::ListThreads`, `Account::threads`); a press
     opens the thread. Files: messages with media, newest first (`Command::ListFiles`), the
     server filtering by URL in the clear, the device searching six pages in encrypted rooms.

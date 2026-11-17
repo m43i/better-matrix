@@ -326,6 +326,8 @@ mod tests {
                 activity_ms: None,
                 encrypted: false,
                 can_rename: false,
+                pinned: Vec::new(),
+                can_pin: true,
             })
             .collect();
         apply(

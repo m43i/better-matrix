@@ -262,3 +262,24 @@ describe('editText', () => {
     );
   });
 });
+
+describe('message utilities', () => {
+  it('should offer forwarding and links for another person’s sent message', () => {
+    expect(messageActions(message('$sent'), ADA, false, true)).toMatchObject({
+      forward: true,
+      link: true,
+      pin: true,
+      edit: false,
+    });
+  });
+  it('should hide pinning without room permission', () =>
+    expect(messageActions(message('$sent'), ADA, false, false).pin).toBe(false));
+  it('should not forward or link local echoes', () =>
+    expect(
+      messageActions({ ...message('local:draft'), pending: true }, ADA, false, true),
+    ).toMatchObject({ forward: false, link: false, pin: false }));
+  it('should retain a link but no content actions for a redacted message', () =>
+    expect(
+      messageActions(withContent('$gone', { type: 'Redacted' }), ADA, false, true),
+    ).toMatchObject({ link: true, forward: false, pin: false, translate: false }));
+});

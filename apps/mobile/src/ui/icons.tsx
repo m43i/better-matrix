@@ -5,6 +5,9 @@
 import { type AndroidSymbol, type SFSymbol, SymbolView } from 'expo-symbols';
 
 export const icons = {
+  pin: { ios: 'pin', android: 'push_pin' },
+  forward: { ios: 'arrowshape.turn.up.right', android: 'forward' },
+  translate: { ios: 'character.bubble', android: 'translate' },
   bold: { ios: 'bold', android: 'format_bold' },
   italic: { ios: 'italic', android: 'format_italic' },
   strike: { ios: 'strikethrough', android: 'strikethrough_s' },

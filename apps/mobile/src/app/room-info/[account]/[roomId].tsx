@@ -226,6 +226,14 @@ export default function RoomInfoScreen() {
         </ListSection>
       ) : null}
       <ListSection>
+        <ListRow
+          icon="pin"
+          title={t('info.pins')}
+          value={String(room.pinned.length)}
+          testID="info-pins"
+          onPress={() => router.push(routes.pins(account, roomId))}
+        />
+        <Divider inset={52} />
         <ListRow icon="users" title={t('members.count', { count: room.member_count })} />
         <Divider inset={52} />
         <ListRow icon="eye" title={historyLabel(room.history)} />

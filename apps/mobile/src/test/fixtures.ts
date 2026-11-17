@@ -50,6 +50,8 @@ export function roomSummary(
     call: { via: null, participants: [] },
     activity_ms: null,
     encrypted: true,
+    pinned: [],
+    can_pin: true,
     can_rename: true,
   };
 }

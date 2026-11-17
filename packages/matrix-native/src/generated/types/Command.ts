@@ -106,7 +106,47 @@ key: TimelineKey,
 /**
  * The message's event ID.
  */
-event_id: string, } } | { "type": "VotePoll", "data": { 
+event_id: string, } } | { "type": "Forward", "data": { 
+/**
+ * The account forwarding the message (source and destination use this account).
+ */
+account: AccountId, 
+/**
+ * The open source timeline.
+ */
+key: TimelineKey, 
+/**
+ * The source message's server event ID.
+ */
+event_id: string, 
+/**
+ * The destination room.
+ */
+room_id: string, } } | { "type": "SetPinned", "data": { 
+/**
+ * The account changing the pins.
+ */
+account: AccountId, 
+/**
+ * The room containing the message.
+ */
+room_id: string, 
+/**
+ * The message's server event ID.
+ */
+event_id: string, 
+/**
+ * Pin when true, unpin when false.
+ */
+pinned: boolean, } } | { "type": "ListPinnedMessages", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room's ID.
+ */
+room_id: string, } } | { "type": "VotePoll", "data": { 
 /**
  * The voting account.
  */

@@ -559,5 +559,22 @@
   "verify.waiting": "Accept the request on your other session.",
   "search.messages": "Messages",
   "search.messages_failed": "Couldn't search messages on this device. Try typing again.",
-  "search.message_unavailable": "This message is no longer available."
+  "search.message_unavailable": "This message is no longer available.",
+  "actions.forward": "Forward…",
+  "actions.copy_link": "Copy message link",
+  "actions.pin": "Pin message",
+  "actions.unpin": "Unpin message",
+  "actions.copy_text": "Copy text",
+  "actions.translate": "Translate…",
+  "info.pins": "Pinned messages",
+  "info.no_pins": "No pinned messages yet. Pin a message to keep it here for everyone.",
+  "message.pinned": "Pinned",
+  "message.unavailable": "This message is unavailable.",
+  "message.open": "Open message",
+  "message.find_room": "Find a conversation",
+  "message.no_rooms": "No conversations found.",
+  "message.translate_explanation": "Open Google Translate? The message text will be shared with Google to translate it into your app language.",
+  "notice.message_action": "Couldn’t complete the message action: {{error}}",
+  "message.forwarded": "Message forwarded.",
+  "info.pins_retry": "Try again"
 }

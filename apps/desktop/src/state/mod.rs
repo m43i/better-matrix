@@ -17,6 +17,7 @@ mod gifs;
 mod link_previews;
 mod links;
 mod media;
+mod message_actions;
 mod navigation;
 mod poll;
 mod preview;
@@ -90,6 +91,8 @@ pub enum Popover {
     MessageMenu {
         key: TimelineKey,
         event_id: String,
+        /// Window point for a context menu; absent when opened from More.
+        at: Option<(i32, i32)>,
     },
     /// What can be done with a member, from the member list: start a chat, call, invite to
     /// another room, and with the rights, kick, ban or change their role.
@@ -135,6 +138,7 @@ pub enum SidePanel {
     Members,
     Threads,
     Files,
+    Pins,
 }
 
 /// A submenu of the member menu.
@@ -257,6 +261,16 @@ pub enum EmojiFor {
 /// variants.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Modal {
+    /// Choose a destination room for a forwarded message.
+    Forward {
+        account: AccountId,
+        key: TimelineKey,
+        event_id: String,
+        search: TextEdit,
+        sending: Option<RequestId>,
+    },
+    /// Confirm sending message text to Google Translate in the browser.
+    Translate(String),
     Invitation {
         account: AccountId,
         room_id: String,
@@ -431,6 +445,8 @@ enum Purpose {
     Edit(Box<composer::Edit>),
     /// Deleting one of the user's messages.
     Delete,
+    MessageAction,
+    Forward,
     Logout,
     Media {
         media: MediaRef,
@@ -920,7 +936,17 @@ impl State {
                     })
                     .map(|room| room.room_id.clone())
                     .collect();
+                let pins_changed = self.nav.account.as_ref() == Some(&account)
+                    && self.active_room_id().is_some_and(|id| {
+                        let old = self.accounts.get(&account).and_then(|data| data.room(id));
+                        let new = list.rooms.iter().find(|room| room.room_id == id);
+                        old.map(|r| &r.pinned) != new.map(|r| &r.pinned)
+                    });
                 self.accounts.set_room_list(&account, list);
+                if pins_changed && self.side == Some(SidePanel::Pins) {
+                    self.side_loaded = None;
+                    self.sync_side();
+                }
                 for room_id in changed_counts {
                     self.invalidate_members(&account, &room_id);
                 }
@@ -1232,6 +1258,9 @@ impl State {
             }
             Event::CallDevices(devices) => self.call_devices = Some(devices),
             Event::Threads { account, room_id, threads } => self.accounts.set_threads(&account, room_id, threads),
+            Event::PinnedMessages { account, room_id, messages } => {
+                self.accounts.set_pins(&account, room_id, messages);
+            }
             Event::Files { account, room_id, files } => self.accounts.set_files(&account, room_id, files),
             // Pushes are for phones: the desktop syncs while it runs and never registers a pusher.
             Event::PushContent { .. } => {}
@@ -1414,6 +1443,9 @@ impl State {
         let Some(purpose) = self.pending.remove(&request) else { return };
         let Err(error) = result else {
             match &purpose {
+                Purpose::Forward if matches!(self.modal, Some(Modal::Forward { sending: Some(waiting), .. }) if waiting == request) => {
+                    self.modal = None
+                }
                 Purpose::Membership { account, room_id, action, scope } => {
                     self.membership_finished(account, room_id, *action, scope)
                 }
@@ -1472,6 +1504,15 @@ impl State {
                 // free. (Removing an account forgets its edits on their way.)
                 self.set_edit_aside(*edit);
                 self.resume_edits();
+            }
+            Purpose::MessageAction => self.notice = Some(tf!("notice.message_action", error = error)),
+            Purpose::Forward => {
+                if let Some(Modal::Forward { sending, .. }) = &mut self.modal
+                    && *sending == Some(request)
+                {
+                    *sending = None;
+                }
+                self.notice = Some(tf!("notice.message_action", error = error));
             }
             Purpose::Delete => self.notice = Some(tf!("notice.not_deleted", error = error)),
             Purpose::Logout => self.notice = Some(tf!("notice.sign_out", error = error)),
@@ -1561,6 +1602,9 @@ impl State {
                 match panel {
                     SidePanel::Threads => self.accounts.set_threads(&account, room_id, Vec::new()),
                     SidePanel::Files => self.accounts.set_files(&account, room_id, Vec::new()),
+                    SidePanel::Pins => {
+                        self.accounts.pins_failed(&account, room_id, error.clone());
+                    }
                     SidePanel::Info | SidePanel::Members => {}
                 }
                 self.notice = Some(tf!("notice.side", error = error));
@@ -1656,7 +1700,7 @@ impl State {
 
     /// Asks for the open side panel's list (threads or files) of the room shown, once per room.
     fn sync_side(&mut self) {
-        let (Some(account), Some(room_id), Some(panel @ (SidePanel::Threads | SidePanel::Files))) =
+        let (Some(account), Some(room_id), Some(panel @ (SidePanel::Threads | SidePanel::Files | SidePanel::Pins))) =
             (self.nav.account.clone(), self.active_room_id().map(str::to_owned), self.side)
         else {
             return;
@@ -1669,6 +1713,7 @@ impl State {
         let purpose = Purpose::SidePanel(account.clone(), room_id.clone(), panel);
         let command = match panel {
             SidePanel::Threads => Command::ListThreads { account, room_id },
+            SidePanel::Pins => Command::ListPinnedMessages { account, room_id },
             _ => Command::ListFiles { account, room_id },
         };
         self.dispatch(command, purpose);
@@ -2740,7 +2785,7 @@ impl State {
                 self.list_all_members();
             }
             // Opened again, its list is fresh.
-            SidePanel::Threads | SidePanel::Files => {
+            SidePanel::Threads | SidePanel::Files | SidePanel::Pins => {
                 self.side_loaded = None;
                 self.sync_side();
             }
@@ -2969,7 +3014,8 @@ impl State {
     pub fn modal_field(&mut self) -> &mut TextEdit {
         match &mut self.modal {
             Some(
-                Modal::RecoveryKeyEntry { edit, .. }
+                Modal::Forward { search: edit, .. }
+                | Modal::RecoveryKeyEntry { edit, .. }
                 | Modal::Password { edit, .. }
                 | Modal::RenameSession { edit, .. }
                 | Modal::SectionName { edit, .. },

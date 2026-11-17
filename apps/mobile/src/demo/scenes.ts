@@ -101,6 +101,16 @@ export const scenes = {
     setup: general,
     routes: [routes.room(ADA, GENERAL), routes.messageActions(ADA, GENERAL, TEST_PLAN)],
   },
+  'pinned-messages': {
+    about: 'Shared pinned messages',
+    setup: general,
+    routes: [routes.room(ADA, GENERAL), routes.pins(ADA, GENERAL)],
+  },
+  'forward-message': {
+    about: 'Choose a conversation for a forwarded message',
+    setup: general,
+    routes: [routes.room(ADA, GENERAL), routes.forward(ADA, GENERAL, TEST_PLAN)],
+  },
   react: {
     about: 'Picking a reaction',
     setup: general,

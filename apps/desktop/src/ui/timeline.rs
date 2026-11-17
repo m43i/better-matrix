@@ -645,6 +645,23 @@ fn message_row(
         }
         col().grow(1.0).min_w(0.0).gap(2.0).child(meta).child(body)
     };
+    let pinned = cx.room.pinned.contains(&message.event_id);
+    let content = if pinned {
+        col()
+            .grow(1.0)
+            .min_w(0.0)
+            .gap(3.0)
+            .child(
+                row()
+                    .gap(5.0)
+                    .center_y()
+                    .child(icon(&icons::PIN, 12.0).color(p.accent))
+                    .child(text(t!("message.pinned")).font(font::META).color(p.accent)),
+            )
+            .child(content)
+    } else {
+        content
+    };
     let gutter = if continues {
         el().w(AVATAR)
     } else {
@@ -661,11 +678,21 @@ fn message_row(
         .opacity(if message.pending { 0.6 } else { 1.0 })
         .child(gutter)
         .child(content);
+    if pinned {
+        row = row.fill(p.accent.alpha(0.06)).border_sides([0.0, 0.0, 0.0, 3.0], p.accent);
+    }
     if interactive {
         row = row.hover(p.hover);
     }
     if interactive && !message.pending {
-        row = row.child(toolbar(cx, message, p));
+        let (menu_key, id) = (cx.key.clone(), message.event_id.clone());
+        row = row.child(toolbar(cx, message, p)).on_secondary_press(move |s: &mut State, point, _| {
+            s.popover = Some(Popover::MessageMenu {
+                key: menu_key.clone(),
+                event_id: id.clone(),
+                at: Some((point.x as i32, point.y as i32)),
+            });
+        });
         if !cx.in_thread() {
             let root = message.event_id.clone();
             row = row.cursor(rune::Cursor::Pointer).on_press(move |s: &mut State| s.open_thread(&root));
@@ -724,46 +751,14 @@ fn toolbar(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
             button(&icons::THREAD, t!("actions.thread"), "thread").on_press(move |s: &mut State| s.open_thread(&root)),
         );
     }
-    // The user's own messages: more, in a menu (edit, delete).
-    if message.sender_id == cx.account.as_str() && !matches!(message.content, MessageContent::Redacted) {
+    // Every sent message has utilities, including other people's messages.
+    {
         let (key, id) = (cx.key.clone(), event_id.clone());
         bar = bar.child(button(&icons::MORE, t!("actions.more"), "more").on_press(move |s: &mut State| {
-            s.toggle_popover(Popover::MessageMenu { key: key.clone(), event_id: id.clone() });
+            s.toggle_popover(Popover::MessageMenu { key: key.clone(), event_id: id.clone(), at: None });
         }));
     }
     bar
-}
-
-/// The menu of one of the user's messages, under its toolbar's ⋮: edit (text only) and delete.
-pub fn message_menu(s: &State, key: &TimelineKey, event_id: &str, p: &Palette) -> Vec<El> {
-    use super::components::{Tone, menu_action, popover_panel};
-    let message = s.nav.account.as_ref().and_then(|account| s.accounts.get(account)).and_then(|data| {
-        data.timeline(key)?.entries.iter().find_map(|entry| match &entry.kind {
-            EntryView::Message(item) if item.message.event_id == event_id => Some(item.message.clone()),
-            _ => None,
-        })
-    });
-    let Some(message) = message else { return Vec::new() };
-    let (target, thread) = match key.thread {
-        None => (ComposerTarget::Room, ""),
-        Some(_) => (ComposerTarget::Thread, "thread-"),
-    };
-    let mut panel = popover_panel(p).key("message-menu").w(200.0);
-    if message.editable && !message.pending {
-        panel = panel.child(
-            menu_action(&icons::PENCIL, t!("actions.edit"), Tone::Normal, p)
-                .key("message-edit")
-                .on_press_tx(move |s: &mut State, tx| s.start_edit(target, &message, tx)),
-        );
-    }
-    let (key, deleted) = (key.clone(), event_id.to_owned());
-    panel = panel.child(
-        menu_action(&icons::TRASH, t!("actions.delete"), Tone::Danger, p)
-            .key("message-delete")
-            .on_press(move |s: &mut State| s.delete_message(key.clone(), &deleted)),
-    );
-    let anchor = format!("{thread}more-{event_id}");
-    vec![rune::col().child(panel).anchored(anchor, rune::Side::Bottom, rune::Align::End, 4.0)]
 }
 
 /// The message a reply answers: who wrote it and an excerpt, behind a bar.
@@ -958,6 +953,7 @@ fn text_body(event_id: &str, plain: &str, rich: Option<&rune::TextEdit>, p: &Pal
         // Its own handler keeps the clicks: a double-click takes a word, a triple-click the
         // paragraph, rather than opening the thread.
         None => text(plain.to_owned())
+            .key(format!("text-{event_id}"))
             .font(font::BODY)
             .color(p.text)
             .self_start()

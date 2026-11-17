@@ -43,6 +43,7 @@ export type { Outgoing } from "./Outgoing";
 export type { Password } from "./Password";
 export type { PendingContact } from "./PendingContact";
 export type { Person } from "./Person";
+export type { PinnedMessage } from "./PinnedMessage";
 export type { Poll } from "./Poll";
 export type { PollAnswer } from "./PollAnswer";
 export type { Presence } from "./Presence";

@@ -100,7 +100,16 @@ one message with its formatting pre-parsed. See [ADR 0006](adr/0006-timelines.md
 
 **Message actions**
 : On phones, the sheet a long press on a message opens: quick reactions, reply, reply in thread,
-copy, edit, delete, end poll, share. The mobile counterpart of the hover toolbar.
+forward, edit, copy link, pin/unpin, copy text, translate, end poll, share/save and delete.
+The desktop offers the same actions under More and in the right-click message menu.
+
+**Pinned message**
+: A message kept for everyone in a room through Matrix's `m.room.pinned_events` state. Its row
+has a pin marker; room info leads to the full pinned list, including older messages.
+
+**Forward**
+: Send a copy of a text or attachment message into a chosen conversation on the same account,
+keeping its current content and formatting and removing its reply, thread and edit relations.
 
 **Hover toolbar**
 : React, reply and reply-in-thread buttons at a message's top right, shown while it is hovered.

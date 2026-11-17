@@ -106,7 +106,7 @@ fn card_of(content: &TimelineItemContent) -> Option<CallCard> {
     }
 }
 
-fn message(event: &EventTimelineItem, me: &UserId) -> Option<Message> {
+pub(crate) fn message(event: &EventTimelineItem, me: &UserId) -> Option<Message> {
     if let Some(card) = call_card(event) {
         return Some(Message { content: MessageContent::Call(card), ..base_message(event) });
     }
