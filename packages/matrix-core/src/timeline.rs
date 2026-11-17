@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use eyeball_im::VectorDiff;
 use matrix_sdk::ruma::UserId;
+use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::message::MessageType;
 use matrix_sdk_ui::timeline::{
     EmbeddedEvent, EventTimelineItem, MsgLikeContent, MsgLikeKind, Profile, TimelineDetails, TimelineItem,
@@ -171,7 +172,9 @@ fn base_message(event: &EventTimelineItem, me: &UserId) -> Message {
     let mut read_receipts: Vec<_> = event
         .read_receipts()
         .iter()
-        .filter(|(user, _)| user.as_str() != me.as_str())
+        .filter(|(user, receipt)| {
+            user.as_str() != me.as_str() && matches!(receipt.thread, ReceiptThread::Unthreaded | ReceiptThread::Main)
+        })
         .map(|(user, receipt)| crate::model::ReadReceipt {
             user_id: user.to_string(),
             timestamp_ms: receipt.ts.map(|ts| u64::from(ts.0)),

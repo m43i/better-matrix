@@ -5,7 +5,7 @@
 use matrix_core::{AttachmentKind, RoomKind, RoomSummary};
 use rune::{El, ScrollSpec, col, el, icon, row, text};
 
-use super::components::{ButtonKind, button, divider, icon_button, media_avatar};
+use super::components::{ButtonKind, button, divider, icon_button, media_avatar, when};
 use super::icons;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tp};
@@ -118,13 +118,6 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
     // Leaving sits apart from the rest, at the bottom, however long the topic.
     let footer = col().w_full().child(divider(p)).child(leave.mb(8.0));
     frame("info-panel", t!("info.title"), content, Some(footer), p)
-}
-
-/// When something happened, as a list shows it: the day in the user's language, then the time.
-fn when(ms: u64) -> String {
-    let now = crate::state::now_ms();
-    let (at, now) = (super::components::local_ms(ms), super::components::local_ms(now));
-    format!("{}, {}", super::timeline::date_label(at, now), super::components::clock_time(at))
 }
 
 /// The room's threads; pressing one opens it.

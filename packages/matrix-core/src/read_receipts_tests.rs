@@ -8,7 +8,7 @@ fn sync_response(request: &str) -> serde_json::Value {
     if request.contains("/sync?") {
         response["rooms"]["join"]["!room:example.org"]["ephemeral"] = serde_json::json!({"events":[{
             "type":"m.receipt", "content":{"$root":{
-                "m.read": {"@a:example.org":{"ts":30}, "@b:example.org":{"ts":20}, "@c:example.org":{}},
+                "m.read": {"@a:example.org":{"ts":30}, "@b:example.org":{"ts":20}, "@c:example.org":{}, "@thread-only:example.org":{"ts":40,"thread_id":"$root"}},
                 "m.read.private": {"@hidden:example.org":{"ts":40}}
             }}
         }]});
@@ -50,7 +50,7 @@ async fn advancing_a_receipt_should_remove_its_old_indicator_and_update_the_new_
         }
         serde_json::json!({"next_batch":"advanced", "rooms":{"join":{"!room:example.org":{
             "timeline":{"events":[{"type":"m.room.message","event_id":"$next","sender":"@a:example.org","origin_server_ts":50,"content":{"msgtype":"m.text","body":"Next"}}],"limited":false},
-            "ephemeral":{"events":[{"type":"m.receipt","content":{"$next":{"m.read":{"@b:example.org":{"ts":60}}}}}]}
+            "ephemeral":{"events":[{"type":"m.receipt","content":{"$next":{"m.read":{"@b:example.org":{"ts":60},"@thread-only:example.org":{"ts":70,"thread_id":"$root"}}}}}]}
         }}}})
     });
     let account = Account::for_test(&server.url()).await;
@@ -75,6 +75,7 @@ async fn advancing_a_receipt_should_remove_its_old_indicator_and_update_the_new_
             };
             if readers("$next").is_some_and(|r| r.iter().any(|r| r.user_id == "@b:example.org")) {
                 assert!(readers("$root").unwrap().iter().all(|r| r.user_id != "@b:example.org"));
+                assert!(readers("$next").unwrap().iter().all(|r| r.user_id != "@thread-only:example.org"));
                 return;
             }
         }

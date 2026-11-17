@@ -3,6 +3,7 @@ import type { MediaRef } from "./MediaRef";
 import type { MessageContent } from "./MessageContent";
 import type { Quote } from "./Quote";
 import type { Reaction } from "./Reaction";
+import type { ReadReceipt } from "./ReadReceipt";
 import type { ThreadSummary } from "./ThreadSummary";
 
 /**
@@ -50,6 +51,11 @@ timestamp_ms: number,
  * Reactions, in the order they were first used.
  */
 reactions: Array<Reaction>, 
+/**
+ * Readers at this message's read position, excluding this account. Empty when no
+ * receipts are exposed. These are positions, not a cumulative list of earlier reads.
+ */
+read_receipts?: Array<ReadReceipt>, 
 /**
  * The message this one answers, when it is a reply.
  */

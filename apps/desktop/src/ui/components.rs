@@ -437,6 +437,13 @@ pub fn clock_time(timestamp_ms: u64) -> String {
     format!("{:02}:{:02}", (minutes / 60) % 24, minutes % 60)
 }
 
+/// When something happened, as a list shows it: the day in the user's language, then the time.
+pub fn when(ms: u64) -> String {
+    let now = crate::state::now_ms();
+    let (at, now) = (local_ms(ms), local_ms(now));
+    format!("{}, {}", super::timeline::date_label(at, now), clock_time(at))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

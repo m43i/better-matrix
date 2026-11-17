@@ -3,7 +3,7 @@
 use matrix_core::{Message, TimelineKey};
 use rune::{Align, Cursor, El, ScrollSpec, Side, col, el, row, text};
 
-use super::components::{clock_time, local_ms, media_avatar, popover_panel};
+use super::components::{media_avatar, popover_panel, when};
 use super::theme::{Palette, font};
 use crate::i18n::tp;
 use crate::state::{AccountData, MediaCache, READER_FACES, ReaderMenu, State};
@@ -58,6 +58,9 @@ pub fn panels(
     member: Option<&ReaderMenu>,
     p: &Palette,
 ) -> Vec<El> {
+    if s.active_room_id() != Some(key.room_id.as_str()) {
+        return Vec::new();
+    }
     let readers = account.readers(key, event_id);
     if readers.is_empty() {
         return Vec::new();
@@ -92,7 +95,7 @@ pub fn panels(
                     .gap(2.0)
                     .child(text(person.name.clone()).font(font::BODY).color(palette.text).truncate());
                 if let Some(at) = receipt.timestamp_ms {
-                    details = details.child(text(clock_time(local_ms(at))).font(font::META).color(palette.text_muted));
+                    details = details.child(text(when(at)).font(font::META).color(palette.text_muted));
                 }
                 let user_id = person.id.clone();
                 row()

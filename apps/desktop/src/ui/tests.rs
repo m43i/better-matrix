@@ -781,7 +781,7 @@ fn a_read_indicator_should_open_readers_without_opening_a_thread() {
     let mut rt = readers_runtime();
     open_readers(&mut rt);
     assert!(rt.find("readers-panel").is_some());
-    assert!(rt.state.nav.threads.is_empty());
+    assert!(rt.state.active_thread().is_none());
     let panel = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("readers-panel")).unwrap();
     assert!(panel.rect[3] <= 380.0);
     assert!(rt.elements().iter().any(|e| e.text.as_deref() == Some("Seen by 6 people")));
@@ -878,4 +878,28 @@ fn a_large_reader_list_should_scroll_to_every_reader() {
         rt.frame(1.0 / 60.0);
     }
     assert!(rt.find("reader-@reader-99:example.org").is_some());
+}
+
+#[test]
+fn reader_actions_should_close_when_the_open_room_changes() {
+    let mut rt = readers_runtime();
+    open_readers(&mut rt);
+    press(&mut rt, "reader-@kai:example.org");
+    rt.update(|s, _| s.select_room("!design:example.org"));
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("readers-panel").is_none());
+    assert!(rt.find("member-menu-kick").is_none());
+}
+
+#[test]
+fn a_reader_timestamp_should_include_its_localized_day() {
+    let mut rt = readers_runtime();
+    open_readers(&mut rt);
+    let at = rt.state.active_account().unwrap().readers(&TimelineKey::room(demo::DEMO_THREAD.0), "$read-demo")[0]
+        .timestamp_ms
+        .unwrap();
+    let label = super::components::when(at);
+    assert!(label.contains(", "));
+    assert!(rt.elements().iter().any(|element| element.text.as_deref() == Some(label.as_str())));
 }

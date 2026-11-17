@@ -53,6 +53,7 @@ export type { PushTarget } from "./PushTarget";
 export type { Pusher } from "./Pusher";
 export type { Quote } from "./Quote";
 export type { Reaction } from "./Reaction";
+export type { ReadReceipt } from "./ReadReceipt";
 export type { RecoveryStatus } from "./RecoveryStatus";
 export type { RequestId } from "./RequestId";
 export type { RoomCall } from "./RoomCall";
