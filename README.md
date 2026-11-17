@@ -27,6 +27,24 @@
 - **Fast and native.** Rust from the network to the pixels, rendered on the GPU with
   [Rune](https://github.com/anomalyco/rune). In English, German and French.
 
+## Compared with Element
+
+[Element](https://element.io) is the reference Matrix client and covers more of Matrix than Better
+Matrix does today. Better Matrix trades some of that breadth for several accounts in one window and
+a native app instead of a web page in Electron:
+
+|                                  | Better Matrix                     | Element Desktop                 |
+| -------------------------------- | --------------------------------- | ------------------------------- |
+| Accounts in one window           | As many as you like, side by side | One (a second needs a profile)  |
+| Built with                       | Rust, drawn on the GPU            | Electron (Chromium and Node.js) |
+| Processes                        | 1                                 | 8                               |
+| Memory (PSS, shared pages split) | 104 MiB                           | 280 MiB                         |
+| CPU while idle                   | 0.03%                             | 0.17%                           |
+
+Measured on one Linux machine (Wayland, Element Desktop 1.12.25 on Electron 43), each app open and
+idle, summed over all its processes for 30 seconds. A snapshot, not a controlled benchmark: memory
+grows with the rooms an app has loaded.
+
 ## Install
 
 Copy the line for your system into a terminal. Each one fetches the latest release from

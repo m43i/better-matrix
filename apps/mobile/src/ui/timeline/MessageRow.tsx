@@ -1,6 +1,6 @@
 // One message, as Slack's mobile app lays it out: the sender's face, name (in their identity
 // colour) and time on the first of a run, then what it answers, its content, a linked GIF or a
-// link's card, reactions and its thread. A long press opens its actions.
+// link's card, reactions, its thread and who has read up to it. A long press opens its actions.
 
 import type { Message } from '@better-matrix/matrix-native/types';
 import { memo } from 'react';
@@ -20,6 +20,7 @@ import { CallCardView } from './CallCard';
 import { useTimelineContext } from './context';
 import { LinkCard, LinkedGif, QuoteBlock, Reactions, ThreadLink } from './Parts';
 import { PollCard } from './PollCard';
+import { ReadIndicator } from './ReadIndicator';
 import { RichText } from './RichText';
 
 export const AVATAR = 36;
@@ -131,6 +132,9 @@ export const MessageRow = memo(function MessageRow({
         ) : null}
         {continues && status ? (
           <Text style={[font.meta, { color: palette.textMuted }]}>{status}</Text>
+        ) : null}
+        {thread === null && !message.pending && (message.read_receipts?.length ?? 0) > 0 ? (
+          <ReadIndicator message={message} />
         ) : null}
       </View>
     </Pressable>

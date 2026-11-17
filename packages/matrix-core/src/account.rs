@@ -667,13 +667,13 @@ impl Account {
             None => TimelineFocus::Live { hide_threaded_events: true },
             Some(root) => TimelineFocus::Thread { root_event_id: matrix_sdk::ruma::EventId::parse(root)? },
         };
-        Ok(self
-            .joined_room(&key.room_id)?
-            .timeline_builder()
-            .track_read_marker_and_receipts(TimelineReadReceiptTracking::MessageLikeEvents)
-            .with_focus(focus)
-            .build()
-            .await?)
+        let mut builder = self.joined_room(&key.room_id)?.timeline_builder().with_focus(focus);
+        // Read positions show in a room's timeline only: tracked in a thread, every receipt in
+        // the room would update its items for nothing.
+        if key.thread.is_none() {
+            builder = builder.track_read_marker_and_receipts(TimelineReadReceiptTracking::MessageLikeEvents);
+        }
+        Ok(builder.build().await?)
     }
 
     /// Fetches a cold thread's first replies immediately, independently of the SDK's wait

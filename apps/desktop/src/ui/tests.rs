@@ -968,3 +968,73 @@ fn escape_should_close_an_attachment_preview_before_the_dialog_beneath_it() {
         assert!(rt.state.modal.is_some());
     }
 }
+
+/// How long building the view takes for a large room whose readers are people the app knows
+/// nothing about yet (no loaded member, no message of theirs): `cargo test -p
+/// better-matrix-desktop --release -- --ignored --nocapture large_room_view_build`.
+#[test]
+#[ignore = "a timing, not a check"]
+fn large_room_view_build_timing() {
+    let mut rt = runtime(|s| {
+        demo::read_receipts(s);
+        let account = AccountId::new(demo::ADA);
+        let room_id = demo::DEMO_THREAD.0.to_owned();
+        let member = |id: String| matrix_core::RoomMember {
+            person: matrix_core::Person { name: id.clone(), id, avatar: None },
+            role: matrix_core::MemberRole::Member,
+            presence: matrix_core::Presence::Unknown,
+            verified: false,
+            level: 0,
+        };
+        let members = matrix_core::Members {
+            people: (0..3000).map(|i| member(format!("@member{i}:example.org"))).collect(),
+            complete: true,
+            ..Default::default()
+        };
+        s.apply(
+            Event::Members { request: None, account: account.clone(), room_id: room_id.clone(), members },
+            &mut rune::Tx::default(),
+        );
+        let entries = (0..400)
+            .map(|i| {
+                let message = Message {
+                    event_id: format!("$bench{i}"),
+                    sender_id: format!("@sender{}:example.org", i % 20),
+                    sender_name: format!("Sender {}", i % 20),
+                    timestamp_ms: 1_700_000_000_000 + i * 60_000,
+                    content: MessageContent::Text { body: format!("message {i}"), html: None },
+                    read_receipts: (0..5)
+                        .map(|r| matrix_core::ReadReceipt {
+                            user_id: format!("@lurker{i}-{r}:example.org"),
+                            timestamp_ms: None,
+                        })
+                        .collect(),
+                    ..Message::default()
+                };
+                TimelineEntry { id: format!("bench{i}"), kind: EntryKind::Message(Box::new(message)) }
+            })
+            .collect();
+        s.apply(
+            Event::TimelineChanged {
+                account,
+                key: TimelineKey::room(&room_id),
+                diffs: vec![TimelineDiff::Append(entries)],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    rt.frame(1.0 / 60.0);
+    // The median of ten batches of a hundred rebuilds, so one busy moment doesn't decide it.
+    let mut batches: Vec<f64> = (0..10)
+        .map(|_| {
+            let started = std::time::Instant::now();
+            for _ in 0..100 {
+                rt.update(|s, _| s.drop_hover = !s.drop_hover);
+                rt.frame(1.0 / 60.0);
+            }
+            started.elapsed().as_secs_f64() * 1000.0 / 100.0
+        })
+        .collect();
+    batches.sort_by(f64::total_cmp);
+    eprintln!("view build + frame: median {:.3} ms, best {:.3} ms", batches[5], batches[0]);
+}

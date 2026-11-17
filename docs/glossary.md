@@ -107,7 +107,8 @@ one message with its formatting pre-parsed. See [ADR 0006](adr/0006-timelines.md
 
 **Read indicator**
 : The small avatar stack at a message's lower right showing whose latest exposed read position
-is there. Opens the reader list with receipt times; selecting a reader opens the member menu.
+is there. Opens the reader list with receipt times (a sheet on mobile); selecting a reader opens
+the member menu.
 
 **Message actions**
 : On phones, the sheet a long press on a message opens: quick reactions, reply, reply in thread,

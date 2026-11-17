@@ -28,6 +28,7 @@ import {
   GENERAL,
   GRACE,
   KAI,
+  READ_BY_SIX,
   ring,
   SCREENSHOT,
   seedEvents,
@@ -114,6 +115,11 @@ export const scenes = {
       routes.preview(ADA, DESIGN, SCREENSHOT),
       routes.attachmentActions(ADA, DESIGN, SCREENSHOT),
     ],
+  },
+  'read-receipts': {
+    about: 'Who has read a message, from its read indicator',
+    setup: general,
+    routes: [routes.room(ADA, GENERAL), routes.readers(ADA, GENERAL, READ_BY_SIX)],
   },
   'pinned-messages': {
     about: 'Shared pinned messages',

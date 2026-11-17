@@ -320,6 +320,23 @@ function general(): Message[] {
       call: null,
     },
   };
+  // Ada's last word, read by six (three the room knows only by ID), as the desktop's
+  // read-receipts scene shows it.
+  const last = list[9]!;
+  list[9] = {
+    ...last,
+    read_receipts: [
+      KAI,
+      GRACE,
+      ALAN,
+      '@mira:example.org',
+      '@lin:example.org',
+      '@sam:example.org',
+    ].map((user_id, index) => ({
+      user_id,
+      timestamp_ms: index === 5 ? null : last.timestamp_ms + (6 - index) * 60_000,
+    })),
+  };
   // A thread on the cross-signing report.
   const report = list[5]!;
   list[5] = {
@@ -339,6 +356,9 @@ export const DEMO_THREAD = { roomId: GENERAL, root: `$demo-${ALAN}-5` } as const
 
 /** Alan's encryption test plan in #general: formatted, with reactions and a reply. */
 export const TEST_PLAN = `$demo-${ALAN}-2`;
+
+/** Ada's last message in #general, which six people have read. */
+export const READ_BY_SIX = `$demo-${ADA}-9`;
 
 /** Grace's screenshot in #design, an image the demo engine serves. */
 export const SCREENSHOT = `$demo-${GRACE}-1`;

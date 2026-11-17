@@ -228,9 +228,15 @@ see who is typing there.
   beside the list. A reader outside the joined-member list keeps chat, call and invite actions,
   without invented moderation rights. Only visible reader pictures load. Subscription diffs move
   or remove indicators and update an open list. Thread indicators stay hidden because the pinned
-  SDK's exposed receipt map does not distinguish threads. Thread-specific receipts are also
-  excluded from main-timeline conversion. Mobile receives the shared data but its presentation
-  remains unchanged.
+  SDK's exposed receipt map does not distinguish threads, so only room timelines track receipts
+  and the read marker (`Account::timeline`): in a thread every receipt in the room would update
+  its items for nothing. Thread-specific receipts are also excluded from main-timeline
+  conversion. Readers are looked up by index, as the view asks for every reader on screen in
+  each frame it builds: members by `AccountData::member` (indexed when a list is set), senders by
+  `RoomTimeline::sender` (indexed once per revision). Mobile shows the same indicator under a
+  message (`ui/timeline/ReadIndicator.tsx`) and the reader list as a sheet (`app/readers.tsx`):
+  members load with it, a member opens the member sheet, and readers resolve as on the desktop
+  (`state/readers.ts`, indexes per immutable list).
 - **Read receipts:** the desktop sends `Command::MarkRead` when an open timeline changes while
   the window is focused, and for each open timeline when focus returns.
   - Room reads send both the public `m.read` receipt and the private, cross-device

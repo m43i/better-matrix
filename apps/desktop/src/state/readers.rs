@@ -15,23 +15,14 @@ pub struct ReaderMenu {
 }
 
 impl AccountData {
+    /// A reader as the room knows them: a member, else a sender in its timeline, else their ID.
     pub fn reader(&self, room_id: &str, user_id: &str) -> Person {
-        if let Some(member) =
-            self.members.get(room_id).and_then(|members| members.people.iter().find(|m| m.person.id == user_id))
-        {
+        if let Some(member) = self.member(room_id, user_id) {
             return member.person.clone();
         }
-        if let Some(message) = self
-            .timeline(&TimelineKey::room(room_id))
-            .and_then(|timeline| timeline.messages().rev().find(|m| m.sender_id == user_id))
-        {
-            return Person {
-                id: user_id.to_owned(),
-                name: message.sender_name.clone(),
-                avatar: message.sender_avatar.clone(),
-            };
-        }
-        Person { id: user_id.to_owned(), name: user_id.to_owned(), avatar: None }
+        self.timeline(&TimelineKey::room(room_id))
+            .and_then(|timeline| timeline.sender(user_id))
+            .unwrap_or_else(|| Person { id: user_id.to_owned(), name: user_id.to_owned(), avatar: None })
     }
 
     pub fn readers(&self, key: &TimelineKey, event_id: &str) -> &[ReadReceipt] {

@@ -186,6 +186,9 @@ pub struct RoomTimeline {
     /// Changes whenever the timeline may have, and is never the same for two timelines: the
     /// view replans its rows only when it does. 0 for one never changed.
     pub revision: u64,
+    /// Each sender's latest name and picture, for read indicators, at the revision it was
+    /// built for.
+    senders: std::sync::Mutex<Option<(u64, std::sync::Arc<HashMap<String, matrix_core::Person>>)>>,
 }
 
 /// Which entries of a timeline its view shows (plus a margin), as it last reported: their
@@ -393,6 +396,25 @@ impl RoomTimeline {
         self.entries.iter().filter_map(Entry::message)
     }
 
+    /// A sender's latest name and picture in this timeline. Built once per revision: the view
+    /// asks for every reader on screen in every frame it builds.
+    pub fn sender(&self, user_id: &str) -> Option<matrix_core::Person> {
+        let Ok(mut cache) = self.senders.lock() else {
+            return self.messages().rev().find(|m| m.sender_id == user_id).map(sender_of);
+        };
+        let index = match &*cache {
+            Some((revision, index)) if *revision == self.revision => std::sync::Arc::clone(index),
+            _ => {
+                // Oldest first, so each sender's newest name and picture win.
+                let index: HashMap<_, _> = self.messages().map(|m| (m.sender_id.clone(), sender_of(m))).collect();
+                let index = std::sync::Arc::new(index);
+                *cache = Some((self.revision, std::sync::Arc::clone(&index)));
+                index
+            }
+        };
+        index.get(user_id).cloned()
+    }
+
     /// The GIF links its messages show, found once when each message arrived.
     pub fn gif_links(&self) -> impl Iterator<Item = &str> {
         self.entries.iter().filter_map(Entry::gif_link)
@@ -499,6 +521,8 @@ pub struct AccountData {
     pub contacts: Option<matrix_core::Contacts>,
     /// Rooms' members, by room ID, once listed.
     pub members: HashMap<String, matrix_core::Members>,
+    /// Where each member is in `members`, by room and user ID, for read indicators.
+    member_index: HashMap<String, HashMap<String, usize>>,
     /// Snapshots kept visible while a newer membership list is fetched.
     stale_members: HashSet<String>,
     /// Rooms' threads, by room ID, once listed for the info panel.
@@ -546,6 +570,7 @@ impl AccountData {
             sessions: None,
             contacts: None,
             members: HashMap::new(),
+            member_index: HashMap::new(),
             stale_members: HashSet::new(),
             threads: HashMap::new(),
             files: HashMap::new(),
@@ -614,7 +639,25 @@ impl AccountData {
     }
 }
 
+/// Who sent a message, as it names them.
+fn sender_of(message: &Message) -> matrix_core::Person {
+    matrix_core::Person {
+        id: message.sender_id.clone(),
+        name: message.sender_name.clone(),
+        avatar: message.sender_avatar.clone(),
+    }
+}
+
 impl AccountData {
+    /// A room's member by user ID, once its members are listed.
+    pub fn member(&self, room_id: &str, user_id: &str) -> Option<&matrix_core::RoomMember> {
+        let people = &self.members.get(room_id)?.people;
+        match self.member_index.get(room_id).filter(|index| index.len() == people.len()) {
+            Some(index) => index.get(user_id).and_then(|at| people.get(*at)).filter(|m| m.person.id == user_id),
+            None => people.iter().find(|m| m.person.id == user_id),
+        }
+    }
+
     /// The newest message in a room: from its timeline when open, else from sync.
     pub fn last_message(&self, room_id: &str) -> Option<&Message> {
         let from_timeline =
@@ -805,6 +848,8 @@ impl Accounts {
         let stale = account.stale_members.remove(&room_id);
         let had_all = account.members.get(&room_id).is_some_and(|known| known.complete);
         if members.complete || !had_all || stale {
+            let index = members.people.iter().enumerate().map(|(at, m)| (m.person.id.clone(), at)).collect();
+            account.member_index.insert(room_id.clone(), index);
             account.members.insert(room_id, members);
         }
     }

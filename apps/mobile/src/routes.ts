@@ -90,6 +90,11 @@ export const routes = {
     pathname: '/room-info/[account]/[roomId]',
     params: { account, roomId },
   }),
+  /** Who has read up to a message in a room's timeline. */
+  readers: (account: AccountId, roomId: string, eventId: string): Href => ({
+    pathname: '/readers',
+    params: { account, roomId, eventId },
+  }),
   member: (account: AccountId, roomId: string, userId: string): Href => ({
     pathname: '/member',
     params: { account, roomId, userId },
