@@ -219,18 +219,18 @@ see who is typing there.
     commit that left the timeline alone.
 - **Read indicators:** `Message::read_receipts` carries the SDK's read positions (user ID and
   optional receipt time), excluding the signed-in account, newest receipts first with stable ID
-  ties. SDK tracking uses message-like events, so a receipt on a later state event still
-  marks the preceding message. Only supplied positions are shown: no room permission or read
-  is inferred from an absent receipt. The desktop shows up to four overlapping avatars and an overflow count at the lower
-  right of a sent message. Clicking opens a virtualized reader list, with available receipt
-  dates/times and room profiles (falling back to timeline senders or user IDs). The list loads the room
-  members as the member panel does; selecting a reader opens that same member menu beside the
-  list. A reader outside the joined-member list keeps chat, call and invite actions, without
-  invented moderation rights. Only visible reader pictures load. Subscription diffs move or
-  remove indicators and update an open list. Thread indicators stay hidden because the pinned
+  ties. SDK tracking uses message-like events, so a receipt on a later state event still marks the
+  preceding message. Only supplied positions are shown: no room permission or read is inferred
+  from an absent receipt. The desktop shows up to four overlapping avatars and an overflow count
+  at the lower right of a sent message. Clicking opens a virtualized reader list, with available
+  receipt dates/times and room profiles (falling back to timeline senders or user IDs). The list
+  loads the room members as the member panel does; selecting a reader opens that same member menu
+  beside the list. A reader outside the joined-member list keeps chat, call and invite actions,
+  without invented moderation rights. Only visible reader pictures load. Subscription diffs move
+  or remove indicators and update an open list. Thread indicators stay hidden because the pinned
   SDK's exposed receipt map does not distinguish threads. Thread-specific receipts are also
-  excluded from main-timeline conversion. Mobile receives the shared data but
-  its presentation remains unchanged.
+  excluded from main-timeline conversion. Mobile receives the shared data but its presentation
+  remains unchanged.
 - **Read receipts:** the desktop sends `Command::MarkRead` when an open timeline changes while
   the window is focused, and for each open timeline when focus returns.
   - Room reads send both the public `m.read` receipt and the private, cross-device
