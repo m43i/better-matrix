@@ -528,6 +528,156 @@ fn right_clicking_message_text_should_open_the_full_message_menu() {
 }
 
 #[test]
+fn a_message_menu_should_keep_other_rows_from_hovering_underneath_it() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        let entries = (0..4)
+            .map(|i| TimelineEntry {
+                id: format!("menu-row-{i}"),
+                kind: EntryKind::Message(Box::new(Message {
+                    event_id: format!("$menu-{i}"),
+                    sender_id: "@grace:example.org".into(),
+                    sender_name: "Grace".into(),
+                    timestamp_ms: demo::DEMO_DAY_MS + i * 600_000,
+                    content: MessageContent::Text {
+                        body: "A message\nwith several lines\nto hover over".into(),
+                        html: None,
+                    },
+                    ..Message::default()
+                })),
+            })
+            .collect();
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::Reset(entries)],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let (x, y) = rt.find("text-$menu-2").unwrap();
+    rt.update(|s, _| {
+        s.popover = Some(crate::state::Popover::MessageMenu {
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            event_id: "$menu-0".into(),
+            at: Some((x as i32 - 50, y as i32 - 50)),
+        })
+    });
+    rt.frame(0.1);
+    rt.pointer_move(x, y);
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert_eq!(rt.presented("actions-$menu-2").unwrap().1, 0.0);
+}
+
+#[test]
+fn an_image_message_should_offer_file_actions_without_copying_its_filename() {
+    let mut rt = runtime(demo::attachment_message);
+    let (x, y) = rt.find("image-better-matrix.png").unwrap();
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    rt.frame(0.1);
+    for key in ["attachment-copy-image", "attachment-open", "attachment-download", "message-forward"] {
+        assert!(rt.find(key).is_some(), "missing {key}");
+    }
+    assert!(rt.find("message-copy").is_none());
+    assert!(rt.find("message-translate").is_none());
+    assert!(rt.state.preview.is_none());
+    assert!(rt.state.active_thread().is_none());
+}
+
+#[test]
+fn a_file_message_should_offer_download_and_open_without_copy_image() {
+    let mut rt = runtime(|s| {
+        demo::attachment_message(s);
+        let key = TimelineKey::room(demo::DEMO_THREAD.0);
+        let mut message = s.active_account().unwrap().timeline(&key).unwrap().entries[0].message().unwrap().clone();
+        let MessageContent::Attachment(file) = &mut message.content else { panic!("attachment") };
+        file.kind = matrix_core::AttachmentKind::File;
+        file.name = "notes.pdf".into();
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key,
+                diffs: vec![TimelineDiff::Reset(vec![TimelineEntry {
+                    id: "file".into(),
+                    kind: EntryKind::Message(Box::new(message)),
+                }])],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let (x, y) = rt.find("file-notes.pdf").unwrap();
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    rt.frame(0.1);
+    assert!(rt.find("attachment-download").is_some());
+    assert!(rt.find("attachment-open").is_some());
+    assert!(rt.find("attachment-copy-image").is_none());
+    assert!(rt.find("message-copy").is_none());
+}
+
+#[test]
+fn right_clicking_a_preview_should_offer_file_actions_above_the_viewer() {
+    let mut rt = runtime(|s| {
+        demo::attachment_preview(s);
+        s.close_popover();
+    });
+    let (x, y) = rt.find("preview-image").unwrap();
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    rt.frame(0.1);
+    assert!(rt.find("attachment-copy-image").is_some());
+    press(&mut rt, "attachment-copy-image");
+    assert!(rt.state.popover.is_none());
+    assert!(rt.state.preview.is_some());
+}
+
+#[test]
+fn dismissing_a_preview_menu_should_keep_the_preview_open() {
+    let mut rt = runtime(demo::attachment_preview);
+    rt.pointer_down(30.0, 500.0);
+    rt.pointer_up(30.0, 500.0);
+    rt.frame(0.1);
+    assert!(rt.state.popover.is_none());
+    assert!(rt.state.preview.is_some());
+}
+
+#[test]
+fn escape_should_close_the_preview_menu_before_the_preview() {
+    let mut rt = runtime(demo::attachment_preview);
+    rt.on_key = crate::spec().on_key;
+    rt.key(rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() });
+    rt.frame(0.1);
+    assert!(rt.state.popover.is_none());
+    assert!(rt.state.preview.is_some());
+    rt.key(rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() });
+    rt.frame(0.1);
+    assert!(rt.state.preview.is_none());
+}
+
+#[test]
+fn a_document_preview_should_offer_open_and_download_without_copy_image() {
+    let mut rt = runtime(|s| {
+        demo::attachment_preview(s);
+        let preview = s.preview.as_mut().unwrap();
+        preview.attachment.kind = matrix_core::AttachmentKind::File;
+        preview.attachment.name = "notes.pdf".into();
+        preview.content =
+            crate::state::PreviewContent::Document { pages: vec![], status: crate::state::DocumentStatus::Done };
+        s.close_popover();
+    });
+    rt.secondary_down(600.0, 300.0);
+    rt.secondary_up(600.0, 300.0);
+    rt.frame(0.1);
+    assert!(rt.find("attachment-open").is_some());
+    assert!(rt.find("attachment-download").is_some());
+    assert!(rt.find("attachment-copy-image").is_none());
+}
+
+#[test]
 fn room_info_should_open_the_shared_pinned_messages() {
     let mut rt = runtime(|s| {
         demo::pinned_messages(s);

@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   GestureDetector,
+  useLongPressGesture,
   usePanGesture,
   usePinchGesture,
   useSimultaneousGestures,
@@ -20,6 +21,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { t } from '../i18n';
+import { routes } from '../routes';
 import { attachmentPreview, findMessage } from '../state/messages';
 import { useAppStore, useStore } from '../state/react';
 import { timeline } from '../state/selectors';
@@ -55,6 +57,7 @@ export default function PreviewScreen() {
   const message = useStore((s) => findMessage(timeline(s, account, key).entries, eventId));
   const attachment = message?.content.type === 'Attachment' ? message.content.data : null;
   const [busy, setBusy] = useState(false);
+  const showActions = () => router.push(routes.attachmentActions(account, roomId, eventId, thread));
 
   const run = (action: typeof shareAttachment) => {
     if (!attachment) return;
@@ -69,7 +72,7 @@ export default function PreviewScreen() {
         attachment.kind === 'Video' ? (
           <VideoContent account={account} attachment={attachment} />
         ) : (
-          <ImageContent account={account} attachment={attachment} />
+          <ImageContent account={account} attachment={attachment} onLongPress={showActions} />
         )
       ) : (
         <Text style={[font.body, styles.status]}>{t('mobile.conversation.message_missing')}</Text>
@@ -96,6 +99,12 @@ export default function PreviewScreen() {
         {attachment?.media ? (
           <>
             {busy ? <ActivityIndicator color="#ffffff" style={styles.busy} /> : null}
+            <BarButton
+              icon="more"
+              label={t('actions.more')}
+              onPress={showActions}
+              testID="preview-more"
+            />
             <BarButton
               icon="share"
               label={t('mobile.conversation.share')}
@@ -143,7 +152,15 @@ function BarButton({
 }
 
 /** The image full size, its preview shown while the original loads. */
-function ImageContent({ account, attachment }: { account: string; attachment: Attachment }) {
+function ImageContent({
+  account,
+  attachment,
+  onLongPress,
+}: {
+  account: string;
+  attachment: Attachment;
+  onLongPress: () => void;
+}) {
   const preview = attachmentPreview(attachment);
   const small = useMedia(account, preview?.media ?? null, preview?.size ?? PREVIEW_SIZE);
   const original = useMedia(account, attachment.media, ORIGINAL);
@@ -151,11 +168,19 @@ function ImageContent({ account, attachment }: { account: string; attachment: At
 
   if (!uri) return <ActivityIndicator color="#ffffff" style={StyleSheet.absoluteFill} />;
 
-  return <Zoomable uri={uri} label={attachment.name} />;
+  return <Zoomable uri={uri} label={attachment.name} onLongPress={onLongPress} />;
 }
 
 /** Pinch to zoom, pan while zoomed, double-tap to zoom in or back out. */
-function Zoomable({ uri, label }: { uri: string; label: string }) {
+function Zoomable({
+  uri,
+  label,
+  onLongPress,
+}: {
+  uri: string;
+  label: string;
+  onLongPress: () => void;
+}) {
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const x = useSharedValue(0);
@@ -211,7 +236,13 @@ function Zoomable({ uri, label }: { uri: string; label: string }) {
     },
   });
 
-  const gesture = useSimultaneousGestures(pinch, pan, doubleTap);
+  const longPress = useLongPressGesture({
+    minDuration: 350,
+    runOnJS: true,
+    onActivate: onLongPress,
+  });
+
+  const gesture = useSimultaneousGestures(pinch, pan, doubleTap, longPress);
 
   const style = useAnimatedStyle(() => ({
     transform: [{ translateX: x.value }, { translateY: y.value }, { scale: scale.value }],

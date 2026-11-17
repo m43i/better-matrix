@@ -128,7 +128,9 @@ name (`RoomEvent`, `RoomChange`). Shown as a small line; joins and leaves in a r
 [ADR 0006](adr/0006-timelines.md).
 
 **Attachment preview**
-: An image or PDF shown full size over the window, with download and close (`State::preview`).
+: An image or PDF shown full size over the window, with download, close and right-click file
+actions (copy image, download, open in the default application; `State::preview`). On phones,
+the full-screen image/video viewer has the same file actions under More and an image long press.
 See [ADR 0007](adr/0007-composer-and-media.md).
 
 **Upload**

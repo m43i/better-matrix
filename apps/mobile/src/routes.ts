@@ -53,6 +53,16 @@ export const routes = {
     pathname: '/pinned-messages',
     params: { account, roomId },
   }),
+  /** File actions over an attachment preview. */
+  attachmentActions: (
+    account: AccountId,
+    roomId: string,
+    eventId: string,
+    thread?: string,
+  ): Href => ({
+    pathname: '/attachment-actions',
+    params: thread ? { account, roomId, eventId, thread } : { account, roomId, eventId },
+  }),
   /** Full-screen attachment preview of a message's attachment. */
   preview: (account: AccountId, roomId: string, eventId: string, thread?: string): Href => ({
     pathname: '/preview',

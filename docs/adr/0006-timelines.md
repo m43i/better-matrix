@@ -107,7 +107,12 @@ see who is typing there.
 - **Message utilities:** More and right-click use the same menu on desktop; long press opens
   the corresponding phone sheet. Conversation actions (reply, thread, forward, edit) come first,
   followed by copy link, pin/unpin, copy text and translate; deletion stays last and separate.
-  Permissions, local echoes and content type determine availability. Calls keep their own controls.
+  Permissions, local echoes and content type determine availability. Attachment messages start
+  with the shared file actions (copy image for images, download and open in the default app);
+  they offer no copy-text action for their filename. Empty text has no copy action either.
+  Phones use the same content rules in their message sheet, with the system share action too.
+  The message menu establishes a modal input boundary, so rows behind it cannot hover or
+  reveal their toolbars. Calls keep their own controls.
   `Command::Forward` reads the open timeline's latest event JSON (including edits), strips source
   relations, mentions and legacy reply fallbacks, and sends the text or attachment through the
   chosen room on the same account. The destination picker separates Rooms (`#` and name)

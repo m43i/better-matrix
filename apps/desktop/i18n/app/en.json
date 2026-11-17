@@ -575,5 +575,10 @@
   "message.no_rooms": "No conversations found.",
   "message.translate_explanation": "Open Google Translate? The message text will be shared with Google to translate it into your app language.",
   "notice.message_action": "Couldn’t complete the message action: {{error}}",
-  "info.pins_retry": "Try again"
+  "info.pins_retry": "Try again",
+  "attachment.open": "Open",
+  "attachment.copy_image": "Copy image",
+  "notice.copy_image": "Could not copy the image: {{error}}",
+  "notice.open_attachment": "Could not open the attachment: {{error}}",
+  "attachment.copy_too_large": "The image exceeds clipboard limits."
 }

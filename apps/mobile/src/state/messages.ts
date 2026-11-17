@@ -129,16 +129,19 @@ export function messageActions(
   const readable =
     content.type !== 'Call' && content.type !== 'Redacted' && content.type !== 'Undecryptable';
 
+  const text = messageText(message);
+  const hasText = text !== null && text.trim() !== '';
+
   return {
     forward: sent && (content.type === 'Text' || content.type === 'Attachment'),
     link: sent && content.type !== 'Call',
     pin: sent && readable && canPin,
-    translate: content.type === 'Text' && messageText(message) !== '',
+    translate: content.type === 'Text' && hasText,
     // A call's card takes no reactions: the timeline keeps none on it.
     react: sent && readable,
     reply: sent && readable,
     thread: sent && readable && !inThread,
-    copy: messageText(message) !== null,
+    copy: (content.type === 'Text' || content.type === 'Poll') && hasText,
     edit: sent && own && message.editable,
     delete: sent && own && content.type !== 'Redacted',
     endPoll: sent && own && content.type === 'Poll' && !content.data.ended,
@@ -169,6 +172,17 @@ export function findMessage(
 }
 
 // ----- attachments -------------------------------------------------------------------------
+
+export type AttachmentAction = 'copyImage' | 'open' | 'share' | 'save';
+
+/** File actions shared by a message's long-press sheet and its attachment preview. */
+export function attachmentActions(attachment: Attachment): AttachmentAction[] {
+  if (!attachment.media) return [];
+
+  return attachment.kind === 'Image'
+    ? ['copyImage', 'open', 'share', 'save']
+    : ['open', 'share', 'save'];
+}
 
 /** The size timelines fetch image previews at, as the desktop's `MediaSize::PREVIEW`. */
 const PREVIEW: MediaSize = { type: 'Thumbnail', data: { width: 800, height: 600 } };

@@ -3,7 +3,7 @@
 
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Linking, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { locale, t } from '../i18n';
@@ -19,7 +19,7 @@ import { Divider, EmptyState, ListRow } from '../ui/components';
 import { Icon } from '../ui/icons';
 import { usePalette } from '../ui/theme';
 import { confirmEndPoll } from '../ui/timeline/PollCard';
-import { saveAttachment, shareAttachment } from '../ui/timeline/files';
+import { AttachmentActions } from '../ui/timeline/AttachmentActions';
 
 /** The quick reactions, as the desktop's picker offers them first. */
 const QUICK = ['👍', '❤️', '😂', '🎉', '😮', '🙏'];
@@ -42,7 +42,6 @@ export default function MessageActionsScreen() {
 
   const message = useStore((s) => findMessage(timeline(s, account, key).entries, eventId));
   const summary = useStore((s) => room(s, account, roomId));
-  const [busy, setBusy] = useState<'save' | 'share' | null>(null);
 
   if (!message) {
     return (
@@ -75,21 +74,6 @@ export default function MessageActionsScreen() {
   const reactWith = (emoji: string) => {
     react(store, account, key, message.event_id, emoji);
     close();
-  };
-
-  const file = (kind: 'save' | 'share') => {
-    if (!attachment) return;
-    setBusy(kind);
-
-    const done =
-      kind === 'save'
-        ? saveAttachment(store, account, attachment)
-        : shareAttachment(store, account, attachment);
-
-    void done.finally(() => {
-      setBusy(null);
-      close();
-    });
   };
 
   const askDelete = () =>
@@ -154,6 +138,12 @@ export default function MessageActionsScreen() {
       <View
         style={[styles.list, { backgroundColor: palette.surface, borderColor: palette.divider }]}
       >
+        {can.file && attachment ? (
+          <>
+            <AttachmentActions account={account} attachment={attachment} onDone={close} />
+            <Divider inset={52} />
+          </>
+        ) : null}
         {can.reply ? (
           <ListRow
             icon="reply"
@@ -244,26 +234,6 @@ export default function MessageActionsScreen() {
             testID="message-actions-translate"
             onPress={translate}
           />
-        ) : null}
-        {can.file && attachment ? (
-          <>
-            <ListRow
-              icon="share"
-              title={t('mobile.conversation.share')}
-              chevron={false}
-              value={busy === 'share' ? '…' : undefined}
-              testID="message-actions-share"
-              onPress={() => file('share')}
-            />
-            <ListRow
-              icon="save"
-              title={t('preview.download')}
-              chevron={false}
-              value={busy === 'save' ? '…' : undefined}
-              testID="message-actions-save"
-              onPress={() => file('save')}
-            />
-          </>
         ) : null}
         {can.endPoll && message.content.type === 'Poll' ? (
           <ListRow

@@ -6,7 +6,7 @@ use rune::{Color, El, ScrollSpec, SurfaceFit, col, el, icon, row, text};
 use super::icons;
 use super::theme::font;
 use crate::i18n::{t, tf};
-use crate::state::{DocumentStatus, ImageStatus, Preview, PreviewContent, State};
+use crate::state::{DocumentStatus, ImageStatus, Popover, Preview, PreviewContent, State};
 
 /// The widest a PDF page draws, in points.
 const PAGE_WIDTH: f32 = 820.0;
@@ -86,7 +86,11 @@ pub fn preview(preview: &Preview, window: [f32; 2]) -> El {
         .h_full()
         .center()
         .role("dialog")
+        .modal(false, State::close_preview)
         .label(preview.attachment.name.clone())
+        .on_secondary_press(|s: &mut State, point, _| {
+            s.popover = Some(Popover::AttachmentMenu { at: (point.x as i32, point.y as i32) });
+        })
         .child(backdrop)
         .child(content)
         .child(bar(preview))

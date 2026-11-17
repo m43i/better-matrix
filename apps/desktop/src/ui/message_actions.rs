@@ -36,6 +36,12 @@ pub fn menu(
         !matches!(message.content, MessageContent::Redacted | MessageContent::Undecryptable | MessageContent::Call(_));
     let action = |glyph, label, id| menu_action(glyph, label, Tone::Normal, p).key(id);
     let mut panel = popover_panel(p).key("message-menu").w(300.0);
+    if let MessageContent::Attachment(file) = &message.content {
+        let actions = super::attachments::actions(&account.summary.id, file, p);
+        if !actions.is_empty() {
+            panel = panel.children(actions).child(divider(p));
+        }
+    }
     if readable {
         let reply = message.clone();
         panel = panel.child(action(&icons::REPLY, t!("actions.reply"), "message-reply").on_press_tx(
@@ -88,8 +94,7 @@ pub fn menu(
         );
     }
     let body = match &message.content {
-        MessageContent::Text { body, .. } => Some(body.clone()),
-        MessageContent::Attachment(file) => Some(file.name.clone()),
+        MessageContent::Text { body, .. } if !body.trim().is_empty() => Some(body.clone()),
         MessageContent::Poll(poll) => Some(poll.question.clone()),
         _ => None,
     };
@@ -129,7 +134,12 @@ pub fn menu(
             );
         }
     }
-    let menu = col().child(panel.max_h((window[1] - 16.0).max(100.0)).scroll(rune::ScrollSpec { stick_bottom: false }));
+    let menu = col()
+        .key("message-menu-layer")
+        .role("menu")
+        .focus_group()
+        .modal(true, State::close_popover)
+        .child(panel.max_h((window[1] - 16.0).max(100.0)).scroll(rune::ScrollSpec { stick_bottom: false }));
     vec![match at {
         Some((x, y)) => menu.absolute(
             (x as f32).clamp(4.0, (window[0] - 308.0).max(4.0)),

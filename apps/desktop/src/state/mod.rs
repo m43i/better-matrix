@@ -8,6 +8,7 @@
 //! Side effects on the OS (dialogs, notifications) go through [`Shell`].
 
 mod accounts;
+mod attachments;
 pub mod backdrop;
 mod call;
 mod call_glow;
@@ -46,6 +47,7 @@ use rune::{TextEdit, Tx};
 
 pub use accounts::READ_MARKER_FADE;
 pub use accounts::{AccountData, Accounts, EntryView, RoomTimeline, Scope, TimelineItem, now_ms, wants_attention};
+pub use attachments::AttachmentAction;
 pub use call::Call;
 pub use call_layout::{CallLayout, CallTile};
 pub use composer::{Composer, EditTarget, Format, ReplyTarget, VoiceMemo};
@@ -87,12 +89,16 @@ pub enum Popover {
     },
     /// The emoji picker, for a reaction or for a composer.
     Emoji(EmojiFor),
-    /// More that can be done with one of the user's messages: edit it, delete it.
+    /// The actions available for one sent message, including its attachment.
     MessageMenu {
         key: TimelineKey,
         event_id: String,
         /// Window point for a context menu; absent when opened from More.
         at: Option<(i32, i32)>,
+    },
+    /// File actions over the currently open attachment preview.
+    AttachmentMenu {
+        at: (i32, i32),
     },
     /// What can be done with a member, from the member list: start a chat, call, invite to
     /// another room, and with the rights, kick, ban or change their role.
@@ -478,6 +484,10 @@ enum Purpose {
     Preview(MediaRef),
     /// Saving a file the user chose to download.
     Save,
+    /// Fetching the original image for a clipboard copy.
+    CopyImage,
+    /// Saving an attachment in scratch before opening it with the default application.
+    OpenFile(PathBuf),
     /// Reading a room's members.
     Members {
         account: AccountId,
@@ -1178,6 +1188,7 @@ impl State {
             }
             Event::MediaLoaded { request, media, bytes, .. } => match self.pending.get(&request) {
                 Some(Purpose::Preview(_)) => self.preview_loaded(&media, bytes),
+                Some(Purpose::CopyImage) => self.shell.copy_image(bytes),
                 Some(Purpose::Media { dimensions, .. }) => {
                     let dimensions = *dimensions;
                     self.media.loaded(media, bytes, dimensions);
@@ -1489,6 +1500,7 @@ impl State {
                     }
                 }
                 Purpose::Avatar => self.profile.saving_avatar = false,
+                Purpose::OpenFile(path) => self.shell.open_file(path.clone()),
                 Purpose::Layout(account) => self.save_layout_again(account.clone()),
                 Purpose::ContactConfirm(kind) => {
                     let kind = *kind;
@@ -1594,6 +1606,8 @@ impl State {
                 }
             }
             Purpose::Save => self.notice = Some(tf!("notice.save", error = error)),
+            Purpose::CopyImage => self.notice = Some(tf!("notice.copy_image", error = error)),
+            Purpose::OpenFile(_) => self.notice = Some(tf!("notice.open_attachment", error = error)),
             Purpose::RecoveryKey | Purpose::Security => self.notice = Some(error),
             Purpose::Gif(url) => {
                 self.gifs.failed(&url, std::time::Instant::now());
@@ -2650,6 +2664,9 @@ impl State {
     }
 
     pub fn close_preview(&mut self) {
+        if matches!(self.popover, Some(Popover::AttachmentMenu { .. })) {
+            self.popover = None;
+        }
         self.preview = None;
         self.shell.stop_document();
     }

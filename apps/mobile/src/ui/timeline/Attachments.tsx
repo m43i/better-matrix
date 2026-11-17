@@ -51,22 +51,22 @@ export function AttachmentView({
       return attachmentPreview(attachment) ? (
         <ImageAttachment message={message} attachment={attachment} />
       ) : (
-        <FileCard attachment={attachment} />
+        <FileCard message={message} attachment={attachment} />
       );
     case 'Video':
       return attachment.media ? (
         <VideoAttachment message={message} attachment={attachment} />
       ) : (
-        <FileCard attachment={attachment} />
+        <FileCard message={message} attachment={attachment} />
       );
     case 'Audio':
       return attachment.media ? (
-        <AudioCard key={attachment.media} attachment={attachment} />
+        <AudioCard key={attachment.media} message={message} attachment={attachment} />
       ) : (
-        <FileCard attachment={attachment} />
+        <FileCard message={message} attachment={attachment} />
       );
     case 'File':
-      return <FileCard attachment={attachment} />;
+      return <FileCard message={message} attachment={attachment} />;
   }
 }
 
@@ -81,7 +81,7 @@ function useOpenPreview(message: Message): () => void {
 
 function ImageAttachment({ message, attachment }: { message: Message; attachment: Attachment }) {
   const palette = usePalette();
-  const { account } = useTimelineContext();
+  const { account, openActions } = useTimelineContext();
   const preview = attachmentPreview(attachment);
   const uri = useMedia(account, preview?.media ?? null, preview?.size ?? PREVIEW_SIZE);
   const size = previewSize(attachment.dimensions, useMediaBox());
@@ -90,6 +90,8 @@ function ImageAttachment({ message, attachment }: { message: Message; attachment
   return (
     <Pressable
       onPress={open}
+      onLongPress={() => openActions(message)}
+      delayLongPress={350}
       accessibilityRole="imagebutton"
       accessibilityLabel={attachment.name}
       style={styles.media}
@@ -121,7 +123,7 @@ function ImageAttachment({ message, attachment }: { message: Message; attachment
 /** A video's poster (the sender's thumbnail) with a play button; it plays in the preview. */
 function VideoAttachment({ message, attachment }: { message: Message; attachment: Attachment }) {
   const palette = usePalette();
-  const { account } = useTimelineContext();
+  const { account, openActions } = useTimelineContext();
   const poster = useMedia(account, attachment.thumbnail, ORIGINAL);
   const size = previewSize(attachment.dimensions, useMediaBox());
   const open = useOpenPreview(message);
@@ -129,6 +131,8 @@ function VideoAttachment({ message, attachment }: { message: Message; attachment
   return (
     <Pressable
       onPress={open}
+      onLongPress={() => openActions(message)}
+      delayLongPress={350}
       accessibilityRole="button"
       accessibilityLabel={`${t('mobile.conversation.play_video')}: ${attachment.name}`}
       style={styles.media}
@@ -161,6 +165,7 @@ function Card({
   icon,
   attachment,
   onPress,
+  onLongPress,
   busy = false,
   detail,
   leading,
@@ -168,6 +173,7 @@ function Card({
   icon: IconName;
   attachment: Attachment;
   onPress?: () => void;
+  onLongPress?: () => void;
   busy?: boolean;
   detail?: string;
   leading?: ReactNode;
@@ -197,11 +203,13 @@ function Card({
 
   const style = [styles.card, { backgroundColor: palette.surface, borderColor: palette.divider }];
 
-  if (!onPress) return <View style={style}>{body}</View>;
+  if (!onPress && !onLongPress) return <View style={style}>{body}</View>;
 
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={350}
       disabled={busy}
       accessibilityRole="button"
       accessibilityLabel={attachment.name}
@@ -214,9 +222,9 @@ function Card({
 }
 
 /** A file: pressing it downloads it and opens the share sheet. */
-function FileCard({ attachment }: { attachment: Attachment }) {
+function FileCard({ message, attachment }: { message: Message; attachment: Attachment }) {
   const store = useAppStore();
-  const { account } = useTimelineContext();
+  const { account, openActions } = useTimelineContext();
   const [busy, setBusy] = useState(false);
 
   const icon: IconName =
@@ -239,15 +247,16 @@ function FileCard({ attachment }: { attachment: Attachment }) {
       attachment={attachment}
       busy={busy}
       onPress={attachment.media ? share : undefined}
+      onLongPress={() => openActions(message)}
     />
   );
 }
 
 /** Audio and voice memos: play and pause, the time played of its length, and a progress bar. */
-function AudioCard({ attachment }: { attachment: Attachment }) {
+function AudioCard({ message, attachment }: { message: Message; attachment: Attachment }) {
   const palette = usePalette();
   const store = useAppStore();
-  const { account } = useTimelineContext();
+  const { account, openActions } = useTimelineContext();
   const player = useAudioPlayer(null, { updateInterval: 250 });
   const status = useAudioPlayerStatus(player);
   const [loaded, setLoaded] = useState(false);
@@ -295,6 +304,8 @@ function AudioCard({ attachment }: { attachment: Attachment }) {
   const button = (
     <Pressable
       onPress={toggle}
+      onLongPress={() => openActions(message)}
+      delayLongPress={350}
       disabled={busy}
       accessibilityRole="button"
       accessibilityLabel={status.playing ? t('audio.pause') : t('audio.play')}
@@ -311,7 +322,13 @@ function AudioCard({ attachment }: { attachment: Attachment }) {
 
   return (
     <View>
-      <Card icon="audio" attachment={attachment} leading={button} detail={detail} />
+      <Card
+        icon="audio"
+        attachment={attachment}
+        leading={button}
+        detail={detail}
+        onLongPress={() => openActions(message)}
+      />
       {loaded ? (
         <View style={[styles.progress, { backgroundColor: palette.divider }]}>
           <View

@@ -3,6 +3,7 @@
 // (Android; on iOS the share sheet's "Save to Files" and "Save Image" do that).
 
 import type { AccountId, Attachment } from '@better-matrix/matrix-native/types';
+import * as Clipboard from 'expo-clipboard';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
@@ -68,23 +69,66 @@ function cancelled(cause: unknown): boolean {
   return /cancel/i.test(String(cause));
 }
 
+/** Copies the original image, never the timeline's thumbnail or the file's name. */
+export async function copyAttachmentImage(
+  store: Store,
+  account: AccountId,
+  attachment: Attachment,
+): Promise<boolean> {
+  if (attachment.kind !== 'Image' || !attachment.media) return false;
+
+  try {
+    const uri = await fetchOriginal(store, account, attachment.media);
+    await Clipboard.setImageAsync(await new File(uri).base64());
+
+    return true;
+  } catch (error) {
+    store.update((s) => addNotice(s, t('notice.copy_image', { error: String(error) })));
+
+    return false;
+  }
+}
+
+/** Quick Look on iOS, or the system's ACTION_VIEW handler on Android. */
+export async function openAttachment(
+  store: Store,
+  account: AccountId,
+  attachment: Attachment,
+): Promise<boolean> {
+  try {
+    const file = await namedFile(store, account, attachment);
+    await file.preview({ mimeType: mimeOf(attachment.name), title: attachment.name });
+
+    return true;
+  } catch (error) {
+    if (!cancelled(error))
+      store.update((s) => addNotice(s, t('notice.open_attachment', { error: String(error) })));
+
+    return false;
+  }
+}
+
 /** Hands the attachment to the system share sheet. */
 export async function shareAttachment(
   store: Store,
   account: AccountId,
   attachment: Attachment,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const file = await namedFile(store, account, attachment);
     await Sharing.shareAsync(file.uri, {
       mimeType: mimeOf(attachment.name),
       dialogTitle: attachment.name,
     });
+
+    return true;
   } catch (error) {
     if (!cancelled(error))
       store.update((s) =>
         addNotice(s, t('mobile.conversation.share_failed', { error: String(error) })),
       );
+
+    return false;
   }
 }
 
@@ -93,11 +137,9 @@ export async function saveAttachment(
   store: Store,
   account: AccountId,
   attachment: Attachment,
-): Promise<void> {
+): Promise<boolean> {
   if (Platform.OS !== 'android') {
-    await shareAttachment(store, account, attachment);
-
-    return;
+    return shareAttachment(store, account, attachment);
   }
 
   try {
@@ -106,8 +148,12 @@ export async function saveAttachment(
     const saved = folder.createFile(safeName(attachment.name), mimeOf(attachment.name));
     await saved.write(await file.bytes());
     store.update((s) => addNotice(s, t('mobile.conversation.saved', { name: attachment.name })));
+
+    return true;
   } catch (error) {
     if (!cancelled(error))
       store.update((s) => addNotice(s, t('notice.save', { error: String(error) })));
+
+    return false;
   }
 }

@@ -2,6 +2,7 @@ import type { Attachment, CallCard, Poll } from '@better-matrix/matrix-native/ty
 
 import {
   attachmentPreview,
+  attachmentActions,
   callStatus,
   cardLink,
   messageActions,
@@ -65,6 +66,25 @@ describe('messageText', () => {
 });
 
 describe('messageActions', () => {
+  it('should not copy the filename of an attachment as message text', () => {
+    const attachment = withContent('$m', {
+      type: 'Attachment',
+      data: {
+        kind: 'Image',
+        name: 'photo.png',
+        media: 'original',
+        thumbnail: null,
+        dimensions: null,
+        size: null,
+      },
+    });
+
+    expect(messageActions(attachment, ADA, false).copy).toBe(false);
+  });
+
+  it('should not offer to copy empty message text', () => {
+    expect(messageActions(text('  '), ADA, false).copy).toBe(false);
+  });
   it('should let the user delete their own message', () => {
     expect(messageActions({ ...message('$m'), sender_id: ADA }, ADA, false).delete).toBe(true);
   });
@@ -99,6 +119,33 @@ describe('messageActions', () => {
   it('should let the sender end an open poll', () => {
     const poll = withContent('$m', { type: 'Poll', data: makePoll(1, []) }, { sender_id: ADA });
     expect(messageActions(poll, ADA, false).endPoll).toBe(true);
+  });
+});
+
+describe('attachmentActions', () => {
+  const file: Attachment = {
+    kind: 'Image',
+    name: 'photo.png',
+    media: 'original',
+    thumbnail: null,
+    dimensions: null,
+    size: null,
+  };
+
+  it('should offer image copying alongside opening sharing and saving', () => {
+    expect(attachmentActions(file)).toEqual(['copyImage', 'open', 'share', 'save']);
+  });
+
+  it('should not offer image copying for other files', () => {
+    expect(attachmentActions({ ...file, kind: 'File', name: 'notes.pdf' })).toEqual([
+      'open',
+      'share',
+      'save',
+    ]);
+  });
+
+  it('should offer no file actions without the original media', () => {
+    expect(attachmentActions({ ...file, media: null })).toEqual([]);
   });
 });
 

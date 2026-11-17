@@ -29,6 +29,15 @@ fn spec() -> AppSpec<State> {
         min_size: Some((720.0, 480.0)),
         scenes: &[
             ("demo", demo::seed),
+            ("demo-attachment-menu", |s| {
+                demo::attachment_message(s);
+                s.popover = Some(Popover::MessageMenu {
+                    key: matrix_core::TimelineKey::room(demo::DEMO_THREAD.0),
+                    event_id: "$attachment".into(),
+                    at: Some((700, 220)),
+                });
+            }),
+            ("demo-attachment-preview", demo::attachment_preview),
             ("demo-pinned-message", |s| {
                 demo::pinned_messages(s);
                 s.open_thread(demo::DEMO_THREAD.1);
@@ -468,12 +477,12 @@ fn spec() -> AppSpec<State> {
 /// Window-wide keys the focused element left unhandled.
 fn on_key(s: &mut State, key: &KeyEvent, _: &mut Tx) -> bool {
     match key.key {
-        Key::Escape if s.preview.is_some() => {
-            s.close_preview();
-            true
-        }
         Key::Escape if s.popover.is_some() => {
             s.close_popover();
+            true
+        }
+        Key::Escape if s.preview.is_some() => {
+            s.close_preview();
             true
         }
         Key::Escape if s.modal.is_some() => {

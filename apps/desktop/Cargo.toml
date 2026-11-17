@@ -19,7 +19,14 @@ hot = ["rune/hot"]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 # Renders PDF pages for the attachment preview: pure Rust, so every platform previews without a system library.
 hayro = "0.9"
-image = { version = "0.25", default-features = false, features = ["gif"] }
+image = { version = "0.25", default-features = false, features = [
+  "png",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "ico",
+] }
 keyring = { version = "3", features = [
   "apple-native",
   "windows-native",

@@ -101,6 +101,20 @@ export const scenes = {
     setup: general,
     routes: [routes.room(ADA, GENERAL), routes.messageActions(ADA, GENERAL, TEST_PLAN)],
   },
+  'image-actions': {
+    about: 'An image message’s content-aware long-press sheet',
+    setup: general,
+    routes: [routes.room(ADA, DESIGN), routes.messageActions(ADA, DESIGN, SCREENSHOT)],
+  },
+  'attachment-actions': {
+    about: 'File actions above the full-screen image preview',
+    setup: general,
+    routes: [
+      routes.room(ADA, DESIGN),
+      routes.preview(ADA, DESIGN, SCREENSHOT),
+      routes.attachmentActions(ADA, DESIGN, SCREENSHOT),
+    ],
+  },
   'pinned-messages': {
     about: 'Shared pinned messages',
     setup: general,

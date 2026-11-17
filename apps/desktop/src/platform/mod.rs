@@ -2,6 +2,7 @@
 //! notifications, and the keychain. State code calls [`Shell`]; it never touches the OS itself,
 //! so tests run it headless.
 
+mod attachments;
 mod files;
 pub mod launch;
 mod notify;

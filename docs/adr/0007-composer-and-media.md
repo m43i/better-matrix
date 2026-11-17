@@ -140,6 +140,9 @@ screenshots, voice memos, and images and PDFs that open large.
   - `State::preview` is its own slot, drawn over everything including dialogs, because it holds
     live resources. A black layer at 86% opacity, the name top left, Download and Close top
     right; Esc or a press beside the file closes it.
+  - Right-click opens the same file actions used by attachment messages: Copy image for
+    images, Download and Open in the default application. The preview and its context menu
+    each trap input above the background; Escape closes the menu before the preview.
   - Images fetch the original (`MediaSize::Original`) and decode outside `MediaCache`, since a
     thumbnail may share the original's `MediaRef`.
     The cached timeline thumbnail shows immediately while the original downloads and decodes.
@@ -150,6 +153,11 @@ screenshots, voice memos, and images and PDFs that open large.
     library. Pages arrive one by one as `rune::Pixels` at 2× point size, up to 60.
   - A PDF render stops at 40 million pixels (160 MiB), draws pages above 8 million pixels
     smaller, and stops when the preview closes.
+- **Attachment actions:** `AttachmentAction` flows through `State::act_on_attachment`. Copy
+  image fetches the original, converts it to a clipboard PNG on a worker, then writes through
+  Rune. Open saves the original to a unique path in the private scratch folder, then asks the
+  OS default application on a worker; the file lives until the app exits. Download uses the
+  save dialog. Fetch, conversion and open failures become notices.
 - **Download:** the save dialog (rfd) runs on a worker; `Command::SaveMedia` downloads the
   original and writes it in the engine.
 - **Pointer cursors** mark whatever a press acts on: components with a button, menu, radio or

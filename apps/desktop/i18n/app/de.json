@@ -575,5 +575,10 @@
   "message.no_rooms": "Keine Unterhaltungen gefunden.",
   "message.translate_explanation": "Google Übersetzer öffnen? Der Nachrichtentext wird mit Google geteilt und in deine App-Sprache übersetzt.",
   "notice.message_action": "Nachrichtenaktion fehlgeschlagen: {{error}}",
-  "info.pins_retry": "Erneut versuchen"
+  "info.pins_retry": "Erneut versuchen",
+  "attachment.open": "Öffnen",
+  "attachment.copy_image": "Bild kopieren",
+  "notice.copy_image": "Das Bild konnte nicht kopiert werden: {{error}}",
+  "notice.open_attachment": "Der Anhang konnte nicht geöffnet werden: {{error}}",
+  "attachment.copy_too_large": "Das Bild überschreitet die Größenbeschränkung der Zwischenablage."
 }

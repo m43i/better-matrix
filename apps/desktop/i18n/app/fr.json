@@ -575,5 +575,10 @@
   "message.no_rooms": "Aucune conversation trouvée.",
   "message.translate_explanation": "Ouvrir Google Traduction ? Le texte du message sera partagé avec Google pour le traduire dans la langue de votre application.",
   "notice.message_action": "Impossible d’effectuer cette action sur le message : {{error}}",
-  "info.pins_retry": "Réessayer"
+  "info.pins_retry": "Réessayer",
+  "attachment.open": "Ouvrir",
+  "attachment.copy_image": "Copier l’image",
+  "notice.copy_image": "Impossible de copier l’image : {{error}}",
+  "notice.open_attachment": "Impossible d’ouvrir la pièce jointe : {{error}}",
+  "attachment.copy_too_large": "L’image dépasse la taille maximale du presse-papiers."
 }

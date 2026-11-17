@@ -35,6 +35,63 @@ const GRACE: &str = "@grace:example.org";
 const ALAN: &str = "@alan:example.org";
 pub const ADA: &str = "@ada:example.org";
 
+fn demo_attachment() -> Attachment {
+    Attachment {
+        kind: AttachmentKind::Image,
+        name: "better-matrix.png".into(),
+        size: Some(24_000),
+        media: Some(matrix_core::MediaRef::opaque("demo-image")),
+        thumbnail: None,
+        dimensions: Some((256, 256)),
+    }
+}
+
+/// A sent image for exercising its file actions without an account or network.
+pub fn attachment_message(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    let file = demo_attachment();
+    apply(
+        s,
+        Event::TimelineChanged {
+            account: AccountId::new(ADA),
+            key: TimelineKey::room(DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(vec![TimelineEntry {
+                id: "attachment".into(),
+                kind: EntryKind::Message(Box::new(Message {
+                    event_id: "$attachment".into(),
+                    sender_id: GRACE.into(),
+                    sender_name: "Grace Hopper".into(),
+                    timestamp_ms: DEMO_DAY_MS,
+                    content: MessageContent::Attachment(file.clone()),
+                    ..Message::default()
+                })),
+            }])],
+        },
+    );
+    s.media.attach(std::sync::Arc::new(|| {}));
+    if let Some(media) = file.media {
+        s.media.loaded(
+            media,
+            include_bytes!("../../../packaging/icons/better-matrix-256.png").as_slice().into(),
+            file.dimensions,
+        );
+    }
+}
+
+/// The same image full size, with its right-click menu open over the viewer.
+pub fn attachment_preview(s: &mut State) {
+    attachment_message(s);
+    let file = demo_attachment();
+    s.open_attachment(&file);
+    let bytes = include_bytes!("../../../packaging/icons/better-matrix-256.png").as_slice().into();
+    if let (Some(preview), Some(image)) = (&mut s.preview, s.media.decode(bytes)) {
+        preview.content =
+            crate::state::PreviewContent::Image { thumbnail: None, status: crate::state::ImageStatus::Decoding(image) };
+    }
+    s.popover = Some(crate::state::Popover::AttachmentMenu { at: (700, 350) });
+}
+
 /// A divider between the last few messages, for inspecting its fade in place.
 pub fn unread(s: &mut State) {
     seed(s);

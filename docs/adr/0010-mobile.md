@@ -266,6 +266,15 @@ Date: 2026-11-16
   desktop's: `call-voice`, `call-video`, `call-gallery`, `call-many`, `call-direct`,
   `call-shares`, `call-focus`, `call-chat`, `call-voice-chat`, `call-bar`, `ringing`; the
   layout menu is native and can't be opened by a scene.
+- **File actions:** message sheets offer Copy image only for images with media, plus Open,
+  Share and Download; they never offer Copy message for an attachment filename or empty text.
+  Attachment surfaces forward long presses to the message sheet, including image/video
+  previews and audio controls. The full-screen preview opens a file-only fitted sheet from
+  More or an image long press (`attachment-actions`), preserving the preview when dismissed.
+  `attachmentActions` supplies both sheets’ file actions; `AttachmentActions` owns their busy
+  state and suppresses repeated actions until completion. Copy image fetches the original and
+  passes its base64 bytes to `expo-clipboard`. Open uses `File.preview`: Quick Look on iOS,
+  `ACTION_VIEW` on Android. Failure keeps the sheet available for retry and shows a notice.
 - **Files leave through the system:** sharing or saving an attachment fetches the original,
   copies it into the cache under its own name and opens the share sheet (Android can also pick a
   folder to download to).
