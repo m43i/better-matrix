@@ -96,7 +96,10 @@ Date: 2026-11-14
 - **Settings:** a modal in sections (`SettingsSection`). Device settings go to a prefs file off
   the UI thread; account settings live on the homeserver.
   - The section content uses `instant_changes`: switching sections replaces it immediately,
-    without morphing unrelated controls. The modal itself keeps its entrance and exit.
+    without morphing unrelated controls. Each section's content has its own stable key, so
+    Rune does not reuse an unrelated control's colour tracks at the same position in the tree:
+    `instant_changes` lands layout and presence but deliberately keeps colour animation.
+    The modal itself keeps its entrance and exit.
   - Choices with more than a couple of options (language, each account's notifications,
     the ring, devices) are selects: the current choice in a button that opens its list
     (`select_button`, `select_option`, `select_menu`; `Popover::Select(SelectFor)`). The list

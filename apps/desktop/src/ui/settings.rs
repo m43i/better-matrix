@@ -96,7 +96,9 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
             .shrink()
             .min_h(0.0)
             .scroll(ScrollSpec { stick_bottom: false })
-            .child(body.max_w(640.0).padding(24.0)),
+            // Scope descendant identities to the section, so Rune cannot tween an old
+            // control's colours into an unrelated heading or avatar.
+            .child(body.key(format!("settings-section-{}", section.id())).max_w(640.0).padding(24.0)),
     );
 
     let [w, h] = window;

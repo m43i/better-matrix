@@ -1,7 +1,10 @@
 use matrix_core::{AccountId, EntryKind, Event, Message, MessageContent, TimelineDiff, TimelineEntry, TimelineKey};
 use rune::{Env, Runtime};
 
-use crate::{demo, state::State};
+use crate::{
+    demo,
+    state::{SettingsSection, State},
+};
 
 fn runtime(scene: impl FnOnce(&mut State)) -> Runtime<State> {
     let mut state = State::detached();
@@ -32,6 +35,39 @@ fn switching_settings_sections_should_land_the_new_content_at_once() {
     for _ in 0..60 {
         rt.frame(1.0 / 60.0);
         assert_eq!(rt.presented("app-version").unwrap().0, first, "settings content must not morph into place");
+    }
+}
+
+#[test]
+fn switching_settings_sections_should_show_their_final_colours_on_the_first_frame() {
+    for source in SettingsSection::ALL {
+        for destination in SettingsSection::ALL {
+            if source == destination {
+                continue;
+            }
+            let mut rt = runtime(|s| {
+                s.open_settings();
+                s.show_settings_section(source);
+            });
+            press(&mut rt, &format!("settings-{}", destination.id()));
+            let elements = rt.elements();
+            let body = elements.iter().find(|e| e.key.as_deref() == Some("settings-body")).unwrap();
+            let prefix = format!("{}/", body.path);
+            let first: Vec<_> = elements.into_iter().filter(|e| e.path.starts_with(&prefix)).collect();
+            rt.settle_all();
+            rt.frame(1.0 / 60.0);
+            let settled = rt.elements();
+            for element in first {
+                let final_element = settled.iter().find(|e| e.path == element.path).unwrap();
+                assert_eq!(
+                    (element.fill, element.text_color),
+                    (final_element.fill, final_element.text_color),
+                    "{source:?} -> {destination:?}: colours must not fade at {} ({:?})",
+                    element.path,
+                    element.text,
+                );
+            }
+        }
     }
 }
 
