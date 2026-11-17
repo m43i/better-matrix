@@ -441,3 +441,13 @@ fn the_unpin_icon_should_not_open_the_message() {
     assert_eq!(rt.state.side, Some(SidePanel::Pins));
     assert!(rt.state.message_jump.is_none());
 }
+
+#[test]
+fn forwarding_should_separate_rooms_and_direct_messages() {
+    let rt = runtime(|s| {
+        s.start_forward(TimelineKey::room(demo::DEMO_THREAD.0), demo::DEMO_THREAD.1.into());
+    });
+    let rooms = rt.find("forward-rooms").expect("rooms section");
+    let direct = rt.find("forward-direct").expect("direct messages section");
+    assert!(rooms.1 < direct.1);
+}

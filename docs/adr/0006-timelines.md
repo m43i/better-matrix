@@ -110,7 +110,8 @@ see who is typing there.
   Permissions, local echoes and content type determine availability. Calls keep their own controls.
   `Command::Forward` reads the open timeline's latest event JSON (including edits), strips source
   relations, mentions and legacy reply fallbacks, and sends the text or attachment through the
-  chosen room on the same account.
+  chosen room on the same account. The destination picker separates Rooms (`#` and name)
+  from Direct messages (avatar and name), as the sidebar does.
   Message links use matrix.to with an account-server routing hint, including v12 room IDs.
   Translate opens Google Translate in the browser targeting the app language, after confirmation
   that its text will be shared with Google. It is offered for text only.

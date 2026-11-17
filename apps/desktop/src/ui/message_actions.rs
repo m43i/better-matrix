@@ -1,9 +1,11 @@
 //! Message menus and the destination picker. More and right-click share the same actions.
 
-use matrix_core::{MessageContent, TimelineKey};
-use rune::{El, col, icon, row, text};
+use matrix_core::{MessageContent, RoomKind, TimelineKey};
+use rune::{El, col, row, text};
 
-use super::components::{ButtonKind, Tone, button, dialog as frame, divider, field_input, menu_action, popover_panel};
+use super::components::{
+    ButtonKind, Tone, button, dialog as frame, divider, field_input, media_avatar, menu_action, popover_panel,
+};
 use super::{
     icons,
     theme::{Palette, font},
@@ -176,24 +178,48 @@ pub fn dialog(s: &State, p: &Palette) -> Option<El> {
                 if rooms.is_empty() {
                     content = content.child(text(t!("message.no_rooms")).font(font::BODY).color(p.text_muted));
                 }
-                for room in rooms {
-                    let id = room.room_id.clone();
+                for (kind, title, section_key) in [
+                    (RoomKind::Group, t!("sidebar.rooms"), "forward-rooms"),
+                    (RoomKind::Direct, t!("sidebar.direct"), "forward-direct"),
+                ] {
+                    if !rooms.iter().any(|room| room.kind == kind) {
+                        continue;
+                    }
                     content = content.child(
-                        row()
-                            .key(format!("forward-room-{id}"))
-                            .w_full()
-                            .px(12.0)
-                            .py(10.0)
-                            .gap(8.0)
-                            .center_y()
-                            .hover(p.hover)
-                            .role("button")
-                            .focusable(sending.is_none())
-                            .label(room.name.clone())
-                            .child(icon(&icons::FORWARD, 16.0).color(p.accent))
-                            .child(text(room.name.clone()).font(font::BODY).color(p.text).truncate())
-                            .on_press(move |s: &mut State| s.forward_to(id.clone())),
+                        text(title).key(section_key).font(font::SECTION).color(p.text_muted).px(12.0).pt(8.0).pb(2.0),
                     );
+                    for room in rooms.iter().filter(|room| room.kind == kind) {
+                        let id = room.room_id.clone();
+                        let leading = match kind {
+                            RoomKind::Group => rune::el()
+                                .size(28.0, 28.0)
+                                .center()
+                                .child(text("#").font(font::HEADER).color(p.text_muted)),
+                            RoomKind::Direct => media_avatar(
+                                room.dm_users.first().unwrap_or(&room.room_id),
+                                &room.name,
+                                room.avatar.as_ref(),
+                                &s.media,
+                                28.0,
+                            ),
+                        };
+                        content = content.child(
+                            row()
+                                .key(format!("forward-room-{id}"))
+                                .w_full()
+                                .px(12.0)
+                                .py(8.0)
+                                .gap(10.0)
+                                .center_y()
+                                .hover(p.hover)
+                                .role("button")
+                                .focusable(sending.is_none())
+                                .label(room.name.clone())
+                                .child(leading)
+                                .child(text(room.name.clone()).font(font::BODY).color(p.text).grow(1.0).truncate())
+                                .on_press(move |s: &mut State| s.forward_to(id.clone())),
+                        );
+                    }
                 }
             }
             if sending.is_some() {

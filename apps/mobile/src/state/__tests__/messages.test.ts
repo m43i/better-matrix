@@ -5,6 +5,7 @@ import {
   callStatus,
   cardLink,
   messageActions,
+  forwardSections,
   messageText,
   nextVote,
   playTime,
@@ -282,4 +283,19 @@ describe('message utilities', () => {
     expect(
       messageActions(withContent('$gone', { type: 'Redacted' }), ADA, false, true),
     ).toMatchObject({ link: true, forward: false, pin: false, translate: false }));
+});
+
+it('should separate forwarding destinations into rooms and direct messages', () => {
+  const room = roomSummary('!r:x', 'general');
+  const direct = roomSummary('!dm:x', 'Grace', 'Direct');
+  expect(forwardSections([direct, room], '')).toEqual([
+    { kind: 'Group', data: [room] },
+    { kind: 'Direct', data: [direct] },
+  ]);
+});
+
+it('should hide an empty forwarding section after searching', () => {
+  const room = roomSummary('!r:x', 'general');
+  const direct = roomSummary('!dm:x', 'Grace', 'Direct');
+  expect(forwardSections([room, direct], 'gr')).toEqual([{ kind: 'Direct', data: [direct] }]);
 });

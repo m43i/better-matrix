@@ -3,6 +3,7 @@
 // votes, call cards' status, image preview sizes, which actions the user has on it.
 
 import { draftOf } from './format';
+import { matches } from './people';
 import type {
   AccountId,
   Attachment,
@@ -143,6 +144,15 @@ export function messageActions(
     endPoll: sent && own && content.type === 'Poll' && !content.data.ended,
     file: content.type === 'Attachment' && content.data.media !== null,
   };
+}
+
+/** Forwarding destinations follow the sidebar: rooms first, then direct messages. */
+export function forwardSections(rooms: readonly RoomSummary[], query: string) {
+  return (['Group', 'Direct'] as const).flatMap((kind) => {
+    const data = rooms.filter((room) => room.kind === kind && matches(room.name, query));
+
+    return data.length > 0 ? [{ kind, data }] : [];
+  });
 }
 
 /** The message with this event ID among `entries`. */

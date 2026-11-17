@@ -1,10 +1,13 @@
 // Choose a joined conversation on the message's account; failures leave the picker open.
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { FlatList, TextInput, View } from 'react-native';
+import { SectionList, Text, TextInput, View } from 'react-native';
 import { t } from '../i18n';
 import { forwardMessage } from '../state/actions/message-actions';
-import { matches } from '../state/people';
+import { forwardSections } from '../state/messages';
+import { font } from '../theme/palette';
+import { Avatar } from '../ui/Avatar';
+import { Icon } from '../ui/icons';
 import { useAppStore, useStore } from '../state/react';
 import { account as accountOf } from '../state/selectors';
 import { roomKey, threadKey } from '../state/timeline';
@@ -55,11 +58,29 @@ export default function ForwardMessageScreen() {
   return (
     <>
       <Stack.Screen options={{ title: t('actions.forward') }} />
-      <FlatList
+      <SectionList
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         testID="forward-message"
-        data={(rooms ?? []).filter((r) => matches(r.name, search))}
+        sections={forwardSections(rooms ?? [], search)}
+        stickySectionHeadersEnabled={false}
+        renderSectionHeader={({ section }) => (
+          <Text
+            testID={`forward-section-${section.kind}`}
+            style={[
+              font.section,
+              {
+                color: palette.textMuted,
+                backgroundColor: palette.bg,
+                paddingHorizontal: 16,
+                paddingTop: 16,
+                paddingBottom: 6,
+              },
+            ]}
+          >
+            {t(section.kind === 'Group' ? 'sidebar.rooms' : 'sidebar.direct')}
+          </Text>
+        )}
         keyExtractor={(r) => r.room_id}
         ListHeaderComponent={
           <View style={{ padding: 16, gap: 8 }}>
@@ -82,7 +103,21 @@ export default function ForwardMessageScreen() {
         ListEmptyComponent={<EmptyState icon="search" title={t('message.no_rooms')} />}
         renderItem={({ item }) => (
           <ListRow
-            icon="forward"
+            leading={
+              <View style={{ width: 28, alignItems: 'center' }}>
+                {item.kind === 'Group' ? (
+                  <Icon name="hash" size={22} color={palette.textMuted} />
+                ) : (
+                  <Avatar
+                    account={account}
+                    id={item.dm_users[0] ?? item.room_id}
+                    name={item.name}
+                    media={item.avatar}
+                    size={28}
+                  />
+                )}
+              </View>
+            }
             title={item.name}
             chevron={false}
             value={sending ? '…' : undefined}
