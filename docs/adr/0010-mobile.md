@@ -26,6 +26,8 @@ Date: 2026-11-16
 - **Navigation:** the platform's tab bar holds Home and Direct messages. Each tab is a folder
   with its own native stack (`ui/shell/TabStack`) for its header; everything opened from a tab
   (rooms, sheets, modals) is declared on the root stack and covers the tabs.
+  - _Adding an account:_ sign-in opens a full-screen page with an X at the top left to cancel
+    and return; it shares the first-account sign-in form (ADR 0003).
   - _Header:_ the account on screen is its picture at the header's right (`ui/shell/TabHeader`;
     on iOS a `Stack.Toolbar.View` without the shared glass background; on Android one row with
     the title, since the native stack lays a custom title across the whole bar and a right item

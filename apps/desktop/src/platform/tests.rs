@@ -1,0 +1,28 @@
+use super::*;
+use matrix_core::AccountId;
+
+#[test]
+fn the_last_used_account_should_survive_saving_and_loading_settings() {
+    let settings = Settings { last_account: Some(AccountId::new("@ada:example.org")), ..Settings::fixed_english() };
+    let mut prefs = Prefs::memory();
+    write_settings(&mut prefs, &settings).unwrap();
+
+    assert_eq!(load_settings(&prefs), settings);
+}
+
+#[test]
+fn older_settings_should_have_no_last_used_account() {
+    let mut prefs = Prefs::memory();
+    prefs.set(LANGUAGE, "en").unwrap();
+
+    assert_eq!(load_settings(&prefs).last_account, None);
+}
+
+#[test]
+fn clearing_the_last_used_account_should_survive_saving_and_loading_settings() {
+    let mut prefs = Prefs::memory();
+    prefs.set(LAST_ACCOUNT, "@ada:example.org").unwrap();
+    write_settings(&mut prefs, &Settings::fixed_english()).unwrap();
+
+    assert_eq!(load_settings(&prefs).last_account, None);
+}

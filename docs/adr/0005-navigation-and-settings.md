@@ -21,6 +21,7 @@ Date: 2026-11-14
   - Home: every direct chat, and the rooms in no space.
   - A space: its rooms, subspaces included (cycle-safe), and direct chats with its members.
   - Each account remembers its own scope and open room.
+  - The device remembers which account was last used and opens it at launch (ADR 0003).
 - **Overview:** the main pane with no room open.
   - Home greets the user; a space shows its size. Then rooms that want attention (mentions
     first) and recent conversations.

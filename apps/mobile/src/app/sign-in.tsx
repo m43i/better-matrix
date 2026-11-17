@@ -1,5 +1,5 @@
 // Signing in: the desktop's sign-in card laid out for a phone, in two steps (homeserver, then the
-// browser or a password). Full screen when signed out; a modal when adding an account; `resume`
+// browser or a password). Full screen, with a close button when adding an account; `resume`
 // signs in again as an account whose session ended.
 
 import type { AccountId, Homeserver } from '@better-matrix/matrix-native/types';
@@ -21,7 +21,7 @@ import { shallow, useAppStore, useStore } from '../state/react';
 import { font } from '../theme/palette';
 import { authBrowser } from '../ui/accounts/browser';
 import { Logo } from '../ui/accounts/Logo';
-import { Button, ListSection, TextField } from '../ui/components';
+import { Button, IconButton, ListSection, TextField } from '../ui/components';
 import { Icon } from '../ui/icons';
 import { usePalette } from '../ui/theme';
 
@@ -63,7 +63,7 @@ export default function SignInScreen() {
   useEffect(() => () => flow.cancelPending(), [flow]);
 
   // Signed in: the first account opens Home by itself (the root guards on accounts); an added
-  // one closes this modal.
+  // one closes this page.
   const done = step.type === 'done';
   useEffect(() => {
     if (done && router.canGoBack()) router.back();
@@ -78,7 +78,12 @@ export default function SignInScreen() {
     <SafeAreaView style={[styles.screen, { backgroundColor: palette.bg }]}>
       {adding ? (
         <View style={styles.topBar}>
-          <Button testID="sign-in-close" title={t('common.cancel')} kind="plain" onPress={close} />
+          <IconButton
+            testID="sign-in-close"
+            icon="close"
+            label={t('common.close')}
+            onPress={close}
+          />
         </View>
       ) : null}
       <KeyboardAwareScrollView

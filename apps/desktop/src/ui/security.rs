@@ -30,6 +30,7 @@ pub fn dialog_for(modal: &Modal, p: &Palette) -> Option<El> {
         Modal::Forward { .. }
         | Modal::Translate(_)
         | Modal::Settings(_)
+        | Modal::SignIn
         | Modal::Confirm(_)
         | Modal::Invite { .. }
         | Modal::Invitation { .. }

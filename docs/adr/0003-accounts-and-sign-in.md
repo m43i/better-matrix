@@ -63,10 +63,19 @@ end a session at any time, hard or softly.
     suspended. Restored accounts get ready like fresh ones (`Account::ready`).
   - The desktop shows "Signing you back in…" (`Screen::Restoring`) until each account arrives
     (`AccountAdded`) or fails (`AccountError`).
+  - Device settings remember the last used account. The desktop waits for that account to
+    restore, regardless of completion order; if it is missing or cannot restore, another
+    restored account opens. Choosing an account explicitly takes precedence over restoration.
   - Dev builds optimise dependencies (`opt-level = 2`), since unoptimised key derivation made
     restoring take seconds.
   - Data lives in the app's data folder and the keychain, which no build or install touches, so
     dev runs, release builds and the installed app (`bun run install:linux`) share accounts.
+- **Adding another account:** the desktop keeps the current conversation behind a sign-in
+  modal taking 90% of the window in each direction, like Settings. The existing animated
+  backdrop fills the modal behind the sign-in card. Closing cancels discovery
+  or sign-in still under way. On phones, sign-in opens a full-screen page with an X at the
+  top left to cancel and return. Successful sign-in selects the added account and closes the
+  modal or page. The first account still uses the full sign-in screen.
 - **Ended session:**
   - `account::session_ended` recognises an unknown access token, or a refresh token missing or
     rejected with `invalid_grant`; the sync loop then stops. Only `watch_session` sends
@@ -98,7 +107,7 @@ end a session at any time, hard or softly.
     pixel per cell, upscaled smoothly. The characters (` =+xX0S8#@`) are one monospace text
     element per row, coloured by spans, and scramble under the pointer.
   - 12 ticks a second (`TICK`) on `poll`'s clock, virtual when headless, only while the screen
-    shows in a focused window. Rows are memoized per tick.
+    shows in a focused window, including inside the add-account modal. Rows are memoized per tick.
   - A screen shown again rises in anew. Under reduced motion it holds still once risen.
   - Dark uses deep and pale blues with near white; light runs the same blues as ink.
 

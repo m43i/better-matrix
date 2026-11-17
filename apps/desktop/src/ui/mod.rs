@@ -114,6 +114,10 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         root = root.child(scrim()).children(panels);
     }
     let dialog = match &s.modal {
+        Some(Modal::SignIn) => {
+            let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
+            Some(sign_in::dialog(s, window, s.dark(cx.system_dark()), &p))
+        }
         Some(Modal::Settings(section)) => {
             // The window's size, from the root's last layout; a guess until the first one.
             let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);

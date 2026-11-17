@@ -121,6 +121,177 @@ fn a_restored_account_should_not_steal_focus_from_the_active_one() {
 }
 
 #[test]
+fn restarting_should_open_the_last_used_account_even_when_it_restores_last() {
+    let (mut s, _) = state();
+    let first = AccountId::new("@a:example.org");
+    let last = AccountId::new("@b:example.org");
+    apply(&mut s, Event::AccountAdded(account(first.as_str())));
+    apply(&mut s, Event::AccountAdded(account(last.as_str())));
+    s.select_account(&last);
+
+    let mut restarted = State::new(EngineHandle::detached().0, Shell::headless(), s.settings.clone());
+    apply(&mut restarted, Event::Restoring(vec![first.clone(), last.clone()]));
+    apply(&mut restarted, Event::AccountAdded(account(first.as_str())));
+    apply(&mut restarted, Event::AccountAdded(account(last.as_str())));
+
+    assert_eq!(restarted.nav.account, Some(last));
+}
+
+#[test]
+fn other_accounts_restoring_first_should_wait_for_the_last_used_account() {
+    let first = AccountId::new("@a:example.org");
+    let last = AccountId::new("@b:example.org");
+    let settings = Settings { last_account: Some(last.clone()), ..Settings::fixed_english() };
+    let mut s = State::new(EngineHandle::detached().0, Shell::headless(), settings);
+    apply(&mut s, Event::Restoring(vec![first.clone(), last.clone()]));
+    apply(&mut s, Event::AccountAdded(account(first.as_str())));
+
+    assert_eq!((s.screen(), s.settings.last_account), (Screen::Restoring, Some(last)));
+}
+
+#[test]
+fn the_last_used_account_restoring_first_should_keep_focus() {
+    let first = AccountId::new("@a:example.org");
+    let last = AccountId::new("@b:example.org");
+    let settings = Settings { last_account: Some(last.clone()), ..Settings::fixed_english() };
+    let mut s = State::new(EngineHandle::detached().0, Shell::headless(), settings);
+    apply(&mut s, Event::Restoring(vec![first.clone(), last.clone()]));
+    apply(&mut s, Event::AccountAdded(account(last.as_str())));
+    apply(&mut s, Event::AccountAdded(account(first.as_str())));
+
+    assert_eq!(s.nav.account, Some(last));
+}
+
+#[test]
+fn a_missing_last_used_account_should_fall_back_to_another() {
+    let settings = Settings { last_account: Some(AccountId::new("@gone:example.org")), ..Settings::fixed_english() };
+    let mut s = State::new(EngineHandle::detached().0, Shell::headless(), settings);
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::Restoring(vec![id.clone()]));
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+
+    assert_eq!((s.screen(), s.settings.last_account), (Screen::Chat, Some(id)));
+}
+
+#[test]
+fn a_last_used_account_that_fails_to_restore_should_fall_back_to_another() {
+    let last = AccountId::new("@b:example.org");
+    let settings = Settings { last_account: Some(last.clone()), ..Settings::fixed_english() };
+    let mut s = State::new(EngineHandle::detached().0, Shell::headless(), settings);
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::Restoring(vec![id.clone(), last.clone()]));
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    apply(&mut s, Event::AccountError { account: last, error: "unavailable".into() });
+
+    assert_eq!((s.screen(), s.settings.last_account), (Screen::Chat, Some(id)));
+}
+
+#[test]
+fn selecting_an_account_during_restore_should_override_the_saved_choice() {
+    let last = AccountId::new("@b:example.org");
+    let settings = Settings { last_account: Some(last.clone()), ..Settings::fixed_english() };
+    let mut s = State::new(EngineHandle::detached().0, Shell::headless(), settings);
+    let selected = AccountId::new("@a:example.org");
+    apply(&mut s, Event::Restoring(vec![selected.clone(), last.clone()]));
+    apply(&mut s, Event::AccountAdded(account(selected.as_str())));
+    s.select_account(&selected);
+    apply(&mut s, Event::AccountAdded(account(last.as_str())));
+
+    assert_eq!(s.nav.account, Some(selected));
+}
+
+#[test]
+fn removing_the_active_account_should_remember_its_replacement() {
+    let (mut s, _) = state();
+    apply(&mut s, Event::AccountAdded(account("@a:example.org")));
+    apply(&mut s, Event::AccountAdded(account("@b:example.org")));
+    apply(&mut s, Event::AccountRemoved(AccountId::new("@a:example.org")));
+
+    assert_eq!(s.settings.last_account, Some(AccountId::new("@b:example.org")));
+}
+
+#[test]
+fn closing_the_sign_in_modal_should_cancel_its_pending_request() {
+    let (mut s, mut commands) = state();
+    apply(&mut s, Event::AccountAdded(account("@a:example.org")));
+    s.start_adding_account();
+    s.submit_server();
+    let (request, _) = commands.try_next().unwrap();
+    s.close_modal();
+
+    assert!(matches!(commands.try_next(), Some((_, Command::Cancel(cancelled))) if cancelled == request));
+}
+
+#[test]
+fn an_incoming_dialog_during_sign_in_should_still_select_the_added_account() {
+    let (mut s, mut commands) = state();
+    let current = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(current.as_str())));
+    s.start_adding_account();
+    discover(&mut s, &mut commands, true, false);
+    apply(&mut s, Event::SessionEnded { account: current, kept: true });
+    apply(&mut s, Event::AccountAdded(account("@b:example.org")));
+
+    assert_eq!(s.nav.account, Some(AccountId::new("@b:example.org")));
+}
+
+#[test]
+fn signing_in_from_the_modal_should_close_it_and_remember_the_new_account() {
+    let (mut s, mut commands) = state();
+    apply(&mut s, Event::AccountAdded(account("@a:example.org")));
+    s.start_adding_account();
+    discover(&mut s, &mut commands, false, true);
+    fill_password(&mut s);
+    s.submit_password();
+    let (request, _) = commands.try_next().unwrap();
+    let added = AccountId::new("@b:example.org");
+    apply(&mut s, Event::AccountAdded(account(added.as_str())));
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+
+    assert!(s.modal.is_none() && s.settings.last_account == Some(added));
+}
+
+#[test]
+fn a_sign_in_finishing_after_cancel_should_not_change_the_account_on_screen() {
+    let (mut s, mut commands) = state();
+    let current = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(current.as_str())));
+    s.start_adding_account();
+    discover(&mut s, &mut commands, true, false);
+    s.close_modal();
+    apply(&mut s, Event::AccountAdded(account("@b:example.org")));
+
+    assert_eq!(s.nav.account, Some(current));
+}
+
+#[test]
+fn the_last_account_leaving_should_continue_sign_in_full_screen() {
+    let (mut s, _) = state();
+    let current = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(current.as_str())));
+    apply(&mut s, Event::SessionEnded { account: current.clone(), kept: false });
+    s.sign_in_again();
+    let request = s.sign_in.pending().expect("discovery under way");
+    apply(&mut s, Event::AccountRemoved(current));
+
+    assert!(s.modal.is_none() && s.screen() == Screen::SignIn && s.sign_in.pending() == Some(request));
+}
+
+#[test]
+fn a_restoring_account_should_not_replace_the_account_behind_sign_in() {
+    let current = AccountId::new("@a:example.org");
+    let other = AccountId::new("@b:example.org");
+    let settings = Settings { last_account: Some(current.clone()), ..Settings::fixed_english() };
+    let mut s = State::new(EngineHandle::detached().0, Shell::headless(), settings);
+    apply(&mut s, Event::Restoring(vec![current.clone(), other.clone()]));
+    apply(&mut s, Event::AccountAdded(account(current.as_str())));
+    s.start_adding_account();
+    apply(&mut s, Event::AccountAdded(account(other.as_str())));
+
+    assert_eq!((s.nav.account, s.settings.last_account), (Some(current.clone()), Some(current)));
+}
+
+#[test]
 fn no_room_should_open_by_itself() {
     let (mut s, _) = state();
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x", "!two:x"], Vec::new());
@@ -1037,7 +1208,7 @@ fn signing_in_again_should_look_up_the_server_of_the_account() {
     apply(&mut s, Event::SessionEnded { account: id, kept: false });
     drain(&mut commands);
     s.sign_in_again();
-    assert!(s.modal.is_none());
+    assert!(matches!(s.modal, Some(Modal::SignIn)));
     assert!(matches!(commands.try_next(), Some((_, Command::Discover { server })) if server == "example.org"));
 }
 
@@ -2016,9 +2187,11 @@ fn an_ended_session_reported_twice_should_sign_out_once() {
 
 #[test]
 fn an_account_added_while_adding_one_should_become_active() {
-    let (mut s, _) = state();
+    let (mut s, mut commands) = state();
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
     s.start_adding_account();
+    discover(&mut s, &mut commands, true, false);
     // The engine reports the account before answering the sign-in.
     apply(&mut s, Event::AccountAdded(account("@b:example.org")));
     assert_eq!(s.nav.account, Some(AccountId::new("@b:example.org")));
@@ -2371,6 +2544,32 @@ fn the_backdrop_should_rest_once_the_chat_shows() {
     let (mut s, _) = state();
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
     assert!(!s.animate(1.0, &mut Tx::default()));
+}
+
+#[test]
+fn the_sign_in_modal_should_animate_its_backdrop_over_chat() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.start_adding_account();
+    s.backdrop.resized([1080.0, 684.0]);
+    s.backdrop.measured(8.0);
+    s.animate(0.0, &mut Tx::default());
+
+    assert!(s.animate(1.0, &mut Tx::default()));
+}
+
+#[test]
+fn closing_the_sign_in_modal_should_stop_its_backdrop() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.start_adding_account();
+    s.backdrop.resized([1080.0, 684.0]);
+    s.backdrop.measured(8.0);
+    s.animate(0.0, &mut Tx::default());
+    s.animate(1.0, &mut Tx::default());
+    s.close_modal();
+
+    assert!(!s.animate(2.0, &mut Tx::default()));
 }
 
 #[test]

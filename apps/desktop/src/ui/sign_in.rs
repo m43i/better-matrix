@@ -3,8 +3,9 @@
 //! more.
 
 use matrix_core::Homeserver;
-use rune::{El, col, icon, row, text};
+use rune::{Color, El, ScrollSpec, col, icon, row, text};
 
+use super::backdrop;
 use super::components::{ButtonKind, button, field_input, labelled};
 use super::icons;
 use super::theme::{Palette, font};
@@ -12,6 +13,25 @@ use crate::i18n::{t, tf};
 use crate::state::{SignInStep, State};
 
 pub fn sign_in(s: &State, p: &Palette) -> El {
+    col().key("sign-in-screen").w_full().h_full().padding(24.0).center().child(card(s, p))
+}
+
+/// The same sign-in form over the conversation when adding another account.
+pub fn dialog(s: &State, window: [f32; 2], dark: bool, p: &Palette) -> El {
+    col()
+        .key("sign-in-modal")
+        .size(window[0] * 0.9, window[1] * 0.9)
+        .padding(1.0)
+        .radius(14.0)
+        .fill(p.bg)
+        .border(1.0, p.text_muted.alpha(0.35))
+        .role("dialog")
+        .label(t!("sign_in.add_title"))
+        .shadow(16.0, 48.0, Color::BLACK.alpha(0.5))
+        .child(backdrop::behind(s, sign_in(s, p), dark, p).radius(13.0).clip_rounded(13.0))
+}
+
+fn card(s: &State, p: &Palette) -> El {
     let form = &s.sign_in;
     let adding = !s.accounts.is_empty();
 
@@ -24,6 +44,7 @@ pub fn sign_in(s: &State, p: &Palette) -> El {
         .radius(14.0)
         .fill(p.surface)
         .border(1.0, p.divider)
+        .scroll(ScrollSpec { stick_bottom: false })
         .child(brand(p));
 
     card = match &form.step {
@@ -43,10 +64,10 @@ pub fn sign_in(s: &State, p: &Palette) -> El {
             button(t!("common.cancel"), ButtonKind::Secondary, true, p)
                 .key("cancel")
                 .w_full()
-                .on_press_tx(crate::state::navigate(State::cancel_adding_account)),
+                .on_press(State::close_modal),
         );
     }
-    col().key("sign-in-screen").w_full().h_full().padding(24.0).center().child(card)
+    card
 }
 
 /// The app's logo and name, heading the card.

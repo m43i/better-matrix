@@ -117,6 +117,47 @@ fn space_creation_should_be_absent_from_the_sidebar_create_menu() {
 }
 
 #[test]
+fn adding_an_account_should_show_a_modal_over_the_current_conversation() {
+    let mut rt = runtime(|s| s.select_room(demo::DEMO_THREAD.0));
+    press(&mut rt, "account-button");
+    press(&mut rt, "menu-add-account");
+
+    assert!(rt.find("sign-in-modal").is_some() && rt.find("modal-backdrop").is_some());
+    assert!(rt.find("room").is_some() && rt.find("backdrop").is_some());
+    assert_eq!(rt.state.active_room_id(), Some(demo::DEMO_THREAD.0));
+}
+
+#[test]
+fn the_sign_in_modal_should_fill_ninety_percent_of_the_window() {
+    let rt = runtime(State::start_adding_account);
+    let (rect, _) = rt.presented("sign-in-modal").expect("the sign-in modal");
+
+    assert_eq!(rect, [60.0, 38.0, 1080.0, 684.0]);
+}
+
+#[test]
+fn closing_the_add_account_modal_should_return_to_the_current_conversation() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.start_adding_account();
+    });
+    press(&mut rt, "cancel");
+
+    assert!(rt.state.modal.is_none());
+    assert_eq!(rt.state.active_room_id(), Some(demo::DEMO_THREAD.0));
+}
+
+#[test]
+fn pressing_the_sign_in_backdrop_should_close_the_modal() {
+    let mut rt = runtime(State::start_adding_account);
+    rt.pointer_down(20.0, 20.0);
+    rt.pointer_up(20.0, 20.0);
+    rt.frame(1.0 / 60.0);
+
+    assert!(rt.state.modal.is_none());
+}
+
+#[test]
 fn switching_settings_sections_should_land_the_new_content_at_once() {
     let mut rt = runtime(State::open_settings);
     press(&mut rt, "settings-info");
@@ -173,9 +214,15 @@ fn switching_accounts_should_remove_the_previous_conversation_at_once() {
 #[test]
 fn switching_screens_should_remove_the_previous_content_at_once() {
     let mut rt = runtime(|s| s.select_room(demo::DEMO_THREAD.0));
-    press(&mut rt, "account-button");
-    press(&mut rt, "menu-add-account");
+    rt.update(|s, tx| {
+        let accounts: Vec<_> = s.accounts.iter().map(|a| a.summary.id.clone()).collect();
+        for id in accounts {
+            s.apply(Event::AccountRemoved(id), tx);
+        }
+    });
+    rt.frame(1.0 / 60.0);
     assert!(rt.presented("room-header").is_none(), "the conversation must not linger over sign-in");
+    assert!(rt.presented("sign-in-card").is_some());
 }
 
 #[test]

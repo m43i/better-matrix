@@ -124,7 +124,7 @@ function Routes({ scene }: { scene: SceneName | null }) {
           name="sign-in"
           options={{
             headerShown: false,
-            presentation: signedIn ? 'modal' : 'card',
+            presentation: signedIn ? 'fullScreenModal' : 'card',
             animation: signedIn ? 'default' : 'none',
           }}
         />

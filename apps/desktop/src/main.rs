@@ -1638,7 +1638,7 @@ mod tests {
         let mut rt = runtime(demo::seed);
         press(&mut rt, "account-button");
         press(&mut rt, "menu-add-account");
-        assert!(rt.find("sign-in-card").is_some());
+        assert!(rt.find("sign-in-modal").is_some());
     }
 
     #[test]

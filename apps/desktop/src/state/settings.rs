@@ -79,6 +79,8 @@ impl Default for Zoom {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
+    /// The account last on screen, restored at the next launch.
+    pub last_account: Option<matrix_core::AccountId>,
     pub language: Language,
     pub appearance: Appearance,
     pub zoom: Zoom,
@@ -95,6 +97,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            last_account: None,
             language: Language::default(),
             appearance: Appearance::default(),
             zoom: Zoom::default(),

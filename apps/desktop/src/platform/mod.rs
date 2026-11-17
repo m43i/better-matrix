@@ -8,6 +8,9 @@ mod notify;
 mod secrets;
 pub mod sound;
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::{Arc, Mutex};
 
 use rune::AppHandle;
@@ -167,17 +170,7 @@ impl Shell {
             if saves.load(Ordering::Relaxed) != save {
                 return;
             }
-            let saved = prefs
-                .set(LANGUAGE, &settings.language.id())
-                .and_then(|()| prefs.set(APPEARANCE, &settings.appearance.id()))
-                .and_then(|()| prefs.set(ZOOM, &settings.zoom.percent()))
-                .and_then(|()| prefs.set(LINK_GIFS, &settings.show_link_gifs))
-                .and_then(|()| prefs.set(LINK_PREVIEWS, &settings.show_link_previews))
-                .and_then(|()| prefs.set(RING_SOUND, &settings.ring_sound))
-                .and_then(|()| prefs.set(MICROPHONE, &settings.devices.microphone))
-                .and_then(|()| prefs.set(SPEAKER, &settings.devices.speaker))
-                .and_then(|()| prefs.set(CAMERA, &settings.devices.camera));
-            if let Err(error) = saved {
+            if let Err(error) = write_settings(&mut prefs, &settings) {
                 eprintln!("better-matrix: could not save settings: {error}");
             }
         });
@@ -248,10 +241,25 @@ const RING_SOUND: &str = "ring_sound";
 const MICROPHONE: &str = "microphone";
 const SPEAKER: &str = "speaker";
 const CAMERA: &str = "camera";
+const LAST_ACCOUNT: &str = "last_account";
+
+fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::prefs::PrefsError> {
+    prefs.set(LANGUAGE, &settings.language.id())?;
+    prefs.set(APPEARANCE, &settings.appearance.id())?;
+    prefs.set(ZOOM, &settings.zoom.percent())?;
+    prefs.set(LINK_GIFS, &settings.show_link_gifs)?;
+    prefs.set(LINK_PREVIEWS, &settings.show_link_previews)?;
+    prefs.set(RING_SOUND, &settings.ring_sound)?;
+    prefs.set(MICROPHONE, &settings.devices.microphone)?;
+    prefs.set(SPEAKER, &settings.devices.speaker)?;
+    prefs.set(CAMERA, &settings.devices.camera)?;
+    prefs.set(LAST_ACCOUNT, &settings.last_account.as_ref().map(matrix_core::AccountId::as_str))
+}
 
 /// This device's saved settings, read at launch before the first frame (a small file).
 pub fn load_settings(prefs: &Prefs) -> Settings {
     Settings {
+        last_account: prefs.get::<String>(LAST_ACCOUNT).map(matrix_core::AccountId::new),
         language: prefs.get::<String>(LANGUAGE).map_or(Language::System, |id| Language::from_id(&id)),
         appearance: prefs.get::<String>(APPEARANCE).map_or(Appearance::System, |id| Appearance::from_id(&id)),
         zoom: prefs.get::<u16>(ZOOM).map_or_else(Zoom::default, Zoom::from_percent),

@@ -280,6 +280,8 @@ pub enum Modal {
         space: String,
     },
     Settings(SettingsSection),
+    /// Signing in to another account over the current conversation.
+    SignIn,
     /// Writing a poll (`State::poll_form`).
     Poll,
     /// "Are you sure?" before something that can't be undone.
@@ -546,7 +548,6 @@ pub struct Nav {
     rooms: HashMap<AccountId, String>,
     /// The thread open beside the room, by its root event, per account.
     threads: HashMap<AccountId, String>,
-    pub adding_account: bool,
     /// The shown room whose visit has been recorded, independent of subscription retries.
     visited: Option<(AccountId, String)>,
 }
@@ -667,7 +668,7 @@ impl State {
         let mut state = Self {
             directories: HashMap::new(),
             accounts: Accounts::default(),
-            nav: Nav::default(),
+            nav: Nav { account: settings.last_account.clone(), ..Nav::default() },
             sign_in: SignInForm::default(),
             composer: Composer::default(),
             thread_composer: Composer::default(),
@@ -746,9 +747,7 @@ impl State {
     // ----- reading -------------------------------------------------------------------------
 
     pub fn screen(&self) -> Screen {
-        if self.nav.adding_account {
-            Screen::SignIn
-        } else if !self.accounts.is_empty() {
+        if self.active_account().is_some() {
             Screen::Chat
         } else if !self.restoring.is_empty() {
             Screen::Restoring
@@ -862,7 +861,12 @@ impl State {
                     *shown = Some(url);
                 }
             }
-            Event::Restoring(accounts) => self.restoring = accounts,
+            Event::Restoring(accounts) => {
+                if self.nav.account.as_ref().is_some_and(|id| !accounts.contains(id)) {
+                    self.nav.account = None;
+                }
+                self.restoring = accounts;
+            }
             // Every refused request reports the ended session again: only the first counts.
             Event::SessionEnded { account, .. } if matches!(&self.modal, Some(Modal::SessionEnded { account: shown, .. }) if *shown == account) =>
                 {}
@@ -890,7 +894,12 @@ impl State {
             Event::AccountAdded(summary) => {
                 self.restoring.retain(|id| *id != summary.id);
                 self.suspended.retain(|id| *id != summary.id);
-                if self.nav.account.is_none() || self.nav.adding_account {
+                // An incoming dialog can cover sign-in while its request continues. An
+                // explicit close clears the form's request, so a cancelled sign-in won't
+                // take over if it still completes.
+                let signing_in =
+                    self.sign_in.pending().and_then(|request| self.pending.get(&request)) == Some(&Purpose::SignIn);
+                if self.nav.account.is_none() || signing_in {
                     self.nav.account = Some(summary.id.clone());
                 }
                 // Signed in again while it ran: the engine runs it afresh, so its open timelines
@@ -913,6 +922,10 @@ impl State {
                 // A suspended account stays listed in `suspended`: removing it is what suspending
                 // does here.
                 self.accounts.remove(&id);
+                // The full sign-in screen takes over without cancelling the form's request.
+                if self.accounts.is_empty() && matches!(self.modal, Some(Modal::SignIn)) {
+                    self.modal = None;
+                }
                 self.nav.rooms.remove(&id);
                 self.nav.scopes.remove(&id);
                 if self.nav.account.as_ref() == Some(&id) {
@@ -1198,6 +1211,9 @@ impl State {
             Event::AccountError { account, error } => {
                 // A saved account that couldn't be signed back in: the sign-in screen takes over.
                 self.restoring.retain(|id| *id != account);
+                if self.nav.account.as_ref() == Some(&account) && self.accounts.get(&account).is_none() {
+                    self.nav.account = self.accounts.iter().next().map(|data| data.summary.id.clone());
+                }
                 self.notice = Some(tf!("notice.account", account = account, error = error));
             }
             Event::CallUpdated(info) => {
@@ -1268,6 +1284,7 @@ impl State {
             // Pushes are for phones: the desktop syncs while it runs and never registers a pusher.
             Event::PushContent { .. } => {}
         }
+        self.remember_account();
         if !location.is_current(self) {
             tx.settle();
         }
@@ -1482,7 +1499,9 @@ impl State {
             }
             if purpose == Purpose::SignIn {
                 self.sign_in = SignInForm::default();
-                self.nav.adding_account = false;
+                if matches!(self.modal, Some(Modal::SignIn)) {
+                    self.modal = None;
+                }
                 self.sync_timeline();
             }
             return;
@@ -1851,7 +1870,7 @@ impl State {
                 tx.wake_after(call.glow.wait(clock));
             }
         }
-        if !matches!(self.screen(), Screen::SignIn | Screen::Restoring) {
+        if !matches!(self.screen(), Screen::SignIn | Screen::Restoring) && !matches!(self.modal, Some(Modal::SignIn)) {
             self.backdrop.hidden();
             return ended;
         }
@@ -2651,13 +2670,28 @@ impl State {
 
     // ----- navigation ----------------------------------------------------------------------
 
+    fn remember_account(&mut self) {
+        // A remembered account may still be restoring. Other accounts arriving first must
+        // neither replace it on screen nor overwrite the saved choice.
+        if self.nav.account.as_ref().is_some_and(|id| self.accounts.get(id).is_none()) {
+            return;
+        }
+        if self.settings.last_account != self.nav.account {
+            self.settings.last_account.clone_from(&self.nav.account);
+            self.shell.save_settings(self.settings.clone());
+        }
+    }
+
     pub fn select_account(&mut self, id: &AccountId) {
         if self.accounts.get(id).is_some() {
             if self.nav.account.as_ref() != Some(id) {
                 self.reset_search();
             }
             self.nav.account = Some(id.clone());
-            self.nav.adding_account = false;
+            self.remember_account();
+            if matches!(self.modal, Some(Modal::SignIn)) {
+                self.close_modal();
+            }
             self.sync_timeline();
             self.request_timeline_media();
             self.request_avatars();
@@ -3305,6 +3339,7 @@ impl State {
     /// Closes the open dialog, stopping an identity reset that is waiting for its approval.
     pub fn close_modal(&mut self) {
         match self.modal.take() {
+            Some(Modal::SignIn) => self.change_server(),
             Some(Modal::ResetIdentity { step: ResetStep::Resetting { request, .. }, .. }) => {
                 self.dispatch(Command::Cancel(request), Purpose::Cancel);
             }
@@ -3363,15 +3398,10 @@ impl State {
 
     pub fn start_adding_account(&mut self) {
         self.sign_in.resume = None;
-        self.nav.adding_account = true;
+        if !self.accounts.is_empty() {
+            self.modal = Some(Modal::SignIn);
+        }
         self.popover = None;
-        self.sync_timeline();
-    }
-
-    pub fn cancel_adding_account(&mut self) {
-        self.change_server();
-        self.nav.adding_account = false;
-        self.sync_timeline();
     }
 
     /// Step 1: resolve what the user typed. A full Matrix ID also fills in the username.
