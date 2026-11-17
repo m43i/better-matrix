@@ -2112,7 +2112,7 @@ impl State {
 
     /// Fetches the pictures on screen that aren't loaded yet, but for the timelines' (see
     /// [`State::request_timeline_media`]): every account's, and the active account's spaces,
-    /// rooms, members, people typing and people found.
+    /// rooms, members, pinned-message senders, people typing and people found.
     fn request_avatars(&mut self) {
         let mut wanted: Vec<(AccountId, MediaRef)> = self
             .accounts

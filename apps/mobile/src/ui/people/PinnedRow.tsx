@@ -29,7 +29,11 @@ export function PinnedRow({
         onPress={onOpen}
         disabled={message.body === null}
         accessibilityRole="button"
-        accessibilityLabel={message.body ?? t('message.unavailable')}
+        accessibilityLabel={
+          message.sender_name
+            ? `${message.sender_name}: ${message.body ?? t('message.unavailable')}`
+            : (message.body ?? t('message.unavailable'))
+        }
         accessibilityHint={t('message.open')}
         style={styles.row}
       >
