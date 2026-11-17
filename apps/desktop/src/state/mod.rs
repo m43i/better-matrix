@@ -445,7 +445,9 @@ enum Purpose {
     Edit(Box<composer::Edit>),
     /// Deleting one of the user's messages.
     Delete,
+    /// Message utilities whose failures become a notice.
     MessageAction,
+    /// Forwarding from the destination picker, which stays open on failure.
     Forward,
     Logout,
     Media {
@@ -1607,7 +1609,9 @@ impl State {
                     }
                     SidePanel::Info | SidePanel::Members => {}
                 }
-                self.notice = Some(tf!("notice.side", error = error));
+                if panel != SidePanel::Pins {
+                    self.notice = Some(tf!("notice.side", error = error));
+                }
             }
             Purpose::Poll => self.notice = Some(tf!("notice.poll", error = error)),
             Purpose::Permalink => self.link_failed(request, error),

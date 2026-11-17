@@ -26,7 +26,7 @@ pub fn menu(
     else {
         return Vec::new();
     };
-    if message.pending || message.event_id.starts_with("local:") {
+    if message.pending || message.event_id.starts_with("local:") || matches!(message.content, MessageContent::Call(_)) {
         return Vec::new();
     }
     let target = if key.thread.is_some() { ComposerTarget::Thread } else { ComposerTarget::Room };

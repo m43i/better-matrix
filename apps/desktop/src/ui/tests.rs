@@ -402,12 +402,31 @@ fn room_info_should_open_the_shared_pinned_messages() {
 }
 
 #[test]
-fn opening_a_pin_should_show_its_message_in_the_thread_panel() {
+fn opening_a_pin_should_jump_to_its_message_in_the_conversation() {
     let mut rt = runtime(|s| {
         demo::pinned_messages(s);
         s.show_side(SidePanel::Pins);
     });
     press(&mut rt, &format!("pinned-open-{}", demo::DEMO_THREAD.1));
-    assert_eq!(rt.state.active_thread(), Some(demo::DEMO_THREAD.1));
+    assert_eq!(rt.state.active_room_id(), Some(demo::DEMO_THREAD.0));
+    assert_eq!(rt.state.active_thread(), None);
     assert!(rt.state.side.is_none());
+}
+
+#[test]
+fn right_clicking_formatted_message_text_should_open_message_actions() {
+    let mut rt = runtime(|s| {
+        demo::seed(s);
+        s.select_room(demo::DEMO_THREAD.0);
+    });
+    let id = "$demo-@alan:example.org-2";
+    rt.update(|_, tx| tx.scroll_into_view_in("timeline", format!("rich-{id}")));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let (x, y) = rt.find(&format!("rich-{id}-0")).expect("formatted paragraph");
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    rt.frame(0.1);
+    assert!(rt.find("message-copy-link").is_some());
 }

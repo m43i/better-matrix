@@ -575,6 +575,5 @@
   "message.no_rooms": "Keine Unterhaltungen gefunden.",
   "message.translate_explanation": "Google Übersetzer öffnen? Der Nachrichtentext wird mit Google geteilt und in deine App-Sprache übersetzt.",
   "notice.message_action": "Nachrichtenaktion fehlgeschlagen: {{error}}",
-  "message.forwarded": "Nachricht weitergeleitet.",
   "info.pins_retry": "Erneut versuchen"
 }

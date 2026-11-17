@@ -30,9 +30,16 @@ export function forwardMessage(
 export function messageLink(roomId: string, eventId: string, account: AccountId): string {
   const server = account.slice(account.indexOf(':') + 1);
 
-  return `https://matrix.to/#/${encodeURIComponent(roomId)}/${encodeURIComponent(eventId)}?via=${encodeURIComponent(server)}`;
+  return `https://matrix.to/#/${encodeComponent(roomId)}/${encodeComponent(eventId)}?via=${encodeComponent(server)}`;
 }
 
 export function translationUrl(body: string, language: string): string {
-  return `https://translate.google.com/?sl=auto&tl=${encodeURIComponent(language)}&text=${encodeURIComponent(body)}&op=translate`;
+  return `https://translate.google.com/?sl=auto&tl=${encodeComponent(language)}&text=${encodeComponent(body)}&op=translate`;
+}
+
+/** The WHATWG form encoding Rust's url::form_urlencoded uses. */
+function encodeComponent(text: string): string {
+  return encodeURIComponent(text)
+    .replace(/[!'()~]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)
+    .replace(/%20/g, '+');
 }

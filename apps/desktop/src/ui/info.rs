@@ -236,7 +236,9 @@ pub fn pins(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
                 list = list.child(text(t!("info.no_pins")).font(font::BODY).color(p.text_muted).wrap());
             }
             for pin in pins.iter().filter(|pin| room.pinned.contains(&pin.event_id)) {
-                let root = pin.thread.as_ref().unwrap_or(&pin.event_id).clone();
+                let destination =
+                    matrix_core::TimelineKey { room_id: room.room_id.clone(), thread: pin.thread.clone() };
+                let event_id = pin.event_id.clone();
                 let (key, id) = (matrix_core::TimelineKey::room(&room.room_id), pin.event_id.clone());
                 let mut card = col()
                     .key(format!("pinned-{}", pin.event_id))
@@ -265,7 +267,10 @@ pub fn pins(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
                     card = card.child(
                         button(t!("message.open"), ButtonKind::Secondary, true, p)
                             .key(format!("pinned-open-{}", pin.event_id))
-                            .on_press(move |s: &mut State| s.open_listed_thread(&root)),
+                            .on_press(move |s: &mut State| {
+                                s.side = None;
+                                s.open_message(&destination, &event_id);
+                            }),
                     );
                 }
                 if room.can_pin {

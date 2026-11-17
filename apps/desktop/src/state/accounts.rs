@@ -505,7 +505,9 @@ pub struct AccountData {
     pub threads: HashMap<String, Vec<matrix_core::ThreadInfo>>,
     /// The files shared in rooms, by room ID, once listed for the info panel.
     pub files: HashMap<String, Vec<matrix_core::SharedFile>>,
+    /// Shared pinned-message previews by room, including unavailable placeholders.
     pub pins: HashMap<String, Vec<matrix_core::PinnedMessage>>,
+    /// Pin-list failures shown inline, alongside cached previews and a retry.
     pub pin_errors: HashMap<String, String>,
     /// Who is typing, by room ID, in the rooms whose timelines are open.
     pub typing: HashMap<String, Vec<matrix_core::Person>>,

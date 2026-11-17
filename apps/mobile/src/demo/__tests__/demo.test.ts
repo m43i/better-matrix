@@ -2,7 +2,7 @@ import { activeAccount } from '../../state/selectors';
 import { timelineId } from '../../state/timeline';
 import { bootDemo } from '../boot';
 import { answer, demoEngine } from '../engine';
-import { ADA, ADA_HOBBY, DEMO_THREAD, GENERAL } from '../fixtures';
+import { ADA, ADA_HOBBY, DEMO_THREAD, GENERAL, TEST_PLAN } from '../fixtures';
 import { demoScene } from '../link';
 import { scenes, isScene } from '../scenes';
 
@@ -173,4 +173,21 @@ describe('the demo engine', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(finished).toEqual([request]);
   });
+});
+
+it('should list a newly pinned message with its real preview', async () => {
+  const store = bootDemo('room', noMedia);
+  await store.run({
+    type: 'SetPinned',
+    data: { account: ADA, room_id: GENERAL, event_id: TEST_PLAN, pinned: true },
+  });
+  await store.run({ type: 'ListPinnedMessages', data: { account: ADA, room_id: GENERAL } });
+  expect(store.getState().accounts[0]?.pins[GENERAL]).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        event_id: TEST_PLAN,
+        body: expect.stringContaining('Encryption test plan'),
+      }),
+    ]),
+  );
 });

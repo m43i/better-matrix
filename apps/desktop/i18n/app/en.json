@@ -575,6 +575,5 @@
   "message.no_rooms": "No conversations found.",
   "message.translate_explanation": "Open Google Translate? The message text will be shared with Google to translate it into your app language.",
   "notice.message_action": "Couldn’t complete the message action: {{error}}",
-  "message.forwarded": "Message forwarded.",
   "info.pins_retry": "Try again"
 }

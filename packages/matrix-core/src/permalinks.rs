@@ -255,6 +255,26 @@ mod tests {
     }
 
     #[test]
+    fn message_links_should_match_the_shared_mobile_vectors() {
+        let vectors: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("message_links.json")).expect("vectors");
+        for vector in vectors {
+            assert_eq!(
+                message_link(
+                    vector["room"].as_str().unwrap(),
+                    vector["event"].as_str().unwrap(),
+                    vector["account"].as_str().unwrap()
+                ),
+                vector["link"]
+            );
+            assert_eq!(
+                crate::links::translation_url(vector["body"].as_str().unwrap(), vector["language"].as_str().unwrap()),
+                vector["translation"]
+            );
+        }
+    }
+
+    #[test]
     fn every_shared_vector_should_parse_as_written() {
         let vectors: Vec<Value> = serde_json::from_str(VECTORS).expect("the vectors are JSON");
         assert!(vectors.len() > 30);

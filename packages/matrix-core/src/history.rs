@@ -71,9 +71,16 @@ pub(crate) fn forward_content(event: &Value) -> Option<RoomMessageEventContent> 
     let content = &event["content"];
     let mut content = content.get("m.new_content").unwrap_or(content).clone();
     let object = content.as_object_mut()?;
+    let reply = object.get("m.relates_to").is_some_and(|relation| relation["m.in_reply_to"].is_object());
+    object.remove("m.mentions");
     object.remove("m.relates_to");
     object.remove("m.new_content");
-    serde_json::from_value(content).ok()
+    let mut content: RoomMessageEventContent = serde_json::from_value(content).ok()?;
+    if reply {
+        use matrix_sdk::ruma::html::{HtmlSanitizerMode, RemoveReplyFallback};
+        content.msgtype.sanitize(HtmlSanitizerMode::Compat, RemoveReplyFallback::Yes);
+    }
+    Some(content)
 }
 
 impl Account {
@@ -112,6 +119,23 @@ impl Account {
         // Use the SDK's pinned timeline so edits, redactions, polls and decryption follow the
         // same aggregation as the conversation, even for events outside loaded history.
         let timeline = room.timeline_builder().with_focus(TimelineFocus::PinnedEvents).build().await?;
+        // Building a pinned timeline subscribes to the cache; its first network reload is
+        // asynchronous. Subscribe before checking items so the arrival cannot be missed.
+        let (_, mut updates) = timeline.subscribe().await;
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            use futures_util::StreamExt;
+            loop {
+                let mut loaded = true;
+                for id in &ids {
+                    loaded &= timeline.item_by_event_id(id).await.is_some();
+                }
+                if loaded || updates.next().await.is_none() {
+                    break;
+                }
+            }
+        })
+        .await;
+
         let mut messages = Vec::new();
         for id in ids {
             let mut preview =
@@ -245,6 +269,21 @@ mod message_action_tests {
     use serde_json::json;
 
     #[test]
+    fn forwarding_should_not_carry_mentions_into_the_destination() {
+        let event = json!({"type":"m.room.message","content":{"msgtype":"m.text","body":"Hi Alice","m.mentions":{"user_ids":["@alice:example.org"],"room":true}}});
+        let content = serde_json::to_value(forward_content(&event).expect("content")).expect("JSON");
+        assert!(content.get("m.mentions").is_none());
+    }
+
+    #[test]
+    fn forwarding_a_legacy_reply_should_remove_its_quote_fallbacks() {
+        let event = json!({"type":"m.room.message","content":{"msgtype":"m.text","body":"> <@a:x> quoted\n> text\n\nA reply","format":"org.matrix.custom.html","formatted_body":"<mx-reply><blockquote>quoted text</blockquote></mx-reply><b>A reply</b>","m.relates_to":{"m.in_reply_to":{"event_id":"$old"}}}});
+        let content = serde_json::to_value(forward_content(&event).expect("content")).expect("JSON");
+        assert_eq!(content["body"], "A reply");
+        assert_eq!(content["formatted_body"], "<b>A reply</b>");
+    }
+
+    #[test]
     fn forwarding_an_edited_reply_should_send_the_replacement_without_relations() {
         let event = json!({"type":"m.room.message","content":{"msgtype":"m.text","body":"* old","m.relates_to":{"rel_type":"m.replace","event_id":"$old"},"m.new_content":{"msgtype":"m.text","body":"new","format":"org.matrix.custom.html","formatted_body":"<b>new</b>","m.relates_to":{"m.in_reply_to":{"event_id":"$reply"}}}}});
         let content = serde_json::to_value(forward_content(&event).expect("forwardable")).expect("JSON");
@@ -295,5 +334,35 @@ mod message_action_tests {
         let requests = sent.lock().expect("requests");
         let body: Value = serde_json::from_str(&requests[0]).expect("pin content");
         assert_eq!(body["pinned"], json!(["$old", "$new"]));
+    }
+}
+
+#[cfg(test)]
+mod pinned_loading_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn a_server_only_pin_should_load_before_its_preview_is_returned() {
+        let server = crate::test_server::Server::new(|request| {
+            if request.contains("/event/") || request.contains("/context/") {
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                return json!({"type":"m.room.message","room_id":"!room:example.org","event_id":"$server-only","sender":"@a:example.org","origin_server_ts":2,"content":{"msgtype":"m.text","body":"A pin outside loaded history"}});
+            }
+            let mut response = crate::test_server::thread_response(request);
+            if request.contains("/sync?") {
+                response["rooms"]["join"]["!room:example.org"]["timeline"]["events"] = json!([]);
+                response["rooms"]["join"]["!room:example.org"]["state"]["events"].as_array_mut().expect("state").push(json!({"type":"m.room.pinned_events","state_key":"","event_id":"$pins","sender":"@a:example.org","origin_server_ts":1,"content":{"pinned":["$server-only"]}}));
+            }
+            response
+        });
+        let account = Account::for_test(&server.url()).await;
+        account
+            .client()
+            .sync_once(matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::ZERO))
+            .await
+            .expect("sync");
+        let previews = account.pinned_messages("!room:example.org").await.expect("load pins");
+        assert_eq!(previews[0].body.as_deref(), Some("A pin outside loaded history"));
     }
 }

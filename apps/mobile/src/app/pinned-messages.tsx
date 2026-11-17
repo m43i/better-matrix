@@ -106,7 +106,7 @@ export default function PinnedMessagesScreen() {
                 onPress={() => {
                   router.push(
                     item.thread
-                      ? routes.thread(account, roomId, item.thread)
+                      ? routes.thread(account, roomId, item.thread, item.event_id)
                       : routes.room(account, roomId, item.event_id),
                   );
                 }}

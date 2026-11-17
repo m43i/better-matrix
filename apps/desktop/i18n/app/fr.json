@@ -575,6 +575,5 @@
   "message.no_rooms": "Aucune conversation trouvée.",
   "message.translate_explanation": "Ouvrir Google Traduction ? Le texte du message sera partagé avec Google pour le traduire dans la langue de votre application.",
   "notice.message_action": "Impossible d’effectuer cette action sur le message : {{error}}",
-  "message.forwarded": "Message transféré.",
   "info.pins_retry": "Réessayer"
 }

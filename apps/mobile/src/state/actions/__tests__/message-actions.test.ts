@@ -1,7 +1,14 @@
+import vectors from '../../../../../../packages/matrix-core/src/message_links.json';
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 import { Store } from '../../store';
 import { threadKey } from '../../timeline';
-import { forwardMessage, listPins, messageLink, setPinned } from '../message-actions';
+import {
+  forwardMessage,
+  listPins,
+  messageLink,
+  setPinned,
+  translationUrl,
+} from '../message-actions';
 import { ADA, summary } from '../../../test/fixtures';
 import { parsePermalink } from '../../permalinks';
 
@@ -66,4 +73,9 @@ it('should copy links with routing information for room ids without a server', (
     via: ['example.org'],
     action: null,
   });
+});
+
+it.each(vectors)('should match the shared link builders for $event', (vector) => {
+  expect(messageLink(vector.room, vector.event, vector.account)).toBe(vector.link);
+  expect(translationUrl(vector.body, vector.language)).toBe(vector.translation);
 });

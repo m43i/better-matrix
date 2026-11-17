@@ -1,0 +1,29 @@
+[
+  {
+    "room": "!v12",
+    "event": "$event",
+    "account": "@ada:example.org",
+    "link": "https://matrix.to/#/%21v12/%24event?via=example.org",
+    "body": "Bonjour",
+    "language": "en",
+    "translation": "https://translate.google.com/?sl=auto&tl=en&text=Bonjour&op=translate"
+  },
+  {
+    "room": "!room:example.org",
+    "event": "$event/with?symbols!~*'()",
+    "account": "@ada:example.org",
+    "link": "https://matrix.to/#/%21room%3Aexample.org/%24event%2Fwith%3Fsymbols%21%7E*%27%28%29?via=example.org",
+    "body": "Hello & <world> ~!*() é",
+    "language": "de",
+    "translation": "https://translate.google.com/?sl=auto&tl=de&text=Hello+%26+%3Cworld%3E+%7E%21*%28%29+%C3%A9&op=translate"
+  },
+  {
+    "room": "!room:example.org",
+    "event": "$abc",
+    "account": "@a:example.org:8448",
+    "link": "https://matrix.to/#/%21room%3Aexample.org/%24abc?via=example.org%3A8448",
+    "body": "Grüße\nمرحبا",
+    "language": "fr",
+    "translation": "https://translate.google.com/?sl=auto&tl=fr&text=Gr%C3%BC%C3%9Fe%0A%D9%85%D8%B1%D8%AD%D8%A8%D8%A7&op=translate"
+  }
+]

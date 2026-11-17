@@ -144,14 +144,18 @@ impl super::State {
     }
 
     pub fn open_found_message(&mut self, hit: &MessageHit) {
+        self.open_message(
+            &matrix_core::TimelineKey { room_id: hit.room_id.clone(), thread: hit.thread.clone() },
+            &hit.event_id,
+        );
+    }
+
+    /// Open a message from search or pinned messages, loading history until it is on screen.
+    pub fn open_message(&mut self, key: &matrix_core::TimelineKey, event_id: &str) {
         let Some(account) = self.nav.account.clone() else { return };
-        self.message_jump = Some(MessageJump {
-            account,
-            key: matrix_core::TimelineKey { room_id: hit.room_id.clone(), thread: hit.thread.clone() },
-            event_id: hit.event_id.clone(),
-        });
-        self.open_found_room(&hit.room_id);
-        if let Some(root) = &hit.thread {
+        self.message_jump = Some(MessageJump { account, key: key.clone(), event_id: event_id.to_owned() });
+        self.open_found_room(&key.room_id);
+        if let Some(root) = &key.thread {
             self.open_thread(root);
         }
     }

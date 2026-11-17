@@ -29,6 +29,10 @@ fn spec() -> AppSpec<State> {
         min_size: Some((720.0, 480.0)),
         scenes: &[
             ("demo", demo::seed),
+            ("demo-pinned-message", |s| {
+                demo::pinned_messages(s);
+                s.open_thread(demo::DEMO_THREAD.1);
+            }),
             ("demo-pins", |s| {
                 demo::pinned_messages(s);
                 s.show_side(state::SidePanel::Pins);
