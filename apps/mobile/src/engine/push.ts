@@ -23,7 +23,6 @@ import type { Store } from '../state/store';
 import type { PusherRegistration, State } from '../state/types';
 import { pushContentOf } from './notificationRules';
 import { notified, presentContent } from './notifications';
-import type { ForegroundMarker } from './front';
 import { dataDirectory, pathOf, readSettings } from './paths';
 import { pushConfig } from './pushConfig';
 import {
@@ -90,12 +89,11 @@ function pushStrings(): PushStrings {
 
 /**
  * Starts push for the running app: keeps pushers registered as accounts, settings and the token
- * change, keeps the badge, and tells the iOS extension how to word notifications. `data` is the
- * engine's data directory. Returns what tells the extension the app is in front, on iOS with
- * push on.
+ * change, keeps the badge, and tells the iOS extension when the app is in front and how to word
+ * notifications. `data` is the engine's data directory.
  */
-export function installPush(store: Store, data: Directory): ForegroundMarker | undefined {
-  if (Platform.OS === 'web') return undefined;
+export function installPush(store: Store, data: Directory): void {
+  if (Platform.OS === 'web') return;
   running = store;
   store.update((s) => ({ ...s, pushers: readRegistrations(data) }));
   installBadge(store);
@@ -105,15 +103,17 @@ export function installPush(store: Store, data: Directory): ForegroundMarker | u
   if (off) {
     if (__DEV__) console.warn(`push is off in this build (${off}): see docs/push.md`);
 
-    return undefined;
+    return;
   }
 
   const gateway = notifyUrl(config.gateway) ?? '';
   const projectId = config.projectId ?? '';
 
-  const marker = Platform.OS === 'android' ? undefined : foregroundMarker(data);
-
-  if (Platform.OS === 'android') Notifications.registerTaskAsync(PUSH_TASK).catch(() => undefined);
+  if (Platform.OS === 'android') {
+    Notifications.registerTaskAsync(PUSH_TASK).catch(() => undefined);
+  } else {
+    installForegroundMarker(data);
+  }
 
   let token: string | null = null;
   let queue = Promise.resolve();
@@ -189,8 +189,6 @@ export function installPush(store: Store, data: Directory): ForegroundMarker | u
   });
 
   if (Platform.OS === 'ios') writeStrings(data);
-
-  return marker;
 }
 
 function writeStrings(data: Directory): void {
@@ -272,9 +270,9 @@ function installBadge(store: Store): void {
 /**
  * Tells the iOS extension the app is in front (`app-active`, refreshed every 30 s): it then
  * leaves pushes alone, since the running engine notifies itself and two processes would race
- * on the store. `followFront` shows and hides it.
+ * on the store.
  */
-function foregroundMarker(data: Directory): ForegroundMarker {
+function installForegroundMarker(data: Directory): void {
   const marker = new File(data, 'app-active');
   let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -286,22 +284,26 @@ function foregroundMarker(data: Directory): ForegroundMarker {
     }
   };
 
-  return {
-    show() {
+  const follow = (state: string) => {
+    if (state === 'active') {
       write();
       timer ??= setInterval(write, ACTIVE_EVERY_MS);
-    },
-    hide() {
-      if (timer) clearInterval(timer);
-      timer = null;
 
-      try {
-        if (marker.exists) marker.delete();
-      } catch {
-        // It goes stale within a minute anyway.
-      }
-    },
+      return;
+    }
+
+    if (timer) clearInterval(timer);
+    timer = null;
+
+    try {
+      if (marker.exists) marker.delete();
+    } catch {
+      // It goes stale within a minute anyway.
+    }
   };
+
+  follow(AppState.currentState ?? 'active');
+  AppState.addEventListener('change', follow);
 }
 
 function hiddenOf(target: PushTarget): PushContent {

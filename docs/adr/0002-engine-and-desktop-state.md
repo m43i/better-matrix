@@ -47,10 +47,11 @@ Date: 2026-11-14
   - It re-reads only what may have changed and reports only a changed list
     (`Account::update_room_list` returns `None` otherwise): a sync re-reads the rooms its update
     touched beyond typing notices (`summary_may_change`), and every room only for `m.direct`
-    and `m.push_rules`, the account data summaries read.
-- **Idle costs nothing:** the engine's runtime has at most four workers (`WORKERS`), and
-  nothing polls: syncs long-poll, and a store shared with no other process takes no
-  cross-process locks ([0010](0010-mobile.md)).
+    and `m.push_rules`, the account data summaries read. Names and heroes the SDK works out
+    from a room's summary arrive through the unread listener's notable updates.
+- **Idle costs nothing on the desktop:** the engine's runtime has at most four workers
+  (`WORKERS`), and nothing polls: syncs long-poll, and a store shared with no other process
+  takes no cross-process locks ([0010](0010-mobile.md)).
   - Spaces without loaded members are queued from the store at start and from every sync.
 - **One reducer on the desktop:**
   - `State::apply(Event, &mut Tx)` is the only way Matrix data enters the app. The sink calls

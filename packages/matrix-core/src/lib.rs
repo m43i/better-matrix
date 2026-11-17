@@ -29,7 +29,6 @@ pub mod sidebar;
 pub mod store;
 
 mod convert;
-mod front;
 mod history;
 mod polls;
 mod session;

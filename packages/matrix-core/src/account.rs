@@ -381,27 +381,6 @@ impl Account {
         self.client.sync_once(settings).await
     }
 
-    /// One sync sharing the store with pushes as the app's place allows (ADR 0010): under the
-    /// crypto store's lock, or, once the app has been in front long enough
-    /// ([`Front::unlocked`](crate::front::Front::unlocked)), after taking the lock only for a
-    /// moment, which waits for a push and reloads what it wrote. `None` when the app left the
-    /// front meanwhile: the sync stopped, as the app being killed would stop it, and its token
-    /// was not kept.
-    pub(crate) async fn sync_once_shared(
-        &self,
-        settings: matrix_sdk::config::SyncSettings,
-        front: &crate::front::Front,
-    ) -> Result<Option<matrix_sdk::sync::SyncResponse>, matrix_sdk::Error> {
-        let Some(mut unlocked) = front.unlocked().await else {
-            return self.sync_once_locked(settings).await.map(Some);
-        };
-        drop(self.client.encryption().spin_lock_store(None).await?);
-        tokio::select! {
-            response = self.client.sync_once(settings) => response.map(Some),
-            () = unlocked.left() => Ok(None),
-        }
-    }
-
     /// Registers (or updates) this device's pusher: the homeserver sends the account's pushes
     /// to the gateway, as event and room IDs only.
     pub async fn register_pusher(&self, pusher: &crate::model::Pusher) -> Result<(), Error> {

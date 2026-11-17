@@ -262,11 +262,6 @@ pub enum Command {
         /// been seen. Thread reads never advance the room-wide marker.
         fully_read: bool,
     },
-    /// The app came to the front (`true`) or left it. On a store shared with pushes
-    /// ([`StoreSharing::WithPush`]) syncs in front stop holding the crypto store's lock; leaving
-    /// finishes once none runs without it, so the app may then let pushes open the store
-    /// (ADR 0010). The engine starts out of front.
-    InFront(bool),
     /// Tell a room whether the user is typing in it. Repeating `true` while typing is cheap: the
     /// SDK sends again only once the last notice is about to expire.
     Typing {
@@ -1040,8 +1035,8 @@ pub enum StoreSharing {
     /// cross-process locks would write a lease to disk every 50 ms while held, as each sync
     /// holds the crypto store's for its whole long poll.
     Alone,
-    /// A push handled without the engine may too (the phones' push extension and push task):
-    /// the two take the SDK's cross-process locks.
+    /// A push handled outside the engine's sync may too (the phones' push extension and push
+    /// task, and the engine's own push fetch): they take the SDK's cross-process locks.
     WithPush,
 }
 
@@ -1207,7 +1202,6 @@ impl Engine {
             layout: StoreLayout::new(&config.data_dir),
             sessions: Sessions::new(&config.data_dir, config.secrets),
             holder: crate::account::Holder::engine(config.stores),
-            front: crate::front::Front::default(),
             identity: config.identity,
             oauth_redirect: config.oauth_redirect,
             oauth_returns: HashMap::new(),
@@ -1351,8 +1345,6 @@ struct State {
     sessions: Sessions,
     /// How accounts' stores are opened: alone, or under the cross-process locks.
     holder: crate::account::Holder,
-    /// Whether the app is in front, for when syncs hold the crypto store's lock.
-    front: crate::front::Front,
     identity: ClientIdentity,
     oauth_redirect: crate::account::OAuthRedirect,
     /// Browser sign-ins waiting for the app to hand their redirect back, by request.
@@ -2320,14 +2312,6 @@ impl State {
                     Ok(Outcome::LoggedOut(id))
                 })
             }
-            Command::InFront(front) => {
-                // Changed now, in the order commands came; only the wait runs beside.
-                let settled = self.front.set(front);
-                Box::pin(async move {
-                    settled.await;
-                    Ok(Outcome::Done)
-                })
-            }
             Command::Typing { account, room_id, typing } => {
                 let account = self.account(&account);
                 Box::pin(async move {
@@ -2454,7 +2438,6 @@ impl State {
                 let started = {
                     let (account, flows, sink, feed) =
                         (account.clone(), flows.clone(), Arc::clone(&self.sink), feed.clone());
-                    let front = self.front.clone();
                     tokio::spawn(async move {
                         // What this device knew showed at once, even offline; the server's
                         // profile follows.
@@ -2490,7 +2473,7 @@ impl State {
                             layout,
                             calls,
                             crate::security::watch(account.clone(), flows, Arc::clone(&sink)),
-                            sync_loop(account.clone(), Arc::clone(&sink), feed, front),
+                            sync_loop(account.clone(), Arc::clone(&sink), feed),
                         );
                     })
                 };
@@ -2544,7 +2527,7 @@ impl State {
 
 /// Syncs one account until it fails or is aborted, reporting rooms, new messages and
 /// notifications. The first response only catches up, so it notifies about nothing.
-async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, front: crate::front::Front) {
+async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed) {
     // Waits between failed syncs: from a few seconds, doubling, to a minute.
     const FIRST_RETRY: std::time::Duration = std::time::Duration::from_secs(2);
     const LAST_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
@@ -2552,7 +2535,7 @@ async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, f
     let mut retry = FIRST_RETRY;
     loop {
         let started = std::time::Instant::now();
-        let Err(error) = sync_until_error(&account, &sink, &feed, &front, &caught_up).await else { return };
+        let Err(error) = sync_until_error(&account, &sink, &feed, &caught_up).await else { return };
         // The session is over. The SDK broadcasts every ending as `UnknownToken`, with whether
         // it was soft, and `watch_session` reports that: the error here may hide it (a rejected
         // refresh), so reporting from here too could call a soft ending hard.
@@ -2574,7 +2557,6 @@ async fn sync_until_error(
     account: &Account,
     sink: &Arc<dyn EventSink>,
     feed: &RoomFeed,
-    front: &crate::front::Front,
     caught_up: &Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), matrix_sdk::Error> {
     // Members load as rooms need them (lazy loading): a first sync doesn't download every member
@@ -2635,7 +2617,13 @@ async fn sync_until_error(
         let feed = feed.clone();
         tokio::spawn(async move {
             use tokio::sync::broadcast::error::{RecvError, TryRecvError};
-            let counts = Reasons::READ_RECEIPT | Reasons::UNREAD_MARKER | Reasons::LATEST_EVENT;
+            // Names and heroes too: a sync re-reads only rooms whose events changed
+            // (`summary_may_change`), and the SDK can change a name from the room's summary.
+            let counts = Reasons::READ_RECEIPT
+                | Reasons::UNREAD_MARKER
+                | Reasons::LATEST_EVENT
+                | Reasons::DISPLAY_NAME
+                | Reasons::HEROES;
             loop {
                 let mut changed = HashSet::new();
                 // Missed updates: any room may have changed.
@@ -2719,9 +2707,9 @@ async fn sync_until_error(
             LoopCtrl::Continue
         }
     };
-    // The SDK's sync loop, each sync sharing the store with pushes (`sync_once_shared`): the next
-    // sync continues from the last one's token, the first error ends the loop for `sync_loop` to
-    // retry, and syncs answered at once are spaced a second apart.
+    // The SDK's sync loop, with each sync under the crypto store's lock (`sync_once_locked`):
+    // the next sync continues from the last one's token, the first error ends the loop for
+    // `sync_loop` to retry, and syncs answered at once are spaced a second apart.
     let mut settings = settings;
     let mut last_sync: Option<std::time::Instant> = None;
     loop {
@@ -2729,8 +2717,7 @@ async fn sync_until_error(
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
         last_sync = Some(std::time::Instant::now());
-        // Stopped as the app left the front: it runs again under the lock, from the same token.
-        let Some(response) = account.sync_once_shared(settings.clone(), front).await? else { continue };
+        let response = account.sync_once_locked(settings.clone()).await?;
         settings = settings.token(response.next_batch.clone());
         if on_response(response).await == LoopCtrl::Break {
             return Ok(());
