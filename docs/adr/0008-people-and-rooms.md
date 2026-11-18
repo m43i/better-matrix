@@ -84,7 +84,7 @@ Date: 2026-11-14
     back with a notice and an earlier save finishing late changes nothing.
 - **Presence of others:** `Event::Presence` carries `PersonPresence` (presence and status
   message) for the people an account learns about: at start, from this device's store, for the
-  user and the people in their direct chats, before syncing starts; then whoever's presence a
+  people in the user's direct chats, before syncing starts; then whoever's presence a
   sync brings (servers
   send only changes after the first sync), and the user's after a status message is set. The
   user's own is never taken from the store, a sync or a member list, which may predate a save

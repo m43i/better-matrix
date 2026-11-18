@@ -895,8 +895,9 @@ pub enum Event {
         status: crate::Status,
     },
     /// What people show others (presence and status message), the user included: at start for
-    /// the user and the people in their direct chats, as this device stored it; then whoever's
-    /// a sync brings, and the user's after [`Command::SetStatusMessage`].
+    /// the people in their direct chats, as this device stored it; then whoever's a sync brings.
+    /// The user's own is read from the server, at start and when a sync brings a change, and
+    /// reported after [`Command::SetStatusMessage`].
     Presence {
         /// Which account learned it.
         account: AccountId,
