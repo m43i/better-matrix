@@ -841,9 +841,13 @@ fn a_read_indicator_should_not_make_its_message_taller() {
     assert_eq!(height(&rt), with_readers);
 }
 
-/// Sets a message with `body` from the demo message's sender after it, so its row continues the
+fn plain(body: &str) -> MessageContent {
+    MessageContent::Text { body: body.to_owned(), html: None }
+}
+
+/// Sets a message of `content` from the demo message's sender after it, so its row continues the
 /// sender's run (no name line), read by `readers` people; gives back the row's height.
-fn set_continued_message(rt: &mut Runtime<State>, body: &str, readers: usize) -> f32 {
+fn set_continued_message(rt: &mut Runtime<State>, content: MessageContent, readers: usize) -> f32 {
     rt.update(|s, tx| {
         let account = s.nav.account.clone().unwrap();
         let key = TimelineKey::room(demo::DEMO_THREAD.0);
@@ -857,7 +861,7 @@ fn set_continued_message(rt: &mut Runtime<State>, body: &str, readers: usize) ->
             sender_id: demo::ADA.into(),
             sender_name: "Ada Lovelace".into(),
             timestamp_ms: demo::DEMO_DAY_MS + 13 * 3_600_000 + 60_000,
-            content: MessageContent::Text { body: body.to_owned(), html: None },
+            content,
             read_receipts,
             ..Message::default()
         };
@@ -878,17 +882,34 @@ fn a_read_indicator_should_not_rewrap_a_long_message() {
     let mut rt = readers_runtime();
     let body = "Ready to try. ".repeat(40);
     let width = |rt: &Runtime<State>| rt.presented("text-$continued").expect("the message's text").0[2];
-    let with_reader = set_continued_message(&mut rt, &body, 1);
+    let with_reader = set_continued_message(&mut rt, plain(&body), 1);
     let text_with_reader = width(&rt);
     assert!(rt.find(&format!("readers-{}-$continued", demo::DEMO_THREAD.0)).is_some());
-    assert_eq!(set_continued_message(&mut rt, &body, 0), with_reader);
+    assert_eq!(set_continued_message(&mut rt, plain(&body), 0), with_reader);
     assert_eq!(width(&rt), text_with_reader, "the text must keep its width");
+}
+
+#[test]
+fn a_read_indicator_should_not_make_content_shorter_than_a_line_taller() {
+    let mut rt = readers_runtime();
+    let tiny = || {
+        MessageContent::Attachment(matrix_core::Attachment {
+            kind: matrix_core::AttachmentKind::Image,
+            name: "dot.png".into(),
+            size: None,
+            media: Some(matrix_core::MediaRef::opaque("dot.png")),
+            thumbnail: None,
+            dimensions: Some((8, 8)),
+        })
+    };
+    let unread = set_continued_message(&mut rt, tiny(), 0);
+    assert_eq!(set_continued_message(&mut rt, tiny(), 1), unread);
 }
 
 #[test]
 fn a_read_indicator_on_a_one_line_message_should_open_readers_not_its_actions() {
     let mut rt = readers_runtime();
-    set_continued_message(&mut rt, "Ready.", 1);
+    set_continued_message(&mut rt, plain("Ready."), 1);
     let (x, y) = rt.find(&format!("readers-{}-$continued", demo::DEMO_THREAD.0)).unwrap();
     rt.pointer_move(x, y);
     rt.frame(1.0 / 60.0);
@@ -908,11 +929,38 @@ fn a_large_reader_count_should_stay_inside_the_readers_column() {
     {
         rt.set_viewport(viewport, 1.0);
         rt.frame(1.0 / 60.0);
-        set_continued_message(&mut rt, "Ready.", 150);
+        set_continued_message(&mut rt, plain("Ready."), 150);
         assert!(rt.elements().iter().any(|e| e.text.as_deref() == Some("99+")));
         let width = rt.presented(&indicator).expect("the read indicator").0[2];
         assert!(width <= super::readers::column_width(faces), "{width} must fit {faces} faces' column");
     }
+}
+
+/// Where the readers' column starts in the room's timeline, in a window of its narrowest size.
+fn readers_column_start(rt: &mut Runtime<State>) -> f32 {
+    rt.set_viewport(crate::spec().min_size.unwrap(), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    let frame = rt.presented("timeline-frame").expect("the timeline").0;
+    frame[0] + frame[2] - 20.0 - super::readers::column_width(super::readers::NARROW_FACES)
+}
+
+#[test]
+fn an_image_should_leave_the_readers_column_clear_in_the_narrowest_window() {
+    let mut rt = runtime(demo::attachment_message);
+    let column = readers_column_start(&mut rt);
+    let image = rt.presented("image-better-matrix.png").expect("the image").0;
+    assert!(image[0] + image[2] <= column, "the image ends at {}, the column starts at {column}", image[0] + image[2]);
+}
+
+#[test]
+fn a_linked_gif_should_leave_the_readers_column_clear_in_the_narrowest_window() {
+    let mut rt = readers_runtime();
+    set_continued_message(&mut rt, plain("https://x.org/a.gif"), 0);
+    let column = readers_column_start(&mut rt);
+    let gif = rt.presented("gif-https://x.org/a.gif").expect("the GIF").0;
+    assert!(gif[0] + gif[2] <= column, "the GIF ends at {}, the column starts at {column}", gif[0] + gif[2]);
 }
 
 #[test]

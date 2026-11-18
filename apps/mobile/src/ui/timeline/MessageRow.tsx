@@ -20,7 +20,7 @@ import { CallCardView } from './CallCard';
 import { useTimelineContext } from './context';
 import { LinkCard, LinkedGif, QuoteBlock, Reactions, ThreadLink } from './Parts';
 import { PollCard } from './PollCard';
-import { ReadIndicator, READERS_COLUMN } from './ReadIndicator';
+import { ReadIndicator, READERS_COLUMN, READERS_HEIGHT } from './ReadIndicator';
 import { RichText } from './RichText';
 
 export const AVATAR = 36;
@@ -188,9 +188,10 @@ const styles = StyleSheet.create({
   },
   gutter: { width: AVATAR },
   content: { flex: 1, minWidth: 0, gap: 2 },
-  // Kept in every room message, filled or not, so a receipt never rewraps the message.
+  // Kept in every room message, filled or not, so a receipt never rewraps or grows it.
   readers: {
     width: READERS_COLUMN,
+    minHeight: READERS_HEIGHT,
     alignSelf: 'flex-end',
     flexDirection: 'row',
     justifyContent: 'flex-end',

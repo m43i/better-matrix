@@ -224,9 +224,10 @@ see who is typing there.
   from an absent receipt. The desktop shows up to four overlapping avatars (two in a timeline
   narrower than 640 points) and an overflow count, which stops at "99+", at the lower right of a
   sent message. Every room message keeps a column of that width free at its right, filled or
-  not, and the indicator is no taller than a line of text, so a receipt arriving never rewraps or
-  grows its message; the column costs each message some width, as in Element, and the hover
-  toolbar sits left of it. Clicking opens a virtualized reader list, with available receipt
+  not and as tall as the indicator, itself no taller than a line of text, so a receipt arriving
+  never rewraps or grows its message; the column costs each message some width, as in Element.
+  Pictures and GIFs fit the width left (the timeline passes it to its rows), and the hover
+  toolbar sits left of the column. Clicking opens a virtualized reader list, with available receipt
   dates/times and room profiles (falling back to timeline senders or user IDs). The list loads
   the room members as the member panel does; selecting a reader opens that same member menu
   beside the list. A reader outside the joined-member list keeps chat, call

@@ -26,6 +26,7 @@ import { Icon } from '../icons';
 import { useMedia } from '../media';
 import { useNow } from '../shell/useNow';
 import { usePalette } from '../theme';
+import { useMediaBox } from './Attachments';
 import { useTimelineContext } from './context';
 import { openLink } from './open';
 
@@ -199,12 +200,15 @@ export function LinkCard({ url }: { url: string }) {
   );
 }
 
-/** A GIF behind a link, playing once fetched; pressing it opens the link. */
+const GIF_WIDTH = 240;
+
+/** A GIF behind a link, playing once fetched, as wide as fits; pressing it opens the link. */
 export function LinkedGif({ url }: { url: string }) {
   const palette = usePalette();
   const store = useAppStore();
   const path = useStore((s) => s.gifs[url]);
   const [aspect, setAspect] = useState(4 / 3);
+  const width = Math.min(GIF_WIDTH, useMediaBox().width);
   useEffect(() => fetchGif(store, url), [store, url]);
 
   return (
@@ -217,7 +221,7 @@ export function LinkedGif({ url }: { url: string }) {
       {path ? (
         <Image
           source={{ uri: `file://${path}` }}
-          style={[styles.gifImage, { aspectRatio: aspect }]}
+          style={[styles.gifImage, { width, aspectRatio: aspect }]}
           contentFit="cover"
           autoplay
           onLoad={(event) => {
@@ -232,6 +236,7 @@ export function LinkedGif({ url }: { url: string }) {
             styles.gifImage,
             styles.center,
             {
+              width,
               aspectRatio: aspect,
               backgroundColor: palette.surface,
               borderColor: palette.divider,
@@ -289,5 +294,5 @@ const styles = StyleSheet.create({
   cardImage: { width: 64, height: 64, borderRadius: 8 },
   center: { alignItems: 'center', justifyContent: 'center' },
   gif: { marginTop: 4, alignSelf: 'flex-start' },
-  gifImage: { width: 240, maxHeight: 320, borderRadius: 8, overflow: 'hidden' },
+  gifImage: { maxHeight: 320, borderRadius: 8, overflow: 'hidden' },
 });

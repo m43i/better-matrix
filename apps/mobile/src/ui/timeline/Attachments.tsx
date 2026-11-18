@@ -27,16 +27,25 @@ import { Icon, type IconName } from '../icons';
 import { ORIGINAL, PREVIEW_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
+import { READERS_COLUMN } from './ReadIndicator';
 import { shareAttachment } from './files';
 
-/** Room on the left of a message's content: the gutter, the avatar and the gaps. */
+/** Room beside a message's content: the row's padding, the avatar and its gap. */
 const ROW_INSET = 16 + 36 + 10 + 16;
 
-/** The largest box an image or video takes: the row's width, up to the desktop's 360 × 280. */
-function useMediaBox() {
-  const { width } = useWindowDimensions();
+/** Room a room message keeps for its read indicator, with its gap. */
+const READERS_INSET = READERS_COLUMN + 10;
 
-  return { width: Math.min(width - ROW_INSET, 360), height: 280 };
+/**
+ * The largest box an image, video or GIF takes: the content's width (clear of the readers'
+ * column in a room), up to the desktop's 360 × 280.
+ */
+export function useMediaBox() {
+  const { width } = useWindowDimensions();
+  const { thread } = useTimelineContext();
+  const inset = ROW_INSET + (thread === null ? READERS_INSET : 0);
+
+  return { width: Math.min(width - inset, 360), height: 280 };
 }
 
 export function AttachmentView({

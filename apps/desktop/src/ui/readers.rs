@@ -12,6 +12,10 @@ const ROW: f32 = 52.0;
 /// A reader's picture in the indicator, and how much the next one overlaps it.
 const FACE: f32 = 18.0;
 const FACE_OVERLAP: f32 = 6.0;
+/// Room above and below the pictures: the indicator is no taller than a line of text.
+const PAD_Y: f32 = 2.0;
+/// The indicator's height, which every room message keeps under its content's last line.
+pub const HEIGHT: f32 = FACE + 2.0 * PAD_Y;
 /// Room for the overflow count ("+99", or "99+") after the pictures.
 const COUNT: f32 = 24.0;
 /// The pictures a narrow timeline shows, and the width below which it is narrow.
@@ -63,7 +67,7 @@ pub fn indicator(
         .gap(6.0)
         .center_y()
         .px(4.0)
-        .py(2.0)
+        .py(PAD_Y)
         .radius(5.0)
         .hover(p.hover)
         .role("button")

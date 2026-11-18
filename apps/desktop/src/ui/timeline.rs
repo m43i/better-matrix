@@ -30,8 +30,9 @@ const ESTIMATED_ROW: f32 = 64.0;
 /// Messages from one sender this close together share one header.
 const GROUP_WINDOW_MS: u64 = 5 * 60_000;
 const AVATAR: f32 = 36.0;
-/// A message row's side padding.
+/// A message row's side padding, and the gap between its parts.
 const MESSAGE_PAD_X: f32 = 20.0;
+const MESSAGE_GAP: f32 = 10.0;
 
 /// What every message row in one timeline needs.
 pub struct Context<'a> {
@@ -54,6 +55,9 @@ pub struct Context<'a> {
     pub audio: Option<&'a AudioClip>,
     /// The most reader pictures a read indicator shows: fewer in a narrow timeline.
     pub reader_faces: usize,
+    /// The widest a message's content can be, once the timeline has a size: pictures and GIFs
+    /// fit it, so they never reach into the readers' column.
+    pub content_width: f32,
 }
 
 impl<'a> Context<'a> {
@@ -73,6 +77,7 @@ impl<'a> Context<'a> {
             ringing: s.rings.iter().any(|ring| ring.account == data.summary.id && ring.room_id == key.room_id),
             audio: s.audio.as_ref(),
             reader_faces: crate::state::READER_FACES,
+            content_width: f32::INFINITY,
         }
     }
 
@@ -419,14 +424,15 @@ pub fn timeline(
     let (keys, shown) = (Rc::clone(&plan), Rc::clone(&plan));
     let (account, key, palette) = (cx.account.clone(), cx.key.clone(), *p);
     let (seen_account, seen_key) = (account.clone(), key.clone());
-    let reader_faces = rune::memo::layout_with(&format!("{view_key}-frame"), |frame| {
-        if frame[2] < super::readers::NARROW_TIMELINE {
-            super::readers::NARROW_FACES
-        } else {
-            crate::state::READER_FACES
-        }
-    })
-    .unwrap_or(crate::state::READER_FACES);
+    let frame_width = rune::memo::layout_with(&format!("{view_key}-frame"), |frame| frame[2]);
+    let reader_faces = match frame_width {
+        Some(width) if width < super::readers::NARROW_TIMELINE => super::readers::NARROW_FACES,
+        _ => crate::state::READER_FACES,
+    };
+    // Less the row's padding, the sender's picture and the readers' column, each with its gap.
+    let readers = if cx.in_thread() { 0.0 } else { super::readers::column_width(reader_faces) + MESSAGE_GAP };
+    let content_width =
+        frame_width.map_or(f32::INFINITY, |width| width - 2.0 * MESSAGE_PAD_X - AVATAR - MESSAGE_GAP - readers);
     let mut list = col()
         .w_full()
         .py(16.0)
@@ -440,6 +446,7 @@ pub fn timeline(
                 match row_context(s, &account, &key) {
                     Some((mut cx, timeline)) => {
                         cx.reader_faces = reader_faces;
+                        cx.content_width = content_width;
                         build_row(&cx, timeline, row_key, row, &palette)
                     }
                     None => el().key(row_key.clone()),
@@ -621,7 +628,7 @@ fn message_row(
             if let Some(rest) = &gif.rest {
                 body = body.child(text_body(&message.event_id, &rest.plain, rest.rich.as_ref(), p));
             }
-            body = body.child(linked_gif(&gif.url, cx.gifs, p));
+            body = body.child(linked_gif(&gif.url, cx.content_width, cx.gifs, p));
         }
         None => body = body.child(message_body(item, cx, latest_call, p)),
     }
@@ -691,15 +698,20 @@ fn message_row(
         .px(MESSAGE_PAD_X)
         .pt(if continues { 2.0 } else { 10.0 })
         .pb(2.0)
-        .gap(10.0)
+        .gap(MESSAGE_GAP)
         .items_start()
         .opacity(if message.pending { 0.6 } else { 1.0 })
         .child(gutter)
         .child(content);
-    // Room messages keep a column at the right for who has read them, filled or not, so a
-    // receipt arriving never rewraps the message (threads track no receipts).
+    // Room messages keep a column at the right for who has read them, filled or not and as tall
+    // as the indicator, so a receipt arriving never rewraps or grows the message (threads track
+    // no receipts).
     if !cx.in_thread() {
-        let mut readers = row_el().w(super::readers::column_width(cx.reader_faces)).self_end().justify_end();
+        let mut readers = row_el()
+            .w(super::readers::column_width(cx.reader_faces))
+            .min_h(super::readers::HEIGHT)
+            .self_end()
+            .justify_end();
         if !message.pending && !message.read_receipts.is_empty() {
             readers = readers.child(super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, p));
         }
@@ -886,9 +898,10 @@ fn thread_link(root: &str, thread: &ThreadSummary, media: &MediaCache, p: &Palet
     link.on_press(move |s: &mut State| s.open_thread(&root))
 }
 
-/// A GIF behind a link in the message, playing once it has loaded.
-fn linked_gif(url: &str, gifs: &GifCache, p: &Palette) -> El {
-    let frame = el().key(format!("gif-{url}")).w(280.0).radius(8.0).role("img").label(url.to_owned());
+/// A GIF behind a link in the message, playing once it has loaded; up to `max_width` wide.
+fn linked_gif(url: &str, max_width: f32, gifs: &GifCache, p: &Palette) -> El {
+    let frame =
+        el().key(format!("gif-{url}")).w(max_width.clamp(0.0, 280.0)).radius(8.0).role("img").label(url.to_owned());
     match gifs.player(url) {
         Some(player) => frame.pixels(player.pixels()),
         None => frame
@@ -910,7 +923,7 @@ fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Pa
             audio_card(attachment, cx.audio, p)
         }
         (MessageContent::Attachment(attachment), _) => match attachment.preview() {
-            Some((preview, _)) if !media.has_failed(&preview) => image_preview(attachment, media, p),
+            Some((preview, _)) if !media.has_failed(&preview) => image_preview(attachment, cx.content_width, media, p),
             _ => attachment_card(attachment, p),
         },
         (MessageContent::Redacted, _) => notice_text(t!("message.deleted"), p),
@@ -1050,10 +1063,12 @@ fn link_card(key: &str, url: &str, card: &LinkPreview, media: &MediaCache, p: &P
     entry.on_press_tx(move |s: &mut State, tx| s.open_link(&opened, tx))
 }
 
-/// An image, scaled to fit [`PREVIEW_BOX`] by the sender's dimensions so the timeline doesn't
-/// jump when it loads; a placeholder of the same size until then.
-fn image_preview(attachment: &Attachment, media: &MediaCache, p: &Palette) -> El {
+/// An image, scaled to fit [`PREVIEW_BOX`] and `max_width` by the sender's dimensions so the
+/// timeline doesn't jump when it loads; a placeholder of the same size until then.
+fn image_preview(attachment: &Attachment, max_width: f32, media: &MediaCache, p: &Palette) -> El {
     let (w, h) = preview_size(attachment.dimensions);
+    let scale = (max_width / w).clamp(0.0, 1.0);
+    let (w, h) = (w * scale, h * scale);
     let opened = attachment.clone();
     let frame = el()
         .key(format!("image-{}", attachment.name))
