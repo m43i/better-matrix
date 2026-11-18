@@ -26,8 +26,8 @@ import { Icon } from '../icons';
 import { useMedia } from '../media';
 import { useNow } from '../shell/useNow';
 import { usePalette } from '../theme';
-import { useMediaBox } from './Attachments';
 import { useTimelineContext } from './context';
+import { useContentWidth } from './readersLayout';
 import { openLink } from './open';
 
 /** The message a reply answers: who wrote it and an excerpt, behind a bar. Pressing it goes there. */
@@ -169,7 +169,7 @@ export function LinkCard({ url }: { url: string }) {
   useEffect(() => fetchLinkPreview(store, account, url), [store, account, url]);
   const image = useMedia(account, preview?.image?.[0] ?? null, CARD_IMAGE);
   // The picture shows only where it leaves the words a readable width beside it.
-  const words = useMediaBox().width - 2 * 12 - 3 - 2 * 12 - CARD_IMAGE_SIDE;
+  const words = useContentWidth() - 2 * 12 - 3 - 2 * 12 - CARD_IMAGE_SIDE;
   const showImage = preview?.image != null && words >= CARD_WORDS_MIN;
 
   if (!preview) return null;
@@ -221,7 +221,7 @@ export function LinkedGif({ url }: { url: string }) {
   const store = useAppStore();
   const path = useStore((s) => s.gifs[url]);
   const [aspect, setAspect] = useState(4 / 3);
-  const width = Math.min(GIF_WIDTH, useMediaBox().width);
+  const width = Math.min(GIF_WIDTH, useContentWidth());
   useEffect(() => fetchGif(store, url), [store, url]);
 
   return (

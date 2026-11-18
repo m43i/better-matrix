@@ -15,8 +15,8 @@ import { routes } from '../../routes';
 import { font } from '../../theme/palette';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
-import { useMediaBox } from './Attachments';
 import { useTimelineContext } from './context';
+import { useContentWidth } from './readersLayout';
 
 const PADDING = 12;
 
@@ -43,7 +43,7 @@ export function CallCardView({ card, latest }: { card: Card; latest: boolean }) 
   );
 
   // The picture and words keep a readable width, or all the card has.
-  const headMin = Math.max(0, Math.min(HEAD_MIN, useMediaBox().width - 2 * (PADDING + 1)));
+  const headMin = Math.max(0, Math.min(HEAD_MIN, useContentWidth() - 2 * (PADDING + 1)));
 
   if (!room) return null;
   const status = callStatus(card, room, { latest, callHere, ringing });

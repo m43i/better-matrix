@@ -80,7 +80,7 @@ impl<'a> Context<'a> {
             ringing: s.rings.iter().any(|ring| ring.account == data.summary.id && ring.room_id == key.room_id),
             audio: s.audio.as_ref(),
             reader_faces: crate::state::READER_FACES,
-            readers_column: true,
+            readers_column: key.thread.is_none(),
             content_width: f32::INFINITY,
         }
     }
@@ -659,7 +659,8 @@ fn message_row(
         body = body.child(thread_link(&message.event_id, thread, cx.media, p));
     }
     // Too narrow a timeline for the readers' column: the indicator takes a line of its own.
-    if !cx.in_thread() && !cx.readers_column && !message.pending && !message.read_receipts.is_empty() {
+    let read = !message.pending && !message.read_receipts.is_empty();
+    if !cx.in_thread() && !cx.readers_column && read {
         let indicator = super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, p);
         body = body.child(row().w_full().justify_end().child(indicator));
     }
@@ -727,13 +728,13 @@ fn message_row(
     // Room messages keep a column at the right for who has read them, filled or not and as tall
     // as the indicator, so a receipt arriving never rewraps or grows the message (threads track
     // no receipts).
-    if !cx.in_thread() && cx.readers_column {
+    if cx.readers_column {
         let mut readers = row_el()
             .w(super::readers::column_width(cx.reader_faces))
             .min_h(super::readers::HEIGHT)
             .self_end()
             .justify_end();
-        if !message.pending && !message.read_receipts.is_empty() {
+        if read {
             readers = readers.child(super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, p));
         }
         row = row.child(readers);
@@ -763,11 +764,7 @@ fn message_row(
 
 /// The message toolbar's distance from its row's right edge.
 fn toolbar_right(cx: &Context<'_>) -> f32 {
-    if cx.in_thread() || !cx.readers_column {
-        16.0
-    } else {
-        MESSAGE_PAD_X + super::readers::column_width(cx.reader_faces)
-    }
+    if cx.readers_column { MESSAGE_PAD_X + super::readers::column_width(cx.reader_faces) } else { 16.0 }
 }
 
 /// React, reply and reply in thread, at the message's top right while it is hovered (or its

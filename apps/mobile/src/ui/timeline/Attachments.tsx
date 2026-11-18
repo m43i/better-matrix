@@ -24,10 +24,10 @@ import { useContentWidth } from './readersLayout';
 import { shareAttachment } from './files';
 
 /**
- * The largest box an image, video or GIF takes: the content's width (clear of the readers'
+ * The largest box an image or video takes: the content's width (clear of the readers'
  * column in a room), up to the desktop's 360 × 280.
  */
-export function useMediaBox() {
+function useMediaBox() {
   return { width: Math.min(useContentWidth(), 360), height: 280 };
 }
 
