@@ -23,6 +23,11 @@ AppSupportURL=https://github.com/m43i/better-matrix/issues
 AppUpdatesURL=https://github.com/m43i/better-matrix/releases
 AppCopyright=Copyright (c) 2026 Malte Eiting and the Better Matrix contributors
 VersionInfoVersion={#FileVersion}
+; The text versions keep a pre-release, like the executable's (apps/desktop/build.rs); code
+; signing checks the product name and version (packaging/windows/signpath/installer.xml).
+VersionInfoTextVersion={#Version}
+VersionInfoProductName=Better Matrix
+VersionInfoProductTextVersion={#Version}
 ; Per user, no administrator rights; {autopf} is then %LOCALAPPDATA%\Programs, the folder the
 ; README's earlier install line used, so running the installer adopts such an install.
 PrivilegesRequired=lowest

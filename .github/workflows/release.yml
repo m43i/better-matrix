@@ -6,9 +6,15 @@
 # the tag is only made when the release is published, so a run that fails leaves no tag behind
 # and can simply be started again. Then: tests (unless the commit already passed CI on main, a
 # version-only change counting as the same commit), builds for macOS (arm64), Windows (x86_64:
-# an installer, and the ZIP the self-update downloads) and Linux (x86_64, aarch64: .deb, .rpm,
-# .pkg.tar.xz with a PKGBUILD, AppImage), and publishes them with notes from the merged pull
-# requests' labels (.github/release.yml).
+# an installer, and the ZIP the self-update downloads, signed once SignPath is set up, see below)
+# and Linux (x86_64, aarch64: .deb, .rpm, .pkg.tar.xz with a PKGBUILD, AppImage), and publishes
+# them with notes from the merged pull requests' labels (.github/release.yml).
+#
+# Windows signing (ADR 0001) turns on with the repository variable SIGNPATH_ORGANIZATION_ID and
+# the secret SIGNPATH_API_TOKEN (a SignPath CI user that may submit to the project). Optional
+# variables: SIGNPATH_PROJECT_SLUG (default better-matrix) and SIGNPATH_SIGNING_POLICY_SLUG
+# (default release-signing). The project needs the artifact configurations "app" and "installer"
+# from packaging/windows/signpath. Each request waits for an approver in SignPath, up to an hour.
 name: Release
 
 on:
@@ -123,12 +129,18 @@ jobs:
           - { name: linux-x86_64, os: ubuntu-22.04, arch: x86_64 }
           - { name: linux-aarch64, os: ubuntu-22.04-arm, arch: aarch64 }
           - { name: macos-arm64, os: macos-26 }
-          - { name: windows-x86_64, os: windows-2025 }
+          # Longer: its two signing requests each wait up to an hour for approval.
+          - { name: windows-x86_64, os: windows-2025, timeout: 180 }
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ matrix.timeout || 60 }}
+    permissions:
+      contents: read
+      # SignPath fetches the artifacts it signs through this run's token.
+      actions: read
     env:
       # libwebrtc links ScreenCaptureKit, which macOS has from 12.3.
       MACOSX_DEPLOYMENT_TARGET: '12.3'
+      SIGN_WINDOWS: ${{ startsWith(matrix.os, 'windows') && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -140,6 +152,35 @@ jobs:
       # release builds share nothing with CI's test builds.
       - name: Build
         run: cargo build -p better-matrix-desktop --release --locked
+      # The executable is signed before packaging, so the installer and the self-update's ZIP
+      # both carry the signed one; the installer is signed after.
+      - name: Upload the executable for signing
+        id: unsigned-app
+        if: env.SIGN_WINDOWS == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          path: target/release/better-matrix.exe
+          archive: false
+          retention-days: 1
+      - name: Sign the executable
+        if: env.SIGN_WINDOWS == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'better-matrix' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: app
+          github-artifact-id: ${{ steps.unsigned-app.outputs.artifact-id }}
+          skip-decompress: true
+          output-artifact-directory: dist/signed
+          wait-for-completion-timeout-in-seconds: 3600
+          parameters: |
+            version: "${{ needs.verify.outputs.version }}"
+      - name: Use the signed executable
+        if: env.SIGN_WINDOWS == 'true'
+        shell: pwsh
+        run: packaging/windows/use-signed.ps1 dist\signed\better-matrix.exe target\release\better-matrix.exe
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -154,9 +195,37 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: packaging/windows/package.ps1 "${{ needs.verify.outputs.version }}"
+      - name: Upload the installer for signing
+        id: unsigned-setup
+        if: env.SIGN_WINDOWS == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/out/better-matrix-windows-x86_64-setup.exe
+          archive: false
+          retention-days: 1
+      - name: Sign the installer
+        if: env.SIGN_WINDOWS == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'better-matrix' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-setup.outputs.artifact-id }}
+          skip-decompress: true
+          output-artifact-directory: dist/signed
+          wait-for-completion-timeout-in-seconds: 3600
+          parameters: |
+            version: "${{ needs.verify.outputs.version }}"
+      - name: Use the signed installer
+        if: env.SIGN_WINDOWS == 'true'
+        shell: pwsh
+        run: packaging/windows/use-signed.ps1 dist\signed\better-matrix-windows-x86_64-setup.exe dist\out\better-matrix-windows-x86_64-setup.exe
+      # Named apart from the unsigned uploads above, which publishing leaves out.
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.name }}
+          name: release-${{ matrix.name }}
           path: dist/out/*
           if-no-files-found: error
           retention-days: 3
@@ -177,6 +246,7 @@ jobs:
           sparse-checkout: packaging/arch
       - uses: actions/download-artifact@v8
         with:
+          pattern: release-*
           path: assets
           merge-multiple: true
       - name: PKGBUILD and checksums
@@ -202,8 +272,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.verify.outputs.tag }}
           SHA: ${{ needs.verify.outputs.sha }}
+          SIGNED: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
         run: |
           flags=()
+          # SignPath Foundation asks for its credit and the policy on the download page.
+          if [ "$SIGNED" = true ]; then
+            flags+=(--notes "Windows builds: free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). See the [code signing policy](https://github.com/$GITHUB_REPOSITORY#code-signing-policy).")
+          fi
           if [[ "$TAG" == *-* ]]; then
             flags+=(--prerelease)
           else
