@@ -1,5 +1,6 @@
-// Who has read up to a message, as the desktop shows it: up to four faces at the message's end,
-// and how many more. A tap lists them all (`app/readers.tsx`).
+// Who has read up to a message, as the desktop shows it in a narrow window: up to two faces and
+// how many more, in a column every room message keeps free at its right (`READERS_COLUMN`), so
+// a receipt never rewraps or grows its message. A tap lists them all (`app/readers.tsx`).
 
 import type { Message, Person } from '@better-matrix/matrix-native/types';
 import { useRouter } from 'expo-router';
@@ -16,7 +17,15 @@ import { Touchable } from '../components';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
 
-const FACE = 18;
+const FACE = 16;
+
+const FACE_OVERLAP = 6;
+
+/** Room for the overflow count ("+99") after the faces. */
+const COUNT = 22;
+
+/** The width every room message keeps free at its right for its read indicator. */
+export const READERS_COLUMN = FACE + (READER_FACES - 1) * (FACE - FACE_OVERLAP) + 6 + COUNT + 8;
 
 export function ReadIndicator({ message }: { message: Message }) {
   const palette = usePalette();
@@ -36,46 +45,46 @@ export function ReadIndicator({ message }: { message: Message }) {
   const more = receipts.length - READER_FACES;
 
   return (
-    <View style={styles.line}>
-      <Touchable
-        testID={`readers-${message.event_id}`}
-        onPress={() => router.push(routes.readers(account, timelineKey.room_id, message.event_id))}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        style={styles.button}
-      >
-        <View style={styles.faces}>
-          {faces.map((person, index) => (
-            <View
-              key={person.id}
-              style={[styles.face, { borderColor: palette.bg, marginLeft: index === 0 ? 0 : -6 }]}
-            >
-              <Avatar
-                account={account}
-                id={person.id}
-                name={person.name}
-                media={person.avatar}
-                size={FACE}
-              />
-            </View>
-          ))}
-        </View>
-        {more > 0 ? (
-          <Text style={[font.meta, { color: palette.textMuted }]}>{`+${more}`}</Text>
-        ) : null}
-      </Touchable>
-    </View>
+    <Touchable
+      testID={`readers-${message.event_id}`}
+      onPress={() => router.push(routes.readers(account, timelineKey.room_id, message.event_id))}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={styles.button}
+    >
+      <View style={styles.faces}>
+        {faces.map((person, index) => (
+          <View
+            key={person.id}
+            style={[
+              styles.face,
+              { borderColor: palette.bg, marginLeft: index === 0 ? 0 : -FACE_OVERLAP },
+            ]}
+          >
+            <Avatar
+              account={account}
+              id={person.id}
+              name={person.name}
+              media={person.avatar}
+              size={FACE}
+            />
+          </View>
+        ))}
+      </View>
+      {more > 0 ? (
+        <Text style={[font.meta, { color: palette.textMuted }]}>{`+${more}`}</Text>
+      ) : null}
+    </Touchable>
   );
 }
 
 const styles = StyleSheet.create({
-  line: { flexDirection: 'row', justifyContent: 'flex-end' },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 4,
-    paddingVertical: 3,
+    paddingVertical: 2,
     borderRadius: 5,
   },
   faces: { flexDirection: 'row', alignItems: 'center' },

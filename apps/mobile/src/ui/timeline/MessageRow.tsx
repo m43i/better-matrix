@@ -20,7 +20,7 @@ import { CallCardView } from './CallCard';
 import { useTimelineContext } from './context';
 import { LinkCard, LinkedGif, QuoteBlock, Reactions, ThreadLink } from './Parts';
 import { PollCard } from './PollCard';
-import { ReadIndicator } from './ReadIndicator';
+import { ReadIndicator, READERS_COLUMN } from './ReadIndicator';
 import { RichText } from './RichText';
 
 export const AVATAR = 36;
@@ -133,10 +133,14 @@ export const MessageRow = memo(function MessageRow({
         {continues && status ? (
           <Text style={[font.meta, { color: palette.textMuted }]}>{status}</Text>
         ) : null}
-        {thread === null && !message.pending && (message.read_receipts?.length ?? 0) > 0 ? (
-          <ReadIndicator message={message} />
-        ) : null}
       </View>
+      {thread === null ? (
+        <View style={styles.readers}>
+          {!message.pending && (message.read_receipts?.length ?? 0) > 0 ? (
+            <ReadIndicator message={message} />
+          ) : null}
+        </View>
+      ) : null}
     </Pressable>
   );
 });
@@ -184,6 +188,13 @@ const styles = StyleSheet.create({
   },
   gutter: { width: AVATAR },
   content: { flex: 1, minWidth: 0, gap: 2 },
+  // Kept in every room message, filled or not, so a receipt never rewraps the message.
+  readers: {
+    width: READERS_COLUMN,
+    alignSelf: 'flex-end',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
   meta: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   name: { flexShrink: 1 },
   notice: { fontStyle: 'italic' },

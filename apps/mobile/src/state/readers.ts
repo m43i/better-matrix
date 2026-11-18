@@ -13,8 +13,8 @@ import { account as accountOf } from './selectors';
 import { roomKey, timelineId } from './timeline';
 import type { AccountData, State } from './types';
 
-/** The most pictures one message's read indicator shows. */
-export const READER_FACES = 4;
+/** The most pictures one message's read indicator shows: two, as a phone is narrow. */
+export const READER_FACES = 2;
 
 const NONE: ReadReceipt[] = [];
 

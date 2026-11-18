@@ -841,8 +841,9 @@ fn a_read_indicator_should_not_make_its_message_taller() {
     assert_eq!(height(&rt), with_readers);
 }
 
-/// Sets a one-line message from the demo message's sender after it, so its row continues the
-/// sender's run (no name line), with or without a reader; gives back the row's height.
+/// Sets a message long enough to wrap from the demo message's sender after it, so its row
+/// continues the sender's run (no name line), with or without a reader; gives back the row's
+/// height.
 fn set_continued_message(rt: &mut Runtime<State>, read: bool) -> f32 {
     rt.update(|s, tx| {
         let account = s.nav.account.clone().unwrap();
@@ -858,7 +859,7 @@ fn set_continued_message(rt: &mut Runtime<State>, read: bool) -> f32 {
             sender_id: demo::ADA.into(),
             sender_name: "Ada Lovelace".into(),
             timestamp_ms: demo::DEMO_DAY_MS + 13 * 3_600_000 + 60_000,
-            content: MessageContent::Text { body: "Ready to try.".into(), html: None },
+            content: MessageContent::Text { body: "Ready to try. ".repeat(40), html: None },
             read_receipts,
             ..Message::default()
         };
@@ -872,11 +873,22 @@ fn set_continued_message(rt: &mut Runtime<State>, read: bool) -> f32 {
 }
 
 #[test]
-fn a_read_indicator_should_not_make_a_continued_message_taller() {
+fn a_read_indicator_should_not_rewrap_a_long_message() {
     let mut rt = readers_runtime();
     let with_reader = set_continued_message(&mut rt, true);
     assert!(rt.find(&format!("readers-{}-$continued", demo::DEMO_THREAD.0)).is_some());
     assert_eq!(set_continued_message(&mut rt, false), with_reader);
+}
+
+#[test]
+fn a_narrow_timeline_should_show_fewer_reader_pictures() {
+    let overflow = |rt: &Runtime<State>| rt.elements().into_iter().any(|e| e.text.as_deref() == Some("+4"));
+    let mut rt = readers_runtime();
+    assert!(!overflow(&rt), "a wide timeline shows four of the six readers");
+    rt.set_viewport((760.0, 760.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.frame(1.0 / 60.0);
+    assert!(overflow(&rt), "a narrow timeline shows two of the six readers");
 }
 
 #[test]

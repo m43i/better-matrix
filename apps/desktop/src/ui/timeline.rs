@@ -50,6 +50,8 @@ pub struct Context<'a> {
     pub ringing: bool,
     /// The audio playing, if any.
     pub audio: Option<&'a AudioClip>,
+    /// The most reader pictures a read indicator shows: fewer in a narrow timeline.
+    pub reader_faces: usize,
 }
 
 impl<'a> Context<'a> {
@@ -68,6 +70,7 @@ impl<'a> Context<'a> {
             call_here: s.call_here().filter(|call| call.info.room_id == key.room_id).map(|call| call.info.via),
             ringing: s.rings.iter().any(|ring| ring.account == data.summary.id && ring.room_id == key.room_id),
             audio: s.audio.as_ref(),
+            reader_faces: crate::state::READER_FACES,
         }
     }
 
@@ -414,6 +417,14 @@ pub fn timeline(
     let (keys, shown) = (Rc::clone(&plan), Rc::clone(&plan));
     let (account, key, palette) = (cx.account.clone(), cx.key.clone(), *p);
     let (seen_account, seen_key) = (account.clone(), key.clone());
+    let reader_faces = rune::memo::layout_with(&format!("{view_key}-frame"), |frame| {
+        if frame[2] < super::readers::NARROW_TIMELINE {
+            super::readers::NARROW_FACES
+        } else {
+            crate::state::READER_FACES
+        }
+    })
+    .unwrap_or(crate::state::READER_FACES);
     let mut list = col()
         .w_full()
         .py(16.0)
@@ -425,7 +436,10 @@ pub fn timeline(
             move |s: &State, i| {
                 let Some((row_key, row)) = plan.get(i) else { return el() };
                 match row_context(s, &account, &key) {
-                    Some((cx, timeline)) => build_row(&cx, timeline, row_key, row, &palette),
+                    Some((mut cx, timeline)) => {
+                        cx.reader_faces = reader_faces;
+                        build_row(&cx, timeline, row_key, row, &palette)
+                    }
                     None => el().key(row_key.clone()),
                 }
             },
@@ -680,8 +694,14 @@ fn message_row(
         .opacity(if message.pending { 0.6 } else { 1.0 })
         .child(gutter)
         .child(content);
-    if !cx.in_thread() && !message.pending && !message.read_receipts.is_empty() {
-        row = row.child(super::readers::indicator(cx.data, cx.key, message, cx.media, p));
+    // Room messages keep a column at the right for who has read them, filled or not, so a
+    // receipt arriving never rewraps the message (threads track no receipts).
+    if !cx.in_thread() {
+        let mut readers = row_el().w(super::readers::column_width(cx.reader_faces)).self_end().justify_end();
+        if !message.pending && !message.read_receipts.is_empty() {
+            readers = readers.child(super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, p));
+        }
+        row = row.child(readers);
     }
     if pinned {
         row = row.fill(p.accent.alpha(0.06)).border_sides([0.0, 0.0, 0.0, 3.0], p.accent);

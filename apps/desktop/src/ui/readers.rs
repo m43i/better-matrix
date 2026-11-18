@@ -6,9 +6,23 @@ use rune::{Align, Cursor, El, ScrollSpec, Side, col, el, row, text};
 use super::components::{media_avatar, popover_panel, when};
 use super::theme::{Palette, font};
 use crate::i18n::tp;
-use crate::state::{AccountData, MediaCache, READER_FACES, ReaderMenu, State};
+use crate::state::{AccountData, MediaCache, ReaderMenu, State};
 
 const ROW: f32 = 52.0;
+/// A reader's picture in the indicator, and how much the next one overlaps it.
+const FACE: f32 = 18.0;
+const FACE_OVERLAP: f32 = 6.0;
+/// Room for the overflow count ("+99") after the pictures.
+const COUNT: f32 = 22.0;
+/// The pictures a narrow timeline shows, and the width below which it is narrow.
+pub const NARROW_FACES: usize = 2;
+pub const NARROW_TIMELINE: f32 = 640.0;
+
+/// The width every room message keeps free at its right for an indicator of up to `faces`
+/// pictures, whether or not it has one, so a receipt never rewraps or grows its message.
+pub fn column_width(faces: usize) -> f32 {
+    FACE + faces.saturating_sub(1) as f32 * (FACE - FACE_OVERLAP) + 6.0 + COUNT + 8.0
+}
 
 fn indicator_key(key: &TimelineKey, event_id: &str) -> String {
     format!("readers-{}-{event_id}", key.room_id)
@@ -18,15 +32,23 @@ fn reader_key(user_id: &str) -> String {
     format!("reader-{user_id}")
 }
 
-/// The read indicator, at the lower right of its message's row: beside the message rather than
-/// below it, so a receipt arriving never makes the message taller.
-pub fn indicator(account: &AccountData, key: &TimelineKey, message: &Message, media: &MediaCache, p: &Palette) -> El {
+/// The read indicator, up to `faces` pictures and how many more, for the column at the lower
+/// right of its message's row ([`column_width`]), no taller than a line of text.
+pub fn indicator(
+    account: &AccountData,
+    key: &TimelineKey,
+    message: &Message,
+    faces: usize,
+    media: &MediaCache,
+    p: &Palette,
+) -> El {
     let mut stack = row().center_y();
-    for (index, receipt) in message.read_receipts.iter().take(READER_FACES).enumerate() {
+    for (index, receipt) in message.read_receipts.iter().take(faces).enumerate() {
         let person = account.reader(&key.room_id, &receipt.user_id);
-        let face =
-            media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, 18.0).radius(9.0).border(1.5, p.bg);
-        stack = stack.child(if index == 0 { face } else { face.ml(-6.0) });
+        let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, FACE)
+            .radius(FACE / 2.0)
+            .border(1.5, p.bg);
+        stack = stack.child(if index == 0 { face } else { face.ml(-FACE_OVERLAP) });
     }
     let label = tp!("message.seen_by", message.read_receipts.len());
     let (target, event_id) = (key.clone(), message.event_id.clone());
@@ -44,12 +66,11 @@ pub fn indicator(account: &AccountData, key: &TimelineKey, message: &Message, me
         .label(label.clone())
         .help(label)
         .child(stack);
-    if message.read_receipts.len() > READER_FACES {
-        button = button.child(
-            text(format!("+{}", message.read_receipts.len() - READER_FACES)).font(font::META).color(p.text_muted),
-        );
+    if message.read_receipts.len() > faces {
+        button = button
+            .child(text(format!("+{}", message.read_receipts.len() - faces)).font(font::META).color(p.text_muted));
     }
-    button.self_end().on_press(move |s: &mut State| s.toggle_readers(&target, &event_id))
+    button.on_press(move |s: &mut State| s.toggle_readers(&target, &event_id))
 }
 
 pub fn panels(
