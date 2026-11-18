@@ -85,17 +85,18 @@ impl Account {
 
     /// Sets this session's presence to `status` now. A sync only marks a session online or away;
     /// one that syncs as offline is left as it was, so hiding needs this on every session. The
-    /// status message another client set is kept. A server that refuses only logs: syncs carry
-    /// the status anyway.
+    /// status message another client set is kept, so without reading it first nothing is sent.
+    /// A failure only logs: syncs carry the status, and a session that stops announcing goes
+    /// offline by itself (Synapse: 30 s after its last online or away sync).
     async fn announce_status(&self, status: Status) {
         let Some(me) = self.client().user_id() else { return };
-        let message = match self.client().send(get_presence::v3::Request::new(me.to_owned())).await {
-            Ok(current) => current.status_msg,
-            Err(_) => None,
+        let announced = async {
+            let current = self.client().send(get_presence::v3::Request::new(me.to_owned())).await?;
+            let mut request = set_presence::v3::Request::new(me.to_owned(), status.presence());
+            request.status_msg = current.status_msg;
+            self.client().send(request).await.map(|_| ())
         };
-        let mut request = set_presence::v3::Request::new(me.to_owned(), status.presence());
-        request.status_msg = message;
-        if let Err(error) = self.client().send(request).await {
+        if let Err(error) = announced.await {
             eprintln!("matrix-engine: could not set the presence of {}: {error}", self.id());
         }
     }
@@ -202,6 +203,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_status_message_that_cannot_be_read_should_not_be_overwritten() {
+        let server = crate::test_server::Server::new(|request| {
+            assert!(!(request.starts_with("PUT") && request.contains("/presence/")), "presence sent");
+            serde_json::json!({})
+        });
+        let account = Account::for_test(&server.url()).await;
+        account.set_status(Status::Away).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn a_status_a_sync_brings_should_be_announced_from_this_session_too() {
         let presence = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured = presence.clone();
@@ -210,6 +221,9 @@ mod tests {
                 let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
                 captured.lock().unwrap().push(serde_json::from_str::<serde_json::Value>(body).unwrap());
                 return serde_json::json!({});
+            }
+            if request.starts_with("GET") && request.contains("/presence/") {
+                return serde_json::json!({ "presence": "online" });
             }
             let mut response = crate::test_server::thread_response(request);
             if request.contains("/sync?") {

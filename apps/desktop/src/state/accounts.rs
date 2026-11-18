@@ -543,8 +543,11 @@ pub struct AccountData {
     pub search_usage: matrix_core::SearchUsage,
     /// Whether `sidebar` is the saved layout yet, rather than the empty one before it is read.
     pub sidebar_loaded: bool,
-    /// What others see of the user, as they set it; online until the engine reports.
+    /// What others see of the user, as they set it, including a choice still being saved;
+    /// online until the engine reports.
     pub status: matrix_core::Status,
+    /// The status as last saved: what a choice that fails to save falls back to.
+    pub saved_status: matrix_core::Status,
 }
 
 impl AccountData {
@@ -586,6 +589,7 @@ impl AccountData {
             search_usage: matrix_core::SearchUsage::default(),
             sidebar_loaded: false,
             status: matrix_core::Status::default(),
+            saved_status: matrix_core::Status::default(),
         }
     }
 
@@ -831,9 +835,18 @@ impl Accounts {
         }
     }
 
+    /// Shows a status the user chose, before it is saved.
     pub fn set_status(&mut self, id: &AccountId, status: matrix_core::Status) {
         if let Some(account) = self.get_mut(id) {
             account.status = status;
+        }
+    }
+
+    /// A status saved, here or on another session: shown, and what a failed choice falls back to.
+    pub fn status_saved(&mut self, id: &AccountId, status: matrix_core::Status) {
+        if let Some(account) = self.get_mut(id) {
+            account.status = status;
+            account.saved_status = status;
         }
     }
 

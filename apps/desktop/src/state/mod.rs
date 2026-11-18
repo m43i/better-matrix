@@ -477,12 +477,11 @@ enum Purpose {
         dimensions: Option<(u32, u32)>,
     },
     NotificationMode,
-    /// Setting the user's status to `chosen`; failing, the account shows `previous` again,
+    /// Setting the user's status to `chosen`; failing, the account shows its saved status again,
     /// unless another status was chosen or reported since.
     Status {
         account: AccountId,
         chosen: matrix_core::Status,
-        previous: matrix_core::Status,
     },
     Leave,
     Recover,
@@ -1139,7 +1138,7 @@ impl State {
             }
             Event::Sessions { account, sessions } => self.accounts.set_sessions(&account, sessions),
             Event::ContactDetails { account, contacts } => self.accounts.set_contacts(&account, contacts),
-            Event::Status { account, status } => self.accounts.set_status(&account, status),
+            Event::Status { account, status } => self.accounts.status_saved(&account, status),
             Event::SidebarLayout { account, layout } => {
                 let newer = self
                     .accounts
@@ -1590,9 +1589,12 @@ impl State {
             Purpose::Delete => self.notice = Some(tf!("notice.not_deleted", error = error)),
             Purpose::Logout => self.notice = Some(tf!("notice.sign_out", error = error)),
             Purpose::NotificationMode => self.notice = Some(tf!("notice.notification_setting", error = error)),
-            Purpose::Status { account, chosen, previous } => {
-                if self.accounts.get(&account).is_some_and(|data| data.status == chosen) {
-                    self.accounts.set_status(&account, previous);
+            Purpose::Status { account, chosen } => {
+                if let Some(data) = self.accounts.get(&account)
+                    && data.status == chosen
+                {
+                    let saved = data.saved_status;
+                    self.accounts.set_status(&account, saved);
                 }
                 self.notice = Some(tf!("notice.status", error = error));
             }
@@ -3096,13 +3098,12 @@ impl State {
     /// account menu.
     pub fn set_status(&mut self, account: &AccountId, status: matrix_core::Status) {
         self.popover = None;
-        let Some(previous) = self.accounts.get(account).map(|data| data.status) else { return };
-        if previous == status {
+        if self.accounts.get(account).is_none_or(|data| data.status == status) {
             return;
         }
         self.accounts.set_status(account, status);
         let command = Command::SetStatus { account: account.clone(), status };
-        self.dispatch(command, Purpose::Status { account: account.clone(), chosen: status, previous });
+        self.dispatch(command, Purpose::Status { account: account.clone(), chosen: status });
     }
 
     // ----- encryption and sessions ---------------------------------------------------------

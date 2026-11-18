@@ -38,11 +38,15 @@ Date: 2026-11-14
     `PUT /presence` on every session: `Command::SetStatus` writes the account data and then
     announces it, and every session announces a status that a sync brings. A sync that raced a
     change brings that change back, so its announcement lands after the stale sync. Announcing
-    keeps the status message another client set; a refused one only logs. Changes to one
-    account save and announce one at a time (`Account::status_writes`).
+    keeps the status message another client set, and sends nothing when it can't read it.
+    Changes to one account save and announce one at a time (`Account::status_writes`).
+  - A missed announcement (a failed request, the app quitting between a sync and its
+    announcement) is not retried: syncs carry Online and Away, and Synapse takes a session
+    offline 30 s after its last online or away sync (`presence_sync_online_timeout`), so Hidden
+    still holds, only later.
   - `Event::Status` reports it at start, after a change here, and when a sync brings one.
-  - The apps show the choice at once and, if saving fails, show the previous one with a notice,
-    unless another was chosen or reported since.
+  - The apps show the choice at once and, if saving fails, show the status last saved with a
+    notice, unless another was chosen or reported since.
   - Synapse turns Away (`unavailable`) back into online when the user sends a message, types or
     reads; the next sync or change sets it again. Hidden is not affected. Servers with presence
     switched off accept the status but show nobody's.

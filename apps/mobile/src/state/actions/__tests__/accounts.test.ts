@@ -464,6 +464,16 @@ describe('setStatus', () => {
     expect(status(store)).toBe('Hidden');
   });
 
+  it('should fall back to the saved status when every choice fails', async () => {
+    const { store, sent, finish } = withAda();
+    setStatus(store, ADA, 'Away');
+    setStatus(store, ADA, 'Hidden');
+
+    for (const { request } of sent) finish(request, 'offline');
+    await flush();
+    expect(status(store)).toBe('Online');
+  });
+
   it('should show the previous status and why when the server refuses', async () => {
     const { store, sent, finish } = withAda();
     setStatus(store, ADA, 'Away');
