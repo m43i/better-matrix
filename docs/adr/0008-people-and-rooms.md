@@ -74,24 +74,28 @@ Date: 2026-11-14
     Until a sync has brought the status it goes out offline, as the copy here may be stale and
     the status set elsewhere Hidden; the sync's announcement then sets the presence. The engine
     numbers messages as commands arrive and drops one whose task runs after a later one's; the
-    user's `Event::Presence` is sent under the same lock. Blank clears it; the apps trim it and
-    keep at most 100 characters.
+    user's `Event::Presence` is sent under the same lock. Saving gives up after 20 s, as syncs
+    wait for the lock. Blank clears it; the apps trim it and keep at most 100 characters.
   - Written in the account menu: its first row shows the message (× clears it); pressed, the
     menu becomes a field with an emoji button (the picker takes the menu's place and returns to
     it), four suggestions that set themselves at once, and Save. Escape stops writing. The
-    message shows at once and, if saving fails, falls back to the one last reported, with a
-    notice.
+    message shows at once, over what the engine reports, until the request saving the latest
+    choice finishes (`saving_status_message`); then it shows as last reported, so a failure falls
+    back with a notice and an earlier save finishing late changes nothing.
 - **Presence of others:** `Event::Presence` carries `PersonPresence` (presence and status
   message) for the people an account learns about: at start, from this device's store, for the
   user and the people in their direct chats, before syncing starts; then whoever's presence a
   sync brings (servers
-  send only changes after the first sync), and the user's after a status message is set.
+  send only changes after the first sync), and the user's after a status message is set. The
+  user's own is never taken from the store or a sync, which may predate a save made meanwhile:
+  it is read from the server under the status's lock, at start and when a sync brings a change.
   Member lists carry the same from the store and fill in only people not reported yet, as a
   report is newer. The desktop keeps one map per account.
   - Shown as a dot on avatars: green online, amber away, a hollow ring offline (as the user's
     own Hidden). No dot and no words when a server shares no presence; a presence the engine
     doesn't know carries no message either.
-  - Direct chats of two in the sidebar (one direct target, at most two members) get the dot, and the emoji their person's message
+  - Direct chats of two in the sidebar (one direct target, at most two joined or invited) get
+    the dot, and the emoji their person's message
     starts with when the row shows no notification icon; the header says "Away · message";
     the timeline puts the dot on a run's avatar (hover says it in words) and the emoji after
     the name; the member list puts the message under the name.

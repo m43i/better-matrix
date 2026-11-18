@@ -395,13 +395,16 @@ fn sort_members(people: &mut [RoomMember]) {
 }
 
 impl Account {
-    /// What the user and the people in their direct chats show, as this device stored it: what
-    /// the apps show until a sync brings changes.
+    /// What the people in the user's direct chats show, as this device stored it: what the apps
+    /// show until a sync brings changes. The user's own is read from the server instead
+    /// ([`Account::report_own_presence`]).
     pub(crate) async fn known_presence(&self) -> Vec<PersonPresence> {
-        let mut people: Vec<OwnedUserId> = self.user_id().ok().into_iter().collect();
+        let me = self.user_id().ok();
+        let mut people: Vec<OwnedUserId> = Vec::new();
         for room in self.client().joined_rooms() {
             for target in room.direct_targets() {
                 if let Some(user) = target.as_user_id()
+                    && me.as_deref() != Some(user)
                     && !people.iter().any(|known| known == user)
                 {
                     people.push(user.to_owned());

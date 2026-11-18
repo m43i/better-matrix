@@ -79,9 +79,9 @@ impl State {
         if data.status_message() == message.as_deref() {
             return;
         }
-        self.accounts.set_own_status_message(account, message.clone());
         let command = Command::SetStatusMessage { account: account.clone(), message: message.clone() };
-        self.dispatch(command, Purpose::StatusMessage { account: account.clone(), chosen: message });
+        let request = self.dispatch(command, Purpose::StatusMessage { account: account.clone() });
+        self.accounts.status_message_chosen(account, message, request);
     }
 
     /// An emoji picked for the message being written: it starts the message, replacing the one
@@ -91,16 +91,6 @@ impl State {
         if self.status_draft.is_some() {
             self.status_edit = TextEdit::new(with_emoji(&self.status_edit.text, emoji));
             self.status_edit.focused = true;
-        }
-    }
-
-    /// Saving `chosen` failed: the message last saved comes back, unless another was set or
-    /// reported since.
-    pub(super) fn status_message_failed(&mut self, account: &AccountId, chosen: Option<String>) {
-        let Some(data) = self.accounts.get(account) else { return };
-        if data.status_message() == chosen.as_deref() {
-            let saved = data.saved_status_message.clone();
-            self.accounts.set_own_status_message(account, saved);
         }
     }
 }

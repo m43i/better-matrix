@@ -487,11 +487,10 @@ enum Purpose {
         account: AccountId,
         chosen: matrix_core::Status,
     },
-    /// Setting the user's status message to `chosen`; failing, the one last saved shows again,
-    /// unless another message was set or reported since.
+    /// Setting the user's status message; once the latest one set finishes, the message shows as
+    /// the engine reports it.
     StatusMessage {
         account: AccountId,
-        chosen: Option<String>,
     },
     Leave,
     Recover,
@@ -1546,6 +1545,7 @@ impl State {
                     }
                 }
                 Purpose::ProfileName => self.profile.saving_name = false,
+                Purpose::StatusMessage { account } => self.accounts.status_message_saved(account, request),
                 Purpose::Audio { media, path } => {
                     if let Some(clip) = self.audio.as_mut().filter(|clip| clip.media == *media) {
                         let speaker = self.settings.devices.speaker.clone();
@@ -1615,8 +1615,8 @@ impl State {
                 }
                 self.notice = Some(tf!("notice.status", error = error));
             }
-            Purpose::StatusMessage { account, chosen } => {
-                self.status_message_failed(&account, chosen);
+            Purpose::StatusMessage { account } => {
+                self.accounts.status_message_saved(&account, request);
                 self.notice = Some(tf!("notice.status_message", error = error));
             }
             Purpose::Leave => self.notice = Some(tf!("notice.leave", error = error)),

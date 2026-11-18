@@ -1491,7 +1491,9 @@ fn a_section_should_count_its_rooms_mentions_while_collapsed() {
     });
     // Grace's two and Kai's one.
     assert!(rt.find("section-mentions-direct").is_some());
-    assert!(rt.elements().iter().any(|element| element.text.as_deref() == Some("3")));
+    let badge = rt.presented("section-mentions-direct").expect("the section's mention count").0;
+    let inside = |rect: [f32; 4]| rect[0] >= badge[0] && rect[0] + rect[2] <= badge[0] + badge[2] + 0.5;
+    assert!(rt.elements().iter().any(|element| element.text.as_deref() == Some("3") && inside(element.rect)));
     assert!(rt.find("room-!dm-grace:example.org").is_none(), "collapsed, its rooms are hidden");
 }
 
@@ -1531,8 +1533,10 @@ fn a_direct_chat_more_people_joined_should_show_no_presence() {
             spaces: account.spaces.clone(),
             invitations: Vec::new(),
         };
+        // Two joined, a third invited.
         for room in list.rooms.iter_mut().filter(|room| room.room_id == "!dm-kai:example.org") {
-            room.member_count = 3;
+            room.member_count = 2;
+            room.active_member_count = 3;
         }
         s.apply(Event::RoomsUpdated { account: ada, list }, &mut rune::Tx::default());
     });

@@ -146,13 +146,35 @@ impl Account {
         };
         let mut request = set_presence::v3::Request::new(me.clone(), presence.clone());
         request.status_msg = message.clone();
-        self.client().send(request).await?;
+        // Syncs wait for the lock: a server asking to retry later must not hold them up long.
+        tokio::time::timeout(ANNOUNCE_WAIT, self.client().send(request)).await.map_err(|_| Error::TimedOut)??;
         report(crate::PersonPresence {
             user_id: me.to_string(),
             presence: crate::people::presence(&presence),
             status_message: message,
         });
         Ok(())
+    }
+
+    /// `report`s what the user shows as the server says now: at start, and when a sync brings a
+    /// change. Read under the status's lock, as what a sync or this device's store says may be
+    /// older than a status message saved meanwhile. Nothing when the server can't be read.
+    pub(crate) async fn report_own_presence(&self, report: impl Fn(crate::PersonPresence)) {
+        let Ok(me) = self.user_id() else { return };
+        let _known = self.known().await;
+        let read = self.client().send(get_presence::v3::Request::new(me.clone()));
+        match tokio::time::timeout(ANNOUNCE_WAIT, read).await {
+            Ok(Ok(current)) => {
+                let presence = crate::people::presence(&current.presence);
+                let status_message = match presence {
+                    crate::Presence::Unknown => None,
+                    _ => crate::people::status_message(current.status_msg.as_deref()),
+                };
+                report(crate::PersonPresence { user_id: me.to_string(), presence, status_message });
+            }
+            Ok(Err(error)) => eprintln!("matrix-engine: could not read the presence of {}: {error}", self.id()),
+            Err(_) => eprintln!("matrix-engine: reading the presence of {} took too long", self.id()),
+        }
     }
 
     /// `report`s the status known now, if any: at start, in turn with saves and syncs.
@@ -562,6 +584,25 @@ mod tests {
         account.set_status_message(Some("   "), 1, report).await.unwrap();
         assert_eq!(server.sent("/presence/").last(), Some(&json!({ "presence": "online" })));
         assert_eq!(heard.lock().unwrap().pop().map(|me| me.status_message), Some(None));
+    }
+
+    #[tokio::test]
+    async fn the_users_own_presence_should_be_read_from_the_server() {
+        let server = Homeserver::new(Value::Null, Some("🌴 Out"), || true);
+        let account = server.account().await;
+        let (heard, report) = shown();
+        account.report_own_presence(report).await;
+        let me = heard.lock().unwrap().pop().unwrap();
+        assert_eq!((me.presence, me.status_message.as_deref()), (crate::Presence::Online, Some("🌴 Out")));
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_own_presence_should_report_nothing() {
+        let server = Homeserver::new(Value::Null, Some("🌴 Out"), || false);
+        let account = server.account().await;
+        let (heard, report) = shown();
+        account.report_own_presence(report).await;
+        assert!(heard.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

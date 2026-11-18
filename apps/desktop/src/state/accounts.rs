@@ -551,8 +551,11 @@ pub struct AccountData {
     /// What people show others (presence and status message), the user included, by user ID:
     /// as the engine reports it, and from member lists for whoever it hasn't reported yet.
     pub presence: HashMap<String, matrix_core::PersonPresence>,
-    /// The user's status message as last saved: what a message that fails to save falls back to.
+    /// The user's status message as the engine last reported it.
     pub saved_status_message: Option<String>,
+    /// The latest status message chosen while it is saved: until that request finishes, it shows
+    /// over what the engine reports.
+    pub saving_status_message: Option<matrix_core::RequestId>,
 }
 
 impl AccountData {
@@ -597,6 +600,7 @@ impl AccountData {
             saved_status: matrix_core::Status::default(),
             presence: HashMap::new(),
             saved_status_message: None,
+            saving_status_message: None,
         }
     }
 
@@ -870,18 +874,24 @@ impl Accounts {
     /// What people show now, as the engine reported it.
     pub fn set_presence(&mut self, id: &AccountId, people: Vec<matrix_core::PersonPresence>) {
         if let Some(account) = self.get_mut(id) {
-            for shown in people {
+            for mut shown in people {
                 if shown.user_id == account.summary.id.as_str() {
                     account.saved_status_message.clone_from(&shown.status_message);
+                    if account.saving_status_message.is_some()
+                        && let Some(chosen) = account.presence.get_mut(&shown.user_id)
+                    {
+                        shown.status_message = chosen.status_message.take();
+                    }
                 }
                 account.presence.insert(shown.user_id.clone(), shown);
             }
         }
     }
 
-    /// Shows the user's own status message as `message` at once, while it is saved.
-    pub fn set_own_status_message(&mut self, id: &AccountId, message: Option<String>) {
+    /// Shows the user's own status message as `message` at once, while `request` saves it.
+    pub fn status_message_chosen(&mut self, id: &AccountId, message: Option<String>, request: matrix_core::RequestId) {
         let Some(account) = self.get_mut(id) else { return };
+        account.saving_status_message = Some(request);
         let presence = match account.status {
             matrix_core::Status::Online => matrix_core::Presence::Online,
             matrix_core::Status::Away => matrix_core::Presence::Away,
@@ -894,6 +904,20 @@ impl Accounts {
             status_message: None,
         });
         shown.status_message = message;
+    }
+
+    /// Saving a status message finished: once the latest one has, the message shows as the
+    /// engine last reported it (the one saved, or the one before when saving failed).
+    pub fn status_message_saved(&mut self, id: &AccountId, request: matrix_core::RequestId) {
+        let Some(account) = self.get_mut(id) else { return };
+        if account.saving_status_message != Some(request) {
+            return;
+        }
+        account.saving_status_message = None;
+        let saved = account.saved_status_message.clone();
+        if let Some(me) = account.presence.get_mut(account.summary.id.as_str()) {
+            me.status_message = saved;
+        }
     }
 
     pub fn set_sidebar(&mut self, id: &AccountId, layout: matrix_core::SidebarLayout) {

@@ -182,6 +182,9 @@ pub enum Error {
     /// The server rejected a confirmation code.
     #[error("that code is not right")]
     WrongCode,
+    /// The server did not answer in time.
+    #[error("the server took too long to answer")]
+    TimedOut,
     /// The browser approval of an identity reset did not arrive in time.
     #[error("the reset was not approved in time; start it again")]
     ApprovalTimedOut,

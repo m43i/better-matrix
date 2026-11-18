@@ -244,10 +244,10 @@ fn room_row(
 }
 
 /// The one other person in a direct chat of two, when it is one: a chat marked direct with one
-/// person may since have been joined by more.
+/// person may since have been joined by, or invited, more.
 pub fn dm_partner(room: &RoomSummary) -> Option<&str> {
     match room.dm_users.as_slice() {
-        [partner] if room.kind == RoomKind::Direct && room.member_count <= 2 => Some(partner),
+        [partner] if room.kind == RoomKind::Direct && room.active_member_count <= 2 => Some(partner),
         _ => None,
     }
 }

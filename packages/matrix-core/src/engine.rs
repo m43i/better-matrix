@@ -2540,10 +2540,14 @@ impl State {
                         if !people.is_empty() {
                             sink.emit(Event::Presence { account: account.id().clone(), people });
                         }
+                        let own = account.report_own_presence(|me| {
+                            sink.emit(Event::Presence { account: account.id().clone(), people: vec![me] })
+                        });
                         tokio::join!(
                             profile,
                             layout,
                             status,
+                            own,
                             calls,
                             crate::security::watch(account.clone(), flows, Arc::clone(&sink)),
                             sync_loop(account.clone(), Arc::clone(&sink), feed),
@@ -2776,9 +2780,21 @@ async fn sync_until_error(
             {
                 sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
             }
-            let people = crate::people::synced_presence(&response.presence);
+            // The user's own, as the server says now: the sync may predate a status message saved
+            // meanwhile.
+            let me = account.client().user_id().map(ToString::to_string);
+            let (own, people): (Vec<_>, Vec<_>) = crate::people::synced_presence(&response.presence)
+                .into_iter()
+                .partition(|shown| me.as_deref() == Some(shown.user_id.as_str()));
             if !people.is_empty() {
                 sink.emit(Event::Presence { account: account.id().clone(), people });
+            }
+            if !own.is_empty() {
+                account
+                    .report_own_presence(|me| {
+                        sink.emit(Event::Presence { account: account.id().clone(), people: vec![me] })
+                    })
+                    .await;
             }
             let report = |status| sink.emit(Event::Status { account: account.id().clone(), status });
             account.follow_status(&response.account_data, &sent, report).await;

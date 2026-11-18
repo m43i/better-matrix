@@ -686,6 +686,49 @@ fn status_messages_that_all_fail_should_fall_back_to_the_saved_one() {
 }
 
 #[test]
+fn an_earlier_save_reported_while_a_later_one_saves_should_not_replace_it() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.set_status_message(&id, "A");
+    s.set_status_message(&id, "B");
+    let me = person_presence(id.as_str(), matrix_core::Presence::Online, Some("A"));
+    apply(&mut s, Event::Presence { account: id.clone(), people: vec![me] });
+    assert_eq!(s.accounts.get(&id).and_then(|a| a.status_message()), Some("B"));
+    s.set_status_message(&id, "A");
+    assert_eq!(drain(&mut commands).len(), 3, "choosing A again is saved again");
+}
+
+#[test]
+fn an_earlier_save_failing_should_not_undo_a_later_choice() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.set_status_message(&id, "A");
+    s.set_status_message(&id, "B");
+    s.set_status_message(&id, "A");
+    let (first, _) = commands.try_next().unwrap();
+    apply(&mut s, Event::Finished { request: first, result: Err("offline".into()) });
+    assert_eq!(s.accounts.get(&id).and_then(|a| a.status_message()), Some("A"));
+    assert_eq!(s.accounts.get(&id).and_then(|a| a.saving_status_message), drain(&mut commands).last().map(|(r, _)| *r));
+}
+
+#[test]
+fn the_latest_save_finishing_should_show_the_message_as_reported() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.set_status_message(&id, "Out");
+    let (request, _) = commands.try_next().unwrap();
+    let me = person_presence(id.as_str(), matrix_core::Presence::Online, Some("Out"));
+    apply(&mut s, Event::Presence { account: id.clone(), people: vec![me] });
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    let data = s.accounts.get(&id);
+    assert_eq!(data.and_then(|a| a.status_message()), Some("Out"));
+    assert!(data.is_some_and(|a| a.saving_status_message.is_none()));
+}
+
+#[test]
 fn escape_while_writing_a_status_message_should_keep_the_account_menu_open() {
     let (mut s, _) = state();
     let id = AccountId::new("@a:example.org");
