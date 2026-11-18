@@ -15,7 +15,13 @@ import { routes } from '../../routes';
 import { font } from '../../theme/palette';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
+import { useMediaBox } from './Attachments';
 import { useTimelineContext } from './context';
+
+const PADDING = 12;
+
+/** The width a call card's picture and words keep beside Join before Join wraps under them. */
+const HEAD_MIN = 120;
 
 export function CallCardView({ card, latest }: { card: Card; latest: boolean }) {
   const palette = usePalette();
@@ -36,6 +42,9 @@ export function CallCardView({ card, latest }: { card: Card; latest: boolean }) 
     s.call.rings.some((r) => r.account === account && r.room_id === roomId),
   );
 
+  // The picture and words keep a readable width, or all the card has.
+  const headMin = Math.max(0, Math.min(HEAD_MIN, useMediaBox().width - 2 * (PADDING + 1)));
+
   if (!room) return null;
   const status = callStatus(card, room, { latest, callHere, ringing });
 
@@ -54,7 +63,7 @@ export function CallCardView({ card, latest }: { card: Card; latest: boolean }) 
         },
       ]}
     >
-      <View style={styles.head}>
+      <View style={[styles.head, { minWidth: headMin }]}>
         <View
           style={[
             styles.tile,
@@ -103,7 +112,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     alignItems: 'center',
     gap: 12,
-    padding: 12,
+    padding: PADDING,
     borderRadius: 10,
     borderWidth: 1,
   },
@@ -116,7 +125,6 @@ const styles = StyleSheet.create({
     gap: 12,
     flexGrow: 1,
     flexShrink: 1,
-    minWidth: 120,
   },
   words: { flex: 1, gap: 2 },
   joined: { flexShrink: 1, textAlign: 'right' },
