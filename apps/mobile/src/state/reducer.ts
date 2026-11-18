@@ -129,6 +129,27 @@ export function updateAccount(
   return { ...state, accounts };
 }
 
+/**
+ * `account` without what it fetched about one room for screens over it (its members, threads,
+ * files and pins); `account` itself when it holds none of them. The screens ask afresh.
+ */
+export function forgetRoomDetails(account: AccountData, roomId: string): AccountData {
+  const members = withoutKey(account.members, roomId);
+  const threads = withoutKey(account.threads, roomId);
+  const files = withoutKey(account.files, roomId);
+  const pins = withoutKey(account.pins, roomId);
+
+  if (
+    members === account.members &&
+    threads === account.threads &&
+    files === account.files &&
+    pins === account.pins
+  )
+    return account;
+
+  return { ...account, members, threads, files, pins };
+}
+
 /** `state` with one timeline changed by `change`. */
 export function updateTimeline(
   state: State,

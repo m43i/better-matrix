@@ -14,7 +14,7 @@ import { memo, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
-import { fetchGif, fetchLinkPreview } from '../../state/actions/core';
+import { wantGif, wantLinkPreview } from '../../state/actions/core';
 import { react } from '../../state/actions/timeline';
 import { useAppStore, useStore } from '../../state/react';
 import { Lru } from '../../state/lru';
@@ -167,7 +167,7 @@ export function LinkCard({ url }: { url: string }) {
   const store = useAppStore();
   const { account } = useTimelineContext();
   const preview = useStore((s) => s.linkPreviews[previewKey(account, url)]);
-  useEffect(() => fetchLinkPreview(store, account, url), [store, account, url]);
+  useEffect(() => wantLinkPreview(store, account, url), [store, account, url]);
   const image = useMedia(account, preview?.image?.[0] ?? null, CARD_IMAGE);
   // The picture shows only where it leaves the words a readable width beside it.
   const words = useContentWidth() - 2 * 12 - 3 - 2 * 12 - CARD_IMAGE_SIDE;
@@ -231,7 +231,7 @@ export function LinkedGif({ url }: { url: string }) {
   const [measured, setMeasured] = useState<{ url: string; aspect: number } | null>(null);
   const aspect = measured?.url === url ? measured.aspect : (gifAspects.get(url) ?? GIF_ASPECT);
   const width = Math.min(GIF_WIDTH, useContentWidth());
-  useEffect(() => fetchGif(store, url), [store, url]);
+  useEffect(() => wantGif(store, url), [store, url]);
 
   return (
     <Pressable

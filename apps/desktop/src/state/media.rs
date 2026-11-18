@@ -44,7 +44,7 @@ pub struct MediaCache {
     used: BTreeMap<u64, MediaRef>,
     /// The next use's place in `used`.
     uses: u64,
-    /// Images eviction takes only once nothing else is left: the pictures lists show.
+    /// Images eviction leaves, and the budget doesn't count: the pictures lists show.
     kept: HashSet<MediaRef>,
     /// Ready entries still counted at their estimate.
     unmeasured: Vec<MediaRef>,
@@ -286,18 +286,34 @@ impl MediaCache {
         self.uses
     }
 
-    /// Past the budget, lets go of the least recently used images, those not kept first.
+    /// Past the budget, lets go of the least recently used images but the newest. Kept images
+    /// (the pictures lists show) stay and don't count: they are bounded by the lists, and
+    /// letting them go would only fetch them again when the lists next change, over and over
+    /// once they alone outgrew the budget. The budget bounds everything else.
     fn evict(&mut self) {
-        while self.bytes > BUDGET_BYTES && self.used.len() > 1 {
-            let oldest = self
-                .used
-                .iter()
-                .find(|(_, media)| !self.kept.contains(*media))
-                .or_else(|| self.used.iter().next())
-                .map(|(used, _)| *used);
-            let Some(media) = oldest.and_then(|used| self.used.remove(&used)) else { break };
+        if self.bytes <= BUDGET_BYTES {
+            return;
+        }
+        let kept: usize = self
+            .kept
+            .iter()
+            .filter_map(|media| match self.entries.get(media) {
+                Some(Entry::Ready { bytes, .. }) => Some(*bytes),
+                _ => None,
+            })
+            .sum();
+        let mut others = self.bytes - kept;
+        while others > BUDGET_BYTES {
+            let mut unkept = self.used.iter().filter(|(_, media)| !self.kept.contains(*media));
+            let Some((&oldest, _)) = unkept.next() else { break };
+            // The newest stays even if it alone outgrows the budget.
+            if unkept.next().is_none() {
+                break;
+            }
+            let Some(media) = self.used.remove(&oldest) else { break };
             if let Some(Entry::Ready { bytes, .. }) = self.entries.remove(&media) {
                 self.bytes -= bytes;
+                others -= bytes;
             }
         }
     }
@@ -339,10 +355,20 @@ impl MediaCache {
         }
     }
 
-    /// The images that stay while anything else can go: the pictures lists show (rooms, spaces,
-    /// invitations, accounts), which are touched only when those lists change.
+    /// The images that stay outside the budget: the pictures lists show (rooms, spaces,
+    /// invitations, accounts). Those no longer kept count again, and may go.
     pub fn keep(&mut self, kept: HashSet<MediaRef>) {
         self.kept = kept;
+        self.evict();
+    }
+
+    /// Lets go of `media` as eviction would, for tests of what comes back after.
+    #[cfg(test)]
+    pub fn forget(&mut self, media: &MediaRef) {
+        if let Some(Entry::Ready { bytes, used, .. }) = self.entries.remove(media) {
+            self.bytes -= bytes;
+            self.used.remove(&used);
+        }
     }
 }
 
@@ -374,15 +400,39 @@ mod tests {
         assert_eq!(kept, [true, false, true]);
     }
 
+    fn here(cache: &MediaCache, ids: &[&str]) -> Vec<bool> {
+        ids.iter().map(|id| cache.entries.contains_key(&MediaRef::opaque(id))).collect()
+    }
+
     #[test]
     fn making_room_should_keep_the_pictures_lists_show() {
         let mut cache = cache();
         cache.keep([MediaRef::opaque("a")].into_iter().collect());
-        load(&mut cache, "a");
-        load(&mut cache, "b");
-        load(&mut cache, "c");
-        let kept: Vec<bool> = ["a", "b", "c"].map(|id| cache.entries.contains_key(&MediaRef::opaque(id))).into();
-        assert_eq!(kept, [true, false, true]);
+        for id in ["a", "b", "c", "d"] {
+            load(&mut cache, id);
+        }
+        assert_eq!(here(&cache, &["a", "b", "c", "d"]), [true, false, true, true]);
+    }
+
+    #[test]
+    fn the_pictures_lists_show_should_stay_though_they_alone_outgrow_the_budget() {
+        let mut cache = cache();
+        cache.keep(["a", "b", "c"].map(MediaRef::opaque).into_iter().collect());
+        for id in ["a", "b", "c", "d"] {
+            load(&mut cache, id);
+        }
+        assert_eq!(here(&cache, &["a", "b", "c", "d"]), [true; 4]);
+    }
+
+    #[test]
+    fn pictures_no_longer_listed_should_count_against_the_budget_again() {
+        let mut cache = cache();
+        cache.keep(["a", "b", "c"].map(MediaRef::opaque).into_iter().collect());
+        for id in ["a", "b", "c"] {
+            load(&mut cache, id);
+        }
+        cache.keep(HashSet::new());
+        assert_eq!(here(&cache, &["a", "b", "c"]), [false, true, true]);
     }
 
     #[test]

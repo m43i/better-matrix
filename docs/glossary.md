@@ -196,6 +196,12 @@ See [ADR 0007](adr/0007-composer-and-media.md).
 that finishes after its close lands here too. See
 [ADR 0006](adr/0006-timelines.md) and [ADR 0002](adr/0002-engine-and-desktop-state.md).
 
+**Cold timeline**
+: A closed timeline past the engine's warm set, which the engine let go of. The mobile store keeps
+it trimmed to its newest entries (`coldTimeline`), at least its newest message for the room list,
+and forgets the room's members, threads, files and pins once no timeline of the room is open or
+warm. See [ADR 0010](adr/0010-mobile.md).
+
 **On screen**
 : The timeline rows the view shows, plus ten either side (`State::rows_shown`). Only their
 pictures, previews and GIFs load; before the view reports, a timeline's newest 30 entries
@@ -534,6 +540,11 @@ account signed in or out).
 **Bridge**
 : The engine for the phones: `matrix-ffi`'s UniFFI object that takes commands and gives events
 as JSON, with media handed over as files (`Bridge`, `BridgeEvent`). See
+[ADR 0010](adr/0010-mobile.md).
+
+**Event batch**
+: Events the bridge delivers to JavaScript together in one call (`events::next_batch`), applied by
+the store with one notification to the views (`Engine.subscribeBatches`). See
 [ADR 0010](adr/0010-mobile.md).
 
 **Launch handoff**

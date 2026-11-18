@@ -104,11 +104,26 @@ Date: 2026-11-16
   notifications to React are batched per burst of events. Events that repeat what the store
   holds keep its objects (a re-sent room list, unchanged call levels), so memoised views don't
   redraw. A closed timeline keeps its entries while the engine keeps it warm (eight per
-  account); after that only its newest page, since opening it again starts from the engine's
-  newest anyway. Selectors run on every notification, so they stay cheap: what they derive from
-  a list is kept per list (the scope helpers in `state/sections.ts`, the badge), the room lists
-  select only the fields they draw (`activeRoomList`), and what every row needs is read once and
-  handed down by context (the palette from `PaletteProvider` at the root, a timeline's pins).
+  account); after that, a cold timeline, only its newest page, since opening it again starts
+  from the engine's newest anyway, and once no timeline of its room is open or warm the room's
+  members, threads, files and pins go too (`forgetRoomDetails`): every screen showing them
+  (room info, readers, invite, a member, pinned messages) is pushed over the room and asks for
+  them when it mounts. Selectors run on every notification, so they stay cheap: what they derive
+  from a list is kept per list (the scope helpers in `state/sections.ts`, the badge), the room
+  lists select only the fields they draw (`activeRoomList`), of the timelines only each room's
+  newest message as the list shows it (`newestMessages`, the same object until one changes), and
+  what every row needs is read once and handed down by context (the palette from
+  `PaletteProvider` at the root, a timeline's pins).
+- **Media, link cards and GIFs are wanted by the views showing them** (`Store.want`, released on
+  unmount). Each is fetched once a run; one that failed (the fetch, or writing its file) waits as
+  the desktop's do (`state/retry.ts`, the desktop's `Retries`: 5 s, doubling, up to 5 minutes;
+  the 512 failures to be tried again last are remembered), and the store fetches it again when
+  the wait is over if a view still wants it, else the next view that does. Views keep no timers
+  of their own, so a list of pictures from a server that is down costs one fetch per picture per
+  wait.
+- **The engine hears events in batches** (`Engine.subscribeBatches`): each listener hears a
+  whole event batch before the next listener hears any of it. The store is the only listener in
+  the app (the demo engine adds one), so nothing depends on listeners' interleaving.
 - **Design:** the desktop's palette roles (`ui/theme.rs`) as sRGB in `src/theme/palette.ts`,
   its type scale and identity colours; icons are SF Symbols on iOS and Material Symbols on
   Android through one name table (`src/ui/icons.tsx`) mirroring the desktop's icon set.

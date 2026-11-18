@@ -4621,6 +4621,55 @@ fn directory_results_should_request_their_avatar_as_soon_as_they_arrive() {
     )));
 }
 
+/// An account whose one room shows a picture, fetched and loaded; returns that picture.
+fn listed_picture(s: &mut State, commands: &mut DetachedCommands, id: &AccountId) -> MediaRef {
+    s.media.attach(Arc::new(|| {}));
+    let avatar = MediaRef::opaque("room-avatar");
+    apply(s, Event::AccountAdded(account(id.as_str())));
+    let list = |unread| RoomList {
+        rooms: vec![RoomSummary { avatar: Some(avatar.clone()), unread, ..room("!one:x") }],
+        spaces: Vec::new(),
+        invitations: Vec::new(),
+    };
+    apply(s, Event::RoomsUpdated { account: id.clone(), list: list(1) });
+    let (request, _) = drain(commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::FetchMedia { media, .. } if media == &avatar))
+        .expect("the listed picture to be fetched");
+    let bytes: Arc<[u8]> = Arc::from(&b"an avatar"[..]);
+    apply(s, Event::MediaLoaded { request, media: avatar.clone(), size: AVATAR_SIZE, bytes });
+    avatar
+}
+
+fn change_the_room_list(s: &mut State, account: &AccountId, avatar: &MediaRef) {
+    let room = RoomSummary { avatar: Some(avatar.clone()), unread: 5, ..room("!one:x") };
+    let list = RoomList { rooms: vec![room], spaces: Vec::new(), invitations: Vec::new() };
+    apply(s, Event::RoomsUpdated { account: account.clone(), list });
+}
+
+fn fetches(commands: &mut DetachedCommands, avatar: &MediaRef) -> bool {
+    all_commands(commands).iter().any(|command| matches!(command, Command::FetchMedia { media, .. } if media == avatar))
+}
+
+#[test]
+fn a_list_change_showing_the_same_pictures_should_not_fetch_them_again() {
+    let (mut s, mut commands) = state();
+    let account = AccountId::new("@a:example.org");
+    let avatar = listed_picture(&mut s, &mut commands, &account);
+    change_the_room_list(&mut s, &account, &avatar);
+    assert!(!fetches(&mut commands, &avatar));
+}
+
+#[test]
+fn a_listed_picture_let_go_of_should_be_fetched_again_when_the_lists_change() {
+    let (mut s, mut commands) = state();
+    let account = AccountId::new("@a:example.org");
+    let avatar = listed_picture(&mut s, &mut commands, &account);
+    s.media.forget(&avatar);
+    change_the_room_list(&mut s, &account, &avatar);
+    assert!(fetches(&mut commands, &avatar));
+}
+
 fn read_member(id: &str, name: &str) -> matrix_core::RoomMember {
     matrix_core::RoomMember {
         person: matrix_core::Person { id: id.into(), name: name.into(), avatar: None },

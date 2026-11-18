@@ -13,7 +13,7 @@ import {
 } from '../core';
 import { timeline } from '../../selectors';
 import { Store } from '../../store';
-import { roomKey } from '../../timeline';
+import { roomKey, threadKey } from '../../timeline';
 import { ADA, entry, person, roomEventEntry, summary, timelineOf } from '../../../test/fixtures';
 
 function setup() {
@@ -192,6 +192,70 @@ describe('closed timelines', () => {
     const cold = coldTimeline(timelineOf([...entries(10), ...events]));
     expect(cold.entries[0]?.id).toBe('$9');
     expect(cold.entries).toHaveLength(COLD_ENTRIES + 6);
+  });
+
+  const MEMBERS = {
+    people: [],
+    complete: true,
+    can_invite: false,
+    own_level: 0,
+    can_kick: false,
+    can_ban: false,
+    can_set_roles: false,
+  };
+
+  /** Room `i` as screens over it fetched it: its members, threads, files and pins. */
+  function detailed({ engine }: ReturnType<typeof setup>, i: number) {
+    const room_id = `!${i}:x`;
+    engine.emitAll([
+      { type: 'Members', data: { request: null, account: ADA, room_id, members: MEMBERS } },
+      { type: 'Threads', data: { account: ADA, room_id, threads: [] } },
+      { type: 'Files', data: { account: ADA, room_id, files: [] } },
+      { type: 'PinnedMessages', data: { account: ADA, room_id, messages: [] } },
+    ]);
+  }
+
+  const detailsOf = (app: ReturnType<typeof setup>, i: number) => {
+    const account = app.store.getState().accounts[0]!;
+    const room = `!${i}:x`;
+
+    return [
+      room in account.members,
+      room in account.threads,
+      room in account.files,
+      room in account.pins,
+    ];
+  };
+
+  it('a room whose timelines all went cold should forget its members, threads, files and pins', () => {
+    const app = setup();
+    detailed(app, 0);
+
+    for (let i = 0; i <= WARM_TIMELINES; i++) visit(app, i);
+    expect(detailsOf(app, 0)).toEqual([false, false, false, false]);
+  });
+
+  it('a room whose thread is still warm should keep its details', () => {
+    const app = setup();
+    detailed(app, 0);
+    visit(app, 0);
+    openTimeline(app.store, ADA, threadKey('!0:x', '$root'));
+    closeTimeline(app.store, ADA, threadKey('!0:x', '$root'));
+
+    for (let i = 1; i < WARM_TIMELINES; i++) visit(app, i);
+    expect(entriesOf(app, 0)).toHaveLength(COLD_ENTRIES);
+    expect(detailsOf(app, 0)).toEqual([true, true, true, true]);
+  });
+
+  it('a room on screen should keep its details when its thread goes cold', () => {
+    const app = setup();
+    detailed(app, 0);
+    openTimeline(app.store, ADA, roomKey('!0:x'));
+    openTimeline(app.store, ADA, threadKey('!0:x', '$root'));
+    closeTimeline(app.store, ADA, threadKey('!0:x', '$root'));
+
+    for (let i = 1; i <= WARM_TIMELINES; i++) visit(app, i);
+    expect(detailsOf(app, 0)).toEqual([true, true, true, true]);
   });
 
   it('a short timeline should stay as it is', () => {

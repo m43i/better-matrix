@@ -168,10 +168,13 @@ screenshots, voice memos, and images and PDFs that open large.
   used; what shows counts as used each time the rows on screen are fetched for
   (`MediaCache::touch`). The SDK caches downloads on disk.
   - The pictures lists show (accounts, and the active account's rooms, spaces and invitations)
-    are asked for only when those lists change (`Accounts::revision`, then a fingerprint of the
-    pictures), not on every event, and eviction takes them last (`MediaCache::keep`). If they
-    alone outgrow the budget, those let go of come back when the lists change, rather than being
-    fetched and decoded again on every event.
+    are asked for only when those lists change (`Accounts::revision`), not on every event. A
+    change that shows the same pictures (a fingerprint of them), all of them here, asks for
+    none; one not here (a failed one whose wait is over) is asked for again.
+  - Eviction leaves those pictures, and the budget doesn't count them (`MediaCache::keep`):
+    they are bounded by the lists (a 128×128 thumbnail each), and letting them go when they
+    alone outgrew the budget would fetch and evict them again on every list change. The budget
+    bounds the rest. Pictures a list no longer shows count again and may go.
   - An image whose download failed shows as failed while a retry loads, so its row keeps its
     height. The 512 failures to be tried again last are remembered (`FAILURES_KEPT`).
   - An image counts at the size fetched (a thumbnail, the sender's own included), not the

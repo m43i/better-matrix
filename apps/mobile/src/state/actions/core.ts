@@ -7,7 +7,7 @@ import type {
   TimelineKey,
 } from '@better-matrix/matrix-native/types';
 
-import { mediaKey, previewKey, updateAccount, updateTimeline } from '../reducer';
+import { forgetRoomDetails, mediaKey, previewKey, updateAccount, updateTimeline } from '../reducer';
 import type { CommandFailed } from '../requests';
 import type { Settings } from '../settings';
 import type { Store } from '../store';
@@ -47,7 +47,9 @@ export function cyclePlaybackSpeed(store: Store): void {
  * shows why where its history would load, with Try again (`retryHistory`).
  */
 export function openTimeline(store: Store, account: AccountId, key: TimelineKey): void {
-  closedOf(store, account).delete(timelineId(key));
+  const followed = followedOf(store, account);
+  followed.warm.delete(timelineId(key));
+  followed.open.set(timelineId(key), key.room_id);
   store.update((s) =>
     updateTimeline(s, account, key, (t) => ({
       ...t,
@@ -89,45 +91,68 @@ export const WARM_TIMELINES = 8;
 /** The most entries a timeline the engine let go of keeps: one page of history. */
 export const COLD_ENTRIES = 30;
 
-/** Each account's closed timelines, by `timelineId`, closed longest ago first, per store. */
-const closed = new WeakMap<Store, Map<AccountId, Set<string>>>();
+/**
+ * An account's open timelines, and its closed ones the engine keeps warm (closed longest ago
+ * first), each by `timelineId` with its room's ID.
+ */
+interface Followed {
+  open: Map<string, string>;
+  warm: Map<string, string>;
+}
 
-function closedOf(store: Store, account: AccountId): Set<string> {
-  const accounts = closed.get(store) ?? new Map<AccountId, Set<string>>();
-  closed.set(store, accounts);
-  const ids = accounts.get(account) ?? new Set<string>();
-  accounts.set(account, ids);
+const followed = new WeakMap<Store, Map<AccountId, Followed>>();
 
-  return ids;
+function followedOf(store: Store, account: AccountId): Followed {
+  const accounts = followed.get(store) ?? new Map<AccountId, Followed>();
+  followed.set(store, accounts);
+  const timelines = accounts.get(account) ?? { open: new Map(), warm: new Map() };
+  accounts.set(account, timelines);
+
+  return timelines;
+}
+
+/** Whether a timeline of `roomId` (its main one or a thread) is open or warm. */
+function roomFollowed({ open, warm }: Followed, roomId: string): boolean {
+  for (const room of open.values()) if (room === roomId) return true;
+
+  for (const room of warm.values()) if (room === roomId) return true;
+
+  return false;
 }
 
 /**
  * Stops following a timeline; the engine keeps it warm, and the store its entries. Once the
- * engine lets it go, closed more than `WARM_TIMELINES` timelines ago, the store keeps only its
- * newest entries (`coldTimeline`): opening it again starts over from the engine's newest anyway.
+ * engine lets it go, closed more than `WARM_TIMELINES` timelines ago, it is a cold timeline: the
+ * store keeps only its newest entries (`coldTimeline`), since opening it again starts over from
+ * the engine's newest anyway. Once no timeline of its room is open or warm, the room's members,
+ * threads, files and pins go too (`forgetRoomDetails`): the screens showing them ask afresh.
  */
 export function closeTimeline(store: Store, account: AccountId, key: TimelineKey): void {
   store.send({ type: 'CloseTimeline', data: { account, key } }, { quiet: true });
 
   const id = timelineId(key);
-  const ids = closedOf(store, account);
-  ids.delete(id);
+  const timelines = followedOf(store, account);
+  timelines.open.delete(id);
+  timelines.warm.delete(id);
 
   // One that never opened isn't kept warm.
   if (timelineOf(store, account, id)?.openFailed) return;
-  ids.add(id);
+  timelines.warm.set(id, key.room_id);
 
-  for (const cold of ids) {
-    if (ids.size <= WARM_TIMELINES) break;
-    ids.delete(cold);
+  for (const [cold, roomId] of timelines.warm) {
+    if (timelines.warm.size <= WARM_TIMELINES) break;
+    timelines.warm.delete(cold);
+    const forget = !roomFollowed(timelines, roomId);
+
     store.update((s) =>
       updateAccount(s, account, (a) => {
         const timeline = a.timelines[cold];
+        const kept = timeline && coldTimeline(timeline);
 
-        if (!timeline) return a;
-        const kept = coldTimeline(timeline);
+        const trimmed =
+          kept && kept !== timeline ? { ...a, timelines: { ...a.timelines, [cold]: kept } } : a;
 
-        return kept === timeline ? a : { ...a, timelines: { ...a.timelines, [cold]: kept } };
+        return forget ? forgetRoomDetails(trimmed, roomId) : trimmed;
       }),
     );
   }
@@ -211,30 +236,33 @@ export function mayMarkFullyRead(store: Store, account: AccountId, key: Timeline
   return boundary?.kind === 'absent' || boundary?.kind === 'loaded';
 }
 
-/** Fetches media once; the file shows up in `State.media` (see `useMedia`). */
-export function fetchMedia(
+/**
+ * Wants media fetched while a view shows it (`Store.want`); the file shows up in `State.media`
+ * (see `useMedia`). The returned function says the view no longer wants it.
+ */
+export function wantMedia(
   store: Store,
   account: AccountId,
   media: MediaRef,
   size: MediaSize,
-): void {
-  store.fetchOnce(`media:${mediaKey(media, size)}`, {
+): () => void {
+  return store.want(`media:${mediaKey(media, size)}`, {
     type: 'FetchMedia',
     data: { account, media, size },
   });
 }
 
-/** Fetches a link's card once. */
-export function fetchLinkPreview(store: Store, account: AccountId, url: string): void {
-  store.fetchOnce(`preview:${previewKey(account, url)}`, {
+/** Wants a link's card fetched while a view shows it (`Store.want`). */
+export function wantLinkPreview(store: Store, account: AccountId, url: string): () => void {
+  return store.want(`preview:${previewKey(account, url)}`, {
     type: 'PreviewLink',
     data: { account, url },
   });
 }
 
-/** Fetches a linked GIF once. */
-export function fetchGif(store: Store, url: string): void {
-  store.fetchOnce(`gif:${url}`, { type: 'FetchGif', data: { url } });
+/** Wants a linked GIF fetched while a view shows it (`Store.want`). */
+export function wantGif(store: Store, url: string): () => void {
+  return store.want(`gif:${url}`, { type: 'FetchGif', data: { url } });
 }
 
 /** Forgets a notice once it was shown. */

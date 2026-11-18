@@ -4,12 +4,12 @@
 
 import type { MemberRole, Moderation } from '@better-matrix/matrix-native/types';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../i18n';
 import { routes } from '../routes';
-import { invite, moderate, openDirectChat } from '../state/actions/people';
+import { invite, listAllMembers, moderate, openDirectChat } from '../state/actions/people';
 import { asksFirst, inviteTargets, may, memberOf, rolesOffered, ROLES } from '../state/people';
 import { shallow, useAppStore, useStore } from '../state/react';
 import { account as accountOf } from '../state/selectors';
@@ -37,6 +37,8 @@ export default function MemberScreen() {
   const rooms = useStore((s) => inviteTargets(accountOf(s, account)?.rooms ?? [], roomId), shallow);
   const [open, setOpen] = useState<Open>('none');
   const [busy, setBusy] = useState<'chat' | MemberRole | null>(null);
+  // A mention opens this sheet straight from the timeline, before anything listed the members.
+  useEffect(() => listAllMembers(store, account, roomId), [store, account, roomId]);
   const member = memberOf(members, userId);
 
   if (!members || !member) return null;

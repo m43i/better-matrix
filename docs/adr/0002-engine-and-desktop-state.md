@@ -55,7 +55,9 @@ Date: 2026-11-14
   (`WORKERS`), and nothing polls: syncs long-poll, and a store shared with no other process
   takes no cross-process locks ([0010](0010-mobile.md)).
   - Spaces without loaded members are queued from the store at start, from every sync, and
-    after a failed sync. A failed member fetch is tried again when its space is next queued.
+    after a failed sync. A failed member fetch (a space that forbids it, a server error) is
+    tried again when its space is next queued, but not before a wait: 30 s, doubling with each
+    failure in a row to an hour, forgotten on success (`Backoff`).
 - **One reducer on the desktop:**
   - `State::apply(Event, &mut Tx)` is the only way Matrix data enters the app. The sink calls
     `AppHandle::update`, so it runs on the UI thread.

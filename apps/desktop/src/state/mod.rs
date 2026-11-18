@@ -703,7 +703,7 @@ pub struct State {
     /// [`Accounts::revision`] then. Their pictures are asked for again only once these change.
     avatars_listed: Option<(Option<AccountId>, u64)>,
     /// A fingerprint of the pictures those lists showed, so a list that changed but shows the
-    /// same pictures asks for none.
+    /// same pictures, all of them here, asks for none.
     listed_pictures: Option<u64>,
     /// Accounts the server signed out softly, whose data waits on this device until the user
     /// signs in as them again or removes them.
@@ -2444,9 +2444,10 @@ impl State {
     }
 
     /// Fetches the pictures the lists show (every account's own, and the active account's
-    /// rooms, spaces and invitations) once those lists change: they are kept over other images
-    /// while room is made, so nothing needs to touch them in between. When they alone outgrow
-    /// the media budget, those let go of come back once the lists change.
+    /// rooms, spaces and invitations) once those lists change: the media cache keeps them
+    /// outside its budget (`MediaCache::keep`), so nothing needs to touch them in between.
+    /// When the lists change, any of their pictures not here (a failed one whose wait is over)
+    /// is asked for again, even if the lists show the same pictures.
     fn request_listed_avatars(&mut self, now: std::time::Instant) {
         if !self.media.can_load() {
             return;
@@ -2470,20 +2471,26 @@ impl State {
             });
             own.chain(active)
         };
-        let fingerprint = {
+        let (fingerprint, missing) = {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            pictures().for_each(|picture| picture.hash(&mut hasher));
-            hasher.finish()
+            let mut missing = false;
+            for picture in pictures() {
+                picture.hash(&mut hasher);
+                missing = missing || self.media.wants(picture.1, now);
+            }
+            (hasher.finish(), missing)
         };
-        if self.listed_pictures == Some(fingerprint) {
+        let same = self.listed_pictures == Some(fingerprint);
+        if same && !missing {
             return;
         }
         let wanted: Vec<(AccountId, MediaRef)> =
             pictures().map(|(account, media)| (account.clone(), media.clone())).collect();
-        self.listed_pictures = Some(fingerprint);
-        self.media.keep(wanted.iter().map(|(_, media)| media.clone()).collect());
-        self.media.touch(wanted.iter().map(|(_, media)| media));
+        if !same {
+            self.listed_pictures = Some(fingerprint);
+            self.media.keep(wanted.iter().map(|(_, media)| media.clone()).collect());
+        }
         self.fetch_avatars(wanted, now);
     }
 

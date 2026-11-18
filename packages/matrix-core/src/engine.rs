@@ -2777,13 +2777,48 @@ fn want_members(wanted: &WantedMembers, room: &matrix_sdk::Room) {
     }
 }
 
+/// When failed fetches may be tried again: not before a wait that starts at
+/// [`Backoff::FIRST_WAIT`] and doubles with each failure in a row, up to [`Backoff::LAST_WAIT`].
+/// A success forgets the failures.
+#[derive(Debug)]
+struct Backoff<K> {
+    /// How often each failed in a row, and when it may be tried again.
+    failed: HashMap<K, (u32, std::time::Instant)>,
+}
+
+impl<K: std::hash::Hash + Eq> Backoff<K> {
+    const FIRST_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+    const LAST_WAIT: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+    fn new() -> Self {
+        Self { failed: HashMap::new() }
+    }
+
+    /// Whether `key` may be tried at `now`: it never failed, or its wait is over.
+    fn may_try(&self, key: &K, now: std::time::Instant) -> bool {
+        self.failed.get(key).is_none_or(|(_, at)| *at <= now)
+    }
+
+    fn failed(&mut self, key: K, now: std::time::Instant) {
+        let attempts = self.failed.get(&key).map_or(0, |(attempts, _)| *attempts).saturating_add(1);
+        let wait = Self::FIRST_WAIT.saturating_mul(1 << (attempts - 1).min(16)).min(Self::LAST_WAIT);
+        self.failed.insert(key, (attempts, now + wait));
+    }
+
+    fn succeeded(&mut self, key: &K) {
+        self.failed.remove(key);
+    }
+}
+
 /// A space's people come from its full member list, which lazy loading leaves out: each is
 /// fetched once, one after another, beside the sync rather than in its way. A fetch that fails
-/// is tried again when the space is next asked for, not at once.
+/// (a space that forbids it, a server error) is tried again when the space is next asked for,
+/// but not before its [`Backoff`] wait: 30 s, doubling to an hour.
 fn fetch_space_members(feed: RoomFeed) -> (WantedMembers, AbortHandle) {
     let (wanted, mut spaces) = tokio::sync::mpsc::unbounded_channel::<matrix_sdk::ruma::OwnedRoomId>();
     let task = tokio::spawn(async move {
         let mut fetched = HashSet::new();
+        let mut backoff = Backoff::new();
         while let Some(first) = spaces.recv().await {
             let mut batch = vec![first];
             while let Ok(more) = spaces.try_recv() {
@@ -2793,10 +2828,19 @@ fn fetch_space_members(feed: RoomFeed) -> (WantedMembers, AbortHandle) {
             }
             let mut synced = HashSet::new();
             for room_id in batch {
+                if fetched.contains(&room_id) || !backoff.may_try(&room_id, std::time::Instant::now()) {
+                    continue;
+                }
                 let Some(space) = feed.account.client().get_room(&room_id) else { continue };
-                if !fetched.contains(&room_id) && !space.are_members_synced() && space.sync_members().await.is_ok() {
+                if space.are_members_synced() {
+                    continue;
+                }
+                if space.sync_members().await.is_ok() {
+                    backoff.succeeded(&room_id);
                     synced.insert(room_id.to_string());
                     fetched.insert(room_id);
+                } else {
+                    backoff.failed(room_id, std::time::Instant::now());
                 }
             }
             if !synced.is_empty() {
@@ -3434,6 +3478,47 @@ mod tests {
         matrix_sdk::ruma::serde::Raw::new(&serde_json::json!({ "type": kind, "content": {} }))
             .expect("event")
             .cast_unchecked()
+    }
+
+    #[test]
+    fn a_failed_fetch_should_wait_before_it_is_tried_again() {
+        let (mut backoff, now) = (Backoff::new(), std::time::Instant::now());
+        backoff.failed("!space", now);
+        let wait = Backoff::<&str>::FIRST_WAIT;
+        let tries = (backoff.may_try(&"!space", now + wait / 2), backoff.may_try(&"!space", now + wait));
+        assert_eq!(tries, (false, true));
+    }
+
+    #[test]
+    fn each_failure_in_a_row_should_double_the_wait() {
+        let (mut backoff, now) = (Backoff::new(), std::time::Instant::now());
+        backoff.failed("!space", now);
+        backoff.failed("!space", now);
+        let wait = Backoff::<&str>::FIRST_WAIT * 2;
+        let tries = (
+            backoff.may_try(&"!space", now + wait - Backoff::<&str>::FIRST_WAIT / 2),
+            backoff.may_try(&"!space", now + wait),
+        );
+        assert_eq!(tries, (false, true));
+    }
+
+    #[test]
+    fn the_wait_should_stop_growing_at_an_hour() {
+        let (mut backoff, now) = (Backoff::new(), std::time::Instant::now());
+        for _ in 0..40 {
+            backoff.failed("!space", now);
+        }
+        assert!(backoff.may_try(&"!space", now + Backoff::<&str>::LAST_WAIT));
+    }
+
+    #[test]
+    fn a_success_should_forget_the_failures() {
+        let (mut backoff, now) = (Backoff::new(), std::time::Instant::now());
+        backoff.failed("!space", now);
+        backoff.failed("!space", now);
+        backoff.succeeded(&"!space");
+        backoff.failed("!space", now);
+        assert!(backoff.may_try(&"!space", now + Backoff::<&str>::FIRST_WAIT));
     }
 
     #[test]

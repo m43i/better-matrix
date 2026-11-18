@@ -116,7 +116,9 @@ Date: 2026-11-14
   - On Linux one session-bus connection (zbus), opened by the first notification, shows them
     all and one thread hears every click and close; the rooms of the last 256 shown are kept
     by notification id. A thread and connection per notification, waiting for its click, piled
-    up with the notification history.
+    up with the notification history. A failed show closes the connection (ending its
+    listener) and the next notification opens a new one; the listener skips messages it can't
+    read and ends only with its connection. The action's label is a catalog key.
 - **Wants attention:** one rule (`wants_attention`) for sidebar, rail and account menu.
   - Unread messages or mentions, or only mentions for mentions-only and muted rooms.
   - The engine re-reads rooms on the SDK's room-info updates, so badges follow its counts.

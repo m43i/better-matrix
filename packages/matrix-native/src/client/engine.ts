@@ -32,7 +32,11 @@ export class Engine {
     return this.transport.send(JSON.stringify(command));
   }
 
-  /** Adds a listener; the returned function removes it. */
+  /**
+   * Adds a listener that hears events one by one; the returned function removes it. Listeners
+   * take turns per batch: each hears a whole batch, in order, before the next listener hears any
+   * of it, so with several listeners one may hear a later event before another hears an earlier.
+   */
   subscribe(listener: Listener): () => void {
     return this.subscribeBatches((events) => {
       for (const event of events) listener(event);
@@ -41,7 +45,8 @@ export class Engine {
 
   /**
    * Adds a listener that hears a burst of events at once (a sync, a page of history), so it can
-   * take them in together; the returned function removes it.
+   * take them in together; the returned function removes it. Listeners take turns per batch:
+   * each hears the whole batch before the next listener hears any of it.
    */
   subscribeBatches(listener: BatchListener): () => void {
     this.listeners.add(listener);

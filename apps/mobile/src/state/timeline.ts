@@ -7,6 +7,11 @@ export function timelineId(key: TimelineKey): string {
   return key.thread ? `${key.room_id}|${key.thread}` : key.room_id;
 }
 
+/** Whether a `timelineId` is a room's main timeline rather than a thread. */
+export function isRoomTimeline(id: string): boolean {
+  return !id.includes('|');
+}
+
 /** A room's main timeline. */
 export function roomKey(roomId: string): TimelineKey {
   return { room_id: roomId, thread: null };

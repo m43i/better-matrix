@@ -4,18 +4,21 @@
 // hold the rooms and chats moved into them in the order they were placed. Also which rooms a
 // scope shows, which "want attention", and the edits to a `SidebarLayout` the user can make.
 // Pure: every function takes what it needs; layout edits return new values, and what the scope
-// helpers derive is kept per list and must not be changed.
+// helpers derive is kept per list (`newestMessages`, per account) and must not be changed.
 
 import type {
+  AccountId,
   Message,
   RoomKind,
   RoomSummary,
   ScopeLayout,
   SidebarLayout,
   SpaceSummary,
+  TimelineEntry,
 } from '@better-matrix/matrix-native/types';
 
-import { roomKey, timelineId } from './timeline';
+import { sameJson } from './json';
+import { isRoomTimeline, roomKey, timelineId } from './timeline';
 import type { AccountData, Scope } from './types';
 
 /** The built-in sections' IDs: they can be collapsed, never removed. */
@@ -202,21 +205,111 @@ export function hasUnread(account: Pick<AccountData, 'rooms' | 'spaces'>, scope:
   return unread;
 }
 
+/** Each room's newest message in the timelines the store keeps (threads left out), by room ID. */
+export type NewestMessages = Readonly<Record<string, Message>>;
+
+/**
+ * Where a room's newest message in its timeline is read from: the timelines, or what
+ * `newestMessages` made of them (which changes less often, so a list selecting it redraws less).
+ */
+export type TimelineSource = Pick<AccountData, 'timelines'> | { newest: NewestMessages };
+
+/** What orders rooms by recency: their timelines' and sync's newest messages, and when heard. */
+export type RecencySource = TimelineSource & Pick<AccountData, 'latest' | 'heardAt'>;
+
+/** The newest message of each entries array, once looked for (`null`: it has none). */
+const newestByEntries = new WeakMap<readonly TimelineEntry[], Message | null>();
+
+function newestIn(entries: readonly TimelineEntry[]): Message | undefined {
+  let newest = newestByEntries.get(entries);
+
+  if (newest === undefined) {
+    newest = null;
+
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const kind = entries[i]?.kind;
+
+      if (kind?.type === 'Message') {
+        newest = kind.data;
+        break;
+      }
+    }
+
+    newestByEntries.set(entries, newest);
+  }
+
+  return newest ?? undefined;
+}
+
+/** Whether two messages look the same in a room list: its place, time, sender and text. */
+function samePreview(a: Message, b: Message): boolean {
+  return (
+    a === b ||
+    (a.event_id === b.event_id &&
+      a.timestamp_ms === b.timestamp_ms &&
+      a.sender_name === b.sender_name &&
+      sameJson(a.content, b.content))
+  );
+}
+
+/** What `newestMessages` last made for each account, and from which timelines. */
+const newestKept = new Map<
+  AccountId,
+  { timelines: AccountData['timelines']; newest: NewestMessages }
+>();
+
+/**
+ * Each room's newest message in an account's kept timelines. The same object comes back until
+ * some room's newest message changes how the room list shows it (another message, time, sender
+ * or text), so a timeline growing older history, reactions or receipts leave room lists alone.
+ */
+export function newestMessages(
+  account: Pick<AccountData, 'summary' | 'timelines'>,
+): NewestMessages {
+  const { timelines } = account;
+  const kept = newestKept.get(account.summary.id);
+
+  if (kept?.timelines === timelines) return kept.newest;
+
+  const next: Record<string, Message> = {};
+  let changed = false;
+  let count = 0;
+
+  for (const [id, timeline] of Object.entries(timelines)) {
+    if (!isRoomTimeline(id)) continue;
+    const message = newestIn(timeline.entries);
+
+    if (!message) continue;
+    const before = kept?.newest[id];
+
+    if (before && samePreview(before, message)) {
+      next[id] = before;
+    } else {
+      next[id] = message;
+      changed = true;
+    }
+
+    count++;
+  }
+
+  const newest = kept && !changed && count === Object.keys(kept.newest).length ? kept.newest : next;
+  newestKept.set(account.summary.id, { timelines, newest });
+
+  return newest;
+}
+
 /** The newest message in a room: from its timeline when open, else from sync. */
 export function lastMessage(
-  account: Pick<AccountData, 'timelines' | 'latest'>,
+  account: TimelineSource & Pick<AccountData, 'latest'>,
   roomId: string,
 ): Message | undefined {
-  const entries = account.timelines[timelineId(roomKey(roomId))]?.entries ?? [];
   let fromTimeline: Message | undefined;
 
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const kind = entries[i]?.kind;
-
-    if (kind?.type === 'Message') {
-      fromTimeline = kind.data;
-      break;
-    }
+  if ('newest' in account) {
+    fromTimeline = account.newest[roomId];
+  } else {
+    const entries = account.timelines[timelineId(roomKey(roomId))]?.entries;
+    fromTimeline = entries && newestIn(entries);
   }
 
   const synced = account.latest[roomId];
@@ -236,11 +329,7 @@ const DRIFT_MS = 5 * 60_000;
  * than clocks drift doesn't count, so a misdated event can't hold a room at the top: a message
  * heard this session counts from when it was heard instead.
  */
-export function activity(
-  account: Pick<AccountData, 'timelines' | 'latest' | 'heardAt'>,
-  room: RoomSummary,
-  now: number,
-): number {
+export function activity(account: RecencySource, room: RoomSummary, now: number): number {
   const plausible = (at: number) => at <= now + DRIFT_MS;
   const message = lastMessage(account, room.room_id);
 
@@ -258,7 +347,7 @@ export function activity(
 
 /** Rooms latest conversation first; rooms with nothing known yet after them, by name. */
 export function byRecency(
-  account: Pick<AccountData, 'timelines' | 'latest' | 'heardAt'>,
+  account: RecencySource,
   rooms: readonly RoomSummary[],
   now: number,
 ): RoomSummary[] {
@@ -291,7 +380,7 @@ function scopeLayout(layout: SidebarLayout, scope: Scope): ScopeLayout | undefin
  * in one of the user's; sections the saved order names come first, in its order.
  */
 export function sections(
-  account: Pick<AccountData, 'sidebar' | 'rooms' | 'spaces' | 'timelines' | 'latest' | 'heardAt'>,
+  account: Pick<AccountData, 'sidebar' | 'rooms' | 'spaces'> & RecencySource,
   scope: Scope,
   now: number,
 ): SectionView[] {
@@ -349,7 +438,7 @@ export function unreadRooms(
 
 /** Every direct chat of an account, latest first. */
 export function directChats(
-  account: Pick<AccountData, 'rooms' | 'timelines' | 'latest' | 'heardAt'>,
+  account: Pick<AccountData, 'rooms'> & RecencySource,
   now: number,
 ): RoomSummary[] {
   return byRecency(

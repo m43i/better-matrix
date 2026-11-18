@@ -1,4 +1,4 @@
-import { applyLatestMessages, apply, initialState, mediaKey } from '../reducer';
+import { applyLatestMessages, apply, forgetRoomDetails, initialState, mediaKey } from '../reducer';
 import { DEFAULT_SETTINGS } from '../settings';
 import { roomKey, timelineId } from '../timeline';
 import type { State } from '../types';
@@ -396,5 +396,21 @@ describe('call levels', () => {
   it('someone gone from the levels should be dropped', () => {
     const state = apply(signedIn(ADA), levels([me, bob]));
     expect(apply(state, levels([me])).call.levels).toEqual({ '': 12 });
+  });
+});
+
+describe('forgetRoomDetails', () => {
+  it('should keep an account that holds nothing about the room as it was', () => {
+    const account = signedIn(ADA).accounts[0]!;
+    expect(forgetRoomDetails(account, '!a:x')).toBe(account);
+  });
+
+  it('should leave the details of other rooms alone', () => {
+    const state = apply(signedIn(ADA), {
+      type: 'Threads',
+      data: { account: ADA, room_id: '!b:x', threads: [] },
+    });
+
+    expect(forgetRoomDetails(state.accounts[0]!, '!a:x').threads).toEqual({ '!b:x': [] });
   });
 });
