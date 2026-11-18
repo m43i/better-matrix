@@ -4442,6 +4442,7 @@ dependencies = [
  "eyeball-im",
  "futures-util",
  "getrandom 0.4.3",
+ "image",
  "livekit",
  "matrix-sdk",
  "matrix-sdk-base",

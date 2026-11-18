@@ -2483,7 +2483,13 @@ impl State {
             Command::FetchMedia { account, media, size } => {
                 let account = self.account(&account);
                 Box::pin(async move {
-                    let bytes = account?.fetch_media(&media, size).await?;
+                    let mut bytes = account?.fetch_media(&media, size).await?;
+                    // A thumbnail larger than its box is scaled to fit, off the async threads.
+                    if let MediaSize::Thumbnail { width, height } = size {
+                        bytes = tokio::task::spawn_blocking(move || crate::thumbnail::fit(bytes, width, height))
+                            .await
+                            .map_err(|error| Error::Account(error.to_string()))?;
+                    }
                     sink.emit(Event::MediaLoaded { request, media, size, bytes: bytes.into() });
                     Ok(Outcome::Done)
                 })

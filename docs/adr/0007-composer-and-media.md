@@ -172,13 +172,18 @@ screenshots, voice memos, and images and PDFs that open large.
     change that shows the same pictures (a fingerprint of them), all of them here, asks for
     none; one not here (a failed one whose wait is over) is asked for again.
   - Eviction leaves those pictures, and the budget doesn't count them (`MediaCache::keep`):
-    they are bounded by the lists (a 128×128 thumbnail each), and letting them go when they
+    they are bounded by the lists (a 128×128 thumbnail each, about 87 KB decoded with mips),
+    and letting them go when they
     alone outgrew the budget would fetch and evict them again on every list change. The budget
     bounds the rest. Pictures a list no longer shows count again and may go.
   - An image whose download failed shows as failed while a retry loads, so its row keeps its
     height. The 512 failures to be tried again last are remembered (`FAILURES_KEPT`).
   - An image counts at the size fetched (a thumbnail, the sender's own included), not the
     original.
+  - A thumbnail fits the box it was asked for: a server answers with the nearest rendition it
+    made (Synapse answers 128×128 with 320×240) or the original, so the engine scales a PNG or
+    JPEG larger than the box down to fit it, upright, on a blocking thread, before
+    `MediaLoaded` (`thumbnail::fit`). Other formats, animated ones among them, pass through.
   - It counts at an estimate until Rune decodes it, then `MediaCache::measure` (from `poll`)
     counts what Rune holds: RGBA at every mip level.
   - Animated frames are counted from the file without decoding (GIF image blocks, APNG `acTL`,

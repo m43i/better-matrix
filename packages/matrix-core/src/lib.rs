@@ -37,6 +37,7 @@ mod saved;
 mod session;
 #[cfg(test)]
 mod test_server;
+mod thumbnail;
 mod timeline;
 mod timeline_bootstrap;
 mod tls;
