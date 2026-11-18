@@ -44,9 +44,9 @@ Date: 2026-11-14
     could be Hidden. With none ever set, Online.
   - A sync as `offline` leaves the session's presence as it was, so hiding needs an explicit
     `PUT /presence` on every session. A session announces the status after saving one, when a
-    sync brings one (a sync that raced a save brings it back, so announcing lands after that
-    sync), and after any sync while it hasn't announced the current one yet: after starting,
-    and again while announcing fails. Waiting for the server to time a session out isn't
+    sync brings one, after a sync that sent another presence (asked for before a save here, it
+    may reach the server after the save's announcement), and after any sync while it hasn't
+    announced the current one yet: after starting, and again while announcing fails. Waiting for the server to time a session out isn't
     enough: Synapse counts from the session's last activity, so one in use would stay visible.
     Announcing keeps the status message another client set, and sends nothing when it can't
     read it; it gives up after 20 s, retries and waits the server asks for included, as it runs
@@ -54,8 +54,11 @@ Date: 2026-11-14
   - `Event::Status` reports the status that holds, under the same lock: at start, after a save
     (the later one, if the save lost), and when a sync brings one. The apps show a choice at once and, if saving
     fails, show the status last reported with a notice, unless another was chosen or reported
-    since. Cross-device clock skew can misorder changes made seconds apart on two devices, as
-    for the sidebar layout.
+    since. Accepted limits: cross-device clock skew can misorder changes made seconds apart on
+    two devices, as for the sidebar layout; conflicting saves on two devices at the same moment
+    can leave the older one on the server for sessions that start later; and several choices
+    made while one save is still pending (offline, say) can end on an earlier one, which shows
+    and can be chosen again.
   - Synapse turns Away (`unavailable`) back into online when the user sends a message, types or
     reads; the next sync or change sets it again. Hidden is not affected. Servers with presence
     switched off accept the status but show nobody's.

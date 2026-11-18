@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use matrix_sdk::config::SyncSettings;
+use matrix_sdk::ruma::presence::PresenceState;
 use matrix_sdk::{LoopCtrl, SessionChange};
 use tokio::sync::mpsc;
 use tokio::task::{AbortHandle, JoinSet};
@@ -2687,7 +2688,7 @@ async fn sync_until_error(
         })
     };
     let _unread = AbortOnDrop(unread.abort_handle());
-    let on_response = |response: matrix_sdk::sync::SyncResponse| {
+    let on_response = |response: matrix_sdk::sync::SyncResponse, sent: PresenceState| {
         let (account, sink, caught_up, feed) = (account.clone(), Arc::clone(sink), Arc::clone(caught_up), feed.clone());
         let want_members = &want_members;
         async move {
@@ -2739,7 +2740,7 @@ async fn sync_until_error(
                 sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
             }
             let report = |status| sink.emit(Event::Status { account: account.id().clone(), status });
-            account.follow_status(&response.account_data, report).await;
+            account.follow_status(&response.account_data, &sent, report).await;
             feed.refresh((!all).then_some(&changed)).await;
             LoopCtrl::Continue
         }
@@ -2755,11 +2756,11 @@ async fn sync_until_error(
         }
         last_sync = Some(std::time::Instant::now());
         // Each sync announces the status as last synced, so one set elsewhere holds here too.
-        let saved = account.status().await;
-        settings = settings.set_presence(crate::status::sync_presence(saved, caught_up.load(Ordering::Relaxed)));
+        let sent = crate::status::sync_presence(account.status().await, caught_up.load(Ordering::Relaxed));
+        settings = settings.set_presence(sent.clone());
         let response = account.sync_once_locked(settings.clone()).await?;
         settings = settings.token(response.next_batch.clone());
-        if on_response(response).await == LoopCtrl::Break {
+        if on_response(response, sent).await == LoopCtrl::Break {
             return Ok(());
         }
     }

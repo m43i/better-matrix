@@ -123,14 +123,16 @@ impl Account {
         }
     }
 
-    /// After each sync: takes the status it brought (set here or on another session) unless a
-    /// later one is known, and `report`s it; announces the status when it came or this session
-    /// hasn't announced it yet (the first sync, an announcement that failed). Syncing as offline
-    /// leaves a session's presence as it was, so hiding needs this on every session; and a sync
-    /// that raced a save here brings the save back, so announcing it lands after that sync.
+    /// After each sync, which `sent` this presence: takes the status it brought (set here or on
+    /// another session) unless a later one is known, and `report`s it. Announces the status when
+    /// one came, when the sync sent another presence (it was asked for before a save here, and
+    /// may have reached the server after the save's announcement), or when this session hasn't
+    /// announced it yet (the first sync, an announcement that failed). Syncing as offline leaves
+    /// a session's presence as it was, so hiding needs this on every session.
     pub(crate) async fn follow_status(
         &self,
         account_data: &[Raw<matrix_sdk::ruma::events::AnyGlobalAccountDataEvent>],
+        sent: &PresenceState,
         report: impl Fn(Status),
     ) {
         let synced = account_data
@@ -143,7 +145,8 @@ impl Account {
         if came.is_some() {
             known.saved = came;
         }
-        self.settle(&mut known, came.is_some()).await;
+        let raced = known.saved.is_some_and(|saved| saved.status.presence() != *sent);
+        self.settle(&mut known, came.is_some() || raced).await;
         if let Some(came) = came {
             report(came.status);
         }
@@ -388,7 +391,7 @@ mod tests {
     async fn a_save_older_than_a_synced_status_should_keep_the_synced_one() {
         let server = Homeserver::new(json!({ "status": "Hidden", "changed_at": 50 }), None, || true);
         let account = server.account().await;
-        account.follow_status(&sync(&account).await.account_data, |_| {}).await;
+        account.follow_status(&sync(&account).await.account_data, &PresenceState::Offline, |_| {}).await;
         let (heard, report) = reports();
         account.set_status(Status::Online, 10, report).await.unwrap();
         assert_eq!(*heard.lock().unwrap(), vec![Status::Hidden]);
@@ -401,7 +404,7 @@ mod tests {
         let account = server.account().await;
         account.set_status(Status::Hidden, 10, |_| {}).await.unwrap();
         let (heard, report) = reports();
-        account.follow_status(&sync(&account).await.account_data, report).await;
+        account.follow_status(&sync(&account).await.account_data, &PresenceState::Offline, report).await;
         assert!(heard.lock().unwrap().is_empty());
         assert_eq!(account.status().await, Some(Status::Hidden));
         assert_eq!(server.presence(), vec![json!("offline")]);
@@ -412,9 +415,18 @@ mod tests {
         let server = Homeserver::plain();
         let account = server.account().await;
         account.set_status(Status::Hidden, 10, |_| {}).await.unwrap();
-        account.follow_status(&sync(&account).await.account_data, |_| {}).await;
+        account.follow_status(&sync(&account).await.account_data, &PresenceState::Offline, |_| {}).await;
         assert_eq!(account.status().await, Some(Status::Hidden));
         assert_eq!(server.presence(), vec![json!("offline")]);
+    }
+
+    #[tokio::test]
+    async fn a_sync_that_sent_the_presence_from_before_a_save_should_be_followed_by_the_saved_one() {
+        let server = Homeserver::plain();
+        let account = server.account().await;
+        account.set_status(Status::Hidden, 10, |_| {}).await.unwrap();
+        account.follow_status(&[], &PresenceState::Online, |_| {}).await;
+        assert_eq!(server.presence(), vec![json!("offline"), json!("offline")]);
     }
 
     #[tokio::test]
@@ -422,7 +434,7 @@ mod tests {
         let server = Homeserver::new(json!({ "status": "Hidden", "changed_at": 5 }), None, || true);
         let account = server.account().await;
         let (heard, report) = reports();
-        account.follow_status(&sync(&account).await.account_data, report).await;
+        account.follow_status(&sync(&account).await.account_data, &PresenceState::Offline, report).await;
         assert_eq!(*heard.lock().unwrap(), vec![Status::Hidden]);
         assert_eq!(server.presence(), vec![json!("offline")]);
     }
@@ -432,7 +444,7 @@ mod tests {
         let server = Homeserver::plain();
         let account = server.account().await;
         let (heard, report) = reports();
-        account.follow_status(&[], report).await;
+        account.follow_status(&[], &PresenceState::Offline, report).await;
         assert!(heard.lock().unwrap().is_empty() && server.presence().is_empty());
     }
 
@@ -443,11 +455,11 @@ mod tests {
         let server =
             Homeserver::new(json!({ "status": "Hidden" }), None, move || reads.fetch_add(1, Ordering::Relaxed) > 0);
         let account = server.account().await;
-        account.follow_status(&sync(&account).await.account_data, |_| {}).await;
+        account.follow_status(&sync(&account).await.account_data, &PresenceState::Offline, |_| {}).await;
         assert!(server.presence().is_empty());
-        account.follow_status(&[], |_| {}).await;
+        account.follow_status(&[], &PresenceState::Offline, |_| {}).await;
         assert_eq!(server.presence().len(), 1);
-        account.follow_status(&[], |_| {}).await;
+        account.follow_status(&[], &PresenceState::Offline, |_| {}).await;
         assert_eq!(server.presence().len(), 1, "announced once it went through");
     }
 }
