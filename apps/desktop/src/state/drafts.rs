@@ -85,17 +85,18 @@ impl State {
     /// Each composer holds the draft of the timeline it writes into. Leaving a timeline keeps
     /// its draft (in memory, its text in the store too); arriving brings the timeline's back,
     /// from memory, or on the first visit this run from the store. `shown` are the timelines on
-    /// screen, the room's first. True when a composer moved to another timeline.
-    pub(super) fn follow_drafts(&mut self, shown: &[Owner]) -> bool {
+    /// screen, the room's first. Returns the composers (their typing slots) that moved to
+    /// another timeline.
+    pub(super) fn follow_drafts(&mut self, shown: &[Owner]) -> Vec<usize> {
         let now = Instant::now();
-        let mut moved = false;
+        let mut moved = Vec::new();
         for target in [ComposerTarget::Room, ComposerTarget::Thread] {
             let thread = target == ComposerTarget::Thread;
             let owner = shown.iter().find(|(_, key)| key.thread.is_some() == thread).cloned();
             if self.composer(target).owner == owner {
                 continue;
             }
-            moved = true;
+            moved.push(usize::from(thread));
             self.typing.left(usize::from(thread));
             if let Some(left) = self.composer_mut(target).owner.take() {
                 // An edit still in the field is set aside first: only the draft is the timeline's.
@@ -128,8 +129,8 @@ impl State {
             }
             self.composer_mut(target).owner = owner;
         }
-        // Whether a composer moved to another timeline: the caller settles typing once kept edits
-        // are back too. Typing in a composer that moved ends (`Typing::left`).
+        // The caller settles typing for these once kept edits are back too. Typing in a composer
+        // that moved ends (`Typing::left`).
         moved
     }
 
@@ -171,7 +172,7 @@ impl State {
         }
         self.kept_drafts.loaded(&at, Some(&draft));
         self.composer_mut(target).restore_draft(&draft);
-        self.settle_typing();
+        self.settle_typing(&[usize::from(target == ComposerTarget::Thread)]);
     }
 
     /// Writes the drafts on screen to the store as they change (`Kept::due`).

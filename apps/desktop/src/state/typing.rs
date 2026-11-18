@@ -43,9 +43,18 @@ impl Typing {
         }
     }
 
-    /// The drafts changed without the user typing (a draft came back): no notice for that.
-    pub fn seen(&mut self, drafts: &[&str]) {
-        self.drafts = drafts.iter().map(|draft| (*draft).to_owned()).collect();
+    /// The drafts of the composers at `slots` changed without the user typing (a draft came
+    /// back): no notice for that. The other composers keep their last seen draft, so what the
+    /// user did there still counts.
+    pub fn seen(&mut self, drafts: &[&str], slots: &[usize]) {
+        self.drafts = drafts
+            .iter()
+            .enumerate()
+            .map(|(i, draft)| match self.drafts.get(i) {
+                Some(old) if !slots.contains(&i) => old.clone(),
+                _ => (*draft).to_owned(),
+            })
+            .collect();
     }
 
     /// The notices due now, for the room shown (if any) and its composers' drafts, the room's
@@ -171,5 +180,15 @@ mod composers {
         shown(&mut typing, &["room text", ""], now);
         assert_eq!(shown(&mut typing, &["room text", "hi"], now), [true]);
         assert_eq!(shown(&mut typing, &["room text"], now), [false]);
+    }
+
+    #[test]
+    fn a_draft_coming_back_in_one_composer_should_not_swallow_a_stop_in_the_other() {
+        let (mut typing, now) = (Typing::default(), Instant::now());
+        shown(&mut typing, &[""], now);
+        assert_eq!(shown(&mut typing, &["hi"], now), [true]);
+        // The room's message is sent and a thread opens before the next look.
+        typing.seen(&["", ""], &[1]);
+        assert_eq!(shown(&mut typing, &["", ""], now), [false]);
     }
 }

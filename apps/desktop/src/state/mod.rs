@@ -1880,8 +1880,8 @@ impl State {
         let moved = self.follow_drafts(&shown);
         self.resume_edits();
         // A draft or edit coming back with its timeline isn't typing.
-        if moved {
-            self.settle_typing();
+        if !moved.is_empty() {
+            self.settle_typing(&moved);
         }
         let (gone, kept): (Vec<_>, Vec<_>) = self.open_timelines.drain(..).partition(|open| !shown.contains(open));
         for (account, key) in gone {
@@ -2102,9 +2102,10 @@ impl State {
     }
 
     /// A draft came back into a composer: that isn't typing.
-    fn settle_typing(&mut self) {
+    /// `slots` are the composers (0 the room's, 1 the thread's) whose draft came back.
+    fn settle_typing(&mut self, slots: &[usize]) {
         let mut typing = std::mem::take(&mut self.typing);
-        typing.seen(&self.typed());
+        typing.seen(&self.typed(), slots);
         self.typing = typing;
     }
 
