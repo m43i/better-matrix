@@ -190,6 +190,24 @@ impl Draft {
     pub fn stored(&self) -> Option<matrix_core::Draft> {
         stored_draft(&self.edit)
     }
+
+    /// Takes a draft read from the store as its text, the caret at its end.
+    pub fn restore(&mut self, draft: &matrix_core::Draft) {
+        self.edit = field_of(draft);
+    }
+}
+
+/// A field holding a draft read from the store, the caret at its end.
+fn field_of(draft: &matrix_core::Draft) -> TextEdit {
+    let mut field = new_edit();
+    match &draft.html {
+        Some(html) => {
+            let _ = field.paste_html(html, &draft.body);
+        }
+        None => field.insert(&draft.body),
+    }
+    field.clear_history();
+    field
 }
 
 /// A field's text and formatting as the store keeps a draft, unless blank.
@@ -370,19 +388,12 @@ impl Composer {
     /// Puts a draft read from the store into the draft's text, the caret at its end: the field,
     /// or the draft set aside under an edit. A reply and attachments stay.
     pub fn restore_draft(&mut self, draft: &matrix_core::Draft) {
-        let mut field = new_edit();
-        match &draft.html {
-            Some(html) => {
-                let _ = field.paste_html(html, &draft.body);
-            }
-            None => field.insert(&draft.body),
-        }
-        field.clear_history();
         match &mut self.editing {
-            Some(editing) => editing.draft.edit = field,
+            Some(editing) => editing.draft.restore(draft),
             None => {
-                field.focused = self.edit.focused;
-                self.edit = field;
+                let focused = self.edit.focused;
+                self.edit = field_of(draft);
+                self.edit.focused = focused;
             }
         }
     }

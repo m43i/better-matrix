@@ -95,6 +95,7 @@ impl State {
             if self.composer(target).owner == owner {
                 continue;
             }
+            self.typing.left(usize::from(thread));
             if let Some(left) = self.composer_mut(target).owner.take() {
                 let draft = self.composer_mut(target).take_draft();
                 if let Some(keep) = self.kept_drafts.due(&left, draft.stored(), now, true) {
@@ -155,7 +156,14 @@ impl State {
             }
             return;
         }
-        let Some(target) = target else { return };
+        let Some(target) = target else {
+            // Left meanwhile with a reply or files but no text: the text joins them there.
+            if let Some(parked) = self.drafts.get_mut(&at).filter(|parked| parked.stored().is_none()) {
+                parked.restore(&draft);
+                self.kept_drafts.loaded(&at, Some(&draft));
+            }
+            return;
+        };
         if self.composer(target).stored_draft().is_some() {
             return;
         }

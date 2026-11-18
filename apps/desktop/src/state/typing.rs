@@ -29,9 +29,20 @@ pub struct Typing {
     /// Which composer the user typed in last (its place in `drafts`): typing stops when it empties
     /// or goes, whatever another composer holds.
     typing_in: Option<usize>,
+    /// The composer typed in went on to write elsewhere (another thread): typing there ended.
+    ended: bool,
 }
 
 impl Typing {
+    /// The composer at `slot` now writes into another timeline: if it was the one typed in, the
+    /// next update tells the room typing stopped.
+    pub fn left(&mut self, slot: usize) {
+        if self.typing_in == Some(slot) {
+            self.typing_in = None;
+            self.ended = true;
+        }
+    }
+
     /// The drafts changed without the user typing (a draft came back): no notice for that.
     pub fn seen(&mut self, drafts: &[&str]) {
         self.drafts = drafts.iter().map(|draft| (*draft).to_owned()).collect();
@@ -54,15 +65,17 @@ impl Typing {
             self.room = room.map(|(account, room_id)| (account.clone(), room_id.to_owned()));
             self.drafts = drafts.iter().map(|draft| (*draft).to_owned()).collect();
             self.typing_in = None;
+            self.ended = false;
             return notices;
         }
-        if self.drafts.iter().map(String::as_str).eq(drafts.iter().copied()) {
+        let ended = std::mem::take(&mut self.ended);
+        if !ended && self.drafts.iter().map(String::as_str).eq(drafts.iter().copied()) {
             return notices;
         }
         let blank = |i: usize| drafts.get(i).is_none_or(|draft| draft.trim().is_empty());
         // A composer is typed in when its own text changed; one that just showed isn't.
         let typed = (0..drafts.len()).find(|&i| self.drafts.get(i).is_some_and(|old| old != drafts[i]) && !blank(i));
-        let stopped = self.typing_in.is_none_or(blank);
+        let stopped = ended || self.typing_in.is_none_or(blank);
         self.drafts = drafts.iter().map(|draft| (*draft).to_owned()).collect();
         let Some((account, room_id)) = &self.room else { return notices };
         if let Some(i) = typed {

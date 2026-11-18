@@ -5023,3 +5023,34 @@ fn a_read_answered_after_a_write_should_change_nothing() {
     assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
         Command::SaveDraft { draft: Some(draft), .. } if draft.body == "original")));
 }
+
+#[test]
+fn switching_to_a_thread_with_a_draft_should_tell_the_room_typing_stopped() {
+    let (mut s, mut commands, _) = two_rooms();
+    s.open_thread("$b");
+    type_into(&mut s, ComposerTarget::Thread, "kept in b");
+    s.open_thread("$a");
+    s.poll(&mut Tx::default());
+    type_into(&mut s, ComposerTarget::Thread, "typing in a");
+    s.poll(&mut Tx::default());
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c, Command::Typing { typing: true, .. })));
+    s.open_thread("$b");
+    s.poll(&mut Tx::default());
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c, Command::Typing { typing: false, .. })));
+}
+
+#[test]
+fn a_kept_draft_should_join_a_reply_left_in_its_room_before_it_came() {
+    let (mut s, _, id) = two_rooms();
+    s.composer.reply_to =
+        Some(ReplyTarget { event_id: "$q".into(), sender_name: "Grace".into(), excerpt: "Lunch?".into() });
+    s.select_room("!two:x");
+    let draft = matrix_core::Draft { body: "from last time".into(), html: None };
+    apply(
+        &mut s,
+        Event::DraftLoaded { request: RequestId(0), account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) },
+    );
+    s.select_room("!one:x");
+    assert_eq!(s.composer.edit.text, "from last time");
+    assert!(s.composer.reply_to.is_some());
+}
