@@ -5,6 +5,7 @@
 use rune::{Color, El, Icon, Image, SurfaceFit, TextEdit, col, el, icon, row, text, text_input};
 
 use super::theme::{Palette, font, identity_color};
+use crate::i18n::{t, tf};
 
 /// A square avatar with rounded corners, showing initials over the identity's colour. Used for
 /// people, spaces and accounts.
@@ -60,6 +61,44 @@ pub fn status_dot(status: matrix_core::Status, size: f32, ring: Color, p: &Palet
         matrix_core::Status::Online => dot.fill(p.success).border(2.0, ring),
         matrix_core::Status::Away => dot.fill(p.warning).border(2.0, ring),
         matrix_core::Status::Hidden => dot.fill(ring).border(2.0, p.text_muted),
+    }
+}
+
+/// A dot showing whether someone is around, as [`status_dot`] draws the user's own: green
+/// online, amber away, a hollow ring offline. None when their server shares no presence.
+pub fn presence_dot(presence: matrix_core::Presence, size: f32, ring: Color, p: &Palette) -> Option<El> {
+    let status = match presence {
+        matrix_core::Presence::Online => matrix_core::Status::Online,
+        matrix_core::Presence::Away => matrix_core::Status::Away,
+        matrix_core::Presence::Offline => matrix_core::Status::Hidden,
+        matrix_core::Presence::Unknown => return None,
+    };
+    Some(status_dot(status, size, ring, p))
+}
+
+/// `face`, an avatar `size` across, with the dot of what its person `shown` over its
+/// bottom-right corner. `ring` is the surface it sits on.
+pub fn with_presence(face: El, size: f32, shown: Option<&matrix_core::PersonPresence>, ring: Color, p: &Palette) -> El {
+    let dot = (size * 0.33).round().clamp(9.0, 14.0);
+    let at = size - dot + 2.0;
+    el().size(size, size)
+        .child(face)
+        .children(shown.and_then(|shown| presence_dot(shown.presence, dot, ring, p)).map(|d| d.absolute(at, at)))
+}
+
+/// What someone shows, in words: "Away", "Away · 🌴 On vacation", or only the message when
+/// their server shares no presence.
+pub fn presence_text(shown: &matrix_core::PersonPresence) -> Option<String> {
+    let presence = match shown.presence {
+        matrix_core::Presence::Online => Some(t!("presence.online")),
+        matrix_core::Presence::Away => Some(t!("presence.away")),
+        matrix_core::Presence::Offline => Some(t!("presence.offline")),
+        matrix_core::Presence::Unknown => None,
+    };
+    match (presence, shown.status_message.as_deref()) {
+        (Some(presence), Some(message)) => Some(tf!("presence.with_message", presence = presence, message = message)),
+        (Some(presence), None) => Some(presence.to_owned()),
+        (None, message) => message.map(ToOwned::to_owned),
     }
 }
 

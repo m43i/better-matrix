@@ -20,6 +20,10 @@ role: MemberRole,
  */
 presence: Presence, 
 /**
+ * The status message they set, if any.
+ */
+status_message: string | null, 
+/**
  * Whether the user verified them (their cross-signing identity).
  */
 verified: boolean, 

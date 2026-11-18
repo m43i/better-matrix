@@ -586,6 +586,156 @@ fn a_status_set_on_another_session_should_show_here() {
     assert_eq!(s.accounts.get(&id).map(|a| a.status), Some(matrix_core::Status::Away));
 }
 
+/// What `user_id` shows on account `id`, as the state holds it.
+fn shown(s: &State, id: &AccountId, user_id: &str) -> Option<matrix_core::PersonPresence> {
+    s.accounts.get(id).and_then(|account| account.presence.get(user_id)).cloned()
+}
+
+fn person_presence(
+    user_id: &str,
+    presence: matrix_core::Presence,
+    message: Option<&str>,
+) -> matrix_core::PersonPresence {
+    matrix_core::PersonPresence { user_id: user_id.into(), presence, status_message: message.map(Into::into) }
+}
+
+#[test]
+fn writing_a_status_message_should_start_from_the_one_set() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    let me = person_presence(id.as_str(), matrix_core::Presence::Online, Some("🌴 Away"));
+    apply(&mut s, Event::Presence { account: id.clone(), people: vec![me] });
+    s.toggle_popover(Popover::AccountSwitcher);
+    s.edit_status_message();
+    assert_eq!((s.status_draft.as_ref(), s.status_edit.text.as_str()), (Some(&id), "🌴 Away"));
+}
+
+#[test]
+fn saving_a_status_message_should_show_it_at_once_and_tell_the_server() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.toggle_popover(Popover::AccountSwitcher);
+    s.edit_status_message();
+    s.status_edit = rune::TextEdit::new("  🌴 On vacation ");
+    s.save_status_message();
+    assert_eq!(s.accounts.get(&id).and_then(|a| a.status_message()), Some("🌴 On vacation"));
+    assert!(s.popover.is_none() && s.status_draft.is_none());
+    let sent = drain(&mut commands);
+    assert!(matches!(&sent[..], [(_, Command::SetStatusMessage { message: Some(m), .. })] if m == "🌴 On vacation"));
+}
+
+#[test]
+fn clearing_the_status_message_should_send_none() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    let me = person_presence(id.as_str(), matrix_core::Presence::Online, Some("Out"));
+    apply(&mut s, Event::Presence { account: id.clone(), people: vec![me] });
+    s.set_status_message(&id, "");
+    assert_eq!(s.accounts.get(&id).and_then(|a| a.status_message()), None);
+    assert!(matches!(&drain(&mut commands)[..], [(_, Command::SetStatusMessage { message: None, .. })]));
+}
+
+#[test]
+fn a_long_status_message_should_be_cut_at_the_longest_length() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.set_status_message(&id, &"a".repeat(150));
+    assert_eq!(s.accounts.get(&id).and_then(|a| a.status_message()).map(|m| m.chars().count()), Some(100));
+}
+
+#[test]
+fn saving_the_status_message_already_set_should_send_nothing() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.set_status_message(&id, "   ");
+    assert!(drain(&mut commands).is_empty());
+}
+
+#[test]
+fn a_status_message_the_server_refused_should_show_the_previous_one_and_why() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    let me = person_presence(id.as_str(), matrix_core::Presence::Online, Some("Before"));
+    apply(&mut s, Event::Presence { account: id.clone(), people: vec![me] });
+    s.set_status_message(&id, "After");
+    let (request, _) = commands.try_next().unwrap();
+    apply(&mut s, Event::Finished { request, result: Err("offline".into()) });
+    assert_eq!(s.accounts.get(&id).and_then(|a| a.status_message()), Some("Before"));
+    assert!(s.notice.as_deref().is_some_and(|notice| notice.contains("offline")));
+}
+
+#[test]
+fn escape_while_writing_a_status_message_should_keep_the_account_menu_open() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.toggle_popover(Popover::AccountSwitcher);
+    s.edit_status_message();
+    s.cancel_status_message();
+    assert!(s.status_draft.is_none() && s.popover == Some(Popover::AccountSwitcher));
+}
+
+#[test]
+fn reopening_the_account_menu_should_drop_a_half_written_status_message() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.toggle_popover(Popover::AccountSwitcher);
+    s.edit_status_message();
+    s.toggle_popover(Popover::AccountSwitcher);
+    s.toggle_popover(Popover::AccountSwitcher);
+    assert!(s.status_draft.is_none());
+}
+
+#[test]
+fn an_emoji_picked_for_the_status_message_should_start_it_and_return_to_writing() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.toggle_popover(Popover::AccountSwitcher);
+    s.edit_status_message();
+    s.status_edit = rune::TextEdit::new("Back at 3");
+    s.toggle_popover(Popover::Emoji(EmojiFor::StatusMessage));
+    s.choose_emoji(EmojiFor::StatusMessage, "🕒");
+    assert_eq!(s.popover, Some(Popover::AccountSwitcher));
+    assert_eq!((s.status_draft.as_ref(), s.status_edit.text.as_str()), (Some(&id), "🕒 Back at 3"));
+}
+
+#[test]
+fn reported_presence_should_replace_what_was_known() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    let away = person_presence("@kai:x", matrix_core::Presence::Away, Some("🌴 Away"));
+    apply(&mut s, Event::Presence { account: id.clone(), people: vec![away] });
+    let back = person_presence("@kai:x", matrix_core::Presence::Online, None);
+    apply(&mut s, Event::Presence { account: id.clone(), people: vec![back.clone()] });
+    assert_eq!(shown(&s, &id, "@kai:x"), Some(back));
+}
+
+#[test]
+fn a_member_list_should_not_overwrite_presence_the_engine_reported() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    let reported = person_presence("@kai:x", matrix_core::Presence::Away, Some("🌴 Away"));
+    apply(&mut s, Event::Presence { account: id.clone(), people: vec![reported.clone()] });
+    let mut kai = read_member("@kai:x", "Kai");
+    kai.presence = matrix_core::Presence::Online;
+    let mut ana = read_member("@ana:x", "Ana");
+    ana.presence = matrix_core::Presence::Offline;
+    let members = matrix_core::Members { people: vec![kai, ana], complete: true, ..Default::default() };
+    apply(&mut s, Event::Members { request: None, account: id.clone(), room_id: "!r:x".into(), members });
+    assert_eq!(shown(&s, &id, "@kai:x"), Some(reported));
+    assert_eq!(shown(&s, &id, "@ana:x").map(|p| p.presence), Some(matrix_core::Presence::Offline));
+}
+
 #[test]
 fn opening_settings_should_show_the_general_section_and_close_popovers() {
     let (mut s, _) = state();
@@ -1755,6 +1905,7 @@ fn a_partial_member_list_should_not_replace_a_complete_one() {
         person: matrix_core::Person { id: id.into(), name: id.into(), avatar: None },
         role: matrix_core::MemberRole::Member,
         presence: matrix_core::Presence::Unknown,
+        status_message: None,
         verified: false,
         level: 0,
     };
@@ -4001,6 +4152,7 @@ fn read_member(id: &str, name: &str) -> matrix_core::RoomMember {
         person: matrix_core::Person { id: id.into(), name: name.into(), avatar: None },
         role: matrix_core::MemberRole::Member,
         presence: matrix_core::Presence::Unknown,
+        status_message: None,
         verified: false,
         level: 0,
     }

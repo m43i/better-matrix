@@ -225,6 +225,14 @@ pub enum Command {
         /// The new status.
         status: crate::Status,
     },
+    /// Set the status message others see beside the user's presence, or clear it with `None`;
+    /// an [`Event::Presence`] with the user's follows.
+    SetStatusMessage {
+        /// Which account.
+        account: AccountId,
+        /// What the user is up to ("🌴 On vacation"); blank clears it too.
+        message: Option<String>,
+    },
     /// Leave a room; an updated [`Event::RoomsUpdated`] follows without it.
     LeaveRoom {
         /// Whose room.
@@ -885,6 +893,15 @@ pub enum Event {
         account: AccountId,
         /// The status.
         status: crate::Status,
+    },
+    /// What people show others (presence and status message), the user included: at start for
+    /// the user and the people in their direct chats, as this device stored it; then whoever's
+    /// a sync brings, and the user's after [`Command::SetStatusMessage`].
+    Presence {
+        /// Which account learned it.
+        account: AccountId,
+        /// One entry per person.
+        people: Vec<crate::PersonPresence>,
     },
     /// A new recovery key, to show the user once.
     RecoveryKey {
@@ -2414,6 +2431,14 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            Command::SetStatusMessage { account: id, message } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let me = account?.set_status_message(message.as_deref()).await?;
+                    sink.emit(Event::Presence { account: id, people: vec![me] });
+                    Ok(Outcome::Done)
+                })
+            }
             Command::SetNotificationMode { account: id, room_id, mode } => {
                 let (account, feed) = (self.account(&id), self.feed(&id));
                 Box::pin(async move {
@@ -2494,6 +2519,12 @@ impl State {
                         };
                         let status = account
                             .report_status(|status| sink.emit(Event::Status { account: account.id().clone(), status }));
+                        let presence = async {
+                            let people = account.known_presence().await;
+                            if !people.is_empty() {
+                                sink.emit(Event::Presence { account: account.id().clone(), people });
+                            }
+                        };
                         // Once the homeserver names a call service, rooms offer MatrixRTC calls.
                         let calls = {
                             let (account, feed) = (account.clone(), feed.clone());
@@ -2507,6 +2538,7 @@ impl State {
                             profile,
                             layout,
                             status,
+                            presence,
                             calls,
                             crate::security::watch(account.clone(), flows, Arc::clone(&sink)),
                             sync_loop(account.clone(), Arc::clone(&sink), feed),
@@ -2738,6 +2770,10 @@ async fn sync_until_error(
                 && let Ok(layout) = account.sidebar_layout().await
             {
                 sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
+            }
+            let people = crate::people::synced_presence(&response.presence);
+            if !people.is_empty() {
+                sink.emit(Event::Presence { account: account.id().clone(), people });
             }
             let report = |status| sink.emit(Event::Status { account: account.id().clone(), status });
             account.follow_status(&response.account_data, &sent, report).await;

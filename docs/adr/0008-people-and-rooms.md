@@ -64,6 +64,31 @@ Date: 2026-11-14
   - Synapse turns Away (`unavailable`) back into online when the user sends a message, types or
     reads; the next sync or change sets it again. Hidden is not affected. Servers with presence
     switched off accept the status but show nobody's.
+- **Status message:** what the user says they are up to ("🌴 On vacation"), Matrix presence's
+  `status_msg`. It is the spec's only custom status: there is no emoji field and no expiry, so an
+  emoji is the message's first character and the message stays until changed.
+  - Kept on the server only, not in `chat.bettermatrix.status`: other clients set and show the
+    same field. `Command::SetStatusMessage` puts it with the presence of the status that holds
+    (Online when none was ever set), under the status's lock, so an announcement running
+    meanwhile can't write back the old message (announcing keeps whatever message is set).
+    Blank clears it; the apps trim it and keep at most 100 characters.
+  - Written in the account menu: its first row shows the message (× clears it); pressed, the
+    menu becomes a field with an emoji button (the picker takes the menu's place and returns to
+    it), four suggestions that set themselves at once, and Save. Escape stops writing. The
+    message shows at once and falls back with a notice if saving fails.
+- **Presence of others:** `Event::Presence` carries `PersonPresence` (presence and status
+  message) for the people an account learns about: at start, from this device's store, for the
+  user and the people in their direct chats; then whoever's presence a sync brings (servers
+  send only changes after the first sync), and the user's after a status message is set.
+  Member lists carry the same from the store and fill in only people not reported yet, as a
+  report is newer. The desktop keeps one map per account.
+  - Shown as a dot on avatars: green online, amber away, a hollow ring offline (as the user's
+    own Hidden). No dot and no words when a server shares no presence.
+  - Direct chats in the sidebar (1:1 only) get the dot, and the emoji their person's message
+    starts with when the row shows no notification icon; the header says "Away · message";
+    the timeline puts the dot on a run's avatar (hover says it in words) and the emoji after
+    the name; the member list puts the message under the name.
+  - The phones ignore `Event::Presence` for now.
 - **Contact details** step through `ContactStep` per kind:
   1. `Entering` the address.
   2. `Requesting`: `RequestContactCode` sends a link or code; `Event::ContactCodeSent` carries

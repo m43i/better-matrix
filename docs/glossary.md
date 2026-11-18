@@ -18,6 +18,16 @@ status, switch account, add an account, settings, sign out. On phones, the sheet
 Away, or Hidden (shown as offline). Saved in the account's data and announced as Matrix presence
 by every session of this app; a dot on the account's avatar shows it. `Status` in code.
 
+**Status message**
+: What the user says they are up to on one account ("🌴 On vacation"), set in the account menu
+and shown beside their presence: Matrix presence's `status_msg`. An emoji starting it stands for
+it where space is short. `status_message` in code.
+
+**Presence**
+: Whether someone is around (online, away, offline) as their homeserver says, with their status
+message: a dot on their avatar. Unknown when the server shares none, and then nothing shows.
+`Presence` and `PersonPresence` in code.
+
 **Rail**
 : The narrow column on the far left: Home and the active account's spaces in the user's order,
 then "+" to create a space, with the account avatar at the bottom.

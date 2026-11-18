@@ -149,7 +149,10 @@ pub fn picker(s: &State, chosen_for: &EmojiFor, anchor: String, p: &Palette) -> 
     }
     let panel = panel
         .child(col().key("emoji-grid").w_full().max_h(300.0).scroll(ScrollSpec { stick_bottom: false }).child(grid));
-    col().child(panel).anchored(anchor, Side::Top, Align::End, 6.0)
+    match chosen_for {
+        EmojiFor::StatusMessage => col().child(panel).anchored(anchor, Side::Right, Align::End, 10.0),
+        _ => col().child(panel).anchored(anchor, Side::Top, Align::End, 6.0),
+    }
 }
 
 #[cfg(test)]

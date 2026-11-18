@@ -127,6 +127,22 @@ pub fn display_name(room: &RoomSummary) -> String {
 /// button rather than in the header.
 fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, layout: &PaneLayout) -> El {
     let info_open = s.side == Some(SidePanel::Info);
+    let name = text(display_name(room)).key("room-name").font(font::HEADER).color(p.text).shrink().truncate();
+    // A direct chat says what its person shows: their dot, then "Away · 🌴 On vacation".
+    let shown = super::sidebar::dm_partner(room).and_then(|id| account.presence.get(id));
+    let line = shown.and_then(|shown| {
+        let words = super::components::presence_text(shown)?;
+        Some(
+            row()
+                .key("room-presence")
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(6.0)
+                .center_y()
+                .children(super::components::presence_dot(shown.presence, 9.0, p.bg, p))
+                .child(text(words).font(font::BODY).color(p.text_muted).shrink().truncate()),
+        )
+    });
     row()
         .key("room-header")
         .w_full()
@@ -136,7 +152,9 @@ fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, lay
         .center_y()
         .border_sides([0.0, 0.0, 1.0, 0.0], p.divider)
         .children(s.call_here().filter(|_| layout.sidebar_available).map(|call| super::call::sidebar_button(call, p)))
-        .child(text(display_name(room)).key("room-name").font(font::HEADER).color(p.text).grow(1.0).truncate())
+        // Beside the presence line, the name keeps its width and the line takes the rest.
+        .child(if line.is_some() { name } else { name.grow(1.0) })
+        .children(line)
         .children(super::call::header_buttons(s, room, p))
         .children((room.kind == RoomKind::Group).then(|| super::people::members_button(s, account, room, p)))
         .child(

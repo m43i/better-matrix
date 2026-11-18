@@ -44,6 +44,7 @@ function withMembers(state: State): State {
         person: person(KAI, 'Kai'),
         role: 'Member',
         presence: 'Online',
+        status_message: null,
         verified: false,
         level: 0,
       },

@@ -63,7 +63,7 @@ pub use model::{
 /// scroll to the top loads. About a screen and a half at the desktop's density.
 pub const HISTORY_PAGE: u16 = 30;
 pub use history::{PinnedMessage, SharedFile, ThreadInfo};
-pub use people::{MemberRole, Members, Moderation, Presence, RoomMember};
+pub use people::{MemberRole, Members, Moderation, PersonPresence, Presence, RoomMember};
 pub use permalinks::{LinkAction, LinkTarget, Permalink};
 pub use profile::{AccountPage, ContactDetail, ContactKind, Contacts, PendingContact};
 pub use rooms::{DirectoryKind, JoinRule, RoomPreview};

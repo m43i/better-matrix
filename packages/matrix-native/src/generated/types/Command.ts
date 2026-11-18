@@ -240,7 +240,15 @@ account: AccountId,
 /**
  * The new status.
  */
-status: Status, } } | { "type": "LeaveRoom", "data": { 
+status: Status, } } | { "type": "SetStatusMessage", "data": { 
+/**
+ * Which account.
+ */
+account: AccountId, 
+/**
+ * What the user is up to ("🌴 On vacation"); blank clears it too.
+ */
+message: string | null, } } | { "type": "LeaveRoom", "data": { 
 /**
  * Whose room.
  */

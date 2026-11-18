@@ -38,7 +38,14 @@ function member(
   role: RoomMember['role'] = 'Member',
   level = 0,
 ): RoomMember {
-  return { person: person(id, name), role, presence: 'Unknown', verified: false, level };
+  return {
+    person: person(id, name),
+    role,
+    presence: 'Unknown',
+    status_message: null,
+    verified: false,
+    level,
+  };
 }
 
 function members(own_level: number, rights: Partial<Members> = {}): Members {

@@ -189,6 +189,7 @@ pub fn seed(s: &mut State) {
         person: Person { id: id.into(), name: name.into(), avatar: None },
         role,
         presence,
+        status_message: None,
         verified,
         level: role.level(),
     };
@@ -208,6 +209,18 @@ pub fn seed(s: &mut State) {
         can_set_roles: true,
     };
     apply(s, Event::Members { request: None, account: AccountId::new(ADA), room_id: DEMO_THREAD.0.into(), members });
+    // What people show, as the engine reports it at start: Kai is away on vacation.
+    let shown = |id: &str, presence: Presence, message: Option<&str>| matrix_core::PersonPresence {
+        user_id: id.into(),
+        presence,
+        status_message: message.map(Into::into),
+    };
+    let people = vec![
+        shown("@grace:example.org", Presence::Online, Some("🐛 Chasing the sync bug")),
+        shown("@kai:example.org", Presence::Away, Some("🌴 On vacation until Monday")),
+        shown("@alan:example.org", Presence::Offline, None),
+    ];
+    apply(s, Event::Presence { account: AccountId::new(ADA), people });
     let verified = Security { session_verified: true, recovery: RecoveryStatus::Enabled };
     apply(s, Event::SecurityChanged { account: AccountId::new(ADA), security: verified });
     let fresh = Security { session_verified: false, recovery: RecoveryStatus::Enabled };

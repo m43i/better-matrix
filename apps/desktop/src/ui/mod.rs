@@ -120,6 +120,8 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
                     Some(_) => format!("thread-react-{event_id}"),
                 },
                 EmojiFor::Composer(target) => composer::emoji_button(*target),
+                // In the account menu's place: the menu closes while the picker is open.
+                EmojiFor::StatusMessage => rail::ACCOUNT_BUTTON.to_owned(),
             };
             vec![emoji::picker(s, chosen_for, anchor, &p)]
         }

@@ -552,7 +552,7 @@ function member(
 ): RoomMember {
   const level = role === 'Admin' ? 100 : role === 'Moderator' ? 50 : 0;
 
-  return { person: person(id, name), role, presence, verified, level };
+  return { person: person(id, name), role, presence, status_message: null, verified, level };
 }
 
 /** Who is in #general (the member list fills every room the demo engine is asked about). */

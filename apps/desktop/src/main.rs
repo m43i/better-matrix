@@ -99,6 +99,16 @@ fn spec() -> AppSpec<State> {
                 demo::hidden(s);
                 s.toggle_popover(Popover::AccountSwitcher);
             }),
+            ("demo-status-message", |s| {
+                demo::seed(s);
+                s.set_status_message(&matrix_core::AccountId::new(demo::ADA), "🌴 On vacation until Monday");
+                s.toggle_popover(Popover::AccountSwitcher);
+            }),
+            ("demo-status-message-editing", |s| {
+                demo::seed(s);
+                s.toggle_popover(Popover::AccountSwitcher);
+                s.edit_status_message();
+            }),
             ("demo-compose", demo::compose),
             ("demo-add-account", |s| {
                 demo::seed(s);

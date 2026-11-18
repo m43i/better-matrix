@@ -4,11 +4,12 @@
 //! them: start a chat, call, invite to another room, and with the rights, change their role,
 //! kick or ban.
 
-use matrix_core::{MemberRole, Members, Moderation, Presence, RoomKind, RoomMember, RoomSummary};
+use matrix_core::{MemberRole, Members, Moderation, PersonPresence, RoomKind, RoomMember, RoomSummary};
 use rune::{Align, El, ScrollSpec, Side, col, el, icon, row, text, text_input};
 
 use super::components::{
     Tone, divider, icon_button, media_avatar, menu_action, menu_icon, menu_row, popover_panel, submenu_row,
+    with_presence,
 };
 use super::icons;
 use super::theme::{Palette, font};
@@ -130,7 +131,10 @@ pub fn panel(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
                     std::borrow::Cow::Owned(format!("member-{id}"))
                 },
                 move |s: &State, i| match member_at(s, &room_id, found.get(i)) {
-                    Some(member) => member_row(member, member.person.id == me, &s.media, &palette),
+                    Some(member) => {
+                        let shown = s.active_account().and_then(|account| account.presence.get(&member.person.id));
+                        member_row(member, shown, member.person.id == me, &s.media, &palette)
+                    }
                     None => el(),
                 },
             )
@@ -150,20 +154,33 @@ pub fn panel(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
 }
 
 /// One member: their picture with a presence dot, their name, a badge when verified, their role.
-fn member_row(member: &RoomMember, me: bool, media: &crate::state::MediaCache, p: &Palette) -> El {
+fn member_row(
+    member: &RoomMember,
+    shown: Option<&PersonPresence>,
+    me: bool,
+    media: &crate::state::MediaCache,
+    p: &Palette,
+) -> El {
     let person = &member.person;
-    let dot = match member.presence {
-        Presence::Online => Some(p.success),
-        Presence::Away => Some(p.warning),
-        Presence::Offline => Some(p.text_muted),
-        Presence::Unknown => None,
+    // What the engine reported since is newer than the list.
+    let listed = PersonPresence {
+        user_id: person.id.clone(),
+        presence: member.presence,
+        status_message: member.status_message.clone(),
     };
-    let mut face = el()
-        .size(36.0, 36.0)
-        .child(media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, 36.0).radius(18.0));
-    if let Some(color) = dot {
-        face = face.child(el().size(12.0, 12.0).radius(6.0).fill(color).border(2.0, p.bg).absolute(26.0, 26.0));
-    }
+    let shown = shown.unwrap_or(&listed);
+    let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, 36.0).radius(18.0);
+    let face = with_presence(face, 36.0, Some(shown), p.bg, p);
+    let name = text(person.name.clone()).font(font::BODY).color(p.text).truncate();
+    let who = match &shown.status_message {
+        Some(message) => col()
+            .grow(1.0)
+            .min_w(0.0)
+            .gap(1.0)
+            .child(name)
+            .child(text(message.clone()).font(font::META).color(p.text_muted).truncate()),
+        None => col().grow(1.0).min_w(0.0).child(name),
+    };
     let mut entry = row()
         .key(format!("member-{}", person.id))
         .w_full()
@@ -173,7 +190,7 @@ fn member_row(member: &RoomMember, me: bool, media: &crate::state::MediaCache, p
         .center_y()
         .border_sides([0.0, 0.0, 1.0, 0.0], p.divider)
         .child(face)
-        .child(text(person.name.clone()).font(font::BODY).color(p.text).grow(1.0).min_w(0.0).truncate());
+        .child(who);
     if member.verified {
         entry = entry.child(icon(&icons::VERIFIED, 18.0).color(p.success).help(t!("members.verified").to_owned()));
     }

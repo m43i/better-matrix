@@ -548,6 +548,9 @@ pub struct AccountData {
     pub status: matrix_core::Status,
     /// The status as last saved: what a choice that fails to save falls back to.
     pub saved_status: matrix_core::Status,
+    /// What people show others (presence and status message), the user included, by user ID:
+    /// as the engine reports it, and from member lists for whoever it hasn't reported yet.
+    pub presence: HashMap<String, matrix_core::PersonPresence>,
 }
 
 impl AccountData {
@@ -590,7 +593,18 @@ impl AccountData {
             sidebar_loaded: false,
             status: matrix_core::Status::default(),
             saved_status: matrix_core::Status::default(),
+            presence: HashMap::new(),
         }
+    }
+
+    /// The status message `user_id` set, if any.
+    pub fn status_message_of(&self, user_id: &str) -> Option<&str> {
+        self.presence.get(user_id).and_then(|shown| shown.status_message.as_deref())
+    }
+
+    /// The status message the user set on this account, if any.
+    pub fn status_message(&self) -> Option<&str> {
+        self.status_message_of(self.summary.id.as_str())
     }
 
     pub fn room(&self, room_id: &str) -> Option<&RoomSummary> {
@@ -850,6 +864,33 @@ impl Accounts {
         }
     }
 
+    /// What people show now, as the engine reported it.
+    pub fn set_presence(&mut self, id: &AccountId, people: Vec<matrix_core::PersonPresence>) {
+        if let Some(account) = self.get_mut(id) {
+            for shown in people {
+                account.presence.insert(shown.user_id.clone(), shown);
+            }
+        }
+    }
+
+    /// Shows the user's own status message as `message` at once, while it is saved; returns the
+    /// one shown before.
+    pub fn set_own_status_message(&mut self, id: &AccountId, message: Option<String>) -> Option<String> {
+        let account = self.get_mut(id)?;
+        let presence = match account.status {
+            matrix_core::Status::Online => matrix_core::Presence::Online,
+            matrix_core::Status::Away => matrix_core::Presence::Away,
+            matrix_core::Status::Hidden => matrix_core::Presence::Offline,
+        };
+        let me = account.summary.id.as_str().to_owned();
+        let shown = account.presence.entry(me.clone()).or_insert(matrix_core::PersonPresence {
+            user_id: me,
+            presence,
+            status_message: None,
+        });
+        std::mem::replace(&mut shown.status_message, message)
+    }
+
     pub fn set_sidebar(&mut self, id: &AccountId, layout: matrix_core::SidebarLayout) {
         if let Some(account) = self.get_mut(id) {
             account.sidebar = layout;
@@ -870,6 +911,17 @@ impl Accounts {
     /// Keeps a room's members; a partial list never replaces a complete one.
     pub fn set_members(&mut self, id: &AccountId, room_id: String, members: matrix_core::Members) {
         let Some(account) = self.get_mut(id) else { return };
+        // The engine's reports are newer than a member list read from the store: a list only
+        // fills in those it hasn't reported.
+        for member in &members.people {
+            if member.presence != matrix_core::Presence::Unknown || member.status_message.is_some() {
+                account.presence.entry(member.person.id.clone()).or_insert_with(|| matrix_core::PersonPresence {
+                    user_id: member.person.id.clone(),
+                    presence: member.presence,
+                    status_message: member.status_message.clone(),
+                });
+            }
+        }
         let stale = account.stale_members.remove(&room_id);
         let had_all = account.members.get(&room_id).is_some_and(|known| known.complete);
         if members.complete || !had_all || stale {

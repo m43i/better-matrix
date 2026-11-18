@@ -430,6 +430,8 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'MediaFailed':
     case 'CallMediaStopped':
     case 'PushContent':
+    // Presence dots and status messages are desktop-only for now.
+    case 'Presence':
       return state;
     // The bridge reports these as files (MediaFile, GifFile) instead.
     case 'MediaLoaded':

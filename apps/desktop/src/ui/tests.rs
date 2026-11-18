@@ -1330,6 +1330,7 @@ fn large_room_view_build_timing() {
             person: matrix_core::Person { name: id.clone(), id, avatar: None },
             role: matrix_core::MemberRole::Member,
             presence: matrix_core::Presence::Unknown,
+            status_message: None,
             verified: false,
             level: 0,
         };
@@ -1434,6 +1435,51 @@ fn an_update_failure_should_keep_the_rail_action_available() {
     });
     press(&mut rt, "rail-update");
     assert!(matches!(rt.state.update, crate::state::Update::Installing(_)));
+}
+
+#[test]
+fn pressing_the_status_message_should_open_its_field_with_suggestions() {
+    let mut rt = runtime(|_| {});
+    press(&mut rt, "account-button");
+    press(&mut rt, "status-message");
+    assert!(rt.find("status-message-field").is_some() && rt.find("status-suggestion-vacation").is_some());
+    assert!(rt.find("status-online").is_none(), "writing, the menu is only the status message");
+}
+
+#[test]
+fn picking_a_suggested_status_message_should_set_it() {
+    let mut rt = runtime(|_| {});
+    press(&mut rt, "account-button");
+    press(&mut rt, "status-message");
+    press(&mut rt, "status-suggestion-vacation");
+    assert_eq!(rt.state.active_account().and_then(|a| a.status_message()), Some("🌴 On vacation"));
+    assert!(rt.find("account-menu").is_none());
+}
+
+#[test]
+fn a_set_status_message_should_have_a_button_clearing_it() {
+    let mut rt = runtime(|s| s.set_status_message(&AccountId::new(demo::ADA), "🌴 Away"));
+    press(&mut rt, "account-button");
+    press(&mut rt, "status-message-clear");
+    assert_eq!(rt.state.active_account().and_then(|a| a.status_message()), None);
+}
+
+#[test]
+fn a_direct_chat_should_show_the_emoji_its_persons_status_message_starts_with() {
+    let rt = runtime(|_| {});
+    assert!(rt.find("status-emoji-!dm-kai:example.org").is_some());
+}
+
+#[test]
+fn a_direct_chats_header_should_say_what_its_person_shows() {
+    let rt = runtime(|s| s.select_room("!dm-kai:example.org"));
+    assert!(rt.find("room-presence").is_some());
+}
+
+#[test]
+fn a_room_header_should_not_show_presence() {
+    let rt = runtime(|s| s.select_room(demo::DEMO_THREAD.0));
+    assert!(rt.find("room-presence").is_none());
 }
 
 #[test]

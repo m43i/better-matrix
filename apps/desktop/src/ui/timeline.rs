@@ -13,7 +13,7 @@ use matrix_core::{
 };
 use rune::{Color, El, ScrollSpec, SurfaceFit, col, el, icon, row, row as row_el, text};
 
-use super::components::{ButtonKind, button, clock_time, local_ms, media_avatar};
+use super::components::{ButtonKind, button, clock_time, local_ms, media_avatar, presence_text, with_presence};
 use super::icons;
 use super::room::{display_name, inline_name};
 use super::theme::{Palette, font};
@@ -612,6 +612,13 @@ fn civil_date(days: i64) -> (i64, u32, u32) {
     (yoe + era * 400 + i64::from(month <= 2), month, day)
 }
 
+/// The emoji a sender's status message starts with, beside their name; the message on hover.
+fn status_emoji(event_id: &str, message: Option<&str>) -> Option<El> {
+    let message = message?;
+    let emoji = crate::state::leading_emoji(message)?;
+    Some(text(emoji.to_owned()).key(format!("status-emoji-{event_id}")).font(font::BODY).help(message.to_owned()))
+}
+
 /// One message: avatar and name (unless it continues the sender's run), the quoted message it
 /// answers, its content, a linked GIF, reactions and thread; the toolbar shows on hover.
 /// Clicking a room message opens its thread.
@@ -686,6 +693,7 @@ fn message_row(
             .center_y()
             .min_w(0.0)
             .child(text(message.sender_name.clone()).font(font::BODY_STRONG).color(p.text).shrink().truncate())
+            .children(status_emoji(&message.event_id, cx.data.status_message_of(&message.sender_id)))
             .child(text(clock_time(local_ms(message.timestamp_ms))).font(font::META).color(p.text_muted));
         if let Some(status) = status {
             meta = meta.child(status);
@@ -712,7 +720,15 @@ fn message_row(
     let gutter = if continues {
         el().w(AVATAR)
     } else {
-        media_avatar(&message.sender_id, &message.sender_name, message.sender_avatar.as_ref(), cx.media, AVATAR)
+        // The sender's dot, and on hover what they show in words.
+        let shown = cx.data.presence.get(&message.sender_id);
+        let face =
+            media_avatar(&message.sender_id, &message.sender_name, message.sender_avatar.as_ref(), cx.media, AVATAR);
+        let face = with_presence(face, AVATAR, shown, p.bg, p);
+        match shown.and_then(presence_text) {
+            Some(words) => face.key(format!("presence-{}", message.event_id)).help(words),
+            None => face,
+        }
     };
     let mut row = row()
         .key(key.to_owned())

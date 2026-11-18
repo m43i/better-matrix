@@ -8,7 +8,9 @@
 use futures_util::StreamExt;
 use matrix_sdk::RoomMemberships;
 use matrix_sdk::ruma::api::client::profile::{AvatarUrl, DisplayName};
-use matrix_sdk::ruma::{RoomId, UserId};
+use matrix_sdk::ruma::events::presence::PresenceEvent;
+use matrix_sdk::ruma::serde::Raw;
+use matrix_sdk::ruma::{OwnedUserId, RoomId, UserId};
 
 use crate::Error;
 use crate::account::Account;
@@ -29,7 +31,7 @@ pub enum MemberRole {
 }
 
 /// Whether someone is around, as their homeserver last said (servers may not share presence).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum Presence {
     /// Active now.
@@ -43,6 +45,19 @@ pub enum Presence {
     Unknown,
 }
 
+/// What someone shows others, as their homeserver last said: whether they are around, and the
+/// status message they set (Matrix presence's `status_msg`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct PersonPresence {
+    /// Whose.
+    pub user_id: String,
+    /// Whether they are around.
+    pub presence: Presence,
+    /// What they say they are up to ("🌴 On vacation"); `None` when they set none.
+    pub status_message: Option<String>,
+}
+
 /// One joined member, as the member list shows them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
@@ -53,6 +68,8 @@ pub struct RoomMember {
     pub role: MemberRole,
     /// Whether they are around.
     pub presence: Presence,
+    /// The status message they set, if any.
+    pub status_message: Option<String>,
     /// Whether the user verified them (their cross-signing identity).
     pub verified: bool,
     /// Their power level; a room creator's counts as the highest.
@@ -169,13 +186,13 @@ impl Account {
                         50.. => MemberRole::Moderator,
                         _ => MemberRole::Member,
                     };
-                    let presence = store
+                    let shown = store
                         .get_presence_event(member.user_id())
                         .await
                         .ok()
                         .flatten()
                         .and_then(|raw| raw.deserialize().ok())
-                        .map_or(Presence::Unknown, |event| presence(&event.content.presence));
+                        .map(|event| person_presence(&event));
                     let verified = check_verified
                         && encryption
                             .get_user_identity(member.user_id())
@@ -190,7 +207,8 @@ impl Account {
                             avatar: member.avatar_url().map(ToOwned::to_owned).and_then(convert::avatar),
                         },
                         role,
-                        presence,
+                        presence: shown.as_ref().map_or(Presence::Unknown, |shown| shown.presence),
+                        status_message: shown.and_then(|shown| shown.status_message),
                         verified,
                         level,
                     }
@@ -376,7 +394,49 @@ fn sort_members(people: &mut [RoomMember]) {
     people.sort_by_cached_key(|member| (around(member.presence), member.role, member.person.name.to_lowercase()));
 }
 
-fn presence(state: &matrix_sdk::ruma::presence::PresenceState) -> Presence {
+impl Account {
+    /// What the user and the people in their direct chats show, as this device stored it: what
+    /// the apps show until a sync brings changes.
+    pub(crate) async fn known_presence(&self) -> Vec<PersonPresence> {
+        let mut people: Vec<OwnedUserId> = self.user_id().ok().into_iter().collect();
+        for room in self.client().joined_rooms() {
+            for target in room.direct_targets() {
+                if let Some(user) = target.as_user_id()
+                    && !people.iter().any(|known| known == user)
+                {
+                    people.push(user.to_owned());
+                }
+            }
+        }
+        match self.client().state_store().get_presence_events(&people).await {
+            Ok(events) => events.iter().filter_map(|raw| raw.deserialize().ok()).map(|e| person_presence(&e)).collect(),
+            Err(error) => {
+                eprintln!("matrix-engine: could not read stored presence for {}: {error}", self.id());
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// What a sync's presence events say people show now.
+pub(crate) fn synced_presence(events: &[Raw<PresenceEvent>]) -> Vec<PersonPresence> {
+    events.iter().filter_map(|raw| raw.deserialize().ok()).map(|event| person_presence(&event)).collect()
+}
+
+fn person_presence(event: &PresenceEvent) -> PersonPresence {
+    PersonPresence {
+        user_id: event.sender.to_string(),
+        presence: presence(&event.content.presence),
+        status_message: status_message(event.content.status_msg.as_deref()),
+    }
+}
+
+/// A status message as shown: trimmed, and none when only blank.
+pub(crate) fn status_message(message: Option<&str>) -> Option<String> {
+    message.map(str::trim).filter(|message| !message.is_empty()).map(ToOwned::to_owned)
+}
+
+pub(crate) fn presence(state: &matrix_sdk::ruma::presence::PresenceState) -> Presence {
     use matrix_sdk::ruma::presence::PresenceState;
     match state {
         PresenceState::Online => Presence::Online,
@@ -401,6 +461,31 @@ fn on_server(id: &str, home: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn presence_event(content: serde_json::Value) -> Raw<PresenceEvent> {
+        serde_json::from_value(serde_json::json!({ "type": "m.presence", "sender": "@kai:x.org", "content": content }))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_synced_presence_should_carry_the_status_message() {
+        let events = [presence_event(serde_json::json!({ "presence": "unavailable", "status_msg": " 🌴 Away " }))];
+        let shown = synced_presence(&events);
+        assert_eq!(
+            shown,
+            vec![PersonPresence {
+                user_id: "@kai:x.org".into(),
+                presence: Presence::Away,
+                status_message: Some("🌴 Away".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_blank_status_message_should_count_as_none() {
+        let events = [presence_event(serde_json::json!({ "presence": "online", "status_msg": "  " }))];
+        assert_eq!(synced_presence(&events)[0].status_message, None);
+    }
+
     fn people(ids: &[&str]) -> Vec<Person> {
         ids.iter().map(|id| Person { id: (*id).to_owned(), name: (*id).to_owned(), avatar: None }).collect()
     }
@@ -414,6 +499,7 @@ mod tests {
             person: Person { id: name.into(), name: name.into(), avatar: None },
             role,
             presence,
+            status_message: None,
             verified: false,
             level: role.level(),
         }

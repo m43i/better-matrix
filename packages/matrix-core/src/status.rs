@@ -116,6 +116,25 @@ impl Account {
         }
     }
 
+    /// Sets the status message others see beside the user's presence, or clears it with `None`,
+    /// announcing the presence of the status that holds (Online when none was ever set). Under
+    /// the status's lock, so an announcement running meanwhile can't put the old message back.
+    /// Returns what the user shows now.
+    pub async fn set_status_message(&self, message: Option<&str>) -> Result<crate::PersonPresence, Error> {
+        let me = self.user_id()?;
+        let message = crate::people::status_message(message);
+        let known = self.known().await;
+        let presence = known.saved.map_or(Status::Online, |saved| saved.status).presence();
+        let mut request = set_presence::v3::Request::new(me.clone(), presence.clone());
+        request.status_msg = message.clone();
+        self.client().send(request).await?;
+        Ok(crate::PersonPresence {
+            user_id: me.to_string(),
+            presence: crate::people::presence(&presence),
+            status_message: message,
+        })
+    }
+
     /// `report`s the status known now, if any: at start, in turn with saves and syncs.
     pub(crate) async fn report_status(&self, report: impl Fn(Status)) {
         if let Some(saved) = self.known().await.saved {
@@ -490,5 +509,25 @@ mod tests {
         assert_eq!(server.presence().len(), 1);
         account.follow_status(&[], &PresenceState::Offline, |_| {}).await;
         assert_eq!(server.presence().len(), 1, "announced once it went through");
+    }
+
+    #[tokio::test]
+    async fn a_status_message_should_be_announced_trimmed_with_the_status_presence() {
+        let server = Homeserver::plain();
+        let account = server.account().await;
+        account.set_status(Status::Away, 10, |_| {}).await.unwrap();
+        let me = account.set_status_message(Some("  🌴 On vacation ")).await.unwrap();
+        let sent = server.sent("/presence/");
+        assert_eq!(sent.last(), Some(&json!({ "presence": "unavailable", "status_msg": "🌴 On vacation" })));
+        assert_eq!((me.presence, me.status_message.as_deref()), (crate::Presence::Away, Some("🌴 On vacation")));
+    }
+
+    #[tokio::test]
+    async fn a_blank_status_message_should_clear_it() {
+        let server = Homeserver::plain();
+        let account = server.account().await;
+        let me = account.set_status_message(Some("   ")).await.unwrap();
+        assert_eq!(server.sent("/presence/"), vec![json!({ "presence": "online" })]);
+        assert_eq!(me.status_message, None);
     }
 }

@@ -18,6 +18,7 @@ import type { Notification } from "./Notification";
 import type { Password } from "./Password";
 import type { PendingContact } from "./PendingContact";
 import type { Person } from "./Person";
+import type { PersonPresence } from "./PersonPresence";
 import type { PinnedMessage } from "./PinnedMessage";
 import type { PublicRoom } from "./PublicRoom";
 import type { PushContent } from "./PushContent";
@@ -302,7 +303,15 @@ account: AccountId,
 /**
  * The status.
  */
-status: Status, } } | { "type": "RecoveryKey", "data": { 
+status: Status, } } | { "type": "Presence", "data": { 
+/**
+ * Which account learned it.
+ */
+account: AccountId, 
+/**
+ * One entry per person.
+ */
+people: Array<PersonPresence>, } } | { "type": "RecoveryKey", "data": { 
 /**
  * Which account.
  */
