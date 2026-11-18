@@ -16,7 +16,7 @@ pub const READ_MARKER_FADE: f32 = 2.5;
 /// notifies for mentions only or is muted.
 pub fn wants_attention(room: &RoomSummary) -> bool {
     match room.notifications {
-        NotificationMode::AllMessages => room.unread > 0,
+        NotificationMode::AllMessages => room.unread > 0 || room.mentions > 0,
         NotificationMode::MentionsOnly | NotificationMode::Mute => room.mentions > 0,
     }
 }
@@ -551,6 +551,8 @@ pub struct AccountData {
     /// What people show others (presence and status message), the user included, by user ID:
     /// as the engine reports it, and from member lists for whoever it hasn't reported yet.
     pub presence: HashMap<String, matrix_core::PersonPresence>,
+    /// The user's status message as last saved: what a message that fails to save falls back to.
+    pub saved_status_message: Option<String>,
 }
 
 impl AccountData {
@@ -594,6 +596,7 @@ impl AccountData {
             status: matrix_core::Status::default(),
             saved_status: matrix_core::Status::default(),
             presence: HashMap::new(),
+            saved_status_message: None,
         }
     }
 
@@ -868,15 +871,17 @@ impl Accounts {
     pub fn set_presence(&mut self, id: &AccountId, people: Vec<matrix_core::PersonPresence>) {
         if let Some(account) = self.get_mut(id) {
             for shown in people {
+                if shown.user_id == account.summary.id.as_str() {
+                    account.saved_status_message.clone_from(&shown.status_message);
+                }
                 account.presence.insert(shown.user_id.clone(), shown);
             }
         }
     }
 
-    /// Shows the user's own status message as `message` at once, while it is saved; returns the
-    /// one shown before.
-    pub fn set_own_status_message(&mut self, id: &AccountId, message: Option<String>) -> Option<String> {
-        let account = self.get_mut(id)?;
+    /// Shows the user's own status message as `message` at once, while it is saved.
+    pub fn set_own_status_message(&mut self, id: &AccountId, message: Option<String>) {
+        let Some(account) = self.get_mut(id) else { return };
         let presence = match account.status {
             matrix_core::Status::Online => matrix_core::Presence::Online,
             matrix_core::Status::Away => matrix_core::Presence::Away,
@@ -888,7 +893,7 @@ impl Accounts {
             presence,
             status_message: None,
         });
-        std::mem::replace(&mut shown.status_message, message)
+        shown.status_message = message;
     }
 
     pub fn set_sidebar(&mut self, id: &AccountId, layout: matrix_core::SidebarLayout) {
@@ -1307,6 +1312,12 @@ mod tests {
     fn a_muted_room_should_draw_attention_only_for_mentions() {
         let muted = RoomSummary { unread: 5, notifications: NotificationMode::Mute, ..room("!m") };
         assert!(!wants_attention(&muted));
+    }
+
+    #[test]
+    fn a_mention_should_draw_attention_even_without_unread_messages() {
+        let room = RoomSummary { unread: 0, mentions: 1, ..room("!m") };
+        assert!(wants_attention(&room));
     }
 
     #[test]

@@ -86,20 +86,19 @@ pub fn with_presence(face: El, size: f32, shown: Option<&matrix_core::PersonPres
         .children(shown.and_then(|shown| presence_dot(shown.presence, dot, ring, p)).map(|d| d.absolute(at, at)))
 }
 
-/// What someone shows, in words: "Away", "Away · 🌴 On vacation", or only the message when
-/// their server shares no presence.
+/// What someone shows, in words: "Away", or "Away · 🌴 On vacation". Nothing when their server
+/// shares no presence.
 pub fn presence_text(shown: &matrix_core::PersonPresence) -> Option<String> {
     let presence = match shown.presence {
-        matrix_core::Presence::Online => Some(t!("presence.online")),
-        matrix_core::Presence::Away => Some(t!("presence.away")),
-        matrix_core::Presence::Offline => Some(t!("presence.offline")),
-        matrix_core::Presence::Unknown => None,
+        matrix_core::Presence::Online => t!("presence.online"),
+        matrix_core::Presence::Away => t!("presence.away"),
+        matrix_core::Presence::Offline => t!("presence.offline"),
+        matrix_core::Presence::Unknown => return None,
     };
-    match (presence, shown.status_message.as_deref()) {
-        (Some(presence), Some(message)) => Some(tf!("presence.with_message", presence = presence, message = message)),
-        (Some(presence), None) => Some(presence.to_owned()),
-        (None, message) => message.map(ToOwned::to_owned),
-    }
+    Some(match shown.status_message.as_deref() {
+        Some(message) => tf!("presence.with_message", presence = presence, message = message),
+        None => presence.to_owned(),
+    })
 }
 
 /// A square button showing an icon; `active` draws it pressed (a toggled format, say).

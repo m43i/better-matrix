@@ -1489,8 +1489,54 @@ fn a_section_should_count_its_rooms_mentions_while_collapsed() {
         s.accounts.set_sidebar(&ada, matrix_core::SidebarLayout::default());
         s.toggle_section(crate::state::DIRECT);
     });
+    // Grace's two and Kai's one.
     assert!(rt.find("section-mentions-direct").is_some());
+    assert!(rt.elements().iter().any(|element| element.text.as_deref() == Some("3")));
     assert!(rt.find("room-!dm-grace:example.org").is_none(), "collapsed, its rooms are hidden");
+}
+
+#[test]
+fn escape_while_writing_a_status_message_should_go_back_to_the_menu() {
+    let mut rt = runtime(|_| {});
+    rt.on_key = crate::spec().on_key;
+    press(&mut rt, "account-button");
+    press(&mut rt, "status-message");
+    rt.key(rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() });
+    rt.frame(0.1);
+    assert!(rt.state.status_draft.is_none());
+    assert!(rt.find("status-online").is_some(), "the account menu stays open");
+}
+
+#[test]
+fn a_direct_chats_row_should_follow_its_persons_presence() {
+    let mut rt = runtime(|_| {});
+    assert!(rt.find("status-emoji-!dm-kai:example.org").is_some());
+    let back = matrix_core::PersonPresence {
+        user_id: "@kai:example.org".into(),
+        presence: matrix_core::Presence::Online,
+        status_message: None,
+    };
+    rt.update(|s, tx| s.apply(Event::Presence { account: AccountId::new(demo::ADA), people: vec![back] }, tx));
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("status-emoji-!dm-kai:example.org").is_none());
+}
+
+#[test]
+fn a_direct_chat_more_people_joined_should_show_no_presence() {
+    let rt = runtime(|s| {
+        let ada = AccountId::new(demo::ADA);
+        let Some(account) = s.active_account() else { return };
+        let mut list = matrix_core::RoomList {
+            rooms: account.rooms.clone(),
+            spaces: account.spaces.clone(),
+            invitations: Vec::new(),
+        };
+        for room in list.rooms.iter_mut().filter(|room| room.room_id == "!dm-kai:example.org") {
+            room.member_count = 3;
+        }
+        s.apply(Event::RoomsUpdated { account: ada, list }, &mut rune::Tx::default());
+    });
+    assert!(rt.find("status-emoji-!dm-kai:example.org").is_none());
 }
 
 #[test]

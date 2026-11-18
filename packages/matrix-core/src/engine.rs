@@ -1250,6 +1250,7 @@ impl Engine {
             rings: HashMap::new(),
             next_ring: 0,
             status_stamp: 0,
+            message_number: 0,
             devices: crate::calls::DeviceChoice::default(),
         };
         let thread = std::thread::Builder::new().name("matrix-engine".into()).spawn(move || {
@@ -1405,6 +1406,8 @@ struct State {
     /// When the last status was chosen (`Command::SetStatus`), in ms since the epoch: each is
     /// stamped later than the one before, even within one millisecond.
     status_stamp: u64,
+    /// The number of the last status message set (`Command::SetStatusMessage`).
+    message_number: u64,
     /// The microphone, speaker and camera the user picked for calls.
     devices: crate::calls::DeviceChoice,
 }
@@ -2433,9 +2436,12 @@ impl State {
             }
             Command::SetStatusMessage { account: id, message } => {
                 let account = self.account(&id);
+                // Numbered here, as commands arrive: messages settle in the order they were set.
+                self.message_number += 1;
+                let number = self.message_number;
                 Box::pin(async move {
-                    let me = account?.set_status_message(message.as_deref()).await?;
-                    sink.emit(Event::Presence { account: id, people: vec![me] });
+                    let report = |me| sink.emit(Event::Presence { account: id.clone(), people: vec![me] });
+                    account?.set_status_message(message.as_deref(), number, report).await?;
                     Ok(Outcome::Done)
                 })
             }
@@ -2519,12 +2525,6 @@ impl State {
                         };
                         let status = account
                             .report_status(|status| sink.emit(Event::Status { account: account.id().clone(), status }));
-                        let presence = async {
-                            let people = account.known_presence().await;
-                            if !people.is_empty() {
-                                sink.emit(Event::Presence { account: account.id().clone(), people });
-                            }
-                        };
                         // Once the homeserver names a call service, rooms offer MatrixRTC calls.
                         let calls = {
                             let (account, feed) = (account.clone(), feed.clone());
@@ -2534,11 +2534,16 @@ impl State {
                                 }
                             }
                         };
+                        // What people show as this device stored it, before syncing starts: a
+                        // sync's newer report must not come first and be undone by it.
+                        let people = account.known_presence().await;
+                        if !people.is_empty() {
+                            sink.emit(Event::Presence { account: account.id().clone(), people });
+                        }
                         tokio::join!(
                             profile,
                             layout,
                             status,
-                            presence,
                             calls,
                             crate::security::watch(account.clone(), flows, Arc::clone(&sink)),
                             sync_loop(account.clone(), Arc::clone(&sink), feed),

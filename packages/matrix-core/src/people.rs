@@ -423,12 +423,15 @@ pub(crate) fn synced_presence(events: &[Raw<PresenceEvent>]) -> Vec<PersonPresen
     events.iter().filter_map(|raw| raw.deserialize().ok()).map(|event| person_presence(&event)).collect()
 }
 
+/// What an event says someone shows. A presence the apps don't know shows nothing, its message
+/// included.
 fn person_presence(event: &PresenceEvent) -> PersonPresence {
-    PersonPresence {
-        user_id: event.sender.to_string(),
-        presence: presence(&event.content.presence),
-        status_message: status_message(event.content.status_msg.as_deref()),
-    }
+    let presence = presence(&event.content.presence);
+    let status_message = match presence {
+        Presence::Unknown => None,
+        _ => status_message(event.content.status_msg.as_deref()),
+    };
+    PersonPresence { user_id: event.sender.to_string(), presence, status_message }
 }
 
 /// A status message as shown: trimmed, and none when only blank.
@@ -478,6 +481,13 @@ mod tests {
                 status_message: Some("🌴 Away".into()),
             }]
         );
+    }
+
+    #[test]
+    fn an_unknown_presence_should_carry_no_status_message() {
+        let events = [presence_event(serde_json::json!({ "presence": "busy", "status_msg": "Deep work" }))];
+        let shown = synced_presence(&events);
+        assert_eq!((shown[0].presence, shown[0].status_message.as_deref()), (Presence::Unknown, None));
     }
 
     #[test]

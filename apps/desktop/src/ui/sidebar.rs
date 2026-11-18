@@ -243,10 +243,11 @@ fn room_row(
     rune::memo(format!("room-{}", room.room_id), version, || build_room_row(room, partner, selected, dragged, media, p))
 }
 
-/// The one other person in a direct chat, when it has one.
+/// The one other person in a direct chat of two, when it is one: a chat marked direct with one
+/// person may since have been joined by more.
 pub fn dm_partner(room: &RoomSummary) -> Option<&str> {
     match room.dm_users.as_slice() {
-        [partner] if room.kind == RoomKind::Direct => Some(partner),
+        [partner] if room.kind == RoomKind::Direct && room.member_count <= 2 => Some(partner),
         _ => None,
     }
 }

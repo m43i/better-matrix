@@ -31,6 +31,7 @@ pub fn leading_emoji(message: &str) -> Option<&str> {
 
 /// `message` starting with `emoji` instead of the emoji it started with, if any.
 fn with_emoji(message: &str, emoji: &str) -> String {
+    let message = message.trim_start();
     let rest = leading_emoji(message).map_or(message, |old| &message[old.len()..]).trim_start();
     if rest.is_empty() { emoji.to_owned() } else { format!("{emoji} {rest}") }
 }
@@ -78,9 +79,9 @@ impl State {
         if data.status_message() == message.as_deref() {
             return;
         }
-        let previous = self.accounts.set_own_status_message(account, message.clone());
+        self.accounts.set_own_status_message(account, message.clone());
         let command = Command::SetStatusMessage { account: account.clone(), message: message.clone() };
-        self.dispatch(command, Purpose::StatusMessage { account: account.clone(), chosen: message, previous });
+        self.dispatch(command, Purpose::StatusMessage { account: account.clone(), chosen: message });
     }
 
     /// An emoji picked for the message being written: it starts the message, replacing the one
@@ -93,16 +94,13 @@ impl State {
         }
     }
 
-    /// Saving `chosen` failed: the message shown before comes back, unless another was set or
+    /// Saving `chosen` failed: the message last saved comes back, unless another was set or
     /// reported since.
-    pub(super) fn status_message_failed(
-        &mut self,
-        account: &AccountId,
-        chosen: Option<String>,
-        previous: Option<String>,
-    ) {
-        if self.accounts.get(account).is_some_and(|data| data.status_message() == chosen.as_deref()) {
-            self.accounts.set_own_status_message(account, previous);
+    pub(super) fn status_message_failed(&mut self, account: &AccountId, chosen: Option<String>) {
+        let Some(data) = self.accounts.get(account) else { return };
+        if data.status_message() == chosen.as_deref() {
+            let saved = data.saved_status_message.clone();
+            self.accounts.set_own_status_message(account, saved);
         }
     }
 }
@@ -129,6 +127,11 @@ mod tests {
     #[test]
     fn a_picked_emoji_should_replace_the_one_the_message_started_with() {
         assert_eq!(with_emoji("🌴 On vacation", "🏝️"), "🏝️ On vacation");
+    }
+
+    #[test]
+    fn a_picked_emoji_should_replace_an_emoji_after_spaces() {
+        assert_eq!(with_emoji("  🌴 On vacation", "🏝️"), "🏝️ On vacation");
     }
 
     #[test]

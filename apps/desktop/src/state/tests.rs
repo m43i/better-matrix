@@ -671,6 +671,21 @@ fn a_status_message_the_server_refused_should_show_the_previous_one_and_why() {
 }
 
 #[test]
+fn status_messages_that_all_fail_should_fall_back_to_the_saved_one() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    let me = person_presence(id.as_str(), matrix_core::Presence::Online, Some("Saved"));
+    apply(&mut s, Event::Presence { account: id.clone(), people: vec![me] });
+    s.set_status_message(&id, "First");
+    s.set_status_message(&id, "Second");
+    for (request, _) in drain(&mut commands) {
+        apply(&mut s, Event::Finished { request, result: Err("offline".into()) });
+    }
+    assert_eq!(s.accounts.get(&id).and_then(|a| a.status_message()), Some("Saved"));
+}
+
+#[test]
 fn escape_while_writing_a_status_message_should_keep_the_account_menu_open() {
     let (mut s, _) = state();
     let id = AccountId::new("@a:example.org");

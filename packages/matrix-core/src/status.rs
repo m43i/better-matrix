@@ -64,6 +64,10 @@ pub(crate) struct Known {
     saved: Option<Content>,
     /// What this session last announced as presence, if that went through.
     announced: Option<Status>,
+    /// Whether a sync has brought the status yet: until then `saved` may be stale.
+    synced: bool,
+    /// The number of the latest status message set ([`Account::set_status_message`]).
+    message_number: u64,
 }
 
 impl Account {
@@ -117,22 +121,38 @@ impl Account {
     }
 
     /// Sets the status message others see beside the user's presence, or clears it with `None`,
-    /// announcing the presence of the status that holds (Online when none was ever set). Under
-    /// the status's lock, so an announcement running meanwhile can't put the old message back.
-    /// Returns what the user shows now.
-    pub async fn set_status_message(&self, message: Option<&str>) -> Result<crate::PersonPresence, Error> {
+    /// and `report`s what the user shows then. `number` orders the messages as they were set: one
+    /// whose task runs after a later one's is dropped. It goes with the presence of the status
+    /// that holds (Online when none was ever set), or offline until a sync has brought the status,
+    /// which could be Hidden; the sync's announcement then sets the presence, keeping the message.
+    /// Under the status's lock, so an announcement can't put the old message back.
+    pub async fn set_status_message(
+        &self,
+        message: Option<&str>,
+        number: u64,
+        report: impl Fn(crate::PersonPresence),
+    ) -> Result<(), Error> {
         let me = self.user_id()?;
         let message = crate::people::status_message(message);
-        let known = self.known().await;
-        let presence = known.saved.map_or(Status::Online, |saved| saved.status).presence();
+        let mut known = self.known().await;
+        if known.message_number > number {
+            return Ok(());
+        }
+        known.message_number = number;
+        let presence = match known.saved {
+            _ if !known.synced => PresenceState::Offline,
+            Some(saved) => saved.status.presence(),
+            None => PresenceState::Online,
+        };
         let mut request = set_presence::v3::Request::new(me.clone(), presence.clone());
         request.status_msg = message.clone();
         self.client().send(request).await?;
-        Ok(crate::PersonPresence {
+        report(crate::PersonPresence {
             user_id: me.to_string(),
             presence: crate::people::presence(&presence),
             status_message: message,
-        })
+        });
+        Ok(())
     }
 
     /// `report`s the status known now, if any: at start, in turn with saves and syncs.
@@ -164,6 +184,7 @@ impl Account {
         if came.is_some() {
             known.saved = came;
         }
+        known.synced = true;
         let raced = known.saved.is_some_and(|saved| saved.status.presence() != *sent);
         self.settle(&mut known, came.is_some() || raced).await;
         if let Some(came) = came {
@@ -326,6 +347,13 @@ mod tests {
     async fn sync(account: &Account) -> matrix_sdk::sync::SyncResponse {
         let settings = matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::ZERO);
         account.client().sync_once(settings).await.unwrap()
+    }
+
+    /// A presence `report` that keeps what it hears.
+    fn shown() -> (Arc<Mutex<Vec<crate::PersonPresence>>>, impl Fn(crate::PersonPresence)) {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let keep = heard.clone();
+        (heard, move |me| keep.lock().unwrap().push(me))
     }
 
     /// A `report` that keeps what it hears.
@@ -516,9 +544,12 @@ mod tests {
         let server = Homeserver::plain();
         let account = server.account().await;
         account.set_status(Status::Away, 10, |_| {}).await.unwrap();
-        let me = account.set_status_message(Some("  🌴 On vacation ")).await.unwrap();
+        account.follow_status(&[], &PresenceState::Unavailable, |_| {}).await;
+        let (heard, report) = shown();
+        account.set_status_message(Some("  🌴 On vacation "), 1, report).await.unwrap();
         let sent = server.sent("/presence/");
         assert_eq!(sent.last(), Some(&json!({ "presence": "unavailable", "status_msg": "🌴 On vacation" })));
+        let me = heard.lock().unwrap().pop().unwrap();
         assert_eq!((me.presence, me.status_message.as_deref()), (crate::Presence::Away, Some("🌴 On vacation")));
     }
 
@@ -526,8 +557,29 @@ mod tests {
     async fn a_blank_status_message_should_clear_it() {
         let server = Homeserver::plain();
         let account = server.account().await;
-        let me = account.set_status_message(Some("   ")).await.unwrap();
-        assert_eq!(server.sent("/presence/"), vec![json!({ "presence": "online" })]);
-        assert_eq!(me.status_message, None);
+        account.follow_status(&[], &PresenceState::Online, |_| {}).await;
+        let (heard, report) = shown();
+        account.set_status_message(Some("   "), 1, report).await.unwrap();
+        assert_eq!(server.sent("/presence/").last(), Some(&json!({ "presence": "online" })));
+        assert_eq!(heard.lock().unwrap().pop().map(|me| me.status_message), Some(None));
+    }
+
+    #[tokio::test]
+    async fn a_status_message_set_before_a_sync_brought_the_status_should_go_out_offline() {
+        let server = Homeserver::plain();
+        let account = server.account().await;
+        account.set_status_message(Some("Out"), 1, |_| {}).await.unwrap();
+        assert_eq!(server.sent("/presence/"), vec![json!({ "presence": "offline", "status_msg": "Out" })]);
+    }
+
+    #[tokio::test]
+    async fn an_earlier_status_message_saved_after_a_later_one_should_be_dropped() {
+        let server = Homeserver::plain();
+        let account = server.account().await;
+        account.set_status_message(None, 2, |_| {}).await.unwrap();
+        let (heard, report) = shown();
+        account.set_status_message(Some("Out"), 1, report).await.unwrap();
+        assert_eq!(server.sent("/presence/").len(), 1);
+        assert!(heard.lock().unwrap().is_empty());
     }
 }

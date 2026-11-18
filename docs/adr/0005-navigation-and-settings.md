@@ -114,7 +114,7 @@ Date: 2026-11-14
   - Rune's notifier on macOS and Windows, freedesktop on Linux. A click opens the room,
     switching account and scope.
 - **Wants attention:** one rule (`wants_attention`) for sidebar, rail and account menu.
-  - Unread messages, or only mentions for mentions-only and muted rooms.
+  - Unread messages or mentions, or only mentions for mentions-only and muted rooms.
   - The engine re-reads rooms on the SDK's room-info updates, so badges follow its counts.
   - In the sidebar a room that wants attention gets a tinted background (`sidebar_unread`) and
     a bold name; rows carry no counts. A section's header turns bold when any of its rooms

@@ -487,12 +487,11 @@ enum Purpose {
         account: AccountId,
         chosen: matrix_core::Status,
     },
-    /// Setting the user's status message to `chosen`; failing, `previous` shows again, unless
-    /// another message was set or reported since.
+    /// Setting the user's status message to `chosen`; failing, the one last saved shows again,
+    /// unless another message was set or reported since.
     StatusMessage {
         account: AccountId,
         chosen: Option<String>,
-        previous: Option<String>,
     },
     Leave,
     Recover,
@@ -1616,8 +1615,8 @@ impl State {
                 }
                 self.notice = Some(tf!("notice.status", error = error));
             }
-            Purpose::StatusMessage { account, chosen, previous } => {
-                self.status_message_failed(&account, chosen, previous);
+            Purpose::StatusMessage { account, chosen } => {
+                self.status_message_failed(&account, chosen);
                 self.notice = Some(tf!("notice.status_message", error = error));
             }
             Purpose::Leave => self.notice = Some(tf!("notice.leave", error = error)),
