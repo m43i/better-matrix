@@ -1072,6 +1072,35 @@ fn long_names_words_and_reactions_should_stay_clear_of_the_readers_column_beside
 }
 
 #[test]
+fn a_link_card_should_keep_its_words_and_leave_the_readers_column_clear_beside_a_thread() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.open_thread(demo::DEMO_THREAD.1);
+    });
+    // 780 points at 125% zoom.
+    let column = readers_column_start_at(&mut rt, (624.0, 1280.0));
+    let card = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref().is_some_and(|k| k.starts_with("link-")))
+        .expect("the link card")
+        .rect;
+    let inside = rt.elements().into_iter().filter(|e| {
+        e.rect[1] >= card[1] && e.rect[1] + e.rect[3] <= card[1] + card[3] && e.rect[0] >= card[0] && e.rect[0] < column
+    });
+    for e in inside {
+        assert!(
+            e.rect[0] + e.rect[2] <= column,
+            "{:?} ends at {}, the column starts at {column}",
+            e.text,
+            e.rect[0] + e.rect[2]
+        );
+    }
+    let site = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Better Matrix")).expect("the site's name");
+    assert!(site.rect[2] >= 40.0, "the card's words keep room: {}", site.rect[2]);
+}
+
+#[test]
 fn a_thread_link_should_leave_the_readers_column_clear_in_a_narrow_window() {
     let mut rt = readers_runtime();
     rt.set_viewport((760.0, 1200.0), 1.0);

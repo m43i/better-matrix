@@ -636,7 +636,14 @@ fn message_row(
     if let Some((url, card)) =
         item.card_link(cx.show_gifs).and_then(|url| Some((url, cx.link_previews?.get(cx.account, url)?)))
     {
-        body = body.child(link_card(&cx.key(&format!("link-{}", message.event_id)), url, card, cx.media, p));
+        body = body.child(link_card(
+            &cx.key(&format!("link-{}", message.event_id)),
+            url,
+            card,
+            cx.content_width,
+            cx.media,
+            p,
+        ));
     }
     if interactive && !message.reactions.is_empty() {
         body = body.child(reactions(cx, message, p));
@@ -1024,9 +1031,10 @@ fn notice_text(message: &str, p: &Palette) -> El {
 /// The largest box an image preview may take.
 const PREVIEW_BOX: (f32, f32) = (360.0, 280.0);
 
-/// A link's preview card: the site, the page's title and description, its image beside them.
+/// A link's preview card, up to `max_width` wide: the site, the page's title and description,
+/// and its image beside them when that leaves the words room.
 /// Pressing it opens the link.
-fn link_card(key: &str, url: &str, card: &LinkPreview, media: &MediaCache, p: &Palette) -> El {
+fn link_card(key: &str, url: &str, card: &LinkPreview, max_width: f32, media: &MediaCache, p: &Palette) -> El {
     /// The image's side.
     const THUMB: f32 = 72.0;
     let mut words = col().grow(1.0).min_w(0.0).gap(2.0);
@@ -1058,8 +1066,11 @@ fn link_card(key: &str, url: &str, card: &LinkPreview, media: &MediaCache, p: &P
         .focusable(true)
         .child(el().w(3.0).h_full().min_h(THUMB.min(40.0)).radius(1.5).fill(p.accent))
         .child(words);
-    // An image that failed to load leaves the words on their own.
-    if let Some((image, _)) = card.image.as_ref().filter(|(image, _)| !media.has_failed(image)) {
+    // An image that failed to load leaves the words on their own, as does a message too narrow
+    // to keep a readable width for them beside it.
+    const WORDS_MIN: f32 = 120.0;
+    let room = max_width - 2.0 * 12.0 - 3.0 - 2.0 * 12.0 - THUMB;
+    if let Some((image, _)) = card.image.as_ref().filter(|(image, _)| !media.has_failed(image) && room >= WORDS_MIN) {
         let thumb = el().size(THUMB, THUMB).radius(8.0).clip_rounded(8.0);
         entry = entry.child(match media.image(image) {
             Some(image) => thumb.pixels_fit(image.pixels(), SurfaceFit::Fill),

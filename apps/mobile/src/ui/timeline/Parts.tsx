@@ -85,7 +85,9 @@ export const Reactions = memo(function Reactions({
             },
           ]}
         >
-          <Text style={font.body}>{reaction.key}</Text>
+          <Text style={[font.body, styles.chipKey]} numberOfLines={1}>
+            {reaction.key}
+          </Text>
           <Text style={[font.meta, { color: reaction.mine ? palette.accent : palette.textMuted }]}>
             {reaction.count}
           </Text>
@@ -259,9 +261,13 @@ const styles = StyleSheet.create({
   quoteText: { flexShrink: 1, paddingVertical: 2 },
   quoteSender: { fontWeight: '600' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingTop: 4 },
+  chipKey: { flexShrink: 1 },
+  // A long reaction (a shortcode, say) is cut short within the message's width; its
+  // accessibility label keeps all of it.
   chip: {
     height: 28,
     minWidth: 40,
+    maxWidth: '100%',
     paddingHorizontal: 8,
     gap: 6,
     borderRadius: 14,
