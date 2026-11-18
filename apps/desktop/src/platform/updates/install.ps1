@@ -29,7 +29,9 @@ try {
     try {
         $entry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{DB776B2C-C930-4C78-B82D-3BACD4B141C9}_is1'
         $installed = (Get-ItemProperty -LiteralPath $entry -ErrorAction SilentlyContinue).InstallLocation
-        if ($Version -and $installed -and $installed.TrimEnd('\') -eq (Split-Path -Parent $Target).TrimEnd('\')) {
+        $folder = (Split-Path -Parent $Target).TrimEnd('\')
+        if ($Version -and $installed -and
+            [string]::Equals($installed.TrimEnd('\'), $folder, [StringComparison]::OrdinalIgnoreCase)) {
             Set-ItemProperty -LiteralPath $entry -Name DisplayVersion -Value $Version
         }
     } catch {}
