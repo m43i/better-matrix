@@ -20,7 +20,8 @@ import { CallCardView } from './CallCard';
 import { useTimelineContext } from './context';
 import { LinkCard, LinkedGif, QuoteBlock, Reactions, ThreadLink } from './Parts';
 import { PollCard } from './PollCard';
-import { ReadIndicator, READERS_COLUMN, READERS_HEIGHT } from './ReadIndicator';
+import { ReadIndicator } from './ReadIndicator';
+import { READERS_COLUMN, READERS_HEIGHT, useReadersColumn } from './readersLayout';
 import { RichText } from './RichText';
 
 export const AVATAR = 36;
@@ -42,6 +43,8 @@ export const MessageRow = memo(function MessageRow({
 }: MessageRowProps) {
   const palette = usePalette();
   const { account, timelineKey, thread, openActions } = useTimelineContext();
+  const readersColumn = useReadersColumn();
+  const read = !message.pending && (message.read_receipts?.length ?? 0) > 0;
   const showGifs = useStore((s) => s.settings.showLinkGifs);
   const showPreviews = useStore((s) => s.settings.showLinkPreviews);
 
@@ -110,7 +113,12 @@ export const MessageRow = memo(function MessageRow({
               {clockTime(message.timestamp_ms)}
             </Text>
             {status ? (
-              <Text style={[font.meta, { color: palette.textMuted }]}>{status}</Text>
+              <Text
+                style={[font.meta, styles.status, { color: palette.textMuted }]}
+                numberOfLines={1}
+              >
+                {status}
+              </Text>
             ) : null}
           </View>
         )}
@@ -133,13 +141,14 @@ export const MessageRow = memo(function MessageRow({
         {continues && status ? (
           <Text style={[font.meta, { color: palette.textMuted }]}>{status}</Text>
         ) : null}
-      </View>
-      {thread === null ? (
-        <View style={styles.readers}>
-          {!message.pending && (message.read_receipts?.length ?? 0) > 0 ? (
+        {thread === null && !readersColumn && read ? (
+          <View style={styles.readersLine}>
             <ReadIndicator message={message} />
-          ) : null}
-        </View>
+          </View>
+        ) : null}
+      </View>
+      {readersColumn ? (
+        <View style={styles.readers}>{read ? <ReadIndicator message={message} /> : null}</View>
       ) : null}
     </Pressable>
   );
@@ -188,7 +197,9 @@ const styles = StyleSheet.create({
   },
   gutter: { width: AVATAR },
   content: { flex: 1, minWidth: 0, gap: 2 },
-  // Kept in every room message, filled or not, so a receipt never rewraps or grows it.
+  // Kept in every room message, filled or not, so a receipt never rewraps or grows it; on a
+  // screen too narrow for it, the indicator takes a line under the message instead.
+  readersLine: { flexDirection: 'row', justifyContent: 'flex-end' },
   readers: {
     width: READERS_COLUMN,
     minHeight: READERS_HEIGHT,
@@ -198,5 +209,8 @@ const styles = StyleSheet.create({
   },
   meta: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   name: { flexShrink: 1 },
+  // A long status ("Wird gesendet …") gives way before the name on a narrow screen; it keeps to
+  // the line, so a message doesn't change height once it is sent.
+  status: { flexShrink: 3 },
   notice: { fontStyle: 'italic' },
 });

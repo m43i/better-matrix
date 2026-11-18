@@ -1,6 +1,5 @@
 // Who has read up to a message, as the desktop shows it in a narrow window: up to two faces and
-// how many more, in a column every room message keeps free at its right (`READERS_COLUMN`), so
-// a receipt never rewraps or grows its message. A tap lists them all (`app/readers.tsx`).
+// how many more, where `readersLayout.ts` places it. A tap lists them all (`app/readers.tsx`).
 
 import type { Message, Person } from '@better-matrix/matrix-native/types';
 import { useRouter } from 'expo-router';
@@ -16,25 +15,7 @@ import { Avatar } from '../Avatar';
 import { Touchable } from '../components';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
-
-const FACE = 16;
-
-/** The ring that separates overlapping faces; it adds to each face's size. */
-const FACE_BORDER = 1.5;
-
-const FACE_OVERLAP = 6;
-
-const FACE_OUTER = FACE + 2 * FACE_BORDER;
-
-/** Room for the overflow count ("+99", or "99+") after the faces. */
-const COUNT = 24;
-
-/** The indicator's height: a line of text, kept under every room message's content. */
-export const READERS_HEIGHT = font.body.lineHeight;
-
-/** The width every room message keeps free at its right for its read indicator. */
-export const READERS_COLUMN =
-  FACE_OUTER + (READER_FACES - 1) * (FACE_OUTER - FACE_OVERLAP) + 6 + COUNT + 8;
+import { FACE, FACE_BORDER, FACE_OVERLAP, READERS_PADDING_Y } from './readersLayout';
 
 export function ReadIndicator({ message }: { message: Message }) {
   const palette = usePalette();
@@ -100,7 +81,7 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 4,
     // No taller than a line of text, so it never makes a one-line message taller.
-    paddingVertical: (READERS_HEIGHT - FACE_OUTER) / 2,
+    paddingVertical: READERS_PADDING_Y,
     borderRadius: 5,
   },
   faces: { flexDirection: 'row', alignItems: 'center' },

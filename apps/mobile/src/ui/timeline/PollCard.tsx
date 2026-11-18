@@ -105,7 +105,7 @@ export function PollCard({ message, poll }: { message: Message; poll: Poll }) {
         );
       })}
       <View style={styles.footer}>
-        <Text style={[font.meta, styles.grow, { color: palette.textMuted }]}>
+        <Text style={[font.meta, styles.status, { color: palette.textMuted }]}>
           {pollStatus(poll)}
         </Text>
         {votable && message.sender_id === account ? (
@@ -146,5 +146,7 @@ const styles = StyleSheet.create({
   answerHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   mark: { width: 18, height: 18, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   bar: { height: 4, borderRadius: 2, overflow: 'hidden' },
-  footer: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // On a narrow screen, ending the poll takes a line under its status.
+  footer: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 },
+  status: { flexGrow: 1, flexShrink: 1, minWidth: 100 },
 });

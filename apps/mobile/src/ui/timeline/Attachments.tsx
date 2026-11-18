@@ -6,14 +6,7 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { type ReactNode, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
 import { fetchOriginal } from '../../state/actions/timeline';
@@ -27,25 +20,15 @@ import { Icon, type IconName } from '../icons';
 import { ORIGINAL, PREVIEW_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
-import { READERS_COLUMN } from './ReadIndicator';
+import { useContentWidth } from './readersLayout';
 import { shareAttachment } from './files';
-
-/** Room beside a message's content: the row's padding, the avatar and its gap. */
-const ROW_INSET = 16 + 36 + 10 + 16;
-
-/** Room a room message keeps for its read indicator, with its gap. */
-const READERS_INSET = READERS_COLUMN + 10;
 
 /**
  * The largest box an image, video or GIF takes: the content's width (clear of the readers'
  * column in a room), up to the desktop's 360 × 280.
  */
 export function useMediaBox() {
-  const { width } = useWindowDimensions();
-  const { thread } = useTimelineContext();
-  const inset = ROW_INSET + (thread === null ? READERS_INSET : 0);
-
-  return { width: Math.min(width - inset, 360), height: 280 };
+  return { width: Math.min(useContentWidth(), 360), height: 280 };
 }
 
 export function AttachmentView({
