@@ -13,6 +13,7 @@ import type { Settings } from '../settings';
 import type { Store } from '../store';
 import { timelineId } from '../timeline';
 import type { Scope, State, Timeline } from '../types';
+import { nextSpeed } from '../voiceCard';
 
 /** Puts an account on screen. */
 export function setActive(store: Store, account: AccountId): void {
@@ -31,6 +32,14 @@ export function setScope(store: Store, account: AccountId, scope: Scope): void {
 /** Changes this device's preferences. */
 export function updateSettings(store: Store, change: Partial<Settings>): void {
   store.update((s) => ({ ...s, settings: { ...s.settings, ...change } }));
+}
+
+/** Steps the playback speed (1×, 1.5×, 2×), for the clip playing and every one after. */
+export function cyclePlaybackSpeed(store: Store): void {
+  store.update((s) => ({
+    ...s,
+    settings: { ...s.settings, playbackSpeed: nextSpeed(s.settings.playbackSpeed) },
+  }));
 }
 
 /**

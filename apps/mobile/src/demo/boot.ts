@@ -11,6 +11,7 @@ import { type Scene, sceneEvents, scenes, type SceneName } from './scenes';
 const ASSETS = new Map<string, number>([
   [DEMO_MEDIA.screenshot, require('../../assets/images/icon.png')],
   [DEMO_MEDIA.release, require('../../assets/images/android-icon-background.png')],
+  [DEMO_MEDIA.voice, require('../../assets/sounds/ring.wav')],
 ]);
 
 async function resolveMedia(media: string): Promise<string | null> {

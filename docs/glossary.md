@@ -166,8 +166,8 @@ a voice card, not a file.
 (`AudioDetails::waveform`).
 
 **Voice card**
-: How an audio clip shows in the timeline: play, the waveform bars that fill as it plays, a
-scrubber dot to drag, the time, and the playback speed button once it plays.
+: How an audio clip shows in the timeline, on desktop and mobile: play, the waveform bars that
+fill as it plays, a scrubber dot to drag, the time, and the playback speed button once it plays.
 
 **Playback speed**
 : How fast clips play, 1×, 1.5× or 2×, at their own pitch (`PlaybackSpeed`); one choice for every

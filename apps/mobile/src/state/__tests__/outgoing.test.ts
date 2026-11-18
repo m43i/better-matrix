@@ -135,6 +135,11 @@ describe('withAttachments', () => {
 });
 
 describe('voiceMessage', () => {
+  it('should send the recording’s waveform with it', () => {
+    const message = voiceMessage('/v.m4a', 2000, [10, 900]);
+    expect(message.type === 'Voice' && message.data.waveform).toEqual([10, 900]);
+  });
+
   it('should send the recording with its whole milliseconds', () => {
     expect(voiceMessage('/v.m4a', 1234.6)).toEqual({
       type: 'Voice',

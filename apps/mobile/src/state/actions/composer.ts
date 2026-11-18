@@ -172,12 +172,13 @@ export function sendVoiceMemo(
   key: TimelineKey,
   path: string,
   durationMs: number,
+  waveform: number[] = [],
 ): void {
   sendTold(
     store,
     {
       type: 'Send',
-      data: { account, key, reply_to: null, message: voiceMessage(path, durationMs) },
+      data: { account, key, reply_to: null, message: voiceMessage(path, durationMs, waveform) },
     },
     'notice.not_sent',
   );

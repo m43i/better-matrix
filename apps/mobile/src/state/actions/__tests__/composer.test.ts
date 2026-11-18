@@ -230,6 +230,17 @@ describe('composer actions', () => {
     ]);
   });
 
+  it('should send a voice memo with its waveform', () => {
+    const { store, commands } = setUp();
+    sendVoiceMemo(store, ADA, KEY, '/cache/v.m4a', 3200, [12, 700]);
+    const [command] = commands();
+    expect(
+      command?.type === 'Send' &&
+        command.data.message.type === 'Voice' &&
+        command.data.message.data.waveform,
+    ).toEqual([12, 700]);
+  });
+
   it('should send a voice memo with its length', () => {
     const { store, commands } = setUp();
     sendVoiceMemo(store, ADA, KEY, '/cache/v.m4a', 3200);

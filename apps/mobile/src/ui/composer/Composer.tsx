@@ -61,6 +61,7 @@ import { Banner } from './Banner';
 import { FormatBar } from './FormatBar';
 import { DENIED, pickFiles, pickFromLibrary, takeWithCamera } from './pickers';
 import { useVoiceMemo } from './useVoiceMemo';
+import { VoiceGlow } from './VoiceGlow';
 
 export interface ComposerProps {
   account: AccountId;
@@ -212,7 +213,8 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
   const notice = (message: string) => store.update((s) => addNotice(s, message, account));
 
   const voice = useVoiceMemo(
-    (path, durationMs) => sendVoiceMemo(store, account, timelineKey, path, durationMs),
+    (path, durationMs, waveform) =>
+      sendVoiceMemo(store, account, timelineKey, path, durationMs, waveform),
     (message) => notice(message),
   );
 
@@ -437,6 +439,7 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
           />
         )}
         <View style={[styles.field, { backgroundColor: palette.surface }]}>
+          {recording ? <VoiceGlow level={voice.level} radius={FIELD_MIN / 2} /> : null}
           {recording ? (
             <View
               style={styles.recording}

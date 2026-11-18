@@ -75,7 +75,29 @@ export const DEMO_DAY_MS = 20_769 * 86_400_000;
 export const DEMO_MEDIA = {
   screenshot: 'demo-screenshot',
   release: 'demo-release-notes',
+  voice: 'demo-voice-memo',
 } as const;
+
+/** The voice memo Grace sends: 14 seconds of speech, with the waveform a client sends along. */
+function voiceMemo(): MessageContent {
+  // Words and the pauses between them, as the desktop's fixture: a swell every few bars,
+  // quieter at the breaths.
+  const waveform = Array.from({ length: 100 }, (_, i) => {
+    const words = (Math.sin(i * 0.55) * 0.5 + 0.5) * (Math.sin(i * 0.13) * 0.35 + 0.65);
+    const breath = Math.sin(i * 0.09) > 0.93 ? 0.1 : 1;
+
+    return Math.floor(words * breath * 1000) + 24;
+  });
+
+  return {
+    type: 'Attachment',
+    data: file('voice-1765012345.wav', 'Audio', {
+      size: 670_000,
+      media: DEMO_MEDIA.voice,
+      audio: { voice: true, duration_ms: 14_000, waveform },
+    }),
+  };
+}
 
 function person(id: string, name: string): Person {
   return { id, name, avatar: null };
@@ -423,6 +445,7 @@ function work(): Fixture {
           [ADA, 'Ada Lovelace', callCard(true), 0],
           [GRACE, 'Grace Hopper', text('Do you have a minute to look at the sync loop?'), 1],
           [GRACE, 'Grace Hopper', text('It drops the room list after a reconnect.'), 2],
+          [GRACE, 'Grace Hopper', voiceMemo(), 1],
         ]),
       ],
       [{ ...dm('!dm-alan:example.org', ALAN, 'Alan Turing', 0), notifications: 'Mute' }, []],

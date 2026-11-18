@@ -76,14 +76,14 @@ export function canSend(composer: ComposerState): boolean {
   return outgoingText(composer.draft).body !== '' || (composer.attachments?.length ?? 0) > 0;
 }
 
-/** A voice memo as the message that sends it. */
-export function voiceMessage(path: string, durationMs: number): Outgoing {
+/** A voice memo as the message that sends it, with its waveform (none when empty). */
+export function voiceMessage(path: string, durationMs: number, waveform: number[] = []): Outgoing {
   return {
     type: 'Voice',
     data: {
       upload: { type: 'Path', data: path },
       duration_ms: Math.max(0, Math.round(durationMs)),
-      waveform: [],
+      waveform,
     },
   };
 }

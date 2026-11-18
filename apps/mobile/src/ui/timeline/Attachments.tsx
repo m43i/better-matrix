@@ -1,24 +1,23 @@
 // A message's attachment: an image sized by the sender's dimensions (so the list doesn't jump
-// when it loads), a video's poster, an audio player, or a file card that shares the file.
+// when it loads), a video's poster, a voice card (`AudioCard`), or a file card that shares the
+// file.
 
 import type { Attachment, Message } from '@better-matrix/matrix-native/types';
-import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { type ReactNode, useState } from 'react';
+import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
-import { fetchOriginal } from '../../state/actions/timeline';
-import { attachmentPreview, playTime, previewSize } from '../../state/messages';
+import { attachmentPreview, previewSize } from '../../state/messages';
 import { useAppStore } from '../../state/react';
 import { humanSize } from '../../state/timelineText';
-import { addNotice } from '../../state/reducer';
 import { routes } from '../../routes';
 import { font } from '../../theme/palette';
 import { Icon, type IconName } from '../icons';
 import { ORIGINAL, PREVIEW_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
+import { AudioCard } from './AudioCard';
 import { useTimelineContext } from './context';
 import { useContentWidth } from './readersLayout';
 import { shareAttachment } from './files';
@@ -159,31 +158,25 @@ function Card({
   onPress,
   onLongPress,
   busy = false,
-  detail,
-  leading,
 }: {
   icon: IconName;
   attachment: Attachment;
   onPress?: () => void;
   onLongPress?: () => void;
   busy?: boolean;
-  detail?: string;
-  leading?: ReactNode;
 }) {
   const palette = usePalette();
-  const sub = detail ?? (attachment.size !== null ? humanSize(attachment.size) : undefined);
+  const sub = attachment.size !== null ? humanSize(attachment.size) : undefined;
 
   const body = (
     <>
-      {leading ?? (
-        <View style={[styles.cardIcon, { backgroundColor: `${palette.accent}26` }]}>
-          {busy ? (
-            <ActivityIndicator color={palette.accent} />
-          ) : (
-            <Icon name={icon} size={20} color={palette.accent} />
-          )}
-        </View>
-      )}
+      <View style={[styles.cardIcon, { backgroundColor: `${palette.accent}26` }]}>
+        {busy ? (
+          <ActivityIndicator color={palette.accent} />
+        ) : (
+          <Icon name={icon} size={20} color={palette.accent} />
+        )}
+      </View>
       <View style={styles.cardText}>
         <Text style={[font.bodyStrong, { color: palette.text }]} numberOfLines={1}>
           {attachment.name}
@@ -250,94 +243,6 @@ function FileCard({ message, attachment }: { message: Message; attachment: Attac
   );
 }
 
-/** Audio and voice memos: play and pause, the time played of its length, and a progress bar. */
-function AudioCard({ message, attachment }: { message: Message; attachment: Attachment }) {
-  const palette = usePalette();
-  const store = useAppStore();
-  const { account, openActions } = useTimelineContext();
-  const player = useAudioPlayer(null, { updateInterval: 250 });
-  const status = useAudioPlayerStatus(player);
-  const [loaded, setLoaded] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const media = attachment.media;
-
-  const toggle = () => {
-    if (!media) return;
-
-    if (!loaded) {
-      setBusy(true);
-      fetchOriginal(store, account, media)
-        .then((uri) => {
-          player.replace({ uri });
-          setLoaded(true);
-          player.play();
-        })
-        .catch((cause: unknown) =>
-          store.update((s) => addNotice(s, t('notice.audio', { error: String(cause) }))),
-        )
-        .finally(() => setBusy(false));
-
-      return;
-    }
-
-    if (status.playing) {
-      player.pause();
-
-      return;
-    }
-
-    if (status.didJustFinish || (status.duration > 0 && status.currentTime >= status.duration))
-      void player.seekTo(0);
-    player.play();
-  };
-
-  const progress = status.duration > 0 ? Math.min(1, status.currentTime / status.duration) : 0;
-
-  const detail = loaded
-    ? status.duration > 0
-      ? `${playTime(status.currentTime)} / ${playTime(status.duration)}`
-      : playTime(status.currentTime)
-    : undefined;
-
-  const button = (
-    <Pressable
-      onPress={toggle}
-      onLongPress={() => openActions(message)}
-      delayLongPress={350}
-      disabled={busy}
-      accessibilityRole="button"
-      accessibilityLabel={status.playing ? t('audio.pause') : t('audio.play')}
-      hitSlop={6}
-      style={[styles.playButton, { backgroundColor: palette.accent }]}
-    >
-      {busy ? (
-        <ActivityIndicator color={palette.onAccent} />
-      ) : (
-        <Icon name={status.playing ? 'pause' : 'play'} size={18} color={palette.onAccent} />
-      )}
-    </Pressable>
-  );
-
-  return (
-    <View>
-      <Card
-        icon="audio"
-        attachment={attachment}
-        leading={button}
-        detail={detail}
-        onLongPress={() => openActions(message)}
-      />
-      {loaded ? (
-        <View style={[styles.progress, { backgroundColor: palette.divider }]}>
-          <View
-            style={{ width: `${progress * 100}%`, height: '100%', backgroundColor: palette.accent }}
-          />
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   media: { marginTop: 4, alignSelf: 'flex-start' },
   rounded: { borderRadius: 8, overflow: 'hidden' },
@@ -367,12 +272,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cardText: { flexShrink: 1, gap: 2 },
-  playButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  progress: { height: 3, borderRadius: 1.5, marginTop: 4, maxWidth: 420, overflow: 'hidden' },
 });

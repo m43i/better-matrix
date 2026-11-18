@@ -4,6 +4,7 @@
 import { z } from 'zod';
 
 import type { Language } from '../i18n';
+import type { PlaybackSpeed } from './voiceCard';
 
 export type Appearance = 'system' | 'light' | 'dark';
 
@@ -22,6 +23,8 @@ export interface Settings {
   pushEnabled: boolean;
   /** Accounts whose pushes this device doesn't get, though push is on. */
   pushOff: string[];
+  /** How fast voice memos and audio clips play, at their own pitch. */
+  playbackSpeed: PlaybackSpeed;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -33,6 +36,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lastAccount: null,
   pushEnabled: true,
   pushOff: [],
+  playbackSpeed: 1,
 };
 
 const savedSettings = z.object({
@@ -44,6 +48,9 @@ const savedSettings = z.object({
   lastAccount: z.string().nullable().catch(DEFAULT_SETTINGS.lastAccount),
   pushEnabled: z.boolean().catch(DEFAULT_SETTINGS.pushEnabled),
   pushOff: z.array(z.string()).catch(() => []),
+  playbackSpeed: z
+    .union([z.literal(1), z.literal(1.5), z.literal(2)])
+    .catch(DEFAULT_SETTINGS.playbackSpeed),
 });
 
 /** Settings from saved JSON: unknown or broken fields fall back to their defaults. */

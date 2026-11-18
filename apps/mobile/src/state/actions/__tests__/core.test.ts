@@ -1,6 +1,6 @@
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 
-import { loadOlder, markRead, openTimeline, visitRoom } from '../core';
+import { cyclePlaybackSpeed, loadOlder, markRead, openTimeline, visitRoom } from '../core';
 import { timeline } from '../../selectors';
 import { Store } from '../../store';
 import { ADA, summary } from '../../../test/fixtures';
@@ -107,4 +107,18 @@ it('showing a room should record a visit independently of its timeline subscript
   expect(sent.map((s) => s.command)).toEqual([
     { type: 'VisitRoom', data: { account: ADA, room_id: room.room_id } },
   ]);
+});
+
+describe('cyclePlaybackSpeed', () => {
+  it('should step the speed for every clip and come back round', () => {
+    const { store } = setup();
+
+    const speeds = [1, 2, 3].map(() => {
+      cyclePlaybackSpeed(store);
+
+      return store.getState().settings.playbackSpeed;
+    });
+
+    expect(speeds).toEqual([1.5, 2, 1]);
+  });
 });

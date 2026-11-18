@@ -128,7 +128,20 @@ Date: 2026-11-16
   Matrix HTML the desktop's rich field sends (as Rune's `to_html` writes it), HTML only when
   formatted; `draftOf` writes a message's HTML back as markers for an edit. Sends are planned as
   data (`state/outgoing.ts`): text with the reply first, then each attachment as
-  `Upload::Path`; voice memos are AAC `.m4a` from expo-audio.
+  `Upload::Path`; voice memos are AAC `.m4a` from expo-audio, sent with a 100-point waveform
+  from the recorder's metering (read 20 times a second, `waveformFromLevels`, on the desktop's
+  scale).
+- **Voice memos** look and behave as the desktop's voice card (ADR 0007), with the same pure
+  arithmetic in `state/voiceCard.ts`. Recording, a blurred glow (`boxShadow`) surrounds the
+  composer's field; its brighter halo's opacity is a Reanimated shared value the metering sets,
+  so nothing re-renders for it, and it holds half lit under reduced motion (`VoiceGlow`). In
+  the timeline, `AudioCard` shows play beside the waveform bars, a dot to drag (the bars' own
+  responder; only letting go seeks, so the list taking the gesture leaves the clip where it
+  was), the time, and once loaded the speed button (`settings.playbackSpeed`: 1×, 1.5×, 2×,
+  pitch kept by expo-audio). One clip plays at a time (`audioFocus.ts`). A clip that plays to its
+  end pauses and rewinds (Android's player would otherwise play again at the next seek); one
+  moved to its very end waits there. expo-audio reports a paused clip's place only while it
+  plays, so the card keeps where a seek left it.
 - **Calls** keep the desktop's shape: the same commands and events, folded by the reducer;
   `ui/call` (header buttons, ring cards over every screen, the call bar on the tab screens) and
   the stage as a full-screen modal (`app/call.tsx`) that opens by itself when a call starts or is

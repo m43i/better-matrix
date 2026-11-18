@@ -90,7 +90,10 @@ export const scenes = {
     routes: [routes.room(ADA, GENERAL)],
   },
   design: { about: 'A room with an image', setup: general, routes: [routes.room(ADA, DESIGN)] },
-  dm: { about: 'A direct chat with a call card', routes: [routes.room(ADA, DM_GRACE)] },
+  dm: {
+    about: 'A direct chat with a call card and a voice memo',
+    routes: [routes.room(ADA, DM_GRACE)],
+  },
   'call-card': { about: 'A call under way, with Join', routes: [routes.room(ADA, DM_KAI)] },
   thread: {
     about: 'A thread',

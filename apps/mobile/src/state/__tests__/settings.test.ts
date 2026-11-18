@@ -17,4 +17,14 @@ describe('parseSettings', () => {
     const saved = parseSettings(JSON.stringify({ pushEnabled: 'yes', pushOff: [1] }));
     expect([saved.pushEnabled, saved.pushOff]).toEqual([true, []]);
   });
+
+  it('a saved playback speed should be read back', () => {
+    expect(
+      parseSettings(JSON.stringify({ ...DEFAULT_SETTINGS, playbackSpeed: 1.5 })).playbackSpeed,
+    ).toBe(1.5);
+  });
+
+  it('an unknown playback speed should play as recorded', () => {
+    expect(parseSettings(JSON.stringify({ playbackSpeed: 3 })).playbackSpeed).toBe(1);
+  });
 });
