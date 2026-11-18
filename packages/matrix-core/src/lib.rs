@@ -52,11 +52,11 @@ pub use engine::{
     StoreSharing,
 };
 pub use model::{
-    AccountId, AccountSummary, Attachment, AttachmentKind, CallCard, EntryKind, HistoryVisibility, Invitation,
-    LoginMethods, MediaRef, MediaSize, Message, MessageContent, Notification, NotificationMode, Outgoing, Password,
-    Person, Poll, PollAnswer, PublicRoom, PushContent, PushTarget, Pusher, Quote, Reaction, ReadReceipt, RoomChange,
-    RoomEvent, RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary, ThreadSummary, TimelineDiff, TimelineEntry,
-    TimelineKey, Upload,
+    AccountId, AccountSummary, Attachment, AttachmentKind, AudioDetails, CallCard, EntryKind, HistoryVisibility,
+    Invitation, LoginMethods, MediaRef, MediaSize, Message, MessageContent, Notification, NotificationMode, Outgoing,
+    Password, Person, Poll, PollAnswer, PublicRoom, PushContent, PushTarget, Pusher, Quote, Reaction, ReadReceipt,
+    RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary, ThreadSummary, TimelineDiff,
+    TimelineEntry, TimelineKey, Upload,
 };
 
 /// How many messages a timeline page holds: what a room shows when it opens, and what each

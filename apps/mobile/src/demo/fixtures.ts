@@ -94,7 +94,16 @@ function callCard(video: boolean | null): MessageContent {
 }
 
 function file(name: string, kind: Attachment['kind'], extra: Partial<Attachment> = {}): Attachment {
-  return { kind, name, size: 1_450_000, media: null, thumbnail: null, dimensions: null, ...extra };
+  return {
+    kind,
+    name,
+    size: 1_450_000,
+    media: null,
+    thumbnail: null,
+    dimensions: null,
+    audio: null,
+    ...extra,
+  };
 }
 
 function blank(): Omit<

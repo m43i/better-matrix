@@ -92,6 +92,49 @@ pub struct Settings {
     pub devices: matrix_core::DeviceChoice,
     /// Ring aloud for an incoming call; silent, only the notification and the card show.
     pub ring_sound: bool,
+    /// How fast voice memos and audio clips play.
+    pub playback_speed: PlaybackSpeed,
+}
+
+/// How fast voice memos and audio clips play, at their own pitch. The speed button on a clip
+/// steps through them, and the choice holds for every clip after.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PlaybackSpeed {
+    #[default]
+    Normal,
+    Faster,
+    Fastest,
+}
+
+impl PlaybackSpeed {
+    /// How many times as fast as recorded.
+    pub fn rate(self) -> f64 {
+        match self {
+            Self::Normal => 1.0,
+            Self::Faster => 1.5,
+            Self::Fastest => 2.0,
+        }
+    }
+
+    /// The speed the button moves to: 1×, 1.5×, 2×, then 1× again.
+    #[must_use]
+    pub fn next(self) -> Self {
+        match self {
+            Self::Normal => Self::Faster,
+            Self::Faster => Self::Fastest,
+            Self::Fastest => Self::Normal,
+        }
+    }
+
+    /// The rate in percent, as it is saved.
+    pub fn percent(self) -> u16 {
+        (self.rate() * 100.0) as u16
+    }
+
+    /// A saved rate; anything unknown plays as recorded.
+    pub fn from_percent(percent: u16) -> Self {
+        [Self::Faster, Self::Fastest].into_iter().find(|speed| speed.percent() == percent).unwrap_or_default()
+    }
 }
 
 impl Default for Settings {
@@ -105,6 +148,7 @@ impl Default for Settings {
             show_link_previews: true,
             devices: matrix_core::DeviceChoice::default(),
             ring_sound: true,
+            playback_speed: PlaybackSpeed::default(),
         }
     }
 }

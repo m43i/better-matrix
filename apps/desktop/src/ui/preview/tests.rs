@@ -19,6 +19,7 @@ fn the_cached_thumbnail_should_stay_in_place_when_the_original_arrives() {
             media: None,
             thumbnail: None,
             dimensions: None,
+            audio: None,
         },
         media: MediaRef::opaque("picture"),
         content: PreviewContent::Image { thumbnail: Some(image.clone()), status: ImageStatus::Downloading },

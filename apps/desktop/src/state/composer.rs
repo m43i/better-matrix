@@ -75,18 +75,17 @@ impl Format {
     }
 }
 
-/// A voice memo being recorded, the water its voice stirs, and the timeline it is for: once
-/// that leaves the screen, the memo is dropped.
+/// A voice memo being recorded, and the timeline it is for: once that leaves the screen, the
+/// memo is dropped.
 #[derive(Clone)]
-pub struct VoiceMemo(
-    pub crate::platform::sound::Recorder,
-    pub super::water::Water,
-    pub (matrix_core::AccountId, matrix_core::TimelineKey),
-);
+pub struct VoiceMemo {
+    pub recorder: crate::platform::sound::Recorder,
+    pub timeline: (matrix_core::AccountId, matrix_core::TimelineKey),
+}
 
 impl std::fmt::Debug for VoiceMemo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VoiceMemo").field("seconds", &self.0.elapsed()).finish()
+        f.debug_struct("VoiceMemo").field("seconds", &self.recorder.elapsed()).finish()
     }
 }
 

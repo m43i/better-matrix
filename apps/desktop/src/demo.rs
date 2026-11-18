@@ -43,6 +43,7 @@ pub fn demo_attachment() -> Attachment {
         media: Some(matrix_core::MediaRef::opaque("demo-image")),
         thumbnail: None,
         dimensions: Some((256, 256)),
+        audio: None,
     }
 }
 
@@ -311,6 +312,7 @@ pub fn room_history(s: &mut State) {
             media: None,
             thumbnail: None,
             dimensions: None,
+            audio: None,
         },
     };
     let files = vec![
@@ -650,6 +652,30 @@ fn html(body: &str, html: &str) -> MessageContent {
 /// The demo's day: 12 November 2026, UTC.
 pub const DEMO_DAY_MS: u64 = 20_769 * 86_400_000;
 
+/// The voice memo Grace sends: 14 seconds of speech, with the waveform a client sends along.
+pub const DEMO_VOICE_MEMO: &str = "demo-voice-memo";
+
+fn voice_memo() -> MessageContent {
+    // Words and the pauses between them: a swell every few bars, quieter at the breaths.
+    let waveform = (0..100u16)
+        .map(|i| {
+            let x = f32::from(i);
+            let words = ((x * 0.55).sin() * 0.5 + 0.5) * ((x * 0.13).sin() * 0.35 + 0.65);
+            let breath = if (x * 0.09).sin() > 0.93 { 0.1 } else { 1.0 };
+            (words * breath * 1000.0) as u16 + 24
+        })
+        .collect();
+    MessageContent::Attachment(Attachment {
+        kind: AttachmentKind::Audio,
+        name: "voice-1765012345.wav".into(),
+        size: Some(670_000),
+        media: Some(matrix_core::MediaRef::opaque(DEMO_VOICE_MEMO)),
+        thumbnail: None,
+        dimensions: None,
+        audio: Some(matrix_core::AudioDetails { voice: true, duration_ms: Some(14_000), waveform }),
+    })
+}
+
 /// Messages `gap` minutes after the one before, from 09:12 UTC on the demo's day.
 fn messages(lines: Vec<(&str, &str, MessageContent, u64)>) -> Vec<Message> {
     let mut at = DEMO_DAY_MS + (9 * 60 + 12) * 60_000;
@@ -694,6 +720,7 @@ fn work() -> Fixture {
                 media: None,
                 thumbnail: None,
                 dimensions: None,
+                audio: None,
             }),
             14,
         ),
@@ -759,6 +786,7 @@ fn work() -> Fixture {
                     (ADA, "Ada Lovelace", call_card(Some(true)), 0),
                     (GRACE, "Grace Hopper", text("Do you have a minute to look at the sync loop?"), 1),
                     (GRACE, "Grace Hopper", text("It drops the room list after a reconnect."), 2),
+                    (GRACE, "Grace Hopper", voice_memo(), 1),
                 ]),
             ),
             (

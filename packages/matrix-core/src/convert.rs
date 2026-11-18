@@ -6,15 +6,17 @@ use matrix_sdk::media::{MediaFormat, MediaThumbnailSettings};
 use matrix_sdk::notification_settings::{IsEncrypted, IsOneToOne, NotificationSettings, RoomNotificationMode};
 use matrix_sdk::ruma::UInt;
 use matrix_sdk::ruma::events::room::MediaSource;
-use matrix_sdk::ruma::events::room::message::{FormattedBody, MessageFormat, MessageType, SyncRoomMessageEvent};
+use matrix_sdk::ruma::events::room::message::{
+    AudioMessageEventContent, FormattedBody, MessageFormat, MessageType, SyncRoomMessageEvent,
+};
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent};
 use matrix_sdk::{Room, RoomMemberships};
 
 use crate::Error;
 use crate::model::{
-    AccountId, Attachment, AttachmentKind, HistoryVisibility, MediaRef, MediaSize, Message, MessageContent,
-    Notification, NotificationMode, RoomKind, RoomSummary, SpaceSummary,
+    AccountId, Attachment, AttachmentKind, AudioDetails, HistoryVisibility, MediaRef, MediaSize, Message,
+    MessageContent, Notification, NotificationMode, RoomKind, RoomSummary, SpaceSummary,
 };
 
 async fn display_name(room: &Room) -> String {
@@ -259,6 +261,7 @@ pub(crate) fn sticker(sticker: &matrix_sdk::ruma::events::sticker::StickerEventC
         media: MediaRef::of(&MediaSource::from(sticker.source.clone())),
         thumbnail: None,
         dimensions: dimensions(),
+        audio: None,
     })
 }
 
@@ -274,6 +277,7 @@ pub(crate) fn content(msgtype: &MessageType) -> MessageContent {
         media: MediaRef::of(source),
         thumbnail: None,
         dimensions: None,
+        audio: None,
     };
     let dimensions = |w: Option<UInt>, h: Option<UInt>| Some((u32::try_from(w?).ok()?, u32::try_from(h?).ok()?));
     let thumbnail = |source: Option<&MediaSource>| source.and_then(MediaRef::of);
@@ -297,15 +301,31 @@ pub(crate) fn content(msgtype: &MessageType) -> MessageContent {
                 ..attachment(AttachmentKind::Video, c.filename(), &c.source, info.and_then(|i| i.size))
             }
         }
-        MessageType::Audio(c) => {
-            attachment(AttachmentKind::Audio, c.filename(), &c.source, c.info.as_deref().and_then(|i| i.size))
-        }
+        MessageType::Audio(c) => Attachment {
+            audio: audio_details(c),
+            ..attachment(AttachmentKind::Audio, c.filename(), &c.source, c.info.as_deref().and_then(|i| i.size))
+        },
         MessageType::File(c) => {
             attachment(AttachmentKind::File, c.filename(), &c.source, c.info.as_deref().and_then(|i| i.size))
         }
         other => return MessageContent::Text { body: other.body().to_owned(), html: None },
     };
     MessageContent::Attachment(attachment)
+}
+
+/// What an audio message says about itself: MSC3245's voice block marks a voice memo, MSC1767's
+/// audio block carries the waveform (and a length, which `info` may carry instead).
+fn audio_details(c: &AudioMessageEventContent) -> Option<AudioDetails> {
+    let duration = c.audio.as_ref().map(|a| a.duration).or_else(|| c.info.as_deref().and_then(|i| i.duration));
+    let waveform: Vec<u16> = c.audio.as_ref().map_or_else(Vec::new, |a| {
+        a.waveform.iter().map(|v| u16::try_from(v.get()).unwrap_or(u16::MAX).min(AudioDetails::WAVEFORM_MAX)).collect()
+    });
+    let voice = c.voice.is_some();
+    (voice || duration.is_some() || !waveform.is_empty()).then(|| AudioDetails {
+        voice,
+        duration_ms: duration.map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+        waveform,
+    })
 }
 
 #[cfg(test)]
@@ -331,5 +351,29 @@ mod tests {
             (attachment.kind, attachment.name.as_str(), attachment.dimensions, attachment.media.is_some()),
             (AttachmentKind::Image, "A waving cat", Some((128, 96)), true)
         );
+    }
+
+    fn audio(json: serde_json::Value) -> Option<AudioDetails> {
+        let msgtype: MessageType = serde_json::from_value(json).unwrap_or_else(|e| panic!("{e}"));
+        let MessageContent::Attachment(attachment) = content(&msgtype) else { panic!("audio should be an attachment") };
+        attachment.audio
+    }
+
+    #[test]
+    fn a_voice_message_should_carry_its_length_and_waveform() {
+        let details = audio(serde_json::json!({
+            "msgtype": "m.audio", "body": "Voice message.ogg", "url": "mxc://example.org/voice",
+            "org.matrix.msc1767.audio": { "duration": 4200, "waveform": [0, 512, 1024] },
+            "org.matrix.msc3245.voice": {},
+        }));
+        assert_eq!(details, Some(AudioDetails { voice: true, duration_ms: Some(4200), waveform: vec![0, 512, 1024] }));
+    }
+
+    #[test]
+    fn an_audio_file_without_details_should_have_none() {
+        let details = audio(serde_json::json!({
+            "msgtype": "m.audio", "body": "song.mp3", "url": "mxc://example.org/song",
+        }));
+        assert_eq!(details, None);
     }
 }

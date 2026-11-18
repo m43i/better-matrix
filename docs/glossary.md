@@ -151,7 +151,24 @@ keeping its current content and formatting and removing its reply, thread and ed
 per Home or space. See [ADR 0005](adr/0005-navigation-and-settings.md).
 
 **Voice memo**
-: A recording sent as a Matrix voice message (`Outgoing::Voice`).
+: A recording sent as a Matrix voice message (`Outgoing::Voice`), with its waveform. It shows as
+a voice card, not a file.
+
+**Waveform**
+: An audio clip's loudness along its length, amplitudes from 0 to 1024 (MSC3246), drawn as bars
+(`AudioDetails::waveform`).
+
+**Voice card**
+: How an audio clip shows in the timeline: play, the waveform bars that fill as it plays, a
+scrubber dot to drag, the time, and the playback speed button once it plays.
+
+**Playback speed**
+: How fast clips play, 1×, 1.5× or 2×, at their own pitch (`PlaybackSpeed`); one choice for every
+clip, kept in settings.
+
+**Voice glow**
+: The blurred halo around the composer while a voice memo records, brighter as the voice gets
+louder.
 
 **Room event**
 : Something that happened to a room rather than something written: a join, an invite, a new

@@ -1579,6 +1579,7 @@ fn attachment(name: &str, kind: matrix_core::AttachmentKind) -> matrix_core::Att
         media: Some(matrix_core::MediaRef::opaque(name)),
         thumbnail: None,
         dimensions: None,
+        audio: None,
     }
 }
 
@@ -1796,6 +1797,322 @@ fn playing_audio_should_download_it_once_to_play() {
 }
 
 #[test]
+fn scrubbing_a_clip_before_it_plays_should_start_it_there() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    s.seek_audio(&memo, 0.4);
+    s.seek_audio(&memo, 0.6);
+    let saves = all_commands(&mut commands).into_iter().filter(|c| matches!(c, Command::SaveMedia { .. })).count();
+    assert_eq!((saves, s.audio.as_ref().and_then(|clip| clip.start_at)), (1, Some(0.6)));
+}
+
+/// A second of silence playing, decoded, on no speaker, as the current clip.
+fn playing_clip(s: &mut State) -> matrix_core::Attachment {
+    use crate::platform::sound::{NativePlayer, Pcm, Player};
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    let player = Player::Native(NativePlayer::decoded(Pcm { rate: 24_000, channels: 1, samples: vec![0.0; 24_000] }));
+    player.play();
+    let media = memo.media.clone().unwrap_or_else(|| panic!("an attachment with media"));
+    s.audio = Some(AudioClip {
+        id: 0,
+        media,
+        player: Some(player),
+        start_at: None,
+        play: true,
+        held: false,
+        scrub_from: None,
+    });
+    memo
+}
+
+fn clip_playing(s: &State) -> bool {
+    s.audio.as_ref().and_then(|clip| clip.player.as_ref()).is_some_and(crate::platform::sound::Player::is_playing)
+}
+
+#[test]
+fn dragging_along_a_playing_clip_should_pause_it_until_let_go() {
+    let (mut s, _commands) = state();
+    let memo = playing_clip(&mut s);
+    s.scrub_audio(&memo, 0.3, Scrub::Press);
+    let held = clip_playing(&s);
+    s.scrub_audio(&memo, 0.6, Scrub::Release);
+    assert_eq!((held, clip_playing(&s)), (false, true));
+}
+
+#[test]
+fn letting_go_of_a_clip_at_its_end_should_leave_it_paused_there() {
+    let (mut s, _commands) = state();
+    let memo = playing_clip(&mut s);
+    s.scrub_audio(&memo, 0.8, Scrub::Press);
+    s.scrub_audio(&memo, 1.0, Scrub::Release);
+    let progress = s.audio.as_ref().map_or(0.0, AudioClip::progress);
+    assert_eq!((clip_playing(&s), progress), (false, 1.0));
+}
+
+#[test]
+fn a_clip_that_comes_while_its_waveform_is_held_should_wait_to_be_let_go() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    s.scrub_audio(&memo, 0.5, Scrub::Press);
+    let held = s.audio.as_ref().is_some_and(|clip| clip.held && clip.play && clip.player.is_none());
+    s.scrub_audio(&memo, 0.6, Scrub::Release);
+    let waiting = s.audio.as_ref().is_some_and(|clip| !clip.held && clip.start_at == Some(0.6));
+    assert!(held && waiting, "held {held}, then waiting to play from 0.6: {waiting}");
+}
+
+#[test]
+fn play_on_a_downloading_clip_moved_to_its_end_should_start_it_over() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    s.seek_audio(&memo, 1.0);
+    s.toggle_audio(&memo);
+    assert_eq!(s.audio.as_ref().map(|clip| clip.start_at), Some(None));
+}
+
+#[test]
+fn a_played_clip_should_keep_its_waveform_once_another_plays() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let first = playing_clip(&mut s);
+    s.toggle_audio(&attachment("second.ogg", matrix_core::AttachmentKind::Audio));
+    let kept = s.decoded_audio.iter().find(|decoded| first.media.as_ref() == Some(&decoded.media));
+    assert_eq!(kept.map(|decoded| (decoded.waveform.len(), decoded.duration)), Some((100, Some(1.0))));
+}
+
+#[test]
+fn an_earlier_download_of_a_clip_with_its_player_should_not_start_it_over() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = playing_clip(&mut s);
+    s.seek_audio(&memo, 0.5);
+    // The download started before it was last played arrives now.
+    let media = memo.media.clone().unwrap_or_else(|| panic!("an attachment with media"));
+    let save = Command::SaveMedia { account: AccountId::new("@a:example.org"), media: media.clone(), path: "a".into() };
+    let request = s.dispatch(save, Purpose::Audio { media, path: "a".into() });
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    let progress = s.audio.as_ref().map_or(0.0, AudioClip::progress);
+    assert_eq!(progress, 0.5);
+}
+
+#[test]
+fn a_clip_played_again_while_its_file_downloads_should_download_it_once() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let audio = |name| attachment(name, matrix_core::AttachmentKind::Audio);
+    let (first, second) = (audio("a.ogg"), audio("b.ogg"));
+    s.toggle_audio(&first);
+    s.toggle_audio(&second);
+    s.toggle_audio(&first);
+    // Only the second clip's download follows the first's.
+    let saves = all_commands(&mut commands).into_iter().filter(|c| matches!(c, Command::SaveMedia { .. })).count();
+    assert_eq!(saves, 2);
+}
+
+#[test]
+fn a_saved_clip_played_again_should_play_its_file_without_downloading_it_again() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let audio = |name| attachment(name, matrix_core::AttachmentKind::Audio);
+    let (first, second) = (audio("a.ogg"), audio("b.ogg"));
+    s.toggle_audio(&first);
+    let (request, _) = commands.try_next().unwrap_or_else(|| panic!("a download"));
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    s.toggle_audio(&second);
+    s.toggle_audio(&first);
+    // Only the second clip's download follows the first's.
+    let saves = all_commands(&mut commands).into_iter().filter(|c| matches!(c, Command::SaveMedia { .. })).count();
+    let playing = s.audio.as_ref().is_some_and(|clip| {
+        clip.media == first.media.clone().unwrap_or_else(|| panic!("media")) && clip.player.is_some()
+    });
+    assert_eq!((saves, playing), (1, true));
+}
+
+#[test]
+fn a_failure_from_a_clip_picked_before_should_not_stop_it_now() {
+    let (mut s, _commands) = state();
+    let memo = playing_clip(&mut s);
+    if let Some(clip) = s.audio.as_mut() {
+        clip.id = 2;
+    }
+    let media = memo.media.unwrap_or_else(|| panic!("media"));
+    s.audio_failed(&media, Some(1), "gone".into());
+    assert!(s.audio.is_some() && s.notice.is_none());
+}
+
+#[test]
+fn holding_a_saved_clip_s_waveform_should_wait_for_the_release_to_play() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let audio = |name| attachment(name, matrix_core::AttachmentKind::Audio);
+    let (first, second) = (audio("a.ogg"), audio("b.ogg"));
+    s.toggle_audio(&first);
+    let (request, _) = commands.try_next().unwrap_or_else(|| panic!("a download"));
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    s.toggle_audio(&second);
+    s.scrub_audio(&first, 0.3, Scrub::Press);
+    let waiting = s
+        .audio
+        .as_ref()
+        .is_some_and(|clip| clip.held && clip.play && clip.player.as_ref().is_some_and(|player| !player.is_playing()));
+    assert!(waiting, "the saved file is open, paused, waiting to be let go");
+}
+
+#[test]
+fn a_cancelled_press_on_a_clip_should_unpick_it() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    s.scrub_audio(&memo, 0.4, Scrub::Press);
+    s.scrub_audio(&memo, 0.7, Scrub::Cancel);
+    assert!(s.audio.is_none());
+}
+
+#[test]
+fn a_cancelled_drag_should_put_a_playing_clip_back_where_it_was_playing() {
+    let (mut s, _commands) = state();
+    let memo = playing_clip(&mut s);
+    s.seek_audio(&memo, 0.25);
+    s.scrub_audio(&memo, 0.3, Scrub::Press);
+    s.scrub_audio(&memo, 0.9, Scrub::Drag);
+    s.scrub_audio(&memo, 0.9, Scrub::Cancel);
+    let progress = s.audio.as_ref().map_or(0.0, AudioClip::progress);
+    assert_eq!((clip_playing(&s), progress), (true, 0.25));
+}
+
+#[test]
+fn a_release_after_the_clip_failed_should_not_pick_it_again() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    s.scrub_audio(&memo, 0.4, Scrub::Press);
+    let (request, _) = commands.try_next().unwrap_or_else(|| panic!("a download"));
+    apply(&mut s, Event::Finished { request, result: Err("gone".into()) });
+    s.scrub_audio(&memo, 0.6, Scrub::Release);
+    let saves = all_commands(&mut commands).into_iter().filter(|c| matches!(c, Command::SaveMedia { .. })).count();
+    assert_eq!((s.audio.is_none(), saves), (true, 0));
+}
+
+#[test]
+fn cancelling_a_scrub_of_a_downloading_clip_left_at_its_end_should_not_play_it() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    s.seek_audio(&memo, 1.0);
+    s.scrub_audio(&memo, 0.5, Scrub::Press);
+    assert!(s.audio.as_ref().is_some_and(|clip| clip.held && !clip.play));
+}
+
+#[test]
+fn scrubbing_back_a_downloading_clip_left_at_its_end_should_keep_it_paused() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    s.seek_audio(&memo, 1.0);
+    s.scrub_audio(&memo, 0.5, Scrub::Press);
+    s.scrub_audio(&memo, 0.5, Scrub::Release);
+    let clip = s.audio.as_ref().map(|clip| (clip.play, clip.start_at));
+    assert_eq!(clip, Some((false, Some(0.5))));
+}
+
+#[test]
+fn dragging_a_playing_clip_to_its_end_and_back_should_play_on_when_let_go() {
+    let (mut s, _commands) = state();
+    let memo = playing_clip(&mut s);
+    s.scrub_audio(&memo, 0.5, Scrub::Press);
+    s.scrub_audio(&memo, 1.0, Scrub::Drag);
+    s.scrub_audio(&memo, 0.9, Scrub::Release);
+    assert!(clip_playing(&s));
+}
+
+#[test]
+fn a_press_past_the_start_of_a_clip_s_waveform_should_start_it_at_the_start() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    s.scrub_audio(&memo, -0.02, Scrub::Press);
+    assert_eq!(s.audio.as_ref().and_then(|clip| clip.start_at), Some(0.0));
+}
+
+#[test]
+fn a_drag_from_the_end_of_a_new_clip_should_play_it_from_where_it_is_let_go() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    s.scrub_audio(&memo, 1.0, Scrub::Press);
+    s.scrub_audio(&memo, 0.4, Scrub::Release);
+    assert_eq!(s.audio.as_ref().map(|clip| (clip.play, clip.start_at)), Some((true, Some(0.4))));
+}
+
+#[test]
+fn a_second_press_on_a_downloading_clip_should_take_back_playing_it() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    s.toggle_audio(&memo);
+    s.toggle_audio(&memo);
+    let paused = s.audio.as_ref().is_some_and(|clip| !clip.play);
+    s.toggle_audio(&memo);
+    assert_eq!((paused, s.audio.as_ref().map(|clip| clip.play)), (true, Some(true)));
+}
+
+#[test]
+fn going_to_the_end_of_a_playing_clip_should_leave_it_paused_there() {
+    let (mut s, _commands) = state();
+    let memo = playing_clip(&mut s);
+    s.seek_audio(&memo, 1.0);
+    let progress = s.audio.as_ref().map_or(0.0, AudioClip::progress);
+    assert_eq!((clip_playing(&s), progress), (false, 1.0));
+}
+
+#[test]
+fn an_arrow_key_on_a_clip_should_move_it_a_step_along() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    let memo = attachment("memo.ogg", matrix_core::AttachmentKind::Audio);
+    s.seek_audio(&memo, 0.5);
+    s.step_audio(&memo, -2);
+    let start = s.audio.as_ref().and_then(|clip| clip.start_at).unwrap_or_default();
+    assert!((start - 0.4).abs() < 1e-9, "at {start}");
+}
+
+#[test]
+fn the_speed_button_should_step_through_the_speeds_and_back() {
+    let (mut s, _commands) = state();
+    let speeds: Vec<f64> = (0..3)
+        .map(|_| {
+            s.cycle_playback_speed();
+            s.settings.playback_speed.rate()
+        })
+        .collect();
+    assert_eq!(speeds, vec![1.5, 2.0, 1.0]);
+}
+
+#[test]
+fn a_saved_playback_speed_should_read_back() {
+    let speed = crate::state::PlaybackSpeed::Fastest;
+    assert_eq!(crate::state::PlaybackSpeed::from_percent(speed.percent()), speed);
+}
+
+#[test]
 fn a_recorded_voice_memo_should_be_sent_as_one() {
     let (mut s, mut commands) = state();
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
@@ -1809,6 +2126,28 @@ fn a_recorded_voice_memo_should_be_sent_as_one() {
         .any(|c| matches!(c, Command::Send { message: matrix_core::Outgoing::Voice { .. }, .. }));
     assert!(sent || s.notice.is_some(), "a memo is sent, or the recorder says why not");
     assert!(s.composer.voice.is_none());
+}
+
+#[test]
+fn a_recorded_voice_memo_should_carry_its_waveform() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    drain(&mut commands);
+    let memo_for = crate::state::MemoFor {
+        target: ComposerTarget::Room,
+        account: AccountId::new("@a:example.org"),
+        key: TimelineKey::room("!one:x"),
+        reply_to: None,
+    };
+    let recording =
+        crate::platform::sound::Recording { path: "memo.wav".into(), duration: 2.0, waveform: vec![10, 900] };
+    s.voice_memo_recorded(memo_for, Ok(recording), &mut Tx::default());
+    let waveform = all_commands(&mut commands).into_iter().find_map(|c| match c {
+        Command::Send { message: matrix_core::Outgoing::Voice { waveform, .. }, .. } => Some(waveform),
+        _ => None,
+    });
+    assert_eq!(waveform, Some(vec![10, 900]));
 }
 
 /// Every command sent, in order.
@@ -2737,7 +3076,7 @@ fn a_memo_whose_microphone_failed_should_end_at_once_and_say_so() {
     let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
     s.select_room("!one:x");
     let recorder = crate::platform::sound::Recorder::Native(crate::platform::sound::NativeRecorder::failing("gone"));
-    s.composer.voice = Some(VoiceMemo(recorder, Default::default(), (id, TimelineKey::room("!one:x"))));
+    s.composer.voice = Some(VoiceMemo { recorder, timeline: (id, TimelineKey::room("!one:x")) });
     assert!(s.animate(0.0, &mut Tx::default()));
     assert!(s.composer.voice.is_none() && s.notice.is_some());
 }

@@ -11,6 +11,7 @@ const image: Attachment = {
   media: 'original',
   thumbnail: 'thumbnail',
   dimensions: null,
+  audio: null,
   size: null,
 };
 

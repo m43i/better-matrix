@@ -19,11 +19,6 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
     };
     let key = TimelineKey::room(&room.room_id);
     let cx = Context::new(s, account, room, &key);
-    let water = s
-        .composer
-        .voice
-        .as_ref()
-        .map(|memo| super::composer::voice_water(ComposerTarget::Room, memo, "room-voice-water"));
     let mut main = col()
         .key("room")
         .grow(1.0)
@@ -31,7 +26,6 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
         .min_w(0.0)
         .fill(p.bg)
         .border(if s.drop_hover { 2.0 } else { 0.0 }, p.accent)
-        .children(water)
         .child(header(s, account, room, p, layout));
     let mut chat = || {
         col()

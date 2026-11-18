@@ -45,7 +45,7 @@ use theme::{Palette, font, palette};
 
 pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     cx.zoom(s.settings.zoom.factor());
-    // What the state's own animations (the backdrop, the voice water) read when they step.
+    // What the state's own animations (the backdrop) read when they step.
     s.reduced_motion.set(cx.is_reduced_motion());
     let p = palette(s.dark(cx.system_dark()));
     let account = s.active_account();

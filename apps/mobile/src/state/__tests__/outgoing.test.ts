@@ -138,7 +138,7 @@ describe('voiceMessage', () => {
   it('should send the recording with its whole milliseconds', () => {
     expect(voiceMessage('/v.m4a', 1234.6)).toEqual({
       type: 'Voice',
-      data: { upload: { type: 'Path', data: '/v.m4a' }, duration_ms: 1235 },
+      data: { upload: { type: 'Path', data: '/v.m4a' }, duration_ms: 1235, waveform: [] },
     });
   });
 });
@@ -160,6 +160,7 @@ describe('excerpt', () => {
           media: null,
           thumbnail: null,
           dimensions: null,
+          audio: null,
         },
       },
     };

@@ -186,6 +186,21 @@ fn spec() -> AppSpec<State> {
                 s.select_room(demo::DEMO_THREAD.0);
                 s.start_voice_memo(state::ComposerTarget::Room);
             }),
+            // A voice memo dragged a third of the way along while it downloads to play.
+            ("demo-voice-memo", |s| {
+                demo::seed(s);
+                s.select_room("!dm-grace:example.org");
+                let media = matrix_core::MediaRef::opaque(demo::DEMO_VOICE_MEMO);
+                s.audio = Some(state::AudioClip {
+                    id: 0,
+                    media,
+                    player: None,
+                    start_at: Some(0.35),
+                    play: true,
+                    held: false,
+                    scrub_from: None,
+                });
+            }),
             ("demo-typing", |s| {
                 demo::seed(s);
                 s.select_room(demo::DEMO_THREAD.0);
@@ -829,6 +844,7 @@ mod tests {
                         media: Some(MediaRef::opaque(name)),
                         thumbnail: None,
                         dimensions: Some((100, 100)),
+                        audio: None,
                     }),
                 )
             });
@@ -1364,9 +1380,74 @@ mod tests {
     }
 
     #[test]
-    fn recording_a_voice_memo_should_show_water_along_the_bottom_of_the_room() {
+    fn recording_a_voice_memo_should_light_a_glow_around_the_composer() {
         let rt = runtime(recording);
-        assert!(rt.find("room-voice-water").is_some());
+        assert!(rt.find("voice-glow").is_some());
+    }
+
+    /// Grace's voice memo in the demo's chat with her.
+    const MEMO: &str = "$demo-@grace:example.org-3";
+
+    fn voice_memo_chat(s: &mut State) {
+        demo::seed(s);
+        s.select_room("!dm-grace:example.org");
+    }
+
+    #[test]
+    fn a_voice_memo_should_show_its_waveform_and_length_rather_than_its_file_name() {
+        let rt = runtime(voice_memo_chat);
+        let texts: Vec<String> = rt.elements().into_iter().filter_map(|e| e.text).collect();
+        assert!(rt.find(&format!("audio-wave-{MEMO}")).is_some());
+        assert!(texts.iter().any(|t| t == "0:14") && !texts.iter().any(|t| t.ends_with(".wav")));
+    }
+
+    #[test]
+    fn pressing_along_a_voice_memo_should_play_it_from_there() {
+        let mut rt = runtime(voice_memo_chat);
+        let wave = rt.presented(&format!("audio-wave-{MEMO}")).unwrap_or_else(|| panic!("no waveform")).0;
+        let (x, y) = (wave[0] + wave[2] * 0.75, wave[1] + wave[3] / 2.0);
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+        let start = rt.state.audio.as_ref().and_then(|clip| clip.start_at).unwrap_or_default();
+        assert!((start - 0.75).abs() < 0.02, "started at {start}");
+    }
+
+    #[test]
+    fn pressing_the_outer_half_of_the_scrubber_dot_should_scrub_rather_than_open_the_thread() {
+        let mut rt = runtime(voice_memo_chat);
+        // The bars start half a dot into the slider; the dot at the start reaches as far back.
+        let wave = rt.presented(&format!("audio-wave-{MEMO}")).unwrap_or_else(|| panic!("no waveform")).0;
+        let (x, y) = (wave[0] + 2.0, wave[1] + wave[3] / 2.0);
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+        let start = rt.state.audio.as_ref().and_then(|clip| clip.start_at);
+        assert_eq!((start, rt.state.active_thread().is_some()), (Some(0.0), false));
+    }
+
+    #[test]
+    fn an_arrow_key_after_pressing_a_voice_memo_s_waveform_should_step_it() {
+        let mut rt = runtime(voice_memo_chat);
+        let wave = rt.presented(&format!("audio-wave-{MEMO}")).unwrap_or_else(|| panic!("no waveform")).0;
+        let (x, y) = (wave[0] + wave[2] / 2.0, wave[1] + wave[3] / 2.0);
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+        let pressed = rt.state.audio.as_ref().map_or(0.0, state::AudioClip::progress);
+        rt.key(rune::KeyEvent { key: rune::Key::Right, mods: rune::Mods::default() });
+        rt.frame(1.0 / 60.0);
+        let stepped = rt.state.audio.as_ref().map_or(0.0, state::AudioClip::progress);
+        assert!((stepped - pressed - state::AUDIO_STEP).abs() < 1e-6, "{pressed} then {stepped}");
+    }
+
+    #[test]
+    fn a_voice_memo_should_offer_its_speed_once_it_plays() {
+        let mut rt = runtime(voice_memo_chat);
+        assert!(rt.find(&format!("audio-speed-{MEMO}")).is_none());
+        press(&mut rt, &format!("audio-play-{MEMO}"));
+        press(&mut rt, &format!("audio-speed-{MEMO}"));
+        assert_eq!(rt.state.settings.playback_speed, state::PlaybackSpeed::Faster);
     }
 
     #[test]
@@ -1397,10 +1478,10 @@ mod tests {
     }
 
     #[test]
-    fn the_water_should_leave_the_composer_pressable() {
+    fn the_glow_should_leave_the_composer_pressable() {
         let mut rt = runtime(recording);
         press(&mut rt, "voice-cancel");
-        assert!(rt.state.composer.voice.is_none() && rt.find("room-voice-water").is_none());
+        assert!(rt.state.composer.voice.is_none() && rt.find("voice-glow").is_none());
     }
 
     #[test]

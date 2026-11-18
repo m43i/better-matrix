@@ -66,22 +66,66 @@ screenshots, voice memos, and images and PDFs that open large.
     room, the overview, the thread closed), it is dropped (`State::sync_timeline`). Its red dot
     breathes like a studio recording light (`recording_light`): the lamp dims a touch while a soft
     halo swells and fades over 1.6 s, on Rune's clock; still under reduced motion.
-  - While recording, a glow lies along the bottom of the pane it records in (the room or the
-    thread panel), under the timeline and composer, and moves like water (`state::water`,
-    `voice_water`). Loudness sloshes it from wall to wall, where it runs up; a sharp sound
-    (peak well above loudness) throws sparks off the walls. It fades to nothing above its
-    surface. Rune reports loudness, not pitch, so that is what it follows.
-  - The water is a height field across the width, stepped on `poll`'s clock (virtual when
-    headless) and drawn into a `Pixels` image at half resolution, so it never rebuilds the
-    view. It rests while the window is unfocused and under reduced motion
-    (`State::reduced_motion`, which the view sets for the state's animations).
+  - While recording, a voice glow surrounds the composer's frame, drawn under it (`voice_glow`): a
+    faint blurred halo, and over it a brighter one whose opacity is bound live to the recorder's
+    level (`Live::smooth`), so it swells with the voice without rebuilding the view. Under reduced
+    motion the brighter halo holds still, half lit. The water that once lay along the bottom of
+    the pane was dropped: it was too busy for a chat, and it stepped a simulation every frame.
+  - Streams ask cpal for 20 ms blocks (`BufferSize::Fixed`) where the device takes a size.
+    PulseAudio's default buffer is about 2 s. Since a player writes silence while paused, a clip
+    would start that long after the press, and the recording level would lag as long.
   - A memo is sent as `Outgoing::Voice`, a Matrix voice message (`AttachmentInfo::Voice` with
-    its duration).
+    its duration and a 100-point waveform: each stretch's RMS on a decibel scale from -50 dBFS,
+    so quiet speech still shows). Received audio carries `AudioDetails` (whether it is a voice
+    memo, its length and its waveform, from MSC3245's voice block and MSC1767's audio block).
   - Audio attachments and voice memos play on the picked speaker, from a copy saved once to the
     scratch folder (`SaveMedia`), decoded whole on a thread and resampled to the device's rate.
+    Each clip downloads once a run (`State::audio_files`): played again, it opens the saved copy,
+    so no download ever writes over a file a player still reads. Each pick of a clip has its own
+    id, and a failure from a player picked before is ignored.
     A second press pauses. A file that can't be decoded, no speaker, or the speaker going while
     it plays (unplugged, the sound server gone) stops the clip with a notice
     (`State::audio_failed`).
+  - A clip shows as a voice card, as in WhatsApp: play level with the waveform, as bars scaled
+    to its loudest bar (up to 36, as many as the message's width fits: at least 8 in a roomy card, else at
+    least 4 in a compact one with tighter padding; only where not even those fit beside the play
+    button, as at 175% in the smallest window, do the bars go under it, across the card), a scrubber dot,
+    and the time under the bars. A voice memo shows no file name; other audio keeps its name
+    above the bars. Without a sender's waveform the bars are flat until the file is decoded
+    here, which reads one; what a played clip's file said (waveform, length) is kept for its
+    card after another clip plays (`State::decoded_audio`, the newest 64). Pressing or dragging along the bars (the slider reaches half a dot past them at
+    each end, so the whole dot is the scrubber's, and a press focuses it for the keys) seeks; on a clip not yet playing,
+    it starts from there (`State::seek_audio`). Focused, the bars are a slider: the arrow keys
+    move a twentieth, Home and End go to the ends. A drag pauses the clip while the pointer is
+    down and goes on where it is let go; a clip whose file comes while the pointer is down waits
+    to be let go, as does a saved clip a press picks. A cancelled drag (Escape, focus lost)
+    puts the clip back where it was, playing if it was, and unpicks a clip the press picked
+    (`Scrub::Cancel`). Whether a clip is to play is kept apart from where it is (`AudioClip::play`):
+    picking or playing sets it, pausing clears it, and a file that comes later honours it;
+    while the file comes, the button shows pause for a queued play and a press takes it back. Any
+    move to the very end (a drag, End) leaves the clip paused there until
+    play, which starts it over (`State::scrub_audio`, `State::seek_audio`). A clip that plays to its end rewinds. In a
+    message too narrow for the speed button beside the time, it takes a line under it. While a
+    clip plays the view
+    rebuilds as its progress passes each of 120 steps (`PROGRESS_STEPS`), not every frame.
+  - Playback speed (1×, 1.5×, 2×) is one setting for every clip, stepped by the button beside a
+    playing clip's time. Speeds other than 1× keep the pitch: the decoded clip is time-stretched
+    by WSOLA (30 ms windows, a 10 ms search at about 8 kHz) on a worker, in segments of 4 s,
+    each alone, starting with the one playing (after a seek, the one sought to); a segment not
+    stretched yet plays at 1× (as does a clip of only a few windows), so a new speed or a seek
+    waits for one segment (tens of ms), not the whole file. Segments join on the file's own
+    samples (reading past a segment's last frame holds it, rather than dipping to silence);
+    where what plays changes within a segment (its stretched copy arriving, another speed),
+    the two crossfade over 10 ms, ending early at a join (`Playback::render`). Each stretch is a
+    job: its worker stops once another speed starts a newer one or the player is dropped. The windows' places
+    are spread evenly over the copy's due length (hops of at most half a window), each searched
+    against the one before played on by its actual hop. The last window is the file's end,
+    placed (within half a hop of the copy's due length) where its sound best
+    continues the window before, so a segment ends without a dip and the copy is the file's
+    length divided by the speed give or take a few ms (playback maps by the actual length).
+    Each sample is divided by the window weight laid on it, so overlaps neither swell nor dip. The first window starts and the last ends at full strength, so neither end fades. The
+    copy plays at its own sample rate, so the pitch holds; a place in the file is a place in the
+    copy scaled by their lengths (`Playback::render`).
 - **Inline previews:**
   - Attachments carry opaque `MediaRef`s (the file, and the sender's thumbnail if any) and the
     sender's dimensions.

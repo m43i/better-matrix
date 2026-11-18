@@ -703,6 +703,28 @@ pub struct Attachment {
     pub thumbnail: Option<MediaRef>,
     /// Width and height in pixels for images and videos, when the sender said.
     pub dimensions: Option<(u32, u32)>,
+    /// What the sender said about an audio clip: whether it is a voice memo, its length and its
+    /// waveform. `None` for other kinds, and for audio sent without any of it.
+    pub audio: Option<AudioDetails>,
+}
+
+/// What the sender said about an audio clip (`m.audio` with MSC3245's voice and MSC1767's audio
+/// blocks).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct AudioDetails {
+    /// Whether it was sent as a voice memo.
+    pub voice: bool,
+    /// How long it plays, in milliseconds, when the sender said.
+    pub duration_ms: Option<u64>,
+    /// The loudness along the clip, each from 0 to [`AudioDetails::WAVEFORM_MAX`]; empty when
+    /// the sender sent none.
+    pub waveform: Vec<u16>,
+}
+
+impl AudioDetails {
+    /// The loudest a waveform amplitude can be (MSC3246's unit).
+    pub const WAVEFORM_MAX: u16 = 1024;
 }
 
 impl Attachment {
@@ -787,6 +809,9 @@ pub enum Outgoing {
         upload: Upload,
         /// How long it plays, in milliseconds.
         duration_ms: u64,
+        /// The loudness along the memo, each from 0 to [`AudioDetails::WAVEFORM_MAX`], for the
+        /// bars clients draw; empty to send none.
+        waveform: Vec<u16>,
     },
     /// A poll.
     Poll {

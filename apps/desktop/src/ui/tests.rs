@@ -685,6 +685,7 @@ fn an_executable_attachment_menu_should_offer_download_without_open() {
         media: Some(matrix_core::MediaRef::opaque("executable")),
         thumbnail: None,
         dimensions: None,
+        audio: None,
         size: None,
     };
     let mut rt = Runtime::new(
@@ -900,6 +901,7 @@ fn a_read_indicator_should_not_make_content_shorter_than_a_line_taller() {
             media: Some(matrix_core::MediaRef::opaque("dot.png")),
             thumbnail: None,
             dimensions: Some((8, 8)),
+            audio: None,
         })
     };
     let unread = set_continued_message(&mut rt, tiny(), 0);
@@ -1141,6 +1143,45 @@ fn a_call_card_in_a_cramped_timeline_should_keep_its_words_beside_its_picture_an
 }
 
 #[test]
+fn a_voice_memo_in_a_cramped_timeline_should_keep_its_controls_inside_it() {
+    let memo = "$demo-@grace:example.org-3";
+    let mut rt = runtime(|s| {
+        s.select_room("!dm-grace:example.org");
+        let media = matrix_core::MediaRef::opaque(crate::demo::DEMO_VOICE_MEMO);
+        s.audio = Some(crate::state::AudioClip {
+            id: 0,
+            media,
+            player: None,
+            start_at: None,
+            play: true,
+            held: false,
+            scrub_from: None,
+        });
+        // The widest speed label.
+        s.settings.playback_speed = crate::state::PlaybackSpeed::Faster;
+    });
+    // The smallest window, 720 by 480 points, at 150% and 175% zoom; and a compact card.
+    for size in [(480.0, 320.0), (411.0, 274.0), (454.0, 390.0)] {
+        rt.set_viewport(size, 1.0);
+        rt.frame(1.0 / 60.0);
+        rt.settle_all();
+        rt.frame(1.0 / 60.0);
+        let timeline = rt.presented("timeline").expect("the timeline").0;
+        let card = rt.presented(&format!("audio-{memo}")).unwrap_or_else(|| panic!("no card")).0;
+        assert!(card[0] + card[2] <= timeline[0] + timeline[2], "at {size:?}, the card ends past the timeline");
+        for key in [format!("audio-wave-{memo}"), format!("audio-speed-{memo}")] {
+            let rect = rt.presented(&key).unwrap_or_else(|| panic!("no {key}")).0;
+            assert!(
+                rect[0] + rect[2] <= card[0] + card[2],
+                "at {size:?}, {key} ends at {}, the card at {}",
+                rect[0] + rect[2],
+                card[0] + card[2]
+            );
+        }
+    }
+}
+
+#[test]
 fn a_thread_link_should_leave_the_readers_column_clear_in_a_narrow_window() {
     let mut rt = readers_runtime();
     rt.set_viewport((760.0, 1200.0), 1.0);
@@ -1299,6 +1340,7 @@ fn escape_should_close_an_attachment_preview_before_the_dialog_beneath_it() {
                     media: None,
                     thumbnail: None,
                     dimensions: None,
+                    audio: None,
                 },
                 media: MediaRef::opaque("preview"),
                 content: if document {

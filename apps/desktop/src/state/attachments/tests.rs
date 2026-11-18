@@ -16,6 +16,7 @@ fn image() -> Attachment {
         media: Some(MediaRef::opaque("original")),
         thumbnail: Some(MediaRef::opaque("thumbnail")),
         dimensions: None,
+        audio: None,
     }
 }
 

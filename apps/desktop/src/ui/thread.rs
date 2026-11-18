@@ -43,18 +43,12 @@ pub fn thread_panel(
                 .key("thread-close")
                 .on_press(State::close_thread),
         );
-    let water = s
-        .thread_composer
-        .voice
-        .as_ref()
-        .map(|memo| super::composer::voice_water(ComposerTarget::Thread, memo, "thread-voice-water"));
     col()
         .key("thread-panel")
         .w_full()
         .h_full()
         .fill(p.bg)
         .border_sides([0.0, 0.0, 0.0, 1.0], p.divider)
-        .children(water)
         .child(header)
         .child(timeline(&cx, account.timeline(&key), "thread-timeline", &s.thread_near_top, None, p))
         .child(composer(s, ComposerTarget::Thread, t!("thread.placeholder"), p, ui))

@@ -75,6 +75,7 @@ describe('messageActions', () => {
         media: 'original',
         thumbnail: null,
         dimensions: null,
+        audio: null,
         size: null,
       },
     });
@@ -129,6 +130,7 @@ describe('attachmentActions', () => {
     media: 'original',
     thumbnail: null,
     dimensions: null,
+    audio: null,
     size: null,
   };
 
@@ -261,6 +263,7 @@ describe('attachments', () => {
     media: 'mxc-a',
     thumbnail: null,
     dimensions: [1440, 720],
+    audio: null,
   };
 
   it('should preview an image from its thumbnail when it has one', () => {

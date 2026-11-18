@@ -323,6 +323,7 @@ function sentContent(message: Outgoing): MessageContent | null {
           media: null,
           thumbnail: null,
           dimensions: null,
+          audio: null,
         },
       };
     }

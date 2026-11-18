@@ -20,7 +20,12 @@ upload: Upload,
 /**
  * How long it plays, in milliseconds.
  */
-duration_ms: number, } } | { "type": "Poll", "data": { 
+duration_ms: number, 
+/**
+ * The loudness along the memo, each from 0 to [`AudioDetails::WAVEFORM_MAX`], for the
+ * bars clients draw; empty to send none.
+ */
+waveform: Array<number>, } } | { "type": "Poll", "data": { 
 /**
  * What it asks.
  */

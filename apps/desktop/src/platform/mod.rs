@@ -22,7 +22,7 @@ pub use notify::Toast;
 pub use secrets::system_secrets;
 
 use crate::i18n::Language;
-use crate::state::{Appearance, Settings, State, Zoom};
+use crate::state::{Appearance, PlaybackSpeed, Settings, State, Zoom};
 
 /// The OS services the app uses, or inert stand-ins when headless.
 pub struct Shell {
@@ -182,17 +182,24 @@ impl Shell {
         });
     }
 
-    /// A player for `media`'s file on the picked speaker; if it can't play, the app hears it
-    /// through [`State::audio_failed`]. Headless, Rune's player and its fake speaker.
+    /// A player for `media`'s file on the picked speaker; the view runs again once it is
+    /// decoded, and if it can't play, the app hears it through [`State::audio_failed`]. Headless, Rune's player and its fake speaker.
     pub fn player(
         &self,
         path: std::path::PathBuf,
         speaker: Option<String>,
         media: matrix_core::MediaRef,
+        clip: u64,
     ) -> sound::Player {
         if let Some(app) = self.app.clone() {
-            let failed = move |error: String| app.update(move |s: &mut State, _| s.audio_failed(&media, error));
-            sound::Player::Native(sound::NativePlayer::open(path, speaker, failed))
+            // Decoded, the clip's card shows its length and waveform, even while it is paused.
+            let decoded = {
+                let app = app.clone();
+                move || app.update(|_: &mut State, _| {})
+            };
+            let failed =
+                move |error: String| app.update(move |s: &mut State, _| s.audio_failed(&media, Some(clip), error));
+            sound::Player::Native(sound::NativePlayer::open(path, speaker, decoded, failed))
         } else {
             sound::Player::Rune(rune::Player::audio(path))
         }
@@ -244,6 +251,7 @@ const LINK_GIFS: &str = "link_gifs";
 const LINK_PREVIEWS: &str = "link_previews";
 const ZOOM: &str = "zoom";
 const RING_SOUND: &str = "ring_sound";
+const PLAYBACK_SPEED: &str = "playback_speed";
 const MICROPHONE: &str = "microphone";
 const SPEAKER: &str = "speaker";
 const CAMERA: &str = "camera";
@@ -256,6 +264,7 @@ fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::pr
     prefs.set(LINK_GIFS, &settings.show_link_gifs)?;
     prefs.set(LINK_PREVIEWS, &settings.show_link_previews)?;
     prefs.set(RING_SOUND, &settings.ring_sound)?;
+    prefs.set(PLAYBACK_SPEED, &settings.playback_speed.percent())?;
     prefs.set(MICROPHONE, &settings.devices.microphone)?;
     prefs.set(SPEAKER, &settings.devices.speaker)?;
     prefs.set(CAMERA, &settings.devices.camera)?;
@@ -277,6 +286,7 @@ pub fn load_settings(prefs: &Prefs) -> Settings {
             camera: prefs.get::<Option<String>>(CAMERA).flatten(),
         },
         ring_sound: prefs.get::<bool>(RING_SOUND).unwrap_or(true),
+        playback_speed: prefs.get::<u16>(PLAYBACK_SPEED).map_or_else(Default::default, PlaybackSpeed::from_percent),
     }
 }
 

@@ -4,6 +4,7 @@ export type { AccountPage } from "./AccountPage";
 export type { AccountSummary } from "./AccountSummary";
 export type { Attachment } from "./Attachment";
 export type { AttachmentKind } from "./AttachmentKind";
+export type { AudioDetails } from "./AudioDetails";
 export type { BridgeEvent } from "./BridgeEvent";
 export type { CallCard } from "./CallCard";
 export type { CallDevices } from "./CallDevices";

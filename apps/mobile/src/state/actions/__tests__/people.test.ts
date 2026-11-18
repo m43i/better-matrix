@@ -162,6 +162,7 @@ describe('people actions', () => {
       media: 'mxc-notes',
       thumbnail: null,
       dimensions: null,
+      audio: null,
     };
 
     const uri = fileForSharing(app.store, ADA, attachment);

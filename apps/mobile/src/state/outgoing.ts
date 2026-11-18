@@ -83,6 +83,7 @@ export function voiceMessage(path: string, durationMs: number): Outgoing {
     data: {
       upload: { type: 'Path', data: path },
       duration_ms: Math.max(0, Math.round(durationMs)),
+      waveform: [],
     },
   };
 }

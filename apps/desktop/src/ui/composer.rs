@@ -114,7 +114,10 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
         ComposerTarget::Room => typing_line(s, p),
         ComposerTarget::Thread => el().h(TYPING_LINE),
     };
-    col().w_full().px(20.0).pt(4.0).child(frame).child(below)
+    // While a memo records, the voice lights a glow around the frame, drawn under it.
+    let glow = c.voice.as_ref().map(|memo| voice_glow(target, memo, s.reduced_motion.get(), p));
+    let framed = col().key(key(target, "composer-framed")).w_full().children(glow).child(frame);
+    col().w_full().px(20.0).pt(4.0).child(framed).child(below)
 }
 
 /// Rune follows keyboard edits itself; pointer selection also needs its moving end revealed.
@@ -441,20 +444,31 @@ pub fn voice_memos_supported() -> bool {
     true
 }
 
-/// While a voice memo records, water along the bottom edge of the pane it records in, stirred by
-/// the voice (`state::water`). It draws into its own image, so the view never rebuilds for it.
-/// Placed first in its pane, it sits under the timeline and the composer.
-pub fn voice_water(target: ComposerTarget, memo: &crate::state::VoiceMemo, key: &str) -> El {
-    el().key(key.to_owned())
-        .pin(Some(0.0), None, Some(0.0), Some(0.0))
-        .h(crate::state::WATER_HEIGHT)
-        .pixels(&memo.1.pixels)
+/// How far the voice glow reaches past the composer's frame, in points.
+const GLOW_REACH: f32 = 6.0;
+
+/// While a voice memo records, a soft blue glow around the composer that swells with the voice:
+/// a faint halo always, and over it a brighter one whose opacity follows the recorder's level,
+/// bound live, so the view never rebuilds for it. Under reduced motion the brighter halo holds
+/// still, half lit.
+fn voice_glow(target: ComposerTarget, memo: &crate::state::VoiceMemo, still: bool, p: &Palette) -> El {
+    let halo = |reach: f32, sigma: f32, alpha: f32| {
+        el().pin(Some(-reach), Some(-reach), Some(-reach), Some(-reach))
+            .radius(10.0 + reach)
+            .fill(p.accent.alpha(alpha))
+            .blur(sigma)
+    };
+    let voice = halo(GLOW_REACH, 12.0, 0.8).key(key(target, "voice-glow-level"));
+    let voice = if still {
+        voice.opacity(0.5)
+    } else {
+        voice.live_opacity(memo.recorder.live_level().smooth(rune::Spring::new(0.12, 0.0)))
+    };
+    el().key(key(target, "voice-glow"))
+        .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
         .a11y_hidden()
-        .on_layout(move |s: &mut State, rect| {
-            if let Some(memo) = &mut s.composer_mut(target).voice {
-                memo.1.resized([rect[2], rect[3]]);
-            }
-        })
+        .child(halo(2.0, 6.0, 0.35))
+        .child(voice)
 }
 
 /// The red dot of a recording, lit like a studio's recording light: the lamp dims a touch and
@@ -492,7 +506,7 @@ fn recording_light(p: &Palette) -> El {
 /// While a voice memo records: a red dot, the time so far, the input level, and ways to drop or
 /// send it.
 fn recording(target: ComposerTarget, memo: &crate::state::VoiceMemo, p: &Palette) -> El {
-    let seconds = memo.0.elapsed().max(0.0) as u64;
+    let seconds = memo.recorder.elapsed().max(0.0) as u64;
     row()
         .key(key(target, "voice-recording"))
         .w_full()
@@ -504,11 +518,9 @@ fn recording(target: ComposerTarget, memo: &crate::state::VoiceMemo, p: &Palette
         .child(recording_light(p))
         .child(text(t!("composer.recording")).font(font::BODY).color(p.text))
         .child(text(format!("{}:{:02}", seconds / 60, seconds % 60)).font(font::BODY_STRONG).color(p.text))
-        .child(
-            el().w(120.0).h(6.0).radius(3.0).fill(p.divider).child(
-                el().w(120.0).h(6.0).radius(3.0).fill(p.accent).origin(0.0, 0.5).live_scale(&memo.0.live_level()),
-            ),
-        )
+        .child(el().w(120.0).h(6.0).radius(3.0).fill(p.divider).child(
+            el().w(120.0).h(6.0).radius(3.0).fill(p.accent).origin(0.0, 0.5).live_scale(&memo.recorder.live_level()),
+        ))
         .child(el().grow(1.0))
         .child(
             icon_button(&icons::CLOSE, t!("composer.voice_cancel"), false, p.text_muted, p)

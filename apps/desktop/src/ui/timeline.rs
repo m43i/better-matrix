@@ -19,8 +19,8 @@ use super::room::{display_name, inline_name};
 use super::theme::{Palette, font};
 use crate::i18n::{I18N, t, tf, tp};
 use crate::state::{
-    AccountData, AudioClip, ComposerTarget, EmojiFor, EntryView, GifCache, LinkPreviews, MediaCache, Popover,
-    RoomTimeline, State, TimelineItem, audio_supported,
+    AccountData, AudioClip, ComposerTarget, EmojiFor, EntryView, GifCache, LinkPreviews, MediaCache, PlaybackSpeed,
+    Popover, RoomTimeline, Scrub, State, TimelineItem, audio_supported,
 };
 use matrix_core::links::LinkPreview;
 
@@ -53,6 +53,10 @@ pub struct Context<'a> {
     pub ringing: bool,
     /// The audio playing, if any.
     pub audio: Option<&'a AudioClip>,
+    /// How fast clips play.
+    pub playback_speed: PlaybackSpeed,
+    /// What clips played here read from their files.
+    pub decoded_audio: &'a [crate::state::DecodedAudio],
     /// The most reader pictures a read indicator shows: fewer in a narrow timeline.
     pub reader_faces: usize,
     /// Whether messages keep the readers' column: not in a timeline too narrow for it, where an
@@ -79,6 +83,8 @@ impl<'a> Context<'a> {
             call_here: s.call_here().filter(|call| call.info.room_id == key.room_id).map(|call| call.info.via),
             ringing: s.rings.iter().any(|ring| ring.account == data.summary.id && ring.room_id == key.room_id),
             audio: s.audio.as_ref(),
+            playback_speed: s.settings.playback_speed,
+            decoded_audio: &s.decoded_audio,
             reader_faces: crate::state::READER_FACES,
             readers_column: key.thread.is_none(),
             content_width: f32::INFINITY,
@@ -961,7 +967,7 @@ fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Pa
         (MessageContent::Attachment(attachment), _)
             if attachment.kind == AttachmentKind::Audio && audio_supported() =>
         {
-            audio_card(attachment, cx.audio, p)
+            audio_card(&item.message.event_id, attachment, cx, p)
         }
         (MessageContent::Attachment(attachment), _) => match attachment.preview() {
             Some((preview, _)) if !media.has_failed(&preview) => image_preview(attachment, cx.content_width, media, p),
@@ -1205,45 +1211,273 @@ fn attachment_card(attachment: &Attachment, max_width: f32, p: &Palette) -> El {
         .child(titles)
 }
 
-/// An audio file or voice memo: play and pause, its name, and the time played of its length.
-fn audio_card(attachment: &Attachment, clip: Option<&AudioClip>, p: &Palette) -> El {
-    let player =
-        clip.filter(|clip| Some(&clip.media) == attachment.media.as_ref()).and_then(|clip| clip.player.as_ref());
-    let playing = player.is_some_and(crate::platform::sound::Player::is_playing);
-    let minutes = |seconds: f64| format!("{}:{:02}", seconds as u64 / 60, seconds as u64 % 60);
-    let time = player.map(|player| match player.duration() {
-        Some(total) => format!("{} / {}", minutes(player.time()), minutes(total)),
-        None => minutes(player.time()),
-    });
-    let opened = attachment.clone();
-    let mut titles =
-        col().min_w(0.0).shrink().child(text(attachment.name.clone()).font(font::BODY_STRONG).color(p.text).truncate());
-    if let Some(time) = time {
-        titles = titles.child(text(time).font(font::META).color(p.text_muted));
+/// Bars in an audio clip's waveform: as many as fit the message's width, within these.
+const WAVE_MAX_BARS: usize = 36;
+/// The fewest bars a roomy card draws; a compact one draws down to half as many.
+const WAVE_MIN_BARS: usize = 8;
+const WAVE_BAR: f32 = 3.0;
+const WAVE_GAP: f32 = 2.0;
+const WAVE_HEIGHT: f32 = 28.0;
+/// The shortest bar, for silence or a clip whose waveform is unknown.
+const WAVE_MIN_BAR: f32 = 3.0;
+/// The scrubber's dot.
+const KNOB: f32 = 12.0;
+/// The play button.
+const PLAY: f32 = 36.0;
+
+/// How an audio card fits a message: the bars beside the play button with room to spare, then
+/// beside it with tighter padding, and under it, across the card, only where not even a few
+/// bars fit beside it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CardFit {
+    Roomy,
+    Compact,
+    Stacked,
+}
+
+impl CardFit {
+    /// The card's padding, left and right.
+    fn padding(self) -> (f32, f32) {
+        match self {
+            Self::Roomy => (10.0, 14.0),
+            Self::Compact | Self::Stacked => (8.0, 8.0),
+        }
     }
-    row()
-        .key(format!("audio-{}", attachment.name))
-        .max_w(420.0)
+
+    /// The gap between the play button and the bars.
+    fn gap(self) -> f32 {
+        match self {
+            Self::Roomy => 10.0,
+            Self::Compact | Self::Stacked => 6.0,
+        }
+    }
+
+    /// The fewest bars beside the play button this fit takes.
+    fn least_bars(self) -> usize {
+        match self {
+            Self::Roomy => WAVE_MIN_BARS,
+            Self::Compact | Self::Stacked => WAVE_MIN_BARS / 2,
+        }
+    }
+
+    /// How far the bars, the name and the time start from the card's padding.
+    fn indent(self) -> f32 {
+        match self {
+            Self::Stacked => 0.0,
+            fit => PLAY + fit.gap(),
+        }
+    }
+}
+
+/// How many bars a message `width` wide fits, and how the card lays them out.
+fn wave_layout(width: f32) -> (usize, CardFit) {
+    let fit = |room: f32| {
+        if room.is_finite() {
+            ((room + WAVE_GAP) / (WAVE_BAR + WAVE_GAP)).floor().max(0.0) as usize
+        } else {
+            WAVE_MAX_BARS
+        }
+    };
+    let room = |fit: CardFit| {
+        let (left, right) = fit.padding();
+        width - left - right - 2.0 - fit.indent()
+    };
+    [CardFit::Roomy, CardFit::Compact]
+        .into_iter()
+        .map(|card| (fit(room(card)), card))
+        .find(|(bars, card)| *bars >= card.least_bars())
+        .map(|(bars, card)| (bars.min(WAVE_MAX_BARS), card))
+        .unwrap_or_else(|| (fit(room(CardFit::Stacked)).clamp(WAVE_MIN_BARS / 2, WAVE_MAX_BARS), CardFit::Stacked))
+}
+
+/// The width of `bars` bars and the gaps between them.
+fn wave_width(bars: usize) -> f32 {
+    bars as f32 * (WAVE_BAR + WAVE_GAP) - WAVE_GAP
+}
+
+/// An audio clip or voice memo, as WhatsApp draws one: play and pause beside the clip's
+/// waveform as bars that fill as it plays, a dot to drag (or a press anywhere along the bars,
+/// or the arrow keys) to jump, and the time under them. While a clip is the current one, a
+/// button beside the time steps its speed. A voice memo shows no file name; another audio file
+/// keeps its name above the bars.
+fn audio_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &Palette) -> El {
+    let clip = cx.audio.filter(|clip| Some(&clip.media) == attachment.media.as_ref());
+    let player = clip.and_then(|clip| clip.player.as_ref());
+    let playing = player.is_some_and(crate::platform::sound::Player::is_playing);
+    // Pause while it plays, or is queued to play once its file comes.
+    let pausable = playing || clip.is_some_and(|clip| clip.player.is_none() && clip.play && !clip.held);
+    let progress = clip.map_or(0.0, AudioClip::progress) as f32;
+    let details = attachment.audio.as_ref();
+    let voice = details.is_some_and(|details| details.voice);
+    // The sender's waveform; else, once played here, the one read from the file.
+    let decoded = cx.decoded_audio.iter().find(|decoded| attachment.media.as_ref() == Some(&decoded.media));
+    let mut amplitudes = details.map(|details| details.waveform.clone()).unwrap_or_default();
+    if amplitudes.is_empty() {
+        amplitudes = player.map(crate::platform::sound::Player::waveform).unwrap_or_default();
+    }
+    if amplitudes.is_empty() {
+        amplitudes = decoded.map(|decoded| decoded.waveform.clone()).unwrap_or_default();
+    }
+    let duration = details
+        .and_then(|details| details.duration_ms)
+        .map(|ms| ms as f64 / 1000.0)
+        .or_else(|| player.and_then(crate::platform::sound::Player::duration))
+        .or_else(|| decoded.and_then(|decoded| decoded.duration));
+    // While it plays, is held or has been moved along, the time it is at (its share of the
+    // length while its file is still coming); otherwise, its length.
+    let moved = playing || progress > 0.0 || clip.is_some_and(|clip| clip.held);
+    let time = match player.filter(|player| player.duration().is_some()) {
+        Some(player) if moved => Some(player.time()),
+        _ if moved => duration.map(|duration| duration * f64::from(progress)),
+        _ => duration,
+    };
+    let (bars, fit) = wave_layout(cx.content_width);
+    let width = wave_width(bars);
+
+    let opened = attachment.clone();
+    let play = el()
+        .key(format!("audio-play-{event_id}"))
+        .size(PLAY, PLAY)
+        .radius(PLAY / 2.0)
+        .fill(p.accent)
+        .center()
+        .role("button")
+        .focusable(true)
+        .cursor(rune::Cursor::Pointer)
+        .label(if pausable { t!("audio.pause") } else { t!("audio.play") })
+        .child(icon(if pausable { &icons::PAUSE } else { &icons::PLAY }, 18.0).color(p.on_accent))
+        .on_press(move |s: &mut State| s.toggle_audio(&opened));
+
+    // The name and the time line up with the bars, past the play button.
+    let indent = fit.indent();
+    let mut card = col()
+        .key(format!("audio-{event_id}"))
+        .self_start()
         .mt(4.0)
-        .px(12.0)
-        .py(10.0)
-        .gap(12.0)
-        .center_y()
-        .radius(8.0)
+        .pl(fit.padding().0)
+        // The slider reaches half a dot past the bars: the padding gives that room back.
+        .pr(fit.padding().1 - KNOB / 2.0)
+        .py(8.0)
+        .gap(2.0)
+        .radius(12.0)
         .fill(p.surface)
         .border(1.0, p.divider)
-        .child(
-            el().size(36.0, 36.0)
-                .radius(18.0)
-                .fill(p.accent)
-                .center()
-                .role("button")
-                .cursor(rune::Cursor::Pointer)
-                .label(if playing { t!("audio.pause") } else { t!("audio.play") })
-                .child(icon(if playing { &icons::PAUSE } else { &icons::PLAY }, 18.0).color(p.on_accent))
-                .on_press(move |s: &mut State| s.toggle_audio(&opened)),
-        )
-        .child(titles)
+        .label(if voice { t!("audio.voice").to_owned() } else { attachment.name.clone() });
+    if !voice {
+        card = card
+            .child(text(attachment.name.clone()).font(font::BODY_STRONG).color(p.text).truncate().ml(indent).w(width));
+    }
+    // In a narrow message the speed button takes a line under the time.
+    // A compact card's time line spans the card, so the speed button fits beside or under the
+    // time even where the bars are few.
+    let (footer_indent, footer_width) = match fit {
+        CardFit::Roomy => (indent, width),
+        _ => (0.0, indent + width),
+    };
+    let mut footer = row().ml(footer_indent).w(footer_width).min_h(20.0).center_y().flex_wrap().gap(4.0);
+    if let Some(time) = time {
+        footer = footer.child(text(minutes(time)).font(font::META).color(p.text_muted));
+    }
+    if clip.is_some() {
+        footer = footer.child(el().grow(1.0)).child(speed_button(event_id, cx.playback_speed, p));
+    }
+    let wave = waveform(event_id, attachment, &amplitudes, bars, progress, p);
+    match fit {
+        CardFit::Stacked => card.gap(6.0).child(play).child(wave.ml(-KNOB / 2.0)).child(footer),
+        _ => card.child(row().gap(fit.gap() - KNOB / 2.0).center_y().child(play).child(wave)).child(footer),
+    }
+}
+
+/// `seconds` as `m:ss`.
+fn minutes(seconds: f64) -> String {
+    let seconds = seconds.max(0.0) as u64;
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+/// `amplitudes` (each up to [`matrix_core::AudioDetails::WAVEFORM_MAX`]) as `bars` heights
+/// from [`WAVE_MIN_BAR`] to the waveform's height: each bar the loudest of its stretch, scaled to
+/// the loudest bar, so a quiet memo still shows its shape. Flat when there are none.
+fn bar_heights(amplitudes: &[u16], bars: usize) -> Vec<f32> {
+    if amplitudes.is_empty() || bars == 0 {
+        return vec![WAVE_MIN_BAR; bars];
+    }
+    let peaks: Vec<u16> = (0..bars)
+        .map(|i| {
+            let start = i * amplitudes.len() / bars;
+            let end = ((i + 1) * amplitudes.len() / bars).max(start + 1).min(amplitudes.len());
+            amplitudes[start.min(amplitudes.len() - 1)..end].iter().copied().max().unwrap_or(0)
+        })
+        .collect();
+    let loudest = f32::from(peaks.iter().copied().max().unwrap_or(0).max(1));
+    peaks.into_iter().map(|peak| WAVE_MIN_BAR + (WAVE_HEIGHT - WAVE_MIN_BAR) * f32::from(peak) / loudest).collect()
+}
+
+/// The bars and the scrubber's dot: bars played so far in the accent, the rest muted. Pressing
+/// or dragging anywhere along them jumps there; focused, the arrow keys step it, and Home and
+/// End go to the start and the end.
+fn waveform(
+    event_id: &str,
+    attachment: &Attachment,
+    amplitudes: &[u16],
+    bars: usize,
+    progress: f32,
+    p: &Palette,
+) -> El {
+    let width = wave_width(bars);
+    let heights = bar_heights(amplitudes, bars).into_iter().enumerate().map(|(i, height)| {
+        let played = (i as f32 + 0.5) / bars as f32 <= progress;
+        el().w(WAVE_BAR).h(height).radius(WAVE_BAR / 2.0).fill(if played { p.accent } else { p.text_muted.alpha(0.45) })
+    });
+    // The slider reaches half a dot past the bars at each end, so all of the dot at either end
+    // is the scrubber's (and a press there focuses it), not the message's under it.
+    let knob = el()
+        .key(format!("audio-knob-{event_id}"))
+        .absolute(progress * width, (WAVE_HEIGHT - KNOB) / 2.0)
+        .size(KNOB, KNOB)
+        .radius(KNOB / 2.0)
+        .fill(p.accent)
+        .border(2.0, p.surface);
+    let (scrubbed, stepped, ended) = (attachment.clone(), attachment.clone(), attachment.clone());
+    el().key(format!("audio-wave-{event_id}"))
+        .w(width + KNOB)
+        .h(WAVE_HEIGHT)
+        .role("slider")
+        .label(t!("audio.seek"))
+        .range_value(f64::from(progress), 0.0, 1.0)
+        .range_step(crate::state::AUDIO_STEP)
+        .focusable(true)
+        .cursor(rune::Cursor::Pointer)
+        .on_drag(move |s: &mut State, drag, _| {
+            let scrub = match drag.phase {
+                rune::Phase::Down => Scrub::Press,
+                rune::Phase::Move => Scrub::Drag,
+                rune::Phase::Up if drag.cancelled() => Scrub::Cancel,
+                rune::Phase::Up => Scrub::Release,
+            };
+            s.scrub_audio(&scrubbed, f64::from((drag.x - KNOB / 2.0) / width.max(1.0)), scrub);
+        })
+        .on_step(move |s: &mut State, steps, _| s.step_audio(&stepped, steps))
+        .on_step_limit(move |s: &mut State, end, _| s.seek_audio(&ended, if end { 1.0 } else { 0.0 }))
+        .child(row().absolute(KNOB / 2.0, 0.0).w(width).h(WAVE_HEIGHT).gap(WAVE_GAP).center_y().children(heights))
+        .child(knob)
+}
+
+/// The speed a clip plays at, `1×`, `1.5×` or `2×`; pressing it steps to the next.
+fn speed_button(event_id: &str, speed: PlaybackSpeed, p: &Palette) -> El {
+    let rate = I18N.decimal(speed.rate(), 1);
+    el().key(format!("audio-speed-{event_id}"))
+        .px(7.0)
+        .h(20.0)
+        .center()
+        .radius(10.0)
+        .border(1.0, p.divider)
+        .hover(p.hover)
+        .role("button")
+        .focusable(true)
+        .cursor(rune::Cursor::Pointer)
+        .label(tf!("audio.speed_label", rate = rate.clone()))
+        .child(text(tf!("audio.speed", rate = rate)).font(font::META).color(p.text_muted))
+        .on_press(State::cycle_playback_speed)
 }
 
 /// `1.4 MB`-style sizes, with the locale's decimal separator and units.
@@ -1313,6 +1547,38 @@ mod tests {
     fn an_older_date_should_be_spelled_out() {
         let nov_13_2025 = 20_405 * 86_400_000;
         assert_eq!(date_label(nov_13_2025, nov_13_2025 + 5 * 86_400_000), "November 13, 2025");
+    }
+
+    #[test]
+    fn a_waveform_should_scale_to_its_loudest_bar() {
+        assert_eq!(bar_heights(&[0, 256, 512], 3), vec![WAVE_MIN_BAR, (WAVE_MIN_BAR + WAVE_HEIGHT) / 2.0, WAVE_HEIGHT]);
+    }
+
+    #[test]
+    fn a_narrow_message_should_draw_fewer_bars_and_a_wide_one_no_more_than_the_most() {
+        let (narrow, wide, unknown) = (wave_layout(208.0), wave_layout(2000.0), wave_layout(f32::INFINITY));
+        let roomy = CardFit::Roomy;
+        assert_eq!((narrow, wide, unknown), ((27, roomy), (WAVE_MAX_BARS, roomy), (WAVE_MAX_BARS, roomy)));
+    }
+
+    #[test]
+    fn a_narrow_message_should_keep_the_bars_beside_play_in_a_compact_card() {
+        assert_eq!(wave_layout(100.0), (8, CardFit::Compact));
+    }
+
+    #[test]
+    fn a_message_too_narrow_for_bars_beside_play_should_put_them_under_it() {
+        assert_eq!(wave_layout(59.0), (8, CardFit::Stacked));
+    }
+
+    #[test]
+    fn an_unknown_waveform_should_draw_flat_bars() {
+        assert_eq!(bar_heights(&[], 4), vec![WAVE_MIN_BAR; 4]);
+    }
+
+    #[test]
+    fn a_long_waveform_should_keep_each_stretch_peak() {
+        assert_eq!(bar_heights(&[0, 1024, 0, 0], 2)[0], WAVE_HEIGHT);
     }
 
     #[test]

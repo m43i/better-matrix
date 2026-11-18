@@ -236,7 +236,7 @@ describe('composer actions', () => {
     const [command] = commands();
     expect(command?.type === 'Send' && command.data.message).toEqual({
       type: 'Voice',
-      data: { upload: { type: 'Path', data: '/cache/v.m4a' }, duration_ms: 3200 },
+      data: { upload: { type: 'Path', data: '/cache/v.m4a' }, duration_ms: 3200, waveform: [] },
     });
   });
 

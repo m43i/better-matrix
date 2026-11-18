@@ -36,7 +36,6 @@ mod sign_in;
 mod status_message;
 mod typing;
 mod updates;
-mod water;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -69,11 +68,10 @@ pub use readers::{READER_FACES, ReaderMenu};
 pub use room_discovery::Directory;
 pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches};
 pub use sections::{DIRECT, INVITATIONS, ROOMS, SectionView, is_builtin, ordered_spaces, sections};
-pub use settings::{Appearance, Settings, SettingsSection, Zoom};
+pub use settings::{Appearance, PlaybackSpeed, Settings, SettingsSection, Zoom};
 pub use sign_in::{SignInForm, SignInStep};
 pub use status_message::{leading_emoji, suggestions as status_suggestions};
 pub use updates::Update;
-pub use water::WATER_HEIGHT;
 
 use crate::i18n::{Language, t, tf};
 use crate::platform::{Shell, Toast};
@@ -253,10 +251,69 @@ pub enum DropTarget {
 /// An audio attachment or voice memo playing (or downloading to play).
 #[derive(Debug)]
 pub struct AudioClip {
+    /// Which time a clip was picked to play: a failure its player reports after the clip was
+    /// picked again belongs to the earlier time, and is ignored.
+    pub id: u64,
     pub media: MediaRef,
     /// `None` while the file downloads.
     pub player: Option<crate::platform::sound::Player>,
+    /// Where to start once the file is here, as a share of the length: scrubbing a clip before
+    /// it has downloaded.
+    pub start_at: Option<f64>,
+    /// Whether it is to play, apart from where it is: once its file opens, and when a drag along
+    /// its waveform ends. Picking it or pressing play sets it; pausing it, or moving it to its
+    /// very end, clears it.
+    pub play: bool,
+    /// Whether the pointer is down on its waveform: a file that comes meanwhile waits for it.
+    pub held: bool,
+    /// Where it was and whether it was to play when the pointer went down on its waveform, to go
+    /// back to if the drag is cancelled; `None` when that press picked it.
+    pub scrub_from: Option<(f64, bool)>,
 }
+
+/// A step of a press or drag along a clip's waveform (`State::scrub_audio`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scrub {
+    Press,
+    Drag,
+    Release,
+    /// Escape, or the window losing focus, mid-drag.
+    Cancel,
+}
+
+impl AudioClip {
+    /// How far it has played, from 0 to 1; 0 while it downloads.
+    pub fn progress(&self) -> f64 {
+        match &self.player {
+            Some(player) => player.progress(),
+            None => self.start_at.unwrap_or(0.0),
+        }
+    }
+}
+
+/// A clip's file in the scratch folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum AudioFile {
+    Downloading,
+    Saved(std::path::PathBuf),
+}
+
+/// What decoding a clip read from its file: kept for its card after another clip is current.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DecodedAudio {
+    pub media: MediaRef,
+    pub waveform: Vec<u16>,
+    pub duration: Option<f64>,
+}
+
+/// How many clips' [`DecodedAudio`] the state keeps.
+const DECODED_AUDIO: usize = 64;
+
+/// How many steps a playing clip's progress shows in: the view rebuilds as it passes each, so
+/// the bars fill and the scrubber moves without redrawing at every frame.
+pub const PROGRESS_STEPS: f64 = 120.0;
+/// How far one arrow key moves a clip along, as a share of its length.
+pub const AUDIO_STEP: f64 = 0.05;
 
 /// Whether this platform plays audio: the app's own player covers every desktop.
 pub fn audio_supported() -> bool {
@@ -616,10 +673,18 @@ pub struct State {
     pub chat_search: PeopleSearch,
     /// The audio attachment or voice memo playing, if any.
     pub audio: Option<AudioClip>,
+    /// What playing clips here read from their files, newest last, kept once another clip is
+    /// current: the waveform and length of clips whose senders sent neither.
+    pub decoded_audio: Vec<DecodedAudio>,
+    /// Clips' files, downloading or saved to play: one download each, and a saved file is played
+    /// again as it is, so a clip played again never writes its file over while it is read.
+    audio_files: HashMap<MediaRef, AudioFile>,
+    /// The [`AudioClip::id`] of the clip picked last.
+    last_audio_id: u64,
     /// Accounts whose sidebar layout changed while a save was under way.
     layout_unsaved: HashSet<AccountId>,
-    /// The second [`State::clock`] read when the view last showed it.
-    clock_shown: Option<u64>,
+    /// What [`State::clock`] read when the view last showed it.
+    clock_shown: Option<(Option<u64>, Option<u64>)>,
     /// The entries of each open timeline its view shows, by ID; one not reported yet counts
     /// its newest entries.
     on_screen: HashMap<(AccountId, TimelineKey), accounts::Shown>,
@@ -731,6 +796,9 @@ impl State {
             invite_search: PeopleSearch::default(),
             chat_search: PeopleSearch::default(),
             audio: None,
+            decoded_audio: Vec::new(),
+            audio_files: HashMap::new(),
+            last_audio_id: 0,
             layout_unsaved: HashSet::new(),
             clock_shown: None,
             typing: typing::Typing::default(),
@@ -1549,11 +1617,9 @@ impl State {
                     self.accounts.status_message_saved(account, request);
                 }
                 Purpose::Audio { media, path } => {
-                    if let Some(clip) = self.audio.as_mut().filter(|clip| clip.media == *media) {
-                        let speaker = self.settings.devices.speaker.clone();
-                        let player = self.shell.player(path.clone(), speaker, media.clone());
-                        player.play();
-                        clip.player = Some(player);
+                    self.audio_files.insert(media.clone(), AudioFile::Saved(path.clone()));
+                    if self.audio.as_ref().is_some_and(|clip| clip.media == *media) {
+                        self.open_audio(path.clone());
                     }
                 }
                 Purpose::Avatar => self.profile.saving_avatar = false,
@@ -1703,7 +1769,10 @@ impl State {
             }
             Purpose::Create { .. } => self.notice = Some(tf!("notice.create", error = error)),
             Purpose::Rename => self.notice = Some(tf!("notice.rename", error = error)),
-            Purpose::Audio { media, .. } => self.audio_failed(&media, error),
+            Purpose::Audio { media, .. } => {
+                self.audio_files.remove(&media);
+                self.audio_failed(&media, None, error);
+            }
             Purpose::Invite => self.notice = Some(tf!("notice.invite", error = error)),
             Purpose::Moderate => self.notice = Some(tf!("notice.moderate", error = error)),
             // The panel stops loading, and says why.
@@ -1756,7 +1825,7 @@ impl State {
         // open: closing the thread, another room and the overview all drop it. An edit of a
         // message there is set aside, its draft back, and returns when the timeline does.
         for target in [ComposerTarget::Room, ComposerTarget::Thread] {
-            if self.composer(target).voice.as_ref().is_some_and(|memo| !shown.contains(&memo.2)) {
+            if self.composer(target).voice.as_ref().is_some_and(|memo| !shown.contains(&memo.timeline)) {
                 self.cancel_voice_memo(target);
             }
             let editing = self.composer(target).editing.as_ref().map(|editing| &editing.target);
@@ -1882,11 +1951,17 @@ impl State {
             tx.wake_after(wait);
         }
         self.send_typing();
-        // A voice memo's timer and a playing clip's time count seconds: a coarse tick is enough,
-        // and the view rebuilds only when the second shown changes.
+        // A voice memo's timer counts seconds, and a playing clip's progress moves in steps:
+        // a tick a little faster than either is enough, and the view rebuilds only when what
+        // shows changes.
         let clock = self.clock();
         if clock.is_some() {
-            tx.wake_after(std::time::Duration::from_millis(250));
+            let playing = self
+                .audio
+                .as_ref()
+                .and_then(|clip| clip.player.as_ref())
+                .is_some_and(crate::platform::sound::Player::is_playing);
+            tx.wake_after(std::time::Duration::from_millis(if playing { 50 } else { 250 }));
         }
         if clock != self.clock_shown {
             self.clock_shown = clock;
@@ -1927,23 +2002,11 @@ impl State {
         // A memo whose microphone failed ends now, with why, rather than on send.
         let mut ended = false;
         for target in [ComposerTarget::Room, ComposerTarget::Thread] {
-            if let Some(error) = self.composer(target).voice.as_ref().and_then(|memo| memo.0.failed()) {
+            if let Some(error) = self.composer(target).voice.as_ref().and_then(|memo| memo.recorder.failed()) {
                 self.cancel_voice_memo(target);
                 self.notice = Some(tf!("notice.voice", error = error));
                 ended = true;
             }
-        }
-        // The water of a voice memo being recorded moves every frame while the window is
-        // focused; it draws into its own image, so nothing here changes what the view builds.
-        // Under reduced motion it rests, as it was first drawn.
-        for memo in [&mut self.composer.voice, &mut self.thread_composer.voice].into_iter().flatten() {
-            if !focused || still {
-                memo.1.pause();
-                continue;
-            }
-            let level = memo.0.level();
-            memo.1.advance(clock, level.meter(), level.peak_db() - level.rms_db());
-            tx.wake_after(memo.1.wait(clock));
         }
         // The selected rail tile breathes a while in a focused window, then rests.
         if focused {
@@ -2677,24 +2740,200 @@ impl State {
     /// Plays an audio attachment or voice memo, or pauses it when it is the one playing. The
     /// file downloads once, to a temporary file the player opens.
     pub fn toggle_audio(&mut self, attachment: &matrix_core::Attachment) {
-        let (Some(account), Some(media)) = (self.nav.account.clone(), attachment.media.clone()) else { return };
-        if let Some(clip) = self.audio.as_ref().filter(|clip| clip.media == media) {
-            if let Some(player) = &clip.player {
-                if player.is_playing() {
+        let Some(media) = attachment.media.clone() else { return };
+        if let Some(clip) = self.audio.as_mut().filter(|clip| clip.media == media) {
+            match &clip.player {
+                Some(player) if player.is_playing() => {
                     player.pause();
-                } else {
+                    clip.play = false;
+                }
+                Some(player) => {
                     player.play();
+                    clip.play = true;
+                }
+                // Still downloading: a press queues playing it once here (from the start if it
+                // was moved to the end meanwhile), and another takes that back.
+                None => {
+                    clip.play = !clip.play;
+                    if clip.play {
+                        clip.start_at = clip.start_at.filter(|share| *share < 1.0);
+                    }
+                    clip.held = false;
                 }
             }
             return;
         }
-        let extension = std::path::Path::new(&attachment.name).extension().and_then(|e| e.to_str()).unwrap_or("audio");
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        std::hash::Hash::hash(&media, &mut hasher);
-        let path = self.shell.scratch().join(format!("audio-{:x}.{extension}", std::hash::Hasher::finish(&hasher)));
-        let command = Command::SaveMedia { account, media: media.clone(), path: path.clone() };
-        self.dispatch(command, Purpose::Audio { media: media.clone(), path });
-        self.audio = Some(AudioClip { media, player: None });
+        self.load_audio(attachment, None, false);
+    }
+
+    /// Moves a clip to `share` of the way through (0 the start, 1 the end), as dragging along
+    /// its waveform does. A clip that isn't the current one starts playing from there. Moved to
+    /// the very end, a clip waits there until play starts it over, rather than ending and
+    /// rewinding at once.
+    pub fn seek_audio(&mut self, attachment: &matrix_core::Attachment, share: f64) {
+        let Some(media) = attachment.media.clone() else { return };
+        let share = share.clamp(0.0, 1.0);
+        let Some(clip) = self.audio.as_mut().filter(|clip| clip.media == media) else {
+            return self.load_audio(attachment, Some(share), false);
+        };
+        // Mid-drag, the release decides whether it plays on.
+        if share >= 1.0 && !clip.held {
+            clip.play = false;
+        }
+        match &clip.player {
+            Some(player) => {
+                if share >= 1.0 {
+                    player.pause();
+                }
+                player.seek(share);
+            }
+            None => clip.start_at = Some(share),
+        }
+    }
+
+    /// A press or drag along a clip's waveform, at `share` of the way: it pauses while the
+    /// pointer is down and goes on from where it is let go if it is to play (it was playing, or
+    /// the press picked it), unless it was let go at the very end; there it waits at the end for
+    /// play. A cancelled drag puts the clip back where it was, playing if it was, and unpicks a
+    /// clip the press picked.
+    pub fn scrub_audio(&mut self, attachment: &matrix_core::Attachment, share: f64, scrub: Scrub) {
+        let share = share.clamp(0.0, 1.0);
+        match scrub {
+            Scrub::Press => match self.current_audio(attachment) {
+                Some(clip) => {
+                    if let Some(player) = &clip.player {
+                        clip.play = player.is_playing();
+                        player.pause();
+                    }
+                    clip.scrub_from = Some((clip.progress(), clip.play));
+                    clip.held = true;
+                }
+                None => return self.load_audio(attachment, Some(share), true),
+            },
+            // Only a scrub under way goes on: a clip that failed meanwhile isn't picked again.
+            _ if !self.current_audio(attachment).is_some_and(|clip| clip.held) => return,
+            Scrub::Cancel => return self.cancel_scrub(attachment),
+            Scrub::Drag | Scrub::Release => {}
+        }
+        self.seek_audio(attachment, share);
+        let Some(clip) = self.current_audio(attachment) else { return };
+        if scrub == Scrub::Release {
+            clip.held = false;
+            clip.scrub_from = None;
+            // Let go at the very end, it waits there for play.
+            clip.play &= share < 1.0;
+            if let Some(player) = clip.player.as_ref().filter(|_| clip.play) {
+                player.play();
+            }
+        }
+    }
+
+    /// A drag along a clip's waveform cancelled: see [`State::scrub_audio`].
+    fn cancel_scrub(&mut self, attachment: &matrix_core::Attachment) {
+        let Some(clip) = self.current_audio(attachment) else { return };
+        clip.held = false;
+        let Some((from, play)) = clip.scrub_from.take() else {
+            self.audio = None;
+            return;
+        };
+        clip.play = play;
+        match &clip.player {
+            Some(player) => {
+                player.seek(from);
+                if play {
+                    player.play();
+                }
+            }
+            None => clip.start_at = Some(from),
+        }
+    }
+
+    /// The clip playing, if it is `attachment`'s.
+    fn current_audio(&mut self, attachment: &matrix_core::Attachment) -> Option<&mut AudioClip> {
+        self.audio.as_mut().filter(|clip| attachment.media.as_ref() == Some(&clip.media))
+    }
+
+    /// Moves a clip `steps` twentieths along (back when negative), as the arrow keys do on its
+    /// waveform.
+    pub fn step_audio(&mut self, attachment: &matrix_core::Attachment, steps: i32) {
+        let at = self
+            .audio
+            .as_ref()
+            .filter(|clip| attachment.media.as_ref() == Some(&clip.media))
+            .map_or(0.0, AudioClip::progress);
+        self.seek_audio(attachment, at + f64::from(steps) * AUDIO_STEP);
+    }
+
+    /// Steps the playback speed (1×, 1.5×, 2×), for the clip playing and every one after.
+    pub fn cycle_playback_speed(&mut self) {
+        self.settings.playback_speed = self.settings.playback_speed.next();
+        self.shell.save_settings(self.settings.clone());
+        if let Some(player) = self.audio.as_ref().and_then(|clip| clip.player.as_ref()) {
+            player.set_rate(self.settings.playback_speed.rate());
+        }
+    }
+
+    /// Picks a clip to play, from `start_at` of the way through when given: at once from its
+    /// file when that is saved already, else once it has downloaded. `held` when a press on its
+    /// waveform picks it: it waits to be let go.
+    fn load_audio(&mut self, attachment: &matrix_core::Attachment, start_at: Option<f64>, held: bool) {
+        let (Some(account), Some(media)) = (self.nav.account.clone(), attachment.media.clone()) else { return };
+        self.remember_decoded_audio();
+        self.last_audio_id += 1;
+        let id = self.last_audio_id;
+        // Picked by a press on its waveform, the release decides; else, picked at its very end,
+        // it waits there for play.
+        let play = held || start_at.is_none_or(|share| share < 1.0);
+        self.audio = Some(AudioClip { id, media: media.clone(), player: None, start_at, play, held, scrub_from: None });
+        match self.audio_files.get(&media).cloned() {
+            Some(AudioFile::Saved(path)) => self.open_audio(path),
+            Some(AudioFile::Downloading) => {}
+            None => {
+                let extension =
+                    std::path::Path::new(&attachment.name).extension().and_then(|e| e.to_str()).unwrap_or("audio");
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                std::hash::Hash::hash(&media, &mut hasher);
+                let name = format!("audio-{:x}.{extension}", std::hash::Hasher::finish(&hasher));
+                let path = self.shell.scratch().join(name);
+                self.audio_files.insert(media.clone(), AudioFile::Downloading);
+                let command = Command::SaveMedia { account, media: media.clone(), path: path.clone() };
+                self.dispatch(command, Purpose::Audio { media, path });
+            }
+        }
+    }
+
+    /// Opens the current clip's saved file in a player, unless it has one: at the speed chosen,
+    /// from where it was scrubbed to, playing if it is to play; while the pointer is still down
+    /// on its waveform, it waits to be let go.
+    fn open_audio(&mut self, path: std::path::PathBuf) {
+        let speaker = self.settings.devices.speaker.clone();
+        let rate = self.settings.playback_speed.rate();
+        let Some(clip) = self.audio.as_mut().filter(|clip| clip.player.is_none()) else { return };
+        let player = self.shell.player(path, speaker, clip.media.clone(), clip.id);
+        player.set_rate(rate);
+        let share = clip.start_at.take();
+        if let Some(share) = share {
+            player.seek(share);
+        }
+        if clip.play && !clip.held {
+            player.play();
+        }
+        clip.player = Some(player);
+    }
+
+    /// Keeps what the current clip's file said (its waveform and length) for its card, before
+    /// another clip takes its place; the oldest goes past [`DECODED_AUDIO`].
+    fn remember_decoded_audio(&mut self) {
+        let Some(AudioClip { media, player: Some(player), .. }) = &self.audio else { return };
+        let waveform = player.waveform();
+        if waveform.is_empty() {
+            return;
+        }
+        self.decoded_audio.retain(|decoded| decoded.media != *media);
+        if self.decoded_audio.len() >= DECODED_AUDIO {
+            self.decoded_audio.remove(0);
+        }
+        self.decoded_audio.push(DecodedAudio { media: media.clone(), waveform, duration: player.duration() });
     }
 
     // ----- preview ---------------------------------------------------------------------------
@@ -3662,7 +3901,7 @@ impl State {
             // A memo recording in the thread being left goes with it, its file removed; an edit
             // there is set aside, to come back with its thread.
             if let Some(memo) = self.thread_composer.voice.take() {
-                memo.0.cancel();
+                memo.recorder.cancel();
             }
             if let Some(edit) = self.thread_composer.set_aside_edit() {
                 self.set_edit_aside(edit);
@@ -3905,13 +4144,13 @@ impl State {
         let path = self.shell.scratch().join(format!("voice-{stamp}.m4a"));
         let recorder = self.shell.recorder(path, self.settings.devices.microphone.clone());
         recorder.start();
-        self.composer_mut(target).voice = Some(VoiceMemo(recorder, water::Water::default(), (account, key)));
+        self.composer_mut(target).voice = Some(VoiceMemo { recorder, timeline: (account, key) });
     }
 
     /// Drops the voice memo being recorded.
     pub fn cancel_voice_memo(&mut self, target: ComposerTarget) {
         if let Some(memo) = self.composer_mut(target).voice.take() {
-            memo.0.cancel();
+            memo.recorder.cancel();
         }
         self.resume_edits();
     }
@@ -3920,10 +4159,10 @@ impl State {
     /// recorded for, answering what the draft answered then.
     pub fn send_voice_memo(&mut self, target: ComposerTarget, tx: &mut Tx) {
         let Some(memo) = self.composer_mut(target).voice.take() else { return };
-        let (account, key) = memo.2;
+        let (account, key) = memo.timeline;
         let reply_to = self.composer_mut(target).reply_to.take().map(|reply| reply.event_id);
         let memo_for = MemoFor { target, account, key, reply_to };
-        if let Some(result) = self.shell.finish_recording(memo.0, memo_for.clone()) {
+        if let Some(result) = self.shell.finish_recording(memo.recorder, memo_for.clone()) {
             self.voice_memo_recorded(memo_for, result, tx);
         }
         self.resume_edits();
@@ -3941,6 +4180,7 @@ impl State {
                 let message = matrix_core::Outgoing::Voice {
                     upload: matrix_core::Upload::Path(recording.path),
                     duration_ms: (recording.duration * 1000.0).round() as u64,
+                    waveform: recording.waveform,
                 };
                 let command = Command::Send { account: memo.account, key: memo.key, reply_to: memo.reply_to, message };
                 self.dispatch(command, Purpose::Send);
@@ -3951,25 +4191,34 @@ impl State {
     }
 
     /// A clip couldn't be fetched or played: it stops showing as playing, and the user hears why.
-    pub fn audio_failed(&mut self, media: &matrix_core::MediaRef, error: String) {
-        if self.audio.as_ref().is_some_and(|clip| clip.media == *media) {
+    /// `clip` is the [`AudioClip::id`] whose player failed, or `None` when the download did; a
+    /// player picked before the clip was picked again fails unheard.
+    pub fn audio_failed(&mut self, media: &matrix_core::MediaRef, clip: Option<u64>, error: String) {
+        let current = |c: &AudioClip| c.media == *media && clip.is_none_or(|id| c.id == id);
+        if self.audio.as_ref().is_some_and(current) {
             self.audio = None;
+        } else if clip.is_some() {
+            return;
         }
         self.notice = Some(tf!("notice.audio", error = error));
     }
 
-    /// The second a voice memo's timer or a playing clip's time shows, while one is counting.
-    fn clock(&self) -> Option<u64> {
+    /// The second a voice memo's timer shows, and a playing clip's second and progress step,
+    /// while either is counting: the view rebuilds when it changes.
+    fn clock(&self) -> Option<(Option<u64>, Option<u64>)> {
         let recording = [&self.composer, &self.thread_composer]
             .iter()
             .filter_map(|composer| composer.voice.as_ref())
-            .map(|memo| memo.0.elapsed().max(0.0) as u64)
+            .map(|memo| memo.recorder.elapsed().max(0.0) as u64)
             .max();
         let playing = || {
-            let player = self.audio.as_ref()?.player.as_ref().filter(|player| player.is_playing())?;
-            Some(player.time().max(0.0) as u64)
+            let clip = self.audio.as_ref()?;
+            let player = clip.player.as_ref().filter(|player| player.is_playing())?;
+            // The second shown and the step of the progress, together.
+            Some((player.time().max(0.0) as u64) << 16 | (clip.progress() * PROGRESS_STEPS) as u64)
         };
-        recording.or_else(playing)
+        let playing = playing();
+        (recording.is_some() || playing.is_some()).then_some((recording, playing))
     }
 
     /// Asks for files with the system dialog for a composer; they arrive through

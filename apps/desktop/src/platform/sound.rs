@@ -18,6 +18,13 @@ use cpal::{FromSample, SampleFormat, SizedSample};
 const MEMO_RATE: u32 = 24_000;
 /// The level meter's floor: silence reads this, in dBFS.
 const FLOOR_DB: f32 = -160.0;
+/// The block a stream asks its device for, in seconds. Left to itself, PulseAudio buffers two
+/// seconds: a clip would start (and pause) that long after the press, and a meter would lag.
+const BLOCK_SECONDS: f32 = 0.02;
+/// Amplitudes in a voice memo's waveform: within the 30 to 120 MSC3246 suggests.
+pub const WAVEFORM_POINTS: usize = 100;
+/// A waveform's quietest bar, in dBFS: room noise and below read as nothing.
+const WAVEFORM_FLOOR_DB: f32 = -50.0;
 
 /// The host whose device names calls share: PulseAudio where there is one (Linux), else the
 /// system's.
@@ -41,6 +48,19 @@ fn input_device(name: Option<&str>) -> Option<cpal::Device> {
         .or_else(|| host.default_input_device())
 }
 
+/// The device's own stream config, asking for [`BLOCK_SECONDS`] blocks where the device takes
+/// a size (PulseAudio, CoreAudio); elsewhere, the device's default.
+fn low_latency(supported: &cpal::SupportedStreamConfig) -> cpal::StreamConfig {
+    let mut config = supported.config();
+    let frames = (config.sample_rate as f32 * BLOCK_SECONDS) as cpal::FrameCount;
+    if let cpal::SupportedBufferSize::Range { min, max } = supported.buffer_size()
+        && (*min..=*max).contains(&frames)
+    {
+        config.buffer_size = cpal::BufferSize::Fixed(frames);
+    }
+    config
+}
+
 // ----- decoding ----------------------------------------------------------------------------
 
 /// Decoded audio: interleaved samples from -1 to 1.
@@ -56,15 +76,150 @@ impl Pcm {
         self.samples.len() / self.channels.max(1)
     }
 
-    /// Channel `channel` at fractional frame `at`, between the frames around it.
+    /// Channel `channel` at fractional frame `at`, between the frames around it; past the last
+    /// frame, the last, so a segment's end doesn't dip toward silence where the next one joins.
     fn sample(&self, at: f64, channel: usize) -> f32 {
         let channels = self.channels.max(1);
         let channel = channel.min(channels - 1);
-        let first = at.floor() as usize;
-        let mix = (at - at.floor()) as f32;
-        let get = |frame: usize| self.samples.get(frame * channels + channel).copied().unwrap_or(0.0);
+        let last = self.frames().saturating_sub(1);
+        let first = at.max(0.0).floor() as usize;
+        let mix = (at.max(0.0) - first as f64) as f32;
+        let get = |frame: usize| self.samples.get(frame.min(last) * channels + channel).copied().unwrap_or(0.0);
         get(first) * (1.0 - mix) + get(first + 1) * mix
     }
+}
+
+/// The loudness along interleaved `samples` of `channels` in `points` amplitudes, each from 0 to
+/// [`matrix_core::AudioDetails::WAVEFORM_MAX`]: each stretch's RMS on a decibel scale from
+/// [`WAVEFORM_FLOOR_DB`], as ears hear it, so quiet speech still shows. Empty for no samples.
+pub fn waveform(samples: &[f32], channels: usize, points: usize) -> Vec<u16> {
+    let channels = channels.max(1);
+    let frames = samples.len() / channels;
+    if frames == 0 || points == 0 {
+        return Vec::new();
+    }
+    let max = f32::from(matrix_core::AudioDetails::WAVEFORM_MAX);
+    (0..points)
+        .map(|i| {
+            let (start, end) = (i * frames / points, ((i + 1) * frames / points).max(i * frames / points + 1));
+            let stretch = &samples[start * channels..(end * channels).min(samples.len())];
+            let rms = (stretch.iter().map(|s| s * s).sum::<f32>() / stretch.len().max(1) as f32).sqrt();
+            let db = if rms <= 1e-8 { WAVEFORM_FLOOR_DB } else { 20.0 * rms.log10() };
+            let level = ((db - WAVEFORM_FLOOR_DB) / -WAVEFORM_FLOOR_DB).clamp(0.0, 1.0);
+            (level * max).round() as u16
+        })
+        .collect()
+}
+
+/// `pcm` played `rate` times as fast at the same pitch, by WSOLA: windows of 30 ms laid half
+/// over each other, each taken from near where `rate` puts it, at the offset (within 10 ms)
+/// that best continues the window before, so voices neither chirp nor stutter. The search
+/// compares about 8 kHz worth of samples, so its cost doesn't grow with the file's rate. The
+/// last window is the file's very end; where it goes in the copy (within half a window of the
+/// copy's length) is the place its sound best continues the window before, so the copy is the
+/// file's length divided by `rate` give or take a few milliseconds, and ends without a dip.
+/// Every sample is divided by the window weight laid on it, so overlaps neither swell nor dip.
+/// The first window starts and the last ends at full strength, so neither end fades. `None` at
+/// 1×, and for a clip of only a few windows, which plays at 1×.
+pub fn stretch(pcm: &Pcm, rate: f64) -> Option<Pcm> {
+    let channels = pcm.channels.max(1);
+    let frames = pcm.frames();
+    let window = (pcm.rate as usize * 30 / 1000).max(8) & !1;
+    let hop = window / 2;
+    let tolerance = pcm.rate as usize / 100;
+    let stride = (pcm.rate as usize / 8000).max(1);
+    let target = (frames as f64 / rate).round() as usize;
+    if (rate - 1.0).abs() < 1e-3 || rate <= 0.0 || frames < 2 * window + 2 * tolerance || target < window + hop {
+        return None;
+    }
+    // A periodic Hann window: halves laid over each other sum to one.
+    let hann: Vec<f32> =
+        (0..window).map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / window as f32).cos()).collect();
+    let mono = |frame: usize| (0..channels).map(|c| pcm.samples[frame * channels + c]).sum::<f32>();
+    // How alike the sound from `a` and from `b` is over `len` frames, from -1 to 1.
+    let alike = |a: usize, b: usize, len: usize| {
+        let (mut both, mut first, mut second) = (0.0f32, 0.0f32, 0.0f32);
+        for i in (0..len).step_by(stride) {
+            let (x, y) = (mono(a + i), mono(b + i));
+            both += x * y;
+            first += x * x;
+            second += y * y;
+        }
+        both / (first * second).sqrt().max(1e-9)
+    };
+    let last = frames - window;
+    // Where the windows go in the copy: as many as half-window hops need to reach the copy's
+    // end, spread evenly, so the last falls exactly where the copy is due to end and its search
+    // has a full hop of room either way, whatever the copy's length.
+    let count = (target - window).div_ceil(hop).max(1);
+    let place = |k: usize| ((k as f64) * (target - window) as f64 / count as f64).round() as usize;
+    let mut out: Vec<f32> = Vec::with_capacity((target + window) * channels);
+    let mut weights: Vec<f32> = Vec::with_capacity(target + window);
+    // Where the window before went in the copy and was taken from in the file.
+    let mut previous: Option<(usize, usize)> = None;
+    for k in 0..=count {
+        let end = k == count;
+        let (at, taken) = match previous {
+            // The last window, the file's end: placed where it best continues the one before.
+            Some((before_at, before_taken)) if end => {
+                let ideal = place(count);
+                let low = (before_at + hop / 2).max(ideal.saturating_sub(hop / 2));
+                let high = (before_at + window - hop / 2).min(ideal + hop / 2).max(low);
+                let mut best = (f32::MIN, ideal.clamp(low, high));
+                let mut at = low;
+                while at <= high {
+                    let overlap = before_at + window - at;
+                    let score = alike(before_taken + (at - before_at), last, overlap);
+                    if score > best.0 {
+                        best = (score, at);
+                    }
+                    at += stride;
+                }
+                (best.1, last)
+            }
+            _ if end => (target - window, last),
+            None => (0, 0),
+            Some((before_at, before_taken)) => {
+                let at = place(k);
+                let ideal = ((at as f64 * rate) as usize).min(last);
+                // The window before, played on by as far as this one comes after it.
+                let natural = before_taken + (at - before_at);
+                let (low, high) = (ideal.saturating_sub(tolerance), (ideal + tolerance).min(last));
+                let mut best = (f32::MIN, ideal);
+                let mut offset = low;
+                while natural <= last && offset <= high {
+                    let score: f32 =
+                        (0..window).step_by(stride).map(|i| mono(natural + i) * mono(offset + i)).sum::<f32>();
+                    if score > best.0 {
+                        best = (score, offset);
+                    }
+                    offset += stride;
+                }
+                (at, best.1)
+            }
+        };
+        out.resize(out.len().max((at + window) * channels), 0.0);
+        weights.resize(weights.len().max(at + window), 0.0);
+        for (i, hann) in hann.iter().enumerate() {
+            let weight = if (k == 0 && i < hop) || (end && i >= hop) { 1.0 } else { *hann };
+            weights[at + i] += weight;
+            for c in 0..channels {
+                out[(at + i) * channels + c] += pcm.samples[(taken + i) * channels + c] * weight;
+            }
+        }
+        if end {
+            out.truncate((at + window) * channels);
+            weights.truncate(at + window);
+            break;
+        }
+        previous = Some((at, taken));
+    }
+    for (frame, weight) in out.chunks_mut(channels).zip(&weights) {
+        if *weight > 1e-6 {
+            frame.iter_mut().for_each(|sample| *sample /= weight);
+        }
+    }
+    Some(Pcm { rate: pcm.rate, channels: pcm.channels, samples: out })
 }
 
 /// Decodes the file's first audio track.
@@ -202,8 +357,8 @@ fn play_on(
     stop: &Receiver<()>,
     fill: impl FnMut(&mut [f32], u32, usize) + Send + 'static,
 ) -> Result<(), String> {
-    let config = device.default_output_config().map_err(|e| e.to_string())?;
-    let (format, config) = (config.sample_format(), config.config());
+    let supported = device.default_output_config().map_err(|e| e.to_string())?;
+    let (format, config) = (supported.sample_format(), low_latency(&supported));
     let (rate, channels) = (config.sample_rate, usize::from(config.channels));
     let (lost, gone) = channel();
     let stream = match format {
@@ -268,12 +423,257 @@ fn output_stream<T: SizedSample + FromSample<f32>>(
 }
 
 /// A file playing (or paused) on a speaker.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Playback {
     pcm: Option<Arc<Pcm>>,
+    /// `pcm` stretched, a segment at a time, to play at a rate other than 1× at its own pitch;
+    /// a segment not stretched yet plays at 1×.
+    stretched: Option<Stretched>,
     /// Where it is, in the file's frames.
     position: f64,
+    /// Where to start once decoded, as a share of the length.
+    seek_to: Option<f64>,
     playing: bool,
+    /// How fast it plays: 1 is as recorded.
+    rate: f64,
+    /// The loudness along the file, once decoded.
+    waveform: Vec<u16>,
+    /// What the last frame was read from.
+    source: Option<Source>,
+    /// The source before, faded out over [`FADE_SECONDS`] after it changed within a segment
+    /// (its stretched copy arriving, or another speed), with the frames of the fade left.
+    fade: Option<(Source, u32)>,
+    /// The stretches of the file started so far: the latest is [`Stretched::job`].
+    jobs: u64,
+    /// The player is gone: a stretch still under way stops.
+    closed: bool,
+}
+
+/// How long playback crossfades when what it reads from changes mid-segment, in seconds.
+const FADE_SECONDS: f64 = 0.01;
+
+/// What playback reads: the file, or a stretched segment of it.
+#[derive(Clone, Debug)]
+struct Source {
+    pcm: Arc<Pcm>,
+    /// The file's frame the source starts at, and its frames per frame of the file.
+    start: f64,
+    scale: f64,
+    /// The segment it is for, and what it is (the file, or which stretched copy).
+    key: (usize, usize),
+}
+
+impl Source {
+    /// Channel `channel` at frame `position` of the file.
+    fn read(&self, position: f64, channel: usize) -> f32 {
+        self.pcm.sample((position - self.start) * self.scale, channel)
+    }
+}
+
+impl Default for Playback {
+    fn default() -> Self {
+        Self {
+            pcm: None,
+            stretched: None,
+            position: 0.0,
+            seek_to: None,
+            playing: false,
+            rate: 1.0,
+            waveform: Vec::new(),
+            source: None,
+            fade: None,
+            jobs: 0,
+            closed: false,
+        }
+    }
+}
+
+/// Seconds of the file a stretched segment covers: segments are stretched one at a time, from
+/// the one playing, so a new speed or a seek waits for one segment rather than the whole file.
+const SEGMENT_SECONDS: u32 = 4;
+
+/// A segment of the file at another speed.
+#[derive(Clone, Debug)]
+enum Segment {
+    Pending,
+    /// Too short to stretch: it plays at 1×.
+    Plain,
+    Stretched(Arc<Pcm>),
+}
+
+/// The segment of `count`, each `size` frames (the last taking the rest), holding frame
+/// `position` of the file.
+fn segment_of(size: usize, count: usize, position: f64) -> usize {
+    ((position.max(0.0) as usize) / size.max(1)).min(count.max(1) - 1)
+}
+
+/// The segments of a file of `pcm`'s length: their size in frames, and how many.
+fn segment_layout(pcm: &Pcm) -> (usize, usize) {
+    let size = (SEGMENT_SECONDS * pcm.rate.max(1)) as usize;
+    (size, (pcm.frames() / size).max(1))
+}
+
+/// The file at another speed, in segments of [`SEGMENT_SECONDS`] (the last takes the rest).
+/// Each is stretched alone, starting and ending at full strength on the file's own samples, so
+/// they join without a seam.
+#[derive(Debug)]
+struct Stretched {
+    /// Which stretch of the file this is: a worker for an earlier one stops.
+    job: u64,
+    rate: f64,
+    /// Frames of the file a segment covers.
+    size: usize,
+    frames: usize,
+    segments: Vec<Segment>,
+}
+
+impl Stretched {
+    fn new(job: u64, rate: f64, pcm: &Pcm) -> Self {
+        let (size, count) = segment_layout(pcm);
+        Self { job, rate, size, frames: pcm.frames(), segments: vec![Segment::Pending; count] }
+    }
+
+    /// The segment holding frame `position` of the file.
+    fn index(&self, position: f64) -> usize {
+        segment_of(self.size, self.segments.len(), position)
+    }
+
+    /// The file's frames segment `index` covers.
+    fn bounds(&self, index: usize) -> std::ops::Range<usize> {
+        let start = index * self.size;
+        let end = if index + 1 == self.segments.len() { self.frames } else { start + self.size };
+        start..end
+    }
+
+    /// The segment to stretch next: the first pending one at or after `from`, else the first.
+    fn next(&self, from: usize) -> Option<usize> {
+        let pending = |index: &usize| matches!(self.segments[*index], Segment::Pending);
+        (from..self.segments.len()).find(pending).or_else(|| (0..from).find(pending))
+    }
+}
+
+impl Playback {
+    /// Stretch `job`, while it is the latest and the player is still there.
+    fn stretch_job(&mut self, job: u64) -> Option<&mut Stretched> {
+        let closed = self.closed;
+        self.stretched.as_mut().filter(|stretched| stretched.job == job && !closed)
+    }
+
+    /// Starts stretching the file to the speed it plays at, unless that is 1× or the file isn't
+    /// decoded yet: the job for [`stretch_for`].
+    fn begin_stretch(&mut self) -> Option<(u64, Arc<Pcm>)> {
+        let pcm = self.pcm.clone().filter(|_| self.rate != 1.0);
+        self.stretched = pcm.as_deref().map(|pcm| {
+            self.jobs += 1;
+            Stretched::new(self.jobs, self.rate, pcm)
+        });
+        pcm.map(|pcm| (self.jobs, pcm))
+    }
+
+    /// The next block for a speaker at `rate` with `channels`: the file from where it is, until
+    /// its end, where it stops and rewinds. Nothing while paused or before it is decoded. At
+    /// another speed, each stretched segment is read at its own rate so the pitch holds, a place
+    /// in the file being a place in the segment scaled by their lengths; a segment not stretched
+    /// yet (or too short to stretch) plays at 1×. When what it reads changes within a segment,
+    /// the two crossfade, so the switch doesn't pop.
+    fn render(&mut self, out: &mut [f32], rate: u32, channels: usize) {
+        let Some(pcm) = self.pcm.clone() else { return };
+        if !self.playing {
+            return;
+        }
+        let native = f64::from(pcm.rate) / f64::from(rate.max(1));
+        let fade_frames = (FADE_SECONDS * f64::from(rate)).max(1.0) as u32;
+        for frame in out.chunks_mut(channels.max(1)) {
+            if self.position >= pcm.frames() as f64 {
+                self.playing = false;
+                self.position = 0.0;
+                self.source = None;
+                self.fade = None;
+                break;
+            }
+            self.follow_source(&pcm, fade_frames);
+            let Some(source) = self.source.as_ref() else { break };
+            // A fade ends at a segment's join: the source before has nothing past it, and every
+            // source there is on the file's own samples.
+            if self.fade.as_ref().is_some_and(|(before, _)| before.key.0 != source.key.0) {
+                self.fade = None;
+            }
+            for (channel, out) in frame.iter_mut().enumerate() {
+                let sample = source.read(self.position, channel);
+                *out = match &self.fade {
+                    Some((before, left)) => {
+                        let gone = 1.0 - *left as f32 / fade_frames as f32;
+                        before.read(self.position, channel) * (1.0 - gone) + sample * gone
+                    }
+                    None => sample,
+                };
+            }
+            let step = native / source.scale;
+            self.fade = self.fade.take().and_then(|(before, left)| (left > 1).then(|| (before, left - 1)));
+            self.position += step;
+        }
+    }
+
+    /// Points [`Playback::source`] at what the frame at the position is read from now; when that
+    /// changed within a segment, the source before fades out over `fade_frames`.
+    fn follow_source(&mut self, pcm: &Arc<Pcm>, fade_frames: u32) {
+        let (size, count) = segment_layout(pcm);
+        let index = segment_of(size, count, self.position);
+        let copy = self.stretched.as_ref().filter(|stretched| stretched.rate == self.rate).and_then(|stretched| {
+            match &stretched.segments[index] {
+                Segment::Stretched(copy) => Some((stretched.bounds(index), copy)),
+                Segment::Pending | Segment::Plain => None,
+            }
+        });
+        let key = (index, copy.as_ref().map_or(0, |(_, copy)| Arc::as_ptr(copy) as usize));
+        if self.source.as_ref().is_some_and(|source| source.key == key) {
+            return;
+        }
+        let source = match copy {
+            Some((bounds, copy)) => Source {
+                pcm: Arc::clone(copy),
+                start: bounds.start as f64,
+                scale: (copy.frames() as f64 / bounds.len().max(1) as f64).max(1e-9),
+                key,
+            },
+            None => Source { pcm: Arc::clone(pcm), start: 0.0, scale: 1.0, key },
+        };
+        // Crossing into the next segment joins on the file's own samples: no fade there.
+        if let Some(before) = self.source.replace(source).filter(|before| before.key.0 == index) {
+            self.fade = Some((before, fade_frames));
+        }
+    }
+}
+
+/// Stretches `pcm` for stretch `job` on a worker, a segment at a time, each time the pending
+/// one at or after where the clip is now. It stops once every segment is done, or once the job
+/// is no longer the latest (another speed) or the player is gone.
+fn stretch_for(state: &Arc<Mutex<Playback>>, pcm: Arc<Pcm>, job: u64) -> Option<std::thread::JoinHandle<()>> {
+    let state = Arc::clone(state);
+    std::thread::Builder::new()
+        .name("audio-stretch".into())
+        .spawn(move || {
+            loop {
+                let (index, bounds, rate) = {
+                    let Ok(mut state) = state.lock() else { return };
+                    let position = state.position;
+                    let Some(stretched) = state.stretch_job(job) else { return };
+                    let Some(index) = stretched.next(stretched.index(position)) else { return };
+                    (index, stretched.bounds(index), stretched.rate)
+                };
+                let channels = pcm.channels.max(1);
+                let part = Pcm {
+                    rate: pcm.rate,
+                    channels: pcm.channels,
+                    samples: pcm.samples[bounds.start * channels..bounds.end * channels].to_vec(),
+                };
+                let segment = stretch(&part, rate).map_or(Segment::Plain, |copy| Segment::Stretched(Arc::new(copy)));
+                let Ok(mut state) = state.lock() else { return };
+                let Some(stretched) = state.stretch_job(job) else { return };
+                stretched.segments[index] = segment;
+            }
+        })
+        .ok()
 }
 
 #[derive(Debug)]
@@ -282,10 +682,25 @@ pub struct NativePlayer {
     _stop: Sender<()>,
 }
 
+impl Drop for NativePlayer {
+    /// A stretch still under way for it stops (its speaker stops as the stop sender drops).
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.closed = true;
+        }
+    }
+}
+
 impl NativePlayer {
     /// Opens `path` for playing on `device` (the default when `None`); it starts paused.
-    /// `failed` runs (on the player's thread) if the file can't be read or played.
-    pub fn open(path: PathBuf, device: Option<String>, failed: impl FnOnce(String) + Send + 'static) -> Self {
+    /// `decoded` runs (on the player's thread) once the file is decoded, so a paused clip's card
+    /// can show its length and waveform; `failed` if the file can't be read or played.
+    pub fn open(
+        path: PathBuf,
+        device: Option<String>,
+        decoded: impl FnOnce() + Send + 'static,
+        failed: impl FnOnce(String) + Send + 'static,
+    ) -> Self {
         let state = Arc::new(Mutex::new(Playback::default()));
         let (stop, stopped) = channel();
         let shared = Arc::clone(&state);
@@ -294,27 +709,29 @@ impl NativePlayer {
                 Ok(pcm) => Arc::new(pcm),
                 Err(error) => return failed(error),
             };
-            if let Ok(mut state) = shared.lock() {
-                state.pcm = Some(Arc::clone(&pcm));
+            // Read before taking the lock, which the speaker's callback and the view wait on.
+            let points = waveform(&pcm.samples, pcm.channels, WAVEFORM_POINTS);
+            let job = match shared.lock() {
+                Ok(mut state) => {
+                    state.waveform = points;
+                    if let Some(share) = state.seek_to.take() {
+                        state.position = share.clamp(0.0, 1.0) * pcm.frames() as f64;
+                    }
+                    state.pcm = Some(Arc::clone(&pcm));
+                    state.begin_stretch()
+                }
+                Err(_) => None,
+            };
+            if let Some((job, pcm)) = job {
+                stretch_for(&shared, pcm, job);
             }
+            decoded();
             let Some(device) = output_device(device.as_deref()) else {
                 return failed("there is no speaker".to_owned());
             };
             let fill = move |out: &mut [f32], rate: u32, channels: usize| {
-                let Ok(mut state) = shared.lock() else { return };
-                if !state.playing {
-                    return;
-                }
-                let step = f64::from(pcm.rate) / f64::from(rate);
-                for frame in out.chunks_mut(channels) {
-                    if state.position >= pcm.frames() as f64 {
-                        state.playing = false;
-                        break;
-                    }
-                    for (channel, out) in frame.iter_mut().enumerate() {
-                        *out = pcm.sample(state.position, channel);
-                    }
-                    state.position += step;
+                if let Ok(mut state) = shared.lock() {
+                    state.render(out, rate, channels);
                 }
             };
             if let Err(error) = play_on(&device, &stopped, fill) {
@@ -324,14 +741,66 @@ impl NativePlayer {
         Self { state, _stop: stop }
     }
 
+    /// A player for `pcm`, already decoded and paused, on no speaker: for tests.
+    #[cfg(test)]
+    pub fn decoded(pcm: Pcm) -> Self {
+        let points = waveform(&pcm.samples, pcm.channels, WAVEFORM_POINTS);
+        let state = Playback { pcm: Some(Arc::new(pcm)), waveform: points, ..Playback::default() };
+        Self { state: Arc::new(Mutex::new(state)), _stop: channel().0 }
+    }
+
+    /// Plays from where it is; from the start when it is at the end, or is to start there once
+    /// decoded.
     pub fn play(&self) {
         if let Ok(mut state) = self.state.lock() {
             let end = state.pcm.as_ref().map_or(f64::MAX, |pcm| pcm.frames() as f64);
             if state.position >= end {
                 state.position = 0.0;
             }
+            if state.seek_to.is_some_and(|share| share >= 1.0) {
+                state.seek_to = None;
+            }
             state.playing = true;
         }
+    }
+
+    /// How far along it is, from 0 to 1: before it is decoded, where it is to start.
+    pub fn progress(&self) -> f64 {
+        self.state.lock().map_or(0.0, |state| match &state.pcm {
+            Some(pcm) => (state.position / pcm.frames().max(1) as f64).clamp(0.0, 1.0),
+            None => state.seek_to.unwrap_or(0.0).clamp(0.0, 1.0),
+        })
+    }
+
+    /// Moves to `share` of the way through (0 the start, 1 the end); before the file is
+    /// decoded, it starts there.
+    pub fn seek(&self, share: f64) {
+        let Ok(mut state) = self.state.lock() else { return };
+        match state.pcm.as_ref().map(|pcm| pcm.frames()) {
+            Some(frames) => state.position = share.clamp(0.0, 1.0) * frames as f64,
+            None => state.seek_to = Some(share),
+        }
+    }
+
+    /// Plays `rate` times as fast, at the same pitch. It is stretched on a worker, a segment at
+    /// a time from where it is; a segment not ready yet plays at 1×.
+    pub fn set_rate(&self, rate: f64) {
+        let job = {
+            let Ok(mut state) = self.state.lock() else { return };
+            if state.rate == rate {
+                return;
+            }
+            state.rate = rate;
+            state.begin_stretch()
+        };
+        if let Some((job, pcm)) = job {
+            stretch_for(&self.state, pcm, job);
+        }
+    }
+
+    /// The loudness along the file, once decoded.
+    pub fn waveform(&self) -> Vec<u16> {
+        self.state.lock().map(|state| state.waveform.clone()).unwrap_or_default()
     }
 
     pub fn pause(&self) {
@@ -414,12 +883,9 @@ pub struct Level {
 impl Level {
     pub const SILENT: Level = Level { peak_db: FLOOR_DB, rms_db: FLOOR_DB };
 
+    #[cfg(test)]
     pub fn peak_db(&self) -> f32 {
         self.peak_db
-    }
-
-    pub fn rms_db(&self) -> f32 {
-        self.rms_db
     }
 
     /// The RMS for a level bar: -60 dBFS and below is 0, full scale is 1.
@@ -456,6 +922,8 @@ pub struct Recording {
     pub path: PathBuf,
     /// Seconds of audio.
     pub duration: f64,
+    /// The loudness along it, [`WAVEFORM_POINTS`] amplitudes.
+    pub waveform: Vec<u16>,
 }
 
 /// Handles share the recording: a clone stops the same one.
@@ -527,7 +995,8 @@ impl NativeRecorder {
         let samples = resample(&heard.samples, heard.rate, MEMO_RATE);
         let path = self.path.with_extension("wav");
         std::fs::write(&path, wav(&samples, MEMO_RATE)).map_err(|e| e.to_string())?;
-        Ok(Recording { path, duration: samples.len() as f64 / f64::from(MEMO_RATE) })
+        let duration = samples.len() as f64 / f64::from(MEMO_RATE);
+        Ok(Recording { path, duration, waveform: waveform(&samples, 1, WAVEFORM_POINTS) })
     }
 
     pub fn cancel(&self) {
@@ -554,10 +1023,6 @@ impl NativeRecorder {
         recorder
     }
 
-    pub fn level(&self) -> Level {
-        self.heard.lock().ok().and_then(|heard| heard.level).unwrap_or(Level::SILENT)
-    }
-
     pub fn live_level(&self) -> rune::Live<f32> {
         self.live.clone()
     }
@@ -570,8 +1035,8 @@ fn record_on(
     live: rune::Live<f32>,
 ) -> Result<(), String> {
     let device = input_device(device).ok_or("there is no microphone")?;
-    let config = device.default_input_config().map_err(|e| e.to_string())?;
-    let (format, config) = (config.sample_format(), config.config());
+    let supported = device.default_input_config().map_err(|e| e.to_string())?;
+    let (format, config) = (supported.sample_format(), low_latency(&supported));
     if let Ok(mut heard) = heard.lock() {
         heard.rate = config.sample_rate;
         // A minute's room up front, so a short memo never moves its samples.
@@ -702,6 +1167,45 @@ impl Player {
         }
     }
 
+    /// How far along it is, from 0 to 1; 0 until its length is known.
+    pub fn progress(&self) -> f64 {
+        match self {
+            Self::Rune(player) => match player.duration() {
+                Some(total) if total > 0.0 => (player.time() / total).clamp(0.0, 1.0),
+                _ => 0.0,
+            },
+            Self::Native(player) => player.progress(),
+        }
+    }
+
+    /// Moves to `share` of the way through: 0 the start, 1 the end.
+    pub fn seek(&self, share: f64) {
+        match self {
+            Self::Rune(player) => {
+                if let Some(duration) = player.duration() {
+                    player.seek(share.clamp(0.0, 1.0) * duration);
+                }
+            }
+            Self::Native(player) => player.seek(share),
+        }
+    }
+
+    /// Plays `rate` times as fast, at the same pitch.
+    pub fn set_rate(&self, rate: f64) {
+        match self {
+            Self::Rune(player) => player.set_rate(rate as f32),
+            Self::Native(player) => player.set_rate(rate),
+        }
+    }
+
+    /// The loudness along the file, once decoded; Rune's player doesn't say.
+    pub fn waveform(&self) -> Vec<u16> {
+        match self {
+            Self::Rune(_) => Vec::new(),
+            Self::Native(player) => player.waveform(),
+        }
+    }
+
     pub fn time(&self) -> f64 {
         match self {
             Self::Rune(player) => player.time(),
@@ -735,7 +1239,13 @@ impl Recorder {
 
     pub fn stop(&self) -> Result<Recording, String> {
         match self {
-            Self::Rune(recorder) => recorder.stop().map(|done| Recording { path: done.path, duration: done.duration }),
+            // Rune's recorder keeps no samples: its file is read back for the waveform.
+            Self::Rune(recorder) => recorder.stop().map(|done| {
+                let waveform = decode(&done.path)
+                    .map(|pcm| waveform(&pcm.samples, pcm.channels, WAVEFORM_POINTS))
+                    .unwrap_or_default();
+                Recording { path: done.path, duration: done.duration, waveform }
+            }),
             Self::Native(recorder) => recorder.stop(),
         }
     }
@@ -759,16 +1269,6 @@ impl Recorder {
         match self {
             Self::Rune(_) => None,
             Self::Native(recorder) => recorder.failed(),
-        }
-    }
-
-    pub fn level(&self) -> Level {
-        match self {
-            Self::Rune(recorder) => {
-                let level = recorder.level();
-                Level { peak_db: level.peak_db(), rms_db: level.rms_db() }
-            }
-            Self::Native(recorder) => recorder.level(),
         }
     }
 
@@ -817,6 +1317,273 @@ mod tests {
         assert!(loud.peak_db() > -7.0);
         let after = loud.after(&[0.0; 480], 0.01);
         assert!(after.peak_db() > loud.peak_db() - 1.0);
+    }
+
+    #[test]
+    fn a_waveform_should_show_loud_stretches_higher_than_quiet_ones() {
+        let samples: Vec<f32> = (0..2000).map(|i| if i < 1000 { 0.001 } else { 0.5 }).collect();
+        let points = waveform(&samples, 1, 2);
+        assert!(points[0] < points[1] && points[1] <= matrix_core::AudioDetails::WAVEFORM_MAX);
+    }
+
+    #[test]
+    fn a_waveform_of_silence_should_be_flat_at_zero() {
+        assert_eq!(waveform(&[0.0; 400], 2, 4), vec![0; 4]);
+    }
+
+    fn tone(seconds: f32) -> Pcm {
+        let samples = (0..(24_000.0 * seconds) as usize)
+            .map(|i| (std::f32::consts::TAU * 300.0 * i as f32 / 24_000.0).sin() * 0.5);
+        Pcm { rate: 24_000, channels: 1, samples: samples.collect() }
+    }
+
+    fn rms(samples: &[f32]) -> f32 {
+        (samples.iter().map(|s| s * s).sum::<f32>() / samples.len().max(1) as f32).sqrt()
+    }
+
+    #[test]
+    fn stretching_to_twice_the_speed_should_halve_the_length() {
+        // Within half a window's hop (7.5 ms) of half its length.
+        let fast = stretch(&tone(1.0), 2.0).unwrap_or_else(|| panic!("a second should stretch"));
+        assert!(fast.frames().abs_diff(12_000) <= 180, "{} frames", fast.frames());
+    }
+
+    #[test]
+    fn stretching_should_keep_both_ends_of_the_clip_audible() {
+        for rate in [1.5, 2.0] {
+            let fast = stretch(&tone(1.0), rate).unwrap_or_else(|| panic!("a second should stretch"));
+            let (head, tail) = (&fast.samples[..120], &fast.samples[fast.samples.len() - 120..]);
+            assert!(rms(head) > 0.25 && rms(tail) > 0.25, "at {rate}×: {} and {}", rms(head), rms(tail));
+        }
+    }
+
+    #[test]
+    fn a_clip_too_short_to_stretch_should_play_as_it_is() {
+        assert!(stretch(&tone(0.08), 2.0).is_none());
+    }
+
+    fn playing(pcm: Pcm) -> Playback {
+        Playback { pcm: Some(Arc::new(pcm)), playing: true, ..Playback::default() }
+    }
+
+    /// `pcm` at `rate`, with every segment stretched, or those `only` lists.
+    fn stretched_only(pcm: &Pcm, rate: f64, only: Option<&[usize]>) -> Stretched {
+        let mut stretched = Stretched::new(0, rate, pcm);
+        for index in 0..stretched.segments.len() {
+            if only.is_some_and(|only| !only.contains(&index)) {
+                continue;
+            }
+            let bounds = stretched.bounds(index);
+            let part = Pcm { rate: pcm.rate, channels: 1, samples: pcm.samples[bounds].to_vec() };
+            stretched.segments[index] =
+                stretch(&part, rate).map_or(Segment::Plain, |copy| Segment::Stretched(Arc::new(copy)));
+        }
+        stretched
+    }
+
+    fn stretched_all(pcm: &Pcm, rate: f64) -> Stretched {
+        stretched_only(pcm, rate, None)
+    }
+
+    /// Zero crossings a second in `samples` at 24 kHz: 600 for a 300 Hz tone.
+    fn crossings(samples: &[f32]) -> f32 {
+        let count = samples.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count();
+        count as f32 / (samples.len() as f32 / 24_000.0)
+    }
+
+    #[test]
+    fn a_seek_into_a_long_clip_should_play_at_speed_once_its_segment_is_stretched() {
+        // 12 s in three segments; only the last is stretched, and the clip plays from inside it.
+        let pcm = tone(12.0);
+        let stretched = stretched_only(&pcm, 2.0, Some(&[2]));
+        let mut clip = Playback { rate: 2.0, stretched: Some(stretched), position: 200_000.0, ..playing(pcm) };
+        let mut out = vec![0.0; 12_000];
+        clip.render(&mut out, 24_000, 1);
+        // Half a second of output took a second of the file, at the tone's own pitch.
+        assert!((clip.position - 224_000.0).abs() < 50.0, "at {}", clip.position);
+        assert!((crossings(&out) - 600.0).abs() < 30.0, "{} crossings a second", crossings(&out));
+    }
+
+    #[test]
+    fn stretched_segments_should_join_without_a_seam() {
+        let pcm = tone(8.0);
+        let mut clip =
+            Playback { rate: 2.0, stretched: Some(stretched_all(&pcm, 2.0)), position: 86_000.0, ..playing(pcm) };
+        // A quarter second of output either side of the join at 4 s.
+        let mut out = vec![0.0; 12_000];
+        clip.render(&mut out, 24_000, 1);
+        let quietest = out.chunks(240).map(rms).fold(f32::MAX, f32::min);
+        assert!(quietest > 0.25 && (crossings(&out) - 600.0).abs() < 30.0, "quietest {quietest}");
+    }
+
+    #[test]
+    fn a_segment_join_heard_at_twice_the_file_s_rate_should_not_dip() {
+        // A steady level stays steady through a stretched join, read at 48 kHz from 24 kHz.
+        let pcm = Pcm { rate: 24_000, channels: 1, samples: vec![0.5; 24_000 * 8] };
+        let mut clip =
+            Playback { rate: 1.5, stretched: Some(stretched_all(&pcm, 1.5)), position: 90_000.0, ..playing(pcm) };
+        let mut out = vec![0.0; 24_000];
+        clip.render(&mut out, 48_000, 1);
+        let lowest = out.iter().copied().fold(f32::MAX, f32::min);
+        assert!(lowest > 0.49, "dips to {lowest}");
+    }
+
+    /// Eight seconds of smoothed noise: a sound whose stretched copy, unlike a pure tone's,
+    /// isn't in step with the file at the same moment.
+    fn murmur() -> Pcm {
+        let (mut seed, mut level) = (12_345u32, 0.0f32);
+        let samples = (0..24_000 * 8)
+            .map(|_| {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let noise = (seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5;
+                level = level * 0.95 + noise * 0.4;
+                level
+            })
+            .collect();
+        Pcm { rate: 24_000, channels: 1, samples }
+    }
+
+    #[test]
+    fn a_stretched_segment_arriving_mid_play_should_fade_in() {
+        let pcm = murmur();
+        let stretched = stretched_all(&pcm, 2.0);
+        let mut clip = Playback { rate: 2.0, position: 10_000.0, ..playing(pcm) };
+        clip.render(&mut [0.0; 480], 24_000, 1);
+        // What playing on from the file would read next.
+        let next = clip.pcm.as_ref().map_or(0.0, |pcm| pcm.sample(clip.position, 0));
+        clip.stretched = Some(stretched);
+        let mut after = [0.0; 1];
+        clip.render(&mut after, 24_000, 1);
+        assert!((after[0] - next).abs() < 1e-4, "jumps from {next} to {}", after[0]);
+    }
+
+    #[test]
+    fn a_fade_begun_just_before_a_join_should_end_there() {
+        // At 1.5× just short of the join at 4 s, then 2×: the fade from 1.5× would outlast the
+        // join, where the 1.5× segment has nothing left to give.
+        let pcm = murmur();
+        let (faster, fastest) = (stretched_all(&pcm, 1.5), stretched_all(&pcm, 2.0));
+        let mut clip = Playback { rate: 1.5, stretched: Some(faster), position: 95_900.0, ..playing(pcm) };
+        clip.render(&mut [0.0; 8], 48_000, 1);
+        clip.rate = 2.0;
+        clip.stretched = Some(fastest);
+        // Past the join, well within the 10 ms the fade would last.
+        clip.render(&mut [0.0; 200], 48_000, 1);
+        let alone = clip.source.as_ref().map_or(0.0, |source| source.read(clip.position, 0));
+        let mut next = [0.0; 1];
+        clip.render(&mut next, 48_000, 1);
+        assert!((next[0] - alone).abs() < 1e-4, "plays {} where the new segment alone is {alone}", next[0]);
+    }
+
+    #[test]
+    fn a_stretch_for_a_closed_player_or_an_older_job_should_stop() {
+        for (closed, job) in [(true, 1), (false, 0)] {
+            let pcm = Arc::new(tone(8.0));
+            let mut playback = playing(tone(8.0));
+            playback.jobs = 1;
+            playback.stretched = Some(Stretched::new(1, 2.0, &pcm));
+            playback.closed = closed;
+            let state = Arc::new(Mutex::new(playback));
+            if let Some(worker) = stretch_for(&state, pcm, job) {
+                let _ = worker.join();
+            }
+            let untouched = state.lock().is_ok_and(|state| {
+                state.stretched.as_ref().is_some_and(|s| s.segments.iter().all(|s| matches!(s, Segment::Pending)))
+            });
+            assert!(untouched, "closed {closed}, job {job}");
+        }
+    }
+
+    /// Eight seconds of a steady voice-like sound at `pitch` Hz, with fading harmonics.
+    fn vowel(pitch: f32) -> Pcm {
+        let samples = (0..24_000 * 8)
+            .map(|i| {
+                let t = i as f32 / 24_000.0;
+                (1..=4).map(|h| (std::f32::consts::TAU * pitch * h as f32 * t).sin() * 0.3 / h as f32).sum::<f32>()
+            })
+            .collect();
+        Pcm { rate: 24_000, channels: 1, samples }
+    }
+
+    #[test]
+    fn a_steady_voice_at_speed_should_keep_its_loudness_through_a_join() {
+        // A high voice and a low one, at both speeds: a tenth of a second either side of the
+        // join at 4 s, its loudness over one pitch period at every point.
+        for (pitch, rate) in [(170.0, 1.5), (170.0, 2.0), (86.0, 1.5), (86.0, 2.0)] {
+            let pcm = vowel(pitch);
+            let stretched = Some(stretched_all(&pcm, rate));
+            let start = 96_000.0 - 2_400.0 * rate;
+            let mut clip = Playback { rate, stretched, position: start, ..playing(pcm) };
+            let mut out = vec![0.0; 4_800];
+            clip.render(&mut out, 24_000, 1);
+            let period = (24_000.0 / pitch) as usize;
+            let levels: Vec<f32> = out.windows(period).step_by(period / 4).map(rms).collect();
+            let (quietest, loudest) =
+                levels.iter().fold((f32::MAX, 0.0f32), |(q, l), level| (q.min(*level), l.max(*level)));
+            let drop_db = 20.0 * (loudest / quietest).log10();
+            assert!(drop_db < 2.0, "{pitch} Hz at {rate}×: dips {drop_db:.1} dB");
+        }
+    }
+
+    #[test]
+    fn the_segment_playing_should_be_stretched_first() {
+        let mut stretched = Stretched::new(0, 2.0, &tone(16.0));
+        let first = stretched.next(2);
+        stretched.segments[2] = Segment::Plain;
+        stretched.segments[3] = Segment::Plain;
+        assert_eq!((first, stretched.next(2)), (Some(2), Some(0)));
+    }
+
+    #[test]
+    fn a_clip_playing_to_its_end_should_stop_and_rewind() {
+        let mut clip = playing(tone(0.01));
+        clip.render(&mut [0.0; 480], 24_000, 1);
+        assert_eq!((clip.playing, clip.position), (false, 0.0));
+    }
+
+    #[test]
+    fn a_clip_paused_at_its_end_should_stay_there() {
+        let mut clip = Playback { position: 240.0, playing: false, ..playing(tone(0.01)) };
+        clip.render(&mut [0.0; 480], 24_000, 1);
+        assert_eq!(clip.position, 240.0);
+    }
+
+    #[test]
+    fn play_after_a_seek_to_the_end_before_decoding_should_start_from_the_beginning() {
+        let player = NativePlayer { state: Arc::default(), _stop: channel().0 };
+        player.seek(1.0);
+        let waiting = player.progress();
+        player.play();
+        assert_eq!((waiting, player.progress()), (1.0, 0.0));
+    }
+
+    #[test]
+    fn a_short_clip_at_twice_the_speed_should_keep_its_pitch_and_take_half_as_long() {
+        // 120 ms of a 300 Hz tone, played at 2×: 600 zero crossings a second, whatever the speed.
+        let pcm = tone(0.12);
+        let stretched = stretched_all(&pcm, 2.0);
+        let mut clip = Playback { rate: 2.0, stretched: Some(stretched), ..playing(pcm) };
+        let mut out = vec![0.0; 2880];
+        clip.render(&mut out, 24_000, 1);
+        // It plays for 60 ms, half its length, then stops.
+        let end = out.iter().rposition(|s| *s != 0.0).unwrap_or(0);
+        let crossings = out[..end].windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count();
+        let per_second = crossings as f32 / (end as f32 / 24_000.0);
+        assert!(end.abs_diff(1440) <= 24 && !clip.playing, "played {end} frames");
+        assert!((per_second - 600.0).abs() < 40.0, "{per_second} crossings a second");
+    }
+
+    #[test]
+    fn stretching_should_keep_the_pitch() {
+        // A 300 Hz tone crosses zero 600 times a second, at any speed.
+        let tone: Vec<f32> =
+            (0..48_000).map(|i| (std::f32::consts::TAU * 300.0 * i as f32 / 24_000.0).sin() * 0.5).collect();
+        let fast = stretch(&Pcm { rate: 24_000, channels: 1, samples: tone }, 1.5)
+            .unwrap_or_else(|| panic!("two seconds should stretch"));
+        let middle = &fast.samples[2400..fast.samples.len() - 2400];
+        let crossings = middle.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count();
+        let per_second = crossings as f32 / (middle.len() as f32 / 24_000.0);
+        assert!((per_second - 600.0).abs() < 30.0, "{per_second} crossings a second");
     }
 
     #[test]

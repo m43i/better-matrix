@@ -921,11 +921,12 @@ pub(crate) fn session_ended(error: &matrix_sdk::Error) -> bool {
 
 /// The attachment info that makes an upload a voice message, for [`Outgoing::Voice`].
 pub(crate) fn voice_info(message: &Outgoing) -> Option<matrix_sdk::attachment::AttachmentInfo> {
-    let Outgoing::Voice { duration_ms, .. } = message else { return None };
+    let Outgoing::Voice { duration_ms, waveform, .. } = message else { return None };
+    let max = f32::from(crate::model::AudioDetails::WAVEFORM_MAX);
     Some(matrix_sdk::attachment::AttachmentInfo::Voice(matrix_sdk::attachment::BaseAudioInfo {
         duration: Some(std::time::Duration::from_millis(*duration_ms)),
         size: None,
-        waveform: None,
+        waveform: (!waveform.is_empty()).then(|| waveform.iter().map(|&v| f32::from(v) / max).collect()),
     }))
 }
 

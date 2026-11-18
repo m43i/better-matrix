@@ -50,6 +50,7 @@ describe('messageText', () => {
         media: null,
         thumbnail: null,
         dimensions: null,
+        audio: null,
       },
     };
 
