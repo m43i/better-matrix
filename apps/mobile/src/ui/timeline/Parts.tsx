@@ -152,7 +152,15 @@ export function ThreadLink({ root, thread }: { root: string; thread: ThreadSumma
 /** The size link cards fetch their image at. */
 const CARD_IMAGE: MediaSize = { type: 'Thumbnail', data: { width: 192, height: 192 } };
 
-/** A link's card once the homeserver described the page: site, title, description and image. */
+const CARD_IMAGE_SIDE = 64;
+
+/** The least width a link card keeps for its words beside its picture. */
+const CARD_WORDS_MIN = 100;
+
+/**
+ * A link's card once the homeserver described the page: site, title, description and image
+ * (left out where it would leave the words too little room).
+ */
 export function LinkCard({ url }: { url: string }) {
   const palette = usePalette();
   const store = useAppStore();
@@ -160,6 +168,9 @@ export function LinkCard({ url }: { url: string }) {
   const preview = useStore((s) => s.linkPreviews[previewKey(account, url)]);
   useEffect(() => fetchLinkPreview(store, account, url), [store, account, url]);
   const image = useMedia(account, preview?.image?.[0] ?? null, CARD_IMAGE);
+  // The picture shows only where it leaves the words a readable width beside it.
+  const words = useMediaBox().width - 2 * 12 - 3 - 2 * 12 - CARD_IMAGE_SIDE;
+  const showImage = preview?.image != null && words >= CARD_WORDS_MIN;
 
   if (!preview) return null;
 
@@ -189,7 +200,7 @@ export function LinkCard({ url }: { url: string }) {
           </Text>
         ) : null}
       </View>
-      {preview.image ? (
+      {showImage ? (
         image ? (
           <Image source={{ uri: image }} style={styles.cardImage} contentFit="cover" />
         ) : (
@@ -297,7 +308,7 @@ const styles = StyleSheet.create({
   },
   cardBar: { width: 3, borderRadius: 1.5 },
   cardWords: { flex: 1, gap: 2 },
-  cardImage: { width: 64, height: 64, borderRadius: 8 },
+  cardImage: { width: CARD_IMAGE_SIDE, height: CARD_IMAGE_SIDE, borderRadius: 8 },
   center: { alignItems: 'center', justifyContent: 'center' },
   gif: { marginTop: 4, alignSelf: 'flex-start' },
   gifImage: { maxHeight: 320, borderRadius: 8, overflow: 'hidden' },
