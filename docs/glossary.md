@@ -10,8 +10,13 @@ needs one, add it here.
 each has its own client, store and sync loop. `AccountId` in code.
 
 **Account menu**
-: The popover opened from the signed-in user's avatar at the bottom of the rail: switch account,
-add an account, settings, sign out. On phones, the sheet the avatar at the header's right opens.
+: The popover opened from the signed-in user's avatar at the bottom of the rail: the user's
+status, switch account, add an account, settings, sign out. On phones, the sheet the avatar at the header's right opens.
+
+**Status**
+: What others see of the user on one account, as the user sets it in the account menu: Online,
+Away, or Hidden (shown as offline). Saved in the account's data and announced as Matrix presence
+by every session of this app; a dot on the account's avatar shows it. `Status` in code.
 
 **Rail**
 : The narrow column on the far left: Home and the active account's spaces in the user's order,

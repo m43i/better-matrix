@@ -29,6 +29,7 @@ import type { Security } from "./Security";
 import type { Session } from "./Session";
 import type { SharedFile } from "./SharedFile";
 import type { SidebarLayout } from "./SidebarLayout";
+import type { Status } from "./Status";
 import type { ThreadInfo } from "./ThreadInfo";
 import type { TimelineDiff } from "./TimelineDiff";
 import type { TimelineKey } from "./TimelineKey";
@@ -293,7 +294,15 @@ account: AccountId,
 /**
  * The arrangement.
  */
-layout: SidebarLayout, } } | { "type": "RecoveryKey", "data": { 
+layout: SidebarLayout, } } | { "type": "Status", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The status.
+ */
+status: Status, } } | { "type": "RecoveryKey", "data": { 
 /**
  * Which account.
  */

@@ -216,6 +216,14 @@ pub enum Command {
         /// The new default.
         mode: NotificationMode,
     },
+    /// Set what others see of the user (online, away or hidden) on every session of this app;
+    /// an [`Event::Status`] follows.
+    SetStatus {
+        /// Which account.
+        account: AccountId,
+        /// The new status.
+        status: crate::Status,
+    },
     /// Leave a room; an updated [`Event::RoomsUpdated`] follows without it.
     LeaveRoom {
         /// Whose room.
@@ -868,6 +876,14 @@ pub enum Event {
         account: AccountId,
         /// The arrangement.
         layout: crate::SidebarLayout,
+    },
+    /// The status the user set for an account, as saved: sent once an account is ready and
+    /// whenever it changes, here or on another session.
+    Status {
+        /// Whose.
+        account: AccountId,
+        /// The status.
+        status: crate::Status,
     },
     /// A new recovery key, to show the user once.
     RecoveryKey {
@@ -2381,6 +2397,14 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            Command::SetStatus { account: id, status } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    account?.set_status(status).await?;
+                    sink.emit(Event::Status { account: id, status });
+                    Ok(Outcome::Done)
+                })
+            }
             Command::SetNotificationMode { account: id, room_id, mode } => {
                 let (account, feed) = (self.account(&id), self.feed(&id));
                 Box::pin(async move {
@@ -2459,6 +2483,11 @@ impl State {
                             };
                             sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
                         };
+                        let status = async {
+                            if let Ok(Some(status)) = account.status().await {
+                                sink.emit(Event::Status { account: account.id().clone(), status });
+                            }
+                        };
                         // Once the homeserver names a call service, rooms offer MatrixRTC calls.
                         let calls = {
                             let (account, feed) = (account.clone(), feed.clone());
@@ -2471,6 +2500,7 @@ impl State {
                         tokio::join!(
                             profile,
                             layout,
+                            status,
                             calls,
                             crate::security::watch(account.clone(), flows, Arc::clone(&sink)),
                             sync_loop(account.clone(), Arc::clone(&sink), feed),
@@ -2703,6 +2733,11 @@ async fn sync_until_error(
             {
                 sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
             }
+            if crate::status::changed_in(&response.account_data)
+                && let Ok(Some(status)) = account.status().await
+            {
+                sink.emit(Event::Status { account: account.id().clone(), status });
+            }
             feed.refresh((!all).then_some(&changed)).await;
             LoopCtrl::Continue
         }
@@ -2717,6 +2752,9 @@ async fn sync_until_error(
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
         last_sync = Some(std::time::Instant::now());
+        // Each sync announces the status as last synced, so one set elsewhere holds here too.
+        let saved = account.status().await.ok().flatten();
+        settings = settings.set_presence(crate::status::sync_presence(saved, caught_up.load(Ordering::Relaxed)));
         let response = account.sync_once_locked(settings.clone()).await?;
         settings = settings.token(response.next_batch.clone());
         if on_response(response).await == LoopCtrl::Break {

@@ -23,6 +23,7 @@ import type {
   SharedFile,
   SidebarLayout,
   SpaceSummary,
+  Status,
   ThreadInfo,
   TimelineEntry,
   VerificationStep,
@@ -91,6 +92,8 @@ export interface AccountData {
   sidebar: SidebarLayout;
   searchUsage: SearchUsage;
   sidebarLoaded: boolean;
+  /** What others see of the user, as they set it; online until the engine reports. */
+  status: Status;
 }
 
 /** A verification running for one of the accounts. */

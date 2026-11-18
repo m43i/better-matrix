@@ -1,6 +1,6 @@
 // A tab's header: its title, and the account on screen at the right, its picture opening the
-// account menu (switch or add an account, settings, sign out), with a dot when another account
-// has something new, as the desktop's rail shows. iOS places the picture as a toolbar item
+// account menu (status, switch or add an account, settings, sign out), with the user's status and
+// a dot when another account has something new, as the desktop's rail shows. iOS places the picture as a toolbar item
 // without the shared glass background. Android's native stack lays a custom title out across the
 // whole bar, which pushes a right item to the bar's start, so there the title and the picture
 // share one row, the picture at its end.
@@ -22,6 +22,7 @@ const SIZE = 32;
 
 function ProfileButton() {
   const summary = useStore((s) => activeAccount(s)?.summary);
+  const status = useStore((s) => activeAccount(s)?.status);
 
   const othersUnread = useStore((s) =>
     s.accounts.some((a) => a.summary.id !== s.active && hasUnread(a, 'home')),
@@ -40,7 +41,7 @@ function ProfileButton() {
       style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
     >
       <WithDot on={othersUnread} size={SIZE}>
-        <AccountAvatar summary={summary} size={SIZE} />
+        <AccountAvatar summary={summary} size={SIZE} status={status} />
       </WithDot>
     </Pressable>
   );

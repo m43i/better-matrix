@@ -52,6 +52,17 @@ pub fn unread_dot(tile_size: f32, ring: Color, p: &Palette) -> El {
     el().size(10.0, 10.0).radius(5.0).fill(p.mention).border(2.0, ring).absolute(tile_size - 7.0, -3.0)
 }
 
+/// A dot showing the user's status: filled green when online, amber when away, a hollow ring when
+/// hidden (as others see them: offline). `ring` is the surface it sits on.
+pub fn status_dot(status: matrix_core::Status, size: f32, ring: Color, p: &Palette) -> El {
+    let dot = el().size(size, size).radius(size / 2.0);
+    match status {
+        matrix_core::Status::Online => dot.fill(p.success).border(2.0, ring),
+        matrix_core::Status::Away => dot.fill(p.warning).border(2.0, ring),
+        matrix_core::Status::Hidden => dot.fill(ring).border(2.0, p.text_muted),
+    }
+}
+
 /// A square button showing an icon; `active` draws it pressed (a toggled format, say).
 pub fn icon_button(glyph: &'static Icon, label: &str, active: bool, color: Color, p: &Palette) -> El {
     el().size(28.0, 28.0)

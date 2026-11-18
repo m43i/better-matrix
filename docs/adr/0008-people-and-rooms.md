@@ -24,6 +24,22 @@ Date: 2026-11-14
     not the sign-in method: where it allows changes, the add and remove form shows; where not,
     the linked details show read-only (kinds with none are left out), and an OAuth account gets
     a link to its account page (`Command::OpenAccountPage`, answered by `Event::OpenUrl`).
+- **Status:** the account menu starts with the user's status for the account on screen: Online,
+  Away, or Hidden (shown to others as offline); a dot on the account's avatar shows it. Do not
+  disturb is left out: Matrix presence has only `online`, `unavailable` and `offline`, and
+  MSC3026's `busy` is not in the spec.
+  - Saved in the account data event `chat.bettermatrix.status`, not on the device: presence
+    belongs to the user, so every session of this app announces the same one. Other clients
+    still announce online while they sync.
+  - Every sync sends it as `set_presence`, read from the store before each request, so a status
+    set on another session holds here from the next sync. Until the first sync has caught up,
+    an account with none stored syncs as `offline`: a hidden user never shows online while the
+    status is unknown. With none at all after that, it is Online.
+  - `Command::SetStatus` writes the account data, then sets presence at once
+    (`PUT /presence`); a refused presence request only logs, as syncs carry the status anyway.
+    `Event::Status` reports it at start, after a change here, and when a sync brings one.
+  - The apps show the choice at once and, if saving fails, show the previous one with a notice.
+  - Servers with presence switched off accept the status but show nobody's.
 - **Contact details** step through `ContactStep` per kind:
   1. `Entering` the address.
   2. `Requesting`: `RequestContactCode` sends a link or code; `Event::ContactCodeSent` carries

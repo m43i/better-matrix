@@ -14,6 +14,7 @@ import {
   removeEnded,
   requestContactCode,
   serverName,
+  setStatus,
   SignInFlow,
   signOut,
 } from '../accounts';
@@ -426,5 +427,42 @@ describe('signOut', () => {
     await flush();
     await flush();
     expect(commands()[1]).toEqual<Command>({ type: 'Logout', data: ADA });
+  });
+});
+
+describe('setStatus', () => {
+  function withAda() {
+    const harness = setup();
+    harness.engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+
+    return harness;
+  }
+
+  const status = (store: Store) => store.getState().accounts[0]!.status;
+
+  it('should show the chosen status at once and tell the engine', () => {
+    const { store, commands } = withAda();
+    setStatus(store, ADA, 'Hidden');
+    expect(status(store)).toBe('Hidden');
+    expect(commands()).toEqual<Command[]>([
+      { type: 'SetStatus', data: { account: ADA, status: 'Hidden' } },
+    ]);
+  });
+
+  it('should send nothing for the status already shown', () => {
+    const { store, commands } = withAda();
+    setStatus(store, ADA, 'Online');
+    expect(commands()).toEqual([]);
+  });
+
+  it('should show the previous status and why when the server refuses', async () => {
+    const { store, sent, finish } = withAda();
+    setStatus(store, ADA, 'Away');
+    finish(sent[0]!.request, 'offline');
+    await flush();
+    expect(status(store)).toBe('Online');
+    expect(store.getState().notices.map((n) => n.message)).toContain(
+      t('notice.status', { error: 'offline' }),
+    );
   });
 });

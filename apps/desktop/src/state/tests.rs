@@ -520,6 +520,48 @@ fn changing_the_default_should_tell_the_server() {
 }
 
 #[test]
+fn choosing_a_status_should_show_it_at_once_and_tell_the_server() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.toggle_popover(Popover::AccountSwitcher);
+    s.set_status(&id, matrix_core::Status::Hidden);
+    assert_eq!(s.accounts.get(&id).map(|a| a.status), Some(matrix_core::Status::Hidden));
+    assert!(s.popover.is_none());
+    assert!(matches!(&drain(&mut commands)[..], [(_, Command::SetStatus { status: matrix_core::Status::Hidden, .. })]));
+}
+
+#[test]
+fn choosing_the_current_status_should_send_nothing() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.set_status(&id, matrix_core::Status::Online);
+    assert!(drain(&mut commands).is_empty());
+}
+
+#[test]
+fn a_status_the_server_refused_should_show_the_previous_one_and_why() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.set_status(&id, matrix_core::Status::Away);
+    let (request, _) = commands.try_next().unwrap();
+    apply(&mut s, Event::Finished { request, result: Err("offline".into()) });
+    assert_eq!(s.accounts.get(&id).map(|a| a.status), Some(matrix_core::Status::Online));
+    assert!(s.notice.as_deref().is_some_and(|notice| notice.contains("offline")));
+}
+
+#[test]
+fn a_status_set_on_another_session_should_show_here() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    apply(&mut s, Event::Status { account: id.clone(), status: matrix_core::Status::Away });
+    assert_eq!(s.accounts.get(&id).map(|a| a.status), Some(matrix_core::Status::Away));
+}
+
+#[test]
 fn opening_settings_should_show_the_general_section_and_close_popovers() {
     let (mut s, _) = state();
     s.toggle_popover(Popover::AccountSwitcher);

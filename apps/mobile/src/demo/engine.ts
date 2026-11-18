@@ -261,6 +261,8 @@ export function answer(
       ];
     case 'HangUp':
       return [];
+    case 'SetStatus':
+      return [{ type: 'Status', data: command.data }];
     default:
       return [];
   }

@@ -94,6 +94,11 @@ fn spec() -> AppSpec<State> {
                 demo::seed(s);
                 s.toggle_popover(Popover::AccountSwitcher);
             }),
+            ("demo-status-hidden", |s| {
+                demo::seed(s);
+                demo::hidden(s);
+                s.toggle_popover(Popover::AccountSwitcher);
+            }),
             ("demo-compose", demo::compose),
             ("demo-add-account", |s| {
                 demo::seed(s);

@@ -1423,3 +1423,13 @@ fn an_update_failure_should_keep_the_rail_action_available() {
     press(&mut rt, "rail-update");
     assert!(matches!(rt.state.update, crate::state::Update::Installing(_)));
 }
+
+#[test]
+fn choosing_away_in_the_account_menu_should_set_the_status() {
+    let mut rt = runtime(|_| {});
+    press(&mut rt, "account-button");
+    assert!(rt.find("status-online").is_some() && rt.find("status-hidden").is_some());
+    press(&mut rt, "status-away");
+    assert_eq!(rt.state.active_account().map(|a| a.status), Some(matrix_core::Status::Away));
+    assert!(rt.find("account-menu").is_none());
+}

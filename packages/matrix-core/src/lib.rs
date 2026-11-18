@@ -26,6 +26,7 @@ pub mod search;
 pub mod secrets;
 pub mod security;
 pub mod sidebar;
+pub mod status;
 pub mod store;
 
 mod convert;
@@ -70,6 +71,7 @@ pub use search::{MessageHit, SearchUsage};
 pub use secrets::{FileSecrets, MemorySecrets, SecretError, SecretStore};
 pub use security::{RecoveryStatus, SasEmoji, Security, Session, VerificationStep};
 pub use sidebar::{ScopeLayout, Section, SidebarLayout};
+pub use status::Status;
 pub use store::StoreLayout;
 
 /// Shown to other devices and in the server's session list.

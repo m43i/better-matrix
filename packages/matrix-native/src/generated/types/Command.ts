@@ -17,6 +17,7 @@ import type { PendingContact } from "./PendingContact";
 import type { Pusher } from "./Pusher";
 import type { RequestId } from "./RequestId";
 import type { SidebarLayout } from "./SidebarLayout";
+import type { Status } from "./Status";
 import type { TimelineKey } from "./TimelineKey";
 import type { VideoId } from "./VideoId";
 
@@ -231,7 +232,15 @@ account: AccountId,
 /**
  * The new default.
  */
-mode: NotificationMode, } } | { "type": "LeaveRoom", "data": { 
+mode: NotificationMode, } } | { "type": "SetStatus", "data": { 
+/**
+ * Which account.
+ */
+account: AccountId, 
+/**
+ * The new status.
+ */
+status: Status, } } | { "type": "LeaveRoom", "data": { 
 /**
  * Whose room.
  */

@@ -89,6 +89,7 @@ function newAccount(summary: AccountSummary): AccountData {
     sidebar: EMPTY_LAYOUT,
     searchUsage: { rooms: {}, people: {} },
     sidebarLoaded: false,
+    status: 'Online',
   };
 }
 
@@ -312,6 +313,8 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
           ? a
           : { ...a, sidebar: event.data.layout, sidebarLoaded: true },
       );
+    case 'Status':
+      return updateAccount(state, event.data.account, (a) => ({ ...a, status: event.data.status }));
     case 'RecoveryKey':
       return { ...state, recoveryKey: { account: event.data.account, key: event.data.key } };
     case 'Verification': {

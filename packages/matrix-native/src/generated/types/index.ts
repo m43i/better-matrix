@@ -75,6 +75,7 @@ export type { SharedFile } from "./SharedFile";
 export type { SidebarLayout } from "./SidebarLayout";
 export type { SignInMethod } from "./SignInMethod";
 export type { SpaceSummary } from "./SpaceSummary";
+export type { Status } from "./Status";
 export type { ThreadInfo } from "./ThreadInfo";
 export type { ThreadSummary } from "./ThreadSummary";
 export type { TimelineDiff } from "./TimelineDiff";

@@ -12,12 +12,13 @@ import type {
   PendingContact,
   RequestId,
   Security,
+  Status,
 } from '@better-matrix/matrix-native/types';
 
 import { OAUTH_REDIRECT } from '../../engine/identity';
 import { PUSH_APP_ID } from '../../engine/pushRules';
 import { t } from '../../i18n';
-import { addNotice } from '../reducer';
+import { addNotice, updateAccount } from '../reducer';
 import { CommandFailed } from '../requests';
 import type { Store } from '../store';
 import type { State } from '../types';
@@ -451,6 +452,25 @@ export function setDefaultNotificationMode(
   mode: NotificationMode,
 ): void {
   store.send({ type: 'SetDefaultNotificationMode', data: { account, mode } });
+}
+
+/**
+ * Sets what others see of the user on an account (online, away, hidden), showing it at once;
+ * if the server refuses, the previous status shows again with a notice.
+ */
+export function setStatus(store: Store, account: AccountId, status: Status): void {
+  const previous = store.getState().accounts.find((a) => a.summary.id === account)?.status;
+
+  if (previous === undefined || previous === status) return;
+
+  const show = (shown: Status) =>
+    store.update((s) => updateAccount(s, account, (a) => ({ ...a, status: shown })));
+
+  show(status);
+  store.run({ type: 'SetStatus', data: { account, status } }).catch((error: CommandFailed) => {
+    show(previous);
+    store.update((s) => addNotice(s, t('notice.status', { error: error.message })));
+  });
 }
 
 /** The display name the profile's field starts with: empty when the account has none. */

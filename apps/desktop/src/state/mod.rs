@@ -477,6 +477,11 @@ enum Purpose {
         dimensions: Option<(u32, u32)>,
     },
     NotificationMode,
+    /// Setting the user's status; failing, the account shows `previous` again.
+    Status {
+        account: AccountId,
+        previous: matrix_core::Status,
+    },
     Leave,
     Recover,
     RecoveryKey,
@@ -1132,6 +1137,7 @@ impl State {
             }
             Event::Sessions { account, sessions } => self.accounts.set_sessions(&account, sessions),
             Event::ContactDetails { account, contacts } => self.accounts.set_contacts(&account, contacts),
+            Event::Status { account, status } => self.accounts.set_status(&account, status),
             Event::SidebarLayout { account, layout } => {
                 let newer = self
                     .accounts
@@ -1582,6 +1588,10 @@ impl State {
             Purpose::Delete => self.notice = Some(tf!("notice.not_deleted", error = error)),
             Purpose::Logout => self.notice = Some(tf!("notice.sign_out", error = error)),
             Purpose::NotificationMode => self.notice = Some(tf!("notice.notification_setting", error = error)),
+            Purpose::Status { account, previous } => {
+                self.accounts.set_status(&account, previous);
+                self.notice = Some(tf!("notice.status", error = error));
+            }
             Purpose::Leave => self.notice = Some(tf!("notice.leave", error = error)),
             // History that couldn't load waits for the user to retry, instead of retrying on every
             // scroll; a timeline that couldn't open opens again the next time it is shown.
@@ -3076,6 +3086,19 @@ impl State {
         self.accounts.set_default_notifications(account, mode);
         let command = Command::SetDefaultNotificationMode { account: account.clone(), mode };
         self.dispatch(command, Purpose::NotificationMode);
+    }
+
+    /// Sets what others see of the user on an account, showing it at once, and closes the
+    /// account menu.
+    pub fn set_status(&mut self, account: &AccountId, status: matrix_core::Status) {
+        self.popover = None;
+        let Some(previous) = self.accounts.get(account).map(|data| data.status) else { return };
+        if previous == status {
+            return;
+        }
+        self.accounts.set_status(account, status);
+        let command = Command::SetStatus { account: account.clone(), status };
+        self.dispatch(command, Purpose::Status { account: account.clone(), previous });
     }
 
     // ----- encryption and sessions ---------------------------------------------------------

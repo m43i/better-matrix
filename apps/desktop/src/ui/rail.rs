@@ -5,7 +5,7 @@
 use crate::i18n::{t, tf};
 use rune::{El, ScrollSpec, col, el, icon};
 
-use super::components::{account_avatar, media_avatar, unread_dot};
+use super::components::{account_avatar, media_avatar, status_dot, unread_dot};
 use super::icons;
 use super::theme::Palette;
 use crate::state::{AccountData, Dragged, DropTarget, Popover, Scope, State, Update, ordered_spaces};
@@ -110,7 +110,8 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
             .cursor(rune::Cursor::Pointer)
             .label(tf!("rail.switch_account", name = account.summary.display_name))
             .focusable(true)
-            .on_press(|s: &mut State| s.toggle_popover(Popover::AccountSwitcher));
+            .on_press(|s: &mut State| s.toggle_popover(Popover::AccountSwitcher))
+            .child(status_dot(account.status, 14.0, p.rail_bg, p).absolute(TILE - 10.0, TILE - 10.0));
         if s.other_accounts_unread() {
             me = me.child(unread_dot(TILE, p.rail_bg, p));
         }

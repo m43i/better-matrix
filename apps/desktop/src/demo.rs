@@ -104,6 +104,11 @@ pub fn unread(s: &mut State) {
     }
 }
 
+/// The user hidden from others: their status, as the engine reports it once saved.
+pub fn hidden(s: &mut State) {
+    apply(s, Event::Status { account: AccountId::new(ADA), status: matrix_core::Status::Hidden });
+}
+
 /// A received invitation, for checking its sidebar entry and preview.
 pub fn invitation(s: &mut State) {
     seed(s);

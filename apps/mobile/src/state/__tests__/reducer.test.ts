@@ -150,6 +150,12 @@ describe('apply', () => {
     expect(state.accounts[0]!.sidebar.changed_at).toBe(10);
   });
 
+  it('should show the status the engine reports for an account', () => {
+    const state = apply(signedIn(ADA), { type: 'Status', data: { account: ADA, status: 'Away' } });
+
+    expect(state.accounts[0]!.status).toBe('Away');
+  });
+
   it('should keep a fetched media file by what it is', () => {
     const media = 'mxc://example.org/a';
     const size = { type: 'Original' as const };
