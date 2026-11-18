@@ -320,7 +320,9 @@ see who is typing there.
   - A changed, non-empty draft says "typing" at most every 3 s (`REPEAT`); the SDK repeats it
     only near the 4 s expiry.
   - An emptied draft or leaving the room says "stopped"; an idle draft lets the notice lapse.
-  - Opening a room with an old draft isn't typing.
+  - Opening a room or thread with an old draft isn't typing, nor is a draft coming back
+    ([0007](0007-composer-and-media.md)). Typing belongs to the composer typed in: it stops when
+    that composer empties or closes, whatever the other one holds.
 - **Times:** times and date dividers use the local time zone at that moment, so summer time
   applies to summer dates (`local_ms`).
 

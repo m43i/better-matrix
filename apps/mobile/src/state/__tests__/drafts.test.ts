@@ -43,9 +43,12 @@ describe('kept drafts', () => {
     expect(withKeptDraft(typed, { body: 'old', html: null })).toBe(typed);
   });
 
-  it('should leave a composer answering a message', () => {
+  it('should bring a kept draft back beside a reply picked meanwhile', () => {
     const replying = { ...EMPTY_COMPOSER, replyTo: message('$q') };
 
-    expect(withKeptDraft(replying, { body: 'old', html: null })).toBe(replying);
+    expect(withKeptDraft(replying, { body: 'old', html: null })).toMatchObject({
+      draft: 'old',
+      replyTo: message('$q'),
+    });
   });
 });

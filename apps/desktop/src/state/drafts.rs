@@ -25,6 +25,9 @@ pub struct Kept {
     /// Timelines whose draft the user changed this run: a draft read from the store after that
     /// doesn't replace what they did.
     touched: HashSet<Owner>,
+    /// Timelines whose draft was written this run: the engine reads and writes in order, so a
+    /// read answered after a write is older than what the store holds.
+    wrote: HashSet<Owner>,
 }
 
 impl Kept {
@@ -50,12 +53,18 @@ impl Kept {
             return None;
         }
         self.loaded(at, draft.as_ref());
+        self.wrote.insert(at.clone());
         Some(draft)
     }
 
     /// Whether the user changed the draft of `at` this run.
     pub fn touched(&self, at: &Owner) -> bool {
         self.touched.contains(at)
+    }
+
+    /// Whether the draft of `at` was written this run.
+    pub fn wrote(&self, at: &Owner) -> bool {
+        self.wrote.contains(at)
     }
 
     /// How long until a changed draft is due.
@@ -68,6 +77,7 @@ impl Kept {
         self.stored.retain(|(owner, _), _| owner != account);
         self.changed.retain(|(owner, _), _| owner != account);
         self.touched.retain(|(owner, _)| owner != account);
+        self.wrote.retain(|(owner, _)| owner != account);
     }
 }
 
@@ -120,11 +130,16 @@ impl State {
         }
     }
 
-    /// The store's draft for `at`, read on the first visit: it goes into the composer if that
-    /// still writes there and the user hasn't changed it. What the user did meanwhile wins, and
-    /// replaces it in the store too (even text typed and cleared again, here or since left).
+    /// The store's draft for `at`, read on the first visit: its text goes into the composer if
+    /// that still writes there and the user hasn't changed the draft (beside a reply or files
+    /// picked meanwhile, or under an edit started meanwhile). What the user did meanwhile wins,
+    /// and replaces it in the store too (even text typed and cleared again, here or since left).
     pub(super) fn draft_loaded(&mut self, at: Owner, draft: Option<Draft>) {
         let Some(draft) = draft else { return };
+        // The store already holds what was written since this was read.
+        if self.kept_drafts.wrote(&at) {
+            return;
+        }
         let target = [ComposerTarget::Room, ComposerTarget::Thread]
             .into_iter()
             .find(|target| self.composer(*target).owner.as_ref() == Some(&at));
@@ -141,7 +156,7 @@ impl State {
             return;
         }
         let Some(target) = target else { return };
-        if !self.composer(target).is_blank() {
+        if self.composer(target).stored_draft().is_some() {
             return;
         }
         self.kept_drafts.loaded(&at, Some(&draft));

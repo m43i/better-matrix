@@ -4978,3 +4978,48 @@ fn a_draft_cleared_before_its_room_was_left_should_not_come_back_from_a_late_rea
     assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
         Command::SaveDraft { key, draft: None, .. } if *key == TimelineKey::room("!one:x"))));
 }
+
+#[test]
+fn a_kept_draft_should_go_under_an_edit_started_before_it_came() {
+    let (mut s, _) = state();
+    let id = with_own_message(&mut s);
+    s.edit_last(ComposerTarget::Room, &mut Tx::default());
+    let draft = matrix_core::Draft { body: "from last time".into(), html: None };
+    apply(
+        &mut s,
+        Event::DraftLoaded { request: RequestId(0), account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) },
+    );
+    s.cancel_edit(ComposerTarget::Room);
+    assert_eq!(s.composer.edit.text, "from last time");
+}
+
+#[test]
+fn a_kept_draft_should_join_a_reply_picked_before_it_came() {
+    let (mut s, _, id) = two_rooms();
+    s.composer.reply_to =
+        Some(ReplyTarget { event_id: "$q".into(), sender_name: "Grace".into(), excerpt: "Lunch?".into() });
+    let draft = matrix_core::Draft { body: "from last time".into(), html: None };
+    apply(
+        &mut s,
+        Event::DraftLoaded { request: RequestId(0), account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) },
+    );
+    assert_eq!(s.composer.edit.text, "from last time");
+    assert!(s.composer.reply_to.is_some());
+}
+
+#[test]
+fn a_read_answered_after_a_write_should_change_nothing() {
+    let (mut s, mut commands, id) = two_rooms();
+    type_into(&mut s, ComposerTarget::Room, "replacement");
+    s.focus_changed(false);
+    type_into(&mut s, ComposerTarget::Room, "original");
+    let draft = matrix_core::Draft { body: "original".into(), html: None };
+    apply(
+        &mut s,
+        Event::DraftLoaded { request: RequestId(0), account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) },
+    );
+    drain(&mut commands);
+    s.focus_changed(false);
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
+        Command::SaveDraft { draft: Some(draft), .. } if draft.body == "original")));
+}

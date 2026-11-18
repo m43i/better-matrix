@@ -169,3 +169,20 @@ it('should ignore a draft read answered after its account signed out', async () 
 
   expect(store.getState().composers).toEqual({});
 });
+
+it('should leave a read answered after a write unheeded', async () => {
+  const { engine, store, sent } = setup();
+  followDraft(store, ADA, KEY);
+  setDraft(store, ADA, KEY, 'replacement');
+  await settle();
+  flushDraft(store, ADA, KEY);
+  setDraft(store, ADA, KEY, 'original');
+  await settle();
+  answer({ engine, sent }, { body: 'original', html: null });
+  flushDraft(store, ADA, KEY);
+
+  expect(saves(sent)).toEqual([
+    { body: 'replacement', html: null },
+    { body: 'original', html: null },
+  ]);
+});

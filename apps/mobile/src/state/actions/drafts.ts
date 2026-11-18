@@ -24,6 +24,11 @@ class DraftKeeper {
   /** Each composer as last looked at, so only changed ones are compared. */
   private readonly seen = new Map<string, ComposerState | undefined>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * Composers whose draft was written this run: the engine reads and writes in order, so a read
+   * answered after a write is older than what the store holds.
+   */
+  private readonly written = new Set<string>();
 
   constructor(private readonly store: Store) {
     store.subscribe(() => this.check());
@@ -57,6 +62,7 @@ class DraftKeeper {
    * draft meanwhile; then what they left (even nothing) is written over it.
    */
   private loaded(id: string, draft: Draft): void {
+    if (this.written.has(id)) return;
     const composer = this.store.getState().composers[id];
 
     if (composer?.touched) {
@@ -86,6 +92,7 @@ class DraftKeeper {
       this.owners.delete(id);
       this.kept.delete(id);
       this.seen.delete(id);
+      this.written.delete(id);
     }
   }
 
@@ -129,6 +136,7 @@ class DraftKeeper {
 
     if (draft) this.kept.set(id, draft);
     else this.kept.delete(id);
+    this.written.add(id);
     this.store.send(
       { type: 'SaveDraft', data: { account: owner.account, key: owner.key, draft } },
       { quiet: true },

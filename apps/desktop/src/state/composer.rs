@@ -367,15 +367,9 @@ impl Composer {
         }
     }
 
-    /// Nothing in it at all: no text, reply, attachment, edit or voice memo. Only then does a
-    /// draft read from the store go in, so it never replaces what the user did meanwhile.
-    pub fn is_blank(&self) -> bool {
-        self.editing.is_none() && self.voice.is_none() && self.reply_to.is_none() && self.is_empty()
-    }
-
-    /// Fills the field with a draft read from the store, the caret at its end.
+    /// Puts a draft read from the store into the draft's text, the caret at its end: the field,
+    /// or the draft set aside under an edit. A reply and attachments stay.
     pub fn restore_draft(&mut self, draft: &matrix_core::Draft) {
-        let focused = self.edit.focused;
         let mut field = new_edit();
         match &draft.html {
             Some(html) => {
@@ -384,8 +378,13 @@ impl Composer {
             None => field.insert(&draft.body),
         }
         field.clear_history();
-        field.focused = focused;
-        self.edit = field;
+        match &mut self.editing {
+            Some(editing) => editing.draft.edit = field,
+            None => {
+                field.focused = self.edit.focused;
+                self.edit = field;
+            }
+        }
     }
 
     /// Before a key reaches the field: typing straight on from a freshly formatted selection

@@ -26,19 +26,10 @@ export function sameDraft(a: Draft | null, b: Draft | null): boolean {
   return a?.body === b?.body && (a?.html ?? null) === (b?.html ?? null);
 }
 
-/** Nothing in it at all: no text, reply, edit or attachment. */
-export function isBlank(composer: ComposerState): boolean {
-  return (
-    composer.draft.trim() === '' &&
-    !composer.replyTo &&
-    !composer.editing &&
-    (composer.attachments ?? []).length === 0
-  );
-}
-
 /**
- * A kept draft back in `composer` if the user hasn't changed its draft: into the field, or under
- * an edit started meanwhile, as the draft it sets aside. Else the composer as it is.
+ * A kept draft back in `composer` if the user hasn't changed its draft and its text is blank:
+ * into the field (beside a reply or files picked meanwhile), or under an edit started meanwhile,
+ * as the draft it sets aside. Else the composer as it is.
  */
 export function withKeptDraft(composer: ComposerState | undefined, draft: Draft): ComposerState {
   const current = composer ?? EMPTY_COMPOSER;
@@ -47,17 +38,11 @@ export function withKeptDraft(composer: ComposerState | undefined, draft: Draft)
 
   if (current.touched) return current;
 
-  if (isBlank(current)) return { ...current, draft: text };
-
-  if (
-    current.editing &&
-    aside &&
-    aside.draft.trim() === '' &&
-    !aside.replyTo &&
-    aside.attachments.length === 0
-  ) {
-    return { ...current, setAside: { ...aside, draft: text } };
+  if (current.editing) {
+    return aside && aside.draft.trim() === ''
+      ? { ...current, setAside: { ...aside, draft: text } }
+      : current;
   }
 
-  return current;
+  return current.draft.trim() === '' ? { ...current, draft: text } : current;
 }
