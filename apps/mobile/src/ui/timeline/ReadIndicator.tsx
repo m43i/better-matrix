@@ -8,7 +8,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { tp } from '../../i18n';
 import { routes } from '../../routes';
-import { READER_FACES, readerOf } from '../../state/readers';
+import { READER_FACES, readerOf, readerOverflow } from '../../state/readers';
 import { shallow, useStore } from '../../state/react';
 import { account as accountOf } from '../../state/selectors';
 import { font } from '../../theme/palette';
@@ -19,13 +19,19 @@ import { useTimelineContext } from './context';
 
 const FACE = 16;
 
+/** The ring that separates overlapping faces; it adds to each face's size. */
+const FACE_BORDER = 1.5;
+
 const FACE_OVERLAP = 6;
 
-/** Room for the overflow count ("+99") after the faces. */
-const COUNT = 22;
+const FACE_OUTER = FACE + 2 * FACE_BORDER;
+
+/** Room for the overflow count ("+99", or "99+") after the faces. */
+const COUNT = 24;
 
 /** The width every room message keeps free at its right for its read indicator. */
-export const READERS_COLUMN = FACE + (READER_FACES - 1) * (FACE - FACE_OVERLAP) + 6 + COUNT + 8;
+export const READERS_COLUMN =
+  FACE_OUTER + (READER_FACES - 1) * (FACE_OUTER - FACE_OVERLAP) + 6 + COUNT + 8;
 
 export function ReadIndicator({ message }: { message: Message }) {
   const palette = usePalette();
@@ -42,7 +48,7 @@ export function ReadIndicator({ message }: { message: Message }) {
   );
 
   const label = tp('message.seen_by', receipts.length);
-  const more = receipts.length - READER_FACES;
+  const more = readerOverflow(receipts.length);
 
   return (
     <Touchable
@@ -71,8 +77,10 @@ export function ReadIndicator({ message }: { message: Message }) {
           </View>
         ))}
       </View>
-      {more > 0 ? (
-        <Text style={[font.meta, { color: palette.textMuted }]}>{`+${more}`}</Text>
+      {more ? (
+        <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
+          {more}
+        </Text>
       ) : null}
     </Touchable>
   );
@@ -84,9 +92,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 4,
-    paddingVertical: 2,
+    // No taller than a line of text, so it never makes a one-line message taller.
+    paddingVertical: (font.body.lineHeight - FACE_OUTER) / 2,
     borderRadius: 5,
   },
   faces: { flexDirection: 'row', alignItems: 'center' },
-  face: { borderWidth: 1.5, borderRadius: FACE, overflow: 'hidden' },
+  face: { borderWidth: FACE_BORDER, borderRadius: FACE, overflow: 'hidden' },
 });

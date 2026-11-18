@@ -842,17 +842,16 @@ fn a_read_indicator_should_not_make_its_message_taller() {
 }
 
 /// Sets a message with `body` from the demo message's sender after it, so its row continues the
-/// sender's run (no name line), with or without a reader; gives back the row's height.
-fn set_continued_message(rt: &mut Runtime<State>, body: &str, read: bool) -> f32 {
+/// sender's run (no name line), read by `readers` people; gives back the row's height.
+fn set_continued_message(rt: &mut Runtime<State>, body: &str, readers: usize) -> f32 {
     rt.update(|s, tx| {
         let account = s.nav.account.clone().unwrap();
         let key = TimelineKey::room(demo::DEMO_THREAD.0);
-        let entries = s.active_account().unwrap().timeline(&key).unwrap().entries.len();
-        let read_receipts = if read {
-            vec![matrix_core::ReadReceipt { user_id: "@kai:example.org".into(), timestamp_ms: None }]
-        } else {
-            Vec::new()
-        };
+        let entries = &s.active_account().unwrap().timeline(&key).unwrap().entries;
+        let existing = entries.iter().position(|entry| entry.id == "continued");
+        let read_receipts = (0..readers)
+            .map(|i| matrix_core::ReadReceipt { user_id: format!("@reader-{i}:example.org"), timestamp_ms: None })
+            .collect();
         let message = Message {
             event_id: "$continued".into(),
             sender_id: demo::ADA.into(),
@@ -863,7 +862,10 @@ fn set_continued_message(rt: &mut Runtime<State>, body: &str, read: bool) -> f32
             ..Message::default()
         };
         let entry = TimelineEntry { id: "continued".into(), kind: EntryKind::Message(Box::new(message)) };
-        let diff = if read { TimelineDiff::PushBack(entry) } else { TimelineDiff::Set { index: entries - 1, entry } };
+        let diff = match existing {
+            Some(index) => TimelineDiff::Set { index, entry },
+            None => TimelineDiff::PushBack(entry),
+        };
         s.apply(Event::TimelineChanged { account, key, diffs: vec![diff] }, tx);
     });
     rt.settle_all();
@@ -875,15 +877,18 @@ fn set_continued_message(rt: &mut Runtime<State>, body: &str, read: bool) -> f32
 fn a_read_indicator_should_not_rewrap_a_long_message() {
     let mut rt = readers_runtime();
     let body = "Ready to try. ".repeat(40);
-    let with_reader = set_continued_message(&mut rt, &body, true);
+    let width = |rt: &Runtime<State>| rt.presented("text-$continued").expect("the message's text").0[2];
+    let with_reader = set_continued_message(&mut rt, &body, 1);
+    let text_with_reader = width(&rt);
     assert!(rt.find(&format!("readers-{}-$continued", demo::DEMO_THREAD.0)).is_some());
-    assert_eq!(set_continued_message(&mut rt, &body, false), with_reader);
+    assert_eq!(set_continued_message(&mut rt, &body, 0), with_reader);
+    assert_eq!(width(&rt), text_with_reader, "the text must keep its width");
 }
 
 #[test]
 fn a_read_indicator_on_a_one_line_message_should_open_readers_not_its_actions() {
     let mut rt = readers_runtime();
-    set_continued_message(&mut rt, "Ready.", true);
+    set_continued_message(&mut rt, "Ready.", 1);
     let (x, y) = rt.find(&format!("readers-{}-$continued", demo::DEMO_THREAD.0)).unwrap();
     rt.pointer_move(x, y);
     rt.frame(1.0 / 60.0);
@@ -892,6 +897,22 @@ fn a_read_indicator_on_a_one_line_message_should_open_readers_not_its_actions() 
     rt.frame(1.0 / 60.0);
     assert!(rt.find("readers-panel").is_some());
     assert!(rt.find("message-menu").is_none());
+}
+
+#[test]
+fn a_large_reader_count_should_stay_inside_the_readers_column() {
+    let mut rt = readers_runtime();
+    let indicator = format!("readers-{}-$continued", demo::DEMO_THREAD.0);
+    for (viewport, faces) in
+        [((1200.0, 760.0), crate::state::READER_FACES), ((760.0, 760.0), super::readers::NARROW_FACES)]
+    {
+        rt.set_viewport(viewport, 1.0);
+        rt.frame(1.0 / 60.0);
+        set_continued_message(&mut rt, "Ready.", 150);
+        assert!(rt.elements().iter().any(|e| e.text.as_deref() == Some("99+")));
+        let width = rt.presented(&indicator).expect("the read indicator").0[2];
+        assert!(width <= super::readers::column_width(faces), "{width} must fit {faces} faces' column");
+    }
 }
 
 #[test]

@@ -222,13 +222,14 @@ see who is typing there.
   ties. SDK tracking uses message-like events, so a receipt on a later state event still marks the
   preceding message. Only supplied positions are shown: no room permission or read is inferred
   from an absent receipt. The desktop shows up to four overlapping avatars (two in a timeline
-  narrower than 640 points) and an overflow count at the lower right of a sent message. Every
-  room message keeps a column of that width free at its right, filled or not, and the indicator
-  is no taller than a line of text, so a receipt arriving never rewraps or grows its message;
-  the column costs each message some width, as in Element. Clicking opens a virtualized reader
-  list, with available receipt dates/times and room profiles (falling back to timeline senders or
-  user IDs). The list loads the room members as the member panel does; selecting a reader opens
-  that same member menu beside the list. A reader outside the joined-member list keeps chat, call
+  narrower than 640 points) and an overflow count, which stops at "99+", at the lower right of a
+  sent message. Every room message keeps a column of that width free at its right, filled or
+  not, and the indicator is no taller than a line of text, so a receipt arriving never rewraps or
+  grows its message; the column costs each message some width, as in Element, and the hover
+  toolbar sits left of it. Clicking opens a virtualized reader list, with available receipt
+  dates/times and room profiles (falling back to timeline senders or user IDs). The list loads
+  the room members as the member panel does; selecting a reader opens that same member menu
+  beside the list. A reader outside the joined-member list keeps chat, call
   and invite actions, without invented moderation rights. Only visible reader pictures load.
   Subscription diffs move or remove indicators and update an open list. Thread indicators stay
   hidden because the pinned SDK's exposed receipt map does not distinguish threads, so only room

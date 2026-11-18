@@ -1,7 +1,7 @@
 import type { Members, ReadReceipt } from '@better-matrix/matrix-native/types';
 
 import { ADA, GRACE, messageEntry, person, summary } from '../../test/fixtures';
-import { readerOf, readersOf } from '../readers';
+import { READER_FACES, readerOf, readerOverflow, readersOf } from '../readers';
 import { apply, initialState } from '../reducer';
 import { account as accountOf } from '../selectors';
 import type { State } from '../types';
@@ -87,5 +87,19 @@ describe('readers', () => {
 
   it('should name a reader the room knows nothing about by their user ID', () => {
     expect(readerOf(accountOf(setUp(), ADA), ROOM, SAM)).toEqual(person(SAM));
+  });
+});
+
+describe('readerOverflow', () => {
+  it('should be absent when every reader has a face', () => {
+    expect(readerOverflow(READER_FACES)).toBeNull();
+  });
+
+  it('should count the readers beyond the faces', () => {
+    expect(readerOverflow(READER_FACES + 5)).toBe('+5');
+  });
+
+  it('should stop counting past 99 so it fits its column', () => {
+    expect(readerOverflow(READER_FACES + 150)).toBe('99+');
   });
 });

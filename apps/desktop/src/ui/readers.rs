@@ -12,8 +12,8 @@ const ROW: f32 = 52.0;
 /// A reader's picture in the indicator, and how much the next one overlaps it.
 const FACE: f32 = 18.0;
 const FACE_OVERLAP: f32 = 6.0;
-/// Room for the overflow count ("+99") after the pictures.
-const COUNT: f32 = 22.0;
+/// Room for the overflow count ("+99", or "99+") after the pictures.
+const COUNT: f32 = 24.0;
 /// The pictures a narrow timeline shows, and the width below which it is narrow.
 pub const NARROW_FACES: usize = 2;
 pub const NARROW_TIMELINE: f32 = 640.0;
@@ -30,6 +30,12 @@ fn indicator_key(key: &TimelineKey, event_id: &str) -> String {
 
 fn reader_key(user_id: &str) -> String {
     format!("reader-{user_id}")
+}
+
+/// How many more readers there are than pictures: "+5", and "99+" past that so the count stays
+/// within the column's room for it.
+fn overflow(more: usize) -> String {
+    if more > 99 { "99+".to_owned() } else { format!("+{more}") }
 }
 
 /// The read indicator, up to `faces` pictures and how many more, for the column at the lower
@@ -66,9 +72,8 @@ pub fn indicator(
         .label(label.clone())
         .help(label)
         .child(stack);
-    if message.read_receipts.len() > faces {
-        button = button
-            .child(text(format!("+{}", message.read_receipts.len() - faces)).font(font::META).color(p.text_muted));
+    if let Some(more) = message.read_receipts.len().checked_sub(faces).filter(|more| *more > 0) {
+        button = button.child(text(overflow(more)).font(font::META).color(p.text_muted));
     }
     button.on_press(move |s: &mut State| s.toggle_readers(&target, &event_id))
 }

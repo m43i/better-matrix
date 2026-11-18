@@ -16,6 +16,20 @@ import type { AccountData, State } from './types';
 /** The most pictures one message's read indicator shows: two, as a phone is narrow. */
 export const READER_FACES = 2;
 
+/**
+ * How many more people read a message than its indicator shows faces for: "+5", "99+" past
+ * that so the count fits the indicator's column, or null when every reader has a face.
+ */
+export function readerOverflow(readers: number): string | null {
+  const more = readers - READER_FACES;
+
+  if (more <= 0) {
+    return null;
+  }
+
+  return more > 99 ? '99+' : `+${more}`;
+}
+
 const NONE: ReadReceipt[] = [];
 
 /**
