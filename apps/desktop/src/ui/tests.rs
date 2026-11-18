@@ -964,6 +964,30 @@ fn a_linked_gif_should_leave_the_readers_column_clear_in_the_narrowest_window() 
 }
 
 #[test]
+fn a_thread_link_should_leave_the_readers_column_clear_in_a_narrow_window() {
+    let mut rt = readers_runtime();
+    rt.set_viewport((760.0, 1200.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    let frame = rt.presented("timeline-frame").expect("the timeline").0;
+    let column = frame[0] + frame[2] - 20.0 - super::readers::column_width(super::readers::NARROW_FACES);
+    let link = format!("thread-link-{}", demo::DEMO_THREAD.1);
+    let link = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(link.as_str())).expect("the thread link");
+    let texts = rt.elements().into_iter().filter(|e| {
+        e.text.is_some() && e.rect[1] >= link.rect[1] && e.rect[1] + e.rect[3] <= link.rect[1] + link.rect[3]
+    });
+    for e in texts {
+        assert!(
+            e.rect[0] + e.rect[2] <= column,
+            "{:?} ends at {}, the column starts at {column}",
+            e.text,
+            e.rect[0] + e.rect[2]
+        );
+    }
+}
+
+#[test]
 fn a_narrow_timeline_should_show_fewer_reader_pictures() {
     let overflow = |rt: &Runtime<State>| rt.elements().into_iter().any(|e| e.text.as_deref() == Some("+4"));
     let mut rt = readers_runtime();

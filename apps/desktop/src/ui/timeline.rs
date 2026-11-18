@@ -893,7 +893,8 @@ fn thread_link(root: &str, thread: &ThreadSummary, media: &MediaCache, p: &Palet
         } else {
             tf!("thread.last_reply", date = date_label(at, now), time = time)
         };
-        link = link.child(text(when).font(font::META).color(p.text_muted));
+        // Cut short in a narrow message rather than reach into the readers' column.
+        link = link.child(text(when).font(font::META).color(p.text_muted).shrink().truncate());
     }
     link.on_press(move |s: &mut State| s.open_thread(&root))
 }
