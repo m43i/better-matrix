@@ -68,6 +68,9 @@ pub(crate) struct Known {
     synced: bool,
     /// The number of the latest status message set ([`Account::set_status_message`]).
     message_number: u64,
+    /// How many status messages were saved: a read of the user's presence that one went through
+    /// during is older than what the save reported.
+    messages_saved: u64,
 }
 
 impl Account {
@@ -148,6 +151,7 @@ impl Account {
         request.status_msg = message.clone();
         // Syncs wait for the lock: a server asking to retry later must not hold them up long.
         tokio::time::timeout(ANNOUNCE_WAIT, self.client().send(request)).await.map_err(|_| Error::TimedOut)??;
+        known.messages_saved += 1;
         report(crate::PersonPresence {
             user_id: me.to_string(),
             presence: crate::people::presence(&presence),
@@ -163,7 +167,8 @@ impl Account {
     /// can't be read.
     pub(crate) async fn report_own_presence(&self, report: impl Fn(crate::PersonPresence)) {
         let Ok(me) = self.user_id() else { return };
-        let before = self.known().await.message_number;
+        let _one_at_a_time = self.presence_reads.lock().await;
+        let before = self.known().await.messages_saved;
         let read = self.client().send(get_presence::v3::Request::new(me.clone()));
         let current = match tokio::time::timeout(ANNOUNCE_WAIT, read).await {
             Ok(Ok(current)) => current,
@@ -179,17 +184,19 @@ impl Account {
         self.report_read_presence(before, shown, report).await;
     }
 
-    /// `report`s the user's own presence as read when the last status message saved was number
-    /// `before`, unless one was saved since.
+    /// `report`s the user's own presence as read when `before` status messages had been saved,
+    /// unless one was saved since; under the status's lock, so no save reports in between.
     async fn report_read_presence(
         &self,
         before: u64,
         shown: crate::PersonPresence,
         report: impl Fn(crate::PersonPresence),
     ) {
-        if self.known().await.message_number == before {
+        let known = self.known().await;
+        if known.messages_saved == before {
             report(shown);
         }
+        drop(known);
     }
 
     /// `report`s the status known now, if any: at start, in turn with saves and syncs.
@@ -624,21 +631,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_rejected_status_message_should_not_drop_a_presence_read() {
+        let server = Homeserver::plain();
+        let account = server.account().await;
+        account.known().await.message_number = 1;
+        let read =
+            crate::PersonPresence { user_id: "@me:x".into(), presence: crate::Presence::Online, status_message: None };
+        let (heard, report) = shown();
+        account.report_read_presence(0, read, report).await;
+        assert_eq!(heard.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn reading_own_presence_should_not_hold_the_status_for_syncs() {
-        // The server answers presence reads only once the status could be read meanwhile.
-        let (tx, rx) = std::sync::mpsc::channel::<()>();
-        let rx = Mutex::new(rx);
+        // The server says when a presence read arrives, and answers it only once told to.
+        let (arrived, arrival) = std::sync::mpsc::channel::<()>();
+        let (answer, answered) = std::sync::mpsc::channel::<()>();
+        let (arrived, answered) = (Mutex::new(arrived), Mutex::new(answered));
         let server = Homeserver::new(Value::Null, Some("Out"), move || {
-            rx.lock().unwrap().recv_timeout(std::time::Duration::from_secs(5)).is_ok()
+            let _ = arrived.lock().unwrap().send(());
+            answered.lock().unwrap().recv_timeout(std::time::Duration::from_secs(5)).is_ok()
         });
         let account = Arc::new(server.account().await);
         let reading = {
             let account = Arc::clone(&account);
             tokio::spawn(async move { account.report_own_presence(|_| {}).await })
         };
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let wait = std::time::Duration::from_secs(5);
+        tokio::task::spawn_blocking(move || arrival.recv_timeout(wait)).await.unwrap().unwrap();
         let status = tokio::time::timeout(std::time::Duration::from_secs(1), account.status()).await;
-        tx.send(()).unwrap();
+        answer.send(()).unwrap();
         reading.await.unwrap();
         assert!(status.is_ok(), "a sync could read the status while presence was being read");
     }
