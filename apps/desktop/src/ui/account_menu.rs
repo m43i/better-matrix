@@ -13,7 +13,9 @@ use crate::i18n::{t, tf};
 use crate::state::{AccountData, EmojiFor, Popover, Scope, State, leading_emoji, status_suggestions};
 use matrix_core::{AccountId, Status};
 
-pub fn account_menu(s: &State, p: &Palette) -> El {
+/// The menu, at most as tall as the `window` leaves room for: in a short window it scrolls, so
+/// Settings and Sign out stay reachable.
+pub fn account_menu(s: &State, window: [f32; 2], p: &Palette) -> El {
     let mut panel = popover_panel(p).key("account-menu");
     if let Some(account) = s.active_account() {
         // Writing a status message, the menu is only that: it stays short and on screen.
@@ -97,6 +99,7 @@ pub fn account_menu(s: &State, p: &Palette) -> El {
             .on_press(move |s: &mut State| s.sign_out(&id)),
         );
     }
+    let panel = panel.max_h((window[1] - 16.0).max(100.0)).scroll(rune::ScrollSpec { stick_bottom: false });
     col().child(panel).anchored(ACCOUNT_BUTTON, Side::Right, Align::End, 10.0)
 }
 

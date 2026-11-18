@@ -1640,3 +1640,21 @@ fn the_bookmark_button_should_not_open_the_saved_message() {
     assert!(rt.find("saved-dialog").is_some());
     assert!(rt.state.message_jump.is_none());
 }
+
+#[test]
+fn the_account_menu_should_fit_the_smallest_window() {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    state.set_status_message(&AccountId::new(demo::ADA), "🌴 On vacation until Monday");
+    state.toggle_popover(crate::state::Popover::AccountSwitcher);
+    let mut rt = Runtime::new(state, super::view, (720.0, 480.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    let menu = rt.presented("account-menu").expect("the account menu").0;
+    assert!(menu[1] >= 0.0 && menu[1] + menu[3] <= 480.0, "the menu stays inside the window: {menu:?}");
+    rt.update(|_, tx| tx.scroll_into_view("menu-sign-out"));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let sign_out = rt.presented("menu-sign-out").expect("sign out").0;
+    assert!(sign_out[1] + sign_out[3] <= 480.0, "sign out can be reached: {sign_out:?}");
+}
