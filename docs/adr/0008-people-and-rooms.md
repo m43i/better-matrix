@@ -36,11 +36,13 @@ Date: 2026-11-14
     may be stale, and one set elsewhere meanwhile could be Hidden. With none ever set, Online.
   - A sync as `offline` leaves the session's presence as it was, so hiding needs an explicit
     `PUT /presence` on every session: `Command::SetStatus` writes the account data (and this
-    device's copy, so a sync answered before the save can't bring the old status back) and then
-    announces it, and every session announces a status that a sync brings. A sync that raced a
+    device's copy, so a sync answered before the save can't bring the old status back, unless
+    the copy already holds a later one: each save carries `changed_at`) and then announces it,
+    and every session announces a status that a sync brings. A sync that raced a
     change brings that change back, so its announcement lands after the stale sync. Announcing
     keeps the status message another client set, and sends nothing when it can't read it.
-    Presence requests try three times, ten seconds each, as they run between syncs.
+    Announcing gives up after 20 s, retries and waits the server asks for included, as it runs
+    between syncs; the next sync tries again.
     Changes to one account save and announce one at a time (`Account::announced`).
   - Each session remembers the status it last announced; after every sync it announces the
     saved one if that differs (`Account::follow_status`): after starting, and again after
