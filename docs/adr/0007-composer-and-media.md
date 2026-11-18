@@ -181,9 +181,13 @@ screenshots, voice memos, and images and PDFs that open large.
   - An image counts at the size fetched (a thumbnail, the sender's own included), not the
     original.
   - A thumbnail fits the box it was asked for: a server answers with the nearest rendition it
-    made (Synapse answers 128×128 with 320×240) or the original, so the engine scales a PNG or
-    JPEG larger than the box down to fit it, upright, on a blocking thread, before
-    `MediaLoaded` (`thumbnail::fit`). Other formats, animated ones among them, pass through.
+    made (Synapse answers 128×128 with 320×240), and the SDK answers one for an encrypted file
+    with the original, so the engine scales a still PNG or JPEG larger than the box down to
+    fit it (upright, premultiplied, keeping its colour profile), two at a time on blocking
+    threads, before `MediaLoaded` (`thumbnail::fit_off_thread`). Decoding is bounded like
+    Rune's (8192 pixels a side, 256 MiB); a larger image, another format (animated PNGs among
+    them) or a failure passes through unchanged. An encrypted original is scaled again on each
+    fetch: the SDK caches the original.
   - It counts at an estimate until Rune decodes it, then `MediaCache::measure` (from `poll`)
     counts what Rune holds: RGBA at every mip level.
   - Animated frames are counted from the file without decoding (GIF image blocks, APNG `acTL`,
