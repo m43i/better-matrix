@@ -15,6 +15,12 @@ use crate::account::Account;
 /// The account data event the status is stored in.
 const EVENT_TYPE: &str = "chat.bettermatrix.status";
 
+/// How presence is asked for and set: a few tries, each answered within ten seconds, so a
+/// server whose presence is down holds the sync that announces only briefly.
+fn presence_requests() -> matrix_sdk::config::RequestConfig {
+    matrix_sdk::config::RequestConfig::short_retry().timeout(std::time::Duration::from_secs(10))
+}
+
 /// What others see of the user, as the user set it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ffi", derive(ts_rs::TS))]
@@ -54,11 +60,20 @@ impl Account {
     }
 
     /// Saves the status to the account's data, which the next sync announces, and announces it
-    /// now. Changes save one at a time, in the order they were asked for.
+    /// now. Changes save one at a time, in the order they were asked for. This device's copy is
+    /// updated at once: a sync answered before the save doesn't carry it, and must not bring the
+    /// old status back here.
     pub async fn set_status(&self, status: Status) -> Result<(), Error> {
         let mut announced = self.announced.lock().await;
+        let event_type = GlobalAccountDataEventType::from(EVENT_TYPE);
         let raw = Raw::new(&Content { status }).map_err(|e| Error::Storage(e.into()))?.cast_unchecked();
-        self.client().account().set_account_data_raw(GlobalAccountDataEventType::from(EVENT_TYPE), raw).await?;
+        self.client().account().set_account_data_raw(event_type.clone(), raw).await?;
+        let event = serde_json::json!({ "type": EVENT_TYPE, "content": Content { status } });
+        let mut changes = matrix_sdk::StateChanges::default();
+        changes
+            .account_data
+            .insert(event_type, Raw::new(&event).map_err(|e| Error::Storage(e.into()))?.cast_unchecked());
+        self.client().state_store().save_changes(&changes).await.map_err(matrix_sdk::Error::from)?;
         *announced = self.announce_status(status).await.then_some(status);
         Ok(())
     }
@@ -89,10 +104,14 @@ impl Account {
     async fn announce_status(&self, status: Status) -> bool {
         let Some(me) = self.client().user_id() else { return false };
         let announced = async {
-            let current = self.client().send(get_presence::v3::Request::new(me.to_owned())).await?;
+            let current = self
+                .client()
+                .send(get_presence::v3::Request::new(me.to_owned()))
+                .with_request_config(presence_requests())
+                .await?;
             let mut request = set_presence::v3::Request::new(me.to_owned(), status.presence());
             request.status_msg = current.status_msg;
-            self.client().send(request).await.map(|_| ())
+            self.client().send(request).with_request_config(presence_requests()).await.map(|_| ())
         };
         match announced.await {
             Ok(()) => true,
@@ -204,6 +223,43 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(account.status().await.unwrap(), Some(Status::Away));
+    }
+
+    #[tokio::test]
+    async fn a_sync_answered_before_a_change_should_not_bring_the_old_status_back() {
+        let presence = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = presence.clone();
+        let synced = std::sync::Arc::new(AtomicUsize::new(0));
+        let server = crate::test_server::Server::new(move |request| {
+            if request.starts_with("PUT") && request.contains("/presence/") {
+                let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
+                captured
+                    .lock()
+                    .unwrap()
+                    .push(serde_json::from_str::<serde_json::Value>(body).unwrap()["presence"].clone());
+                return serde_json::json!({});
+            }
+            if request.starts_with("GET") && request.contains("/presence/") {
+                return serde_json::json!({ "presence": "online" });
+            }
+            let mut response = crate::test_server::thread_response(request);
+            // The first sync brings Online; later ones were answered before the change (nothing new).
+            if request.contains("/sync?") && synced.fetch_add(1, Ordering::Relaxed) == 0 {
+                response["account_data"] =
+                    serde_json::json!({"events":[{"type":EVENT_TYPE,"content":{"status":"Online"}}]});
+            }
+            response
+        });
+        let account = Account::for_test(&server.url()).await;
+        let sync = || {
+            account.client().sync_once(matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::ZERO))
+        };
+        sync().await.unwrap();
+        account.set_status(Status::Hidden).await.unwrap();
+        let stale = sync().await.unwrap();
+        assert_eq!(account.follow_status(&stale.account_data).await, None);
+        assert_eq!(account.status().await.unwrap(), Some(Status::Hidden));
+        assert_eq!(*presence.lock().unwrap(), vec![serde_json::json!("offline")]);
     }
 
     #[tokio::test]

@@ -35,10 +35,12 @@ Date: 2026-11-14
     first sync has caught up, every sync sends `offline`, which marks no one: the stored status
     may be stale, and one set elsewhere meanwhile could be Hidden. With none ever set, Online.
   - A sync as `offline` leaves the session's presence as it was, so hiding needs an explicit
-    `PUT /presence` on every session: `Command::SetStatus` writes the account data and then
+    `PUT /presence` on every session: `Command::SetStatus` writes the account data (and this
+    device's copy, so a sync answered before the save can't bring the old status back) and then
     announces it, and every session announces a status that a sync brings. A sync that raced a
     change brings that change back, so its announcement lands after the stale sync. Announcing
     keeps the status message another client set, and sends nothing when it can't read it.
+    Presence requests try three times, ten seconds each, as they run between syncs.
     Changes to one account save and announce one at a time (`Account::announced`).
   - Each session remembers the status it last announced; after every sync it announces the
     saved one if that differs (`Account::follow_status`): after starting, and again after
