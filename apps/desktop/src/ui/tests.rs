@@ -969,12 +969,9 @@ fn a_linked_gif_should_leave_the_readers_column_clear_in_the_narrowest_window() 
 }
 
 #[test]
-fn a_file_card_should_leave_the_readers_column_clear_beside_a_thread() {
-    let mut rt = runtime(|s| {
-        s.select_room(demo::DEMO_THREAD.0);
-        s.open_thread(demo::DEMO_THREAD.1);
-    });
-    let column = readers_column_start_at(&mut rt, (720.0, 1600.0));
+fn a_file_card_should_leave_the_readers_column_clear_in_the_narrowest_window() {
+    let mut rt = runtime(|s| s.select_room(demo::DEMO_THREAD.0));
+    let column = readers_column_start(&mut rt);
     let names = rt.elements().into_iter().filter(|e| e.text.as_deref() == Some("release-notes-0.2.pdf"));
     for e in names.chain(rt.elements().into_iter().filter(|e| e.key.as_deref() == Some("file-release-notes-0.2.pdf"))) {
         assert!(
@@ -1003,11 +1000,10 @@ fn a_long_link_should_wrap_clear_of_the_readers_column() {
 }
 
 #[test]
-fn long_names_words_and_reactions_should_stay_clear_of_the_readers_column_beside_a_thread() {
+fn long_names_words_and_reactions_should_stay_clear_of_the_readers_column_in_the_narrowest_window() {
     const LONG: &str = "3f1c9a7e5b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a";
     let mut rt = readers_runtime();
     rt.update(|s, tx| {
-        s.open_thread(demo::DEMO_THREAD.1);
         let account = s.nav.account.clone().unwrap();
         let read = vec![matrix_core::ReadReceipt { user_id: "@kai:example.org".into(), timestamp_ms: None }];
         let message = |id: &str, content: MessageContent| {
@@ -1051,11 +1047,12 @@ fn long_names_words_and_reactions_should_stay_clear_of_the_readers_column_beside
             tx,
         );
     });
-    let column = readers_column_start_at(&mut rt, (760.0, 1350.0));
+    let column = readers_column_start(&mut rt);
+    let frame = rt.presented("timeline-frame").expect("the timeline").0;
     for key in ["msg-long", "msg-long-poll"] {
         let row = rt.presented(key).expect("the message").0;
         let inside = rt.elements().into_iter().filter(|e| {
-            e.rect[1] >= row[1]
+            e.rect[1] >= row[1].max(frame[1])
                 && e.rect[1] + e.rect[3] <= row[1] + row[3]
                 && e.rect[0] < column
                 && e.key.as_deref() != Some(key)
@@ -1072,32 +1069,21 @@ fn long_names_words_and_reactions_should_stay_clear_of_the_readers_column_beside
 }
 
 #[test]
-fn a_link_card_should_keep_its_words_and_leave_the_readers_column_clear_beside_a_thread() {
-    let mut rt = runtime(|s| {
-        s.select_room(demo::DEMO_THREAD.0);
-        s.open_thread(demo::DEMO_THREAD.1);
-    });
-    // 780 points at 125% zoom.
-    let column = readers_column_start_at(&mut rt, (624.0, 1280.0));
-    let card = rt
-        .elements()
-        .into_iter()
-        .find(|e| e.key.as_deref().is_some_and(|k| k.starts_with("link-")))
-        .expect("the link card")
-        .rect;
-    let inside = rt.elements().into_iter().filter(|e| {
-        e.rect[1] >= card[1] && e.rect[1] + e.rect[3] <= card[1] + card[3] && e.rect[0] >= card[0] && e.rect[0] < column
-    });
-    for e in inside {
-        assert!(
-            e.rect[0] + e.rect[2] <= column,
-            "{:?} ends at {}, the column starts at {column}",
-            e.text,
-            e.rect[0] + e.rect[2]
-        );
-    }
+fn a_timeline_too_narrow_for_the_readers_column_should_show_indicators_under_their_messages() {
+    let mut rt = readers_runtime();
+    rt.update(|s, _| s.open_thread(demo::DEMO_THREAD.1));
+    // 780 points at 125% zoom, beside a thread.
+    rt.set_viewport((624.0, 1280.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    let text = rt.presented("text-$read-demo").expect("the message's text").0;
+    let indicator = rt.presented(&format!("readers-{}-$read-demo", demo::DEMO_THREAD.0)).expect("the indicator").0;
+    assert!(indicator[1] >= text[1] + text[3], "the indicator takes a line under the message");
+    let answer = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Friday")).expect("a poll answer");
+    assert!(answer.rect[3] < 30.0, "a poll answer keeps to a line: {}", answer.rect[3]);
     let site = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Better Matrix")).expect("the site's name");
-    assert!(site.rect[2] >= 40.0, "the card's words keep room: {}", site.rect[2]);
+    assert!(site.rect[2] >= 40.0, "the link card's words keep room: {}", site.rect[2]);
 }
 
 #[test]

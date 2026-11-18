@@ -21,6 +21,9 @@ const COUNT: f32 = 24.0;
 /// The pictures a narrow timeline shows, and the width below which it is narrow.
 pub const NARROW_FACES: usize = 2;
 pub const NARROW_TIMELINE: f32 = 640.0;
+/// The least width a message keeps beside the readers' column; a timeline too narrow for that
+/// shows each indicator on a line under its message instead.
+pub const MIN_CONTENT: f32 = 200.0;
 
 /// The width every room message keeps free at its right for an indicator of up to `faces`
 /// pictures, whether or not it has one, so a receipt never rewraps or grows its message.
@@ -43,7 +46,8 @@ fn overflow(more: usize) -> String {
 }
 
 /// The read indicator, up to `faces` pictures and how many more, for the column at the lower
-/// right of its message's row ([`column_width`]), no taller than a line of text.
+/// right of its message's row ([`column_width`]) or a line under it, no taller than a line of
+/// text.
 pub fn indicator(
     account: &AccountData,
     key: &TimelineKey,

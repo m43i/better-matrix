@@ -55,6 +55,9 @@ pub struct Context<'a> {
     pub audio: Option<&'a AudioClip>,
     /// The most reader pictures a read indicator shows: fewer in a narrow timeline.
     pub reader_faces: usize,
+    /// Whether messages keep the readers' column: not in a timeline too narrow for it, where an
+    /// indicator takes a line under its message instead.
+    pub readers_column: bool,
     /// The widest a message's content can be, once the timeline has a size: pictures and GIFs
     /// fit it, so they never reach into the readers' column.
     pub content_width: f32,
@@ -77,6 +80,7 @@ impl<'a> Context<'a> {
             ringing: s.rings.iter().any(|ring| ring.account == data.summary.id && ring.room_id == key.room_id),
             audio: s.audio.as_ref(),
             reader_faces: crate::state::READER_FACES,
+            readers_column: true,
             content_width: f32::INFINITY,
         }
     }
@@ -429,10 +433,12 @@ pub fn timeline(
         Some(width) if width < super::readers::NARROW_TIMELINE => super::readers::NARROW_FACES,
         _ => crate::state::READER_FACES,
     };
-    // Less the row's padding, the sender's picture and the readers' column, each with its gap.
-    let readers = if cx.in_thread() { 0.0 } else { super::readers::column_width(reader_faces) + MESSAGE_GAP };
-    let content_width =
-        frame_width.map_or(f32::INFINITY, |width| width - 2.0 * MESSAGE_PAD_X - AVATAR - MESSAGE_GAP - readers);
+    // Less the row's padding, the sender's picture and the readers' column, each with its gap;
+    // a timeline that can't spare the column for messages drops it.
+    let beside = frame_width.map_or(f32::INFINITY, |width| width - 2.0 * MESSAGE_PAD_X - AVATAR - MESSAGE_GAP);
+    let readers = super::readers::column_width(reader_faces) + MESSAGE_GAP;
+    let readers_column = !cx.in_thread() && beside - readers >= super::readers::MIN_CONTENT;
+    let content_width = if readers_column { beside - readers } else { beside };
     let mut list = col()
         .w_full()
         .py(16.0)
@@ -446,6 +452,7 @@ pub fn timeline(
                 match row_context(s, &account, &key) {
                     Some((mut cx, timeline)) => {
                         cx.reader_faces = reader_faces;
+                        cx.readers_column = readers_column;
                         cx.content_width = content_width;
                         build_row(&cx, timeline, row_key, row, &palette)
                     }
@@ -651,6 +658,11 @@ fn message_row(
     if let (true, Some(thread), false) = (interactive, &message.thread, cx.in_thread()) {
         body = body.child(thread_link(&message.event_id, thread, cx.media, p));
     }
+    // Too narrow a timeline for the readers' column: the indicator takes a line of its own.
+    if !cx.in_thread() && !cx.readers_column && !message.pending && !message.read_receipts.is_empty() {
+        let indicator = super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, p);
+        body = body.child(row().w_full().justify_end().child(indicator));
+    }
 
     let mut status = Vec::new();
     if message.edited {
@@ -715,7 +727,7 @@ fn message_row(
     // Room messages keep a column at the right for who has read them, filled or not and as tall
     // as the indicator, so a receipt arriving never rewraps or grows the message (threads track
     // no receipts).
-    if !cx.in_thread() {
+    if !cx.in_thread() && cx.readers_column {
         let mut readers = row_el()
             .w(super::readers::column_width(cx.reader_faces))
             .min_h(super::readers::HEIGHT)
@@ -751,7 +763,11 @@ fn message_row(
 
 /// The message toolbar's distance from its row's right edge.
 fn toolbar_right(cx: &Context<'_>) -> f32 {
-    if cx.in_thread() { 16.0 } else { MESSAGE_PAD_X + super::readers::column_width(cx.reader_faces) }
+    if cx.in_thread() || !cx.readers_column {
+        16.0
+    } else {
+        MESSAGE_PAD_X + super::readers::column_width(cx.reader_faces)
+    }
 }
 
 /// React, reply and reply in thread, at the message's top right while it is hovered (or its
