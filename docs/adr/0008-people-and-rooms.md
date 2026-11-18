@@ -31,15 +31,21 @@ Date: 2026-11-14
   - Saved in the account data event `chat.bettermatrix.status`, not on the device: presence
     belongs to the user, so every session of this app announces the same one. Other clients
     still announce online while they sync.
-  - Every sync sends it as `set_presence`, read from the store before each request, so a status
-    set on another session holds here from the next sync. Until the first sync has caught up,
-    an account with none stored syncs as `offline`: a hidden user never shows online while the
-    status is unknown. With none at all after that, it is Online.
-  - `Command::SetStatus` writes the account data, then sets presence at once
-    (`PUT /presence`); a refused presence request only logs, as syncs carry the status anyway.
-    `Event::Status` reports it at start, after a change here, and when a sync brings one.
-  - The apps show the choice at once and, if saving fails, show the previous one with a notice.
-  - Servers with presence switched off accept the status but show nobody's.
+  - Every sync sends it as `set_presence`, read from the store before each request. Until the
+    first sync has caught up, every sync sends `offline`, which marks no one: the stored status
+    may be stale, and one set elsewhere meanwhile could be Hidden. With none ever set, Online.
+  - A sync as `offline` leaves the session's presence as it was, so hiding needs an explicit
+    `PUT /presence` on every session: `Command::SetStatus` writes the account data and then
+    announces it, and every session announces a status that a sync brings. A sync that raced a
+    change brings that change back, so its announcement lands after the stale sync. Announcing
+    keeps the status message another client set; a refused one only logs. Changes to one
+    account save and announce one at a time (`Account::status_writes`).
+  - `Event::Status` reports it at start, after a change here, and when a sync brings one.
+  - The apps show the choice at once and, if saving fails, show the previous one with a notice,
+    unless another was chosen or reported since.
+  - Synapse turns Away (`unavailable`) back into online when the user sends a message, types or
+    reads; the next sync or change sets it again. Hidden is not affected. Servers with presence
+    switched off accept the status but show nobody's.
 - **Contact details** step through `ContactStep` per kind:
   1. `Entering` the address.
   2. `Requesting`: `RequestContactCode` sends a link or code; `Event::ContactCodeSent` carries

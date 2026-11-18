@@ -2733,9 +2733,7 @@ async fn sync_until_error(
             {
                 sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
             }
-            if crate::status::changed_in(&response.account_data)
-                && let Ok(Some(status)) = account.status().await
-            {
+            if let Some(status) = account.follow_status(&response.account_data).await {
                 sink.emit(Event::Status { account: account.id().clone(), status });
             }
             feed.refresh((!all).then_some(&changed)).await;

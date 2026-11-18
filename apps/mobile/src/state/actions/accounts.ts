@@ -456,7 +456,8 @@ export function setDefaultNotificationMode(
 
 /**
  * Sets what others see of the user on an account (online, away, hidden), showing it at once;
- * if the server refuses, the previous status shows again with a notice.
+ * if the server refuses, the previous status shows again (unless another was chosen since) with
+ * a notice.
  */
 export function setStatus(store: Store, account: AccountId, status: Status): void {
   const previous = store.getState().accounts.find((a) => a.summary.id === account)?.status;
@@ -468,7 +469,10 @@ export function setStatus(store: Store, account: AccountId, status: Status): voi
 
   show(status);
   store.run({ type: 'SetStatus', data: { account, status } }).catch((error: CommandFailed) => {
-    show(previous);
+    // Another status chosen or reported since stays.
+    const shown = store.getState().accounts.find((a) => a.summary.id === account)?.status;
+
+    if (shown === status) show(previous);
     store.update((s) => addNotice(s, t('notice.status', { error: error.message })));
   });
 }

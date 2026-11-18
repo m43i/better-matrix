@@ -455,6 +455,15 @@ describe('setStatus', () => {
     expect(commands()).toEqual([]);
   });
 
+  it('should keep a status chosen since when an earlier one fails', async () => {
+    const { store, sent, finish } = withAda();
+    setStatus(store, ADA, 'Away');
+    setStatus(store, ADA, 'Hidden');
+    finish(sent[0]!.request, 'offline');
+    await flush();
+    expect(status(store)).toBe('Hidden');
+  });
+
   it('should show the previous status and why when the server refuses', async () => {
     const { store, sent, finish } = withAda();
     setStatus(store, ADA, 'Away');

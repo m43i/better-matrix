@@ -477,9 +477,11 @@ enum Purpose {
         dimensions: Option<(u32, u32)>,
     },
     NotificationMode,
-    /// Setting the user's status; failing, the account shows `previous` again.
+    /// Setting the user's status to `chosen`; failing, the account shows `previous` again,
+    /// unless another status was chosen or reported since.
     Status {
         account: AccountId,
+        chosen: matrix_core::Status,
         previous: matrix_core::Status,
     },
     Leave,
@@ -1588,8 +1590,10 @@ impl State {
             Purpose::Delete => self.notice = Some(tf!("notice.not_deleted", error = error)),
             Purpose::Logout => self.notice = Some(tf!("notice.sign_out", error = error)),
             Purpose::NotificationMode => self.notice = Some(tf!("notice.notification_setting", error = error)),
-            Purpose::Status { account, previous } => {
-                self.accounts.set_status(&account, previous);
+            Purpose::Status { account, chosen, previous } => {
+                if self.accounts.get(&account).is_some_and(|data| data.status == chosen) {
+                    self.accounts.set_status(&account, previous);
+                }
                 self.notice = Some(tf!("notice.status", error = error));
             }
             Purpose::Leave => self.notice = Some(tf!("notice.leave", error = error)),
@@ -3098,7 +3102,7 @@ impl State {
         }
         self.accounts.set_status(account, status);
         let command = Command::SetStatus { account: account.clone(), status };
-        self.dispatch(command, Purpose::Status { account: account.clone(), previous });
+        self.dispatch(command, Purpose::Status { account: account.clone(), chosen: status, previous });
     }
 
     // ----- encryption and sessions ---------------------------------------------------------

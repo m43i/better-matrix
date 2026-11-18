@@ -553,6 +553,18 @@ fn a_status_the_server_refused_should_show_the_previous_one_and_why() {
 }
 
 #[test]
+fn a_late_failure_should_not_undo_a_status_chosen_since() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.set_status(&id, matrix_core::Status::Away);
+    let (away, _) = commands.try_next().unwrap();
+    s.set_status(&id, matrix_core::Status::Hidden);
+    apply(&mut s, Event::Finished { request: away, result: Err("offline".into()) });
+    assert_eq!(s.accounts.get(&id).map(|a| a.status), Some(matrix_core::Status::Hidden));
+}
+
+#[test]
 fn a_status_set_on_another_session_should_show_here() {
     let (mut s, _) = state();
     let id = AccountId::new("@a:example.org");

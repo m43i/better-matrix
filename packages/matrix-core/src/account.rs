@@ -76,6 +76,8 @@ pub struct Account {
     session_changes: Arc<Mutex<Option<broadcast::Receiver<SessionChange>>>>,
     /// The LiveKit service the homeserver names for calls, once looked up.
     rtc: Arc<Mutex<Option<String>>>,
+    /// Held while a status is saved and announced: one change at a time, in the order chosen.
+    pub(crate) status_writes: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Where the browser comes back to after an OAuth sign-in.
@@ -254,6 +256,7 @@ impl Account {
             client,
             session_changes: Arc::new(Mutex::new(None)),
             rtc: Arc::new(Mutex::new(None)),
+            status_writes: Arc::default(),
         }
     }
 
@@ -358,7 +361,13 @@ impl Account {
         if let Err(error) = client.media().set_media_retention_policy(media_cache()).await {
             eprintln!("matrix-core: could not limit the media cache: {error}");
         }
-        Ok(Self { id, client, session_changes: Arc::new(Mutex::new(Some(changes))), rtc: Arc::default() })
+        Ok(Self {
+            id,
+            client,
+            session_changes: Arc::new(Mutex::new(Some(changes))),
+            rtc: Arc::default(),
+            status_writes: Arc::default(),
+        })
     }
 
     /// The account's token changes: the subscription made before its first request, the first
@@ -938,6 +947,7 @@ mod tests {
             client,
             session_changes: Arc::new(Mutex::new(None)),
             rtc: Arc::new(Mutex::new(None)),
+            status_writes: Arc::default(),
         }
     }
 

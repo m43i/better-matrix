@@ -288,7 +288,12 @@ export function ListRow({
   if (!onPress) return <View testID={testID}>{body}</View>;
 
   return (
-    <Touchable testID={testID} onPress={onPress} accessibilityRole="button">
+    <Touchable
+      testID={testID}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={selected === undefined ? undefined : { selected }}
+    >
       {body}
     </Touchable>
   );
