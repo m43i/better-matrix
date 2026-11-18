@@ -29,9 +29,12 @@ pub struct Typing {
 }
 
 impl Typing {
-    /// The drafts changed without the user typing (a draft came back): no notice for that.
+    /// The drafts changed without the user typing (a draft came back): no notice for that. Drafts
+    /// that all went empty are left to `update`, which tells the room typing stopped.
     pub fn seen(&mut self, drafts: &[&str]) {
-        self.drafts = drafts.iter().map(|draft| (*draft).to_owned()).collect();
+        if drafts.iter().any(|draft| !draft.trim().is_empty()) {
+            self.drafts = drafts.iter().map(|draft| (*draft).to_owned()).collect();
+        }
     }
 
     /// The notices due now, for the room shown (if any) and its composers' drafts. Opening a

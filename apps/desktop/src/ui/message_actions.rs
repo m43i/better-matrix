@@ -95,12 +95,12 @@ pub fn menu(
     }
     if readable {
         let saved = account.is_saved(&key.room_id, event_id);
-        let (room_id, id) = (key.room_id.clone(), event_id.to_owned());
+        let (owner, room_id, id) = (account.summary.id.clone(), key.room_id.clone(), event_id.to_owned());
         let (glyph, label) =
             if saved { (&icons::UNBOOKMARK, t!("actions.unsave")) } else { (&icons::BOOKMARK, t!("actions.save")) };
         panel = panel.child(
             action(glyph, label, "message-save")
-                .on_press(move |s: &mut State| s.set_message_saved(&room_id, &id, !saved)),
+                .on_press(move |s: &mut State| s.set_message_saved(&owner, &room_id, &id, !saved)),
         );
     }
     let body = match &message.content {

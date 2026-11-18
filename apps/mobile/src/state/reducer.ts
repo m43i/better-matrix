@@ -187,6 +187,10 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
         verifications: state.verifications.filter((v) => v.account !== event.data),
         // Its pusher went with its session (signing out removes it first, ADR 0010).
         pushers: withoutKey(state.pushers, event.data),
+        // Its drafts go with it; signing in again reads the ones its store kept.
+        composers: Object.fromEntries(
+          Object.entries(state.composers).filter(([id]) => !id.startsWith(`${event.data}|`)),
+        ),
       };
     }
 

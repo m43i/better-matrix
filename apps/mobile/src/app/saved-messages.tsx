@@ -1,7 +1,7 @@
 // The messages the account saved, across its rooms, most recently saved first: from the account
 // menu. A row opens its message where it was sent; its bookmark stops saving it.
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FlatList, View } from 'react-native';
 import { t } from '../i18n';
 import { routes } from '../routes';
@@ -30,15 +30,21 @@ export default function SavedMessagesScreen() {
     error: null,
   });
 
+  // One list request at a time, in order: a newer list never gives way to an older one that
+  // happened to answer last.
+  const listing = useRef<Promise<void>>(Promise.resolve());
+
   useEffect(() => {
     let active = true;
+    const listed = listing.current.catch(() => undefined).then(() => listSaved(store, account));
+    listing.current = listed;
 
-    void listSaved(store, account).then(
+    void listed.then(
       () => {
         if (active) setStatus({ loading: false, error: null });
       },
       (error: Error) => {
-        if (active) setStatus({ loading: false, error: String(error) });
+        if (active) setStatus({ loading: false, error: error.message });
       },
     );
 
@@ -65,7 +71,7 @@ export default function SavedMessagesScreen() {
         ListHeaderComponent={
           status.error ? (
             <View>
-              <EmptyState icon="alert" title={status.error} />
+              <EmptyState icon="alert" title={t('saved.failed', { error: status.error })} />
               <ListRow title={t('saved.retry')} onPress={reload} testID="saved-retry" />
             </View>
           ) : undefined

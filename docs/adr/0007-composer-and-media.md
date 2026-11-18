@@ -53,11 +53,16 @@ screenshots, voice memos, and images and PDFs that open large.
   keep a composer per timeline already (`ComposerState`). The text and its formatting also go to
   the device's store through the SDK's composer drafts (`Command::SaveDraft` / `LoadDraft`,
   `NewMessage` drafts by room and thread root), so a draft survives a restart; replies and
-  attachments don't. A draft being typed is written at most every 500 ms, an emptied one (sent or
-  cleared) and one being left at once, so a sent message never comes back
-  (`state/drafts.rs`, `state/actions/drafts.ts`). A timeline asks the store once per run, on its
-  first visit; the answer goes in only if the composer still writes there and holds nothing,
-  without a typing notice, so it never replaces what the user did meanwhile.
+  attachments don't. The engine runs an account's draft reads and writes one at a time in the
+  order asked (`DraftQueue`), so a write never lands after a later clear. A draft being typed is
+  written at most every 500 ms; an emptied one (sent or cleared), one being left, and the drafts
+  on screen as the window loses focus (phones: as the conversation is left) at once, so a sent
+  message never comes back. Quitting within half a second of the last keystroke can lose it.
+  (`state/drafts.rs`, `state/actions/drafts.ts`.) A timeline asks the store once per run, on its
+  first visit; the answer goes in only if the composer still writes there and the user hasn't
+  changed it this run (`Kept::touched`, `ComposerState.touched`), without a typing notice; if
+  they had, what they left is written over it. Phones keep their own composer source (markers
+  and all) as the body, so it comes back exactly; the desktop keeps text and HTML.
 - **Uploads:** `Outgoing::File` carries an `Upload`, a path on disk or bytes with a name.
   - Pastes reach the field through `on_input_paste`. A pasted image joins the draft as
     `image.png`, `image-2.png` and so on; pasted files are attached; text pastes as text.

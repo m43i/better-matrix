@@ -604,6 +604,7 @@
   "saved.empty": "Nothing saved yet. Save a message from its menu to find it here. Only you can see what you save.",
   "saved.in_room": "in {{room}}",
   "saved.retry": "Try again",
+  "saved.failed": "Couldn’t load your saved messages: {{error}}",
   "actions.copy_text": "Copy text",
   "actions.translate": "Translate…",
   "info.pins": "Pinned messages",

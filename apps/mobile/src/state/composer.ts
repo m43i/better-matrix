@@ -20,6 +20,8 @@ export interface ComposerState {
   setAside?: SetAside | null;
   /** Where the caret was when the field last reported it: a picked emoji goes there. */
   selection?: { start: number; end: number };
+  /** The user changed the draft this run: a kept draft read after that doesn't replace it. */
+  touched?: boolean;
   /**
    * Edits the server refused while another edit held the field, newest first: each comes back
    * when the field is free (ADR 0006).

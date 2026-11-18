@@ -604,6 +604,7 @@
   "saved.empty": "Noch nichts gespeichert. Speichere eine Nachricht über ihr Menü, um sie hier wiederzufinden. Nur du siehst, was du speicherst.",
   "saved.in_room": "in {{room}}",
   "saved.retry": "Erneut versuchen",
+  "saved.failed": "Gespeicherte Nachrichten konnten nicht geladen werden: {{error}}",
   "actions.copy_text": "Text kopieren",
   "actions.translate": "Übersetzen…",
   "info.pins": "Angeheftete Nachrichten",

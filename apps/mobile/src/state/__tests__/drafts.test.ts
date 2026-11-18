@@ -7,11 +7,11 @@ describe('kept drafts', () => {
     expect(storedDraft({ ...EMPTY_COMPOSER, draft: '  \n' })).toBeNull();
   });
 
-  it('should keep a draft’s formatting as the desktop sends it', () => {
-    expect(storedDraft({ ...EMPTY_COMPOSER, draft: '**hi** there' })).toEqual({
-      body: 'hi there',
-      html: '<p><strong>hi</strong> there</p>',
-    });
+  it('should keep a draft exactly as typed, markers, escapes and spaces included', () => {
+    const typed = '**hi** \\*literal\\* ';
+    const kept = storedDraft({ ...EMPTY_COMPOSER, draft: typed });
+
+    expect(kept && withKeptDraft(undefined, kept).draft).toBe(typed);
   });
 
   it('should keep the draft set aside under an edit, not the edit', () => {
@@ -29,6 +29,12 @@ describe('kept drafts', () => {
     expect(withKeptDraft(undefined, { body: 'hi there', html: '<em>hi</em> there' }).draft).toBe(
       '_hi_ there',
     );
+  });
+
+  it('should leave a composer the user typed in and cleared again', () => {
+    const cleared = { ...EMPTY_COMPOSER, touched: true };
+
+    expect(withKeptDraft(cleared, { body: 'old', html: null })).toBe(cleared);
   });
 
   it('should leave what was typed meanwhile', () => {

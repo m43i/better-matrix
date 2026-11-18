@@ -3,7 +3,7 @@
 //! at most every `EVERY`; an emptied one (sent or cleared) and the draft of a timeline being left
 //! at once, so a sent message never comes back as a draft after a restart.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use matrix_core::{AccountId, Command, Draft, TimelineKey};
@@ -22,6 +22,9 @@ pub struct Kept {
     stored: HashMap<Owner, Draft>,
     /// Timelines whose draft changed since it was last written, and since when.
     changed: HashMap<Owner, Instant>,
+    /// Timelines whose draft the user changed this run: a draft read from the store after that
+    /// doesn't replace what they did.
+    touched: HashSet<Owner>,
 }
 
 impl Kept {
@@ -41,12 +44,18 @@ impl Kept {
             self.changed.remove(at);
             return None;
         }
+        self.touched.insert(at.clone());
         let since = *self.changed.entry(at.clone()).or_insert(now);
         if !leaving && draft.is_some() && now.duration_since(since) < EVERY {
             return None;
         }
         self.loaded(at, draft.as_ref());
         Some(draft)
+    }
+
+    /// Whether the user changed the draft of `at` this run.
+    pub fn touched(&self, at: &Owner) -> bool {
+        self.touched.contains(at)
     }
 
     /// How long until a changed draft is due.
@@ -58,6 +67,7 @@ impl Kept {
     pub fn forget(&mut self, account: &AccountId) {
         self.stored.retain(|(owner, _), _| owner != account);
         self.changed.retain(|(owner, _), _| owner != account);
+        self.touched.retain(|(owner, _)| owner != account);
     }
 }
 
@@ -105,7 +115,8 @@ impl State {
     }
 
     /// The store's draft for `at`, read on the first visit: it goes into the composer if that
-    /// still writes there and holds nothing; what the user did meanwhile wins.
+    /// still writes there and the user hasn't changed it. What the user did meanwhile wins, and
+    /// replaces it in the store too (even text typed and cleared again).
     pub(super) fn draft_loaded(&mut self, at: Owner, draft: Option<Draft>) {
         let Some(target) = [ComposerTarget::Room, ComposerTarget::Thread]
             .into_iter()
@@ -114,6 +125,11 @@ impl State {
             return;
         };
         let Some(draft) = draft else { return };
+        if self.kept_drafts.touched(&at) {
+            // `keep_drafts` now writes what the composer holds over it.
+            self.kept_drafts.loaded(&at, Some(&draft));
+            return;
+        }
         if !self.composer(target).is_blank() {
             return;
         }
@@ -124,17 +140,23 @@ impl State {
 
     /// Writes the drafts on screen to the store as they change (`Kept::due`).
     pub(super) fn keep_drafts(&mut self, now: Instant, tx: &mut rune::Tx) {
+        self.write_drafts(now, false);
+        if let Some(wait) = self.kept_drafts.wait(now) {
+            tx.wake_after(wait);
+        }
+    }
+
+    /// Writes the drafts on screen that changed; `now_or_never` writes them without waiting, as
+    /// the window loses focus (the app may be about to quit).
+    pub(super) fn write_drafts(&mut self, now: Instant, now_or_never: bool) {
         for target in [ComposerTarget::Room, ComposerTarget::Thread] {
             let composer = self.composer(target);
             let Some(owner) = composer.owner.clone() else { continue };
             let draft = composer.stored_draft();
-            if let Some(keep) = self.kept_drafts.due(&owner, draft, now, false) {
+            if let Some(keep) = self.kept_drafts.due(&owner, draft, now, now_or_never) {
                 let (account, key) = owner;
                 self.dispatch(Command::SaveDraft { account, key, draft: keep }, Purpose::KeepDraft);
             }
-        }
-        if let Some(wait) = self.kept_drafts.wait(now) {
-            tx.wake_after(wait);
         }
     }
 }

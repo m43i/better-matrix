@@ -1657,6 +1657,8 @@ impl State {
                 Purpose::Avatar => self.profile.saving_avatar = false,
                 Purpose::OpenFile(path) => self.shell.open_file(path.clone()),
                 Purpose::Layout(account) => self.save_layout_again(account.clone()),
+                // Something saved while this list was on its way is listed now.
+                Purpose::Saved(account) => self.saved_changed(&account.clone()),
                 Purpose::ContactConfirm(kind) => {
                     let kind = *kind;
                     self.add_contact(kind);
@@ -1944,6 +1946,7 @@ impl State {
         // Linked GIFs play only while someone can see them.
         self.fetch_linked(std::time::Instant::now());
         if !focused {
+            self.write_drafts(std::time::Instant::now(), true);
             return;
         }
         self.breath.ask();

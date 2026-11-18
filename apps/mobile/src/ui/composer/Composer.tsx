@@ -35,7 +35,7 @@ import {
   setDraft,
   setSelection,
 } from '../../state/actions/composer';
-import { followDraft } from '../../state/actions/drafts';
+import { flushDraft, followDraft } from '../../state/actions/drafts';
 import { composer, type PendingAttachment } from '../../state/composer';
 import {
   activeBlocks,
@@ -145,15 +145,17 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
     return () => clearTimeout(timer);
   }, [target]);
 
-  // Leaving the conversation (another screen on top, or back) ends typing there.
+  // Leaving the conversation (another screen on top, or back) ends typing there, and writes its
+  // draft without waiting (the app may be closed next).
   useFocusEffect(
     useCallback(
       () => () => {
         const step = typingEnded(typing.current);
         typing.current = step.next;
         notify(step.notice);
+        flushDraft(store, account, timelineKey);
       },
-      [notify],
+      [notify, store, account, timelineKey],
     ),
   );
 

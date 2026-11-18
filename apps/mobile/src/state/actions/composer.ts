@@ -54,6 +54,7 @@ export function setDraft(
     ...c,
     draft,
     selection: selection ?? c.selection,
+    touched: true,
   }));
 }
 
@@ -77,7 +78,7 @@ export function insertIntoDraft(
   updateComposer(store, account, key, (c) => {
     const inserted = insertAt(c.draft, c.selection, text);
 
-    return { ...c, draft: inserted.text, selection: inserted.selection };
+    return { ...c, draft: inserted.text, selection: inserted.selection, touched: true };
   });
 }
 

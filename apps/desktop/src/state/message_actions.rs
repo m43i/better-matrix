@@ -1,6 +1,6 @@
 //! Message utilities shared by the hover menu and the right-click menu.
 
-use matrix_core::{Command, TimelineKey};
+use matrix_core::{AccountId, Command, TimelineKey};
 use rune::TextEdit;
 
 use super::{Modal, Purpose, State};
@@ -17,9 +17,9 @@ impl State {
 
     /// Saves a message for the user alone, or stops saving it. Room summaries follow through
     /// sync, and with them the menu and the saved list.
-    pub fn set_message_saved(&mut self, room_id: &str, event_id: &str, saved: bool) {
+    pub fn set_message_saved(&mut self, account: &AccountId, room_id: &str, event_id: &str, saved: bool) {
         self.popover = None;
-        let Some(account) = self.nav.account.clone() else { return };
+        let account = account.clone();
         let command = Command::SetSaved { account, room_id: room_id.to_owned(), event_id: event_id.to_owned(), saved };
         self.dispatch(command, Purpose::MessageAction);
     }
@@ -32,7 +32,7 @@ impl State {
         self.list_saved(account);
     }
 
-    fn list_saved(&mut self, account: matrix_core::AccountId) {
+    fn list_saved(&mut self, account: AccountId) {
         self.accounts.listing_saved(&account);
         if !self.pending.values().any(|purpose| *purpose == Purpose::Saved(account.clone())) {
             self.dispatch(Command::ListSavedMessages { account: account.clone() }, Purpose::Saved(account));
@@ -50,7 +50,7 @@ impl State {
     /// on another session) is listed. One no longer saved leaves on its own
     /// (`AccountData::saved_messages`). After a failure, only Try again lists them, so syncs
     /// don't ask a failing server again and again.
-    pub(super) fn saved_changed(&mut self, account: &matrix_core::AccountId) {
+    pub(super) fn saved_changed(&mut self, account: &AccountId) {
         if matches!(&self.modal, Some(Modal::Saved(shown)) if shown == account)
             && self.accounts.get(account).is_some_and(|data| data.saved_error.is_none() && data.saved_unlisted())
         {
@@ -58,9 +58,12 @@ impl State {
         }
     }
 
-    /// Opens a saved message where it was sent: its room, or its thread.
-    pub fn open_saved_message(&mut self, room_id: &str, thread: Option<&str>, event_id: &str) {
+    /// Opens a saved message of `account` where it was sent: its room, or its thread.
+    pub fn open_saved_message(&mut self, account: &AccountId, room_id: &str, thread: Option<&str>, event_id: &str) {
         self.modal = None;
+        if self.nav.account.as_ref() != Some(account) {
+            self.select_account(account);
+        }
         let key = TimelineKey { room_id: room_id.to_owned(), thread: thread.map(str::to_owned) };
         self.open_message(&key, event_id);
     }

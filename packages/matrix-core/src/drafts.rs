@@ -3,11 +3,49 @@
 //! Only the text and its formatting are kept: replies and attachments live with the app's
 //! composer while it runs.
 
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, OnceLock};
+
 use matrix_sdk::{ComposerDraft, ComposerDraftType};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::Error;
 use crate::account::Account;
 use crate::model::TimelineKey;
+
+type Job = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// One account's draft reads and writes, run one at a time in the order they were asked for, so
+/// a write never lands after a later one (a draft written back after the clear that followed its
+/// send) and a read sees every write asked for before it.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DraftQueue(Arc<OnceLock<mpsc::UnboundedSender<Job>>>);
+
+impl DraftQueue {
+    /// Queues `job` at once (not when the returned future is first polled); the answer comes once
+    /// every job queued before it has run. Call within the engine's runtime.
+    pub(crate) fn run<T, F>(&self, job: F) -> impl Future<Output = Result<T, Error>> + use<T, F>
+    where
+        T: Send + 'static,
+        F: Future<Output = Result<T, Error>> + Send + 'static,
+    {
+        let queue = self.0.get_or_init(|| {
+            let (queue, mut jobs) = mpsc::unbounded_channel::<Job>();
+            tokio::spawn(async move {
+                while let Some(job) = jobs.recv().await {
+                    job.await;
+                }
+            });
+            queue
+        });
+        let (answer, answered) = oneshot::channel();
+        let _ = queue.send(Box::pin(async move {
+            let _ = answer.send(job.await);
+        }));
+        async move { answered.await.unwrap_or(Err(Error::Cancelled)) }
+    }
+}
 
 /// A message being written and not sent yet.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -63,6 +101,26 @@ mod tests {
             .await
             .expect("sync");
         (server, account)
+    }
+
+    #[tokio::test]
+    async fn queued_draft_changes_should_land_in_the_order_they_were_asked_for() {
+        let (_server, account) = account().await;
+        let key = TimelineKey::room("!room:example.org");
+        let queue = DraftQueue::default();
+        let (slow, slow_key) = (account.clone(), key.clone());
+        let save = queue.run(async move {
+            // The write asked for first is slow to start; the clear asked after it must still
+            // land last.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            slow.save_draft(&slow_key, Some(Draft { body: "sent already".into(), html: None })).await
+        });
+        let (fast, fast_key) = (account.clone(), key.clone());
+        let clear = queue.run(async move { fast.save_draft(&fast_key, None).await });
+        let (saved, cleared) = tokio::join!(save, clear);
+        saved.expect("save");
+        cleared.expect("clear");
+        assert_eq!(account.load_draft(&key).await.expect("load"), None);
     }
 
     #[tokio::test]

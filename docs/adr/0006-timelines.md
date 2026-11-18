@@ -139,13 +139,17 @@ see who is typing there.
   they leave, and other tags and fields are kept. `Command::SetSaved` reads the server's copy and
   writes it back, one change per account at a time (`Account::saved_changes`), so quick changes
   in a row or another session's aren't lost before sync; summaries (`RoomSummary::saved`) follow
-  through sync. `ListSavedMessages` reads each saved event from the event cache, else fetches it,
+  through sync. Two sessions changing the same room's saved messages at the same moment can still
+  lose one change (last write wins): room account data has no conditional write, as MSC2437
+  itself notes, and a format of our own would give up the shared one. `ListSavedMessages` reads each saved event from the event cache, else fetches it,
   most recently saved first; unreadable ones keep a placeholder. Its text is the event's as sent:
   a later edit shows once the message is opened (fetching every message's relations would cost a
   request each). The account menu opens the list: a dialog on desktop (`Modal::Saved`), a pushed
   screen on phones (`app/saved-messages.tsx`). Rows show sender, room, excerpt and time; one no
-  longer saved leaves at once, and one saved meanwhile reloads the open list. Opening a row uses
-  the shared message jump; its bookmark button stops saving it.
+  longer saved leaves at once, and one saved meanwhile reloads the open list (checked again when
+  a list request finishes; phones run list requests one at a time). Opening a row uses the shared
+  message jump; its bookmark button stops saving it. The desktop's rows act on the dialog's
+  account, which need not be the one on screen.
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
     reaction's count and whether the user is among them. The picker offers quick reactions,

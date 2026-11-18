@@ -4788,7 +4788,7 @@ fn a_draft_coming_back_should_not_tell_the_room_the_user_is_typing() {
 #[test]
 fn saving_a_message_should_ask_the_engine_to_save_it() {
     let (mut s, mut commands, id) = two_rooms();
-    s.set_message_saved("!one:x", "$m", true);
+    s.set_message_saved(&id, "!one:x", "$m", true);
     assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
         Command::SetSaved { account, room_id, event_id, saved: true }
         if *account == id && room_id == "!one:x" && event_id == "$m")));
@@ -4862,7 +4862,86 @@ fn a_message_saved_elsewhere_should_join_the_open_list() {
 fn opening_a_saved_message_should_show_its_room() {
     let (mut s, _, _) = two_rooms();
     s.open_saved();
-    s.open_saved_message("!two:x", None, "$m");
+    s.open_saved_message(&AccountId::new("@a:example.org"), "!two:x", None, "$m");
     assert_eq!(s.modal, None);
     assert_eq!(s.active_room_id(), Some("!two:x"));
+}
+
+#[test]
+fn a_kept_draft_should_not_return_once_the_user_typed_and_cleared_meanwhile() {
+    let (mut s, mut commands, id) = two_rooms();
+    type_into(&mut s, ComposerTarget::Room, "new words");
+    s.poll(&mut Tx::default());
+    type_into(&mut s, ComposerTarget::Room, "");
+    s.poll(&mut Tx::default());
+    drain(&mut commands);
+    let draft = matrix_core::Draft { body: "from last time".into(), html: None };
+    apply(&mut s, Event::DraftLoaded { account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) });
+    assert_eq!(s.composer.edit.text, "");
+    s.poll(&mut Tx::default());
+    // What the user left (nothing) replaces the stored draft too.
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
+        Command::SaveDraft { key, draft: None, .. } if *key == TimelineKey::room("!one:x"))));
+}
+
+#[test]
+fn losing_focus_should_write_a_changed_draft_at_once() {
+    let (mut s, mut commands, _) = two_rooms();
+    type_into(&mut s, ComposerTarget::Room, "almost done");
+    s.poll(&mut Tx::default());
+    drain(&mut commands);
+    s.focus_changed(false);
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
+        Command::SaveDraft { draft: Some(draft), .. } if draft.body == "almost done")));
+}
+
+#[test]
+fn closing_a_thread_typed_in_should_tell_the_room_typing_stopped() {
+    let (mut s, mut commands, _) = two_rooms();
+    s.open_thread("$root");
+    s.poll(&mut Tx::default());
+    type_into(&mut s, ComposerTarget::Thread, "in the thread");
+    s.poll(&mut Tx::default());
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c, Command::Typing { typing: true, .. })));
+    s.close_thread();
+    s.poll(&mut Tx::default());
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c, Command::Typing { typing: false, .. })));
+}
+
+#[test]
+fn a_message_saved_while_the_list_loads_should_be_listed_after() {
+    let (mut s, mut commands, id) = two_rooms();
+    s.open_saved();
+    let (request, _) = drain(&mut commands).pop().expect("listed");
+    // Saved while the list was on its way: the list can't have it.
+    set_saved_ids(&mut s, &id, "!two:x", &["$new"]);
+    apply(&mut s, Event::SavedMessages { account: id.clone(), messages: Vec::new() });
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c, Command::ListSavedMessages { .. })));
+}
+
+#[test]
+fn a_saved_message_of_another_account_should_open_on_that_account() {
+    let (mut s, _, a) = two_rooms();
+    let b = AccountId::new("@b:example.org");
+    with_rooms(&mut s, &b, &["!b-room:x"], Vec::new());
+    s.select_account(&b);
+    s.open_saved_message(&a, "!two:x", None, "$m");
+    assert_eq!(s.nav.account, Some(a));
+    assert_eq!(s.active_room_id(), Some("!two:x"));
+}
+
+#[test]
+fn removing_a_saved_message_should_use_the_lists_account() {
+    let (mut s, mut commands, a) = two_rooms();
+    let b = AccountId::new("@b:example.org");
+    with_rooms(&mut s, &b, &["!two:x"], Vec::new());
+    s.select_account(&b);
+    drain(&mut commands);
+    s.set_message_saved(&a, "!two:x", "$m", false);
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::SetSaved { account, saved: false, .. } if *account == a))
+    );
 }

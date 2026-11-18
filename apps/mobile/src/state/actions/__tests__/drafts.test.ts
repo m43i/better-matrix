@@ -6,7 +6,7 @@ import { KEEP_EVERY_MS } from '../../drafts';
 import { Store } from '../../store';
 import { roomKey } from '../../timeline';
 import { setDraft } from '../composer';
-import { followDraft } from '../drafts';
+import { flushDraft, followDraft } from '../drafts';
 import { ADA, summary } from '../../../test/fixtures';
 
 const KEY = roomKey('!r:x');
@@ -84,4 +84,46 @@ it('should not write a kept draft back as it comes in', async () => {
   jest.advanceTimersByTime(KEEP_EVERY_MS);
 
   expect(saves(sent)).toEqual([]);
+});
+
+it('should write what the user left over a kept draft that came too late', async () => {
+  const { engine, store, sent } = setup();
+  followDraft(store, ADA, KEY);
+  setDraft(store, ADA, KEY, 'new words');
+  setDraft(store, ADA, KEY, '');
+  await settle();
+  engine.emit({
+    type: 'DraftLoaded',
+    data: { account: ADA, key: KEY, draft: { body: 'from last time', html: null } },
+  });
+
+  expect(composer(store.getState(), ADA, KEY).draft).toBe('');
+  expect(saves(sent)).toEqual([null]);
+});
+
+it('should write a changed draft at once when its conversation is left', async () => {
+  const { store, sent } = setup();
+  followDraft(store, ADA, KEY);
+  setDraft(store, ADA, KEY, 'leaving now');
+  await settle();
+  flushDraft(store, ADA, KEY);
+
+  expect(saves(sent)).toEqual([{ body: 'leaving now', html: null }]);
+});
+
+it('should forget an account’s drafts when it signs out', async () => {
+  const { engine, store, sent } = setup();
+  followDraft(store, ADA, KEY);
+  setDraft(store, ADA, KEY, 'half a thought');
+  await settle();
+  engine.emit({ type: 'AccountRemoved', data: ADA });
+  jest.advanceTimersByTime(KEEP_EVERY_MS);
+
+  expect(store.getState().composers).toEqual({});
+  expect(saves(sent)).toEqual([]);
+
+  engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+  followDraft(store, ADA, KEY);
+
+  expect(sent.filter(({ command }) => command.type === 'LoadDraft')).toHaveLength(2);
 });

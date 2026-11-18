@@ -1999,17 +1999,24 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            // Queued now, in the order the commands came: drafts change in that order.
             Command::SaveDraft { account, key, draft } => {
-                let account = self.account(&account);
+                let saved = self.account(&account).map(|account| {
+                    let queue = account.drafts.clone();
+                    queue.run(async move { account.save_draft(&key, draft).await })
+                });
                 Box::pin(async move {
-                    account?.save_draft(&key, draft).await?;
+                    saved?.await?;
                     Ok(Outcome::Done)
                 })
             }
             Command::LoadDraft { account: id, key } => {
-                let account = self.account(&id);
+                let loaded = self.account(&id).map(|account| {
+                    let (queue, key) = (account.drafts.clone(), key.clone());
+                    queue.run(async move { account.load_draft(&key).await })
+                });
                 Box::pin(async move {
-                    let draft = account?.load_draft(&key).await?;
+                    let draft = loaded?.await?;
                     sink.emit(Event::DraftLoaded { account: id, key, draft });
                     Ok(Outcome::Done)
                 })

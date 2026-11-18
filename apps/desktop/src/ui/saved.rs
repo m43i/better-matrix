@@ -11,11 +11,15 @@ use super::theme::{Palette, font};
 use crate::i18n::{t, tf};
 use crate::state::{AccountData, State};
 
+/// The saved messages of `account`, which may not be the account on screen (a call answered for
+/// another account switches it): every row acts on `account`'s own.
 pub fn saved(s: &State, account: &AccountData, p: &Palette) -> El {
+    let owner = &account.summary.id;
     let mut list = col().w_full();
     if let Some(error) = &account.saved_error {
+        let failed = tf!("saved.failed", error = error);
         list = list.child(
-            col().w_full().py(8.0).gap(8.0).child(text(error.clone()).font(font::BODY).color(p.danger).wrap()).child(
+            col().w_full().py(8.0).gap(8.0).child(text(failed).font(font::BODY).color(p.danger).wrap()).child(
                 button(t!("saved.retry"), ButtonKind::Secondary, true, p)
                     .key("saved-retry")
                     .on_press(State::retry_saved),
@@ -40,7 +44,7 @@ pub fn saved(s: &State, account: &AccountData, p: &Palette) -> El {
             Some(room) => room.name.clone(),
             None => saved.room_id.clone(),
         };
-        let (room_id, event_id) = (saved.room_id.clone(), message.event_id.clone());
+        let (removed, room_id, event_id) = (owner.clone(), saved.room_id.clone(), message.event_id.clone());
         let header = row()
             .w_full()
             .min_h(28.0)
@@ -52,7 +56,7 @@ pub fn saved(s: &State, account: &AccountData, p: &Palette) -> El {
                 icon_button(&icons::UNBOOKMARK, t!("actions.unsave"), false, p.text_muted, p)
                     .key(format!("saved-remove-{room_id}-{event_id}"))
                     .help(t!("actions.unsave"))
-                    .on_press(move |s: &mut State| s.set_message_saved(&room_id, &event_id, false)),
+                    .on_press(move |s: &mut State| s.set_message_saved(&removed, &room_id, &event_id, false)),
             );
         let mut body = col().grow(1.0).min_w(0.0).gap(3.0).child(header).child(
             text(message.body.clone().unwrap_or_else(|| t!("message.unavailable").to_owned()))
@@ -78,7 +82,8 @@ pub fn saved(s: &State, account: &AccountData, p: &Palette) -> El {
             )
             .child(body);
         if message.body.is_some() {
-            let (room_id, thread, event_id) = (saved.room_id.clone(), message.thread.clone(), message.event_id.clone());
+            let (opened, room_id, thread, event_id) =
+                (owner.clone(), saved.room_id.clone(), message.thread.clone(), message.event_id.clone());
             entry = entry
                 .role("button")
                 .label(t!("message.open"))
@@ -86,7 +91,7 @@ pub fn saved(s: &State, account: &AccountData, p: &Palette) -> El {
                 .cursor(rune::Cursor::Pointer)
                 .hover(p.hover)
                 .on_press_tx(crate::state::navigate(move |s| {
-                    s.open_saved_message(&room_id, thread.as_deref(), &event_id);
+                    s.open_saved_message(&opened, &room_id, thread.as_deref(), &event_id);
                 }));
         }
         list = list.child(entry);

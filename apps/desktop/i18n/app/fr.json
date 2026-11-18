@@ -604,6 +604,7 @@
   "saved.empty": "Rien d’enregistré pour l’instant. Enregistrez un message depuis son menu pour le retrouver ici. Vous seul voyez ce que vous enregistrez.",
   "saved.in_room": "dans {{room}}",
   "saved.retry": "Réessayer",
+  "saved.failed": "Impossible de charger vos messages enregistrés : {{error}}",
   "actions.copy_text": "Copier le texte",
   "actions.translate": "Traduire…",
   "info.pins": "Messages épinglés",

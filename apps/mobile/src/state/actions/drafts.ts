@@ -26,12 +26,19 @@ class DraftKeeper {
   constructor(private readonly store: Store) {
     store.subscribe(() => this.check());
     store.addEffect((event) => {
+      if (event.type === 'AccountRemoved') this.forget(event.data);
+
       if (event.type !== 'DraftLoaded' || event.data.draft === null) return;
       const id = composerId(event.data.account, event.data.key);
 
-      // Only a draft that went into its composer is known to be what the store holds: one the
-      // user's typing kept out is written over in turn.
-      if (sameDraft(storedDraft(store.getState().composers[id]), event.data.draft)) {
+      if (!this.owners.has(id)) return;
+      const composer = store.getState().composers[id];
+
+      if (composer?.touched) {
+        // The user's changes kept it out: what they left (even nothing) is written over it.
+        this.kept.set(id, event.data.draft);
+        this.write(id);
+      } else if (sameDraft(storedDraft(composer), event.data.draft)) {
         this.kept.set(id, event.data.draft);
       }
     });
@@ -48,6 +55,23 @@ class DraftKeeper {
       // A failed read is asked again the next time the composer shows.
       this.owners.delete(id);
     });
+  }
+
+  /** Writes the draft of `key` now, if it changed: its conversation is being left. */
+  flush(account: AccountId, key: TimelineKey): void {
+    const id = composerId(account, key);
+
+    if (this.timers.has(id)) this.write(id);
+  }
+
+  /** An account went: its composers are no longer followed, and nothing of it is written. */
+  private forget(account: AccountId): void {
+    for (const id of [...this.owners.keys()].filter((id) => id.startsWith(`${account}|`))) {
+      this.cancel(id);
+      this.owners.delete(id);
+      this.kept.delete(id);
+      this.seen.delete(id);
+    }
   }
 
   private check(): void {
@@ -99,8 +123,7 @@ class DraftKeeper {
 
 const keepers = new WeakMap<Store, DraftKeeper>();
 
-/** Keeps the draft of the composer of `key` in the store, from now on in this run. */
-export function followDraft(store: Store, account: AccountId, key: TimelineKey): void {
+function keeperOf(store: Store): DraftKeeper {
   let keeper = keepers.get(store);
 
   if (!keeper) {
@@ -108,5 +131,15 @@ export function followDraft(store: Store, account: AccountId, key: TimelineKey):
     keepers.set(store, keeper);
   }
 
-  keeper.follow(account, key);
+  return keeper;
+}
+
+/** Keeps the draft of the composer of `key` in the store, from now on in this run. */
+export function followDraft(store: Store, account: AccountId, key: TimelineKey): void {
+  keeperOf(store).follow(account, key);
+}
+
+/** Writes the draft of `key` without waiting: its conversation is being left. */
+export function flushDraft(store: Store, account: AccountId, key: TimelineKey): void {
+  keeperOf(store).flush(account, key);
 }
