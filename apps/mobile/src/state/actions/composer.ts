@@ -54,7 +54,8 @@ export function setDraft(
     ...c,
     draft,
     selection: selection ?? c.selection,
-    touched: true,
+    // Typing in an edit changes the sent message, not the draft set aside under it.
+    touched: c.touched || !c.editing,
   }));
 }
 
@@ -78,7 +79,12 @@ export function insertIntoDraft(
   updateComposer(store, account, key, (c) => {
     const inserted = insertAt(c.draft, c.selection, text);
 
-    return { ...c, draft: inserted.text, selection: inserted.selection, touched: true };
+    return {
+      ...c,
+      draft: inserted.text,
+      selection: inserted.selection,
+      touched: c.touched || !c.editing,
+    };
   });
 }
 
@@ -128,7 +134,8 @@ export function sendComposer(store: Store, account: AccountId, key: TimelineKey)
 
   if (!canSend(current) && !current.editing) return false;
   const plan = planSend(current, account, key);
-  updateComposer(store, account, key, () => plan.composer);
+  // A draft sent is a draft the user changed: a kept one read late doesn't come back over it.
+  updateComposer(store, account, key, () => ({ ...plan.composer, touched: current.touched }));
 
   // A refused edit comes back as the user left it (ADR 0006), unless a newer edit of the
   // message was sent since: that one's outcome decides.

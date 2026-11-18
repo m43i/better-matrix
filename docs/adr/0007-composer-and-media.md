@@ -60,8 +60,12 @@ screenshots, voice memos, and images and PDFs that open large.
   message never comes back. Quitting within half a second of the last keystroke can lose it.
   (`state/drafts.rs`, `state/actions/drafts.ts`.) A timeline asks the store once per run, on its
   first visit; the answer goes in only if the composer still writes there and the user hasn't
-  changed it this run (`Kept::touched`, `ComposerState.touched`), without a typing notice; if
-  they had, what they left is written over it. Phones keep their own composer source (markers
+  changed it this run (`Kept::touched`, `ComposerState.touched`; typing in an edit or sending
+  counts as changing it on phones only for the draft, not the edit), without a typing notice; if
+  they had, what they left is written over it, even after leaving the timeline. Phones take the
+  answer only for the read that asked (`DraftLoaded.request`, and a token per follow, so a read
+  answered after sign-out is dropped), and put it under an edit started meanwhile as the draft
+  it sets aside. Phones keep their own composer source (markers
   and all) as the body, so it comes back exactly; the desktop keeps text and HTML.
 - **Uploads:** `Outgoing::File` carries an `Upload`, a path on disk or bytes with a name.
   - Pastes reach the field through `on_input_paste`. A pasted image joins the draft as

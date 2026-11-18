@@ -1444,7 +1444,7 @@ impl State {
                 self.accounts.set_saved_messages(&account, messages);
                 self.request_avatars();
             }
-            Event::DraftLoaded { account, key, draft } => self.draft_loaded((account, key), draft),
+            Event::DraftLoaded { account, key, draft, .. } => self.draft_loaded((account, key), draft),
             Event::Files { account, room_id, files } => self.accounts.set_files(&account, room_id, files),
             // Pushes are for phones: the desktop syncs while it runs and never registers a pusher.
             Event::PushContent { .. } => {}

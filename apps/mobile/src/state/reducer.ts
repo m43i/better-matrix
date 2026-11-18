@@ -15,8 +15,6 @@ import type {
 import { initialCallView, reconcileView } from './callView';
 import { DEFAULT_SETTINGS, type Settings } from './settings';
 import { applyDiffs, timelineId } from './timeline';
-import { composerId } from './composer';
-import { withKeptDraft } from './drafts';
 import type { AccountData, State, Timeline } from './types';
 
 /** A fetched rendition's key in `State.media`. */
@@ -309,17 +307,6 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
         ...a,
         pins: { ...a.pins, [event.data.room_id]: event.data.messages },
       }));
-    case 'DraftLoaded': {
-      const { account, key, draft } = event.data;
-
-      if (draft === null) return state;
-      const id = composerId(account, key);
-      const current = state.composers[id];
-      const next = withKeptDraft(current, draft);
-
-      return next === current ? state : { ...state, composers: { ...state.composers, [id]: next } };
-    }
-
     case 'SavedMessages':
       return updateAccount(state, event.data.account, (a) => ({
         ...a,
@@ -443,6 +430,8 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'ContactCodeSent':
     case 'MessagesFound':
     case 'PeopleFound':
+    // Answers the composer's own read (`state/actions/drafts.ts`).
+    case 'DraftLoaded':
     case 'DirectoryFound':
     case 'DirectChat':
     case 'PublicRooms':

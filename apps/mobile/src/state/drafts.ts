@@ -36,11 +36,28 @@ export function isBlank(composer: ComposerState): boolean {
   );
 }
 
-/** A kept draft back in `composer`, if the user hasn't changed it; else the composer as it is. */
+/**
+ * A kept draft back in `composer` if the user hasn't changed its draft: into the field, or under
+ * an edit started meanwhile, as the draft it sets aside. Else the composer as it is.
+ */
 export function withKeptDraft(composer: ComposerState | undefined, draft: Draft): ComposerState {
   const current = composer ?? EMPTY_COMPOSER;
+  const text = draftOf(draft.body, draft.html);
+  const aside = current.setAside;
 
-  return isBlank(current) && !current.touched
-    ? { ...current, draft: draftOf(draft.body, draft.html) }
-    : current;
+  if (current.touched) return current;
+
+  if (isBlank(current)) return { ...current, draft: text };
+
+  if (
+    current.editing &&
+    aside &&
+    aside.draft.trim() === '' &&
+    !aside.replyTo &&
+    aside.attachments.length === 0
+  ) {
+    return { ...current, setAside: { ...aside, draft: text } };
+  }
+
+  return current;
 }

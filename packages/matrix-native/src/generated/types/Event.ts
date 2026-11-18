@@ -411,6 +411,10 @@ account: AccountId,
  */
 messages: Array<SavedMessage>, } } | { "type": "DraftLoaded", "data": { 
 /**
+ * The read it answers.
+ */
+request: RequestId, 
+/**
  * The account writing.
  */
 account: AccountId, 

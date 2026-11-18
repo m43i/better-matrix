@@ -121,3 +121,20 @@ it('should list the saved messages into the account', async () => {
   await done;
   expect(store.getState().accounts[0]?.saved?.[0]?.preview.body).toBe('Remember this');
 });
+
+it('should ask for an account’s saved messages one list at a time, in order', async () => {
+  const { engine, store, sent } = setup();
+  const first = listSaved(store, ADA);
+  const second = listSaved(store, ADA);
+  await Promise.resolve();
+  expect(sent.filter(({ command }) => command.type === 'ListSavedMessages')).toHaveLength(1);
+
+  engine.emit({ type: 'Finished', data: { request: sent[0]!.request, result: { Ok: null } } });
+  await first;
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  const lists = sent.filter(({ command }) => command.type === 'ListSavedMessages');
+  expect(lists).toHaveLength(2);
+
+  engine.emit({ type: 'Finished', data: { request: lists[1]!.request, result: { Ok: null } } });
+  await second;
+});

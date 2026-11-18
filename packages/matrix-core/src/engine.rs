@@ -1044,6 +1044,8 @@ pub enum Event {
     /// The draft kept for a room or thread, for [`Command::LoadDraft`]; `None` when there is
     /// none.
     DraftLoaded {
+        /// The read it answers.
+        request: RequestId,
         /// The account writing.
         account: AccountId,
         /// The room or thread written in.
@@ -2017,7 +2019,7 @@ impl State {
                 });
                 Box::pin(async move {
                     let draft = loaded?.await?;
-                    sink.emit(Event::DraftLoaded { account: id, key, draft });
+                    sink.emit(Event::DraftLoaded { request, account: id, key, draft });
                     Ok(Outcome::Done)
                 })
             }

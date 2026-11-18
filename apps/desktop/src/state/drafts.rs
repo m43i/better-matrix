@@ -78,6 +78,7 @@ impl State {
     /// screen, the room's first.
     pub(super) fn follow_drafts(&mut self, shown: &[Owner]) {
         let now = Instant::now();
+        let mut restored = false;
         for target in [ComposerTarget::Room, ComposerTarget::Thread] {
             let thread = target == ComposerTarget::Thread;
             let owner = shown.iter().find(|(_, key)| key.thread.is_some() == thread).cloned();
@@ -104,6 +105,7 @@ impl State {
             if let Some(at) = &owner {
                 if let Some(draft) = self.drafts.remove(at) {
                     self.composer_mut(target).put_draft(draft);
+                    restored = true;
                 } else if self.drafts_asked.insert(at.clone()) {
                     let (account, key) = at.clone();
                     self.dispatch(Command::LoadDraft { account, key }, Purpose::Draft(at.clone()));
@@ -111,25 +113,34 @@ impl State {
             }
             self.composer_mut(target).owner = owner;
         }
-        self.settle_typing();
+        // A draft coming back isn't typing; a composer going away is left to `send_typing`, which
+        // tells the room typing stopped.
+        if restored {
+            self.settle_typing();
+        }
     }
 
     /// The store's draft for `at`, read on the first visit: it goes into the composer if that
     /// still writes there and the user hasn't changed it. What the user did meanwhile wins, and
-    /// replaces it in the store too (even text typed and cleared again).
+    /// replaces it in the store too (even text typed and cleared again, here or since left).
     pub(super) fn draft_loaded(&mut self, at: Owner, draft: Option<Draft>) {
-        let Some(target) = [ComposerTarget::Room, ComposerTarget::Thread]
-            .into_iter()
-            .find(|target| self.composer(*target).owner.as_ref() == Some(&at))
-        else {
-            return;
-        };
         let Some(draft) = draft else { return };
+        let target = [ComposerTarget::Room, ComposerTarget::Thread]
+            .into_iter()
+            .find(|target| self.composer(*target).owner.as_ref() == Some(&at));
         if self.kept_drafts.touched(&at) {
-            // `keep_drafts` now writes what the composer holds over it.
+            let left = match target {
+                Some(target) => self.composer(target).stored_draft(),
+                None => self.drafts.get(&at).and_then(super::composer::Draft::stored),
+            };
             self.kept_drafts.loaded(&at, Some(&draft));
+            if let Some(keep) = self.kept_drafts.due(&at, left, Instant::now(), true) {
+                let (account, key) = at;
+                self.dispatch(Command::SaveDraft { account, key, draft: keep }, Purpose::KeepDraft);
+            }
             return;
         }
+        let Some(target) = target else { return };
         if !self.composer(target).is_blank() {
             return;
         }

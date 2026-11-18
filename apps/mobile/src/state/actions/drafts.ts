@@ -6,12 +6,14 @@
 import type { AccountId, Draft, TimelineKey } from '@better-matrix/matrix-native/types';
 
 import { type ComposerState, composerId } from '../composer';
-import { KEEP_EVERY_MS, sameDraft, storedDraft } from '../drafts';
+import { KEEP_EVERY_MS, sameDraft, storedDraft, withKeptDraft } from '../drafts';
 import type { Store } from '../store';
 
 interface Owner {
   account: AccountId;
   key: TimelineKey;
+  /** This follow's own: a read answered after the account left (and came back) is ignored. */
+  token: object;
 }
 
 class DraftKeeper {
@@ -27,20 +29,6 @@ class DraftKeeper {
     store.subscribe(() => this.check());
     store.addEffect((event) => {
       if (event.type === 'AccountRemoved') this.forget(event.data);
-
-      if (event.type !== 'DraftLoaded' || event.data.draft === null) return;
-      const id = composerId(event.data.account, event.data.key);
-
-      if (!this.owners.has(id)) return;
-      const composer = store.getState().composers[id];
-
-      if (composer?.touched) {
-        // The user's changes kept it out: what they left (even nothing) is written over it.
-        this.kept.set(id, event.data.draft);
-        this.write(id);
-      } else if (sameDraft(storedDraft(composer), event.data.draft)) {
-        this.kept.set(id, event.data.draft);
-      }
     });
   }
 
@@ -49,19 +37,46 @@ class DraftKeeper {
     const id = composerId(account, key);
 
     if (this.owners.has(id)) return;
-    this.owners.set(id, { account, key });
+    const token = {};
+    this.owners.set(id, { account, key, token });
     this.seen.set(id, this.store.getState().composers[id]);
-    void this.store.run({ type: 'LoadDraft', data: { account, key } }).catch(() => {
-      // A failed read is asked again the next time the composer shows.
-      this.owners.delete(id);
-    });
+    const ours = () => this.owners.get(id)?.token === token;
+    void this.store
+      .run({ type: 'LoadDraft', data: { account, key } }, (event) => {
+        if (event.type === 'DraftLoaded' && event.data.draft && ours())
+          this.loaded(id, event.data.draft);
+      })
+      .catch(() => {
+        // A failed read is asked again the next time the composer shows.
+        if (ours()) this.owners.delete(id);
+      });
+  }
+
+  /**
+   * The store's draft for `id` came: it goes back into the composer unless the user changed the
+   * draft meanwhile; then what they left (even nothing) is written over it.
+   */
+  private loaded(id: string, draft: Draft): void {
+    const composer = this.store.getState().composers[id];
+
+    if (composer?.touched) {
+      this.kept.set(id, draft);
+      this.write(id);
+
+      return;
+    }
+
+    const next = withKeptDraft(composer, draft);
+
+    if (next !== composer) {
+      this.store.update((s) => ({ ...s, composers: { ...s.composers, [id]: next } }));
+      this.kept.set(id, draft);
+    }
   }
 
   /** Writes the draft of `key` now, if it changed: its conversation is being left. */
   flush(account: AccountId, key: TimelineKey): void {
-    const id = composerId(account, key);
-
-    if (this.timers.has(id)) this.write(id);
+    this.write(composerId(account, key));
   }
 
   /** An account went: its composers are no longer followed, and nothing of it is written. */

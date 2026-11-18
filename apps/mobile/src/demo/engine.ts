@@ -510,7 +510,7 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
       const { account, key } = command.data;
       const draft = drafts.get(`${account}|${key.room_id}|${key.thread ?? ''}`) ?? null;
 
-      engine.emit({ type: 'DraftLoaded', data: { account, key, draft } });
+      engine.emit({ type: 'DraftLoaded', data: { request, account, key, draft } });
       finish(request);
 
       return;

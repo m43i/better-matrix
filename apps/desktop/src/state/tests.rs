@@ -4745,7 +4745,10 @@ fn a_room_should_ask_the_store_for_its_draft_once() {
 fn a_kept_draft_should_fill_an_empty_composer() {
     let (mut s, _, id) = two_rooms();
     let draft = matrix_core::Draft { body: "from last time".into(), html: None };
-    apply(&mut s, Event::DraftLoaded { account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) });
+    apply(
+        &mut s,
+        Event::DraftLoaded { request: RequestId(0), account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) },
+    );
     assert_eq!(s.composer.edit.text, "from last time");
 }
 
@@ -4754,7 +4757,10 @@ fn a_kept_draft_should_not_replace_what_was_typed_meanwhile() {
     let (mut s, _, id) = two_rooms();
     type_into(&mut s, ComposerTarget::Room, "new words");
     let draft = matrix_core::Draft { body: "from last time".into(), html: None };
-    apply(&mut s, Event::DraftLoaded { account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) });
+    apply(
+        &mut s,
+        Event::DraftLoaded { request: RequestId(0), account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) },
+    );
     assert_eq!(s.composer.edit.text, "new words");
 }
 
@@ -4763,7 +4769,10 @@ fn a_kept_draft_for_a_room_no_longer_shown_should_wait_for_the_next_visit() {
     let (mut s, mut commands, id) = two_rooms();
     s.select_room("!two:x");
     let draft = matrix_core::Draft { body: "from last time".into(), html: None };
-    apply(&mut s, Event::DraftLoaded { account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) });
+    apply(
+        &mut s,
+        Event::DraftLoaded { request: RequestId(0), account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) },
+    );
     assert_eq!(s.composer.edit.text, "");
     drain(&mut commands);
     s.select_room("!one:x");
@@ -4780,7 +4789,10 @@ fn a_draft_coming_back_should_not_tell_the_room_the_user_is_typing() {
     s.poll(&mut Tx::default());
     drain(&mut commands);
     let draft = matrix_core::Draft { body: "from last time".into(), html: None };
-    apply(&mut s, Event::DraftLoaded { account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) });
+    apply(
+        &mut s,
+        Event::DraftLoaded { request: RequestId(0), account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) },
+    );
     s.poll(&mut Tx::default());
     assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::Typing { typing: true, .. })));
 }
@@ -4876,7 +4888,10 @@ fn a_kept_draft_should_not_return_once_the_user_typed_and_cleared_meanwhile() {
     s.poll(&mut Tx::default());
     drain(&mut commands);
     let draft = matrix_core::Draft { body: "from last time".into(), html: None };
-    apply(&mut s, Event::DraftLoaded { account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) });
+    apply(
+        &mut s,
+        Event::DraftLoaded { request: RequestId(0), account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) },
+    );
     assert_eq!(s.composer.edit.text, "");
     s.poll(&mut Tx::default());
     // What the user left (nothing) replaces the stored draft too.
@@ -4944,4 +4959,22 @@ fn removing_a_saved_message_should_use_the_lists_account() {
             .iter()
             .any(|c| matches!(c, Command::SetSaved { account, saved: false, .. } if *account == a))
     );
+}
+
+#[test]
+fn a_draft_cleared_before_its_room_was_left_should_not_come_back_from_a_late_read() {
+    let (mut s, mut commands, id) = two_rooms();
+    type_into(&mut s, ComposerTarget::Room, "new words");
+    s.poll(&mut Tx::default());
+    type_into(&mut s, ComposerTarget::Room, "");
+    s.poll(&mut Tx::default());
+    s.select_room("!two:x");
+    drain(&mut commands);
+    let draft = matrix_core::Draft { body: "from last time".into(), html: None };
+    apply(
+        &mut s,
+        Event::DraftLoaded { request: RequestId(0), account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) },
+    );
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
+        Command::SaveDraft { key, draft: None, .. } if *key == TimelineKey::room("!one:x"))));
 }

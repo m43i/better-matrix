@@ -27,9 +27,28 @@ export function setSaved(
   store.send({ type: 'SetSaved', data: { account, room_id: roomId, event_id: eventId, saved } });
 }
 
-/** Lists every message the account saved, into `AccountState.saved`. */
+/** Each account's latest saved-list request, per store: requests run one after another. */
+const listing = new WeakMap<Store, Map<AccountId, Promise<void>>>();
+
+/**
+ * Lists every message the account saved, into `AccountState.saved`. Requests for one account run
+ * in order, so an older list never answers after a newer one.
+ */
 export function listSaved(store: Store, account: AccountId): Promise<void> {
-  return store.run({ type: 'ListSavedMessages', data: { account } });
+  const chains = listing.get(store) ?? new Map<AccountId, Promise<void>>();
+  listing.set(store, chains);
+  const list = () => store.run({ type: 'ListSavedMessages', data: { account } });
+  const before = chains.get(account);
+  const listed = before ? before.catch(() => undefined).then(list) : list();
+
+  const done = () => {
+    if (chains.get(account) === listed) chains.delete(account);
+  };
+
+  chains.set(account, listed);
+  listed.then(done, done);
+
+  return listed;
 }
 
 export function forwardMessage(
