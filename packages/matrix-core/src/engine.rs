@@ -148,6 +148,41 @@ pub enum Command {
         /// The room's ID.
         room_id: String,
     },
+    /// Save a message for the user alone, or stop saving it (MSC2437 tagged events in the
+    /// room's account data). Updated room summaries (`RoomSummary::saved`) follow through sync.
+    SetSaved {
+        /// The account saving the message.
+        account: AccountId,
+        /// The room containing the message.
+        room_id: String,
+        /// The message's server event ID.
+        event_id: String,
+        /// Save when true, stop saving when false.
+        saved: bool,
+    },
+    /// Fetch every message the account saved, in all its joined rooms, most recently saved
+    /// first. Answered by [`Event::SavedMessages`]; unreadable events keep a placeholder.
+    ListSavedMessages {
+        /// Whose saved messages.
+        account: AccountId,
+    },
+    /// Keep what the user is writing in a room or thread on this device, replacing what was
+    /// kept there; `None` (or blank text) forgets it.
+    SaveDraft {
+        /// The account writing.
+        account: AccountId,
+        /// The room or thread written in.
+        key: TimelineKey,
+        /// The text and its formatting.
+        draft: Option<crate::Draft>,
+    },
+    /// Read the draft kept for a room or thread. Answered by [`Event::DraftLoaded`].
+    LoadDraft {
+        /// The account writing.
+        account: AccountId,
+        /// The room or thread written in.
+        key: TimelineKey,
+    },
     /// Vote in a poll: `answers` replace the account's earlier vote; none takes it back.
     VotePoll {
         /// The voting account.
@@ -997,7 +1032,24 @@ pub enum Event {
         /// The room's ID.
         room_id: String,
         /// Previews in pin order, including unavailable placeholders.
-        messages: Vec<crate::PinnedMessage>,
+        messages: Vec<crate::MessagePreview>,
+    },
+    /// Every message the account saved, for [`Command::ListSavedMessages`].
+    SavedMessages {
+        /// Whose saved messages.
+        account: AccountId,
+        /// Most recently saved first, including unavailable placeholders.
+        messages: Vec<crate::SavedMessage>,
+    },
+    /// The draft kept for a room or thread, for [`Command::LoadDraft`]; `None` when there is
+    /// none.
+    DraftLoaded {
+        /// The account writing.
+        account: AccountId,
+        /// The room or thread written in.
+        key: TimelineKey,
+        /// The text and its formatting.
+        draft: Option<crate::Draft>,
     },
     /// A room's threads, for [`Command::ListThreads`].
     Threads {
@@ -1929,6 +1981,36 @@ impl State {
                 Box::pin(async move {
                     let messages = account?.pinned_messages(&room_id).await?;
                     sink.emit(Event::PinnedMessages { account: id, room_id, messages });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::SetSaved { account, room_id, event_id, saved } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    account?.set_saved(&room_id, &event_id, saved).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ListSavedMessages { account: id } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let messages = account?.saved_messages().await?;
+                    sink.emit(Event::SavedMessages { account: id, messages });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::SaveDraft { account, key, draft } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    account?.save_draft(&key, draft).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::LoadDraft { account: id, key } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let draft = account?.load_draft(&key).await?;
+                    sink.emit(Event::DraftLoaded { account: id, key, draft });
                     Ok(Outcome::Done)
                 })
             }

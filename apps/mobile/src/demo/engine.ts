@@ -6,6 +6,7 @@
 import { Engine, type EngineEvent } from '@better-matrix/matrix-native/client';
 import type {
   Command,
+  Draft,
   Message,
   MessageContent,
   MessageHit,
@@ -370,6 +371,8 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
   });
 
   const lists = new Map<string, RoomList>();
+  /** Drafts kept as the engine's store keeps them, for the run of the demo. */
+  const drafts = new Map<string, Draft>();
   engine.subscribe((event) => {
     if (event.type === 'RoomsUpdated') lists.set(event.data.account, event.data.list);
   });
@@ -429,6 +432,85 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
             },
           },
         });
+      finish(request);
+
+      return;
+    }
+
+    if (command.type === 'ListSavedMessages') {
+      const { account } = command.data;
+
+      const messages = (lists.get(account)?.rooms ?? []).flatMap((room) =>
+        room.saved.map((eventId) => {
+          const source = demoMessage(account, room.room_id, eventId);
+
+          return {
+            room_id: room.room_id,
+            saved_at_ms: source?.message.timestamp_ms ?? null,
+            preview: {
+              event_id: eventId,
+              sender_name: source?.message.sender_name ?? '',
+              sender_id: source?.message.sender_id ?? '',
+              sender_avatar: source?.message.sender_avatar ?? null,
+              timestamp_ms: source?.message.timestamp_ms ?? null,
+              body: source ? messageText(source.message) : null,
+              thread: source?.thread ?? null,
+            },
+          };
+        }),
+      );
+
+      engine.emit({ type: 'SavedMessages', data: { account, messages } });
+      finish(request);
+
+      return;
+    }
+
+    if (command.type === 'SetSaved') {
+      const { account, room_id: roomId, event_id: eventId, saved } = command.data;
+      const list = lists.get(account);
+
+      if (list)
+        engine.emit({
+          type: 'RoomsUpdated',
+          data: {
+            account,
+            list: {
+              ...list,
+              rooms: list.rooms.map((r) =>
+                r.room_id === roomId
+                  ? {
+                      ...r,
+                      saved: saved
+                        ? [eventId, ...r.saved.filter((id) => id !== eventId)]
+                        : r.saved.filter((id) => id !== eventId),
+                    }
+                  : r,
+              ),
+            },
+          },
+        });
+      finish(request);
+
+      return;
+    }
+
+    if (command.type === 'SaveDraft') {
+      const { account, key, draft } = command.data;
+      const id = `${account}|${key.room_id}|${key.thread ?? ''}`;
+
+      if (draft && draft.body.trim() !== '') drafts.set(id, draft);
+      else drafts.delete(id);
+      finish(request);
+
+      return;
+    }
+
+    if (command.type === 'LoadDraft') {
+      const { account, key } = command.data;
+      const draft = drafts.get(`${account}|${key.room_id}|${key.thread ?? ''}`) ?? null;
+
+      engine.emit({ type: 'DraftLoaded', data: { account, key, draft } });
       finish(request);
 
       return;

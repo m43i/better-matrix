@@ -49,6 +49,7 @@ fn room(room_id: &str) -> RoomSummary {
         can_rename: true,
         pinned: Vec::new(),
         can_pin: true,
+        saved: Vec::new(),
     }
 }
 
@@ -3883,9 +3884,12 @@ fn an_edit_left_by_navigating_should_come_back_with_its_room() {
     s.composer.edit.insert("!");
     s.select_room("!two:x");
     assert!(s.composer.editing.is_none());
-    assert_eq!(s.composer.edit.text, "draft");
+    // The room's draft stays with the room.
+    assert_eq!(s.composer.edit.text, "");
     s.select_room("!one:x");
     assert_eq!((s.composer.editing.is_some(), s.composer.edit.text.as_str()), (true, "helo!"));
+    s.cancel_edit(ComposerTarget::Room);
+    assert_eq!(s.composer.edit.text, "draft");
 }
 
 #[test]
@@ -4647,4 +4651,218 @@ fn a_reader_the_room_knows_nothing_about_should_go_by_their_user_id() {
     with_rooms(&mut s, &id, &["!one:x"], Vec::new());
     post(&mut s, &id, "$1", "@b:x", "Bea");
     assert_eq!(s.accounts.get(&id).unwrap().reader("!one:x", "@z:x").name, "@z:x");
+}
+
+/// A signed-in account with two rooms, the first open, and the commands sent so far drained.
+fn two_rooms() -> (State, DetachedCommands, AccountId) {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x", "!two:x"], Vec::new());
+    s.select_room("!one:x");
+    drain(&mut commands);
+    (s, commands, id)
+}
+
+fn type_into(s: &mut State, target: ComposerTarget, text: &str) {
+    s.composer_mut(target).edit = TextEdit::new(text);
+}
+
+#[test]
+fn a_draft_left_in_a_room_should_be_there_on_coming_back() {
+    let (mut s, _, _) = two_rooms();
+    type_into(&mut s, ComposerTarget::Room, "half a thought");
+    s.select_room("!two:x");
+    assert_eq!(s.composer.edit.text, "");
+    s.select_room("!one:x");
+    assert_eq!(s.composer.edit.text, "half a thought");
+}
+
+#[test]
+fn a_draft_should_keep_its_reply_while_another_room_shows() {
+    let (mut s, _, _) = two_rooms();
+    type_into(&mut s, ComposerTarget::Room, "yes");
+    s.composer.reply_to =
+        Some(ReplyTarget { event_id: "$q".into(), sender_name: "Grace".into(), excerpt: "Lunch?".into() });
+    s.select_room("!two:x");
+    assert_eq!(s.composer.reply_to, None);
+    s.select_room("!one:x");
+    assert_eq!(s.composer.reply_to.as_ref().map(|reply| reply.event_id.as_str()), Some("$q"));
+}
+
+#[test]
+fn a_threads_draft_should_come_back_with_its_thread() {
+    let (mut s, _, _) = two_rooms();
+    s.open_thread("$root");
+    type_into(&mut s, ComposerTarget::Thread, "in the thread");
+    s.open_thread("$other");
+    assert_eq!(s.thread_composer.edit.text, "");
+    s.open_thread("$root");
+    assert_eq!(s.thread_composer.edit.text, "in the thread");
+}
+
+#[test]
+fn leaving_a_room_should_keep_its_draft_in_the_store() {
+    let (mut s, mut commands, id) = two_rooms();
+    type_into(&mut s, ComposerTarget::Room, "for later");
+    s.select_room("!two:x");
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
+        Command::SaveDraft { account, key, draft: Some(draft) }
+        if *account == id && *key == TimelineKey::room("!one:x") && draft.body == "for later")));
+}
+
+#[test]
+fn sending_should_forget_the_kept_draft_at_once() {
+    let (mut s, mut commands, _) = two_rooms();
+    type_into(&mut s, ComposerTarget::Room, "for later");
+    s.select_room("!two:x");
+    s.select_room("!one:x");
+    drain(&mut commands);
+    s.send_message(ComposerTarget::Room, &mut Tx::default());
+    s.poll(&mut Tx::default());
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
+        Command::SaveDraft { key, draft: None, .. } if *key == TimelineKey::room("!one:x"))));
+}
+
+#[test]
+fn a_room_should_ask_the_store_for_its_draft_once() {
+    let (mut s, mut commands, _) = two_rooms();
+    s.select_room("!two:x");
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, c)| matches!(c, Command::LoadDraft { key, .. } if *key == TimelineKey::room("!two:x")))
+        .expect("draft asked");
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    s.select_room("!one:x");
+    s.select_room("!two:x");
+    assert!(
+        !all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::LoadDraft { key, .. } if *key == TimelineKey::room("!two:x")))
+    );
+}
+
+#[test]
+fn a_kept_draft_should_fill_an_empty_composer() {
+    let (mut s, _, id) = two_rooms();
+    let draft = matrix_core::Draft { body: "from last time".into(), html: None };
+    apply(&mut s, Event::DraftLoaded { account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) });
+    assert_eq!(s.composer.edit.text, "from last time");
+}
+
+#[test]
+fn a_kept_draft_should_not_replace_what_was_typed_meanwhile() {
+    let (mut s, _, id) = two_rooms();
+    type_into(&mut s, ComposerTarget::Room, "new words");
+    let draft = matrix_core::Draft { body: "from last time".into(), html: None };
+    apply(&mut s, Event::DraftLoaded { account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) });
+    assert_eq!(s.composer.edit.text, "new words");
+}
+
+#[test]
+fn a_kept_draft_for_a_room_no_longer_shown_should_wait_for_the_next_visit() {
+    let (mut s, mut commands, id) = two_rooms();
+    s.select_room("!two:x");
+    let draft = matrix_core::Draft { body: "from last time".into(), html: None };
+    apply(&mut s, Event::DraftLoaded { account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) });
+    assert_eq!(s.composer.edit.text, "");
+    drain(&mut commands);
+    s.select_room("!one:x");
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::LoadDraft { key, .. } if *key == TimelineKey::room("!one:x")))
+    );
+}
+
+#[test]
+fn a_draft_coming_back_should_not_tell_the_room_the_user_is_typing() {
+    let (mut s, mut commands, id) = two_rooms();
+    s.poll(&mut Tx::default());
+    drain(&mut commands);
+    let draft = matrix_core::Draft { body: "from last time".into(), html: None };
+    apply(&mut s, Event::DraftLoaded { account: id, key: TimelineKey::room("!one:x"), draft: Some(draft) });
+    s.poll(&mut Tx::default());
+    assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::Typing { typing: true, .. })));
+}
+
+#[test]
+fn saving_a_message_should_ask_the_engine_to_save_it() {
+    let (mut s, mut commands, id) = two_rooms();
+    s.set_message_saved("!one:x", "$m", true);
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
+        Command::SetSaved { account, room_id, event_id, saved: true }
+        if *account == id && room_id == "!one:x" && event_id == "$m")));
+}
+
+#[test]
+fn opening_saved_messages_should_list_them() {
+    let (mut s, mut commands, id) = two_rooms();
+    s.open_saved();
+    assert_eq!(s.modal, Some(Modal::Saved(id.clone())));
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::ListSavedMessages { account } if *account == id))
+    );
+}
+
+fn saved_message(room_id: &str, event_id: &str) -> matrix_core::SavedMessage {
+    matrix_core::SavedMessage {
+        room_id: room_id.into(),
+        saved_at_ms: Some(1),
+        preview: matrix_core::MessagePreview {
+            event_id: event_id.into(),
+            sender_name: "Grace".into(),
+            sender_id: "@grace:x".into(),
+            sender_avatar: None,
+            timestamp_ms: Some(1),
+            body: Some("Remember this".into()),
+            thread: None,
+        },
+    }
+}
+
+fn set_saved_ids(s: &mut State, id: &AccountId, room_id: &str, saved: &[&str]) {
+    let data = s.accounts.get(id).expect("account");
+    let (mut rooms, spaces) = (data.rooms.clone(), data.spaces.clone());
+    rooms.iter_mut().find(|r| r.room_id == room_id).expect("room").saved =
+        saved.iter().map(|id| (*id).to_owned()).collect();
+    apply(s, Event::RoomsUpdated { account: id.clone(), list: RoomList { rooms, spaces, invitations: Vec::new() } });
+}
+
+#[test]
+fn a_message_no_longer_saved_should_leave_the_list_at_once() {
+    let (mut s, _, id) = two_rooms();
+    set_saved_ids(&mut s, &id, "!one:x", &["$a", "$b"]);
+    apply(
+        &mut s,
+        Event::SavedMessages {
+            account: id.clone(),
+            messages: vec![saved_message("!one:x", "$a"), saved_message("!one:x", "$b")],
+        },
+    );
+    set_saved_ids(&mut s, &id, "!one:x", &["$b"]);
+    let listed: Vec<_> =
+        s.accounts.get(&id).expect("account").saved_messages().map(|m| m.preview.event_id.as_str()).collect();
+    assert_eq!(listed, ["$b"]);
+}
+
+#[test]
+fn a_message_saved_elsewhere_should_join_the_open_list() {
+    let (mut s, mut commands, id) = two_rooms();
+    s.open_saved();
+    let (request, _) = drain(&mut commands).pop().expect("listed");
+    apply(&mut s, Event::SavedMessages { account: id.clone(), messages: Vec::new() });
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    set_saved_ids(&mut s, &id, "!two:x", &["$new"]);
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c, Command::ListSavedMessages { .. })));
+}
+
+#[test]
+fn opening_a_saved_message_should_show_its_room() {
+    let (mut s, _, _) = two_rooms();
+    s.open_saved();
+    s.open_saved_message("!two:x", None, "$m");
+    assert_eq!(s.modal, None);
+    assert_eq!(s.active_room_id(), Some("!two:x"));
 }

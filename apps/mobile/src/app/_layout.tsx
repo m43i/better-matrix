@@ -100,6 +100,7 @@ function Routes({ scene }: { scene: SceneName | null }) {
           <Stack.Screen name="attachment-actions" options={fittedSheet} />
           <Stack.Screen name="forward-message" options={{ presentation: 'modal' }} />
           <Stack.Screen name="pinned-messages" />
+          <Stack.Screen name="saved-messages" />
           <Stack.Screen name="emoji" options={sheet} />
           <Stack.Screen name="member" options={fittedSheet} />
           <Stack.Screen name="readers" options={sheet} />

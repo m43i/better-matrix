@@ -46,6 +46,18 @@ screenshots, voice memos, and images and PDFs that open large.
     picked emoji goes (`State::choose_emoji`). Its search (focused when it opens) matches every
     Unicode emoji by its English name and shortcodes (the `emojis` crate), up to 96; Enter picks
     the first. Without a search it shows the quick reactions and the curated groups.
+- **Drafts:** every room and thread keeps its own draft. The desktop's two composers each hold
+  the draft of the timeline they write into (`Composer::owner`); when the timeline on screen
+  changes, `State::follow_drafts` (from `sync_timeline`) sets the draft aside, with its reply and
+  attachments (`composer::Draft`, in `State::drafts`), and brings back the new timeline's. Phones
+  keep a composer per timeline already (`ComposerState`). The text and its formatting also go to
+  the device's store through the SDK's composer drafts (`Command::SaveDraft` / `LoadDraft`,
+  `NewMessage` drafts by room and thread root), so a draft survives a restart; replies and
+  attachments don't. A draft being typed is written at most every 500 ms, an emptied one (sent or
+  cleared) and one being left at once, so a sent message never comes back
+  (`state/drafts.rs`, `state/actions/drafts.ts`). A timeline asks the store once per run, on its
+  first visit; the answer goes in only if the composer still writes there and holds nothing,
+  without a typing notice, so it never replaces what the user did meanwhile.
 - **Uploads:** `Outgoing::File` carries an `Upload`, a path on disk or bytes with a name.
   - Pastes reach the field through `on_input_paste`. A pasted image joins the draft as
     `image.png`, `image-2.png` and so on; pasted files are attached; text pastes as text.

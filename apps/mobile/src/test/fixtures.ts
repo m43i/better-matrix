@@ -52,6 +52,7 @@ export function roomSummary(
     encrypted: true,
     pinned: [],
     can_pin: true,
+    saved: [],
     can_rename: true,
   };
 }

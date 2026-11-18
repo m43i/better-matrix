@@ -35,6 +35,7 @@ import {
   setDraft,
   setSelection,
 } from '../../state/actions/composer';
+import { followDraft } from '../../state/actions/drafts';
 import { composer, type PendingAttachment } from '../../state/composer';
 import {
   activeBlocks,
@@ -104,7 +105,14 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
     [store, account, roomId],
   );
 
-  // A draft changed elsewhere (an emoji picked, an edit started or dropped, a send) comes in.
+  // The draft is kept on the device as it changes; the first time this composer shows in a run,
+  // the draft kept from before comes back into it, unless something was typed meanwhile.
+  useEffect(() => {
+    followDraft(store, account, timelineKey);
+  }, [store, account, timelineKey]);
+
+  // A draft changed elsewhere (an emoji picked, an edit started or dropped, a kept draft read
+  // back, a send) comes in.
   useEffect(() => {
     if (state.draft === written.current) return;
     written.current = state.draft;

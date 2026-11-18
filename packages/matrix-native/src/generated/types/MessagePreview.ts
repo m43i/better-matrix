@@ -4,7 +4,7 @@ import type { MediaRef } from "./MediaRef";
 /**
  * A pinned message preview. Missing or unreadable events remain visible as placeholders.
  */
-export type PinnedMessage = { 
+export type MessagePreview = { 
 /**
  * The pinned event's ID.
  */

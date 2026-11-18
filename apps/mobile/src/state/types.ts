@@ -16,7 +16,8 @@ import type {
   Members,
   Message,
   Person,
-  PinnedMessage,
+  MessagePreview,
+  SavedMessage,
   RoomSummary,
   Security,
   Session,
@@ -88,7 +89,9 @@ export interface AccountData {
   members: Record<string, Members>;
   threads: Record<string, ThreadInfo[]>;
   files: Record<string, SharedFile[]>;
-  pins: Record<string, PinnedMessage[]>;
+  pins: Record<string, MessagePreview[]>;
+  /** The messages the user saved, most recently saved first, once listed. */
+  saved: SavedMessage[] | null;
   sidebar: SidebarLayout;
   searchUsage: SearchUsage;
   sidebarLoaded: boolean;

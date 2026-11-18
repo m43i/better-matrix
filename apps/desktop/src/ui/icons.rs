@@ -19,6 +19,8 @@ macro_rules! icons {
 icons! {
     UNPIN = "unpin": r#"<path d="M16 3H8l1 6-4 4v2h6v7M13 15h6v-2l-4-4M3 3l18 18"/>"#;
     PIN = "pin": r#"<path d="M16 3H8l1 6-4 4v2h6v7h2v-7h6v-2l-4-4z"/>"#;
+    BOOKMARK = "bookmark": r#"<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>"#;
+    UNBOOKMARK = "unbookmark": r#"<path d="M19 13.5V5a2 2 0 0 0-2-2H8.5M5 5v16l7-5 7 5v-2M3 3l18 18"/>"#;
     COPY = "copy": r#"<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>"#;
     FORWARD = "forward": r#"<path d="m15 17 5-5-5-5M20 12H9a5 5 0 0 0-5 5v2"/>"#;
     LAYOUT = "layout": r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18M15 12h6"/>"#;

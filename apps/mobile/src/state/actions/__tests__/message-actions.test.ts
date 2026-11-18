@@ -5,8 +5,10 @@ import { threadKey } from '../../timeline';
 import {
   forwardMessage,
   listPins,
+  listSaved,
   messageLink,
   setPinned,
+  setSaved,
   translationUrl,
 } from '../message-actions';
 import { ADA, summary } from '../../../test/fixtures';
@@ -86,4 +88,36 @@ it('should copy links with routing information for room ids without a server', (
 it.each(vectors)('should match the shared link builders for $event', (vector) => {
   expect(messageLink(vector.room, vector.event, vector.account)).toBe(vector.link);
   expect(translationUrl(vector.body, vector.language)).toBe(vector.translation);
+});
+
+it('should save a message for the user alone', () => {
+  const { store, sent } = setup();
+  setSaved(store, ADA, '!r:x', '$m', true);
+  expect(sent[0]?.command).toEqual({
+    type: 'SetSaved',
+    data: { account: ADA, room_id: '!r:x', event_id: '$m', saved: true },
+  });
+});
+
+it('should list the saved messages into the account', async () => {
+  const { engine, store, sent } = setup();
+  const done = listSaved(store, ADA);
+
+  const preview = {
+    event_id: '$m',
+    sender_name: 'Grace',
+    sender_id: '@grace:x',
+    sender_avatar: null,
+    timestamp_ms: 1,
+    body: 'Remember this',
+    thread: null,
+  };
+
+  engine.emit({
+    type: 'SavedMessages',
+    data: { account: ADA, messages: [{ room_id: '!r:x', saved_at_ms: 2, preview }] },
+  });
+  engine.emit({ type: 'Finished', data: { request: sent[0]!.request, result: { Ok: null } } });
+  await done;
+  expect(store.getState().accounts[0]?.saved?.[0]?.preview.body).toBe('Remember this');
 });

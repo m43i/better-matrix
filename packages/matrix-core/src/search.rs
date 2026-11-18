@@ -199,7 +199,7 @@ fn search_events(room: &str, events: &[TimelineEvent], term: &str) -> Vec<(usize
     found
 }
 
-fn message_body<'a>(kind: &str, content: &'a Value) -> Option<&'a str> {
+pub(crate) fn message_body<'a>(kind: &str, content: &'a Value) -> Option<&'a str> {
     match kind {
         "m.room.message" | "m.sticker" => content["body"].as_str(),
         "org.matrix.msc3381.poll.start" => content["org.matrix.msc1767.text"]

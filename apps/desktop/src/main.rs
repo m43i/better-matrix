@@ -54,6 +54,21 @@ fn spec() -> AppSpec<State> {
                     at: Some((600, 280)),
                 });
             }),
+            ("demo-saved", demo::saved_messages),
+            ("demo-saved-menu", |s| {
+                demo::saved_messages(s);
+                s.close_modal();
+                let event_id = s
+                    .active_account()
+                    .and_then(|account| account.room(demo::DEMO_THREAD.0))
+                    .and_then(|room| room.saved.first().cloned())
+                    .unwrap_or_default();
+                s.popover = Some(state::Popover::MessageMenu {
+                    key: matrix_core::TimelineKey::room(demo::DEMO_THREAD.0),
+                    event_id,
+                    at: Some((600, 280)),
+                });
+            }),
             ("demo-forward", |s| {
                 demo::seed(s);
                 s.start_forward(matrix_core::TimelineKey::room(demo::DEMO_THREAD.0), demo::DEMO_THREAD.1.into());

@@ -104,6 +104,8 @@ export interface MessageActions {
   forward: boolean;
   link: boolean;
   pin: boolean;
+  /** Saving it for the user alone (or no longer). */
+  save: boolean;
   translate: boolean;
   react: boolean;
   reply: boolean;
@@ -136,6 +138,7 @@ export function messageActions(
     forward: sent && (content.type === 'Text' || content.type === 'Attachment'),
     link: sent && content.type !== 'Call',
     pin: sent && readable && canPin,
+    save: sent && readable,
     translate: content.type === 'Text' && hasText,
     // A call's card takes no reactions: the timeline keeps none on it.
     react: sent && readable,

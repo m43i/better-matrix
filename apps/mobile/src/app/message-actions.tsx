@@ -7,7 +7,7 @@ import { useMemo } from 'react';
 import { Linking, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { locale, t } from '../i18n';
-import { setPinned, messageLink, translationUrl } from '../state/actions/message-actions';
+import { setPinned, setSaved, messageLink, translationUrl } from '../state/actions/message-actions';
 import { deleteMessage, react } from '../state/actions/timeline';
 import { startEdit, startReply } from '../state/composer';
 import { editText, findMessage, messageActions, messageText } from '../state/messages';
@@ -56,6 +56,7 @@ export default function MessageActionsScreen() {
   const attachment = message.content.type === 'Attachment' ? message.content.data : null;
   const close = () => router.back();
   const pinned = summary?.pinned.includes(eventId) ?? false;
+  const saved = summary?.saved.includes(eventId) ?? false;
 
   const translate = () =>
     Alert.alert(t('actions.translate'), t('message.translate_explanation'), [
@@ -210,6 +211,18 @@ export default function MessageActionsScreen() {
             testID="message-actions-pin"
             onPress={() => {
               setPinned(store, account, roomId, eventId, !pinned);
+              close();
+            }}
+          />
+        ) : null}
+        {can.save ? (
+          <ListRow
+            icon={saved ? 'unbookmark' : 'bookmark'}
+            title={t(saved ? 'actions.unsave' : 'actions.save')}
+            chevron={false}
+            testID="message-actions-save"
+            onPress={() => {
+              setSaved(store, account, roomId, eventId, !saved);
               close();
             }}
           />

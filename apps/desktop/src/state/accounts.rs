@@ -533,9 +533,13 @@ pub struct AccountData {
     /// The files shared in rooms, by room ID, once listed for the info panel.
     pub files: HashMap<String, Vec<matrix_core::SharedFile>>,
     /// Shared pinned-message previews by room, including unavailable placeholders.
-    pub pins: HashMap<String, Vec<matrix_core::PinnedMessage>>,
+    pub pins: HashMap<String, Vec<matrix_core::MessagePreview>>,
     /// Pin-list failures shown inline, alongside cached previews and a retry.
     pub pin_errors: HashMap<String, String>,
+    /// The messages the user saved, most recently saved first, once listed.
+    pub saved: Option<Vec<matrix_core::SavedMessage>>,
+    /// Why the saved messages couldn't be listed, shown with the list and a retry.
+    pub saved_error: Option<String>,
     /// Who is typing, by room ID, in the rooms whose timelines are open.
     pub typing: HashMap<String, Vec<matrix_core::Person>>,
     /// How the user arranged the sidebar.
@@ -592,6 +596,8 @@ impl AccountData {
             files: HashMap::new(),
             pins: HashMap::new(),
             pin_errors: HashMap::new(),
+            saved: None,
+            saved_error: None,
             typing: HashMap::new(),
             sidebar: matrix_core::SidebarLayout::default(),
             search_usage: matrix_core::SearchUsage::default(),
@@ -616,6 +622,26 @@ impl AccountData {
 
     pub fn room(&self, room_id: &str) -> Option<&RoomSummary> {
         self.rooms.iter().find(|room| room.room_id == room_id)
+    }
+
+    /// Whether the user saved the message `event_id` in the room.
+    pub fn is_saved(&self, room_id: &str, event_id: &str) -> bool {
+        self.room(room_id).is_some_and(|room| room.saved.iter().any(|id| id == event_id))
+    }
+
+    /// The saved messages listed, as rooms' summaries know them now: one no longer saved
+    /// leaves at once.
+    pub fn saved_messages(&self) -> impl Iterator<Item = &matrix_core::SavedMessage> {
+        self.saved.iter().flatten().filter(|saved| self.is_saved(&saved.room_id, &saved.preview.event_id))
+    }
+
+    /// Whether a message saved in some room isn't in the list yet: saved here or on another
+    /// session since it was listed.
+    pub fn saved_unlisted(&self) -> bool {
+        let Some(listed) = &self.saved else { return false };
+        self.rooms.iter().any(|room| {
+            room.saved.iter().any(|id| !listed.iter().any(|s| s.room_id == room.room_id && s.preview.event_id == *id))
+        })
     }
 
     pub fn space(&self, room_id: &str) -> Option<&SpaceSummary> {
@@ -1025,10 +1051,30 @@ impl Accounts {
         }
     }
 
-    pub fn set_pins(&mut self, id: &AccountId, room_id: String, messages: Vec<matrix_core::PinnedMessage>) {
+    pub fn set_pins(&mut self, id: &AccountId, room_id: String, messages: Vec<matrix_core::MessagePreview>) {
         if let Some(account) = self.get_mut(id) {
             account.pin_errors.remove(&room_id);
             account.pins.insert(room_id, messages);
+        }
+    }
+
+    pub fn set_saved_messages(&mut self, id: &AccountId, messages: Vec<matrix_core::SavedMessage>) {
+        if let Some(account) = self.get_mut(id) {
+            account.saved_error = None;
+            account.saved = Some(messages);
+        }
+    }
+
+    /// The saved messages are being listed again: the last failure no longer stands.
+    pub fn listing_saved(&mut self, id: &AccountId) {
+        if let Some(account) = self.get_mut(id) {
+            account.saved_error = None;
+        }
+    }
+
+    pub fn saved_failed(&mut self, id: &AccountId, error: String) {
+        if let Some(account) = self.get_mut(id) {
+            account.saved_error = Some(error);
         }
     }
 
@@ -1249,6 +1295,7 @@ mod tests {
             can_rename: false,
             pinned: Vec::new(),
             can_pin: true,
+            saved: Vec::new(),
         }
     }
 

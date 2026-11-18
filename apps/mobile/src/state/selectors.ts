@@ -4,6 +4,7 @@ import type {
   AccountId,
   MediaRef,
   MediaSize,
+  SavedMessage,
   TimelineKey,
 } from '@better-matrix/matrix-native/types';
 
@@ -33,4 +34,28 @@ export function mediaUri(state: State, media: MediaRef, size: MediaSize): string
   const path = state.media[mediaKey(media, size)];
 
   return path === undefined ? undefined : `file://${path}`;
+}
+
+/**
+ * The saved messages listed, as the rooms' summaries know them now: one no longer saved leaves
+ * at once. `undefined` until listed.
+ */
+export function savedMessages(state: State, id: AccountId): SavedMessage[] | undefined {
+  const data = account(state, id);
+
+  if (!data?.saved) return undefined;
+
+  const saved = new Set(
+    data.rooms.flatMap((r) => r.saved.map((eventId) => `${r.room_id}|${eventId}`)),
+  );
+
+  return data.saved.filter((m) => saved.has(`${m.room_id}|${m.preview.event_id}`));
+}
+
+/** Every saved message's room and event, as one string: it changes when anything is saved. */
+export function savedSignature(state: State, id: AccountId): string {
+  return (account(state, id)?.rooms ?? [])
+    .flatMap((r) => r.saved.map((eventId) => `${r.room_id}|${eventId}`))
+    .sort()
+    .join(',');
 }

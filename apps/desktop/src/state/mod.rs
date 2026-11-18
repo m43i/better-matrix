@@ -15,6 +15,7 @@ mod call;
 mod call_glow;
 mod call_layout;
 mod composer;
+mod drafts;
 mod gifs;
 mod link_previews;
 mod links;
@@ -342,6 +343,8 @@ pub enum EmojiFor {
 /// variants.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Modal {
+    /// The messages an account saved, from the account menu.
+    Saved(AccountId),
     /// Choose a destination room for a forwarded message.
     Forward {
         account: AccountId,
@@ -530,6 +533,12 @@ enum Purpose {
     Delete,
     /// Message utilities whose failures become a notice.
     MessageAction,
+    /// Listing the messages an account saved; a failure shows in the list.
+    Saved(AccountId),
+    /// Reading the draft the store keeps for a timeline; a failure lets the next visit ask again.
+    Draft(drafts::Owner),
+    /// Keeping a draft in the store; a failure is forgotten, as the draft stays in memory.
+    KeepDraft,
     /// Forwarding from the destination picker, which stays open on failure.
     Forward,
     Logout,
@@ -726,6 +735,14 @@ pub struct State {
     /// Edits set aside: refused by the server, or left by navigating away. Each comes back into
     /// its composer once its timeline shows with the composer free (no other edit, no memo).
     set_aside: Vec<composer::Edit>,
+    /// Drafts of timelines not on screen, by timeline: each comes back into its composer when
+    /// its timeline shows again (`State::follow_drafts`).
+    drafts: HashMap<drafts::Owner, composer::Draft>,
+    /// Timelines whose draft was asked of the store this run: it is read once, on the first
+    /// visit, as the store holds what was left at the last run.
+    drafts_asked: HashSet<drafts::Owner>,
+    /// What the store holds of each draft, and which are due to be written.
+    kept_drafts: drafts::Kept,
     /// The panel beside the open room.
     pub side: Option<SidePanel>,
     /// Widths shared across rooms and accounts for this window.
@@ -822,6 +839,9 @@ impl State {
             status_edit: TextEdit::default(),
             poll_form: PollForm::default(),
             set_aside: Vec::new(),
+            drafts: HashMap::new(),
+            drafts_asked: HashSet::new(),
+            kept_drafts: drafts::Kept::default(),
             side: None,
             panes: PaneWidths::default(),
             side_loaded: None,
@@ -1061,6 +1081,12 @@ impl State {
                 // After the sync, which sets an edit of its timelines aside: they all go with it,
                 // and an edit still on its way doesn't come back if the account signs in again.
                 self.set_aside.retain(|edit| edit.target.account != id);
+                self.drafts.retain(|(account, _), _| *account != id);
+                self.drafts_asked.retain(|(account, _)| *account != id);
+                self.kept_drafts.forget(&id);
+                if matches!(&self.modal, Some(Modal::Saved(account)) if *account == id) {
+                    self.modal = None;
+                }
                 self.pending.retain(|_, purpose| !matches!(purpose, Purpose::Edit(edit) if edit.target.account == id));
             }
             Event::RoomsUpdated { account, list } => {
@@ -1082,6 +1108,7 @@ impl State {
                         old.map(|r| &r.pinned) != new.map(|r| &r.pinned)
                     });
                 self.accounts.set_room_list(&account, list);
+                self.saved_changed(&account);
                 if pins_changed && self.side == Some(SidePanel::Pins) {
                     self.side_loaded = None;
                     self.sync_side();
@@ -1413,6 +1440,11 @@ impl State {
                 self.accounts.set_pins(&account, room_id, messages);
                 self.request_avatars();
             }
+            Event::SavedMessages { account, messages } => {
+                self.accounts.set_saved_messages(&account, messages);
+                self.request_avatars();
+            }
+            Event::DraftLoaded { account, key, draft } => self.draft_loaded((account, key), draft),
             Event::Files { account, room_id, files } => self.accounts.set_files(&account, room_id, files),
             // Pushes are for phones: the desktop syncs while it runs and never registers a pusher.
             Event::PushContent { .. } => {}
@@ -1663,6 +1695,11 @@ impl State {
                 self.resume_edits();
             }
             Purpose::MessageAction => self.notice = Some(tf!("notice.message_action", error = error)),
+            Purpose::Saved(account) => self.accounts.saved_failed(&account, error),
+            Purpose::Draft(owner) => {
+                self.drafts_asked.remove(&owner);
+            }
+            Purpose::KeepDraft => {}
             Purpose::Forward => {
                 if let Some(Modal::Forward { sending, .. }) = &mut self.modal
                     && *sending == Some(request)
@@ -1835,6 +1872,7 @@ impl State {
                 self.set_edit_aside(edit);
             }
         }
+        self.follow_drafts(&shown);
         self.resume_edits();
         let (gone, kept): (Vec<_>, Vec<_>) = self.open_timelines.drain(..).partition(|open| !shown.contains(open));
         for (account, key) in gone {
@@ -1951,6 +1989,7 @@ impl State {
             tx.wake_after(wait);
         }
         self.send_typing();
+        self.keep_drafts(now, tx);
         // A voice memo's timer counts seconds, and a playing clip's progress moves in steps:
         // a tick a little faster than either is enough, and the view rebuilds only when what
         // shows changes.
@@ -2043,6 +2082,22 @@ impl State {
         moved || ended
     }
 
+    /// The text in the composers on screen, as typing notices follow it.
+    fn typed(&self) -> Vec<&str> {
+        let mut drafts = vec![self.composer.edit.text.as_str()];
+        if self.active_thread().is_some() {
+            drafts.push(self.thread_composer.edit.text.as_str());
+        }
+        drafts
+    }
+
+    /// A draft came back into a composer: that isn't typing.
+    fn settle_typing(&mut self) {
+        let mut typing = std::mem::take(&mut self.typing);
+        typing.seen(&self.typed());
+        self.typing = typing;
+    }
+
     /// Tells the room shown whether the user is typing in it, from its composers' drafts.
     fn send_typing(&mut self) {
         let mut typing = std::mem::take(&mut self.typing);
@@ -2050,10 +2105,7 @@ impl State {
             (Some(account), Some(room_id), Screen::Chat) => Some((account, room_id)),
             _ => None,
         };
-        let mut drafts = vec![self.composer.edit.text.as_str()];
-        if self.active_thread().is_some() {
-            drafts.push(self.thread_composer.edit.text.as_str());
-        }
+        let drafts = self.typed();
         let notices = typing.update(room, &drafts, std::time::Instant::now());
         self.typing = typing;
         for typing::Notice { account, room_id, typing } in notices {
@@ -3897,17 +3949,8 @@ impl State {
         {
             return;
         }
-        if self.nav.threads.get(&account).map(String::as_str) != Some(root_event_id) {
-            // A memo recording in the thread being left goes with it, its file removed; an edit
-            // there is set aside, to come back with its thread.
-            if let Some(memo) = self.thread_composer.voice.take() {
-                memo.recorder.cancel();
-            }
-            if let Some(edit) = self.thread_composer.set_aside_edit() {
-                self.set_edit_aside(edit);
-            }
-            self.thread_composer = Composer::default();
-        }
+        // A memo recording in a thread being left goes with it; an edit and the draft there
+        // are set aside, to come back with the thread (`sync_timeline`).
         let key = self.active_room_id().map(|room_id| TimelineKey::thread(room_id, root_event_id));
         if let Some(key) = key {
             self.accounts.seed_thread(&account, &key);

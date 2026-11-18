@@ -93,6 +93,16 @@ pub fn menu(
                 .on_press(move |s: &mut State| s.set_message_pinned(&key, &id, !pinned)),
         );
     }
+    if readable {
+        let saved = account.is_saved(&key.room_id, event_id);
+        let (room_id, id) = (key.room_id.clone(), event_id.to_owned());
+        let (glyph, label) =
+            if saved { (&icons::UNBOOKMARK, t!("actions.unsave")) } else { (&icons::BOOKMARK, t!("actions.save")) };
+        panel = panel.child(
+            action(glyph, label, "message-save")
+                .on_press(move |s: &mut State| s.set_message_saved(&room_id, &id, !saved)),
+        );
+    }
     let body = match &message.content {
         MessageContent::Text { body, .. } if !body.trim().is_empty() => Some(body.clone()),
         MessageContent::Poll(poll) => Some(poll.question.clone()),

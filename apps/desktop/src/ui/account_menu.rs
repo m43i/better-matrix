@@ -1,5 +1,5 @@
 //! The menu behind the user's avatar: the account's status, every signed-in account, then
-//! adding one, settings and signing out.
+//! adding one, the account's saved messages, profile, settings and signing out.
 
 use rune::{Align, El, Side, col, el, icon, row, text, text_input};
 
@@ -68,6 +68,11 @@ pub fn account_menu(s: &State, p: &Palette) -> El {
                 .key("menu-add-account")
                 .on_press_tx(crate::state::navigate(State::start_adding_account)),
         )
+        .children(s.active_account().map(|_| {
+            menu_row(menu_icon(&icons::BOOKMARK, p), t!("saved.title"), None, None, p)
+                .key("menu-saved")
+                .on_press(State::open_saved)
+        }))
         .children(s.active_account().map(|_| {
             menu_row(menu_icon(&icons::USER, p), t!("settings.profile"), None, None, p)
                 .key("menu-profile")

@@ -53,6 +53,8 @@ export const routes = {
     pathname: '/pinned-messages',
     params: { account, roomId },
   }),
+  /** The messages the account saved, from the account menu. */
+  saved: (account: AccountId): Href => ({ pathname: '/saved-messages', params: { account } }),
   /** File actions over an attachment preview. */
   attachmentActions: (
     account: AccountId,

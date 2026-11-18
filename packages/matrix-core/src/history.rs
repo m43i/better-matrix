@@ -51,7 +51,7 @@ pub struct SharedFile {
 /// A pinned message preview. Missing or unreadable events remain visible as placeholders.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
-pub struct PinnedMessage {
+pub struct MessagePreview {
     /// The pinned event's ID.
     pub event_id: String,
     /// Its sender's display name, when available.
@@ -90,7 +90,7 @@ pub(crate) fn forward_content(event: &Value) -> Option<RoomMessageEventContent> 
 }
 
 impl Account {
-    fn room(&self, room_id: &str) -> Result<Room, Error> {
+    pub(crate) fn room(&self, room_id: &str) -> Result<Room, Error> {
         self.client()
             .get_room(&RoomId::parse(room_id)?)
             .ok_or_else(|| Error::UnknownRoom { account: self.id().clone(), room_id: room_id.to_owned() })
@@ -115,7 +115,7 @@ impl Account {
     }
 
     /// Fetch previews even when the timeline has never loaded the pinned events.
-    pub async fn pinned_messages(&self, room_id: &str) -> Result<Vec<PinnedMessage>, Error> {
+    pub async fn pinned_messages(&self, room_id: &str) -> Result<Vec<MessagePreview>, Error> {
         let room = self.room(room_id)?;
         use matrix_sdk_ui::timeline::{RoomExt, TimelineFocus};
         let ids = room.pinned_event_ids().unwrap_or_default();
@@ -144,7 +144,7 @@ impl Account {
 
         let mut messages = Vec::new();
         for id in ids {
-            let mut preview = PinnedMessage {
+            let mut preview = MessagePreview {
                 event_id: id.to_string(),
                 sender_name: String::new(),
                 sender_id: String::new(),

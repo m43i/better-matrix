@@ -11,7 +11,7 @@ each has its own client, store and sync loop. `AccountId` in code.
 
 **Account menu**
 : The popover opened from the signed-in user's avatar at the bottom of the rail: the user's
-status, switch account, add an account, settings, sign out. On phones, the sheet the avatar at the header's right opens.
+status, switch account, add an account, saved messages, profile, settings, sign out. On phones, the sheet the avatar at the header's right opens.
 
 **Status**
 : What others see of the user on one account, as the user sets it in the account menu: Online,
@@ -132,12 +132,19 @@ the member menu.
 
 **Message actions**
 : On phones, the sheet a long press on a message opens: quick reactions, reply, reply in thread,
-forward, edit, copy link, pin/unpin, copy text, translate, end poll, share/save and delete.
+forward, edit, copy link, pin/unpin, save/remove from saved, copy text, translate, end poll,
+share/save and delete.
 The desktop offers the same actions under More and in the right-click message menu.
 
 **Pinned message**
 : A message kept for everyone in a room through Matrix's `m.room.pinned_events` state. Its row
 has a pin marker; room info leads to the full pinned list, including older messages.
+
+**Saved message**
+: A message the user keeps for themselves, from its message actions. Private to the user and
+following them to every session: MSC2437 tagged events (`m.favourite`) in the room's account data.
+The account menu lists them across the account's rooms. `SavedMessage` in code; pinned and saved
+messages show as a `MessagePreview` outside their timeline.
 
 **Forward**
 : Send a copy of a text or attachment message into a chosen conversation on the same account,
@@ -228,6 +235,12 @@ retries it while offline and after a restart.
 **Composer**
 : Where messages are written: the formatting toolbar, the rich-text field, pending attachments,
 attach and send.
+
+**Draft**
+: What the user wrote in a composer and hasn't sent. Each room and thread keeps its own: leaving
+keeps it, coming back brings it back, and its text stays in this device's store across restarts.
+`Draft` in code (the stored text and formatting; the desktop's `composer::Draft` also holds the
+reply and attachments while the app runs).
 
 **Format**
 : One composer formatting action (bold, link, bulleted list, …).

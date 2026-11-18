@@ -5,6 +5,7 @@ import type { CallDevices } from "./CallDevices";
 import type { CallEnd } from "./CallEnd";
 import type { CallInfo } from "./CallInfo";
 import type { Contacts } from "./Contacts";
+import type { Draft } from "./Draft";
 import type { Homeserver } from "./Homeserver";
 import type { IncomingCall } from "./IncomingCall";
 import type { LinkPreview } from "./LinkPreview";
@@ -14,17 +15,18 @@ import type { MediaToggle } from "./MediaToggle";
 import type { Members } from "./Members";
 import type { Message } from "./Message";
 import type { MessageHit } from "./MessageHit";
+import type { MessagePreview } from "./MessagePreview";
 import type { Notification } from "./Notification";
 import type { Password } from "./Password";
 import type { PendingContact } from "./PendingContact";
 import type { Person } from "./Person";
 import type { PersonPresence } from "./PersonPresence";
-import type { PinnedMessage } from "./PinnedMessage";
 import type { PublicRoom } from "./PublicRoom";
 import type { PushContent } from "./PushContent";
 import type { RequestId } from "./RequestId";
 import type { RoomList } from "./RoomList";
 import type { RoomPreview } from "./RoomPreview";
+import type { SavedMessage } from "./SavedMessage";
 import type { SearchUsage } from "./SearchUsage";
 import type { Security } from "./Security";
 import type { Session } from "./Session";
@@ -399,7 +401,27 @@ room_id: string,
 /**
  * Previews in pin order, including unavailable placeholders.
  */
-messages: Array<PinnedMessage>, } } | { "type": "Threads", "data": { 
+messages: Array<MessagePreview>, } } | { "type": "SavedMessages", "data": { 
+/**
+ * Whose saved messages.
+ */
+account: AccountId, 
+/**
+ * Most recently saved first, including unavailable placeholders.
+ */
+messages: Array<SavedMessage>, } } | { "type": "DraftLoaded", "data": { 
+/**
+ * The account writing.
+ */
+account: AccountId, 
+/**
+ * The room or thread written in.
+ */
+key: TimelineKey, 
+/**
+ * The text and its formatting.
+ */
+draft: Draft | null, } } | { "type": "Threads", "data": { 
 /**
  * Whose room.
  */

@@ -1595,3 +1595,48 @@ fn choosing_away_in_the_account_menu_should_set_the_status() {
     assert_eq!(rt.state.active_account().map(|a| a.status), Some(matrix_core::Status::Away));
     assert!(rt.find("account-menu").is_none());
 }
+
+#[test]
+fn the_account_menu_should_open_saved_messages() {
+    let mut rt = runtime(|s| s.toggle_popover(crate::state::Popover::AccountSwitcher));
+    press(&mut rt, "menu-saved");
+    assert!(rt.find("saved-dialog").is_some());
+}
+
+#[test]
+fn the_message_menu_should_offer_to_save_a_message() {
+    let rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.popover = Some(crate::state::Popover::MessageMenu {
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            event_id: demo::DEMO_THREAD.1.into(),
+            at: Some((600, 280)),
+        });
+    });
+    assert!(rt.find("message-save").is_some());
+}
+
+/// The first message the saved-messages demo lists, and its room.
+fn first_saved(rt: &Runtime<State>) -> (String, String) {
+    let account = rt.state.active_account().expect("account");
+    let saved = account.saved_messages().next().expect("a saved message");
+    (saved.room_id.clone(), saved.preview.event_id.clone())
+}
+
+#[test]
+fn opening_a_saved_message_should_close_the_list_and_show_its_room() {
+    let mut rt = runtime(demo::saved_messages);
+    let (room_id, event_id) = first_saved(&rt);
+    press(&mut rt, &format!("saved-open-{room_id}-{event_id}"));
+    assert!(rt.state.modal.is_none());
+    assert_eq!(rt.state.active_room_id(), Some(room_id.as_str()));
+}
+
+#[test]
+fn the_bookmark_button_should_not_open_the_saved_message() {
+    let mut rt = runtime(demo::saved_messages);
+    let (room_id, event_id) = first_saved(&rt);
+    press(&mut rt, &format!("saved-remove-{room_id}-{event_id}"));
+    assert!(rt.find("saved-dialog").is_some());
+    assert!(rt.state.message_jump.is_none());
+}

@@ -611,6 +611,7 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
         can_rename: true,
         pinned: Vec::new(),
         can_pin: true,
+        saved: Vec::new(),
     }
 }
 
@@ -986,7 +987,7 @@ pub fn pinned_messages(s: &mut State) {
         .flat_map(|timeline| &timeline.entries)
         .filter_map(|entry| entry.message())
         .filter(|message| ids.contains(&message.event_id.as_str()))
-        .map(|message| matrix_core::PinnedMessage {
+        .map(|message| matrix_core::MessagePreview {
             event_id: message.event_id.clone(),
             sender_name: message.sender_name.clone(),
             sender_id: message.sender_id.clone(),
@@ -1003,6 +1004,48 @@ pub fn pinned_messages(s: &mut State) {
     s.accounts.set_room_list(&account, matrix_core::RoomList { rooms, spaces, invitations: Vec::new() });
     s.accounts.set_pins(&account, DEMO_THREAD.0.into(), pins);
     s.select_room(DEMO_THREAD.0);
+}
+
+/// Messages Ada saved in two rooms, listed from the account menu.
+pub fn saved_messages(s: &mut State) {
+    seed(s);
+    let account = AccountId::new(ADA);
+    let Some(data) = s.accounts.get(&account) else { return };
+    let mut saved = Vec::new();
+    let (mut rooms, spaces) = (data.rooms.clone(), data.spaces.clone());
+    for (room_id, picked) in [(DEMO_THREAD.0, 2), ("!dm-grace:example.org", 1)] {
+        let messages: Vec<_> = data
+            .timeline(&TimelineKey::room(room_id))
+            .into_iter()
+            .flat_map(|timeline| &timeline.entries)
+            .filter_map(|entry| entry.message())
+            .filter(|message| matches!(message.content, matrix_core::MessageContent::Text { .. }))
+            .take(picked)
+            .collect();
+        for message in &messages {
+            saved.push(matrix_core::SavedMessage {
+                room_id: room_id.into(),
+                saved_at_ms: Some(message.timestamp_ms),
+                preview: matrix_core::MessagePreview {
+                    event_id: message.event_id.clone(),
+                    sender_name: message.sender_name.clone(),
+                    sender_id: message.sender_id.clone(),
+                    sender_avatar: message.sender_avatar.clone(),
+                    timestamp_ms: Some(message.timestamp_ms),
+                    body: Some(message.content.plain().to_owned()),
+                    thread: None,
+                },
+            });
+        }
+        if let Some(room) = rooms.iter_mut().find(|r| r.room_id == room_id) {
+            room.saved = messages.iter().map(|message| message.event_id.clone()).collect();
+        }
+    }
+    saved.sort_by_key(|m| std::cmp::Reverse(m.saved_at_ms));
+    s.accounts.set_room_list(&account, matrix_core::RoomList { rooms, spaces, invitations: Vec::new() });
+    s.select_room(DEMO_THREAD.0);
+    s.open_saved();
+    s.accounts.set_saved_messages(&account, saved);
 }
 
 /// Read positions with overflow, missing timestamps and the existing member menu.

@@ -86,4 +86,8 @@ pinned: Array<string>,
 /**
  * Whether the user may change the room's pinned messages.
  */
-can_pin: boolean, };
+can_pin: boolean, 
+/**
+ * Event IDs the user saved in this room, most recently saved first. Private to the user.
+ */
+saved: Array<string>, };

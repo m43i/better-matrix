@@ -8,7 +8,7 @@ import { listPins, setPinned } from '../state/actions/message-actions';
 import { useAppStore, useStore } from '../state/react';
 import { account as accountOf, room as roomOf } from '../state/selectors';
 import { Divider, EmptyState, ListRow } from '../ui/components';
-import { PinnedRow } from '../ui/people/PinnedRow';
+import { PreviewRow } from '../ui/people/PreviewRow';
 
 export default function PinnedMessagesScreen() {
   const { account, roomId } = useLocalSearchParams<{ account: string; roomId: string }>();
@@ -77,9 +77,10 @@ export default function PinnedMessagesScreen() {
           setRetry((n) => n + 1);
         }}
         renderItem={({ item }) => (
-          <PinnedRow
+          <PreviewRow
             account={account}
             message={item}
+            list="pinned"
             onOpen={() => {
               router.push(
                 item.thread
@@ -87,9 +88,13 @@ export default function PinnedMessagesScreen() {
                   : routes.room(account, roomId, item.event_id),
               );
             }}
-            onUnpin={
+            action={
               room?.can_pin
-                ? () => setPinned(store, account, roomId, item.event_id, false)
+                ? {
+                    icon: 'unpin',
+                    label: t('actions.unpin'),
+                    onPress: () => setPinned(store, account, roomId, item.event_id, false),
+                  }
                 : undefined
             }
           />

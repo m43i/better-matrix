@@ -29,6 +29,11 @@ pub struct Typing {
 }
 
 impl Typing {
+    /// The drafts changed without the user typing (a draft came back): no notice for that.
+    pub fn seen(&mut self, drafts: &[&str]) {
+        self.drafts = drafts.iter().map(|draft| (*draft).to_owned()).collect();
+    }
+
     /// The notices due now, for the room shown (if any) and its composers' drafts. Opening a
     /// room with a draft already in it isn't typing; changing the draft is.
     pub fn update(&mut self, room: Option<(&AccountId, &str)>, drafts: &[&str], now: Instant) -> Vec<Notice> {

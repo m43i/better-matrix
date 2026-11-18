@@ -328,6 +328,7 @@ mod tests {
                 can_rename: false,
                 pinned: Vec::new(),
                 can_pin: true,
+                saved: Vec::new(),
             })
             .collect();
         apply(

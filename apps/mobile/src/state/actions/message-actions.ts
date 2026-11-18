@@ -16,6 +16,22 @@ export function listPins(store: Store, account: AccountId, roomId: string): Prom
   return store.run({ type: 'ListPinnedMessages', data: { account, room_id: roomId } });
 }
 
+/** Saves a message for the user alone, or stops saving it; room summaries follow through sync. */
+export function setSaved(
+  store: Store,
+  account: AccountId,
+  roomId: string,
+  eventId: string,
+  saved: boolean,
+): void {
+  store.send({ type: 'SetSaved', data: { account, room_id: roomId, event_id: eventId, saved } });
+}
+
+/** Lists every message the account saved, into `AccountState.saved`. */
+export function listSaved(store: Store, account: AccountId): Promise<void> {
+  return store.run({ type: 'ListSavedMessages', data: { account } });
+}
+
 export function forwardMessage(
   store: Store,
   account: AccountId,

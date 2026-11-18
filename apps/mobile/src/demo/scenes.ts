@@ -126,6 +126,11 @@ export const scenes = {
     setup: general,
     routes: [routes.room(ADA, GENERAL), routes.pins(ADA, GENERAL)],
   },
+  'saved-messages': {
+    about: 'The messages the user saved, from the account menu',
+    setup: general,
+    routes: [routes.saved(ADA)],
+  },
   'forward-message': {
     about: 'Choose a conversation for a forwarded message',
     setup: general,

@@ -111,6 +111,8 @@ pub struct RoomSummary {
     pub pinned: Vec<String>,
     /// Whether the user may change the room's pinned messages.
     pub can_pin: bool,
+    /// Event IDs the user saved in this room, most recently saved first. Private to the user.
+    pub saved: Vec<String>,
 }
 
 /// Who can read a room's messages from before they joined, by the room's settings. The server

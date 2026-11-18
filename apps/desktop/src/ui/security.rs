@@ -28,6 +28,7 @@ pub fn dialog_for(modal: &Modal, p: &Palette) -> Option<El> {
         Modal::SectionName { section, edit } => section_name(section.is_some(), edit, p),
         Modal::RoomForm { form, name, topic } => room_form(form, name, topic, p),
         Modal::Forward { .. }
+        | Modal::Saved(_)
         | Modal::Translate(_)
         | Modal::Settings(_)
         | Modal::SignIn

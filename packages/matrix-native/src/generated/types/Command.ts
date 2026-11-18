@@ -5,6 +5,7 @@ import type { ContactDetail } from "./ContactDetail";
 import type { ContactKind } from "./ContactKind";
 import type { DeviceKind } from "./DeviceKind";
 import type { DirectoryKind } from "./DirectoryKind";
+import type { Draft } from "./Draft";
 import type { LoginRequest } from "./LoginRequest";
 import type { MediaRef } from "./MediaRef";
 import type { MediaSize } from "./MediaSize";
@@ -148,7 +149,47 @@ account: AccountId,
 /**
  * The room's ID.
  */
-room_id: string, } } | { "type": "VotePoll", "data": { 
+room_id: string, } } | { "type": "SetSaved", "data": { 
+/**
+ * The account saving the message.
+ */
+account: AccountId, 
+/**
+ * The room containing the message.
+ */
+room_id: string, 
+/**
+ * The message's server event ID.
+ */
+event_id: string, 
+/**
+ * Save when true, stop saving when false.
+ */
+saved: boolean, } } | { "type": "ListSavedMessages", "data": { 
+/**
+ * Whose saved messages.
+ */
+account: AccountId, } } | { "type": "SaveDraft", "data": { 
+/**
+ * The account writing.
+ */
+account: AccountId, 
+/**
+ * The room or thread written in.
+ */
+key: TimelineKey, 
+/**
+ * The text and its formatting.
+ */
+draft: Draft | null, } } | { "type": "LoadDraft", "data": { 
+/**
+ * The account writing.
+ */
+account: AccountId, 
+/**
+ * The room or thread written in.
+ */
+key: TimelineKey, } } | { "type": "VotePoll", "data": { 
 /**
  * The voting account.
  */

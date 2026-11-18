@@ -323,6 +323,16 @@ describe('message utilities', () => {
       edit: false,
     });
   });
+  it('should offer saving a sent message to anyone who can read it', () =>
+    expect(messageActions(message('$sent'), ADA, false, false).save).toBe(true));
+  it('should not offer saving a message still sending or deleted', () => {
+    expect(
+      messageActions({ ...message('local:draft'), pending: true }, ADA, false, true).save,
+    ).toBe(false);
+    expect(messageActions(withContent('$gone', { type: 'Redacted' }), ADA, false, true).save).toBe(
+      false,
+    );
+  });
   it('should hide pinning without room permission', () =>
     expect(messageActions(message('$sent'), ADA, false, false).pin).toBe(false));
   it('should not forward or link local echoes', () =>

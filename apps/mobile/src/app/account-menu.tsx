@@ -1,6 +1,7 @@
 // The account menu, opened from the avatar in the tab bar, as the desktop's account menu: the
 // status of the account on screen, every signed-in account to switch to (a dot when it has
-// something new), adding one, settings, and signing out of the account on screen.
+// something new), adding one, its saved messages, settings, and signing out of the account on
+// screen.
 
 import type { AccountSummary, Status } from '@better-matrix/matrix-native/types';
 import { router } from 'expo-router';
@@ -128,6 +129,17 @@ export default function AccountMenuScreen() {
         />
       </ListSection>
       <ListSection>
+        {current ? (
+          <>
+            <ListRow
+              testID="account-menu-saved"
+              icon="bookmark"
+              title={t('saved.title')}
+              onPress={() => go(routes.saved(current.id))}
+            />
+            <Divider inset={52} />
+          </>
+        ) : null}
         <ListRow
           testID="account-menu-settings"
           icon="settings"

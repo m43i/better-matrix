@@ -168,6 +168,7 @@ function room(
     encrypted: true,
     pinned: id === GENERAL ? [DEMO_THREAD.root, TEST_PLAN] : [],
     can_pin: true,
+    saved: id === GENERAL ? [TEST_PLAN] : [],
     can_rename: true,
   };
 }

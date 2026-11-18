@@ -30,8 +30,10 @@ pub mod status;
 pub mod store;
 
 mod convert;
+mod drafts;
 mod history;
 mod polls;
+mod saved;
 mod session;
 #[cfg(test)]
 mod test_server;
@@ -62,11 +64,13 @@ pub use model::{
 /// How many messages a timeline page holds: what a room shows when it opens, and what each
 /// scroll to the top loads. About a screen and a half at the desktop's density.
 pub const HISTORY_PAGE: u16 = 30;
-pub use history::{PinnedMessage, SharedFile, ThreadInfo};
+pub use drafts::Draft;
+pub use history::{MessagePreview, SharedFile, ThreadInfo};
 pub use people::{MemberRole, Members, Moderation, PersonPresence, Presence, RoomMember};
 pub use permalinks::{LinkAction, LinkTarget, Permalink};
 pub use profile::{AccountPage, ContactDetail, ContactKind, Contacts, PendingContact};
 pub use rooms::{DirectoryKind, JoinRule, RoomPreview};
+pub use saved::SavedMessage;
 pub use search::{MessageHit, SearchUsage};
 pub use secrets::{FileSecrets, MemorySecrets, SecretError, SecretStore};
 pub use security::{RecoveryStatus, SasEmoji, Security, Session, VerificationStep};
