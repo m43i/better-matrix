@@ -134,6 +134,10 @@ pub(crate) async fn fetch(
         room_name: client.get_room(&room).and_then(|room| room.cached_display_name()).map(|name| name.to_string()),
         event_id: event_id.to_owned(),
     };
+    // Fetching a push is no sign of the user: its syncs mark no one present, whatever the status
+    // (`crate::status`). This sets the default for the syncs the SDK makes itself; the engine's
+    // own sync says its presence each time.
+    let _ = client.set_presence(matrix_sdk::ruma::presence::PresenceState::Offline, None, false).await;
     // Multiple processes: the engine's own sync or another process may run beside it, so its
     // writes to the crypto store go through the SDK's cross-process lock.
     let notifications = match NotificationClient::new(client.clone(), NotificationProcessSetup::MultipleProcesses).await
@@ -256,6 +260,23 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[tokio::test]
+    async fn fetching_a_push_should_not_mark_the_user_present() {
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = requests.clone();
+        let server = crate::test_server::Server::new(move |request| {
+            captured.lock().unwrap().push(request.lines().next().unwrap_or_default().to_owned());
+            json!({})
+        });
+        let account = crate::Account::for_test(&server.url()).await;
+        account.client().set_sliding_sync_version(matrix_sdk::sliding_sync::Version::Native);
+        let _ = fetch(account.client(), account.id(), "!room:example.org", "$event").await;
+        let requests = requests.lock().unwrap();
+        let syncs: Vec<_> = requests.iter().filter(|line| line.contains("/sync")).collect();
+        assert!(!syncs.is_empty(), "no sync in {requests:?}");
+        assert!(syncs.iter().all(|line| line.contains("set_presence=offline")), "{syncs:?}");
+    }
 
     fn account() -> AccountId {
         AccountId::new("@alice:example.org")

@@ -41,7 +41,8 @@ Date: 2026-11-14
     hold up syncs.
   - Every sync sends it as `set_presence`. Until the first sync has caught up, every sync sends
     `offline`, which marks no one: the copy here may be stale, and one set elsewhere meanwhile
-    could be Hidden. With none ever set, Online.
+    could be Hidden. With none ever set, Online. Syncs the SDK makes itself (fetching a push,
+    in the engine or without it) always send `offline`: a push is no sign of the user.
   - A sync as `offline` leaves the session's presence as it was, so hiding needs an explicit
     `PUT /presence` on every session. A session announces the status after saving one, when a
     sync brings one, after a sync that sent another presence (asked for before a save here, it
