@@ -1491,9 +1491,10 @@ fn a_section_should_count_its_rooms_mentions_while_collapsed() {
     });
     // Grace's two and Kai's one.
     assert!(rt.find("section-mentions-direct").is_some());
-    let badge = rt.presented("section-mentions-direct").expect("the section's mention count").0;
-    let inside = |rect: [f32; 4]| rect[0] >= badge[0] && rect[0] + rect[2] <= badge[0] + badge[2] + 0.5;
-    assert!(rt.elements().iter().any(|element| element.text.as_deref() == Some("3") && inside(element.rect)));
+    let elements = rt.elements();
+    let badge = elements.iter().position(|element| element.key.as_deref() == Some("section-mentions-direct"));
+    assert!(badge.is_some(), "the section's mention count");
+    assert!(elements.iter().any(|element| element.text.as_deref() == Some("3") && element.parent == badge));
     assert!(rt.find("room-!dm-grace:example.org").is_none(), "collapsed, its rooms are hidden");
 }
 

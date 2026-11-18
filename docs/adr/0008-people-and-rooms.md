@@ -87,8 +87,11 @@ Date: 2026-11-14
   user and the people in their direct chats, before syncing starts; then whoever's presence a
   sync brings (servers
   send only changes after the first sync), and the user's after a status message is set. The
-  user's own is never taken from the store or a sync, which may predate a save made meanwhile:
-  it is read from the server under the status's lock, at start and when a sync brings a change.
+  user's own is never taken from the store, a sync or a member list, which may predate a save
+  made meanwhile: it is read from the server at start and, aside from the sync loop, when a
+  sync brings a change; a read during which a message was saved is dropped, as the save
+  reported itself. It is read without the status's lock, which syncs wait for. A save
+  superseded by a later choice shows no failure notice.
   Member lists carry the same from the store and fill in only people not reported yet, as a
   report is newer. The desktop keeps one map per account.
   - Shown as a dot on avatars: green online, amber away, a hollow ring offline (as the user's

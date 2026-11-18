@@ -907,17 +907,19 @@ impl Accounts {
     }
 
     /// Saving a status message finished: once the latest one has, the message shows as the
-    /// engine last reported it (the one saved, or the one before when saving failed).
-    pub fn status_message_saved(&mut self, id: &AccountId, request: matrix_core::RequestId) {
-        let Some(account) = self.get_mut(id) else { return };
+    /// engine last reported it (the one saved, or the one before when saving failed). Whether it
+    /// was the latest.
+    pub fn status_message_saved(&mut self, id: &AccountId, request: matrix_core::RequestId) -> bool {
+        let Some(account) = self.get_mut(id) else { return false };
         if account.saving_status_message != Some(request) {
-            return;
+            return false;
         }
         account.saving_status_message = None;
         let saved = account.saved_status_message.clone();
         if let Some(me) = account.presence.get_mut(account.summary.id.as_str()) {
             me.status_message = saved;
         }
+        true
     }
 
     pub fn set_sidebar(&mut self, id: &AccountId, layout: matrix_core::SidebarLayout) {
@@ -942,7 +944,11 @@ impl Accounts {
         let Some(account) = self.get_mut(id) else { return };
         // The engine's reports are newer than a member list read from the store: a list only
         // fills in those it hasn't reported.
+        // The user's own is the engine's to report: the list's may predate a save.
         for member in &members.people {
+            if member.person.id == account.summary.id.as_str() {
+                continue;
+            }
             if member.presence != matrix_core::Presence::Unknown || member.status_message.is_some() {
                 account.presence.entry(member.person.id.clone()).or_insert_with(|| matrix_core::PersonPresence {
                     user_id: member.person.id.clone(),

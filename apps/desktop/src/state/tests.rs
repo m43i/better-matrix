@@ -729,6 +729,31 @@ fn the_latest_save_finishing_should_show_the_message_as_reported() {
 }
 
 #[test]
+fn a_superseded_save_failing_should_show_no_notice() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.set_status_message(&id, "A");
+    s.set_status_message(&id, "B");
+    let (first, _) = commands.try_next().unwrap();
+    apply(&mut s, Event::Finished { request: first, result: Err("offline".into()) });
+    assert!(s.notice.is_none());
+}
+
+#[test]
+fn a_member_list_should_not_supply_the_users_own_status_message() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    let mut me = read_member(id.as_str(), "A");
+    me.presence = matrix_core::Presence::Online;
+    me.status_message = Some("Stale".into());
+    let members = matrix_core::Members { people: vec![me], complete: true, ..Default::default() };
+    apply(&mut s, Event::Members { request: None, account: id.clone(), room_id: "!r:x".into(), members });
+    assert_eq!(s.accounts.get(&id).and_then(|a| a.status_message()), None);
+}
+
+#[test]
 fn escape_while_writing_a_status_message_should_keep_the_account_menu_open() {
     let (mut s, _) = state();
     let id = AccountId::new("@a:example.org");

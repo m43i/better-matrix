@@ -166,7 +166,8 @@ fn member_row(
     let listed = PersonPresence {
         user_id: person.id.clone(),
         presence: member.presence,
-        status_message: member.status_message.clone(),
+        // The user's own message is the engine's to report: the list's may predate a save.
+        status_message: if me { None } else { member.status_message.clone() },
     };
     let shown = shown.unwrap_or(&listed);
     let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, 36.0).radius(18.0);

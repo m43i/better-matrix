@@ -2789,12 +2789,13 @@ async fn sync_until_error(
             if !people.is_empty() {
                 sink.emit(Event::Presence { account: account.id().clone(), people });
             }
+            // Read aside, so the next sync doesn't wait for it.
             if !own.is_empty() {
-                account
-                    .report_own_presence(|me| {
-                        sink.emit(Event::Presence { account: account.id().clone(), people: vec![me] })
-                    })
-                    .await;
+                let (account, sink) = (account.clone(), Arc::clone(&sink));
+                tokio::spawn(async move {
+                    let report = |me| sink.emit(Event::Presence { account: account.id().clone(), people: vec![me] });
+                    account.report_own_presence(report).await;
+                });
             }
             let report = |status| sink.emit(Event::Status { account: account.id().clone(), status });
             account.follow_status(&response.account_data, &sent, report).await;
