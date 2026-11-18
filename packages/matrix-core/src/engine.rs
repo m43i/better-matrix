@@ -2399,9 +2399,12 @@ impl State {
             }
             Command::SetStatus { account: id, status } => {
                 let account = self.account(&id);
+                // Stamped here, as commands arrive: choices settle in the order they were made,
+                // whichever task runs first.
+                let changed_at = now_ms();
                 Box::pin(async move {
-                    account?.set_status(status).await?;
-                    sink.emit(Event::Status { account: id, status });
+                    let report = |status| sink.emit(Event::Status { account: id.clone(), status });
+                    account?.set_status(status, changed_at, report).await?;
                     Ok(Outcome::Done)
                 })
             }
@@ -2484,7 +2487,7 @@ impl State {
                             sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
                         };
                         let status = async {
-                            if let Ok(Some(status)) = account.status().await {
+                            if let Some(status) = account.status().await {
                                 sink.emit(Event::Status { account: account.id().clone(), status });
                             }
                         };
@@ -2733,9 +2736,8 @@ async fn sync_until_error(
             {
                 sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
             }
-            if let Some(status) = account.follow_status(&response.account_data).await {
-                sink.emit(Event::Status { account: account.id().clone(), status });
-            }
+            let report = |status| sink.emit(Event::Status { account: account.id().clone(), status });
+            account.follow_status(&response.account_data, report).await;
             feed.refresh((!all).then_some(&changed)).await;
             LoopCtrl::Continue
         }
@@ -2751,7 +2753,7 @@ async fn sync_until_error(
         }
         last_sync = Some(std::time::Instant::now());
         // Each sync announces the status as last synced, so one set elsewhere holds here too.
-        let saved = account.status().await.ok().flatten();
+        let saved = account.status().await;
         settings = settings.set_presence(crate::status::sync_presence(saved, caught_up.load(Ordering::Relaxed)));
         let response = account.sync_once_locked(settings.clone()).await?;
         settings = settings.token(response.next_batch.clone());

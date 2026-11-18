@@ -31,28 +31,29 @@ Date: 2026-11-14
   - Saved in the account data event `chat.bettermatrix.status`, not on the device: presence
     belongs to the user, so every session of this app announces the same one. Other clients
     still announce online while they sync.
-  - Every sync sends it as `set_presence`, read from the store before each request. Until the
-    first sync has caught up, every sync sends `offline`, which marks no one: the stored status
-    may be stale, and one set elsewhere meanwhile could be Hidden. With none ever set, Online.
+  - Each session keeps the status as it knows it in one place (`status::Known`): read from
+    this device's copy of the account data once, then settled by saves and syncs under one lock
+    by `changed_at` (stamped as the engine receives `Command::SetStatus`, so in the order
+    chosen). A save answered late, a sync answered before a save or carrying an older status,
+    and choices whose tasks run out of order all lose to what was chosen later. Saves wait for
+    each other on a lock of their own, so a slow save doesn't hold up syncs.
+  - Every sync sends it as `set_presence`. Until the first sync has caught up, every sync sends
+    `offline`, which marks no one: the copy here may be stale, and one set elsewhere meanwhile
+    could be Hidden. With none ever set, Online.
   - A sync as `offline` leaves the session's presence as it was, so hiding needs an explicit
-    `PUT /presence` on every session: `Command::SetStatus` writes the account data (and this
-    device's copy, so a sync answered before the save can't bring the old status back, unless
-    the copy already holds a later one: each save carries `changed_at`) and then announces it,
-    and every session announces a status that a sync brings. A sync that raced a
-    change brings that change back, so its announcement lands after the stale sync. Announcing
-    keeps the status message another client set, and sends nothing when it can't read it.
-    Announcing gives up after 20 s, retries and waits the server asks for included, as it runs
-    between syncs; the next sync tries again.
-    Changes to one account save and announce one at a time (`Account::announced`).
-  - Each session remembers the status it last announced; after every sync it announces the
-    saved one if that differs (`Account::follow_status`): after starting, and again after
-    each sync while an announcement fails. Waiting for the server to time a session out isn't
+    `PUT /presence` on every session. A session announces the status after saving one, when a
+    sync brings one (a sync that raced a save brings it back, so announcing lands after that
+    sync), and after any sync while it hasn't announced the current one yet: after starting,
+    and again while announcing fails. Waiting for the server to time a session out isn't
     enough: Synapse counts from the session's last activity, so one in use would stay visible.
-  - `Event::Status` reports it at start, after a change here, and when a sync brings one.
-  - The apps show the choice at once and, if saving fails, show the status last saved with a
-    notice, unless another was chosen or reported since. Choices made within one request of
-    each other, or at the same moment on two sessions, may show briefly out of order; every
-    session settles on the server's last write with the next sync.
+    Announcing keeps the status message another client set, and sends nothing when it can't
+    read it; it gives up after 20 s, retries and waits the server asks for included, as it runs
+    between syncs.
+  - `Event::Status` reports the status that holds: at start, after a save (the later one, if
+    the save lost), and when a sync brings one. The apps show a choice at once and, if saving
+    fails, show the status last reported with a notice, unless another was chosen or reported
+    since. Cross-device clock skew can misorder changes made seconds apart on two devices, as
+    for the sidebar layout.
   - Synapse turns Away (`unavailable`) back into online when the user sends a message, types or
     reads; the next sync or change sets it again. Hidden is not affected. Servers with presence
     switched off accept the status but show nobody's.

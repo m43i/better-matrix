@@ -76,9 +76,10 @@ pub struct Account {
     session_changes: Arc<Mutex<Option<broadcast::Receiver<SessionChange>>>>,
     /// The LiveKit service the homeserver names for calls, once looked up.
     rtc: Arc<Mutex<Option<String>>>,
-    /// The status this session last announced as presence, if the announcement went through;
-    /// held while one is saved or announced, so changes go one at a time.
-    pub(crate) announced: Arc<tokio::sync::Mutex<Option<crate::Status>>>,
+    /// The user's status as this session knows it (`crate::status`).
+    pub(crate) status: Arc<tokio::sync::Mutex<crate::status::Known>>,
+    /// Held while a status is saved: one save at a time, apart from the lock syncs take.
+    pub(crate) status_saves: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Where the browser comes back to after an OAuth sign-in.
@@ -257,7 +258,8 @@ impl Account {
             client,
             session_changes: Arc::new(Mutex::new(None)),
             rtc: Arc::new(Mutex::new(None)),
-            announced: Arc::default(),
+            status: Arc::default(),
+            status_saves: Arc::default(),
         }
     }
 
@@ -367,7 +369,8 @@ impl Account {
             client,
             session_changes: Arc::new(Mutex::new(Some(changes))),
             rtc: Arc::default(),
-            announced: Arc::default(),
+            status: Arc::default(),
+            status_saves: Arc::default(),
         })
     }
 
@@ -948,7 +951,8 @@ mod tests {
             client,
             session_changes: Arc::new(Mutex::new(None)),
             rtc: Arc::new(Mutex::new(None)),
-            announced: Arc::default(),
+            status: Arc::default(),
+            status_saves: Arc::default(),
         }
     }
 
