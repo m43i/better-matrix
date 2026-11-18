@@ -56,17 +56,19 @@ impl Account {
     /// Saves the status to the account's data, which the next sync announces, and announces it
     /// now. Changes save one at a time, in the order they were asked for.
     pub async fn set_status(&self, status: Status) -> Result<(), Error> {
-        let _one_at_a_time = self.status_writes.lock().await;
+        let mut announced = self.announced.lock().await;
         let raw = Raw::new(&Content { status }).map_err(|e| Error::Storage(e.into()))?.cast_unchecked();
         self.client().account().set_account_data_raw(GlobalAccountDataEventType::from(EVENT_TYPE), raw).await?;
-        self.announce_status(status).await;
+        *announced = self.announce_status(status).await.then_some(status);
         Ok(())
     }
 
-    /// When a sync's account data carries a status (set here or on another session), announces
-    /// it from this session too and returns it: syncing as offline leaves a session's presence
-    /// as it was. A sync that raced a change here brings the change back, so the announcement
-    /// lands after any sync that still carried the old status.
+    /// After each sync: announces the saved status from this session when the sync brought one
+    /// (set here or on another session) or this session hasn't announced it yet (the first sync
+    /// after starting, an announcement that failed). Syncing as offline leaves a session's
+    /// presence as it was, so hiding needs this on every session; a sync that raced a change here
+    /// brings the change back, so the announcement lands after it. Returns the status the sync
+    /// brought.
     pub(crate) async fn follow_status(
         &self,
         account_data: &[Raw<matrix_sdk::ruma::events::AnyGlobalAccountDataEvent>],
@@ -74,30 +76,30 @@ impl Account {
         let changed = account_data
             .iter()
             .any(|raw| raw.get_field::<String>("type").ok().flatten().as_deref() == Some(EVENT_TYPE));
-        if !changed {
-            return None;
-        }
-        let _one_at_a_time = self.status_writes.lock().await;
+        let mut announced = self.announced.lock().await;
         let status = self.status().await.ok().flatten()?;
-        self.announce_status(status).await;
-        Some(status)
+        if changed || *announced != Some(status) {
+            *announced = self.announce_status(status).await.then_some(status);
+        }
+        changed.then_some(status)
     }
 
-    /// Sets this session's presence to `status` now. A sync only marks a session online or away;
-    /// one that syncs as offline is left as it was, so hiding needs this on every session. The
-    /// status message another client set is kept, so without reading it first nothing is sent.
-    /// A failure only logs: syncs carry the status, and a session that stops announcing goes
-    /// offline by itself (Synapse: 30 s after its last online or away sync).
-    async fn announce_status(&self, status: Status) {
-        let Some(me) = self.client().user_id() else { return };
+    /// Sets this session's presence to `status` now; false when that failed. The status message
+    /// another client set is kept, so without reading it first nothing is sent.
+    async fn announce_status(&self, status: Status) -> bool {
+        let Some(me) = self.client().user_id() else { return false };
         let announced = async {
             let current = self.client().send(get_presence::v3::Request::new(me.to_owned())).await?;
             let mut request = set_presence::v3::Request::new(me.to_owned(), status.presence());
             request.status_msg = current.status_msg;
             self.client().send(request).await.map(|_| ())
         };
-        if let Err(error) = announced.await {
-            eprintln!("matrix-engine: could not set the presence of {}: {error}", self.id());
+        match announced.await {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("matrix-engine: could not set the presence of {}: {error}", self.id());
+                false
+            }
         }
     }
 }
@@ -115,6 +117,8 @@ pub(crate) fn sync_presence(saved: Option<Status>, caught_up: bool) -> PresenceS
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
 
     #[test]
@@ -247,6 +251,44 @@ mod tests {
         let server = crate::test_server::Server::new(crate::test_server::thread_response);
         let account = Account::for_test(&server.url()).await;
         assert_eq!(account.follow_status(&[]).await, None);
+    }
+
+    #[tokio::test]
+    async fn an_announcement_that_failed_should_be_tried_again_after_the_next_sync() {
+        let (reads, puts) = (std::sync::Arc::new(AtomicUsize::new(0)), std::sync::Arc::new(AtomicUsize::new(0)));
+        let (read, put) = (reads.clone(), puts.clone());
+        let server = crate::test_server::Server::new(move |request| {
+            if request.starts_with("PUT") && request.contains("/presence/") {
+                put.fetch_add(1, Ordering::Relaxed);
+                return serde_json::json!({});
+            }
+            if request.starts_with("GET") && request.contains("/presence/") {
+                // The first read fails (a body that isn't a presence), later ones succeed.
+                return if read.fetch_add(1, Ordering::Relaxed) == 0 {
+                    serde_json::json!({})
+                } else {
+                    serde_json::json!({ "presence": "online" })
+                };
+            }
+            let mut response = crate::test_server::thread_response(request);
+            if request.contains("/sync?") {
+                response["account_data"] =
+                    serde_json::json!({"events":[{"type":EVENT_TYPE,"content":{"status":"Hidden"}}]});
+            }
+            response
+        });
+        let account = Account::for_test(&server.url()).await;
+        let response = account
+            .client()
+            .sync_once(matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::ZERO))
+            .await
+            .unwrap();
+        assert_eq!(account.follow_status(&response.account_data).await, Some(Status::Hidden));
+        assert_eq!(puts.load(Ordering::Relaxed), 0);
+        assert_eq!(account.follow_status(&[]).await, None);
+        assert_eq!(puts.load(Ordering::Relaxed), 1);
+        account.follow_status(&[]).await;
+        assert_eq!(puts.load(Ordering::Relaxed), 1, "announced once it went through");
     }
 
     #[test]
