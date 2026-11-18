@@ -116,6 +116,9 @@ Date: 2026-11-14
 - **Wants attention:** one rule (`wants_attention`) for sidebar, rail and account menu.
   - Unread messages, or only mentions for mentions-only and muted rooms.
   - The engine re-reads rooms on the SDK's room-info updates, so badges follow its counts.
+  - In the sidebar a room that wants attention gets a tinted background (`sidebar_unread`) and
+    a bold name; rows carry no counts. A section's header turns bold when any of its rooms
+    wants attention and counts their mentions, so both show while it is collapsed.
 - **Settings:** a modal in sections (`SettingsSection`). Device settings go to a prefs file off
   the UI thread; account settings live on the homeserver.
   - Every desktop dialog uses the shared modal layer's Rune focus trap and Escape dismissal.

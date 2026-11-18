@@ -4,7 +4,7 @@ use crate::i18n::t;
 use matrix_core::{NotificationMode, PersonPresence, RoomKind, RoomSummary};
 use rune::{El, ScrollSpec, col, el, icon, row, text};
 
-use super::components::{NavEmphasis, media_avatar, nav_row, with_presence};
+use super::components::{NavEmphasis, badge, media_avatar, nav_row, with_presence};
 use super::icons;
 use super::theme::{Palette, font};
 use crate::state::{
@@ -153,6 +153,8 @@ fn section_block(s: &State, view: &SectionView<'_>, open: Option<&str>, drop_at:
         _ => t!("sidebar.direct").to_owned(),
     };
     let toggle = id.clone();
+    let news = view.rooms.iter().any(|room| wants_attention(room));
+    let mentions: u64 = view.rooms.iter().map(|room| room.mentions).sum();
     let mut header = row()
         .key(format!("section-header-{id}"))
         .w_full()
@@ -169,7 +171,16 @@ fn section_block(s: &State, view: &SectionView<'_>, open: Option<&str>, drop_at:
             icon(if view.collapsed { &icons::CHEVRON_RIGHT } else { &icons::CHEVRON_DOWN }, 14.0)
                 .color(p.sidebar_text_muted),
         )
-        .child(text(title).font(font::SECTION).color(p.sidebar_text_muted).grow(1.0).truncate())
+        // Something new in a room sets the title in bold, and the section counts their mentions,
+        // so both show while it is collapsed.
+        .child(
+            text(title)
+                .font(if news { font::SECTION_STRONG } else { font::SECTION })
+                .color(if news { p.sidebar_text } else { p.sidebar_text_muted })
+                .grow(1.0)
+                .truncate(),
+        )
+        .children(badge(mentions, p).map(|badge| badge.key(format!("section-mentions-{id}"))))
         .on_press(move |s: &mut State| s.toggle_section(&toggle))
         .on_drag({
             let id = id.clone();
@@ -289,7 +300,7 @@ fn build_room_row(
     };
     let (open, menu) = (room.room_id.clone(), room.room_id.clone());
     let (drag, zone) = (room.room_id.clone(), room.room_id.clone());
-    nav_row(leading, &room.name, emphasis, status, room.mentions, p)
+    nav_row(leading, &room.name, emphasis, status, p)
         .key(format!("room-{}", room.room_id))
         .opacity(if dragged { 0.35 } else { 1.0 })
         .on_press_tx(crate::state::navigate(move |s| s.select_room(&open)))

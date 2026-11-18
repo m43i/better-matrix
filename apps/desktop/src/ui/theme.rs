@@ -13,6 +13,8 @@ pub struct Palette {
     pub sidebar_hover: Color,
     pub sidebar_selected: Color,
     pub sidebar_selected_text: Color,
+    /// Behind a room or direct chat with something new in it.
+    pub sidebar_unread: Color,
     pub sidebar_divider: Color,
     pub bg: Color,
     pub surface: Color,
@@ -43,6 +45,7 @@ pub fn palette(dark: bool) -> Palette {
                 sidebar_text_muted: oklch(0.7155, 0.0, 0.0),
                 sidebar_hover: oklcha(1.0, 0.0, 0.0, 0.06),
                 sidebar_selected: oklch(0.3791, 0.1378, 265.5222),
+                sidebar_unread: oklcha(0.6231, 0.1880, 259.8145, 0.18),
                 sidebar_selected_text: oklch(0.8823, 0.0571, 254.1284),
                 sidebar_divider: oklch(0.3715, 0.0, 0.0),
             },
@@ -64,6 +67,7 @@ pub fn palette(dark: bool) -> Palette {
                 sidebar_text_muted: oklch(0.5510, 0.0234, 264.3637),
                 sidebar_hover: oklcha(0.0, 0.0, 0.0, 0.05),
                 sidebar_selected: oklch(0.9514, 0.0250, 236.8242),
+                sidebar_unread: oklcha(0.6231, 0.1880, 259.8145, 0.12),
                 sidebar_selected_text: oklch(0.3791, 0.1378, 265.5222),
                 sidebar_divider: oklch(0.9276, 0.0058, 264.5313),
             },
@@ -84,6 +88,7 @@ pub fn palette(dark: bool) -> Palette {
         sidebar_text_muted: sidebar.sidebar_text_muted,
         sidebar_hover: sidebar.sidebar_hover,
         sidebar_selected: sidebar.sidebar_selected,
+        sidebar_unread: sidebar.sidebar_unread,
         sidebar_selected_text: sidebar.sidebar_selected_text,
         sidebar_divider: sidebar.sidebar_divider,
         bg: content.bg,
@@ -108,6 +113,7 @@ struct Sidebar {
     sidebar_text_muted: Color,
     sidebar_hover: Color,
     sidebar_selected: Color,
+    sidebar_unread: Color,
     sidebar_selected_text: Color,
     sidebar_divider: Color,
 }
@@ -144,6 +150,8 @@ pub mod font {
     pub const NAV: TextStyle = TextStyle::new(15.0, 400.0);
     pub const NAV_STRONG: TextStyle = TextStyle::new(15.0, 700.0);
     pub const SECTION: TextStyle = TextStyle::new(13.0, 600.0);
+    /// A section title with something new in it.
+    pub const SECTION_STRONG: TextStyle = TextStyle::new(13.0, 700.0);
     pub const META: TextStyle = TextStyle::new(12.0, 400.0);
     pub const BADGE: TextStyle = TextStyle::new(11.0, 700.0);
     pub const TITLE: TextStyle = TextStyle::new(28.0, 700.0);

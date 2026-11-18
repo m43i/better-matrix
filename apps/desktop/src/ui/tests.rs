@@ -1483,6 +1483,17 @@ fn a_room_header_should_not_show_presence() {
 }
 
 #[test]
+fn a_section_should_count_its_rooms_mentions_while_collapsed() {
+    let rt = runtime(|s| {
+        let ada = AccountId::new(demo::ADA);
+        s.accounts.set_sidebar(&ada, matrix_core::SidebarLayout::default());
+        s.toggle_section(crate::state::DIRECT);
+    });
+    assert!(rt.find("section-mentions-direct").is_some());
+    assert!(rt.find("room-!dm-grace:example.org").is_none(), "collapsed, its rooms are hidden");
+}
+
+#[test]
 fn choosing_away_in_the_account_menu_should_set_the_status() {
     let mut rt = runtime(|_| {});
     press(&mut rt, "account-button");

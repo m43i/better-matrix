@@ -47,7 +47,7 @@ pub fn invitations(s: &State, account: &AccountData, p: &Palette) -> Option<El> 
             media_avatar(&room_id, &invite.name, invite.avatar.as_ref(), &s.media, 18.0)
         };
         list = list.child(
-            nav_row(leading, &invite.name, NavEmphasis::Unread, None, 0, p)
+            nav_row(leading, &invite.name, NavEmphasis::Unread, None, p)
                 .key(format!("invitation-{room_id}"))
                 .on_press(move |s: &mut State| s.show_invitation(&room_id)),
         );

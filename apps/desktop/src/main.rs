@@ -69,6 +69,13 @@ fn spec() -> AppSpec<State> {
                 demo::invitation(s);
                 s.close_modal();
             }),
+            ("demo-collapsed-unread", |s| {
+                demo::seed(s);
+                s.settings.appearance = Appearance::Light;
+                let ada = matrix_core::AccountId::new(demo::ADA);
+                s.accounts.set_sidebar(&ada, matrix_core::SidebarLayout::default());
+                s.toggle_section(state::DIRECT);
+            }),
             ("demo-invitations-collapsed", |s| {
                 demo::invitation(s);
                 s.close_modal();

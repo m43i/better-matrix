@@ -383,12 +383,12 @@ pub enum NavEmphasis {
     Muted,
 }
 
-/// One row in the sidebar: a leading mark, a label, an optional status mark, and a mention
-/// badge.
-pub fn nav_row(leading: El, label: &str, emphasis: NavEmphasis, status: Option<El>, mentions: u64, p: &Palette) -> El {
+/// One row in the sidebar: a leading mark, a label and an optional status mark. Something new
+/// in it lights it up and sets its label in bold; how many mentions is its section's to say.
+pub fn nav_row(leading: El, label: &str, emphasis: NavEmphasis, status: Option<El>, p: &Palette) -> El {
     let (fill, color, style) = match emphasis {
         NavEmphasis::Selected => (p.sidebar_selected, p.sidebar_selected_text, font::NAV_STRONG),
-        NavEmphasis::Unread => (Color::TRANSPARENT, p.sidebar_text, font::NAV_STRONG),
+        NavEmphasis::Unread => (p.sidebar_unread, p.sidebar_text, font::NAV_STRONG),
         NavEmphasis::Normal => (Color::TRANSPARENT, p.sidebar_text_muted, font::NAV),
         NavEmphasis::Muted => (Color::TRANSPARENT, p.sidebar_text_muted.alpha(p.sidebar_text_muted.a * 0.6), font::NAV),
     };
@@ -412,10 +412,7 @@ pub fn nav_row(leading: El, label: &str, emphasis: NavEmphasis, status: Option<E
     if let Some(status) = status {
         r = r.child(status);
     }
-    match badge(mentions, p) {
-        Some(b) => r.child(b),
-        None => r,
-    }
+    r
 }
 
 /// Button styles.
