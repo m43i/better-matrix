@@ -1231,6 +1231,7 @@ impl Engine {
             leaving: crate::calls::Leaving::default(),
             rings: HashMap::new(),
             next_ring: 0,
+            status_stamp: 0,
             devices: crate::calls::DeviceChoice::default(),
         };
         let thread = std::thread::Builder::new().name("matrix-engine".into()).spawn(move || {
@@ -1383,6 +1384,9 @@ struct State {
     rings: HashMap<(AccountId, String), (u64, Ring)>,
     /// The number of the next ring.
     next_ring: u64,
+    /// When the last status was chosen (`Command::SetStatus`), in ms since the epoch: each is
+    /// stamped later than the one before, even within one millisecond.
+    status_stamp: u64,
     /// The microphone, speaker and camera the user picked for calls.
     devices: crate::calls::DeviceChoice,
 }
@@ -2401,7 +2405,8 @@ impl State {
                 let account = self.account(&id);
                 // Stamped here, as commands arrive: choices settle in the order they were made,
                 // whichever task runs first.
-                let changed_at = now_ms();
+                let changed_at = now_ms().max(self.status_stamp + 1);
+                self.status_stamp = changed_at;
                 Box::pin(async move {
                     let report = |status| sink.emit(Event::Status { account: id.clone(), status });
                     account?.set_status(status, changed_at, report).await?;
@@ -2486,11 +2491,8 @@ impl State {
                             };
                             sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
                         };
-                        let status = async {
-                            if let Some(status) = account.status().await {
-                                sink.emit(Event::Status { account: account.id().clone(), status });
-                            }
-                        };
+                        let status = account
+                            .report_status(|status| sink.emit(Event::Status { account: account.id().clone(), status }));
                         // Once the homeserver names a call service, rooms offer MatrixRTC calls.
                         let calls = {
                             let (account, feed) = (account.clone(), feed.clone());

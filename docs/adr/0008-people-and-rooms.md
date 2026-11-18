@@ -33,10 +33,12 @@ Date: 2026-11-14
     still announce online while they sync.
   - Each session keeps the status as it knows it in one place (`status::Known`): read from
     this device's copy of the account data once, then settled by saves and syncs under one lock
-    by `changed_at` (stamped as the engine receives `Command::SetStatus`, so in the order
-    chosen). A save answered late, a sync answered before a save or carrying an older status,
-    and choices whose tasks run out of order all lose to what was chosen later. Saves wait for
-    each other on a lock of their own, so a slow save doesn't hold up syncs.
+    by `changed_at` (stamped as the engine receives `Command::SetStatus`, each later than the
+    last, so in the order chosen). A save answered late, a sync answered before a save or
+    carrying an older status, and choices whose tasks run out of order all lose to what was
+    chosen later; a save that replaced a later status on the server while in flight puts the
+    later one back. Saves wait for each other on a lock of their own, so a slow save doesn't
+    hold up syncs.
   - Every sync sends it as `set_presence`. Until the first sync has caught up, every sync sends
     `offline`, which marks no one: the copy here may be stale, and one set elsewhere meanwhile
     could be Hidden. With none ever set, Online.
@@ -49,8 +51,8 @@ Date: 2026-11-14
     Announcing keeps the status message another client set, and sends nothing when it can't
     read it; it gives up after 20 s, retries and waits the server asks for included, as it runs
     between syncs.
-  - `Event::Status` reports the status that holds: at start, after a save (the later one, if
-    the save lost), and when a sync brings one. The apps show a choice at once and, if saving
+  - `Event::Status` reports the status that holds, under the same lock: at start, after a save
+    (the later one, if the save lost), and when a sync brings one. The apps show a choice at once and, if saving
     fails, show the status last reported with a notice, unless another was chosen or reported
     since. Cross-device clock skew can misorder changes made seconds apart on two devices, as
     for the sidebar layout.

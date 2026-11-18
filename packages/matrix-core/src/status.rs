@@ -90,26 +90,37 @@ impl Account {
     /// holds afterwards. Saves go one at a time, without holding up syncs.
     pub async fn set_status(&self, status: Status, changed_at: u64, report: impl Fn(Status)) -> Result<(), Error> {
         let _one_at_a_time = self.status_saves.lock().await;
-        let content = Content { status, changed_at };
-        let later = |known: &Known| known.saved.filter(|saved| saved.changed_at >= changed_at);
+        let mut content = Content { status, changed_at };
         {
             let known = self.known().await;
-            if let Some(saved) = later(&known) {
-                report(saved.status);
+            if let Some(later) = known.saved.filter(|saved| saved.changed_at >= changed_at) {
+                report(later.status);
                 return Ok(());
             }
         }
-        let raw = Raw::new(&content).map_err(|e| Error::Storage(e.into()))?.cast_unchecked();
-        self.client().account().set_account_data_raw(GlobalAccountDataEventType::from(EVENT_TYPE), raw).await?;
-        let mut known = self.known().await;
-        if later(&known).is_none() {
-            known.saved = Some(content);
+        loop {
+            let raw = Raw::new(&content).map_err(|e| Error::Storage(e.into()))?.cast_unchecked();
+            self.client().account().set_account_data_raw(GlobalAccountDataEventType::from(EVENT_TYPE), raw).await?;
+            let mut known = self.known().await;
+            match known.saved.filter(|saved| saved.changed_at > content.changed_at) {
+                // A later status synced in while this one was saved, and this save replaced it on
+                // the server: put the later one back.
+                Some(later) => content = later,
+                None => {
+                    known.saved = Some(content);
+                    self.settle(&mut known, false).await;
+                    report(content.status);
+                    return Ok(());
+                }
+            }
         }
-        self.settle(&mut known, false).await;
-        if let Some(saved) = known.saved {
+    }
+
+    /// `report`s the status known now, if any: at start, in turn with saves and syncs.
+    pub(crate) async fn report_status(&self, report: impl Fn(Status)) {
+        if let Some(saved) = self.known().await.saved {
             report(saved.status);
         }
-        Ok(())
     }
 
     /// After each sync: takes the status it brought (set here or on another session) unless a
@@ -336,6 +347,41 @@ mod tests {
         assert_eq!(server.sent("/account_data/").len(), 1);
         assert_eq!(*heard.lock().unwrap(), vec![Status::Hidden]);
         assert_eq!(account.status().await, Some(Status::Hidden));
+    }
+
+    #[tokio::test]
+    async fn a_later_status_synced_while_saving_should_be_put_back_on_the_server() {
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let (released, saving) = (Mutex::new(released), Arc::new(std::sync::atomic::AtomicBool::new(false)));
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let (seen, captured) = (saving.clone(), writes.clone());
+        let server = crate::test_server::Server::new(move |request| {
+            if request.starts_with("PUT") && request.contains("/account_data/") {
+                let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
+                captured.lock().unwrap().push(serde_json::from_str::<Value>(body).unwrap());
+                // The first save waits until the test let a later status in.
+                if !seen.swap(true, Ordering::Relaxed) {
+                    released.lock().unwrap().recv().unwrap();
+                }
+            }
+            json!({})
+        });
+        let account = Account::for_test(&server.url()).await;
+        let (heard, report) = reports();
+        let later_status_syncs = async {
+            while !saving.load(Ordering::Relaxed) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            let mut known = account.status.lock().await;
+            known.saved = Some(Content { status: Status::Hidden, changed_at: 50 });
+            drop(known);
+            release.send(()).unwrap();
+        };
+        let (saved, ()) = tokio::join!(account.set_status(Status::Online, 10, report), later_status_syncs);
+        saved.unwrap();
+        let statuses: Vec<Value> = writes.lock().unwrap().iter().map(|body| body["status"].clone()).collect();
+        assert_eq!(statuses, vec![json!("Online"), json!("Hidden")]);
+        assert_eq!(*heard.lock().unwrap(), vec![Status::Hidden]);
     }
 
     #[tokio::test]
