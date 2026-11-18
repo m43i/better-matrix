@@ -229,19 +229,19 @@ see who is typing there.
   Pictures and GIFs fit the width left (the timeline passes it to its rows), and the hover
   toolbar sits left of the column. A desktop timeline that can't keep 200 points of message
   beside the column (a thread open at a high zoom) drops it, and each indicator takes a line
-  under its message instead, as it did before the column. Clicking opens a virtualized reader list, with available receipt
-  dates/times and room profiles (falling back to timeline senders or user IDs). The list loads
-  the room members as the member panel does; selecting a reader opens that same member menu
-  beside the list. A reader outside the joined-member list keeps chat, call
-  and invite actions, without invented moderation rights. Only visible reader pictures load.
-  Subscription diffs move or remove indicators and update an open list. Thread indicators stay
-  hidden because the pinned SDK's exposed receipt map does not distinguish threads, so only room
-  timelines track receipts and the read marker (`Account::timeline`): in a thread every receipt
-  in the room would update its items for nothing. Thread-specific receipts are also excluded from
-  main-timeline conversion. Readers are looked up by index, as the view asks for every reader on
-  screen in each frame it builds: members by `AccountData::member` (indexed when a list is set),
-  senders by `RoomTimeline::sender` (indexed once per revision). Mobile shows the indicator as a
-  narrow desktop window does, two slightly smaller avatars in a column every room message keeps
+  under its message instead, as it did before the column. Clicking opens a virtualized reader list,
+  with available receipt dates/times and room profiles (falling back to timeline senders or user
+  IDs). The list loads the room members as the member panel does; selecting a reader opens that same
+  member menu beside the list. A reader outside the joined-member list keeps chat, call and invite
+  actions, without invented moderation rights. Only visible reader pictures load. Subscription diffs
+  move or remove indicators and update an open list. Thread indicators stay hidden because the
+  pinned SDK's exposed receipt map does not distinguish threads, so only room timelines track
+  receipts and the read marker (`Account::timeline`): in a thread every receipt in the room would
+  update its items for nothing. Thread-specific receipts are also excluded from main-timeline
+  conversion. Readers are looked up by index, as the view asks for every reader on screen in each
+  frame it builds: members by `AccountData::member` (indexed when a list is set), senders by
+  `RoomTimeline::sender` (indexed once per revision). Mobile shows the indicator as a narrow desktop
+  window does, two slightly smaller avatars in a column every room message keeps
   (`ui/timeline/ReadIndicator.tsx`), and the reader list as a sheet (`app/readers.tsx`): members
   load with it, a member opens the member sheet, and readers resolve as on the desktop
   (`state/readers.ts`, indexes per immutable list).
