@@ -1102,6 +1102,33 @@ fn a_call_card_at_the_narrowest_column_width_should_keep_its_words_readable() {
 }
 
 #[test]
+fn a_call_card_in_a_cramped_timeline_should_keep_its_words_beside_its_picture_and_inside_it() {
+    let mut rt = runtime(|s| s.select_room("!dm-kai:example.org"));
+    // 720 points at 150% zoom.
+    rt.set_viewport((480.0, 900.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    let card = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref().is_some_and(|k| k.starts_with("call-card-") && !k.starts_with("call-card-join-")));
+    let card = card.expect("the call card").rect;
+    let title = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Voice call")).expect("the title").rect;
+    let join = rt.elements().into_iter().find(|e| e.key.as_deref().is_some_and(|k| k.starts_with("call-card-join-")));
+    let join = join.expect("the join button").rect;
+    for (what, rect) in [("title", title), ("join", join)] {
+        assert!(
+            rect[0] + rect[2] <= card[0] + card[2],
+            "the {what} ends at {}, the card at {}",
+            rect[0] + rect[2],
+            card[0] + card[2]
+        );
+    }
+    assert!(title[1] < card[1] + 12.0 + 40.0, "the title sits beside the picture, at {}", title[1]);
+}
+
+#[test]
 fn a_thread_link_should_leave_the_readers_column_clear_in_a_narrow_window() {
     let mut rt = readers_runtime();
     rt.set_viewport((760.0, 1200.0), 1.0);

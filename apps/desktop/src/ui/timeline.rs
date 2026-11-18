@@ -990,26 +990,30 @@ fn call_card(cx: &Context<'_>, event_id: &str, card: &CallCard, latest_call: boo
         .center()
         .fill(if ongoing { p.success } else { p.hover })
         .child(icon(glyph, 20.0).color(if ongoing { p.on_accent } else { p.text_muted }));
-    // The words keep a readable width; in a narrow message, Join takes a line under them.
     let words = col()
         .grow(1.0)
-        .min_w(CALL_WORDS_MIN)
+        .min_w(0.0)
         .gap(2.0)
         .child(text(crate::state::call_title(card)).font(font::BODY_STRONG).color(p.text).truncate())
         .child(text(status).font(font::META).color(p.text_muted).truncate());
+    // The picture and words keep a readable width, or all the card has; in a narrow message,
+    // Join takes a line under them.
+    const PADDING: f32 = 12.0;
+    let room = cx.content_width - 2.0 * (PADDING + 1.0);
+    let head =
+        row().grow(1.0).min_w((40.0 + 12.0 + CALL_WORDS_MIN).min(room)).gap(12.0).center_y().child(tile).child(words);
     let mut entry = row()
         .key(cx.key(&format!("call-card-{event_id}")))
         .max_w(460.0)
         .mt(2.0)
-        .padding(12.0)
+        .padding(PADDING)
         .gap(12.0)
         .flex_wrap()
         .center_y()
         .radius(10.0)
         .fill(p.surface)
         .border(1.0, if ongoing { p.success.alpha(0.6) } else { p.divider })
-        .child(tile)
-        .child(words);
+        .child(head);
     // Join as the header offers it: where the room allows calls, and not when already in it here.
     if cx.call_here.is_some() && ongoing {
         entry = entry.child(text(t!("call.card.joined")).font(font::META).color(p.text_muted));
