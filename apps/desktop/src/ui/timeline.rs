@@ -964,6 +964,9 @@ fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Pa
     }
 }
 
+/// The least width a call card's title and status keep beside its picture.
+const CALL_WORDS_MIN: f32 = 100.0;
+
 /// A call's card: what kind it is and how it stands. The newest card in the room shows whether
 /// the room's call is under way, with the way in; older ones have ended.
 fn call_card(cx: &Context<'_>, event_id: &str, card: &CallCard, latest_call: bool, p: &Palette) -> El {
@@ -987,9 +990,10 @@ fn call_card(cx: &Context<'_>, event_id: &str, card: &CallCard, latest_call: boo
         .center()
         .fill(if ongoing { p.success } else { p.hover })
         .child(icon(glyph, 20.0).color(if ongoing { p.on_accent } else { p.text_muted }));
+    // The words keep a readable width; in a narrow message, Join takes a line under them.
     let words = col()
         .grow(1.0)
-        .min_w(0.0)
+        .min_w(CALL_WORDS_MIN)
         .gap(2.0)
         .child(text(crate::state::call_title(card)).font(font::BODY_STRONG).color(p.text).truncate())
         .child(text(status).font(font::META).color(p.text_muted).truncate());
@@ -999,6 +1003,7 @@ fn call_card(cx: &Context<'_>, event_id: &str, card: &CallCard, latest_call: boo
         .mt(2.0)
         .padding(12.0)
         .gap(12.0)
+        .flex_wrap()
         .center_y()
         .radius(10.0)
         .fill(p.surface)

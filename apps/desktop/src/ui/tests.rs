@@ -1087,6 +1087,21 @@ fn a_timeline_too_narrow_for_the_readers_column_should_show_indicators_under_the
 }
 
 #[test]
+fn a_call_card_at_the_narrowest_column_width_should_keep_its_words_readable() {
+    let mut rt = runtime(|s| s.select_room("!dm-kai:example.org"));
+    // Just wide enough to keep the readers' column.
+    let column = readers_column_start_at(&mut rt, (694.0, 900.0));
+    let frame = rt.presented("timeline-frame").expect("the timeline").0;
+    let content = column - 10.0 - (frame[0] + 20.0 + 36.0 + 10.0);
+    assert!(content >= super::readers::MIN_CONTENT, "the column stays at {content}");
+    let join = rt.elements().into_iter().find(|e| e.key.as_deref().is_some_and(|k| k.starts_with("call-card-join-")));
+    let join = join.expect("the call card's join button").rect;
+    assert!(join[0] + join[2] <= column, "join ends at {}, the column starts at {column}", join[0] + join[2]);
+    let title = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Voice call")).expect("the call's title");
+    assert!(title.rect[2] >= 60.0, "the call's title keeps room: {}", title.rect[2]);
+}
+
+#[test]
 fn a_thread_link_should_leave_the_readers_column_clear_in_a_narrow_window() {
     let mut rt = readers_runtime();
     rt.set_viewport((760.0, 1200.0), 1.0);
