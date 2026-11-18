@@ -80,8 +80,6 @@ pub struct Account {
     pub(crate) status: Arc<tokio::sync::Mutex<crate::status::Known>>,
     /// Held while a status is saved: one save at a time, apart from the lock syncs take.
     pub(crate) status_saves: Arc<tokio::sync::Mutex<()>>,
-    /// Reads of the user's own presence go one at a time, so they report in the order made.
-    pub(crate) presence_reads: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Where the browser comes back to after an OAuth sign-in.
@@ -262,7 +260,6 @@ impl Account {
             rtc: Arc::new(Mutex::new(None)),
             status: Arc::default(),
             status_saves: Arc::default(),
-            presence_reads: Arc::default(),
         }
     }
 
@@ -374,7 +371,6 @@ impl Account {
             rtc: Arc::default(),
             status: Arc::default(),
             status_saves: Arc::default(),
-            presence_reads: Arc::default(),
         })
     }
 
@@ -957,7 +953,6 @@ mod tests {
             rtc: Arc::new(Mutex::new(None)),
             status: Arc::default(),
             status_saves: Arc::default(),
-            presence_reads: Arc::default(),
         }
     }
 

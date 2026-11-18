@@ -2540,9 +2540,17 @@ impl State {
                         if !people.is_empty() {
                             sink.emit(Event::Presence { account: account.id().clone(), people });
                         }
-                        let own = account.report_own_presence(|me| {
-                            sink.emit(Event::Presence { account: account.id().clone(), people: vec![me] })
-                        });
+                        // The user's own presence, read from the server at start and again when a
+                        // sync asks; asks made meanwhile wait as one. It ends with the account.
+                        let own_refresh = Arc::new(tokio::sync::Notify::new());
+                        let own = async {
+                            let report =
+                                |me| sink.emit(Event::Presence { account: account.id().clone(), people: vec![me] });
+                            loop {
+                                account.report_own_presence(report).await;
+                                own_refresh.notified().await;
+                            }
+                        };
                         tokio::join!(
                             profile,
                             layout,
@@ -2550,7 +2558,7 @@ impl State {
                             own,
                             calls,
                             crate::security::watch(account.clone(), flows, Arc::clone(&sink)),
-                            sync_loop(account.clone(), Arc::clone(&sink), feed),
+                            sync_loop(account.clone(), Arc::clone(&sink), feed, Arc::clone(&own_refresh)),
                         );
                     })
                 };
@@ -2604,7 +2612,8 @@ impl State {
 
 /// Syncs one account until it fails or is aborted, reporting rooms, new messages and
 /// notifications. The first response only catches up, so it notifies about nothing.
-async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed) {
+/// `own_refresh` asks for the user's own presence to be read again.
+async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, own_refresh: Arc<tokio::sync::Notify>) {
     // Waits between failed syncs: from a few seconds, doubling, to a minute.
     const FIRST_RETRY: std::time::Duration = std::time::Duration::from_secs(2);
     const LAST_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
@@ -2612,7 +2621,7 @@ async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed) {
     let mut retry = FIRST_RETRY;
     loop {
         let started = std::time::Instant::now();
-        let Err(error) = sync_until_error(&account, &sink, &feed, &caught_up).await else { return };
+        let Err(error) = sync_until_error(&account, &sink, &feed, &caught_up, &own_refresh).await else { return };
         // The session is over. The SDK broadcasts every ending as `UnknownToken`, with whether
         // it was soft, and `watch_session` reports that: the error here may hide it (a rejected
         // refresh), so reporting from here too could call a soft ending hard.
@@ -2635,6 +2644,7 @@ async fn sync_until_error(
     sink: &Arc<dyn EventSink>,
     feed: &RoomFeed,
     caught_up: &Arc<std::sync::atomic::AtomicBool>,
+    own_refresh: &Arc<tokio::sync::Notify>,
 ) -> Result<(), matrix_sdk::Error> {
     // Members load as rooms need them (lazy loading): a first sync doesn't download every member
     // of every room.
@@ -2791,11 +2801,7 @@ async fn sync_until_error(
             }
             // Read aside, so the next sync doesn't wait for it.
             if !own.is_empty() {
-                let (account, sink) = (account.clone(), Arc::clone(&sink));
-                tokio::spawn(async move {
-                    let report = |me| sink.emit(Event::Presence { account: account.id().clone(), people: vec![me] });
-                    account.report_own_presence(report).await;
-                });
+                own_refresh.notify_one();
             }
             let report = |status| sink.emit(Event::Status { account: account.id().clone(), status });
             account.follow_status(&response.account_data, &sent, report).await;

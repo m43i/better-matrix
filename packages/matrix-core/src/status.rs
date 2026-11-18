@@ -167,7 +167,6 @@ impl Account {
     /// can't be read.
     pub(crate) async fn report_own_presence(&self, report: impl Fn(crate::PersonPresence)) {
         let Ok(me) = self.user_id() else { return };
-        let _one_at_a_time = self.presence_reads.lock().await;
         let before = self.known().await.messages_saved;
         let read = self.client().send(get_presence::v3::Request::new(me.clone()));
         let current = match tokio::time::timeout(ANNOUNCE_WAIT, read).await {

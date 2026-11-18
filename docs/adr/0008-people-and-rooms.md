@@ -88,10 +88,10 @@ Date: 2026-11-14
   sync brings (servers
   send only changes after the first sync), and the user's after a status message is set. The
   user's own is never taken from the store, a sync or a member list, which may predate a save
-  made meanwhile: it is read from the server at start and, aside from the sync loop, when a
-  sync brings a change. Reads go one at a time, so they report in order; one during which a
-  message was saved is dropped (checked and reported under the status's lock), as the save
-  reported itself. It is read without the status's lock, which syncs wait for. A save
+  made meanwhile: one task per account, ending with it, reads it from the server at start and
+  again when a sync brings a change (changes brought while it reads make one more read), so
+  reads report in order and never hold up syncing. A read during which a message was saved is
+  dropped (checked and reported under the status's lock), as the save reported itself. It is read without the status's lock, which syncs wait for. A save
   superseded by a later choice shows no failure notice.
   Member lists carry the same from the store and fill in only people not reported yet, as a
   report is newer. The desktop keeps one map per account.
