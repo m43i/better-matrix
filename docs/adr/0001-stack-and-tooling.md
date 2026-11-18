@@ -89,12 +89,29 @@ Date: 2026-11-14
     tests use a local remote that rejects direct pushes to `main`, run in CI before Cargo.
     The tag is made only when the release is published, so a failed run leaves none behind. It tests the commit
     unless it already passed CI on `main` (a version-only change counts as the same commit),
-    then builds macOS arm64 (`.dmg`, signed ad hoc), Windows x86_64 (`.zip`) and Linux x86_64
-    and aarch64 on Ubuntu 22.04 (glibc 2.35, which the packages require): `.deb`, `.rpm` and an
+    then builds macOS arm64 (`.dmg`, signed ad hoc), Windows x86_64 (an installer and a `.zip`)
+    and Linux x86_64 and aarch64 on Ubuntu 22.04 (glibc 2.35, which the packages require): `.deb`, `.rpm` and an
     Arch `.pkg.tar.xz` from one nfpm description, an AppImage (linuxdeploy) and a tarball the
     release's `PKGBUILD` installs. Asset names carry no version, so `releases/latest/download/…`
     links stay stable. Release builds keep no Rust cache: a tag's cache can't be restored by any
     other run.
+  - The Windows installer is Inno Setup (`packaging/windows/better-matrix.iss`, preinstalled on
+    the Windows runners): an `.exe` rather than an MSI, because a per-user MSI is awkward and the
+    self-update needs a folder the user can write. It installs for the current user without
+    elevation into `%LOCALAPPDATA%\Programs\Better Matrix` (where the earlier README install line
+    put the app, so it adopts those installs), adds the Start menu entry and the `matrix:`
+    handler, and registers an uninstaller under a fixed `AppId`. It closes a running app before
+    replacing it. The `.zip` stays beside it with the same files: the self-update downloads it,
+    and it serves as the portable build. Neither is code-signed, so SmartScreen warns about both.
+    CI installs, self-updates and uninstalls the installer with a stand-in executable.
+  - The macOS `.dmg` opens on a window to drag the app to Applications: the app, an arrow
+    (`packaging/macos/dmg-background.svg`, rendered to PNGs at 1x and 2x) and an Applications
+    link. dmgbuild writes the window's layout (`packaging/macos/dmg-settings.py`) without
+    driving Finder, which is unreliable on hosted runners; it is installed hash-pinned into a
+    virtual environment (`dmgbuild-requirements.txt`). The README gives no install command for
+    macOS or Windows: people download the disk image or the installer. Opening the ad-hoc-signed
+    app the first time takes **Open Anyway** in Privacy & Security; in-app updates carry no
+    quarantine flag, so they open without it. CI checks the image's contents and layout files.
   - libwebrtc's link settings (`.cargo/config.toml`, as LiveKit's own): `-ObjC` on macOS (or it
     aborts at startup), the static C runtime on Windows; on ARM Linux, lld (with clang driving the
     link in CI). Cargo doesn't pass a dependency's link arguments on, so the app sets them.
@@ -110,7 +127,9 @@ Date: 2026-11-14
     the repository's release permissions and GitHub HTTPS; it is not a separate signing key.
   - Stage beside the install so permissions and disk failures are reported before quitting.
     macOS publishes a ditto ZIP of the complete ad-hoc-signed bundle as well as the DMG, and
-    verifies its code signature. Windows extracts only `better-matrix.exe` from the existing ZIP.
+    verifies its code signature. Windows extracts only `better-matrix.exe` from the existing ZIP,
+    and its helper sets the installer's `DisplayVersion` (under the `AppId`) when that entry
+    exists, so Installed apps shows the running version.
   - A native script helper acknowledges startup, waits for process exit (the engine shuts
     down and releases the single-instance lock normally), moves the previous install aside,
     replaces it and relaunches. It restores the backup if replacement/relaunch fails and
@@ -122,7 +141,7 @@ Date: 2026-11-14
 - **`matrix:` links and one process** (desktop):
   - The installs claim the `matrix` scheme: the Linux desktop entry (`packaging/linux`, and
     `bun run install:linux`) has `MimeType=x-scheme-handler/matrix;` and `Exec=… %u`; the macOS
-    bundle's `Info.plist` has `CFBundleURLTypes`; the Windows install line in the README writes
+    bundle's `Info.plist` has `CFBundleURLTypes`; the Windows installer writes
     `HKCU\Software\Classes\matrix` (`URL Protocol`, `shell\open\command` → `"…exe" "%1"`).
     `https://matrix.to` isn't claimed: no desktop OS hands a web domain to an app without the
     domain's consent, so those links open the browser, and matrix.to's page offers clients.

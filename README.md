@@ -30,9 +30,10 @@
 
 ## Install
 
-Copy the line for your system into a terminal. Each one fetches the latest release from
-[Releases](https://github.com/m43i/better-matrix/releases/latest), where you can also download the
-files by hand. Linux packages come for x86_64 and ARM (aarch64); the commands pick the right one.
+Everything comes from the latest release on
+[Releases](https://github.com/m43i/better-matrix/releases/latest). On macOS and Windows, download
+the disk image or the installer below. On Linux, copy the line for your system into a terminal, or
+download the files by hand. Linux packages come for x86_64 and ARM (aarch64); the commands pick the right one.
 They need glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36, openSUSE Tumbleweed or later
 (RHEL, AlmaLinux and Rocky Linux from version 10).
 
@@ -79,25 +80,23 @@ start it with `--appimage-extract-and-run`.
 
 ### macOS (Apple silicon)
 
-```sh
-curl -fLo /tmp/better-matrix.dmg https://github.com/m43i/better-matrix/releases/latest/download/better-matrix-macos-arm64.dmg && hdiutil attach -nobrowse -quiet -mountpoint /tmp/better-matrix-dmg /tmp/better-matrix.dmg && rm -rf "/Applications/Better Matrix.app" && cp -R "/tmp/better-matrix-dmg/Better Matrix.app" /Applications/ && hdiutil detach -quiet /tmp/better-matrix-dmg && xattr -dr com.apple.quarantine "/Applications/Better Matrix.app"
-```
-
-Quit Better Matrix before updating. The app isn't signed with an Apple Developer ID or notarized
-yet; the last step lets it open without a warning. Because of that, macOS asks again for keychain,
-camera and microphone access after each update. Installing from the `.dmg` by hand works too: drag
-it to Applications, then right-click it and choose **Open** the first time.
+Download
+[`better-matrix-macos-arm64.dmg`](https://github.com/m43i/better-matrix/releases/latest/download/better-matrix-macos-arm64.dmg),
+open it and drag Better Matrix to Applications. The app isn't signed with an Apple Developer ID or
+notarized yet, so macOS won't open it the first time: open **System Settings → Privacy & Security**,
+scroll down to the message about Better Matrix and choose **Open Anyway**. You only do this once;
+updates from inside the app open straight away. Because of the missing signature, macOS asks
+again for keychain, camera and microphone access after each update.
 
 ### Windows (x64)
 
-In PowerShell:
-
-```powershell
-$dir = "$env:LOCALAPPDATA\Programs\Better Matrix"; $zip = "$env:TEMP\better-matrix.zip"; Invoke-WebRequest https://github.com/m43i/better-matrix/releases/latest/download/better-matrix-windows-x86_64.zip -OutFile $zip; Expand-Archive $zip -DestinationPath $dir -Force; $link = (New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Better Matrix.lnk"); $link.TargetPath = "$dir\better-matrix.exe"; $link.IconLocation = "$dir\better-matrix.ico"; $link.Save(); $key = "HKCU:\Software\Classes\matrix"; New-Item -Force "$key\shell\open\command" | Out-Null; Set-Item $key "URL:Matrix link"; New-ItemProperty $key "URL Protocol" -Value "" -Force | Out-Null; Set-Item "$key\shell\open\command" "`"$dir\better-matrix.exe`" `"%1`""; & "$dir\better-matrix.exe"
-```
-
-This installs for your user only (no administrator rights needed), adds Better Matrix to the Start
-menu and opens `matrix:` links with it. Windows may show a SmartScreen warning for a new app: choose **More info**, then **Run anyway**.
+Download and run
+[`better-matrix-windows-x86_64-setup.exe`](https://github.com/m43i/better-matrix/releases/latest/download/better-matrix-windows-x86_64-setup.exe).
+It installs for your user only (no administrator rights needed), adds Better Matrix to the Start
+menu, opens `matrix:` links with it and appears in **Settings → Apps** to uninstall. Windows may show
+a SmartScreen warning for a new app: choose **More info**, then **Run anyway**. Installed with the
+earlier PowerShell line? Run the installer once and it takes that install over. Prefer no installer?
+The release's `better-matrix-windows-x86_64.zip` holds the same app to unpack anywhere you can write.
 
 ### Updating and removing
 
@@ -106,11 +105,10 @@ When one is available, an update icon appears above your avatar in the rail. Cli
 install and restart. The app never installs an update automatically. The install folder must be
 writable; on macOS, run the app from Applications rather than the disk image. Your accounts,
 history and keys stay where they are. See [the update icon in a scrolling rail](docs/self-update.png).
-You can also run the install line again to update. To remove
+You can also install a new release the same way as the first to update. To remove
 the app, uninstall the package (`sudo apt remove better-matrix`, `sudo dnf remove better-matrix`,
-`sudo pacman -R better-matrix`, or `sudo pacman -R better-matrix-bin` after a `PKGBUILD` install), or
-delete the AppImage, the app in Applications, or the `Better Matrix` folder, Start menu entry and
-`matrix:` link handler (`Remove-Item -Recurse HKCU:\Software\Classes\matrix`) on Windows.
+`sudo pacman -R better-matrix`, or `sudo pacman -R better-matrix-bin` after a `PKGBUILD` install),
+delete the AppImage or the app in Applications, or on Windows uninstall it in **Settings → Apps**.
 
 ## Develop
 

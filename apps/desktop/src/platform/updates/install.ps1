@@ -1,5 +1,5 @@
 # Paths are arguments to -File, never interpolated into PowerShell source.
-param([string]$Target, [string]$Staged, [int]$ParentId, [string]$Work, [string]$ErrorFile)
+param([string]$Target, [string]$Staged, [int]$ParentId, [string]$Work, [string]$ErrorFile, [string]$Version)
 $ErrorActionPreference = 'Stop'
 $backup = Join-Path $Work 'previous.exe'
 $replacing = $false
@@ -23,6 +23,14 @@ try {
     }
     Move-Item -LiteralPath $Staged -Destination $Target
     Start-Process -FilePath $Target -WorkingDirectory (Split-Path -Parent $Target)
+    # An install from the installer lists its version in Installed apps: keep it current. The ID
+    # is packaging\windows\better-matrix.iss's AppId. A failure here leaves the update in place.
+    try {
+        $entry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{DB776B2C-C930-4C78-B82D-3BACD4B141C9}_is1'
+        if ($Version -and (Test-Path -LiteralPath $entry)) {
+            Set-ItemProperty -LiteralPath $entry -Name DisplayVersion -Value $Version
+        }
+    } catch {}
 } catch {
     # Before the parent exits, the running app reports the helper-start failure itself.
     if (!$replacing) { exit 1 }

@@ -1,0 +1,11 @@
+<!-- The disk image window's background: an arrow from the app to Applications, whose icons
+     dmg-settings.py places either side of it. It is as tall as the whole window, title bar
+     included, so no strip of window colour shows below it. The PNGs are rendered from this file:
+     rsvg-convert -z 1 -o dmg-background.png dmg-background.svg (and -z 2 for @2x). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400">
+  <rect width="640" height="400" fill="#f4f6fa"/>
+  <g fill="none" stroke="#8d9ab3" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M276 165 H362"/>
+    <path d="M344 147 L364 165 L344 183"/>
+  </g>
+</svg>

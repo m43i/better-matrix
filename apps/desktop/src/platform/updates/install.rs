@@ -115,6 +115,7 @@ impl Install {
             .arg(std::process::id().to_string())
             .arg(work.path())
             .arg(error_file)
+            .arg(&release.version)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

@@ -49,6 +49,56 @@ jobs:
       - name: Test replacement, restart and rollback (macOS)
         if: runner.os == 'macOS'
         run: python3 -m unittest discover -s .github/scripts -p test_update_helpers.py -v
+      # A system executable stands in for the app: the installer and the helper only move it.
+      - name: Check Windows installer, update and uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force target\release | Out-Null
+          Copy-Item "$env:SystemRoot\System32\whoami.exe" target\release\better-matrix.exe
+          packaging/windows/package.ps1 0.0.0-rc.1
+          Expand-Archive dist\out\better-matrix-windows-x86_64.zip dist\check
+          foreach ($file in 'better-matrix.exe', 'better-matrix.ico', 'LICENSE') {
+            if (!(Test-Path "dist\check\$file")) { throw "The ZIP lacks $file" }
+          }
+          $setup = Start-Process dist\out\better-matrix-windows-x86_64-setup.exe -Wait -PassThru `
+            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          if ($setup.ExitCode -ne 0) { throw "Setup failed with exit code $($setup.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Programs\Better Matrix"
+          foreach ($file in 'better-matrix.exe', 'better-matrix.ico', 'LICENSE', 'unins000.exe') {
+            if (!(Test-Path "$app\$file")) { throw "The install lacks $file" }
+          }
+          if (!(Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Better Matrix.lnk")) {
+            throw 'The Start menu entry is missing'
+          }
+          $command = (Get-Item 'HKCU:\Software\Classes\matrix\shell\open\command').GetValue('')
+          if ($command -ne "`"$app\better-matrix.exe`" `"%1`"") { throw "Unexpected matrix: handler $command" }
+          $entry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{DB776B2C-C930-4C78-B82D-3BACD4B141C9}_is1'
+          if ((Get-ItemProperty $entry).DisplayVersion -ne '0.0.0-rc.1') { throw 'The installed version is wrong' }
+
+          # The self-update replaces the installed executable and keeps the listed version current.
+          $gone = Start-Process cmd.exe -ArgumentList '/c', 'exit' -PassThru -WindowStyle Hidden
+          $gone.WaitForExit()
+          $work = New-Item -ItemType Directory "$app\.better-matrix-update-check"
+          Copy-Item "$env:SystemRoot\System32\hostname.exe" "$work\better-matrix.exe"
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass -File apps\desktop\src\platform\updates\install.ps1 `
+            "$app\better-matrix.exe" "$work\better-matrix.exe" $gone.Id "$work" "$env:RUNNER_TEMP\update-error.txt" 0.0.1
+          if ($LASTEXITCODE -ne 0) { throw "The update helper failed: $(Get-Content -Raw "$env:RUNNER_TEMP\update-error.txt")" }
+          if ((Get-FileHash "$app\better-matrix.exe").Hash -ne (Get-FileHash "$env:SystemRoot\System32\hostname.exe").Hash) {
+            throw 'The update did not replace the executable'
+          }
+          if ((Get-ItemProperty $entry).DisplayVersion -ne '0.0.1') { throw 'The update did not set the listed version' }
+
+          $uninstall = Start-Process "$app\unins000.exe" -Wait -PassThru `
+            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstall failed with exit code $($uninstall.ExitCode)" }
+          # The uninstaller finishes from a copy of itself; give it a moment.
+          for ($i = 0; (Test-Path $app) -and $i -lt 60; $i++) { Start-Sleep -Milliseconds 500 }
+          if (Test-Path $app) { throw "Uninstalling left $(Get-ChildItem -Recurse -Name $app)" }
+          if (Test-Path 'HKCU:\Software\Classes\matrix') { throw 'Uninstalling left the matrix: handler' }
+          if (Test-Path $entry) { throw 'Uninstalling left the Installed apps entry' }
       - name: Check macOS update archive
         if: runner.os == 'macOS'
         shell: bash
@@ -61,6 +111,14 @@ jobs:
           test -f 'dist/check/Better Matrix.app/Contents/Resources/better-matrix.icns'
           test -f 'dist/check/Better Matrix.app/Contents/Info.plist'
           test -x 'dist/check/Better Matrix.app/Contents/MacOS/better-matrix'
+          # The disk image: the signed app, Applications to drag it to, and the window's layout.
+          hdiutil attach -nobrowse -readonly -mountpoint dist/volume dist/out/better-matrix-macos-arm64.dmg
+          codesign --verify --deep --strict 'dist/volume/Better Matrix.app'
+          test "$(readlink dist/volume/Applications)" = /Applications
+          test -f dist/volume/.DS_Store
+          test -f dist/volume/.background.tiff
+          test -f dist/volume/.VolumeIcon.icns
+          hdiutil detach dist/volume
 
   test:
     name: Lint and test
