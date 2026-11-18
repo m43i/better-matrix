@@ -85,18 +85,23 @@ impl State {
     /// Each composer holds the draft of the timeline it writes into. Leaving a timeline keeps
     /// its draft (in memory, its text in the store too); arriving brings the timeline's back,
     /// from memory, or on the first visit this run from the store. `shown` are the timelines on
-    /// screen, the room's first.
-    pub(super) fn follow_drafts(&mut self, shown: &[Owner]) {
+    /// screen, the room's first. True when a composer moved to another timeline.
+    pub(super) fn follow_drafts(&mut self, shown: &[Owner]) -> bool {
         let now = Instant::now();
-        let mut restored = false;
+        let mut moved = false;
         for target in [ComposerTarget::Room, ComposerTarget::Thread] {
             let thread = target == ComposerTarget::Thread;
             let owner = shown.iter().find(|(_, key)| key.thread.is_some() == thread).cloned();
             if self.composer(target).owner == owner {
                 continue;
             }
+            moved = true;
             self.typing.left(usize::from(thread));
             if let Some(left) = self.composer_mut(target).owner.take() {
+                // An edit still in the field is set aside first: only the draft is the timeline's.
+                if let Some(edit) = self.composer_mut(target).set_aside_edit() {
+                    self.set_edit_aside(edit);
+                }
                 let draft = self.composer_mut(target).take_draft();
                 if let Some(keep) = self.kept_drafts.due(&left, draft.stored(), now, true) {
                     let (account, key) = left.clone();
@@ -116,7 +121,6 @@ impl State {
             if let Some(at) = &owner {
                 if let Some(draft) = self.drafts.remove(at) {
                     self.composer_mut(target).put_draft(draft);
-                    restored = true;
                 } else if self.drafts_asked.insert(at.clone()) {
                     let (account, key) = at.clone();
                     self.dispatch(Command::LoadDraft { account, key }, Purpose::Draft(at.clone()));
@@ -124,11 +128,9 @@ impl State {
             }
             self.composer_mut(target).owner = owner;
         }
-        // A draft coming back isn't typing; a composer going away is left to `send_typing`, which
-        // tells the room typing stopped.
-        if restored {
-            self.settle_typing();
-        }
+        // Whether a composer moved to another timeline: the caller settles typing once kept edits
+        // are back too. Typing in a composer that moved ends (`Typing::left`).
+        moved
     }
 
     /// The store's draft for `at`, read on the first visit: its text goes into the composer if

@@ -1863,9 +1863,12 @@ impl State {
         // A memo recording for a timeline no longer shown would go on unseen, the microphone
         // open: closing the thread, another room and the overview all drop it. An edit of a
         // message there is set aside, its draft back, and returns when the timeline does.
+        // Kept edits come back only once each composer holds its new timeline's draft.
         for target in [ComposerTarget::Room, ComposerTarget::Thread] {
-            if self.composer(target).voice.as_ref().is_some_and(|memo| !shown.contains(&memo.timeline)) {
-                self.cancel_voice_memo(target);
+            if self.composer(target).voice.as_ref().is_some_and(|memo| !shown.contains(&memo.timeline))
+                && let Some(memo) = self.composer_mut(target).voice.take()
+            {
+                memo.recorder.cancel();
             }
             let editing = self.composer(target).editing.as_ref().map(|editing| &editing.target);
             if editing.is_some_and(|edited| !shown.iter().any(|(a, k)| *a == edited.account && *k == edited.key))
@@ -1874,8 +1877,12 @@ impl State {
                 self.set_edit_aside(edit);
             }
         }
-        self.follow_drafts(&shown);
+        let moved = self.follow_drafts(&shown);
         self.resume_edits();
+        // A draft or edit coming back with its timeline isn't typing.
+        if moved {
+            self.settle_typing();
+        }
         let (gone, kept): (Vec<_>, Vec<_>) = self.open_timelines.drain(..).partition(|open| !shown.contains(open));
         for (account, key) in gone {
             if key.thread.is_none() {

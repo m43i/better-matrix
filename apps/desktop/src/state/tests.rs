@@ -5054,3 +5054,24 @@ fn a_kept_draft_should_join_a_reply_left_in_its_room_before_it_came() {
     assert_eq!(s.composer.edit.text, "from last time");
     assert!(s.composer.reply_to.is_some());
 }
+
+#[test]
+fn switching_threads_while_recording_should_not_mix_their_drafts() {
+    let (mut s, _) = state();
+    let id = with_own_message(&mut s);
+    // Thread B: an edit left unfinished, set aside when its thread closed.
+    s.open_thread("$b");
+    let edited =
+        composer::EditTarget { account: id, key: TimelineKey::thread("!one:x", "$b"), event_id: "$mine".into() };
+    s.thread_composer.start_edit(edited, "helo", None);
+    s.open_thread("$a");
+    // Thread A: a draft, and a memo recording.
+    type_into(&mut s, ComposerTarget::Thread, "draft in a");
+    s.start_voice_memo(ComposerTarget::Thread);
+    s.open_thread("$b");
+    assert!(s.thread_composer.editing.is_some());
+    s.cancel_edit(ComposerTarget::Thread);
+    assert_eq!(s.thread_composer.edit.text, "");
+    s.open_thread("$a");
+    assert_eq!(s.thread_composer.edit.text, "draft in a");
+}
