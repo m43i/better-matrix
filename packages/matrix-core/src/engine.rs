@@ -2758,7 +2758,13 @@ async fn sync_until_error(
         // Each sync announces the status as last synced, so one set elsewhere holds here too.
         let sent = crate::status::sync_presence(account.status().await, caught_up.load(Ordering::Relaxed));
         settings = settings.set_presence(sent.clone());
-        let response = account.sync_once_locked(settings.clone()).await?;
+        let response = match account.sync_once_locked(settings.clone()).await {
+            Ok(response) => response,
+            Err(error) => {
+                account.sync_failed(&sent).await;
+                return Err(error);
+            }
+        };
         settings = settings.token(response.next_batch.clone());
         if on_response(response, sent).await == LoopCtrl::Break {
             return Ok(());

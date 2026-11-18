@@ -45,7 +45,8 @@ Date: 2026-11-14
   - A sync as `offline` leaves the session's presence as it was, so hiding needs an explicit
     `PUT /presence` on every session. A session announces the status after saving one, when a
     sync brings one, after a sync that sent another presence (asked for before a save here, it
-    may reach the server after the save's announcement), and after any sync while it hasn't
+    may reach the server after the save's announcement; also when that sync failed, as the
+    server may have applied it first), and after any sync while it hasn't
     announced the current one yet: after starting, and again while announcing fails. Waiting for the server to time a session out isn't
     enough: Synapse counts from the session's last activity, so one in use would stay visible.
     Announcing keeps the status message another client set, and sends nothing when it can't

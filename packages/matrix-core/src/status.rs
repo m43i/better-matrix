@@ -152,6 +152,15 @@ impl Account {
         }
     }
 
+    /// After a sync that failed, which `sent` this presence: the server may have applied it
+    /// before failing, so when it isn't the current status's, the next sync announces again.
+    pub(crate) async fn sync_failed(&self, sent: &PresenceState) {
+        let mut known = self.known().await;
+        if known.saved.is_some_and(|saved| saved.status.presence() != *sent) {
+            known.announced = None;
+        }
+    }
+
     /// Announces the latest status if this session hasn't yet, or again when `again`.
     async fn settle(&self, known: &mut Known, again: bool) {
         let Some(saved) = known.saved else { return };
@@ -427,6 +436,26 @@ mod tests {
         account.set_status(Status::Hidden, 10, |_| {}).await.unwrap();
         account.follow_status(&[], &PresenceState::Online, |_| {}).await;
         assert_eq!(server.presence(), vec![json!("offline"), json!("offline")]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_sync_that_sent_the_presence_from_before_a_save_should_be_followed_by_the_saved_one() {
+        let server = Homeserver::plain();
+        let account = server.account().await;
+        account.set_status(Status::Hidden, 10, |_| {}).await.unwrap();
+        account.sync_failed(&PresenceState::Online).await;
+        account.follow_status(&[], &PresenceState::Offline, |_| {}).await;
+        assert_eq!(server.presence(), vec![json!("offline"), json!("offline")]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_sync_that_sent_the_current_presence_should_not_announce_again() {
+        let server = Homeserver::plain();
+        let account = server.account().await;
+        account.set_status(Status::Hidden, 10, |_| {}).await.unwrap();
+        account.sync_failed(&PresenceState::Offline).await;
+        account.follow_status(&[], &PresenceState::Offline, |_| {}).await;
+        assert_eq!(server.presence(), vec![json!("offline")]);
     }
 
     #[tokio::test]
