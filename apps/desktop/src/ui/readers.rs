@@ -18,6 +18,8 @@ fn reader_key(user_id: &str) -> String {
     format!("reader-{user_id}")
 }
 
+/// The read indicator, at the lower right of its message's row: beside the message rather than
+/// below it, so a receipt arriving never makes the message taller.
 pub fn indicator(account: &AccountData, key: &TimelineKey, message: &Message, media: &MediaCache, p: &Palette) -> El {
     let mut stack = row().center_y();
     for (index, receipt) in message.read_receipts.iter().take(READER_FACES).enumerate() {
@@ -33,7 +35,7 @@ pub fn indicator(account: &AccountData, key: &TimelineKey, message: &Message, me
         .gap(6.0)
         .center_y()
         .px(4.0)
-        .py(3.0)
+        .py(2.0)
         .radius(5.0)
         .hover(p.hover)
         .role("button")
@@ -47,7 +49,7 @@ pub fn indicator(account: &AccountData, key: &TimelineKey, message: &Message, me
             text(format!("+{}", message.read_receipts.len() - READER_FACES)).font(font::META).color(p.text_muted),
         );
     }
-    row().w_full().justify_end().child(button.on_press(move |s: &mut State| s.toggle_readers(&target, &event_id)))
+    button.self_end().on_press(move |s: &mut State| s.toggle_readers(&target, &event_id))
 }
 
 pub fn panels(

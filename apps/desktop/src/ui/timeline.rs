@@ -622,10 +622,6 @@ fn message_row(
         body = body.child(thread_link(&message.event_id, thread, cx.media, p));
     }
 
-    if !cx.in_thread() && !message.pending && !message.read_receipts.is_empty() {
-        body = body.child(super::readers::indicator(cx.data, cx.key, message, cx.media, p));
-    }
-
     let mut status = Vec::new();
     if message.edited {
         status.push(t!("message.edited"));
@@ -684,6 +680,9 @@ fn message_row(
         .opacity(if message.pending { 0.6 } else { 1.0 })
         .child(gutter)
         .child(content);
+    if !cx.in_thread() && !message.pending && !message.read_receipts.is_empty() {
+        row = row.child(super::readers::indicator(cx.data, cx.key, message, cx.media, p));
+    }
     if pinned {
         row = row.fill(p.accent.alpha(0.06)).border_sides([0.0, 0.0, 0.0, 3.0], p.accent);
     }

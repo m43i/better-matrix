@@ -222,7 +222,8 @@ see who is typing there.
   ties. SDK tracking uses message-like events, so a receipt on a later state event still marks the
   preceding message. Only supplied positions are shown: no room permission or read is inferred
   from an absent receipt. The desktop shows up to four overlapping avatars and an overflow count
-  at the lower right of a sent message. Clicking opens a virtualized reader list, with available
+  at the lower right of a sent message, beside its content rather than below it and no taller
+  than a line of text, so a receipt never makes the message taller. Clicking opens a virtualized reader list, with available
   receipt dates/times and room profiles (falling back to timeline senders or user IDs). The list
   loads the room members as the member panel does; selecting a reader opens that same member menu
   beside the list. A reader outside the joined-member list keeps chat, call and invite actions,

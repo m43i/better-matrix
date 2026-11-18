@@ -812,10 +812,7 @@ fn a_reader_outside_the_member_list_should_keep_chat_actions_without_moderation(
     assert!(rt.find("member-menu-role").is_none());
 }
 
-#[test]
-fn moving_all_readers_away_should_remove_an_open_read_indicator() {
-    let mut rt = readers_runtime();
-    open_readers(&mut rt);
+fn clear_demo_readers(rt: &mut Runtime<State>) {
     rt.update(|s, tx| {
         let key = TimelineKey::room(demo::DEMO_THREAD.0);
         let account = s.nav.account.clone().unwrap();
@@ -833,6 +830,60 @@ fn moving_all_readers_away_should_remove_an_open_read_indicator() {
     });
     rt.settle_all();
     rt.frame(1.0 / 60.0);
+}
+
+#[test]
+fn a_read_indicator_should_not_make_its_message_taller() {
+    let mut rt = readers_runtime();
+    let height = |rt: &Runtime<State>| rt.presented("msg-read-demo").expect("the message row").0[3];
+    let with_readers = height(&rt);
+    clear_demo_readers(&mut rt);
+    assert_eq!(height(&rt), with_readers);
+}
+
+/// Sets a one-line message from the demo message's sender after it, so its row continues the
+/// sender's run (no name line), with or without a reader; gives back the row's height.
+fn set_continued_message(rt: &mut Runtime<State>, read: bool) -> f32 {
+    rt.update(|s, tx| {
+        let account = s.nav.account.clone().unwrap();
+        let key = TimelineKey::room(demo::DEMO_THREAD.0);
+        let entries = s.active_account().unwrap().timeline(&key).unwrap().entries.len();
+        let read_receipts = if read {
+            vec![matrix_core::ReadReceipt { user_id: "@kai:example.org".into(), timestamp_ms: None }]
+        } else {
+            Vec::new()
+        };
+        let message = Message {
+            event_id: "$continued".into(),
+            sender_id: demo::ADA.into(),
+            sender_name: "Ada Lovelace".into(),
+            timestamp_ms: demo::DEMO_DAY_MS + 13 * 3_600_000 + 60_000,
+            content: MessageContent::Text { body: "Ready to try.".into(), html: None },
+            read_receipts,
+            ..Message::default()
+        };
+        let entry = TimelineEntry { id: "continued".into(), kind: EntryKind::Message(Box::new(message)) };
+        let diff = if read { TimelineDiff::PushBack(entry) } else { TimelineDiff::Set { index: entries - 1, entry } };
+        s.apply(Event::TimelineChanged { account, key, diffs: vec![diff] }, tx);
+    });
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    rt.presented("msg-continued").expect("the continued message's row").0[3]
+}
+
+#[test]
+fn a_read_indicator_should_not_make_a_continued_message_taller() {
+    let mut rt = readers_runtime();
+    let with_reader = set_continued_message(&mut rt, true);
+    assert!(rt.find(&format!("readers-{}-$continued", demo::DEMO_THREAD.0)).is_some());
+    assert_eq!(set_continued_message(&mut rt, false), with_reader);
+}
+
+#[test]
+fn moving_all_readers_away_should_remove_an_open_read_indicator() {
+    let mut rt = readers_runtime();
+    open_readers(&mut rt);
+    clear_demo_readers(&mut rt);
     assert!(rt.find("readers-panel").is_none());
     assert!(rt.find(&format!("readers-{}-$read-demo", demo::DEMO_THREAD.0)).is_none());
 }
