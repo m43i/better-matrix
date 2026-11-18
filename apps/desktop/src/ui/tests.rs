@@ -1290,8 +1290,13 @@ fn a_reader_timestamp_should_include_its_localized_day() {
 fn every_demo_dialog_should_close_on_escape_even_when_a_field_is_focused() {
     let mut checked = 0;
     for (name, scene) in crate::spec().scenes {
+        if crate::LANGUAGE_SCENES.contains(name) {
+            continue;
+        }
         let mut state = State::detached();
         scene(&mut state);
+        // Another scene that switches the language would race every test reading English text.
+        assert_eq!(crate::i18n::I18N.locale(), 0, "{name} switches the language: list it in LANGUAGE_SCENES");
         if state.modal.is_none() {
             continue;
         }

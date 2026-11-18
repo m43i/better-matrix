@@ -24,6 +24,11 @@ pub const APP_ID: &str = "chat.bettermatrix.desktop";
 /// show it on the consent screen and require `https`. Placeholder until the project has a site.
 const CLIENT_URI: &str = "https://example.org/better-matrix";
 
+/// The demo scenes that switch the app's language. The language is global, so a test running
+/// alongside one would read it: tests that run every scene leave these out.
+#[cfg(test)]
+const LANGUAGE_SCENES: &[&str] = &["demo-de", "demo-fr-settings"];
+
 fn spec() -> AppSpec<State> {
     AppSpec {
         min_size: Some((720.0, 480.0)),
