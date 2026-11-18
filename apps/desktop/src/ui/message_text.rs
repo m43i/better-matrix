@@ -90,7 +90,8 @@ fn inline(key: &str, edit: &TextEdit, range: std::ops::Range<usize>, block: Bloc
         .self_start()
         .shrink()
         .min_h(22.0)
-        .wrap()
+        // A word longer than the line (a link, say) breaks rather than runs out of the message.
+        .wrap_anywhere()
         .strikes(strikes)
         .selectable(true)
         .cursor(Cursor::Text)

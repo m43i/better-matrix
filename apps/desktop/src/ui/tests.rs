@@ -938,7 +938,12 @@ fn a_large_reader_count_should_stay_inside_the_readers_column() {
 
 /// Where the readers' column starts in the room's timeline, in a window of its narrowest size.
 fn readers_column_start(rt: &mut Runtime<State>) -> f32 {
-    rt.set_viewport(crate::spec().min_size.unwrap(), 1.0);
+    readers_column_start_at(rt, crate::spec().min_size.unwrap())
+}
+
+/// Where the readers' column starts in the room's (narrow) timeline, in a window of `size`.
+fn readers_column_start_at(rt: &mut Runtime<State>, size: (f32, f32)) -> f32 {
+    rt.set_viewport(size, 1.0);
     rt.frame(1.0 / 60.0);
     rt.settle_all();
     rt.frame(1.0 / 60.0);
@@ -961,6 +966,40 @@ fn a_linked_gif_should_leave_the_readers_column_clear_in_the_narrowest_window() 
     let column = readers_column_start(&mut rt);
     let gif = rt.presented("gif-https://x.org/a.gif").expect("the GIF").0;
     assert!(gif[0] + gif[2] <= column, "the GIF ends at {}, the column starts at {column}", gif[0] + gif[2]);
+}
+
+#[test]
+fn a_file_card_should_leave_the_readers_column_clear_beside_a_thread() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.open_thread(demo::DEMO_THREAD.1);
+    });
+    let column = readers_column_start_at(&mut rt, (720.0, 1600.0));
+    let names = rt.elements().into_iter().filter(|e| e.text.as_deref() == Some("release-notes-0.2.pdf"));
+    for e in names.chain(rt.elements().into_iter().filter(|e| e.key.as_deref() == Some("file-release-notes-0.2.pdf"))) {
+        assert!(
+            e.rect[0] + e.rect[2] <= column,
+            "{:?} ends at {}, the column starts at {column}",
+            e.key,
+            e.rect[0] + e.rect[2]
+        );
+    }
+}
+
+#[test]
+fn a_long_link_should_wrap_clear_of_the_readers_column() {
+    let mut rt = readers_runtime();
+    let column = readers_column_start_at(&mut rt, (760.0, 1200.0));
+    let link = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.text.as_deref().is_some_and(|t| t.contains("bettermatrix.example.org/blog")))
+        .expect("the message with the link");
+    assert!(
+        link.rect[0] + link.rect[2] <= column,
+        "the link ends at {}, the column starts at {column}",
+        link.rect[0] + link.rect[2]
+    );
 }
 
 #[test]

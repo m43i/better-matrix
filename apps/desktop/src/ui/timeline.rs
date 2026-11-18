@@ -925,7 +925,7 @@ fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Pa
         }
         (MessageContent::Attachment(attachment), _) => match attachment.preview() {
             Some((preview, _)) if !media.has_failed(&preview) => image_preview(attachment, cx.content_width, media, p),
-            _ => attachment_card(attachment, p),
+            _ => attachment_card(attachment, cx.content_width, p),
         },
         (MessageContent::Redacted, _) => notice_text(t!("message.deleted"), p),
         (MessageContent::Undecryptable, _) => notice_text(t!("message.undecryptable"), p),
@@ -1098,7 +1098,8 @@ pub fn preview_size(dimensions: Option<(u32, u32)>) -> (f32, f32) {
     ((w * scale).round(), (h * scale).round())
 }
 
-fn attachment_card(attachment: &Attachment, p: &Palette) -> El {
+/// A file's card, up to `max_width` wide: a long name is cut short.
+fn attachment_card(attachment: &Attachment, max_width: f32, p: &Palette) -> El {
     let glyph = match attachment.kind {
         AttachmentKind::Image => &icons::IMAGE,
         AttachmentKind::Video => &icons::VIDEO,
@@ -1106,14 +1107,14 @@ fn attachment_card(attachment: &Attachment, p: &Palette) -> El {
         AttachmentKind::File => &icons::FILE,
     };
     let mut titles =
-        col().min_w(0.0).child(text(attachment.name.clone()).font(font::BODY_STRONG).color(p.text).truncate());
+        col().min_w(0.0).shrink().child(text(attachment.name.clone()).font(font::BODY_STRONG).color(p.text).truncate());
     if let Some(size) = attachment.size {
         titles = titles.child(text(human_size(size)).font(font::META).color(p.text_muted));
     }
     let opened = attachment.clone();
     row()
         .key(format!("file-{}", attachment.name))
-        .max_w(420.0)
+        .max_w(max_width.clamp(0.0, 420.0))
         .mt(4.0)
         .px(12.0)
         .py(10.0)
@@ -1149,7 +1150,7 @@ fn audio_card(attachment: &Attachment, clip: Option<&AudioClip>, p: &Palette) ->
     });
     let opened = attachment.clone();
     let mut titles =
-        col().min_w(0.0).child(text(attachment.name.clone()).font(font::BODY_STRONG).color(p.text).truncate());
+        col().min_w(0.0).shrink().child(text(attachment.name.clone()).font(font::BODY_STRONG).color(p.text).truncate());
     if let Some(time) = time {
         titles = titles.child(text(time).font(font::META).color(p.text_muted));
     }
