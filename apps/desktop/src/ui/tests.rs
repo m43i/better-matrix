@@ -1003,7 +1003,7 @@ fn a_long_link_should_wrap_clear_of_the_readers_column() {
 }
 
 #[test]
-fn long_names_and_words_should_stay_clear_of_the_readers_column_beside_a_thread() {
+fn long_names_words_and_reactions_should_stay_clear_of_the_readers_column_beside_a_thread() {
     const LONG: &str = "3f1c9a7e5b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a";
     let mut rt = readers_runtime();
     rt.update(|s, tx| {
@@ -1024,6 +1024,8 @@ fn long_names_and_words_should_stay_clear_of_the_readers_column_beside_a_thread(
         };
         let mut text = message("long", plain(&format!("Fixed in {LONG}")));
         if let EntryKind::Message(message) = &mut text.kind {
+            message.reactions =
+                vec![matrix_core::Reaction { key: ":party_parrot_celebrate_forever:".into(), count: 12, mine: false }];
             message.reply_to = Some(matrix_core::Quote {
                 event_id: "$read-demo".into(),
                 sender_name: Some("Bartholomew Fitzgerald-Kensington".into()),

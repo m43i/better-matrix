@@ -840,6 +840,7 @@ fn reactions(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
         chips = chips.child(
             row()
                 .key(cx.key(&format!("reaction-{}-{}", message.event_id, reaction.key)))
+                .max_w(cx.content_width)
                 .h(26.0)
                 .px(8.0)
                 .gap(6.0)
@@ -852,7 +853,8 @@ fn reactions(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
                 .cursor(rune::Cursor::Pointer)
                 .label(format!("{} {}", reaction.key, reaction.count))
                 .checked(reaction.mine)
-                .child(text(reaction.key.clone()).font(font::BODY))
+                // A long reaction (a shortcode, say) is cut short; its label keeps all of it.
+                .child(text(reaction.key.clone()).font(font::BODY).shrink().truncate())
                 .child(text(reaction.count.to_string()).font(font::META).color(if reaction.mine {
                     p.accent
                 } else {
