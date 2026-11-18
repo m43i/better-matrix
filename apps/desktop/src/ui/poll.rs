@@ -32,7 +32,7 @@ pub fn card(poll: &Poll, event_id: &str, own: bool, key: &TimelineKey, p: &Palet
                 .color(p.text)
                 .grow(1.0)
                 .min_w(0.0)
-                .wrap(),
+                .wrap_anywhere(),
         );
         if results {
             head = head.child(text(answer.votes.to_string()).font(font::META).color(p.text_muted));
@@ -80,8 +80,11 @@ pub fn card(poll: &Poll, event_id: &str, own: bool, key: &TimelineKey, p: &Palet
     } else {
         tf!("poll.hidden", count = poll.voters)
     };
-    let mut footer =
-        row().w_full().gap(10.0).center_y().child(text(status).font(font::META).color(p.text_muted).grow(1.0));
+    let mut footer = row()
+        .w_full()
+        .gap(10.0)
+        .center_y()
+        .child(text(status).font(font::META).color(p.text_muted).grow(1.0).min_w(0.0).wrap_anywhere());
     if own && votable {
         let (key, event_id, question) = (key.clone(), event_id.to_owned(), poll.question.clone());
         footer = footer.child(
@@ -104,13 +107,9 @@ pub fn card(poll: &Poll, event_id: &str, own: bool, key: &TimelineKey, p: &Palet
         .radius(10.0)
         .fill(p.surface)
         .border(1.0, p.divider)
-        .child(
-            row()
-                .w_full()
-                .gap(8.0)
-                .child(icon(&icons::POLL, 18.0).color(p.accent))
-                .child(text(poll.question.clone()).font(font::BODY_STRONG).color(p.text).grow(1.0).min_w(0.0).wrap()),
-        )
+        .child(row().w_full().gap(8.0).child(icon(&icons::POLL, 18.0).color(p.accent)).child(
+            text(poll.question.clone()).font(font::BODY_STRONG).color(p.text).grow(1.0).min_w(0.0).wrap_anywhere(),
+        ))
         .child(answers)
         .child(footer)
 }

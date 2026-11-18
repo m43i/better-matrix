@@ -1003,6 +1003,73 @@ fn a_long_link_should_wrap_clear_of_the_readers_column() {
 }
 
 #[test]
+fn long_names_and_words_should_stay_clear_of_the_readers_column_beside_a_thread() {
+    const LONG: &str = "3f1c9a7e5b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a";
+    let mut rt = readers_runtime();
+    rt.update(|s, tx| {
+        s.open_thread(demo::DEMO_THREAD.1);
+        let account = s.nav.account.clone().unwrap();
+        let read = vec![matrix_core::ReadReceipt { user_id: "@kai:example.org".into(), timestamp_ms: None }];
+        let message = |id: &str, content: MessageContent| {
+            let message = Message {
+                event_id: format!("${id}"),
+                sender_id: "@alexandra:example.org".into(),
+                sender_name: "Alexandra Montgomery-Wellington".into(),
+                timestamp_ms: demo::DEMO_DAY_MS + 13 * 3_600_000 + 120_000,
+                content,
+                read_receipts: read.clone(),
+                ..Message::default()
+            };
+            TimelineEntry { id: id.into(), kind: EntryKind::Message(Box::new(message)) }
+        };
+        let mut text = message("long", plain(&format!("Fixed in {LONG}")));
+        if let EntryKind::Message(message) = &mut text.kind {
+            message.reply_to = Some(matrix_core::Quote {
+                event_id: "$read-demo".into(),
+                sender_name: Some("Bartholomew Fitzgerald-Kensington".into()),
+                body: Some(LONG.into()),
+                call: None,
+            });
+        }
+        let answer = |id: &str| matrix_core::PollAnswer { id: id.into(), text: LONG.into(), votes: 0, mine: false };
+        let poll = matrix_core::Poll {
+            question: format!("Which {LONG}?"),
+            answers: vec![answer("a"), answer("b")],
+            max_selections: 1,
+            ..matrix_core::Poll::default()
+        };
+        let poll = message("long-poll", MessageContent::Poll(poll));
+        let key = TimelineKey::room(demo::DEMO_THREAD.0);
+        s.apply(
+            Event::TimelineChanged {
+                account,
+                key,
+                diffs: vec![TimelineDiff::PushBack(text), TimelineDiff::PushBack(poll)],
+            },
+            tx,
+        );
+    });
+    let column = readers_column_start_at(&mut rt, (760.0, 1350.0));
+    for key in ["msg-long", "msg-long-poll"] {
+        let row = rt.presented(key).expect("the message").0;
+        let inside = rt.elements().into_iter().filter(|e| {
+            e.rect[1] >= row[1]
+                && e.rect[1] + e.rect[3] <= row[1] + row[3]
+                && e.rect[0] < column
+                && e.key.as_deref() != Some(key)
+        });
+        for e in inside {
+            assert!(
+                e.rect[0] + e.rect[2] <= column,
+                "{:?} ends at {}, the column starts at {column}",
+                e.text,
+                e.rect[0] + e.rect[2]
+            );
+        }
+    }
+}
+
+#[test]
 fn a_thread_link_should_leave_the_readers_column_clear_in_a_narrow_window() {
     let mut rt = readers_runtime();
     rt.set_viewport((760.0, 1200.0), 1.0);

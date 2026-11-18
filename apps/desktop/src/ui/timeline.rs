@@ -660,10 +660,12 @@ fn message_row(
         }
         content
     } else {
+        // A long name is cut short, keeping the time beside it within the message's width.
         let mut meta = row()
             .gap(8.0)
             .center_y()
-            .child(text(message.sender_name.clone()).font(font::BODY_STRONG).color(p.text))
+            .min_w(0.0)
+            .child(text(message.sender_name.clone()).font(font::BODY_STRONG).color(p.text).shrink().truncate())
             .child(text(clock_time(local_ms(message.timestamp_ms))).font(font::META).color(p.text_muted));
         if let Some(status) = status {
             meta = meta.child(status);
@@ -815,7 +817,7 @@ fn quote_block(quote: &Quote, p: &Palette) -> El {
             .grow(1.0)
             .min_w(0.0)
             .py(2.0)
-            .child(text(sender).font(font::META.family(rune::Family::Sans)).color(p.text))
+            .child(text(sender).font(font::META.family(rune::Family::Sans)).color(p.text).truncate())
             .child(text(body).font(font::META).color(p.text_muted).max_lines(2).truncate()),
     )
 }
@@ -1004,7 +1006,8 @@ fn text_body(event_id: &str, plain: &str, rich: Option<&rune::TextEdit>, p: &Pal
             .font(font::BODY)
             .color(p.text)
             .self_start()
-            .wrap()
+            // A word longer than the line (a hash, say) breaks rather than runs out of the message.
+            .wrap_anywhere()
             .selectable(true)
             .cursor(rune::Cursor::Text)
             .on_press(|_: &mut State| {}),
@@ -1029,10 +1032,10 @@ fn link_card(key: &str, url: &str, card: &LinkPreview, media: &MediaCache, p: &P
         words = words.child(text(site.clone()).font(font::META).color(p.text_muted).truncate());
     }
     if let Some(title) = &card.title {
-        words = words.child(text(title.clone()).font(font::BODY_STRONG).color(p.accent).max_lines(2));
+        words = words.child(text(title.clone()).font(font::BODY_STRONG).color(p.accent).max_lines(2).wrap_anywhere());
     }
     if let Some(description) = &card.description {
-        words = words.child(text(description.clone()).font(font::META).color(p.text).max_lines(3));
+        words = words.child(text(description.clone()).font(font::META).color(p.text).max_lines(3).wrap_anywhere());
     }
     let label = card.title.clone().unwrap_or_else(|| url.to_owned());
     let opened = url.to_owned();
