@@ -694,19 +694,21 @@ const uniffiTypeBridgeObjectFactory: UniffiObjectFactory<BridgeLike> = (() => {
 const FfiConverterTypeBridge = new FfiConverterObject(uniffiTypeBridgeObjectFactory);
 
 /**
- * Hears the engine's events, one JSON object each: an `Event` or a [`BridgeEvent`].
+ * Hears the engine's events as JSON: an `Event` or a [`BridgeEvent`], or an array of those that
+ * were waiting together (`events::next_batch`).
  */
 export interface EventListener {
     
 /**
- * Handles one event.
+ * Handles one event, or a batch of them in order.
  */
     onEvent(event: string): void;
 }
 
 
 /**
- * Hears the engine's events, one JSON object each: an `Event` or a [`BridgeEvent`].
+ * Hears the engine's events as JSON: an `Event` or a [`BridgeEvent`], or an array of those that
+ * were waiting together (`events::next_batch`).
  */
 export class EventListenerImpl extends UniffiAbstractObject implements EventListener {
 

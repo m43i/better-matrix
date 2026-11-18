@@ -91,6 +91,27 @@ async fn search_should_read_closed_rooms_from_the_store_without_a_request() {
     assert_eq!(hits.iter().map(|h| h.event_id.as_str()).collect::<Vec<_>>(), ["$stored"]);
 }
 
+#[tokio::test]
+async fn a_stored_redaction_should_hide_a_stored_message_from_search() {
+    let server = crate::test_server::Server::new(crate::test_server::thread_response);
+    let account = Account::for_test(&server.url()).await;
+    account
+        .client()
+        .sync_once(matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::ZERO))
+        .await
+        .unwrap();
+    let room = RoomId::parse("!room:example.org").unwrap();
+    {
+        let lock = account.client().event_cache_store().lock().await.unwrap();
+        let store = lock.as_clean().unwrap();
+        store.save_event(&room, event(message("$secret", "hello device"))).await.unwrap();
+        let redaction = json!({"type":"m.room.redaction", "event_id":"$redaction", "sender":"@ada:example.org",
+            "origin_server_ts":101, "content":{"redacts":"$secret"}});
+        store.save_event(&room, event(redaction)).await.unwrap();
+    }
+    assert!(account.search_messages("device", &SearchUsage::default()).await.unwrap().is_empty());
+}
+
 #[test]
 fn a_polls_question_should_be_searchable() {
     let mut poll = message("$poll", "unused");

@@ -28,7 +28,7 @@ import { VerificationPrompt } from '../ui/accounts/VerificationPrompt';
 import { Rings } from '../ui/call/Rings';
 import { LinkOpener } from '../ui/links/LinkOpener';
 import { Notices } from '../ui/Notices';
-import { headerTint, usePalette } from '../ui/theme';
+import { headerTint, PaletteProvider, usePalette } from '../ui/theme';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -181,7 +181,9 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardProvider>
         <StoreProvider store={app.store}>
-          <Routes key={app.generation} scene={app.scene} />
+          <PaletteProvider>
+            <Routes key={app.generation} scene={app.scene} />
+          </PaletteProvider>
         </StoreProvider>
       </KeyboardProvider>
     </GestureHandlerRootView>

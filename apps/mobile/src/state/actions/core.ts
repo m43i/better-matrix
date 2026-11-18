@@ -47,6 +47,7 @@ export function cyclePlaybackSpeed(store: Store): void {
  * shows why where its history would load, with Try again (`retryHistory`).
  */
 export function openTimeline(store: Store, account: AccountId, key: TimelineKey): void {
+  closedOf(store, account).delete(timelineId(key));
   store.update((s) =>
     updateTimeline(s, account, key, (t) => ({
       ...t,
@@ -79,9 +80,82 @@ export function visitRoom(store: Store, account: AccountId, roomId: string): voi
   store.send({ type: 'VisitRoom', data: { account, room_id: roomId } }, { quiet: true });
 }
 
-/** Stops following a timeline; the engine keeps it warm, the store keeps its entries. */
+/**
+ * How many closed timelines an account's engine keeps warm (`WARM_TIMELINES` in matrix-core's
+ * engine): opening one of them again gives back what it had.
+ */
+export const WARM_TIMELINES = 8;
+
+/** The most entries a timeline the engine let go of keeps: one page of history. */
+export const COLD_ENTRIES = 30;
+
+/** Each account's closed timelines, by `timelineId`, closed longest ago first, per store. */
+const closed = new WeakMap<Store, Map<AccountId, Set<string>>>();
+
+function closedOf(store: Store, account: AccountId): Set<string> {
+  const accounts = closed.get(store) ?? new Map<AccountId, Set<string>>();
+  closed.set(store, accounts);
+  const ids = accounts.get(account) ?? new Set<string>();
+  accounts.set(account, ids);
+
+  return ids;
+}
+
+/**
+ * Stops following a timeline; the engine keeps it warm, and the store its entries. Once the
+ * engine lets it go, closed more than `WARM_TIMELINES` timelines ago, the store keeps only its
+ * newest entries (`coldTimeline`): opening it again starts over from the engine's newest anyway.
+ */
 export function closeTimeline(store: Store, account: AccountId, key: TimelineKey): void {
   store.send({ type: 'CloseTimeline', data: { account, key } }, { quiet: true });
+
+  const id = timelineId(key);
+  const ids = closedOf(store, account);
+  ids.delete(id);
+
+  // One that never opened isn't kept warm.
+  if (timelineOf(store, account, id)?.openFailed) return;
+  ids.add(id);
+
+  for (const cold of ids) {
+    if (ids.size <= WARM_TIMELINES) break;
+    ids.delete(cold);
+    store.update((s) =>
+      updateAccount(s, account, (a) => {
+        const timeline = a.timelines[cold];
+
+        if (!timeline) return a;
+        const kept = coldTimeline(timeline);
+
+        return kept === timeline ? a : { ...a, timelines: { ...a.timelines, [cold]: kept } };
+      }),
+    );
+  }
+}
+
+/**
+ * What the store keeps of a timeline the engine let go of: its newest `COLD_ENTRIES` entries, and
+ * at least its newest message, which the room list previews and orders by (`lastMessage`).
+ * History before them is gone, so it hasn't reached the start any more.
+ */
+export function coldTimeline(timeline: Timeline): Timeline {
+  const { entries } = timeline;
+  let from = entries.length - COLD_ENTRIES;
+
+  if (from <= 0) return timeline;
+
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i]?.kind.type === 'Message') {
+      from = Math.min(from, i);
+      break;
+    }
+  }
+
+  return from <= 0 ? timeline : { ...timeline, entries: entries.slice(from), reachedStart: false };
+}
+
+function timelineOf(store: Store, account: AccountId, id: string): Timeline | undefined {
+  return store.getState().accounts.find((a) => a.summary.id === account)?.timelines[id];
 }
 
 /**

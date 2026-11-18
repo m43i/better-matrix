@@ -1,16 +1,32 @@
 // The palette for this device's appearance: the setting, or the system's when it follows it.
+// Worked out once at the root (`PaletteProvider`) and handed down: views ask for it everywhere
+// (every row, avatar and pill), and one subscription serves them all.
 
+import { createContext, type ReactNode, useContext } from 'react';
 import { Platform, useColorScheme } from 'react-native';
 
 import { dark, light, type Palette } from '../theme/palette';
 import { useStore } from '../state/react';
 
-export function usePalette(): Palette {
+const PaletteContext = createContext<Palette | null>(null);
+
+/** Follows the appearance setting and the system's scheme for every view under it. */
+export function PaletteProvider({ children }: { children: ReactNode }) {
   const appearance = useStore((s) => s.settings.appearance);
   const system = useColorScheme();
   const isDark = appearance === 'system' ? system !== 'light' : appearance === 'dark';
 
-  return isDark ? dark : light;
+  return (
+    <PaletteContext.Provider value={isDark ? dark : light}>{children}</PaletteContext.Provider>
+  );
+}
+
+export function usePalette(): Palette {
+  const palette = useContext(PaletteContext);
+
+  if (!palette) throw new Error('usePalette needs a PaletteProvider');
+
+  return palette;
 }
 
 /**

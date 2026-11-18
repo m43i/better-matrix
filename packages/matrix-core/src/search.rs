@@ -97,6 +97,10 @@ fn fold(c: char) -> impl Iterator<Item = char> {
     c.to_lowercase().map(|c| if c == 'ς' { 'σ' } else { c })
 }
 
+/// The event types search reads: those with a [`message_body`] (whose edits share their type),
+/// and redactions, which hide them.
+const SEARCHED_TYPES: [&str; 4] = ["m.room.message", "m.sticker", "org.matrix.msc3381.poll.start", "m.room.redaction"];
+
 impl Account {
     /// Search only joined rooms' locally stored, decrypted history; never fetch or paginate.
     /// Reads the SDK's encrypted-at-rest cache, including closed rooms and thread-only events.
@@ -114,7 +118,17 @@ impl Account {
                 let lock = self.client().event_cache_store().lock().await.map_err(|e| Error::Account(e.to_string()))?;
                 // Reading persistent events doesn't rely on the in-memory cache's generation.
                 let (MappedCrossProcessLockState::Clean(store) | MappedCrossProcessLockState::Dirty(store)) = lock;
-                store.get_room_events(room.room_id(), None, None).await.map_err(|e| Error::Account(e.to_string()))?
+                // Only the types search reads (the store indexes them): reactions, state and
+                // undecrypted events are most of a room's history.
+                let mut events = Vec::new();
+                for kind in SEARCHED_TYPES {
+                    let found = store
+                        .get_room_events(room.room_id(), Some(kind), None)
+                        .await
+                        .map_err(|e| Error::Account(e.to_string()))?;
+                    events.extend(found);
+                }
+                events
             };
             let query = term.to_owned();
             let room_id = room.room_id().to_string();

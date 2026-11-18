@@ -1663,3 +1663,50 @@ fn the_account_menu_should_fit_the_smallest_window() {
     let sign_out = rt.presented("menu-sign-out").expect("sign out").0;
     assert!(sign_out[1] + sign_out[3] <= 480.0, "sign out can be reached: {sign_out:?}");
 }
+
+#[test]
+fn scrolling_past_messages_should_follow_reading_without_rebuilding_the_view() {
+    let mut rt = runtime(demo::stress);
+    rt.settle_all();
+    rt.update(|_, tx| tx.scroll_to_instant("timeline", 0.0, 20_000.0));
+    for _ in 0..120 {
+        rt.frame(1.0 / 60.0);
+    }
+    let (account, key) = (AccountId::new(demo::ADA), TimelineKey::room("!big:example.org"));
+    let read_up_to = |rt: &Runtime<State>| {
+        rt.state.accounts.get(&account).and_then(|data| data.timeline(&key)).and_then(|t| t.read_up_to.clone())
+    };
+    // As if the timeline had opened scrolled up here.
+    rt.update(|s, _| {
+        if let Some(timeline) = s.accounts.kept_timeline_mut(&AccountId::new(demo::ADA), &key) {
+            timeline.read_up_to = None;
+        }
+    });
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    let (x, y) = rt.find("timeline").expect("the timeline");
+    let (before, commits) = (read_up_to(&rt), rt.stats.commits);
+    // Within the rows already mounted, so Rune itself has nothing to build.
+    rt.wheel(x, y, 60.0);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert_ne!(read_up_to(&rt), before, "reading moved on");
+    assert_eq!(rt.stats.commits, commits, "following it is bookkeeping");
+}
+
+#[test]
+fn changing_the_member_search_should_change_the_list_shown() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.toggle_members();
+    });
+    assert!(rt.find("member-@kai:example.org").is_some());
+    rt.update(|s, _| s.member_search.insert("grace"));
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("member-@grace:example.org").is_some() && rt.find("member-@kai:example.org").is_none());
+    rt.update(|s, _| s.member_search = rune::TextEdit::default());
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("member-@kai:example.org").is_some());
+}

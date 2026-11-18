@@ -25,6 +25,11 @@ end a session at any time, hard or softly.
     secrets and list are written. If the list can't be written, the previous secrets go back,
     so the store it still lists stays readable. Signing out deletes the account's
     secrets, entry and store.
+  - The engine opens each of a store's databases with at most 8 connections
+    (`STORE_CONNECTIONS`) instead of the SDK's four per physical core, each with the SDK's
+    default page cache. A push opens them with the SDK's low-memory settings
+    (`SqliteStoreConfig::with_low_memory_config`): it runs in a phone's memory-capped
+    notification process.
 - **Secrets:**
   - Tokens and the passphrase go to the app's `SecretStore`, one entry per account
     (`StoredSecrets`). Calls may block, so they run on Tokio's blocking pool.

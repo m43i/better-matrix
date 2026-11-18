@@ -238,9 +238,15 @@ fn room_row(
     let picture_ready = room.avatar.as_ref().is_some_and(|picture| media.image(picture).is_some());
     let version = (
         (&room.name, room.unread, room.mentions, room.notifications, room.kind, &room.dm_users, partner),
-        (&room.avatar, picture_ready, selected, dragged, format!("{:?}", p.sidebar_bg)),
+        (&room.avatar, picture_ready, selected, dragged, colour_bits(p.sidebar_bg)),
     );
     rune::memo(format!("room-{}", room.room_id), version, || build_room_row(room, partner, selected, dragged, media, p))
+}
+
+/// A colour as its exact bits, for a memo's version: the palette's identity, without formatting
+/// it for every row.
+fn colour_bits(colour: rune::Color) -> [u32; 4] {
+    [colour.r.to_bits(), colour.g.to_bits(), colour.b.to_bits(), colour.a.to_bits()]
 }
 
 /// The one other person in a direct chat of two, when it is one: a chat marked direct with one

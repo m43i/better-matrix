@@ -20,6 +20,7 @@ import type {
 import { t } from '../i18n';
 import { type Block, blocksText, htmlBlocks, plainBlocks } from './html';
 import { findGifLink, findPreviewLink, htmlWithoutLink, withoutLink } from './links';
+import { Lru } from './lru';
 
 /** A text message ready to draw. */
 export interface Prepared {
@@ -33,29 +34,55 @@ export interface Prepared {
 
 const prepared = new WeakMap<Message, Prepared>();
 
-/** `message` ready to draw, parsed once per message (messages are replaced, never changed). */
+/** What a message that isn't text shows: none of it. */
+const NOT_TEXT: Prepared = { blocks: null, gif: null, link: null };
+
+/** Recent texts' parses, by `textKey`: shared by the messages that say the same. */
+const parsed = new Lru<string, Prepared>(500);
+
+/** One key per body and HTML: the body's length marks where the HTML begins. */
+function textKey(body: string, html: string | null): string {
+  return html === null ? `p${body}` : `h${body.length}:${body}${html}`;
+}
+
+function parseText(body: string, html: string | null): Prepared {
+  const blocksOf = (plain: string, markup: string | null) =>
+    markup ? htmlBlocks(markup) : plainBlocks(plain);
+
+  const gifUrl = findGifLink(body);
+  let gif: Prepared['gif'] = null;
+
+  if (gifUrl) {
+    const plain = withoutLink(body, gifUrl);
+    const markup = html ? htmlWithoutLink(html, gifUrl) : null;
+    gif = { url: gifUrl, rest: plain === '' ? null : blocksOf(plain, markup) };
+  }
+
+  return { blocks: blocksOf(body, html), gif, link: findPreviewLink(body) };
+}
+
+/**
+ * `message` ready to draw, parsed once per message (messages are replaced, never changed) and
+ * once per text: a message replaced for a receipt or a reaction keeps the same parse, so the
+ * views drawing its blocks needn't redraw.
+ */
 export function prepare(message: Message): Prepared {
   const known = prepared.get(message);
 
   if (known) return known;
-  let result: Prepared = { blocks: null, gif: null, link: null };
+  let result = NOT_TEXT;
 
   if (message.content.type === 'Text') {
     const { body, html } = message.content.data;
+    const key = textKey(body, html);
+    const kept = parsed.get(key);
 
-    const blocksOf = (plain: string, markup: string | null) =>
-      markup ? htmlBlocks(markup) : plainBlocks(plain);
-
-    const gifUrl = findGifLink(body);
-    let gif: Prepared['gif'] = null;
-
-    if (gifUrl) {
-      const plain = withoutLink(body, gifUrl);
-      const markup = html ? htmlWithoutLink(html, gifUrl) : null;
-      gif = { url: gifUrl, rest: plain === '' ? null : blocksOf(plain, markup) };
+    if (kept) {
+      result = kept;
+    } else {
+      result = parseText(body, html);
+      parsed.set(key, result);
     }
-
-    result = { blocks: blocksOf(body, html), gif, link: findPreviewLink(body) };
   }
 
   prepared.set(message, result);

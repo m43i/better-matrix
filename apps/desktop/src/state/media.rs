@@ -4,7 +4,7 @@
 //! ([`MediaCache::measure`]), and evicts the oldest entries past the budget. A failed download
 //! is tried again after a wait ([`Retries`]).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 
 use matrix_core::MediaRef;
@@ -16,6 +16,8 @@ use super::retry::Retries;
 const BUDGET_BYTES: usize = 64 << 20;
 /// The most an animation's frames may hold before Rune keeps only its first (its own limit).
 const ANIMATION_BYTES: usize = 256 << 20;
+/// The most failed downloads remembered; past it, the longest ago go first.
+const FAILURES_KEPT: usize = 512;
 
 #[derive(Debug)]
 enum Entry {
@@ -27,6 +29,8 @@ enum Entry {
         /// The frames in the file, for an animation's size once decoded.
         frames: usize,
         measured: bool,
+        /// When it was last used, as a place in [`MediaCache::used`].
+        used: u64,
     },
     /// Downloaded but not an image Rune can decode: trying again would fetch the same bytes.
     Undecodable,
@@ -36,8 +40,12 @@ enum Entry {
 pub struct MediaCache {
     decoder: Option<ImageCache>,
     entries: HashMap<MediaRef, Entry>,
-    /// Ready entries, least recently used first, for eviction.
-    order: VecDeque<MediaRef>,
+    /// Ready entries by when they were last used, least recently first, for eviction.
+    used: BTreeMap<u64, MediaRef>,
+    /// The next use's place in `used`.
+    uses: u64,
+    /// Images eviction takes only once nothing else is left: the pictures lists show.
+    kept: HashSet<MediaRef>,
     /// Ready entries still counted at their estimate.
     unmeasured: Vec<MediaRef>,
     bytes: usize,
@@ -184,6 +192,11 @@ impl MediaCache {
         self.decoder = Some(ImageCache::new(waker));
     }
 
+    /// Whether images can load at all: there is a decoder (none headless).
+    pub fn can_load(&self) -> bool {
+        self.decoder.is_some()
+    }
+
     /// Whether `media` has to be fetched at `now`: it isn't here, and if it failed, its wait
     /// is over.
     pub fn wants(&self, media: &MediaRef, now: Instant) -> bool {
@@ -196,8 +209,12 @@ impl MediaCache {
 
     /// A download failed: it is tried again after a wait, when something shows it.
     pub fn failed(&mut self, media: MediaRef, now: Instant) {
-        self.entries.remove(&media);
+        if let Some(Entry::Ready { bytes, used, .. }) = self.entries.remove(&media) {
+            self.bytes -= bytes;
+            self.used.remove(&used);
+        }
         self.retries.failed(media, now);
+        self.retries.keep_latest(FAILURES_KEPT);
     }
 
     /// When the next failed download may be tried again, after `now`.
@@ -212,8 +229,13 @@ impl MediaCache {
         let frames = frame_count(&encoded);
         let bytes = dimensions.map_or(encoded.len() * 4, |(w, h)| animation_bytes(w, h, frames));
         let image = decoder.load(encoded);
-        self.entries.insert(media.clone(), Entry::Ready { image, bytes, frames, measured: false });
-        self.order.push_back(media.clone());
+        let used = self.next_use();
+        let replaced = self.entries.insert(media.clone(), Entry::Ready { image, bytes, frames, measured: false, used });
+        if let Some(Entry::Ready { bytes, used, .. }) = replaced {
+            self.bytes -= bytes;
+            self.used.remove(&used);
+        }
+        self.used.insert(used, media.clone());
         self.unmeasured.push(media);
         self.bytes += bytes;
         self.evict();
@@ -230,7 +252,9 @@ impl MediaCache {
         let mut total = self.bytes;
         let mut broken = Vec::new();
         self.unmeasured.retain(|media| {
-            let Some(Entry::Ready { image, bytes, frames, measured }) = entries.get_mut(media) else { return false };
+            let Some(Entry::Ready { image, bytes, frames, measured, .. }) = entries.get_mut(media) else {
+                return false;
+            };
             if !image.is_ready() {
                 return true;
             }
@@ -248,19 +272,31 @@ impl MediaCache {
         });
         self.bytes = total;
         for media in broken {
-            if let Some(Entry::Ready { bytes, .. }) = self.entries.insert(media.clone(), Entry::Undecodable) {
+            if let Some(Entry::Ready { bytes, used, .. }) = self.entries.insert(media, Entry::Undecodable) {
                 self.bytes -= bytes;
+                self.used.remove(&used);
             }
-            self.order.retain(|kept| *kept != media);
         }
         self.evict();
         changed
     }
 
+    fn next_use(&mut self) -> u64 {
+        self.uses += 1;
+        self.uses
+    }
+
+    /// Past the budget, lets go of the least recently used images, those not kept first.
     fn evict(&mut self) {
-        while self.bytes > BUDGET_BYTES && self.order.len() > 1 {
-            let Some(oldest) = self.order.pop_front() else { break };
-            if let Some(Entry::Ready { bytes, .. }) = self.entries.remove(&oldest) {
+        while self.bytes > BUDGET_BYTES && self.used.len() > 1 {
+            let oldest = self
+                .used
+                .iter()
+                .find(|(_, media)| !self.kept.contains(*media))
+                .or_else(|| self.used.iter().next())
+                .map(|(used, _)| *used);
+            let Some(media) = oldest.and_then(|used| self.used.remove(&used)) else { break };
+            if let Some(Entry::Ready { bytes, .. }) = self.entries.remove(&media) {
                 self.bytes -= bytes;
             }
         }
@@ -291,12 +327,22 @@ impl MediaCache {
     }
 
     /// Marks images as just used: eviction takes the least recently used first.
-    pub fn touch<'a>(&mut self, used: impl Iterator<Item = &'a MediaRef>) {
-        let used: std::collections::HashSet<&MediaRef> = used.collect();
-        let (mut kept, mut fresh): (VecDeque<MediaRef>, VecDeque<MediaRef>) =
-            self.order.drain(..).partition(|media| !used.contains(media));
-        kept.append(&mut fresh);
-        self.order = kept;
+    pub fn touch<'a>(&mut self, media: impl Iterator<Item = &'a MediaRef>) {
+        for media in media {
+            let now = self.uses + 1;
+            let Some(Entry::Ready { used, .. }) = self.entries.get_mut(media) else { continue };
+            if let Some(media) = self.used.remove(used) {
+                self.used.insert(now, media);
+            }
+            *used = now;
+            self.uses = now;
+        }
+    }
+
+    /// The images that stay while anything else can go: the pictures lists show (rooms, spaces,
+    /// invitations, accounts), which are touched only when those lists change.
+    pub fn keep(&mut self, kept: HashSet<MediaRef>) {
+        self.kept = kept;
     }
 }
 
@@ -305,6 +351,39 @@ mod tests {
     use matrix_core::MediaSize;
 
     use super::*;
+
+    /// A cache that decodes, and an image counted at 2400×2400: two fit the budget, three don't.
+    fn cache() -> MediaCache {
+        let mut cache = MediaCache::default();
+        cache.attach(std::sync::Arc::new(|| {}));
+        cache
+    }
+
+    fn load(cache: &mut MediaCache, id: &str) {
+        cache.loaded(MediaRef::opaque(id), std::sync::Arc::from(&b"not an image"[..]), Some((2400, 2400)));
+    }
+
+    #[test]
+    fn making_room_should_let_go_of_the_least_recently_used_image() {
+        let mut cache = cache();
+        load(&mut cache, "a");
+        load(&mut cache, "b");
+        cache.touch([MediaRef::opaque("a")].iter());
+        load(&mut cache, "c");
+        let kept: Vec<bool> = ["a", "b", "c"].map(|id| cache.entries.contains_key(&MediaRef::opaque(id))).into();
+        assert_eq!(kept, [true, false, true]);
+    }
+
+    #[test]
+    fn making_room_should_keep_the_pictures_lists_show() {
+        let mut cache = cache();
+        cache.keep([MediaRef::opaque("a")].into_iter().collect());
+        load(&mut cache, "a");
+        load(&mut cache, "b");
+        load(&mut cache, "c");
+        let kept: Vec<bool> = ["a", "b", "c"].map(|id| cache.entries.contains_key(&MediaRef::opaque(id))).into();
+        assert_eq!(kept, [true, false, true]);
+    }
 
     #[test]
     fn a_thumbnail_should_be_counted_at_its_own_size_not_the_original() {

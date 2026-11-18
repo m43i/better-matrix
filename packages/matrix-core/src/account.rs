@@ -196,6 +196,23 @@ impl Holder {
     }
 }
 
+/// The most connections the engine opens to each of an account's databases. The SDK's default
+/// is four per physical core (each with its own page cache), far more than one account's work
+/// runs at once.
+const STORE_CONNECTIONS: usize = 8;
+
+/// How `holder` opens an account's databases: a push, in a phone's memory-capped notification
+/// process, with the SDK's low-memory settings; the engine with fewer connections than the SDK's
+/// default.
+fn store_config(store_dir: &Path, holder: Holder) -> matrix_sdk::SqliteStoreConfig {
+    match holder {
+        Holder::Push => matrix_sdk::SqliteStoreConfig::with_low_memory_config(store_dir),
+        Holder::Alone | Holder::Engine => {
+            matrix_sdk::SqliteStoreConfig::new(store_dir).pool_max_size(STORE_CONNECTIONS)
+        }
+    }
+}
+
 /// A client for an already resolved homeserver URL (see [`crate::discovery`]).
 ///
 /// Its tokens are shared with the other process that may open the same store: a refresh
@@ -212,7 +229,10 @@ pub(crate) async fn build_client(
     let locks = holder.name().map_or(CrossProcessLockConfig::SingleProcess, CrossProcessLockConfig::multi_process);
     let client = crate::tls::sdk(Client::builder())
         .homeserver_url(homeserver_url)
-        .sqlite_store(store_dir, Some(passphrase))
+        .sqlite_store_with_config_and_cache_path(
+            store_config(store_dir, holder).passphrase(Some(passphrase)),
+            None::<&Path>,
+        )
         .cross_process_store_config(locks)
         .with_encryption_settings(ENCRYPTION)
         .handle_refresh_tokens()

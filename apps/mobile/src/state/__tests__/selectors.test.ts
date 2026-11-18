@@ -1,8 +1,9 @@
 import type { SavedMessage } from '@better-matrix/matrix-native/types';
 
 import { apply, initialState } from '../reducer';
-import { savedMessages, savedSignature } from '../selectors';
-import { ADA, roomSummary, summary } from '../../test/fixtures';
+import { shallow } from '../react';
+import { activeRoomList, savedMessages, savedSignature } from '../selectors';
+import { ADA, person, roomSummary, summary } from '../../test/fixtures';
 
 function saved(room_id: string, event_id: string): SavedMessage {
   return {
@@ -49,5 +50,29 @@ describe('saved messages', () => {
     expect(savedSignature(withSaved(['$a']), ADA)).not.toBe(
       savedSignature(withSaved(['$a', '$c']), ADA),
     );
+  });
+});
+
+describe('activeRoomList', () => {
+  it('should stay the same while someone types', () => {
+    const before = withSaved([]);
+
+    const after = apply(before, {
+      type: 'Typing',
+      data: { account: ADA, room_id: '!r:x', people: [person('@grace:x')] },
+    });
+
+    expect(shallow(activeRoomList(before), activeRoomList(after))).toBe(true);
+  });
+
+  it('should change with the rooms', () => {
+    const before = withSaved([]);
+
+    const after = apply(before, {
+      type: 'RoomsUpdated',
+      data: { account: ADA, list: { rooms: [], spaces: [], invitations: [] } },
+    });
+
+    expect(shallow(activeRoomList(before), activeRoomList(after))).toBe(false);
   });
 });

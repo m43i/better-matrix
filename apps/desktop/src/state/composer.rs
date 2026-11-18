@@ -120,6 +120,9 @@ pub struct Composer {
     /// The timeline whose draft this composer holds; `State::follow_drafts` swaps drafts as
     /// the timeline on screen changes.
     pub owner: Option<(AccountId, TimelineKey)>,
+    /// [`Composer::stored_draft`], and a fingerprint of the field it was read from: drafts are
+    /// checked every frame, and read again only once the field changed.
+    stored: Option<(u64, Option<matrix_core::Draft>)>,
 }
 
 impl Default for Composer {
@@ -135,6 +138,7 @@ impl Default for Composer {
             editing: None,
             revealed_caret: None,
             owner: None,
+            stored: None,
         }
     }
 }
@@ -383,6 +387,32 @@ impl Composer {
             Some(editing) => editing.draft.stored(),
             None => stored_draft(&self.edit),
         }
+    }
+
+    /// Reads [`Composer::stored_draft`] again if the field it comes from changed since the last
+    /// call, for [`Composer::stored_draft_read`]: cheap enough to call every frame.
+    pub fn read_stored_draft(&mut self) {
+        use std::hash::{Hash, Hasher};
+        let source = match &self.editing {
+            Some(editing) => &editing.draft.edit,
+            None => &self.edit,
+        };
+        // A blank field keeps no draft, whatever else it holds: nothing to read.
+        if source.text.trim().is_empty() {
+            self.stored = None;
+            return;
+        }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (self.editing.is_some(), source).hash(&mut hasher);
+        let fingerprint = hasher.finish();
+        if self.stored.as_ref().is_none_or(|(known, _)| *known != fingerprint) {
+            self.stored = Some((fingerprint, self.stored_draft()));
+        }
+    }
+
+    /// [`Composer::stored_draft`] as [`Composer::read_stored_draft`] last read it.
+    pub fn stored_draft_read(&self) -> Option<&matrix_core::Draft> {
+        self.stored.as_ref().and_then(|(_, draft)| draft.as_ref())
     }
 
     /// Puts a draft read from the store into the draft's text, the caret at its end: the field,

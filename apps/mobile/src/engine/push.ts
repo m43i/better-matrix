@@ -258,8 +258,15 @@ async function syncPushers(
 /** Keeps the app icon's badge at the conversations wanting attention. */
 function installBadge(store: Store): void {
   let shown = -1;
+  let counted: State['accounts'] | null = null;
   store.subscribe(() => {
-    const count = badgeCount(store.getState().accounts);
+    // Changes outside the accounts (media, composers, calls) leave the list as it was; within
+    // them, `badgeCount` keeps its count per rooms list.
+    const accounts = store.getState().accounts;
+
+    if (accounts === counted) return;
+    counted = accounts;
+    const count = badgeCount(accounts);
 
     if (count === shown) return;
     shown = count;

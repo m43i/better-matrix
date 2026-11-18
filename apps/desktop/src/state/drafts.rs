@@ -43,18 +43,33 @@ impl Kept {
     /// The draft of `at` is now `draft`: what to write to the store now, if anything (`Some(None)`
     /// forgets the kept one). `leaving` writes a change at once.
     pub fn due(&mut self, at: &Owner, draft: Option<Draft>, now: Instant, leaving: bool) -> Option<Option<Draft>> {
-        if self.stored.get(at) == draft.as_ref() {
+        self.due_ref(at, draft.as_ref(), now, leaving)
+    }
+
+    /// [`Kept::due`] for a draft borrowed from its composer: nothing is copied until it is due.
+    pub fn due_ref(&mut self, at: &Owner, draft: Option<&Draft>, now: Instant, leaving: bool) -> Option<Option<Draft>> {
+        if self.stored.get(at) == draft {
             self.changed.remove(at);
             return None;
         }
-        self.touched.insert(at.clone());
-        let since = *self.changed.entry(at.clone()).or_insert(now);
+        if !self.touched.contains(at) {
+            self.touched.insert(at.clone());
+        }
+        let since = match self.changed.get(at) {
+            Some(since) => *since,
+            None => {
+                self.changed.insert(at.clone(), now);
+                now
+            }
+        };
         if !leaving && draft.is_some() && now.duration_since(since) < EVERY {
             return None;
         }
-        self.loaded(at, draft.as_ref());
-        self.wrote.insert(at.clone());
-        Some(draft)
+        self.loaded(at, draft);
+        if !self.wrote.contains(at) {
+            self.wrote.insert(at.clone());
+        }
+        Some(draft.cloned())
     }
 
     /// Whether the user changed the draft of `at` this run.
@@ -186,14 +201,19 @@ impl State {
     /// Writes the drafts on screen that changed; `now_or_never` writes them without waiting, as
     /// the window loses focus (the app may be about to quit).
     pub(super) fn write_drafts(&mut self, now: Instant, now_or_never: bool) {
-        for target in [ComposerTarget::Room, ComposerTarget::Thread] {
-            let composer = self.composer(target);
-            let Some(owner) = composer.owner.clone() else { continue };
-            let draft = composer.stored_draft();
-            if let Some(keep) = self.kept_drafts.due(&owner, draft, now, now_or_never) {
-                let (account, key) = owner;
-                self.dispatch(Command::SaveDraft { account, key, draft: keep }, Purpose::KeepDraft);
+        let mut due = Vec::new();
+        for composer in [&mut self.composer, &mut self.thread_composer] {
+            if composer.owner.is_none() {
+                continue;
             }
+            composer.read_stored_draft();
+            let Some(owner) = &composer.owner else { continue };
+            if let Some(keep) = self.kept_drafts.due_ref(owner, composer.stored_draft_read(), now, now_or_never) {
+                due.push((owner.clone(), keep));
+            }
+        }
+        for ((account, key), draft) in due {
+            self.dispatch(Command::SaveDraft { account, key, draft }, Purpose::KeepDraft);
         }
     }
 }

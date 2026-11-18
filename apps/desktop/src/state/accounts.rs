@@ -506,6 +506,9 @@ pub struct AccountData {
     pub invitations: Vec<matrix_core::Invitation>,
     pub rooms: Vec<RoomSummary>,
     pub spaces: Vec<SpaceSummary>,
+    /// Lookups worked out from `rooms` and `spaces`, on first use after the list changes
+    /// ([`Accounts::set_room_list`] starts it again).
+    index: std::sync::OnceLock<RoomIndex>,
     timelines: HashMap<TimelineKey, RoomTimeline>,
     /// Timelines no longer on screen whose entries are still kept, oldest first: switching back
     /// shows them at once. Older ones are dropped and load again when opened.
@@ -526,6 +529,9 @@ pub struct AccountData {
     pub members: HashMap<String, matrix_core::Members>,
     /// Where each member is in `members`, by room and user ID, for read indicators.
     member_index: HashMap<String, HashMap<String, usize>>,
+    /// Moves on whenever any room's member list is replaced or forgotten: what the member list's
+    /// rows were worked out for.
+    pub members_revision: u64,
     /// Snapshots kept visible while a newer membership list is fetched.
     stale_members: HashSet<String>,
     /// Rooms' threads, by room ID, once listed for the info panel.
@@ -582,6 +588,7 @@ impl AccountData {
             invitations: Vec::new(),
             rooms: Vec::new(),
             spaces: Vec::new(),
+            index: std::sync::OnceLock::new(),
             timelines: HashMap::new(),
             closed: Vec::new(),
             latest: HashMap::new(),
@@ -591,6 +598,7 @@ impl AccountData {
             contacts: None,
             members: HashMap::new(),
             member_index: HashMap::new(),
+            members_revision: 0,
             stale_members: HashSet::new(),
             threads: HashMap::new(),
             files: HashMap::new(),
@@ -620,8 +628,49 @@ impl AccountData {
         self.status_message_of(self.summary.id.as_str())
     }
 
+    fn index(&self) -> &RoomIndex {
+        self.index.get_or_init(|| RoomIndex::new(&self.rooms, &self.spaces))
+    }
+
     pub fn room(&self, room_id: &str) -> Option<&RoomSummary> {
-        self.rooms.iter().find(|room| room.room_id == room_id)
+        let at = *self.index().rooms.get(room_id)?;
+        self.rooms.get(at).filter(|room| room.room_id == room_id)
+    }
+
+    /// A room, looked up without building the lookups when they aren't yet: for a list about
+    /// to be replaced.
+    pub fn room_unindexed(&self, room_id: &str) -> Option<&RoomSummary> {
+        match self.index.get() {
+            Some(_) => self.room(room_id),
+            None => self.rooms.iter().find(|room| room.room_id == room_id),
+        }
+    }
+
+    /// The rooms of `newer` (the list replacing this one) whose member count changed.
+    pub fn member_counts_changed(&self, newer: &[RoomSummary]) -> Vec<String> {
+        // The lookups if the view built them already, else just the counts.
+        let counts: Option<HashMap<&str, u64>> = self.index.get().is_none().then(|| {
+            let mut counts = HashMap::with_capacity(self.rooms.len());
+            for room in &self.rooms {
+                counts.entry(room.room_id.as_str()).or_insert(room.member_count);
+            }
+            counts
+        });
+        let old = |room_id: &str| match &counts {
+            Some(counts) => counts.get(room_id).copied(),
+            None => self.room(room_id).map(|room| room.member_count),
+        };
+        newer
+            .iter()
+            .filter(|room| old(&room.room_id).is_some_and(|count| count != room.member_count))
+            .map(|room| room.room_id.clone())
+            .collect()
+    }
+
+    /// The name of the room at `at` in `rooms` in lower case, worked out once per room list:
+    /// the sidebar's order among rooms with no activity known.
+    pub fn sort_name(&self, at: usize) -> &str {
+        self.index().sort_names.get(at).map_or("", String::as_str)
     }
 
     /// Whether the user saved the message `event_id` in the room.
@@ -645,42 +694,29 @@ impl AccountData {
     }
 
     pub fn space(&self, room_id: &str) -> Option<&SpaceSummary> {
-        self.spaces.iter().find(|space| space.room_id == room_id)
+        let at = *self.index().spaces.get(room_id)?;
+        self.spaces.get(at).filter(|space| space.room_id == room_id)
     }
 
     /// The rooms a scope shows, of one kind, in list order. Home shows every direct chat and the
     /// rooms in no space; a space shows its rooms (subspaces included) and the direct chats with
     /// its members.
     pub fn rooms_in<'a>(&'a self, scope: &Scope, kind: RoomKind) -> impl Iterator<Item = &'a RoomSummary> + 'a {
-        let filter = match scope {
-            Scope::Home => Filter::NotIn(self.spaces.iter().flat_map(|s| self.space_rooms(&s.room_id)).collect()),
-            Scope::Space(id) => Filter::Space {
-                rooms: self.space_rooms(id),
-                members: self.space(id).map(|s| s.members.iter().map(String::as_str).collect()).unwrap_or_default(),
-            },
-        };
-        self.rooms.iter().filter(move |room| room.kind == kind && filter.shows(room))
+        self.rooms_at(scope, kind).map(|(_, room)| room)
     }
 
-    /// Every room ID under a space, following subspaces; safe against cycles.
-    fn space_rooms(&self, space_id: &str) -> HashSet<&str> {
-        let mut rooms = HashSet::new();
-        let mut seen = HashSet::new();
-        let mut pending = vec![space_id];
-        while let Some(id) = pending.pop() {
-            if !seen.insert(id) {
-                continue;
-            }
-            let Some(space) = self.space(id) else { continue };
-            for child in &space.children {
-                if self.space(child).is_some() {
-                    pending.push(child);
-                } else {
-                    rooms.insert(child.as_str());
-                }
-            }
-        }
-        rooms
+    /// [`AccountData::rooms_in`], with each room's place in `rooms`.
+    pub fn rooms_at<'a>(
+        &'a self,
+        scope: &Scope,
+        kind: RoomKind,
+    ) -> impl Iterator<Item = (usize, &'a RoomSummary)> + 'a {
+        let index = self.index();
+        let listed = match scope {
+            Scope::Home => index.home.as_slice(),
+            Scope::Space(id) => index.in_space.get(id).map_or(&[][..], Vec::as_slice),
+        };
+        listed.iter().filter_map(|at| Some((*at, self.rooms.get(*at)?))).filter(move |(_, room)| room.kind == kind)
     }
 
     /// Whether any room in the scope has unread messages, for the rail's dots.
@@ -715,10 +751,24 @@ impl AccountData {
         }
     }
 
+    /// Lets go of a room's member list.
+    fn forget_members(&mut self, room_id: &str) {
+        if self.members.remove(room_id).is_some() {
+            self.members_revision = next_revision();
+        }
+        self.member_index.remove(room_id);
+        self.stale_members.remove(room_id);
+    }
+
     /// The newest message in a room: from its timeline when open, else from sync.
     pub fn last_message(&self, room_id: &str) -> Option<&Message> {
-        let from_timeline =
-            self.timeline(&TimelineKey::room(room_id)).and_then(|timeline| timeline.messages().next_back());
+        // Asked for every room the sidebar sorts on every commit: the few timelines kept are
+        // looked through rather than a key made for each room.
+        let from_timeline = self
+            .timelines
+            .iter()
+            .find(|(key, _)| key.thread.is_none() && key.room_id == room_id)
+            .and_then(|(_, timeline)| timeline.messages().next_back());
         match (from_timeline, self.latest.get(room_id)) {
             (Some(a), Some(b)) => Some(if a.timestamp_ms >= b.timestamp_ms { a } else { b }),
             (a, b) => a.or(b),
@@ -805,10 +855,92 @@ impl Filter<'_> {
     }
 }
 
+/// What [`AccountData`] looks up in its room list again and again, worked out once per list:
+/// where each room and space is, and which rooms each scope lists.
+#[derive(Debug, Default)]
+struct RoomIndex {
+    rooms: HashMap<String, usize>,
+    spaces: HashMap<String, usize>,
+    /// The rooms Home lists, of both kinds, as places in the room list, in its order.
+    home: Vec<usize>,
+    /// The rooms each space lists (its subspaces' included), likewise.
+    in_space: HashMap<String, Vec<usize>>,
+    /// Each room's name in lower case, by place in the room list.
+    sort_names: Vec<String>,
+}
+
+impl RoomIndex {
+    fn new(rooms: &[RoomSummary], spaces: &[SpaceSummary]) -> Self {
+        // The first of a repeated ID is the one found, as a search through the list finds it.
+        let mut room_at = HashMap::with_capacity(rooms.len());
+        for (at, room) in rooms.iter().enumerate() {
+            room_at.entry(room.room_id.clone()).or_insert(at);
+        }
+        let mut space_at = HashMap::with_capacity(spaces.len());
+        for (at, space) in spaces.iter().enumerate() {
+            space_at.entry(space.room_id.clone()).or_insert(at);
+        }
+        let space = |id: &str| space_at.get(id).and_then(|at| spaces.get(*at));
+        // Every room ID under a space, following subspaces; safe against cycles.
+        let space_rooms = |space_id: &str| {
+            let mut found = HashSet::new();
+            let mut seen = HashSet::new();
+            let mut pending = vec![space_id];
+            while let Some(id) = pending.pop() {
+                if !seen.insert(id) {
+                    continue;
+                }
+                let Some(space) = space(id) else { continue };
+                for child in &space.children {
+                    if space_at.contains_key(child.as_str()) {
+                        pending.push(child);
+                    } else {
+                        found.insert(child.as_str());
+                    }
+                }
+            }
+            found
+        };
+        let listed = |filter: &Filter<'_>| {
+            rooms.iter().enumerate().filter(|(_, room)| filter.shows(room)).map(|(at, _)| at).collect::<Vec<_>>()
+        };
+        // A space lists the rooms under it and the direct chats with its members: found from its
+        // children and among the direct chats, rather than by testing every room. A list
+        // repeating a room's ID (which the engine never sends) is tested room by room instead.
+        let direct: Vec<usize> =
+            rooms.iter().enumerate().filter(|(_, room)| room.kind == RoomKind::Direct).map(|(at, _)| at).collect();
+        let unique = room_at.len() == rooms.len();
+        let space_listed = |under: Vec<&str>, filter: &Filter<'_>| {
+            if !unique {
+                return listed(filter);
+            }
+            let mut found: Vec<usize> = under.iter().filter_map(|id| room_at.get(*id).copied()).collect();
+            found.extend(direct.iter().copied().filter(|at| rooms.get(*at).is_some_and(|room| filter.shows(room))));
+            found.sort_unstable();
+            found.dedup();
+            found
+        };
+        let mut in_spaces = HashSet::new();
+        let mut in_space = HashMap::with_capacity(spaces.len());
+        for (id, at) in &space_at {
+            let under = space_rooms(id);
+            in_spaces.extend(under.iter().copied());
+            let children: Vec<&str> = under.iter().copied().collect();
+            let members = spaces.get(*at).map(|s| s.members.iter().map(String::as_str).collect()).unwrap_or_default();
+            in_space.insert(id.clone(), space_listed(children, &Filter::Space { rooms: under, members }));
+        }
+        let home = listed(&Filter::NotIn(in_spaces));
+        let sort_names = rooms.iter().map(|room| room.name.to_lowercase()).collect();
+        Self { rooms: room_at, spaces: space_at, home, in_space, sort_names }
+    }
+}
+
 /// Every signed-in account, in the order they were added.
 #[derive(Debug, Default)]
 pub struct Accounts {
     list: Vec<AccountData>,
+    /// Moves on whenever an account, or its rooms, spaces or invitations, change.
+    revision: u64,
 }
 
 impl Accounts {
@@ -825,7 +957,14 @@ impl Accounts {
     pub fn forget_invitation(&mut self, account: &AccountId, room_id: &str) {
         if let Some(data) = self.get_mut(account) {
             data.invitations.retain(|invite| invite.room_id != room_id);
+            self.revision += 1;
         }
+    }
+
+    /// Moves on whenever an account, or its rooms, spaces or invitations, change: what is
+    /// worked out from those lists is worked out again only then.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &AccountData> {
@@ -850,10 +989,12 @@ impl Accounts {
             Some(account) => account.summary = summary,
             None => self.list.push(AccountData::new(summary)),
         }
+        self.revision += 1;
     }
 
     pub fn remove(&mut self, id: &AccountId) {
         self.list.retain(|account| &account.summary.id != id);
+        self.revision += 1;
     }
 
     pub fn set_search_usage(&mut self, id: &AccountId, usage: matrix_core::SearchUsage) {
@@ -867,6 +1008,8 @@ impl Accounts {
             account.rooms = list.rooms;
             account.spaces = list.spaces;
             account.invitations = list.invitations;
+            account.index = std::sync::OnceLock::new();
+            self.revision += 1;
         }
     }
 
@@ -989,6 +1132,7 @@ impl Accounts {
             let index = members.people.iter().enumerate().map(|(at, m)| (m.person.id.clone(), at)).collect();
             account.member_index.insert(room_id.clone(), index);
             account.members.insert(room_id, members);
+            account.members_revision = next_revision();
         }
     }
 
@@ -1009,14 +1153,26 @@ impl Accounts {
         if timeline.read_up_to.as_deref() == Some(event_id.as_str()) {
             return false;
         }
-        let position = |id: &str| {
-            timeline.entries.iter().position(|entry| entry.message().is_some_and(|message| message.event_id == id))
-        };
-        if let Some(previous) = timeline.read_up_to.as_deref().and_then(position)
-            && let Some(next) = position(&event_id)
-            && next < previous
-        {
-            return false;
+        // Where the position read so far and the new one are, found in one pass.
+        if let Some(read) = timeline.read_up_to.as_deref() {
+            let (mut previous, mut next) = (None, None);
+            let messages = timeline.entries.iter().enumerate().filter_map(|(at, entry)| Some((at, entry.message()?)));
+            for (at, message) in messages {
+                if previous.is_none() && message.event_id == read {
+                    previous = Some(at);
+                }
+                if next.is_none() && message.event_id == event_id {
+                    next = Some(at);
+                }
+                if previous.is_some() && next.is_some() {
+                    break;
+                }
+            }
+            if let (Some(previous), Some(next)) = (previous, next)
+                && next < previous
+            {
+                return false;
+            }
         }
         timeline.read_up_to = Some(event_id);
         true
@@ -1140,6 +1296,10 @@ impl Accounts {
         while account.closed.len() > KEPT_TIMELINES {
             let oldest = account.closed.remove(0);
             account.timelines.remove(&oldest);
+            // A room's members go with the last of its timelines kept: opening it lists them again.
+            if !account.timelines.keys().any(|key| key.room_id == oldest.room_id) {
+                account.forget_members(&oldest.room_id);
+            }
         }
     }
 
@@ -1156,9 +1316,18 @@ impl Accounts {
         }
     }
 
-    /// A timeline to change, created empty when first touched. Its revision moves on.
+    /// A timeline to change, created empty when first touched: for one being opened. Its
+    /// revision moves on.
     pub fn timeline_mut(&mut self, id: &AccountId, key: &TimelineKey) -> Option<&mut RoomTimeline> {
         let timeline = self.get_mut(id)?.timelines.entry(key.clone()).or_default();
+        timeline.revision = next_revision();
+        Some(timeline)
+    }
+
+    /// A timeline still kept, to change; none for one dropped since (an answer that comes late
+    /// changes nothing). Its revision moves on.
+    pub fn kept_timeline_mut(&mut self, id: &AccountId, key: &TimelineKey) -> Option<&mut RoomTimeline> {
+        let timeline = self.get_mut(id)?.timelines.get_mut(key)?;
         timeline.revision = next_revision();
         Some(timeline)
     }
@@ -1184,7 +1353,9 @@ impl Accounts {
     }
 
     fn room_mut(&mut self, id: &AccountId, room_id: &str) -> Option<&mut RoomSummary> {
-        self.get_mut(id).and_then(|account| account.rooms.iter_mut().find(|room| room.room_id == room_id))
+        let account = self.get_mut(id)?;
+        let at = *account.index().rooms.get(room_id)?;
+        account.rooms.get_mut(at).filter(|room| room.room_id == room_id)
     }
 
     /// Clears a room's unread counts locally, ahead of the server's next count.
@@ -1435,6 +1606,22 @@ mod tests {
         account.latest.insert("!dk".into(), at("$new", 2));
         let recent: Vec<_> = account.overview(&Scope::Home).recent.iter().map(|(r, _)| r.room_id.as_str()).collect();
         assert_eq!(recent, ["!dk", "!c"]);
+    }
+
+    #[test]
+    fn a_new_room_list_should_be_found_by_id() {
+        let mut accounts = Accounts::default();
+        let id = AccountId::new("@a:example.org");
+        accounts.upsert(summary(id.as_str()));
+        let list = |rooms: Vec<RoomSummary>| RoomList { rooms, spaces: Vec::new(), invitations: Vec::new() };
+        accounts.set_room_list(&id, list(vec![room("!old")]));
+        assert!(accounts.get(&id).unwrap().room("!old").is_some());
+        accounts.set_room_list(&id, list(vec![room("!new"), room("!other")]));
+        let account = accounts.get(&id).unwrap();
+        assert_eq!(
+            (account.room("!old").is_some(), account.room("!other").map(|r| r.name.as_str())),
+            (false, Some("!other"))
+        );
     }
 
     #[test]

@@ -484,8 +484,9 @@ pub fn timeline(
                     let item = timeline.entries.get(*entry)?.message()?;
                     (!item.pending && !item.event_id.starts_with("local:")).then(|| item.event_id.clone())
                 });
+                // Where reading got to is bookkeeping for read receipts: no view shows it.
                 if let Some(event_id) = last_message {
-                    changed |= s.read_position_shown(&seen_account, &seen_key, event_id);
+                    s.read_position_shown(&seen_account, &seen_key, event_id);
                 }
                 changed |= s.read_marker_visible(&seen_account, &seen_key, marker);
             }

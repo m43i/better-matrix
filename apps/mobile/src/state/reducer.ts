@@ -13,6 +13,7 @@ import type {
 } from '@better-matrix/matrix-native/types';
 
 import { initialCallView, reconcileView } from './callView';
+import { keepUnchanged } from './json';
 import { DEFAULT_SETTINGS, type Settings } from './settings';
 import { applyDiffs, timelineId } from './timeline';
 import type { AccountData, State, Timeline } from './types';
@@ -105,7 +106,10 @@ export const EMPTY_TIMELINE: Timeline = {
   openFailed: false,
 };
 
-/** `state` with one account changed by `change`; unchanged when the account isn't signed in. */
+/**
+ * `state` with one account changed by `change`; unchanged when the account isn't signed in or
+ * `change` returned it as it was.
+ */
 export function updateAccount(
   state: State,
   id: AccountId,
@@ -113,9 +117,14 @@ export function updateAccount(
 ): State {
   const index = state.accounts.findIndex((a) => a.summary.id === id);
 
-  if (index < 0) return state;
+  const before = state.accounts[index];
+
+  if (before === undefined) return state;
+  const after = change(before);
+
+  if (after === before) return state;
   const accounts = state.accounts.slice();
-  accounts[index] = change(accounts[index]!);
+  accounts[index] = after;
 
   return { ...state, accounts };
 }
@@ -150,6 +159,54 @@ let nextNotice = 1;
 /** `state` with a notice to show once. */
 export function addNotice(state: State, message: string, account: AccountId | null = null): State {
   return { ...state, notices: [...state.notices, { id: nextNotice++, message, account }] };
+}
+
+/** Whether `reported` gives each participant the level `levels` holds, and no one else. */
+function sameLevels(levels: Record<string, number>, reported: Array<[string, number]>): boolean {
+  return (
+    Object.keys(levels).length === reported.length &&
+    reported.every(([key, level]) => levels[key] === level)
+  );
+}
+
+/** A room's newest message from sync. */
+export type LatestMessageEvent = Extract<EngineEvent, { type: 'LatestMessage' }>;
+
+/**
+ * Folds `LatestMessage` events into the state, as `apply` folds them one by one; each account's
+ * maps are copied once, not once per event, since a first sync reports every room.
+ */
+export function applyLatestMessages(
+  state: State,
+  events: readonly LatestMessageEvent[],
+  now: number = Date.now(),
+): State {
+  const changes = new Map<AccountId, Pick<AccountData, 'latest' | 'heardAt'>>();
+
+  for (const { data } of events) {
+    const account = state.accounts.find((a) => a.summary.id === data.account);
+
+    if (!account) continue;
+    let maps = changes.get(data.account);
+
+    if (!maps) {
+      maps = { latest: { ...account.latest }, heardAt: account.heardAt };
+      changes.set(data.account, maps);
+    }
+
+    if (maps.latest[data.room_id]?.event_id !== data.message.event_id) {
+      if (maps.heardAt === account.heardAt) maps.heardAt = { ...account.heardAt };
+      maps.heardAt[data.room_id] = now;
+    }
+
+    maps.latest[data.room_id] = data.message;
+  }
+
+  let next = state;
+
+  for (const [id, maps] of changes) next = updateAccount(next, id, (a) => ({ ...a, ...maps }));
+
+  return next;
 }
 
 /** Folds one event into the state. `now` is when it arrived, in ms since the epoch. */
@@ -205,29 +262,29 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'RoomsUpdated':
       return updateAccount(state, event.data.account, (a) => {
         const scope = a.scope;
+        // Every change to any room lists them all again: rooms that didn't change keep their
+        // objects, so only their rows redraw.
+        const rooms = keepUnchanged(a.rooms, event.data.list.rooms);
+        const spaces = keepUnchanged(a.spaces, event.data.list.spaces);
+        const invitations = keepUnchanged(a.invitations, event.data.list.invitations);
 
-        return {
-          ...a,
-          rooms: event.data.list.rooms,
-          spaces: event.data.list.spaces,
-          invitations: event.data.list.invitations,
-          roomsLoaded: true,
-          // A space the user left takes its scope with it.
-          scope:
-            scope !== 'home' && !event.data.list.spaces.some((s) => s.room_id === scope.space)
-              ? 'home'
-              : scope,
-        };
+        // A space the user left takes its scope with it.
+        const nextScope =
+          scope !== 'home' && !spaces.some((s) => s.room_id === scope.space) ? 'home' : scope;
+
+        if (
+          a.roomsLoaded &&
+          rooms === a.rooms &&
+          spaces === a.spaces &&
+          invitations === a.invitations &&
+          nextScope === scope
+        )
+          return a;
+
+        return { ...a, rooms, spaces, invitations, roomsLoaded: true, scope: nextScope };
       });
     case 'LatestMessage':
-      return updateAccount(state, event.data.account, (a) => ({
-        ...a,
-        latest: { ...a.latest, [event.data.room_id]: event.data.message },
-        heardAt:
-          a.latest[event.data.room_id]?.event_id === event.data.message.event_id
-            ? a.heardAt
-            : { ...a.heardAt, [event.data.room_id]: now },
-      }));
+      return applyLatestMessages(state, [event], now);
     case 'TimelineChanged':
       return updateTimeline(state, event.data.account, event.data.key, (t) => ({
         ...t,
@@ -393,7 +450,10 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     }
 
     case 'CallLevels':
-      return { ...state, call: { ...state.call, levels: Object.fromEntries(event.data) } };
+      // They come every 100 ms in a call, mostly as they were: only a change redraws.
+      return sameLevels(state.call.levels, event.data)
+        ? state
+        : { ...state, call: { ...state.call, levels: Object.fromEntries(event.data) } };
     case 'CallMediaFailed':
       return { ...state, call: { ...state.call, mediaError: event.data } };
     case 'IncomingCall': {

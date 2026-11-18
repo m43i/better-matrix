@@ -350,13 +350,13 @@ impl Opus {
 
 // ----- output ------------------------------------------------------------------------------
 
-/// Plays what `fill` writes (interleaved f32 at the device's rate and channels) on `device`
-/// until `stop` disconnects. Runs on the calling thread.
-fn play_on(
+/// Starts a stream on `device` playing what `fill` writes (interleaved f32 at the device's rate
+/// and channels), until the stream drops; the receiver hears when the device goes for good. The
+/// stream stays on the calling thread.
+fn open_output(
     device: &cpal::Device,
-    stop: &Receiver<()>,
     fill: impl FnMut(&mut [f32], u32, usize) + Send + 'static,
-) -> Result<(), String> {
+) -> Result<(cpal::Stream, Receiver<String>), String> {
     let supported = device.default_output_config().map_err(|e| e.to_string())?;
     let (format, config) = (supported.sample_format(), low_latency(&supported));
     let (rate, channels) = (config.sample_rate, usize::from(config.channels));
@@ -369,9 +369,19 @@ fn play_on(
         other => Err(format!("the speaker's format {other} isn't supported")),
     }?;
     stream.play().map_err(|e| e.to_string())?;
+    Ok((stream, gone))
+}
+
+/// Plays what `fill` writes on `device` until `stop` disconnects. Runs on the calling thread.
+fn play_on(
+    device: &cpal::Device,
+    stop: &Receiver<()>,
+    fill: impl FnMut(&mut [f32], u32, usize) + Send + 'static,
+) -> Result<(), String> {
+    let (_stream, gone) = open_output(device, fill)?;
     // Plays until the handle drops its sender, or the speaker goes.
     loop {
-        match stop.recv_timeout(std::time::Duration::from_millis(100)) {
+        match stop.recv_timeout(SPEAKER_POLL) {
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 if let Ok(error) = gone.try_recv() {
                     return Err(error);
@@ -381,6 +391,9 @@ fn play_on(
         }
     }
 }
+
+/// How often a thread with a stream open checks that its speaker is still there.
+const SPEAKER_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Whether a stream error means the device is gone for good (unplugged, the sound server gone),
 /// rather than a hiccup.
@@ -425,7 +438,11 @@ fn output_stream<T: SizedSample + FromSample<f32>>(
 /// A file playing (or paused) on a speaker.
 #[derive(Debug)]
 struct Playback {
+    /// The decoded file: let go after the clip has been paused a while
+    /// ([`PlayerTiming::release`]), and decoded again to play.
     pcm: Option<Arc<Pcm>>,
+    /// The file's frames and rate, kept when `pcm` is let go.
+    length: Option<(usize, u32)>,
     /// `pcm` stretched, a segment at a time, to play at a rate other than 1× at its own pitch;
     /// a segment not stretched yet plays at 1×.
     stretched: Option<Stretched>,
@@ -474,6 +491,7 @@ impl Default for Playback {
     fn default() -> Self {
         Self {
             pcm: None,
+            length: None,
             stretched: None,
             position: 0.0,
             seek_to: None,
@@ -553,6 +571,35 @@ impl Stretched {
 }
 
 impl Playback {
+    /// The file's frames and rate, once decoded.
+    fn length(&self) -> Option<(usize, u32)> {
+        self.pcm.as_ref().map(|pcm| (pcm.frames(), pcm.rate)).or(self.length)
+    }
+
+    /// Takes the decoded file: to where it was to start, if it was moved before decoding, and
+    /// stretched to the speed it plays at. Returns the stretch job to start ([`stretch_for`]).
+    fn install(&mut self, pcm: Arc<Pcm>) -> Option<(u64, Arc<Pcm>)> {
+        if let Some(share) = self.seek_to.take() {
+            self.position = share.clamp(0.0, 1.0) * pcm.frames() as f64;
+        }
+        self.length = Some((pcm.frames(), pcm.rate));
+        self.pcm = Some(pcm);
+        self.begin_stretch()
+    }
+
+    /// Lets the decoded file and its stretched copies go while paused, keeping its length,
+    /// place and waveform: it is decoded again to play.
+    fn release(&mut self) {
+        if self.playing {
+            return;
+        }
+        self.length = self.length();
+        self.pcm = None;
+        self.stretched = None;
+        self.source = None;
+        self.fade = None;
+    }
+
     /// Stretch `job`, while it is the latest and the player is still there.
     fn stretch_job(&mut self, job: u64) -> Option<&mut Stretched> {
         let closed = self.closed;
@@ -676,14 +723,92 @@ fn stretch_for(state: &Arc<Mutex<Playback>>, pcm: Arc<Pcm>, job: u64) -> Option<
         .ok()
 }
 
+/// When a player opens its speaker and lets go of what it holds.
+#[derive(Clone, Copy, Debug)]
+struct PlayerTiming {
+    /// How often, while the speaker is open, the player checks it is still to play.
+    poll: std::time::Duration,
+    /// How long the speaker stays open after the clip pauses or ends: the last block drains,
+    /// and a quick pause and play go on without opening it again.
+    linger: std::time::Duration,
+    /// How long a paused clip keeps its decoded file before letting it go.
+    release: std::time::Duration,
+}
+
+impl PlayerTiming {
+    const APP: Self = Self {
+        poll: SPEAKER_POLL,
+        linger: std::time::Duration::from_millis(500),
+        release: std::time::Duration::from_secs(60),
+    };
+}
+
+fn is_playing(state: &Mutex<Playback>) -> bool {
+    state.lock().is_ok_and(|state| state.playing)
+}
+
+/// The player's thread once its file is decoded: the speaker is open (`open`) only while the
+/// clip plays, so a paused or finished clip costs nothing, and after [`PlayerTiming::release`]
+/// paused the decoded file goes too, `load`ed again to play. `wake` hears each play and
+/// disconnects when the player goes, which ends the thread.
+fn serve<S>(
+    state: &Mutex<Playback>,
+    wake: &Receiver<()>,
+    timing: PlayerTiming,
+    mut open: impl FnMut() -> Result<(S, Receiver<String>), String>,
+    mut load: impl FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    use std::sync::mpsc::RecvTimeoutError;
+    loop {
+        let mut released = false;
+        while !is_playing(state) {
+            let woke = if released {
+                wake.recv().map_err(|_| RecvTimeoutError::Disconnected)
+            } else {
+                wake.recv_timeout(timing.release)
+            };
+            match woke {
+                Ok(()) => {}
+                Err(RecvTimeoutError::Timeout) => {
+                    if let Ok(mut state) = state.lock() {
+                        state.release();
+                    }
+                    released = true;
+                }
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            }
+        }
+        if state.lock().is_ok_and(|state| state.pcm.is_none()) {
+            load()?;
+        }
+        let (speaker, gone) = open()?;
+        let mut quiet_since: Option<std::time::Instant> = None;
+        loop {
+            if let Err(RecvTimeoutError::Disconnected) = wake.recv_timeout(timing.poll) {
+                return Ok(());
+            }
+            if let Ok(error) = gone.try_recv() {
+                return Err(error);
+            }
+            if is_playing(state) {
+                quiet_since = None;
+            } else if quiet_since.get_or_insert_with(std::time::Instant::now).elapsed() >= timing.linger {
+                break;
+            }
+        }
+        drop(speaker);
+    }
+}
+
 #[derive(Debug)]
 pub struct NativePlayer {
     state: Arc<Mutex<Playback>>,
-    _stop: Sender<()>,
+    /// Wakes the player's thread to play; dropped, the thread ends and its speaker closes.
+    wake: Sender<()>,
 }
 
 impl Drop for NativePlayer {
-    /// A stretch still under way for it stops (its speaker stops as the stop sender drops).
+    /// A stretch still under way for it stops (its speaker stops as the wake sender drops).
     fn drop(&mut self) {
         if let Ok(mut state) = self.state.lock() {
             state.closed = true;
@@ -702,7 +827,7 @@ impl NativePlayer {
         failed: impl FnOnce(String) + Send + 'static,
     ) -> Self {
         let state = Arc::new(Mutex::new(Playback::default()));
-        let (stop, stopped) = channel();
+        let (wake, woken) = channel();
         let shared = Arc::clone(&state);
         let _ = std::thread::Builder::new().name("audio-player".into()).spawn(move || {
             let pcm = match decode(&path) {
@@ -711,17 +836,11 @@ impl NativePlayer {
             };
             // Read before taking the lock, which the speaker's callback and the view wait on.
             let points = waveform(&pcm.samples, pcm.channels, WAVEFORM_POINTS);
-            let job = match shared.lock() {
-                Ok(mut state) => {
-                    state.waveform = points;
-                    if let Some(share) = state.seek_to.take() {
-                        state.position = share.clamp(0.0, 1.0) * pcm.frames() as f64;
-                    }
-                    state.pcm = Some(Arc::clone(&pcm));
-                    state.begin_stretch()
-                }
-                Err(_) => None,
-            };
+            let job = shared.lock().ok().and_then(|mut state| {
+                state.waveform = points;
+                state.install(Arc::clone(&pcm))
+            });
+            drop(pcm);
             if let Some((job, pcm)) = job {
                 stretch_for(&shared, pcm, job);
             }
@@ -729,16 +848,27 @@ impl NativePlayer {
             let Some(device) = output_device(device.as_deref()) else {
                 return failed("there is no speaker".to_owned());
             };
-            let fill = move |out: &mut [f32], rate: u32, channels: usize| {
-                if let Ok(mut state) = shared.lock() {
-                    state.render(out, rate, channels);
-                }
+            let open = || {
+                let shared = Arc::clone(&shared);
+                open_output(&device, move |out: &mut [f32], rate: u32, channels: usize| {
+                    if let Ok(mut state) = shared.lock() {
+                        state.render(out, rate, channels);
+                    }
+                })
             };
-            if let Err(error) = play_on(&device, &stopped, fill) {
+            let load = || {
+                let pcm = Arc::new(decode(&path)?);
+                let job = shared.lock().ok().and_then(|mut state| state.install(pcm));
+                if let Some((job, pcm)) = job {
+                    stretch_for(&shared, pcm, job);
+                }
+                Ok(())
+            };
+            if let Err(error) = serve(&shared, &woken, PlayerTiming::APP, open, load) {
                 failed(error);
             }
         });
-        Self { state, _stop: stop }
+        Self { state, wake }
     }
 
     /// A player for `pcm`, already decoded and paused, on no speaker: for tests.
@@ -746,14 +876,14 @@ impl NativePlayer {
     pub fn decoded(pcm: Pcm) -> Self {
         let points = waveform(&pcm.samples, pcm.channels, WAVEFORM_POINTS);
         let state = Playback { pcm: Some(Arc::new(pcm)), waveform: points, ..Playback::default() };
-        Self { state: Arc::new(Mutex::new(state)), _stop: channel().0 }
+        Self { state: Arc::new(Mutex::new(state)), wake: channel().0 }
     }
 
     /// Plays from where it is; from the start when it is at the end, or is to start there once
     /// decoded.
     pub fn play(&self) {
         if let Ok(mut state) = self.state.lock() {
-            let end = state.pcm.as_ref().map_or(f64::MAX, |pcm| pcm.frames() as f64);
+            let end = state.length().map_or(f64::MAX, |(frames, _)| frames as f64);
             if state.position >= end {
                 state.position = 0.0;
             }
@@ -762,12 +892,13 @@ impl NativePlayer {
             }
             state.playing = true;
         }
+        let _ = self.wake.send(());
     }
 
     /// How far along it is, from 0 to 1: before it is decoded, where it is to start.
     pub fn progress(&self) -> f64 {
-        self.state.lock().map_or(0.0, |state| match &state.pcm {
-            Some(pcm) => (state.position / pcm.frames().max(1) as f64).clamp(0.0, 1.0),
+        self.state.lock().map_or(0.0, |state| match state.length() {
+            Some((frames, _)) => (state.position / frames.max(1) as f64).clamp(0.0, 1.0),
             None => state.seek_to.unwrap_or(0.0).clamp(0.0, 1.0),
         })
     }
@@ -776,8 +907,8 @@ impl NativePlayer {
     /// decoded, it starts there.
     pub fn seek(&self, share: f64) {
         let Ok(mut state) = self.state.lock() else { return };
-        match state.pcm.as_ref().map(|pcm| pcm.frames()) {
-            Some(frames) => state.position = share.clamp(0.0, 1.0) * frames as f64,
+        match state.length() {
+            Some((frames, _)) => state.position = share.clamp(0.0, 1.0) * frames as f64,
             None => state.seek_to = Some(share),
         }
     }
@@ -810,18 +941,22 @@ impl NativePlayer {
     }
 
     pub fn is_playing(&self) -> bool {
-        self.state.lock().is_ok_and(|state| state.playing)
+        is_playing(&self.state)
     }
 
     /// Seconds played.
     pub fn time(&self) -> f64 {
-        self.state.lock().ok().and_then(|s| s.pcm.as_ref().map(|pcm| s.position / f64::from(pcm.rate))).unwrap_or(0.0)
+        self.state
+            .lock()
+            .ok()
+            .and_then(|state| state.length().map(|(_, rate)| state.position / f64::from(rate)))
+            .unwrap_or(0.0)
     }
 
     /// The length, once decoded.
     pub fn duration(&self) -> Option<f64> {
         let state = self.state.lock().ok()?;
-        state.pcm.as_ref().map(|pcm| pcm.frames() as f64 / f64::from(pcm.rate))
+        state.length().map(|(frames, rate)| frames as f64 / f64::from(rate))
     }
 }
 
@@ -1550,11 +1685,112 @@ mod tests {
 
     #[test]
     fn play_after_a_seek_to_the_end_before_decoding_should_start_from_the_beginning() {
-        let player = NativePlayer { state: Arc::default(), _stop: channel().0 };
+        let player = NativePlayer { state: Arc::default(), wake: channel().0 };
         player.seek(1.0);
         let waiting = player.progress();
         player.play();
         assert_eq!((waiting, player.progress()), (1.0, 0.0));
+    }
+
+    /// A speaker for [`serve`] that counts how many are open.
+    struct FakeSpeaker(Arc<std::sync::atomic::AtomicIsize>);
+
+    impl Drop for FakeSpeaker {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    /// Waits up to two seconds for `done`.
+    fn eventually(what: &str, done: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !done() {
+            assert!(std::time::Instant::now() < deadline, "never {what}");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    /// A player on a fake speaker served on its own thread, with `release`: the player, how many
+    /// speakers are open and have been opened, and how many times the file was loaded again.
+    fn served(release: std::time::Duration) -> (NativePlayer, [Arc<std::sync::atomic::AtomicIsize>; 3]) {
+        use std::sync::atomic::{AtomicIsize, Ordering};
+        let pcm = tone(1.0);
+        let waveform = waveform(&pcm.samples, 1, WAVEFORM_POINTS);
+        let playback = Playback { pcm: Some(Arc::new(pcm)), waveform, ..Playback::default() };
+        let (wake, woken) = channel();
+        let player = NativePlayer { state: Arc::new(Mutex::new(playback)), wake };
+        let counts: [Arc<AtomicIsize>; 3] = Default::default();
+        let [open, opened, loads] = counts.clone();
+        let state = Arc::clone(&player.state);
+        std::thread::spawn(move || {
+            let timing = PlayerTiming {
+                poll: std::time::Duration::from_millis(1),
+                linger: std::time::Duration::from_millis(5),
+                release,
+            };
+            let speaker = || {
+                open.fetch_add(1, Ordering::SeqCst);
+                opened.fetch_add(1, Ordering::SeqCst);
+                Ok((FakeSpeaker(Arc::clone(&open)), channel().1))
+            };
+            let load = || {
+                loads.fetch_add(1, Ordering::SeqCst);
+                let _ = state.lock().map(|mut state| state.install(Arc::new(tone(1.0))));
+                Ok(())
+            };
+            serve(&state, &woken, timing, speaker, load)
+        });
+        (player, counts)
+    }
+
+    #[test]
+    fn a_paused_clip_should_close_its_speaker_and_open_it_again_to_play() {
+        use std::sync::atomic::Ordering;
+        let (player, [open, opened, _]) = served(std::time::Duration::from_secs(60));
+        let unopened = open.load(Ordering::SeqCst);
+        player.play();
+        eventually("opened", || open.load(Ordering::SeqCst) == 1);
+        player.pause();
+        eventually("closed", || open.load(Ordering::SeqCst) == 0);
+        player.play();
+        eventually("opened again", || opened.load(Ordering::SeqCst) == 2 && open.load(Ordering::SeqCst) == 1);
+        assert_eq!(unopened, 0);
+    }
+
+    #[test]
+    fn a_clip_played_to_its_end_should_close_its_speaker() {
+        use std::sync::atomic::Ordering;
+        let (player, [open, _, _]) = served(std::time::Duration::from_secs(60));
+        player.play();
+        eventually("opened", || open.load(Ordering::SeqCst) == 1);
+        // The speaker plays the clip to its end.
+        let _ = player.state.lock().map(|mut state| state.render(&mut vec![0.0; 48_000], 24_000, 1));
+        eventually("closed", || open.load(Ordering::SeqCst) == 0);
+        assert!(!player.is_playing());
+    }
+
+    #[test]
+    fn a_clip_paused_a_while_should_let_its_samples_go_and_keep_its_place() {
+        use std::sync::atomic::Ordering;
+        let (player, [_, _, loads]) = served(std::time::Duration::from_millis(10));
+        player.seek(0.5);
+        eventually("released", || player.state.lock().is_ok_and(|state| state.pcm.is_none()));
+        assert_eq!((player.progress(), player.duration(), player.time()), (0.5, Some(1.0), 0.5));
+        assert_eq!(player.waveform().len(), WAVEFORM_POINTS);
+        player.seek(0.25);
+        player.play();
+        eventually("loaded", || player.state.lock().is_ok_and(|state| state.pcm.is_some()));
+        assert_eq!((loads.load(Ordering::SeqCst), player.progress()), (1, 0.25));
+    }
+
+    #[test]
+    fn a_dropped_player_should_close_its_speaker() {
+        use std::sync::atomic::Ordering;
+        let (player, [open, _, _]) = served(std::time::Duration::from_secs(60));
+        player.play();
+        eventually("opened", || open.load(Ordering::SeqCst) == 1);
+        drop(player);
+        eventually("closed", || open.load(Ordering::SeqCst) == 0);
     }
 
     #[test]

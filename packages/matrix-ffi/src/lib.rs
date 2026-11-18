@@ -80,10 +80,11 @@ pub trait NativeSecrets: Send + Sync {
     fn delete(&self, key: String) -> Result<(), SecretFailure>;
 }
 
-/// Hears the engine's events, one JSON object each: an `Event` or a [`BridgeEvent`].
+/// Hears the engine's events as JSON: an `Event` or a [`BridgeEvent`], or an array of those that
+/// were waiting together (`events::next_batch`).
 #[uniffi::export(with_foreign)]
 pub trait EventListener: Send + Sync {
-    /// Handles one event.
+    /// Handles one event, or a batch of them in order.
     fn on_event(&self, event: String);
 }
 

@@ -83,8 +83,11 @@ Date: 2026-11-16
   video views open the file directly. Uploads go the other way as paths (`Upload::Path`);
   `Upload::Bytes` doesn't cross.
 - **Events leave on one thread** (`bridge-events`) in the engine's order; calling JavaScript
-  from it blocks until JavaScript has handled the event, so the engine's threads never wait on
-  the UI.
+  from it blocks until JavaScript has handled the call, so the engine's threads never wait on
+  the UI. Each call is a JavaScript task of its own (React renders between tasks), so the thread
+  sends what queued up meanwhile as one JSON array (`events::next_batch`, at most 256 events or
+  about 1 MiB), and a lone event as its object without waiting. `Engine.emitJson` takes either;
+  the store takes a batch in as one update.
 - **Secrets** go to the iOS keychain and Android's keystore through `expo-secure-store`
   (available after first unlock), called back synchronously from the engine's blocking threads.
 - **OAuth on phones returns to the app.** `EngineConfig::oauth_redirect` is `Loopback` on the
@@ -98,7 +101,14 @@ Date: 2026-11-16
   (a failure becomes a notice unless `quiet`); `Store.run` awaits a request's `Finished` and
   hears the events answering it (a discovered homeserver, a URL to open, people found), which
   is the mobile form of the desktop's `Purpose`. Views read through `useStore(selector)`;
-  notifications to React are batched per burst of events.
+  notifications to React are batched per burst of events. Events that repeat what the store
+  holds keep its objects (a re-sent room list, unchanged call levels), so memoised views don't
+  redraw. A closed timeline keeps its entries while the engine keeps it warm (eight per
+  account); after that only its newest page, since opening it again starts from the engine's
+  newest anyway. Selectors run on every notification, so they stay cheap: what they derive from
+  a list is kept per list (the scope helpers in `state/sections.ts`, the badge), the room lists
+  select only the fields they draw (`activeRoomList`), and what every row needs is read once and
+  handed down by context (the palette from `PaletteProvider` at the root, a timeline's pins).
 - **Design:** the desktop's palette roles (`ui/theme.rs`) as sRGB in `src/theme/palette.ts`,
   its type scale and identity colours; icons are SF Symbols on iOS and Material Symbols on
   Android through one name table (`src/ui/icons.tsx`) mirroring the desktop's icon set.
@@ -135,9 +145,10 @@ Date: 2026-11-16
   arithmetic in `state/voiceCard.ts`. Recording, a blurred glow (`boxShadow`) surrounds the
   composer's field; its brighter halo's opacity is a Reanimated shared value the metering sets,
   so nothing re-renders for it, and it holds half lit under reduced motion (`VoiceGlow`). In
-  the timeline, `AudioCard` shows play beside the waveform bars, a dot to drag (the bars' own
-  responder; only letting go seeks, so the list taking the gesture leaves the clip where it
-  was), the time, and once loaded the speed button (`settings.playbackSpeed`: 1×, 1.5×, 2×,
+  the timeline, `AudioCard` makes its player only once the clip is wanted (play, a seek), so
+  memos scrolled past make none; it shows play beside the waveform bars, a dot to drag (the
+  bars' own responder; only letting go seeks, so the list taking the gesture leaves the clip
+  where it was), the time, and once loaded the speed button (`settings.playbackSpeed`: 1×, 1.5×, 2×,
   pitch kept by expo-audio). One clip plays at a time (`audioFocus.ts`). A clip that plays to its
   end pauses and rewinds (Android's player would otherwise play again at the next seek); one
   moved to its very end waits there. expo-audio reports a paused clip's place only while it

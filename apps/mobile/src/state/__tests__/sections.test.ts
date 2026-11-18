@@ -59,7 +59,7 @@ function dm(id: string, with_: string, change: Partial<RoomSummary> = {}): RoomS
   return { ...roomSummary(id, id, 'Direct'), dm_users: [with_], ...change };
 }
 
-const ids = (rooms: RoomSummary[]) => rooms.map((r) => r.room_id);
+const ids = (rooms: readonly RoomSummary[]) => rooms.map((r) => r.room_id);
 
 describe('wantsAttention', () => {
   it('a room notifying for all messages should want attention while it has unread ones', () => {
@@ -118,6 +118,22 @@ describe('roomsInScope', () => {
 
     expect(ids(roomsInScope(looped, { space: '!b' }))).toEqual(['!r']);
   });
+
+  it('the same rooms and spaces should give the same list', () => {
+    expect(roomsInScope({ ...account }, 'home')).toBe(roomsInScope(account, 'home'));
+  });
+
+  it('a new rooms list should be listed afresh', () => {
+    const changed = { ...account, rooms: [...account.rooms, room('!new')] };
+
+    expect(ids(roomsInScope(changed, 'home', 'Group'))).toEqual(['!outside', '!new']);
+  });
+
+  it('a new spaces list should be listed afresh', () => {
+    const changed = { ...account, spaces: [spaceSummary('!space', ['!outside'])] };
+
+    expect(ids(roomsInScope(changed, { space: '!space' }, 'Group'))).toEqual(['!outside']);
+  });
 });
 
 describe('hasUnread', () => {
@@ -129,6 +145,13 @@ describe('hasUnread', () => {
   it('rooms in a space should not count for home', () => {
     const account = accountWith([room('!a', { unread: 1 })], [spaceSummary('!s', ['!a'])]);
     expect(hasUnread(account, 'home')).toBe(false);
+  });
+
+  it('a scope should have unread activity once its rooms list changes to some', () => {
+    const account = accountWith([room('!a')]);
+    hasUnread(account, 'home');
+
+    expect(hasUnread({ ...account, rooms: [room('!a', { unread: 1 })] }, 'home')).toBe(true);
   });
 });
 

@@ -1,11 +1,12 @@
 //! GIFs linked from messages: fetched once per link, decoded and played on a worker that streams
 //! frames into a [`Pixels`], so animation redraws only the picture and never rebuilds the view.
-//! Bounded: a GIF whose frames would exceed [`MAX_FRAME_BYTES`] plays only its first frame, and
-//! at most [`MAX_PLAYERS`] play at once.
+//! Bounded: a GIF whose frames would exceed [`MAX_FRAME_BYTES`] plays only its first frame, at
+//! most [`MAX_PLAYERS`] play at once, and past [`MAX_TOTAL_BYTES`] of frames across them the GIFs
+//! shown longest ago that are off screen are let go.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use image::AnimationDecoder;
@@ -17,6 +18,9 @@ use super::retry::Retries;
 const MAX_FRAME_BYTES: usize = 48 << 20;
 /// GIFs kept playing; the oldest stop beyond this.
 const MAX_PLAYERS: usize = 16;
+/// Decoded frames all GIFs may hold together before those off screen are let go; those on
+/// screen keep theirs.
+const MAX_TOTAL_BYTES: usize = 128 << 20;
 
 #[derive(Debug)]
 enum Entry {
@@ -34,6 +38,8 @@ enum Entry {
 #[derive(Debug)]
 pub struct Player {
     pixels: Pixels,
+    /// Bytes of decoded frames its worker holds.
+    held: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
     worker: Option<std::thread::Thread>,
@@ -47,16 +53,19 @@ impl Drop for Player {
 }
 
 impl Player {
-    fn start(bytes: Arc<[u8]>) -> Self {
+    /// Plays `bytes` on a worker, counting its decoded frames in `decoded` as well as its own.
+    fn start(bytes: Arc<[u8]>, decoded: &Arc<AtomicUsize>) -> Self {
         let pixels = Pixels::new();
         let (stop, paused) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let held = Arc::new(AtomicUsize::new(0));
         let (out, halt, hold) = (pixels.clone(), Arc::clone(&stop), Arc::clone(&paused));
+        let counted = Held { own: Arc::clone(&held), all: Arc::clone(decoded) };
         let worker = std::thread::Builder::new()
             .name("gif".into())
-            .spawn(move || play(bytes, &out, &halt, &hold))
+            .spawn(move || play(bytes, &out, &halt, &hold, &counted))
             .ok()
             .map(|handle| handle.thread().clone());
-        Self { pixels, stop, paused, worker }
+        Self { pixels, held, stop, paused, worker }
     }
 
     /// Holds or resumes the animation.
@@ -77,9 +86,29 @@ impl Player {
     }
 }
 
+/// The decoded bytes a worker holds, counted for its player and for all of them; given back
+/// when the worker ends and its frames go.
+struct Held {
+    own: Arc<AtomicUsize>,
+    all: Arc<AtomicUsize>,
+}
+
+impl Held {
+    fn add(&self, bytes: usize) {
+        self.own.fetch_add(bytes, Ordering::Relaxed);
+        self.all.fetch_add(bytes, Ordering::Relaxed);
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        self.all.fetch_sub(self.own.swap(0, Ordering::Relaxed), Ordering::Relaxed);
+    }
+}
+
 /// Decodes the frames, lets go of the file, then loops them at their own delays until stopped,
 /// holding the frame shown while paused.
-fn play(bytes: Arc<[u8]>, out: &Pixels, stop: &AtomicBool, paused: &AtomicBool) {
+fn play(bytes: Arc<[u8]>, out: &Pixels, stop: &AtomicBool, paused: &AtomicBool, held: &Held) {
     let Ok(decoder) = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(&bytes[..])) else { return };
     let mut frames = Vec::new();
     let mut total = 0usize;
@@ -89,6 +118,7 @@ fn play(bytes: Arc<[u8]>, out: &Pixels, stop: &AtomicBool, paused: &AtomicBool) 
         let delay = Duration::from_millis(u64::from(numerator / denominator.max(1)).max(20));
         let image = frame.into_buffer();
         total += image.as_raw().len();
+        held.add(image.as_raw().len());
         let first = frames.is_empty();
         frames.push((image.width(), image.height(), image.into_raw(), delay));
         if first {
@@ -135,7 +165,10 @@ fn wait_frame(delay: Duration, stop: &AtomicBool, paused: &AtomicBool) {
 #[derive(Debug, Default)]
 pub struct GifCache {
     entries: HashMap<String, Entry>,
+    /// The GIFs playing, those shown longest ago first.
     playing: VecDeque<String>,
+    /// Bytes of decoded frames all players hold.
+    decoded: Arc<AtomicUsize>,
     retries: Retries<String>,
     /// The GIFs on screen, as last shown.
     on_screen: std::collections::HashSet<String>,
@@ -174,7 +207,7 @@ impl GifCache {
             self.entries.insert(url, Entry::Broken);
             return;
         }
-        self.entries.insert(url.clone(), Entry::Playing(Player::start(bytes)));
+        self.entries.insert(url.clone(), Entry::Playing(Player::start(bytes, &self.decoded)));
         self.playing.push_back(url);
         // Making room: the oldest off screen is forgotten, and fetched again if it comes back;
         // only when every one shows does the oldest stop, holding its place.
@@ -202,14 +235,36 @@ impl GifCache {
         self.retries.retain(|url| shown.contains(url));
     }
 
-    /// Plays the GIFs in `shown` while the window is focused, and holds every other.
+    /// Plays the GIFs in `shown` while the window is focused, and holds every other. Past
+    /// [`MAX_TOTAL_BYTES`] of frames, those off screen are forgotten, the one shown longest ago
+    /// first, and fetched again if they come back.
     pub fn show(&mut self, shown: std::collections::HashSet<String>, focused: bool) {
         for (url, entry) in &self.entries {
             if let Entry::Playing(player) = entry {
                 player.set_paused(!focused || !shown.contains(url));
             }
         }
+        // Those on screen move behind the rest, keeping their order.
+        let (on_screen, off_screen): (VecDeque<String>, VecDeque<String>) =
+            self.playing.drain(..).partition(|url| shown.contains(url));
+        self.playing = off_screen;
+        self.playing.extend(on_screen);
         self.on_screen = shown;
+        self.trim(MAX_TOTAL_BYTES);
+    }
+
+    /// Forgets GIFs off screen, the one shown longest ago first, until their frames come to
+    /// `budget` or only those on screen are left.
+    fn trim(&mut self, budget: usize) {
+        let mut total = self.decoded.load(Ordering::Relaxed);
+        while total > budget {
+            let Some(index) = self.playing.iter().position(|url| !self.on_screen.contains(url)) else { return };
+            let Some(gone) = self.playing.remove(index) else { return };
+            if let Some(Entry::Playing(player)) = self.entries.remove(&gone) {
+                // Its worker gives the bytes back as it ends.
+                total = total.saturating_sub(player.held.load(Ordering::Relaxed));
+            }
+        }
     }
 
     pub fn player(&self, url: &str) -> Option<&Player> {
@@ -298,6 +353,65 @@ mod tests {
         gifs.loading("https://x/a.gif");
         gifs.loaded("https://x/a.gif".into(), Arc::from(&b"<html>"[..]));
         assert!(gifs.has_failed("https://x/a.gif") && !gifs.wants("https://x/a.gif", Instant::now()));
+    }
+
+    /// A player holding `bytes` of frames, with no worker.
+    fn holding(gifs: &mut GifCache, url: &str, bytes: usize) {
+        let player = Player {
+            pixels: Pixels::new(),
+            held: Arc::new(AtomicUsize::new(bytes)),
+            stop: Arc::default(),
+            paused: Arc::default(),
+            worker: None,
+        };
+        gifs.decoded.fetch_add(bytes, Ordering::Relaxed);
+        gifs.entries.insert(url.to_owned(), Entry::Playing(player));
+        gifs.playing.push_back(url.to_owned());
+    }
+
+    #[test]
+    fn past_the_budget_the_gif_shown_longest_ago_off_screen_should_go() {
+        let mut gifs = GifCache::default();
+        for url in ["a", "b", "c"] {
+            holding(&mut gifs, url, 10);
+        }
+        gifs.show(shown(&["a".into()]), true);
+        gifs.show(shown(&["c".into()]), true);
+        gifs.trim(25);
+        let kept = ["a", "b", "c"].map(|url| gifs.player(url).is_some());
+        assert_eq!((kept, gifs.wants("b", Instant::now())), ([true, false, true], true));
+    }
+
+    #[test]
+    fn gifs_on_screen_should_keep_their_frames_past_the_budget() {
+        let mut gifs = GifCache::default();
+        holding(&mut gifs, "a", 10);
+        holding(&mut gifs, "b", 10);
+        gifs.show(shown(&["a".into(), "b".into()]), false);
+        gifs.trim(0);
+        assert!(gifs.player("a").is_some() && gifs.player("b").is_some());
+    }
+
+    #[test]
+    fn a_stopped_gif_should_give_back_its_decoded_frames() {
+        let frame = || image::Frame::new(image::RgbaImage::from_pixel(8, 8, image::Rgba([255, 0, 0, 255])));
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
+            encoder.encode_frames([frame(), frame()]).unwrap();
+        }
+        let decoded = Arc::new(AtomicUsize::new(0));
+        let player = Player::start(Arc::from(bytes), &decoded);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while decoded.load(Ordering::Relaxed) < 2 * 8 * 8 * 4 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let playing = decoded.load(Ordering::Relaxed);
+        drop(player);
+        while decoded.load(Ordering::Relaxed) > 0 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!((playing, decoded.load(Ordering::Relaxed)), (2 * 8 * 8 * 4, 0));
     }
 
     #[test]

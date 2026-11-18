@@ -21,6 +21,44 @@ export function activeAccount(state: State): AccountData | undefined {
   return account(state, state.active);
 }
 
+/** What the room lists (the Home and DMs tabs) draw from an account. */
+export type RoomListData = Pick<
+  AccountData,
+  | 'summary'
+  | 'rooms'
+  | 'spaces'
+  | 'invitations'
+  | 'roomsLoaded'
+  | 'scope'
+  | 'sidebar'
+  | 'timelines'
+  | 'latest'
+  | 'heardAt'
+>;
+
+/**
+ * The account on screen as the room lists draw it. Compared with `shallow`, it changes only when
+ * one of these fields does: typing, members, threads and the like leave the lists alone.
+ */
+export function activeRoomList(state: State): RoomListData | undefined {
+  const data = activeAccount(state);
+
+  if (!data) return undefined;
+
+  return {
+    summary: data.summary,
+    rooms: data.rooms,
+    spaces: data.spaces,
+    invitations: data.invitations,
+    roomsLoaded: data.roomsLoaded,
+    scope: data.scope,
+    sidebar: data.sidebar,
+    timelines: data.timelines,
+    latest: data.latest,
+    heardAt: data.heardAt,
+  };
+}
+
 export function timeline(state: State, id: AccountId, key: TimelineKey): Timeline {
   return account(state, id)?.timelines[timelineId(key)] ?? EMPTY_TIMELINE;
 }

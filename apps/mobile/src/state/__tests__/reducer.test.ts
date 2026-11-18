@@ -1,8 +1,16 @@
-import { apply, initialState, mediaKey } from '../reducer';
+import { applyLatestMessages, apply, initialState, mediaKey } from '../reducer';
 import { DEFAULT_SETTINGS } from '../settings';
 import { roomKey, timelineId } from '../timeline';
 import type { State } from '../types';
-import { ADA, GRACE, entry, message, roomSummary, summary } from '../../test/fixtures';
+import {
+  ADA,
+  GRACE,
+  entry,
+  message,
+  roomSummary,
+  spaceSummary,
+  summary,
+} from '../../test/fixtures';
 
 function signedIn(...ids: string[]): State {
   return ids.reduce(
@@ -310,5 +318,83 @@ describe('pushers', () => {
     expect(
       apply(state, { type: 'PushContent', data: { request: 1, content: { type: 'Nothing' } } }),
     ).toBe(state);
+  });
+});
+
+describe('room lists', () => {
+  const listed = (state: State, rooms = [roomSummary('!a:x'), roomSummary('!b:x')]) =>
+    apply(state, {
+      type: 'RoomsUpdated',
+      data: { account: ADA, list: { rooms, spaces: [spaceSummary('!s:x')], invitations: [] } },
+    });
+
+  it('a room that did not change should keep its object when another one changes', () => {
+    const before = listed(signedIn(ADA));
+
+    const after = listed(before, [roomSummary('!a:x'), { ...roomSummary('!b:x'), unread: 3 }]);
+
+    expect(after.accounts[0]!.rooms[0]).toBe(before.accounts[0]!.rooms[0]);
+    expect(after.accounts[0]!.rooms[1]).not.toBe(before.accounts[0]!.rooms[1]);
+    expect(after.accounts[0]!.rooms[1]!.unread).toBe(3);
+  });
+
+  it('a list that did not change should leave the state as it was', () => {
+    const before = listed(signedIn(ADA));
+    expect(listed(before)).toBe(before);
+  });
+
+  it('a list in a new order should keep its rooms in that order', () => {
+    const before = listed(signedIn(ADA));
+    const after = listed(before, [roomSummary('!b:x'), roomSummary('!a:x')]);
+    expect(after.accounts[0]!.rooms.map((r) => r.room_id)).toEqual(['!b:x', '!a:x']);
+    expect(after.accounts[0]!.rooms[0]).toBe(before.accounts[0]!.rooms[1]);
+  });
+});
+
+describe('latest messages', () => {
+  const latest = (room_id: string, id: string) =>
+    ({
+      type: 'LatestMessage',
+      data: { account: ADA, room_id, message: message(id) },
+    }) as const;
+
+  it('a run of them should fold in as one by one', () => {
+    const state = apply(signedIn(ADA), latest('!a:x', '$0'), 1);
+    const events = [latest('!a:x', '$0'), latest('!b:x', '$1'), latest('!a:x', '$2')];
+    const oneByOne = events.reduce((s, event) => apply(s, event, 7), state);
+    expect(applyLatestMessages(state, events, 7)).toEqual(oneByOne);
+  });
+
+  it('a message heard again should keep when it was first heard', () => {
+    const state = apply(signedIn(ADA), latest('!a:x', '$0'), 1);
+    expect(applyLatestMessages(state, [latest('!a:x', '$0')], 9).accounts[0]!.heardAt).toEqual({
+      '!a:x': 1,
+    });
+  });
+
+  it('messages for an account not signed in should change nothing', () => {
+    const state = signedIn(GRACE);
+    expect(applyLatestMessages(state, [latest('!a:x', '$0')])).toBe(state);
+  });
+});
+
+describe('call levels', () => {
+  const levels = (data: Array<[string, number]>) => ({ type: 'CallLevels', data }) as const;
+  const me: [string, number] = ['', 12];
+  const bob: [string, number] = ['@b', 3];
+
+  it('levels as they were should leave the state as it was', () => {
+    const state = apply(signedIn(ADA), levels([me, bob]));
+    expect(apply(state, levels([bob, me]))).toBe(state);
+  });
+
+  it('a changed level should be kept', () => {
+    const state = apply(signedIn(ADA), levels([me]));
+    expect(apply(state, levels([['', 40]])).call.levels).toEqual({ '': 40 });
+  });
+
+  it('someone gone from the levels should be dropped', () => {
+    const state = apply(signedIn(ADA), levels([me, bob]));
+    expect(apply(state, levels([me])).call.levels).toEqual({ '': 12 });
   });
 });

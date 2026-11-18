@@ -382,7 +382,6 @@ lock_api	0.4.14	MIT OR Apache-2.0
 log	0.4.35	MIT OR Apache-2.0
 loom	0.7.3	MIT
 lru-slab	0.1.3	MIT OR Apache-2.0 OR Zlib
-mac-notification-sys	0.6.15	MIT OR Apache-2.0
 mach2	0.6.0	BSD-2-Clause OR MIT OR Apache-2.0
 macroific	2.0.0	Apache-2.0
 macroific	3.1.0	Apache-2.0
@@ -439,7 +438,6 @@ nokhwa-bindings-windows	0.4.6	Apache-2.0
 nokhwa-core	0.1.9	Apache-2.0
 nom	7.1.3	MIT
 nom	8.0.0	MIT
-notify-rust	4.19.0	MIT OR Apache-2.0
 nu-ansi-term	0.50.3	MIT
 num	0.4.3	MIT OR Apache-2.0
 num_cpus	1.17.0	MIT OR Apache-2.0
@@ -723,7 +721,6 @@ synstructure	0.14.0	MIT
 system-deps	7.0.8	MIT OR Apache-2.0
 taffy	0.15.1	MIT
 target-lexicon	0.13.5	Apache-2.0 WITH LLVM-exception
-tauri-winrt-notification	0.8.1	MIT OR Apache-2.0
 tempfile	3.27.0	MIT OR Apache-2.0
 tendril	0.5.1	MIT OR Apache-2.0
 termcolor	1.4.1	Unlicense OR MIT
@@ -886,7 +883,6 @@ windows-targets	0.42.2	MIT OR Apache-2.0
 windows-targets	0.52.6	MIT OR Apache-2.0
 windows-targets	0.53.5	MIT OR Apache-2.0
 windows-threading	0.2.1	MIT OR Apache-2.0
-windows-version	0.1.7	MIT OR Apache-2.0
 winit	0.30.13	Apache-2.0
 winnow	1.0.5	MIT
 wit-bindgen	0.57.1	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT

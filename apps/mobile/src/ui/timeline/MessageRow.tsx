@@ -9,7 +9,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { t } from '../../i18n';
 import { cardLink, prepare } from '../../state/messages';
 import { useStore } from '../../state/react';
-import { room as roomOf } from '../../state/selectors';
 import { Icon } from '../icons';
 import { clockTime } from '../../state/timelineText';
 import { font, identityColor } from '../../theme/palette';
@@ -17,7 +16,7 @@ import { Avatar } from '../Avatar';
 import { usePalette } from '../theme';
 import { AttachmentView } from './Attachments';
 import { CallCardView } from './CallCard';
-import { useTimelineContext } from './context';
+import { usePinned, useTimelineContext } from './context';
 import { LinkCard, LinkedGif, QuoteBlock, Reactions, ThreadLink } from './Parts';
 import { PollCard } from './PollCard';
 import { ReadIndicator } from './ReadIndicator';
@@ -42,15 +41,13 @@ export const MessageRow = memo(function MessageRow({
   highlighted,
 }: MessageRowProps) {
   const palette = usePalette();
-  const { account, timelineKey, thread, openActions } = useTimelineContext();
+  const { account, thread, openActions } = useTimelineContext();
   const readersColumn = useReadersColumn();
   const read = !message.pending && (message.read_receipts?.length ?? 0) > 0;
   const showGifs = useStore((s) => s.settings.showLinkGifs);
   const showPreviews = useStore((s) => s.settings.showLinkPreviews);
 
-  const pinned = useStore(
-    (s) => roomOf(s, account, timelineKey.room_id)?.pinned.includes(message.event_id) ?? false,
-  );
+  const pinned = usePinned(message.event_id);
 
   const item = prepare(message);
   const gif = showGifs && item.gif ? item.gif : null;

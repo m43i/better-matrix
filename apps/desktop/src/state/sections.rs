@@ -46,13 +46,21 @@ pub fn sections<'a>(account: &'a AccountData, layout: &SidebarLayout, scope: &Sc
 fn unordered<'a>(account: &'a AccountData, layout: &SidebarLayout, scope: &Scope) -> Vec<SectionView<'a>> {
     let scope_layout = layout.scopes.get(&scope_key(scope));
     let collapsed = |id: &str| scope_layout.is_some_and(|l| l.collapsed.iter().any(|c| c == id));
-    let in_scope: Vec<&RoomSummary> =
-        [RoomKind::Group, RoomKind::Direct].into_iter().flat_map(|kind| account.rooms_in(scope, kind)).collect();
+    // The scope's rooms with their places in the account's list, which key their sort names.
+    let in_scope: Vec<(usize, &RoomSummary)> =
+        [RoomKind::Group, RoomKind::Direct].into_iter().flat_map(|kind| account.rooms_at(scope, kind)).collect();
+    let user_sections = scope_layout.map(|l| l.sections.as_slice()).unwrap_or_default();
+    // The scope's rooms by ID, for the user's sections to find theirs (the first of a repeated ID).
+    let mut by_id = std::collections::HashMap::new();
+    if !user_sections.is_empty() {
+        for (_, room) in &in_scope {
+            by_id.entry(room.room_id.as_str()).or_insert(*room);
+        }
+    }
     let mut placed = std::collections::HashSet::new();
     let mut out = Vec::new();
-    for section in scope_layout.map(|l| l.sections.as_slice()).unwrap_or_default() {
-        let rooms: Vec<&RoomSummary> =
-            section.rooms.iter().filter_map(|id| in_scope.iter().find(|room| room.room_id == *id).copied()).collect();
+    for section in user_sections {
+        let rooms: Vec<&RoomSummary> = section.rooms.iter().filter_map(|id| by_id.get(id.as_str()).copied()).collect();
         placed.extend(rooms.iter().map(|room| room.room_id.as_str()));
         out.push(SectionView {
             id: section.id.clone(),
@@ -62,14 +70,15 @@ fn unordered<'a>(account: &'a AccountData, layout: &SidebarLayout, scope: &Scope
         });
     }
     for (id, kind) in [(ROOMS, RoomKind::Group), (DIRECT, RoomKind::Direct)] {
-        let mut rooms: Vec<&RoomSummary> = in_scope
+        let mut rooms: Vec<(usize, &RoomSummary)> = in_scope
             .iter()
-            .filter(|room| room.kind == kind && !placed.contains(room.room_id.as_str()))
+            .filter(|(_, room)| room.kind == kind && (placed.is_empty() || !placed.contains(room.room_id.as_str())))
             .copied()
             .collect();
         // The latest conversation first; rooms with nothing known yet after them, by name.
         let now = super::accounts::now_ms();
-        rooms.sort_by_cached_key(|room| (std::cmp::Reverse(account.activity(room, now)), room.name.to_lowercase()));
+        rooms.sort_by_cached_key(|(at, room)| (std::cmp::Reverse(account.activity(room, now)), account.sort_name(*at)));
+        let rooms = rooms.into_iter().map(|(_, room)| room).collect();
         out.push(SectionView { id: id.to_owned(), name: None, collapsed: collapsed(id), rooms });
     }
     out

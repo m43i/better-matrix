@@ -7,8 +7,8 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { tp } from '../../i18n';
 import { routes } from '../../routes';
-import { READER_FACES, readerOf, readerOverflow } from '../../state/readers';
-import { shallow, useStore } from '../../state/react';
+import { READER_FACES, readerOf, readerOverflow, samePeople } from '../../state/readers';
+import { useStore } from '../../state/react';
 import { account as accountOf } from '../../state/selectors';
 import { font } from '../../theme/palette';
 import { Avatar } from '../Avatar';
@@ -28,7 +28,7 @@ export function ReadIndicator({ message }: { message: Message }) {
       receipts
         .slice(0, READER_FACES)
         .map((r) => readerOf(accountOf(s, account), timelineKey.room_id, r.user_id)),
-    shallow,
+    samePeople,
   );
 
   const label = tp('message.seen_by', receipts.length);

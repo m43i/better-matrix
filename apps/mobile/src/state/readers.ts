@@ -105,3 +105,24 @@ export function readerOf(data: AccountData | undefined, roomId: string, userId: 
 
   return sender ?? { id: userId, name: userId, avatar: null };
 }
+
+/**
+ * Whether two lists show the same people: the same IDs, names and pictures in the same order.
+ * `readerOf` builds a new person for someone known only by ID, and the sender index is built
+ * again as the timeline changes, so comparing by reference would redraw on every change.
+ */
+export function samePeople(a: readonly Person[], b: readonly Person[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((person, i) => {
+      const other = b[i];
+
+      return (
+        other !== undefined &&
+        person.id === other.id &&
+        person.name === other.name &&
+        person.avatar === other.avatar
+      );
+    })
+  );
+}

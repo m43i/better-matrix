@@ -58,13 +58,39 @@ impl Forwarder {
     pub(crate) fn start(cache_dir: PathBuf, listener: Arc<dyn EventListener>) -> std::io::Result<Self> {
         let (sender, events) = mpsc::channel::<Event>();
         std::thread::Builder::new().name("bridge-events".into()).spawn(move || {
-            for event in events {
-                if let Some(json) = to_json(&cache_dir, event) {
+            while let Ok(first) = events.recv() {
+                if let Some(json) = next_batch(&cache_dir, first, &events) {
                     listener.on_event(json);
                 }
             }
         })?;
         Ok(Self(sender))
+    }
+}
+
+/// The most events one call to the listener carries.
+const BATCH_EVENTS: usize = 256;
+/// The JSON a batch stops growing at; one larger event still goes alone.
+const BATCH_BYTES: usize = 1 << 20;
+
+/// `first` and the events queued behind it, as one call's JSON: a lone event as its object, more
+/// as an array in the engine's order. Waits for nothing: what isn't queued yet goes next time.
+/// Each call into JavaScript is a task of its own there, so a burst (a sync, a page of history)
+/// costs one store update instead of one per event.
+pub(crate) fn next_batch(cache_dir: &Path, first: Event, queued: &mpsc::Receiver<Event>) -> Option<String> {
+    let mut batch: Vec<String> = to_json(cache_dir, first).into_iter().collect();
+    let mut bytes = batch.iter().map(String::len).sum::<usize>();
+    while batch.len() < BATCH_EVENTS && bytes < BATCH_BYTES {
+        let Ok(event) = queued.try_recv() else { break };
+        if let Some(json) = to_json(cache_dir, event) {
+            bytes += json.len() + 1;
+            batch.push(json);
+        }
+    }
+    match batch.len() {
+        0 => None,
+        1 => batch.pop(),
+        _ => Some(format!("[{}]", batch.join(","))),
     }
 }
 
@@ -207,5 +233,66 @@ mod tests {
             to_json(cache.path(), event).unwrap(),
             r#"{"type":"Finished","data":{"request":2,"result":{"Err":"no"}}}"#
         );
+    }
+
+    fn queue(events: impl IntoIterator<Item = Event>) -> mpsc::Receiver<Event> {
+        let (sender, receiver) = mpsc::channel();
+        for event in events {
+            sender.send(event).unwrap();
+        }
+        receiver
+    }
+
+    fn removed(n: usize) -> Event {
+        Event::AccountRemoved(AccountId::new(format!("@{n}:example.org")))
+    }
+
+    #[test]
+    fn a_lone_event_should_reach_the_app_as_its_object() {
+        let cache = tempfile::tempdir().unwrap();
+        let json = next_batch(cache.path(), removed(1), &queue([])).unwrap();
+        assert_eq!(json, r#"{"type":"AccountRemoved","data":"@1:example.org"}"#);
+    }
+
+    #[test]
+    fn queued_events_should_reach_the_app_together_in_order() {
+        let cache = tempfile::tempdir().unwrap();
+        let json = next_batch(cache.path(), removed(1), &queue([removed(2), removed(3)])).unwrap();
+        assert_eq!(
+            json,
+            concat!(
+                r#"[{"type":"AccountRemoved","data":"@1:example.org"},"#,
+                r#"{"type":"AccountRemoved","data":"@2:example.org"},"#,
+                r#"{"type":"AccountRemoved","data":"@3:example.org"}]"#,
+            )
+        );
+    }
+
+    #[test]
+    fn a_long_burst_should_be_split_into_batches() {
+        let cache = tempfile::tempdir().unwrap();
+        let queued = queue((1..BATCH_EVENTS + 10).map(removed));
+        let first: Vec<serde_json::Value> =
+            serde_json::from_str(&next_batch(cache.path(), removed(0), &queued).unwrap()).unwrap();
+        assert_eq!(first.len(), BATCH_EVENTS);
+        let rest: Vec<serde_json::Value> =
+            serde_json::from_str(&next_batch(cache.path(), queued.recv().unwrap(), &queued).unwrap()).unwrap();
+        assert_eq!(rest.len(), 10);
+        assert_eq!(rest[0]["data"], format!("@{BATCH_EVENTS}:example.org"));
+    }
+
+    #[test]
+    fn media_in_a_batch_should_be_written_to_its_file() {
+        let cache = tempfile::tempdir().unwrap();
+        let media = Event::MediaLoaded {
+            request: RequestId(4),
+            media: MediaRef::opaque("mxc://example.org/a"),
+            size: MediaSize::Original,
+            bytes: png(),
+        };
+        let json = next_batch(cache.path(), removed(1), &queue([media])).unwrap();
+        let batch: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert_eq!(batch[1]["type"], "MediaFile");
+        assert_eq!(std::fs::read(batch[1]["data"]["path"].as_str().unwrap()).unwrap(), png().to_vec());
     }
 }

@@ -28,6 +28,19 @@ describe('prepare', () => {
     expect(prepare(m)).toBe(prepare(m));
   });
 
+  it('a message replaced with the same text should keep its blocks', () => {
+    const m = text('**hi**', '<strong>hi</strong>');
+    expect(prepare({ ...m, read_receipts: [] }).blocks).toBe(prepare(m).blocks);
+  });
+
+  it('an edited message should be parsed again', () => {
+    expect(prepare(text('hi')).blocks).not.toBe(prepare(text('hi there')).blocks);
+  });
+
+  it('the same words with other formatting should be parsed apart', () => {
+    expect(prepare(text('hi', '<em>hi</em>')).blocks).not.toEqual(prepare(text('hi')).blocks);
+  });
+
   it('should find the link that gets a card', () => {
     expect(prepare(text('see https://matrix.org/blog')).link).toBe('https://matrix.org/blog');
   });

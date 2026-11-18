@@ -17,6 +17,7 @@ import { t } from '../../i18n';
 import { fetchGif, fetchLinkPreview } from '../../state/actions/core';
 import { react } from '../../state/actions/timeline';
 import { useAppStore, useStore } from '../../state/react';
+import { Lru } from '../../state/lru';
 import { previewKey } from '../../state/reducer';
 import { lastReplyText, quoteText, repliesText } from '../../state/timelineText';
 import { routes } from '../../routes';
@@ -215,12 +216,20 @@ export function LinkCard({ url }: { url: string }) {
 
 const GIF_WIDTH = 240;
 
+/** Until a GIF has loaded once, it is drawn 4:3. */
+const GIF_ASPECT = 4 / 3;
+
+/** Each GIF's shape once loaded, so it is drawn right at once when shown again. */
+const gifAspects = new Lru<string, number>(200);
+
 /** A GIF behind a link, playing once fetched, as wide as fits; pressing it opens the link. */
 export function LinkedGif({ url }: { url: string }) {
   const palette = usePalette();
   const store = useAppStore();
   const path = useStore((s) => s.gifs[url]);
-  const [aspect, setAspect] = useState(4 / 3);
+  // The shape this view measured, for its URL (a recycled row may have measured another's).
+  const [measured, setMeasured] = useState<{ url: string; aspect: number } | null>(null);
+  const aspect = measured?.url === url ? measured.aspect : (gifAspects.get(url) ?? GIF_ASPECT);
   const width = Math.min(GIF_WIDTH, useContentWidth());
   useEffect(() => fetchGif(store, url), [store, url]);
 
@@ -240,7 +249,9 @@ export function LinkedGif({ url }: { url: string }) {
           onLoad={(event) => {
             const { width, height } = event.source;
 
-            if (width > 0 && height > 0) setAspect(width / height);
+            if (width <= 0 || height <= 0) return;
+            gifAspects.set(url, width / height);
+            setMeasured({ url, aspect: width / height });
           }}
         />
       ) : (

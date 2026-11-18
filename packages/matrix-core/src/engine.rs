@@ -1349,6 +1349,12 @@ impl Running {
         self.keep_warm(key.clone(), timeline);
     }
 
+    /// Forgets the open `request` was making, once it failed or was cancelled: nothing will
+    /// show its timeline.
+    fn forget_opening(&mut self, request: RequestId) {
+        self.opening.retain(|_, opening| *opening != request);
+    }
+
     fn keep_warm(&mut self, key: TimelineKey, timeline: Arc<matrix_sdk_ui::timeline::Timeline>) {
         self.warm.retain(|(warm, _)| *warm != key);
         self.warm.push((key, timeline));
@@ -1773,6 +1779,7 @@ impl State {
             Command::Cancel(target) => {
                 if let Some(handle) = self.running.remove(&target) {
                     handle.abort();
+                    self.forget_opening(target);
                     self.sink.emit(Event::Finished { request: target, result: Err(Error::Cancelled.to_string()) });
                 }
                 self.sink.emit(Event::Finished { request, result: Ok(()) });
@@ -2573,6 +2580,13 @@ impl State {
         self.running.insert(request, handle);
     }
 
+    /// A timeline `request` was opening, if any, is no longer being opened.
+    fn forget_opening(&mut self, request: RequestId) {
+        for running in self.accounts.values_mut() {
+            running.forget_opening(request);
+        }
+    }
+
     /// Applies a finished task's outcome to the state, then answers its request.
     fn complete(&mut self, Completion { request, result }: Completion) {
         if let Some(request) = request {
@@ -2694,7 +2708,12 @@ impl State {
                 self.sink.emit(Event::AccountRemoved(id));
                 Ok(())
             }
-            Err(error) => Err(error.to_string()),
+            Err(error) => {
+                if let Some(request) = request {
+                    self.forget_opening(request);
+                }
+                Err(error.to_string())
+            }
         };
         if let Some(request) = request {
             self.sink.emit(Event::Finished { request, result });
@@ -2710,10 +2729,29 @@ async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, o
     const FIRST_RETRY: std::time::Duration = std::time::Duration::from_secs(2);
     const LAST_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
     let caught_up = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Room changes the SDK works out on its own (unread counts, each room's latest event) are
+    // heard from before the first read: a latest event worked out for a room the read below
+    // registers isn't missed. Missed ones (the channel overflowing) re-read every room. The
+    // listener hears through failed syncs and the waits between them (a message sent offline
+    // changes its room's latest event), so a retry needn't read every room again.
+    let updates = account.client().room_info_notable_update_receiver();
+    // What is on disk shows before the first sync answers.
+    feed.refresh(None).await;
+    let (wanted_members, members) = fetch_space_members(feed.clone());
+    let _members = AbortOnDrop(members);
+    let _unread = AbortOnDrop(follow_notable_updates(feed.clone(), updates));
     let mut retry = FIRST_RETRY;
     loop {
+        // Spaces arrive from the store now and from syncs later (all of them, after a fresh
+        // sign-in); asking again after a failure retries those whose fetch failed.
+        for room in account.client().joined_rooms() {
+            want_members(&wanted_members, &room);
+        }
         let started = std::time::Instant::now();
-        let Err(error) = sync_until_error(&account, &sink, &feed, &caught_up, &own_refresh).await else { return };
+        let Err(error) = sync_until_error(&account, &sink, &feed, &caught_up, &own_refresh, &wanted_members).await
+        else {
+            return;
+        };
         // The session is over. The SDK broadcasts every ending as `UnknownToken`, with whether
         // it was soft, and `watch_session` reports that: the error here may hide it (a rejected
         // refresh), so reporting from here too could call a soft ending hard.
@@ -2730,6 +2768,91 @@ async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, o
     }
 }
 
+type WantedMembers = tokio::sync::mpsc::UnboundedSender<matrix_sdk::ruma::OwnedRoomId>;
+
+/// Asks for a space's full member list, unless it is loaded already.
+fn want_members(wanted: &WantedMembers, room: &matrix_sdk::Room) {
+    if room.is_space() && !room.are_members_synced() {
+        let _ = wanted.send(room.room_id().to_owned());
+    }
+}
+
+/// A space's people come from its full member list, which lazy loading leaves out: each is
+/// fetched once, one after another, beside the sync rather than in its way. A fetch that fails
+/// is tried again when the space is next asked for, not at once.
+fn fetch_space_members(feed: RoomFeed) -> (WantedMembers, AbortHandle) {
+    let (wanted, mut spaces) = tokio::sync::mpsc::unbounded_channel::<matrix_sdk::ruma::OwnedRoomId>();
+    let task = tokio::spawn(async move {
+        let mut fetched = HashSet::new();
+        while let Some(first) = spaces.recv().await {
+            let mut batch = vec![first];
+            while let Ok(more) = spaces.try_recv() {
+                if !batch.contains(&more) {
+                    batch.push(more);
+                }
+            }
+            let mut synced = HashSet::new();
+            for room_id in batch {
+                let Some(space) = feed.account.client().get_room(&room_id) else { continue };
+                if !fetched.contains(&room_id) && !space.are_members_synced() && space.sync_members().await.is_ok() {
+                    synced.insert(room_id.to_string());
+                    fetched.insert(room_id);
+                }
+            }
+            if !synced.is_empty() {
+                feed.refresh(Some(&synced)).await;
+            }
+        }
+    });
+    (wanted, task.abort_handle())
+}
+
+/// Unread counts and each room's latest event are worked out after a sync's callback runs,
+/// and receipts sent from here change them too: the SDK says which rooms, and those are read
+/// again.
+fn follow_notable_updates(
+    feed: RoomFeed,
+    mut updates: tokio::sync::broadcast::Receiver<matrix_sdk_base::RoomInfoNotableUpdate>,
+) -> AbortHandle {
+    use matrix_sdk_base::RoomInfoNotableUpdateReasons as Reasons;
+    let task = tokio::spawn(async move {
+        use tokio::sync::broadcast::error::{RecvError, TryRecvError};
+        // Names and heroes too: a sync re-reads only rooms whose events changed
+        // (`summary_may_change`), and the SDK can change a name from the room's summary.
+        let counts = Reasons::READ_RECEIPT
+            | Reasons::UNREAD_MARKER
+            | Reasons::LATEST_EVENT
+            | Reasons::DISPLAY_NAME
+            | Reasons::HEROES;
+        loop {
+            let mut changed = HashSet::new();
+            // Missed updates: any room may have changed.
+            let mut all = false;
+            match updates.recv().await {
+                Ok(update) if update.reasons.intersects(counts) => {
+                    changed.insert(update.room_id.to_string());
+                }
+                Ok(_) => continue,
+                Err(RecvError::Lagged(_)) => all = true,
+                Err(RecvError::Closed) => return,
+            }
+            // Several at once (a sync touching many rooms) make one update.
+            loop {
+                match updates.try_recv() {
+                    Ok(update) if update.reasons.intersects(counts) => {
+                        changed.insert(update.room_id.to_string());
+                    }
+                    Ok(_) => {}
+                    Err(TryRecvError::Lagged(_)) => all = true,
+                    Err(_) => break,
+                }
+            }
+            feed.refresh((!all).then_some(&changed)).await;
+        }
+    });
+    task.abort_handle()
+}
+
 /// Syncs until the first error.
 async fn sync_until_error(
     account: &Account,
@@ -2737,6 +2860,7 @@ async fn sync_until_error(
     feed: &RoomFeed,
     caught_up: &Arc<std::sync::atomic::AtomicBool>,
     own_refresh: &Arc<tokio::sync::Notify>,
+    wanted_members: &WantedMembers,
 ) -> Result<(), matrix_sdk::Error> {
     // Members load as rooms need them (lazy loading): a first sync doesn't download every member
     // of every room.
@@ -2744,96 +2868,8 @@ async fn sync_until_error(
     let settings = SyncSettings::default()
         .timeout(std::time::Duration::from_secs(30))
         .filter(matrix_sdk::ruma::api::client::sync::sync_events::v3::Filter::FilterDefinition(filter));
-    // Room changes the SDK works out on its own (unread counts, each room's latest event) are
-    // heard from before the first read: a latest event worked out for a room the read below
-    // registers isn't missed. Missed ones (the channel overflowing) re-read every room.
-    let mut updates = account.client().room_info_notable_update_receiver();
-    // What is on disk shows before the first sync answers.
-    feed.refresh(None).await;
-    // A space's people come from its full member list, which lazy loading leaves out: each is
-    // fetched once, one after another, beside the sync rather than in its way. Spaces arrive from
-    // the store now and from syncs later (all of them, after a fresh sign-in).
-    let (wanted_members, mut spaces) = tokio::sync::mpsc::unbounded_channel::<matrix_sdk::ruma::OwnedRoomId>();
-    let members = {
-        let feed = feed.clone();
-        tokio::spawn(async move {
-            let mut tried = HashSet::new();
-            while let Some(first) = spaces.recv().await {
-                let mut batch = vec![first];
-                while let Ok(more) = spaces.try_recv() {
-                    batch.push(more);
-                }
-                let mut synced = HashSet::new();
-                for room_id in batch {
-                    let Some(space) = feed.account.client().get_room(&room_id) else { continue };
-                    if tried.insert(room_id.clone())
-                        && !space.are_members_synced()
-                        && space.sync_members().await.is_ok()
-                    {
-                        synced.insert(room_id.to_string());
-                    }
-                }
-                if !synced.is_empty() {
-                    feed.refresh(Some(&synced)).await;
-                }
-            }
-        })
-    };
-    let _members = AbortOnDrop(members.abort_handle());
-    let want_members = |room: &matrix_sdk::Room| {
-        if room.is_space() && !room.are_members_synced() {
-            let _ = wanted_members.send(room.room_id().to_owned());
-        }
-    };
-    for room in account.client().joined_rooms() {
-        want_members(&room);
-    }
-    // Unread counts and each room's latest event are worked out after a sync's callback runs,
-    // and receipts sent from here change them too: the SDK says which rooms, and those are read
-    // again.
-    let unread = {
-        use matrix_sdk_base::RoomInfoNotableUpdateReasons as Reasons;
-        let feed = feed.clone();
-        tokio::spawn(async move {
-            use tokio::sync::broadcast::error::{RecvError, TryRecvError};
-            // Names and heroes too: a sync re-reads only rooms whose events changed
-            // (`summary_may_change`), and the SDK can change a name from the room's summary.
-            let counts = Reasons::READ_RECEIPT
-                | Reasons::UNREAD_MARKER
-                | Reasons::LATEST_EVENT
-                | Reasons::DISPLAY_NAME
-                | Reasons::HEROES;
-            loop {
-                let mut changed = HashSet::new();
-                // Missed updates: any room may have changed.
-                let mut all = false;
-                match updates.recv().await {
-                    Ok(update) if update.reasons.intersects(counts) => {
-                        changed.insert(update.room_id.to_string());
-                    }
-                    Ok(_) => continue,
-                    Err(RecvError::Lagged(_)) => all = true,
-                    Err(RecvError::Closed) => return,
-                }
-                // Several at once (a sync touching many rooms) make one update.
-                loop {
-                    match updates.try_recv() {
-                        Ok(update) if update.reasons.intersects(counts) => {
-                            changed.insert(update.room_id.to_string());
-                        }
-                        Ok(_) => {}
-                        Err(TryRecvError::Lagged(_)) => all = true,
-                        Err(_) => break,
-                    }
-                }
-                feed.refresh((!all).then_some(&changed)).await;
-            }
-        })
-    };
-    let _unread = AbortOnDrop(unread.abort_handle());
     let on_response = |response: matrix_sdk::sync::SyncResponse, sent: PresenceState| {
         let (account, sink, caught_up, feed) = (account.clone(), Arc::clone(sink), Arc::clone(caught_up), feed.clone());
-        let want_members = &want_members;
         async move {
             for (room_id, update) in &response.rooms.joined {
                 let Some(room) = account.client().get_room(room_id) else { continue };
@@ -2843,8 +2879,8 @@ async fn sync_until_error(
                         room_id: room_id.to_string(),
                     });
                 }
-                want_members(&room);
-                if let Some(message) = convert::messages(&room, &update.timeline.events).await.pop() {
+                want_members(wanted_members, &room);
+                if let Some(message) = convert::latest_message(&room, &update.timeline.events).await {
                     sink.emit(Event::LatestMessage {
                         account: account.id().clone(),
                         room_id: room_id.to_string(),
@@ -3082,7 +3118,7 @@ fn start_timeline(open: OpenTimeline, sink: &Arc<dyn EventSink>) -> TimelineWatc
         me,
         mut first_page,
         read_boundary,
-        mut items,
+        items,
     } = open;
     let mut bootstrap = first_page
         .as_ref()
@@ -3093,15 +3129,14 @@ fn start_timeline(open: OpenTimeline, sink: &Arc<dyn EventSink>) -> TimelineWatc
             .as_ref()
             .map_or(crate::timeline_bootstrap::Progress::Complete, crate::timeline_bootstrap::Bootstrap::progress),
     );
-    let boundary_loaded = |items: &eyeball_im::Vector<Arc<matrix_sdk_ui::timeline::TimelineItem>>,
-                           read_boundary: &Option<String>| {
-        read_boundary.as_ref().is_none_or(|id| {
-            items.iter().any(|item| {
-                item.as_event().and_then(|event| event.event_id()).is_some_and(|event| event.as_str() == id)
-            })
+    // A room's timeline mirrors its items to tell whether its read boundary is among them; a
+    // thread's has no read boundary, and nothing to mirror.
+    let mut boundary = read_boundary.clone().map(|id| {
+        BoundaryMirror::new(items, move |item: &Arc<matrix_sdk_ui::timeline::TimelineItem>| {
+            item.as_event().and_then(|event| event.event_id()).is_some_and(|event| event.as_str() == id)
         })
-    };
-    let mut read_boundary_loaded = boundary_loaded(&items, &read_boundary);
+    });
+    let mut read_boundary_loaded = boundary.as_ref().is_none_or(BoundaryMirror::holds);
     if key.thread.is_none() {
         sink.emit(Event::ReadBoundary {
             account: id.clone(),
@@ -3128,11 +3163,11 @@ fn start_timeline(open: OpenTimeline, sink: &Arc<dyn EventSink>) -> TimelineWatc
                     biased;
                     batch = changes.next() => {
                         let Some(batch) = batch else { break };
-                        if key.thread.is_none() {
+                        if let Some(boundary) = &mut boundary {
                             for diff in &batch {
-                                diff.clone().apply(&mut items);
+                                boundary.apply(diff.clone());
                             }
-                            let loaded = boundary_loaded(&items, &read_boundary);
+                            let loaded = boundary.holds();
                             if loaded != read_boundary_loaded {
                                 read_boundary_loaded = loaded;
                                 sink.emit(Event::ReadBoundary { account: id.clone(), room_id: key.room_id.clone(), event_id: read_boundary.clone(), loaded });
@@ -3188,6 +3223,65 @@ fn start_timeline(open: OpenTimeline, sink: &Arc<dyn EventSink>) -> TimelineWatc
         sink.emit(Event::HistoryLoaded { account: id, key, reached_start: false });
     }
     TimelineWatch { forward, catchup: catching_up }
+}
+
+/// A timeline's items as its diffs leave them, and whether one of them is the item `is` looks
+/// for. Kept diff by diff: only the items a diff adds or takes are looked at, and all of them
+/// again only when the one looked for goes.
+struct BoundaryMirror<T, F> {
+    items: eyeball_im::Vector<T>,
+    is: F,
+    holds: bool,
+}
+
+impl<T: Clone, F: Fn(&T) -> bool> BoundaryMirror<T, F> {
+    fn new(items: eyeball_im::Vector<T>, is: F) -> Self {
+        let holds = items.iter().any(&is);
+        Self { items, is, holds }
+    }
+
+    /// Whether the items hold the one looked for.
+    fn holds(&self) -> bool {
+        self.holds
+    }
+
+    fn apply(&mut self, diff: eyeball_im::VectorDiff<T>) {
+        use eyeball_im::VectorDiff;
+        let is = &self.is;
+        // Whether a diff that takes items takes the one looked for: then the rest are looked at.
+        let takes = |taken: Option<&T>| taken.is_some_and(is);
+        let rescan = match &diff {
+            VectorDiff::Append { values } => {
+                self.holds |= values.iter().any(is);
+                false
+            }
+            VectorDiff::Reset { values } => {
+                self.holds = values.iter().any(is);
+                false
+            }
+            VectorDiff::PushFront { value } | VectorDiff::PushBack { value } | VectorDiff::Insert { value, .. } => {
+                self.holds |= is(value);
+                false
+            }
+            VectorDiff::Set { index, value } => {
+                let taken = self.holds && takes(self.items.get(*index));
+                self.holds |= is(value);
+                taken && !is(value)
+            }
+            VectorDiff::Clear => {
+                self.holds = false;
+                false
+            }
+            VectorDiff::PopFront => self.holds && takes(self.items.front()),
+            VectorDiff::PopBack => self.holds && takes(self.items.back()),
+            VectorDiff::Remove { index } => self.holds && takes(self.items.get(*index)),
+            VectorDiff::Truncate { length } => self.holds && self.items.iter().skip(*length).any(is),
+        };
+        diff.apply(&mut self.items);
+        if rescan {
+            self.holds = self.items.iter().any(&self.is);
+        }
+    }
 }
 
 /// Both first loads and explicit retries fill any outstanding bootstrap coverage.
@@ -3356,6 +3450,87 @@ mod tests {
             ..Default::default()
         };
         assert!(summary_may_change(&update));
+    }
+
+    fn mirror(items: &[u32]) -> BoundaryMirror<u32, impl Fn(&u32) -> bool> {
+        BoundaryMirror::new(items.iter().copied().collect(), |item: &u32| *item == 7)
+    }
+
+    #[test]
+    fn a_mirror_should_find_a_boundary_an_append_brings() {
+        let mut mirror = mirror(&[1, 2]);
+        mirror.apply(eyeball_im::VectorDiff::Append { values: [3, 7].into_iter().collect() });
+        assert!(mirror.holds());
+    }
+
+    #[test]
+    fn a_mirror_should_lose_the_boundary_its_item_takes_with_it() {
+        let mut mirror = mirror(&[1, 7, 2]);
+        mirror.apply(eyeball_im::VectorDiff::Remove { index: 1 });
+        assert!(!mirror.holds());
+    }
+
+    #[test]
+    fn a_mirror_should_keep_the_boundary_while_another_item_shows_it() {
+        let mut mirror = mirror(&[7, 1, 7]);
+        mirror.apply(eyeball_im::VectorDiff::Set { index: 0, value: 2 });
+        assert!(mirror.holds());
+    }
+
+    #[test]
+    fn a_mirror_should_agree_with_a_full_scan_after_every_diff() {
+        use eyeball_im::VectorDiff;
+        let mut mirror = mirror(&[]);
+        // A fixed pseudo-random walk through every kind of diff, the boundary (7) among few values.
+        let mut seed = 0x2545_f491_u64;
+        let mut next = |below: usize| {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            usize::try_from(seed >> 33).unwrap() % below.max(1)
+        };
+        for step in 0..5_000 {
+            let len = mirror.items.len();
+            let value = u32::try_from(next(9)).unwrap();
+            let diff = match next(11) {
+                0 => VectorDiff::Append { values: (0..next(3)).map(|_| value).collect() },
+                1 if step % 50 == 0 => VectorDiff::Clear,
+                2 => VectorDiff::PushFront { value },
+                3 => VectorDiff::PushBack { value },
+                4 if len > 0 => VectorDiff::PopFront,
+                5 if len > 0 => VectorDiff::PopBack,
+                6 => VectorDiff::Insert { index: next(len + 1), value },
+                7 if len > 0 => VectorDiff::Set { index: next(len), value },
+                8 if len > 0 => VectorDiff::Remove { index: next(len) },
+                9 => VectorDiff::Truncate { length: next(len + 1) },
+                10 if step % 100 == 0 => {
+                    VectorDiff::Reset { values: (0..next(6)).map(|_| u32::try_from(next(9)).unwrap()).collect() }
+                }
+                _ => VectorDiff::PushBack { value },
+            };
+            mirror.apply(diff.clone());
+            assert_eq!(mirror.holds(), mirror.items.contains(&7), "after {diff:?} at step {step}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_open_should_no_longer_count_as_opening() {
+        let account = Account::for_test("https://example.org").await;
+        let sink: Arc<dyn EventSink> = Arc::new(|_| {});
+        let (usage, worker) = crate::search::Usage::start(account.clone(), Arc::clone(&sink));
+        let feed = RoomFeed { account: account.clone(), sink, cache: Arc::default() };
+        let mut running = Running {
+            account,
+            usage,
+            background: vec![worker],
+            flows: crate::security::Flows::default(),
+            timelines: HashMap::new(),
+            warm: Vec::new(),
+            opening: HashMap::from([(TimelineKey::room("!room:example.org"), RequestId(3))]),
+            keys_fetched: HashSet::new(),
+            feed,
+            call_handlers: Vec::new(),
+        };
+        running.forget_opening(RequestId(3));
+        assert!(running.opening.is_empty());
     }
 
     #[tokio::test]

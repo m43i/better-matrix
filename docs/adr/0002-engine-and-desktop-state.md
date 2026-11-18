@@ -49,10 +49,13 @@ Date: 2026-11-14
     touched beyond typing notices (`summary_may_change`), and every room only for `m.direct`
     and `m.push_rules`, the account data summaries read. Names and heroes the SDK works out
     from a room's summary arrive through the unread listener's notable updates.
+  - Every room is read once when the sync starts. The unread listener lives as long as the
+    sync loop, through failed syncs and the waits between them, so a retry re-reads nothing.
 - **Idle costs nothing on the desktop:** the engine's runtime has at most four workers
   (`WORKERS`), and nothing polls: syncs long-poll, and a store shared with no other process
   takes no cross-process locks ([0010](0010-mobile.md)).
-  - Spaces without loaded members are queued from the store at start and from every sync.
+  - Spaces without loaded members are queued from the store at start, from every sync, and
+    after a failed sync. A failed member fetch is tried again when its space is next queued.
 - **One reducer on the desktop:**
   - `State::apply(Event, &mut Tx)` is the only way Matrix data enters the app. The sink calls
     `AppHandle::update`, so it runs on the UI thread.
@@ -66,7 +69,14 @@ Date: 2026-11-14
   - `Purpose::DirectChat` and `Purpose::Create` carry the account; a result for an account no
     longer shown doesn't navigate.
 - **Closed timelines:** the desktop keeps the entries of the last 8 closed timelines per account
-  (`KEPT_TIMELINES`, as many as the engine keeps warm).
+  (`KEPT_TIMELINES`, as many as the engine keeps warm). A room's member list goes with the last
+  of its timelines kept. Answers for a timeline no longer kept (history, read boundary) change
+  nothing (`Accounts::kept_timeline_mut`); only opening one creates it.
+- **Derived data:** what views read on every commit is worked out once per change, not per
+  commit: an account's room lookups and the rooms each scope lists (`RoomIndex`, rebuilt on
+  first use after `set_room_list`), the filtered member list (by `members_revision`), the
+  stored form of a draft (by a fingerprint of its field), and the call's watched videos (by
+  `Call::videos_key`). Viewport bookkeeping (read position) doesn't commit the view.
 - **Overlays:**
   - One `Popover` slot holds every floating panel, drawn over a click-outside scrim.
   - One `Modal` slot holds every dialog over a dimmed backdrop; settings fill 90% of the window.

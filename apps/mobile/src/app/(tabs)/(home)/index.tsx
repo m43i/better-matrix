@@ -13,7 +13,7 @@ import { useNotificationOpener } from '../../../engine/notifications';
 import { t } from '../../../i18n';
 import { routes } from '../../../routes';
 import { toggleSection } from '../../../state/actions/shell';
-import { useAppStore, useStore } from '../../../state/react';
+import { shallow, useAppStore, useStore } from '../../../state/react';
 import {
   hasUnread,
   isBuiltin,
@@ -25,8 +25,8 @@ import {
   unreadRooms,
   wantsAttention,
 } from '../../../state/sections';
-import { activeAccount } from '../../../state/selectors';
-import type { AccountData } from '../../../state/types';
+import { activeAccount, activeRoomList, type RoomListData } from '../../../state/selectors';
+import type { State } from '../../../state/types';
 import { font } from '../../../theme/palette';
 import { EndedSessions } from '../../../ui/accounts/EndedSessions';
 import { SecurityBanner } from '../../../ui/accounts/SecurityBanner';
@@ -51,6 +51,8 @@ const INVITATIONS = 'invitations';
 
 interface ListSection {
   id: string;
+  /** The list's key for it: its ID, so its rows stay mounted as sections come and go. */
+  key: string;
   title: string;
   collapsed: boolean;
   /** One of the user's own sections (empty ones say how to fill them). */
@@ -64,7 +66,7 @@ function isInvitation(item: RoomSummary | Invitation): item is Invitation {
   return 'inviter' in item;
 }
 
-function listSections(account: AccountData, now: number): ListSection[] {
+function listSections(account: RoomListData, now: number): ListSection[] {
   const scope = account.scope;
   const collapsed = new Set(account.sidebar.scopes[scopeKey(scope)]?.collapsed ?? []);
   const out: ListSection[] = [];
@@ -73,6 +75,7 @@ function listSections(account: AccountData, now: number): ListSection[] {
     const closed = collapsed.has(INVITATIONS);
     out.push({
       id: INVITATIONS,
+      key: INVITATIONS,
       title: t('invitations.heading', { count: account.invitations.length }),
       collapsed: closed,
       own: false,
@@ -87,6 +90,7 @@ function listSections(account: AccountData, now: number): ListSection[] {
     const closed = collapsed.has(UNREAD);
     out.push({
       id: UNREAD,
+      key: UNREAD,
       title: t('overview.unread'),
       collapsed: closed,
       own: false,
@@ -100,6 +104,7 @@ function listSections(account: AccountData, now: number): ListSection[] {
     if (isBuiltin(view.id) && view.rooms.length === 0) continue;
     out.push({
       id: view.id,
+      key: view.id,
       title: view.name ?? (view.id === ROOMS ? t('sidebar.rooms') : t('sidebar.direct')),
       collapsed: view.collapsed,
       own: !isBuiltin(view.id),
@@ -111,23 +116,27 @@ function listSections(account: AccountData, now: number): ListSection[] {
   return out;
 }
 
+/** Another scope of the account on screen has something new: the title's chevron gets a dot. */
+function unreadElsewhere(s: State): boolean {
+  const a = activeAccount(s);
+
+  if (!a) return false;
+
+  const scopes = ['home' as const, ...a.spaces.map((x) => ({ space: x.room_id }))];
+
+  return scopes.some((scope) => !sameScope(scope, a.scope) && hasUnread(a, scope));
+}
+
 export default function HomeScreen() {
   const store = useAppStore();
   const palette = usePalette();
-  const account = useStore(activeAccount);
+  // Only what the list draws: typing, members and the like don't redraw it.
+  const account = useStore(activeRoomList, shallow);
 
-  // Another scope of this account has something new: the title's chevron gets a dot.
-  const elsewhere = useStore((s) => {
-    const a = activeAccount(s);
-
-    if (!a) return false;
-    const scopes = ['home' as const, ...a.spaces.map((x) => ({ space: x.room_id }))];
-
-    return scopes.some((scope) => !sameScope(scope, a.scope) && hasUnread(a, scope));
-  });
+  const elsewhere = useStore(unreadElsewhere);
 
   useNotificationOpener();
-  const search = useShellSearch(account);
+  const search = useShellSearch(account?.summary.id);
   const now = useNow();
   const list = useMemo(() => (account ? listSections(account, now) : []), [account, now]);
 
@@ -164,7 +173,7 @@ export default function HomeScreen() {
             style={styles.fill}
             contentInsetAdjustmentBehavior="automatic"
             sections={list}
-            keyExtractor={(room, index) => `${room.room_id}-${index}`}
+            keyExtractor={(room) => room.room_id}
             stickySectionHeadersEnabled={false}
             ListHeaderComponent={header}
             ListEmptyComponent={<EmptyState icon="chat" title={t('sidebar.empty')} />}

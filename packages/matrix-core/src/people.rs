@@ -5,6 +5,8 @@
 //! seen in shared or public rooms, never everyone. So search and suggestions put people on the
 //! user's own server first, and a full user ID typed from any server is looked up on its own.
 
+use std::collections::HashSet;
+
 use futures_util::StreamExt;
 use matrix_sdk::RoomMemberships;
 use matrix_sdk::ruma::api::client::profile::{AvatarUrl, DisplayName};
@@ -162,17 +164,28 @@ impl Account {
         let complete = all || room.are_members_synced();
         /// Verification is looked up for this many members at most: one crypto-store read each.
         const VERIFIED_UP_TO: usize = 1000;
-        /// How many members' presence and verification are read at once.
+        /// How many members' verification is read at once.
         const LOOKUPS_AT_ONCE: usize = 32;
         let check_verified = members.len() <= VERIFIED_UP_TO;
-        // One presence read (and verification read) per member: many at a time, as a large
-        // room has thousands.
+        // Everyone's presence in one store read.
+        let ids: Vec<OwnedUserId> = members.iter().map(|member| member.user_id().to_owned()).collect();
+        let mut presence: std::collections::HashMap<OwnedUserId, PersonPresence> =
+            match self.client().state_store().get_presence_events(&ids).await {
+                Ok(events) => events
+                    .iter()
+                    .filter_map(|raw| raw.deserialize().ok())
+                    .map(|event| (event.sender.clone(), person_presence(&event)))
+                    .collect(),
+                Err(_) => std::collections::HashMap::new(),
+            };
+        // One verification read per member: many at a time, as a large room has thousands.
         let client = self.client().clone();
         let mut people: Vec<RoomMember> = futures_util::stream::iter(members.iter().cloned())
             .map(move |member| {
                 let client = client.clone();
+                let shown = presence.remove(member.user_id());
                 async move {
-                    let (encryption, store) = (client.encryption(), client.state_store());
+                    let encryption = client.encryption();
                     use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
                     // A room's creators (v12) rank above every level.
                     let level = match member.power_level() {
@@ -186,13 +199,6 @@ impl Account {
                         50.. => MemberRole::Moderator,
                         _ => MemberRole::Member,
                     };
-                    let shown = store
-                        .get_presence_event(member.user_id())
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|raw| raw.deserialize().ok())
-                        .map(|event| person_presence(&event));
                     let verified = check_verified
                         && encryption
                             .get_user_identity(member.user_id())
@@ -333,13 +339,25 @@ impl Account {
         const LIMIT: usize = 12;
         let me = self.user_id()?;
         let mut seen: std::collections::HashMap<String, (Person, usize)> = std::collections::HashMap::new();
+        // Everyone with a direct chat, from one pass over the rooms rather than one per member:
+        // `Client::get_dm_room`'s rule (the SDK's default, spec definition), a room whose only
+        // direct target they are.
+        let mut chatting: HashSet<OwnedUserId> = HashSet::new();
+        for room in self.client().joined_rooms() {
+            let targets = room.direct_targets();
+            if targets.len() == 1
+                && let Some(user) = targets.iter().next().and_then(|target| target.as_user_id())
+            {
+                chatting.insert(user.to_owned());
+            }
+        }
         for room in self.client().joined_rooms() {
             if room.is_space() || room.is_direct().await.unwrap_or(false) {
                 continue;
             }
             for member in room.members_no_sync(RoomMemberships::JOIN).await.unwrap_or_default() {
                 let user = member.user_id();
-                if user == me || self.client().get_dm_room(user).is_some() {
+                if user == me || chatting.contains(user) {
                     continue;
                 }
                 let entry = seen.entry(user.to_string()).or_insert_with(|| {
@@ -466,6 +484,64 @@ fn on_server(id: &str, home: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sync with a group room of @a (the user), @b and @c, a direct chat with @b, and @b online.
+    fn people_response(request: &str) -> serde_json::Value {
+        use serde_json::json;
+        if !request.contains("/sync?") {
+            return crate::test_server::thread_response(request);
+        }
+        let room = |members: &[&str]| {
+            let mut events = vec![json!({"type":"m.room.create", "state_key":"", "sender":"@a:example.org",
+                "event_id":"$create", "origin_server_ts":0, "content":{"room_version":"10"}})];
+            events.extend(members.iter().map(|user| {
+                json!({"type":"m.room.member", "state_key":user, "sender":user, "event_id":format!("$join-{user}"),
+                    "origin_server_ts":0, "content":{"membership":"join"}})
+            }));
+            json!({"state":{"events":events}, "timeline":{"events":[], "limited":false}})
+        };
+        json!({"next_batch":"sync",
+        "account_data":{"events":[{"type":"m.direct", "content":{"@b:example.org":["!dm:example.org"]}}]},
+        "presence":{"events":[{"type":"m.presence", "sender":"@b:example.org", "content":{"presence":"online"}}]},
+        "rooms":{"join":{
+            "!group:example.org": room(&["@a:example.org", "@b:example.org", "@c:example.org"]),
+            "!dm:example.org": room(&["@a:example.org", "@b:example.org"]),
+        }}})
+    }
+
+    async fn synced_people() -> (crate::test_server::Server, Account) {
+        let server = crate::test_server::Server::new(people_response);
+        let account = Account::for_test(&server.url()).await;
+        account
+            .client()
+            .sync_once(matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::ZERO))
+            .await
+            .expect("sync rooms");
+        (server, account)
+    }
+
+    #[tokio::test]
+    async fn suggestions_should_leave_out_people_with_a_direct_chat() {
+        let (_server, account) = synced_people().await;
+        let suggested = account.suggest_people().await.expect("suggestions");
+        assert_eq!(suggested.iter().map(|person| person.id.as_str()).collect::<Vec<_>>(), ["@c:example.org"]);
+    }
+
+    #[tokio::test]
+    async fn a_member_list_should_show_each_members_stored_presence() {
+        let (_server, account) = synced_people().await;
+        let members = account.members("!group:example.org", false).await.expect("members");
+        let shown: Vec<(&str, Presence)> =
+            members.people.iter().map(|member| (member.person.id.as_str(), member.presence)).collect();
+        assert_eq!(
+            shown,
+            [
+                ("@b:example.org", Presence::Online),
+                ("@a:example.org", Presence::Unknown),
+                ("@c:example.org", Presence::Unknown)
+            ]
+        );
+    }
 
     fn presence_event(content: serde_json::Value) -> Raw<PresenceEvent> {
         serde_json::from_value(serde_json::json!({ "type": "m.presence", "sender": "@kai:x.org", "content": content }))

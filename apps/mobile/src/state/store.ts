@@ -5,12 +5,22 @@
 import type { Engine, EngineEvent } from '@better-matrix/matrix-native/client';
 import type { Command, RequestId } from '@better-matrix/matrix-native/types';
 
-import { addNotice, apply, initialState } from './reducer';
+import {
+  addNotice,
+  apply,
+  applyLatestMessages,
+  initialState,
+  type LatestMessageEvent,
+} from './reducer';
 import { type RequestEvent, Requests } from './requests';
 import type { Settings } from './settings';
 import type { State } from './types';
 
-/** Something outside the state that reacts to events: notifications, sounds, saved settings. */
+/**
+ * Something outside the state that reacts to events: notifications, sounds, saved settings. It
+ * hears each event once the state took it in; a run of `LatestMessage` is taken in as a whole
+ * first.
+ */
 export type Effect = (event: EngineEvent, store: Store) => void;
 
 export interface SendOptions {
@@ -36,7 +46,7 @@ export class Store {
     settings?: Settings,
   ) {
     this.state = initialState(settings);
-    engine.subscribe((event) => this.hear(event));
+    engine.subscribeBatches((events) => this.hearAll(events));
   }
 
   getState = (): State => this.state;
@@ -95,6 +105,50 @@ export class Store {
     this.fetching.set(this.send(command, { quiet: true }), key);
   }
 
+  /**
+   * Takes in a burst of events, in order; views redraw once for all of them (see `set`). One
+   * event that throws doesn't lose the rest: the first error is thrown once all are in.
+   */
+  private hearAll(events: readonly EngineEvent[]): void {
+    const failures: Array<{ error: unknown }> = [];
+
+    const guarded = (work: () => void) => {
+      try {
+        work();
+      } catch (error) {
+        failures.push({ error });
+      }
+    };
+
+    let i = 0;
+
+    while (i < events.length) {
+      // A first sync reports every room's newest message in a row: one copy of the maps for all.
+      const run: LatestMessageEvent[] = [];
+
+      for (; i < events.length; i++) {
+        const event = events[i];
+
+        if (event?.type !== 'LatestMessage') break;
+        run.push(event);
+      }
+
+      if (run.length > 0) {
+        guarded(() => this.set(applyLatestMessages(this.state, run)));
+
+        for (const event of run) guarded(() => this.heard(event));
+      } else {
+        const event = events[i++];
+
+        if (event) guarded(() => this.hear(event));
+      }
+    }
+
+    const first = failures[0];
+
+    if (first) throw first.error;
+  }
+
   private hear(event: EngineEvent): void {
     this.requests.hear(event);
 
@@ -104,6 +158,11 @@ export class Store {
 
       // A failed fetch may be asked again, the next time a view needs it.
       if (key !== undefined && 'Err' in event.data.result) this.asked.delete(key);
+    } else if (event.type === 'MediaFailed' && event.data.request !== null) {
+      // Fetched, but the file couldn't be written: the fetch finishes well, yet nothing came.
+      const key = this.fetching.get(event.data.request);
+
+      if (key !== undefined) this.asked.delete(key);
     }
 
     let next = apply(this.state, event);
@@ -117,7 +176,11 @@ export class Store {
     }
 
     this.set(next);
+    this.heard(event);
+  }
 
+  /** Tells the effects about an event the state took in. */
+  private heard(event: EngineEvent): void {
     for (const effect of this.effects) effect(event, this);
   }
 

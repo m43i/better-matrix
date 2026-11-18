@@ -2,13 +2,15 @@
 // rounded square, as the desktop's `components::avatar`.
 
 import type { AccountId, MediaRef } from '@better-matrix/matrix-native/types';
-import { Image } from 'expo-image';
+import { Image, type ImageTransition } from 'expo-image';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { identityColor } from '../theme/palette';
 import { initials } from './initials';
 import { AVATAR_SIZE, useMedia } from './media';
 import { usePalette } from './theme';
+
+const TRANSITION: ImageTransition = { duration: 120, skipOnCacheHit: 'memory' };
 
 /** An avatar's corner radius: everyone and everything is a rounded square, as on the desktop. */
 export function avatarRadius(size: number): number {
@@ -41,8 +43,11 @@ export function Avatar({
       {uri ? (
         <Image
           source={{ uri }}
+          // A recycled row shows no one else's face while its own loads, and a face already
+          // in memory shows at once rather than fading in again as rows scroll back.
+          recyclingKey={uri}
           style={{ width: size, height: size, borderRadius: radius }}
-          transition={120}
+          transition={TRANSITION}
         />
       ) : (
         <View

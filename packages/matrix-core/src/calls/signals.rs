@@ -81,10 +81,11 @@ pub(crate) fn listen(
         client.add_event_handler(move |raw: Raw<AnyToDeviceEvent>, encryption: Option<EncryptionInfo>| {
             let (account, signals) = (account.clone(), signals.clone());
             async move {
-                let Ok(event) = raw.deserialize_as_unchecked::<Value>() else { return };
-                if event["type"] != KEYS_EVENT {
+                // Most to-device events are something else (room keys): only keys are read whole.
+                if raw.get_field::<String>("type").ok().flatten().as_deref() != Some(KEYS_EVENT) {
                     return;
                 }
+                let Ok(event) = raw.deserialize_as_unchecked::<Value>() else { return };
                 if let Some(key) = to_device_key(&event, encryption.as_ref()) {
                     let _ = signals.send(Signal::Key { account, key });
                 }
@@ -121,16 +122,20 @@ pub(crate) fn listen(
                 let room_id = room.room_id().to_string();
                 if MEMBER_EVENTS.contains(&kind.as_str()) {
                     let _ = signals.send(Signal::Members { account, room_id });
-                } else if kind == "m.room.member"
-                    && let Ok(event) = raw.deserialize_as_unchecked::<Value>()
-                    && left(&me, &event)
-                {
+                } else if kind == "m.room.member" && raw_left(&me, &raw) {
                     let _ = signals.send(Signal::Left { account, room_id });
                 }
             }
         })
     };
     vec![to_device, timeline, state]
+}
+
+/// [`left`] for an event as it arrives. A large room's members arrive by the thousand: only the
+/// user's own is read whole.
+fn raw_left(me: &str, raw: &Raw<AnySyncStateEvent>) -> bool {
+    raw.get_field::<String>("state_key").ok().flatten().as_deref() == Some(me)
+        && raw.deserialize_as_unchecked::<Value>().is_ok_and(|event| left(me, &event))
 }
 
 /// Whether a room membership event takes the user `me` out of the room.
@@ -283,6 +288,15 @@ mod tests {
         let other =
             serde_json::json!({ "type": "m.room.member", "state_key": "@ada:x", "content": { "membership": "ban" } });
         assert!(left("@me:x", &kicked) && !left("@me:x", &other));
+    }
+
+    #[test]
+    fn being_kicked_should_count_as_leaving_as_the_event_arrives() {
+        let kicked: Raw<AnySyncStateEvent> = serde_json::from_value(serde_json::json!({
+            "type": "m.room.member", "state_key": "@me:x", "content": { "membership": "leave" }
+        }))
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert!(raw_left("@me:x", &kicked));
     }
 
     #[test]

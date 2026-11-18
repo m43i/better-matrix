@@ -89,6 +89,8 @@ pub struct Call {
     aspects: HashMap<VideoId, f32>,
     speaker: Speaker,
     pub glow: CallGlow,
+    /// What `watched` was worked out for: whether the stage showed, and [`Call::videos_key`].
+    pub watched_for: Option<(bool, u64)>,
 }
 
 /// What changed in the videos when the call did.
@@ -121,6 +123,7 @@ impl Call {
             aspects: HashMap::new(),
             speaker: Speaker::Idle,
             glow: CallGlow::default(),
+            watched_for: None,
         }
     }
 
@@ -270,6 +273,28 @@ impl Call {
 
     pub fn visible_videos(&self) -> HashSet<VideoId> {
         self.plan().tiles.iter().filter_map(|tile| self.video_id(&tile.key)).collect()
+    }
+
+    /// A fingerprint of everything [`Call::visible_videos`] reads: the videos, their shapes, the
+    /// layout and its sizes, the page and who speaks. Cheap enough for every frame, where the
+    /// plan itself isn't.
+    pub fn videos_key(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let info = &self.info;
+        (info.video, info.camera, info.screen).hash(&mut hasher);
+        let own = [info.camera, info.screen];
+        for participant in &info.participants {
+            (&participant.key, participant.camera, participant.screen).hash(&mut hasher);
+        }
+        let videos = own.into_iter().chain(info.participants.iter().flat_map(|p| [p.camera, p.screen])).flatten();
+        for video in videos {
+            self.aspects.get(&video).map(|aspect| aspect.to_bits()).hash(&mut hasher);
+        }
+        let floats = [self.size[0], self.size[1], self.room_size[0], self.room_size[1], self.strip];
+        floats.map(f32::to_bits).hash(&mut hasher);
+        (self.show_self, self.chat, &self.layout, self.speaker.current(), self.page).hash(&mut hasher);
+        hasher.finish()
     }
 
     /// Frames still go straight to Pixels. Only a change of source geometry rebuilds the view.

@@ -85,3 +85,11 @@ export function voiceStep(state: VoiceMemo, event: VoiceEvent): VoiceTransition 
         : stay;
   }
 }
+
+/**
+ * How long a memo has recorded as its clock shows it: whole seconds, so the composer redraws
+ * once a second rather than at every tick.
+ */
+export function clockElapsed(ms: number): number {
+  return Math.max(0, Math.floor(ms / 1000) * 1000);
+}

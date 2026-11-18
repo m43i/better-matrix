@@ -24,6 +24,30 @@ describe('Engine', () => {
     expect(heard).toEqual([{ type: 'AccountRemoved', data: '@a:example.org' }]);
   });
 
+  it('should hand a batch of bridge json to every listener as its events in order', () => {
+    const { engine } = detachedEngine();
+    const heard: unknown[] = [];
+    engine.subscribe((event) => heard.push(event));
+    engine.emitJson(
+      '[{"type":"AccountRemoved","data":"@a:x"},{"type":"AccountRemoved","data":"@b:x"}]',
+    );
+    expect(heard).toEqual([
+      { type: 'AccountRemoved', data: '@a:x' },
+      { type: 'AccountRemoved', data: '@b:x' },
+    ]);
+  });
+
+  it('should hand a batch listener the events that came together at once', () => {
+    const { engine } = detachedEngine();
+    const batches: number[] = [];
+    engine.subscribeBatches((events) => batches.push(events.length));
+    engine.emitJson(
+      '[{"type":"AccountRemoved","data":"@a:x"},{"type":"AccountRemoved","data":"@b:x"}]',
+    );
+    engine.emitJson('{"type":"AccountRemoved","data":"@c:x"}');
+    expect(batches).toEqual([2, 1]);
+  });
+
   it('should stop telling a listener once it unsubscribed', () => {
     const { engine } = detachedEngine();
     const heard: unknown[] = [];

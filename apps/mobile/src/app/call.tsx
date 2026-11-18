@@ -159,12 +159,12 @@ function Header({ view, video, onClose }: { view: CallView; video: boolean; onCl
 function Glow() {
   const palette = usePalette();
 
-  const loudest = useStore((s) =>
-    Object.values(s.call.levels).reduce((max, level) => Math.max(max, level), 0),
+  // Steps of 16, taken in the selector, keep the stage from redrawing on every level report.
+  const steps = useStore((s) =>
+    Math.round(Object.values(s.call.levels).reduce((max, level) => Math.max(max, level), 0) / 16),
   );
 
-  // Steps of 16 keep the stage from redrawing on every level report.
-  const step = Math.round(loudest / 16) / 16;
+  const step = steps / 16;
 
   return (
     <View

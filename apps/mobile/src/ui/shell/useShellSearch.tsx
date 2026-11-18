@@ -1,12 +1,13 @@
 // The search under a tab's title, wired for a screen: the bar, the term typed, and the results to
 // show in the tab's place while there is one. The search key opens a typed link at once.
 
+import type { AccountId } from '@better-matrix/matrix-native/types';
 import { type ReactNode, useRef, useState } from 'react';
 
 import { t } from '../../i18n';
 import { parseTyped, permalinkUri } from '../../state/permalinks';
-import { useAppStore } from '../../state/react';
-import type { AccountData } from '../../state/types';
+import { useAppStore, useStore } from '../../state/react';
+import { account as accountOf } from '../../state/selectors';
 import { openPermalink } from '../links/open';
 import { SearchResults } from './SearchResults';
 import { ShellSearch, type ShellSearchHandle } from './ShellSearch';
@@ -18,7 +19,22 @@ export interface ShellSearchView {
   results: ReactNode | null;
 }
 
-export function useShellSearch(account: AccountData | undefined): ShellSearchView {
+/** The results for an account, which follow all of it, so the tab itself needn't. */
+function AccountSearchResults({
+  id,
+  term,
+  onPicked,
+}: {
+  id: AccountId;
+  term: string;
+  onPicked: () => void;
+}) {
+  const account = useStore((s) => accountOf(s, id));
+
+  return account ? <SearchResults account={account} term={term} onPicked={onPicked} /> : null;
+}
+
+export function useShellSearch(account: AccountId | undefined): ShellSearchView {
   const store = useAppStore();
   const handle = useRef<ShellSearchHandle>(null);
   const [term, setTerm] = useState('');
@@ -29,7 +45,7 @@ export function useShellSearch(account: AccountData | undefined): ShellSearchVie
 
     if (link === null) return;
     clear();
-    openPermalink(store, permalinkUri(link), account?.summary.id ?? null);
+    openPermalink(store, permalinkUri(link), account ?? null);
   };
 
   const bar = (
@@ -44,9 +60,9 @@ export function useShellSearch(account: AccountData | undefined): ShellSearchVie
   return {
     bar,
     results:
-      account && term.trim() !== '' ? (
+      account !== undefined && term.trim() !== '' ? (
         // One search per account: switching accounts starts its directory search afresh.
-        <SearchResults key={account.summary.id} account={account} term={term} onPicked={clear} />
+        <AccountSearchResults key={account} id={account} term={term} onPicked={clear} />
       ) : null,
   };
 }

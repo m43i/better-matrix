@@ -1,4 +1,5 @@
 import {
+  clockElapsed,
   SHORTEST_HOLD_MS,
   type VoiceEvent,
   type VoiceMemo,
@@ -91,5 +92,15 @@ describe('voiceStep', () => {
 
   it('should go back to idle once the recorder stopped', () => {
     expect(run([{ type: 'stopped' }], { phase: 'stopping', send: true }).state).toEqual(VOICE_IDLE);
+  });
+});
+
+describe('clockElapsed', () => {
+  it('a recording should show the same time within one second', () => {
+    expect(clockElapsed(1_250)).toBe(clockElapsed(1_999));
+  });
+
+  it('a recording should show the next second once it has passed', () => {
+    expect(clockElapsed(2_000)).toBe(2_000);
   });
 });

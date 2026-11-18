@@ -2288,6 +2288,54 @@ fn timelines_long_closed_should_let_go_of_their_messages() {
     assert!(kept(&mut s, "!1:x"));
 }
 
+fn member(id: &str) -> matrix_core::RoomMember {
+    matrix_core::RoomMember {
+        person: matrix_core::Person { id: id.into(), name: id.into(), avatar: None },
+        role: matrix_core::MemberRole::Member,
+        presence: matrix_core::Presence::Unknown,
+        status_message: None,
+        verified: false,
+        level: 0,
+    }
+}
+
+#[test]
+fn rooms_long_closed_should_let_go_of_their_members() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    let rooms: Vec<String> = (0..10).map(|i| format!("!{i}:x")).collect();
+    with_rooms(&mut s, &id, &rooms.iter().map(String::as_str).collect::<Vec<_>>(), Vec::new());
+    for room in &rooms {
+        s.select_room(room);
+        let members = matrix_core::Members { people: vec![member("@b:x")], complete: true, ..Default::default() };
+        apply(&mut s, Event::Members { request: None, account: id.clone(), room_id: room.clone(), members });
+    }
+    let data = s.accounts.get(&id).unwrap();
+    assert_eq!((data.members.contains_key("!0:x"), data.members.contains_key("!1:x")), (false, true));
+}
+
+#[test]
+fn a_late_history_answer_should_not_bring_back_a_timeline_let_go_of() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    let key = TimelineKey::room("!one:x");
+    apply(&mut s, Event::HistoryLoaded { account: id.clone(), key: key.clone(), reached_start: true });
+    apply(&mut s, Event::HistoryFailed { account: id.clone(), key: key.clone(), error: "gone".into() });
+    apply(&mut s, Event::ReadBoundary { account: id.clone(), room_id: "!one:x".into(), event_id: None, loaded: true });
+    assert!(s.accounts.get(&id).unwrap().timeline(&key).is_none());
+}
+
+#[test]
+fn retrying_history_of_a_timeline_not_kept_should_not_make_one() {
+    let (mut s, _) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    let key = TimelineKey::room("!one:x");
+    s.retry_history(&key);
+    assert!(s.accounts.get(&id).unwrap().timeline(&key).is_none());
+}
+
 #[test]
 fn the_sidebar_should_not_be_saved_before_the_saved_layout_is_read() {
     let (mut s, mut commands) = state();
@@ -4905,6 +4953,18 @@ fn losing_focus_should_write_a_changed_draft_at_once() {
     type_into(&mut s, ComposerTarget::Room, "almost done");
     s.poll(&mut Tx::default());
     drain(&mut commands);
+    s.focus_changed(false);
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
+        Command::SaveDraft { draft: Some(draft), .. } if draft.body == "almost done")));
+}
+
+#[test]
+fn a_draft_changed_after_it_was_written_should_be_written_again() {
+    let (mut s, mut commands, _) = two_rooms();
+    type_into(&mut s, ComposerTarget::Room, "almost");
+    s.focus_changed(false);
+    drain(&mut commands);
+    s.composer.edit.insert(" done");
     s.focus_changed(false);
     assert!(all_commands(&mut commands).iter().any(|c| matches!(c,
         Command::SaveDraft { draft: Some(draft), .. } if draft.body == "almost done")));

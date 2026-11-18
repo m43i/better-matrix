@@ -15,12 +15,15 @@ export interface Transport {
 /** Hears every event. */
 export type Listener = (event: EngineEvent) => void;
 
+/** Hears every event, as the batches they arrive in (in order; never empty). */
+export type BatchListener = (events: readonly EngineEvent[]) => void;
+
 /**
  * A running engine. Each command gets a request ID and ends with exactly one `Finished`
  * event for it; everything else the engine reports reaches every listener.
  */
 export class Engine {
-  private readonly listeners = new Set<Listener>();
+  private readonly listeners = new Set<BatchListener>();
 
   constructor(private readonly transport: Transport) {}
 
@@ -31,6 +34,16 @@ export class Engine {
 
   /** Adds a listener; the returned function removes it. */
   subscribe(listener: Listener): () => void {
+    return this.subscribeBatches((events) => {
+      for (const event of events) listener(event);
+    });
+  }
+
+  /**
+   * Adds a listener that hears a burst of events at once (a sync, a page of history), so it can
+   * take them in together; the returned function removes it.
+   */
+  subscribeBatches(listener: BatchListener): () => void {
     this.listeners.add(listener);
 
     return () => {
@@ -40,15 +53,27 @@ export class Engine {
 
   /** Hands one event to every listener. The transport calls it. */
   emit(event: EngineEvent): void {
+    this.emitAll([event]);
+  }
+
+  /** Hands events, in order, to every listener. */
+  emitAll(events: readonly EngineEvent[]): void {
+    if (events.length === 0) return;
+
     for (const listener of this.listeners) {
-      listener(event);
+      listener(events);
     }
   }
 
-  /** Hands one event, as the bridge's JSON, to every listener. */
+  /**
+   * Hands the bridge's JSON to every listener: one event, or an array of the events that were
+   * waiting together (`matrix_ffi::events::next_batch`).
+   */
   emitJson(json: string): void {
-    // SAFETY: the Rust bridge serialized Event or BridgeEvent from the same types generated into this package.
-    this.emit(JSON.parse(json) as EngineEvent);
+    // SAFETY: the Rust bridge serialized Event or BridgeEvent, alone or in an array, from the same types generated into this package.
+    const parsed = JSON.parse(json) as EngineEvent | EngineEvent[];
+
+    this.emitAll(Array.isArray(parsed) ? parsed : [parsed]);
   }
 }
 

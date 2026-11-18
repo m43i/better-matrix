@@ -18,7 +18,13 @@ import { type SharedValue, useSharedValue } from 'react-native-reanimated';
 import { t } from '../../i18n';
 import { pathFromUri } from '../../state/outgoing';
 import { meterLevel, waveformFromLevels } from '../../state/voiceCard';
-import { VOICE_IDLE, type VoiceEvent, type VoiceMemo, voiceStep } from '../../state/voiceMemo';
+import {
+  clockElapsed,
+  VOICE_IDLE,
+  type VoiceEvent,
+  type VoiceMemo,
+  voiceStep,
+} from '../../state/voiceMemo';
 
 /** Speech needs neither stereo nor music's bit rate. */
 const VOICE: RecordingOptions = {
@@ -33,7 +39,7 @@ const METER_MS = 50;
 
 export interface VoiceMemoControls {
   state: VoiceMemo;
-  /** How long it has recorded, in ms. */
+  /** How long it has recorded, in ms, in whole seconds. */
   elapsed: number;
   /** The microphone's level while recording, from 0 (silence) to 1. */
   level: SharedValue<number>;
@@ -124,12 +130,12 @@ export function useVoiceMemo(
     [recorder],
   );
 
-  // The clock while recording.
+  // The clock while recording; the composer redraws only when the second it shows changes.
   useEffect(() => {
     if (state.phase !== 'recording') return;
 
     const started = state.startedAt;
-    const timer = setInterval(() => setElapsed(Date.now() - started), 250);
+    const timer = setInterval(() => setElapsed(clockElapsed(Date.now() - started)), 250);
 
     return () => clearInterval(timer);
   }, [state]);

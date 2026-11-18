@@ -95,8 +95,13 @@ screenshots, voice memos, and images and PDFs that open large.
     motion the brighter halo holds still, half lit. The water that once lay along the bottom of
     the pane was dropped: it was too busy for a chat, and it stepped a simulation every frame.
   - Streams ask cpal for 20 ms blocks (`BufferSize::Fixed`) where the device takes a size.
-    PulseAudio's default buffer is about 2 s. Since a player writes silence while paused, a clip
-    would start that long after the press, and the recording level would lag as long.
+    PulseAudio's default buffer is about 2 s: a clip would start that long after the press, and
+    the recording level would lag as long.
+  - A player opens its speaker only while its clip plays: play wakes its thread, which opens the
+    stream; half a second after a pause or the clip's end (the last block drains, a quick
+    pause and play reuses it) the stream closes, so a paused clip wakes nothing and lets the
+    sound server suspend. After a minute paused, it also lets its decoded samples go, keeping
+    its length, place and waveform, and decodes the saved copy again to play.
   - A memo is sent as `Outgoing::Voice`, a Matrix voice message (`AttachmentInfo::Voice` with
     its duration and a 100-point waveform: each stretch's RMS on a decibel scale from -50 dBFS,
     so quiet speech still shows). Received audio carries `AudioDetails` (whether it is a voice
@@ -162,8 +167,13 @@ screenshots, voice memos, and images and PDFs that open large.
 - **Image cache:** `MediaCache` keeps decoded images within 64 MiB, evicting the least recently
   used; what shows counts as used each time the rows on screen are fetched for
   (`MediaCache::touch`). The SDK caches downloads on disk.
+  - The pictures lists show (accounts, and the active account's rooms, spaces and invitations)
+    are asked for only when those lists change (`Accounts::revision`, then a fingerprint of the
+    pictures), not on every event, and eviction takes them last (`MediaCache::keep`). If they
+    alone outgrow the budget, those let go of come back when the lists change, rather than being
+    fetched and decoded again on every event.
   - An image whose download failed shows as failed while a retry loads, so its row keeps its
-    height.
+    height. The 512 failures to be tried again last are remembered (`FAILURES_KEPT`).
   - An image counts at the size fetched (a thumbnail, the sender's own included), not the
     original.
   - It counts at an estimate until Rune decodes it, then `MediaCache::measure` (from `poll`)
@@ -194,6 +204,9 @@ screenshots, voice memos, and images and PDFs that open large.
     Settings → General → Link previews turns them off (on by default).
 - **Linked GIFs:** each holds at most 48 MiB of frames (beyond that, its first frame only), and
   at most 16 play.
+  - Past 128 MiB of frames across them, those off screen are forgotten, the one shown longest
+    ago first, and fetched again if they come back; those on screen keep theirs. Each frame is
+    still copied into the picture as it shows: Rune's `Pixels::set` takes an owned buffer.
   - One stopped to make room is marked, not forgotten, so it isn't refetched while shown.
   - GIFs of timelines no longer shown, or all with linked GIFs off, are let go; a download
     finishing after that is dropped, not played.

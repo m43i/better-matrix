@@ -27,7 +27,7 @@ impl CallTile {
 }
 
 /// Focus without a pin follows the speaker; a pin overrides automatic selection locally.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub enum CallLayout {
     #[default]
     Auto,

@@ -15,6 +15,12 @@ export const PREVIEW_SIZE: MediaSize = { type: 'Thumbnail', data: { width: 800, 
 
 export const ORIGINAL: MediaSize = { type: 'Original' };
 
+/**
+ * When a view still waiting for its media asks again, after the first ask: a fetch that failed
+ * (offline, or its file couldn't be written) is fetched again; one under way isn't.
+ */
+export const MEDIA_RETRY_MS = [2_000, 10_000, 30_000];
+
 /** A `file://` URI for `media` at `size`, once fetched; fetches it the first time it's needed. */
 export function useMedia(
   account: AccountId | null,
@@ -24,7 +30,16 @@ export function useMedia(
   const store = useAppStore();
   const uri = useStore((s) => (media ? mediaUri(s, media, size) : undefined));
   useEffect(() => {
-    if (account && media && !uri) fetchMedia(store, account, media, size);
+    if (!account || !media || uri) return;
+    fetchMedia(store, account, media, size);
+
+    const timers = MEDIA_RETRY_MS.map((ms) =>
+      setTimeout(() => fetchMedia(store, account, media, size), ms),
+    );
+
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+    };
     // `size` is a constant per call site; comparing its fields keeps the effect stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, account, media, uri, size.type === 'Thumbnail' ? size.data.width : 0]);

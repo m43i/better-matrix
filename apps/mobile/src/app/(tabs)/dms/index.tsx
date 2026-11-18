@@ -8,9 +8,9 @@ import { FlatList, StyleSheet, View } from 'react-native';
 
 import { t } from '../../../i18n';
 import { routes } from '../../../routes';
-import { useStore } from '../../../state/react';
+import { shallow, useStore } from '../../../state/react';
 import { directChats, lastMessage } from '../../../state/sections';
-import { activeAccount } from '../../../state/selectors';
+import { activeRoomList } from '../../../state/selectors';
 import { Button, EmptyState } from '../../../ui/components';
 import { CallBar } from '../../../ui/call/CallBar';
 import { CreateFab } from '../../../ui/shell/CreateFab';
@@ -20,8 +20,9 @@ import { useNow } from '../../../ui/shell/useNow';
 import { useShellSearch } from '../../../ui/shell/useShellSearch';
 
 export default function DirectMessagesScreen() {
-  const account = useStore(activeAccount);
-  const search = useShellSearch(account);
+  // Only what the list draws: typing, members and the like don't redraw it.
+  const account = useStore(activeRoomList, shallow);
+  const search = useShellSearch(account?.summary.id);
   const now = useNow();
   const chats = useMemo(() => (account ? directChats(account, now) : []), [account, now]);
 

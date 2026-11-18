@@ -48,13 +48,13 @@ import {
   rowOf,
   shouldMarkRead,
 } from '../../state/plan';
-import { useAppStore, useStore } from '../../state/react';
-import { timeline as timelineOf } from '../../state/selectors';
+import { shallow, useAppStore, useStore } from '../../state/react';
+import { room as roomOf, timeline as timelineOf } from '../../state/selectors';
 import { routes } from '../../routes';
 import { font } from '../../theme/palette';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
-import { TimelineContext, type TimelineContextValue } from './context';
+import { PinnedContext, TimelineContext, type TimelineContextValue } from './context';
 import { MessageRow } from './MessageRow';
 import {
   DateDivider,
@@ -65,6 +65,8 @@ import {
   RoomEventLine,
   StartBlock,
 } from './Rows';
+
+const NO_PINS: string[] = [];
 
 /** Within this far of the newest message counts as at it. */
 const AT_LATEST = 48;
@@ -126,6 +128,14 @@ export function Timeline({
   const store = useAppStore();
   const thread = timelineKey.thread;
   const timeline = useStore((s) => timelineOf(s, account, timelineKey));
+
+  // The room's pins, once for every row (each row asking would search the rooms per change).
+  const pinnedIds = useStore(
+    (s) => roomOf(s, account, timelineKey.room_id)?.pinned ?? NO_PINS,
+    shallow,
+  );
+
+  const pinned = useMemo(() => new Set(pinnedIds), [pinnedIds]);
   // The "New" divider stays where it first showed and fades once read past (state/newMarker.ts),
   // derived during render so it is there on the first frame.
   const sdkMarker = useMemo(() => sdkBoundary(timeline.entries), [timeline.entries]);
@@ -355,48 +365,50 @@ export function Timeline({
 
   return (
     <TimelineContext.Provider value={context}>
-      <View style={styles.frame}>
-        <FlashList
-          ref={list}
-          data={rows}
-          renderItem={renderItem}
-          keyExtractor={keyOf}
-          getItemType={typeOf}
-          extraData={highlighted}
-          onScroll={onScroll}
-          onViewableItemsChanged={onViewableItemsChanged}
-          scrollEventThrottle={32}
-          onStartReached={loadMore}
-          onStartReachedThreshold={1}
-          maintainVisibleContentPosition={{
-            autoscrollToBottomThreshold: 0.2,
-            animateAutoScrollToBottom: true,
-            startRenderingFromBottom: true,
-          }}
-          keyboardDismissMode="interactive"
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.content}
-          ListEmptyComponent={
-            empty ? <ActivityIndicator style={styles.spinner} color={palette.textMuted} /> : null
-          }
-        />
-        {farFromLatest ? (
-          <Pressable
-            onPress={() => list.current?.scrollToEnd({ animated: true })}
-            accessibilityRole="button"
-            accessibilityLabel={t('mobile.conversation.jump_latest')}
-            style={[
-              styles.jump,
-              { backgroundColor: palette.surface, borderColor: palette.divider },
-            ]}
-          >
-            <Icon name="arrowDown" size={16} color={palette.accent} />
-            <Text style={[font.section, { color: palette.accent }]}>
-              {t('mobile.conversation.jump_latest')}
-            </Text>
-          </Pressable>
-        ) : null}
-      </View>
+      <PinnedContext.Provider value={pinned}>
+        <View style={styles.frame}>
+          <FlashList
+            ref={list}
+            data={rows}
+            renderItem={renderItem}
+            keyExtractor={keyOf}
+            getItemType={typeOf}
+            extraData={highlighted}
+            onScroll={onScroll}
+            onViewableItemsChanged={onViewableItemsChanged}
+            scrollEventThrottle={32}
+            onStartReached={loadMore}
+            onStartReachedThreshold={1}
+            maintainVisibleContentPosition={{
+              autoscrollToBottomThreshold: 0.2,
+              animateAutoScrollToBottom: true,
+              startRenderingFromBottom: true,
+            }}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.content}
+            ListEmptyComponent={
+              empty ? <ActivityIndicator style={styles.spinner} color={palette.textMuted} /> : null
+            }
+          />
+          {farFromLatest ? (
+            <Pressable
+              onPress={() => list.current?.scrollToEnd({ animated: true })}
+              accessibilityRole="button"
+              accessibilityLabel={t('mobile.conversation.jump_latest')}
+              style={[
+                styles.jump,
+                { backgroundColor: palette.surface, borderColor: palette.divider },
+              ]}
+            >
+              <Icon name="arrowDown" size={16} color={palette.accent} />
+              <Text style={[font.section, { color: palette.accent }]}>
+                {t('mobile.conversation.jump_latest')}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </PinnedContext.Provider>
     </TimelineContext.Provider>
   );
 }

@@ -84,7 +84,9 @@ rune-i18n = { workspace = true, features = ["codegen"] }
 rune-notify.workspace = true
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
-notify-rust = "4"
+# Notifications: one session-bus connection shows them and hears their clicks.
+zbus = { version = "6", default-features = false, features = ["default-rt"] }
+futures-lite = "2"
 # PulseAudio's names for devices, which PipeWire serves too: the names calls see.
 cpal = { version = "0.18", features = ["pulseaudio"] }
 

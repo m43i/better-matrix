@@ -699,6 +699,12 @@ pub struct State {
     on_screen: HashMap<(AccountId, TimelineKey), accounts::Shown>,
     /// When a failed download may next be tried again.
     retry_at: Option<std::time::Instant>,
+    /// The lists whose pictures were last asked for: the active account and
+    /// [`Accounts::revision`] then. Their pictures are asked for again only once these change.
+    avatars_listed: Option<(Option<AccountId>, u64)>,
+    /// A fingerprint of the pictures those lists showed, so a list that changed but shows the
+    /// same pictures asks for none.
+    listed_pictures: Option<u64>,
     /// Accounts the server signed out softly, whose data waits on this device until the user
     /// signs in as them again or removes them.
     pub suspended: Vec<AccountId>,
@@ -825,6 +831,8 @@ impl State {
             reduced_motion: std::cell::Cell::new(false),
             on_screen: HashMap::new(),
             retry_at: None,
+            avatars_listed: None,
+            listed_pictures: None,
             dragging: None,
             section_zones: Vec::new(),
             space_zones: HashMap::new(),
@@ -1090,20 +1098,11 @@ impl State {
                 self.pending.retain(|_, purpose| !matches!(purpose, Purpose::Edit(edit) if edit.target.account == id));
             }
             Event::RoomsUpdated { account, list } => {
-                let changed_counts: Vec<String> = list
-                    .rooms
-                    .iter()
-                    .filter(|room| {
-                        self.accounts
-                            .get(&account)
-                            .and_then(|data| data.room(&room.room_id))
-                            .is_some_and(|previous| previous.member_count != room.member_count)
-                    })
-                    .map(|room| room.room_id.clone())
-                    .collect();
+                let changed_counts =
+                    self.accounts.get(&account).map(|data| data.member_counts_changed(&list.rooms)).unwrap_or_default();
                 let pins_changed = self.nav.account.as_ref() == Some(&account)
                     && self.active_room_id().is_some_and(|id| {
-                        let old = self.accounts.get(&account).and_then(|data| data.room(id));
+                        let old = self.accounts.get(&account).and_then(|data| data.room_unindexed(id));
                         let new = list.rooms.iter().find(|room| room.room_id == id);
                         old.map(|r| &r.pinned) != new.map(|r| &r.pinned)
                     });
@@ -1157,7 +1156,7 @@ impl State {
                 self.accounts.set_latest(&account, &room_id, *message);
             }
             Event::ReadBoundary { account, room_id, event_id, loaded } => {
-                if let Some(timeline) = self.accounts.timeline_mut(&account, &TimelineKey::room(room_id)) {
+                if let Some(timeline) = self.accounts.kept_timeline_mut(&account, &TimelineKey::room(room_id)) {
                     timeline.set_read_boundary(event_id, loaded);
                 }
             }
@@ -1190,6 +1189,16 @@ impl State {
                         .get(&account)
                         .and_then(|data| data.timeline(&key))
                         .is_some_and(RoomTimeline::may_mark_fully_read);
+                // Only a change that takes entries away can take a GIF off the timelines.
+                let only_added = diffs.iter().all(|diff| {
+                    matches!(
+                        diff,
+                        matrix_core::TimelineDiff::PushBack(_)
+                            | matrix_core::TimelineDiff::PushFront(_)
+                            | matrix_core::TimelineDiff::Append(_)
+                            | matrix_core::TimelineDiff::Insert { .. }
+                    )
+                });
                 // A timeline's first content lands as it is, rather than easing in row by row.
                 if diffs.iter().any(|diff| matches!(diff, matrix_core::TimelineDiff::Reset(_))) {
                     if key.thread.is_none() {
@@ -1216,7 +1225,11 @@ impl State {
                     self.mark_timeline_read(account, key);
                 }
                 self.request_timeline_media();
-                self.request_gifs();
+                if only_added {
+                    self.fetch_linked(std::time::Instant::now());
+                } else {
+                    self.request_gifs();
+                }
                 self.request_avatars();
             }
             Event::Typing { account, room_id, people }
@@ -1325,13 +1338,13 @@ impl State {
             }
             Event::Verification { account, flow_id, step } => self.verification_moved(account, flow_id, step),
             Event::HistoryLoaded { account, key, reached_start } => {
-                if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
+                if let Some(timeline) = self.accounts.kept_timeline_mut(&account, &key) {
                     timeline.loading = false;
                     timeline.reached_start |= reached_start;
                 }
             }
             Event::HistoryFailed { account, key, error } => {
-                if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
+                if let Some(timeline) = self.accounts.kept_timeline_mut(&account, &key) {
                     timeline.history_failed(error);
                 }
             }
@@ -1497,6 +1510,12 @@ impl State {
         }
         let shows = self.call_here().is_some();
         let Some(call) = self.call.as_mut() else { return };
+        // Called every frame: the plan is worked out again only when what it reads changed.
+        let key = (shows, call.videos_key());
+        if call.watched_for == Some(key) {
+            return;
+        }
+        call.watched_for = Some(key);
         let visible = if shows { call.visible_videos() } else { HashSet::new() };
         let added: Vec<_> = visible.difference(&call.watched).copied().collect();
         let removed: Vec<_> = call.watched.difference(&visible).copied().collect();
@@ -1732,12 +1751,12 @@ impl State {
             // History that couldn't load waits for the user to retry, instead of retrying on every
             // scroll; a timeline that couldn't open opens again the next time it is shown.
             Purpose::History { account, key } => {
-                if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
+                if let Some(timeline) = self.accounts.kept_timeline_mut(&account, &key) {
                     timeline.history_failed(error);
                 }
             }
             Purpose::Timeline { account, key } => {
-                if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
+                if let Some(timeline) = self.accounts.kept_timeline_mut(&account, &key) {
                     timeline.history_failed(error);
                 }
                 self.open_timelines.retain(|open| *open != (account.clone(), key.clone()));
@@ -2034,7 +2053,7 @@ impl State {
             if !idle {
                 continue;
             }
-            let Some(timeline) = self.accounts.timeline_mut(&account, &key) else { continue };
+            let Some(timeline) = self.accounts.kept_timeline_mut(&account, &key) else { continue };
             timeline.loading = true;
             let purpose = Purpose::History { account: account.clone(), key: key.clone() };
             self.dispatch(Command::LoadOlder { account, key }, purpose);
@@ -2092,20 +2111,20 @@ impl State {
         moved || ended
     }
 
-    /// The text in the composers on screen, as typing notices follow it.
-    fn typed(&self) -> Vec<&str> {
-        let mut drafts = vec![self.composer.edit.text.as_str()];
-        if self.active_thread().is_some() {
-            drafts.push(self.thread_composer.edit.text.as_str());
-        }
-        drafts
+    /// The text in the composers on screen, as typing notices follow it: the room's, then the
+    /// thread's while one is open (how many of the two count). Checked every frame, so nothing
+    /// is allocated.
+    fn typed(&self) -> ([&str; 2], usize) {
+        let shown = if self.active_thread().is_some() { 2 } else { 1 };
+        ([self.composer.edit.text.as_str(), self.thread_composer.edit.text.as_str()], shown)
     }
 
     /// A draft came back into a composer: that isn't typing.
     /// `slots` are the composers (0 the room's, 1 the thread's) whose draft came back.
     fn settle_typing(&mut self, slots: &[usize]) {
         let mut typing = std::mem::take(&mut self.typing);
-        typing.seen(&self.typed(), slots);
+        let (drafts, shown) = self.typed();
+        typing.seen(drafts.get(..shown).unwrap_or_default(), slots);
         self.typing = typing;
     }
 
@@ -2116,8 +2135,8 @@ impl State {
             (Some(account), Some(room_id), Screen::Chat) => Some((account, room_id)),
             _ => None,
         };
-        let drafts = self.typed();
-        let notices = typing.update(room, &drafts, std::time::Instant::now());
+        let (drafts, shown) = self.typed();
+        let notices = typing.update(room, drafts.get(..shown).unwrap_or_default(), std::time::Instant::now());
         self.typing = typing;
         for typing::Notice { account, room_id, typing } in notices {
             self.dispatch(Command::Typing { account, room_id, typing }, Purpose::Typing);
@@ -2129,13 +2148,13 @@ impl State {
         let Some(account) = self.nav.account.clone() else { return };
         if !self.open_timelines.contains(&(account.clone(), key.clone())) {
             // The timeline itself never opened: open it again.
-            if let Some(timeline) = self.accounts.timeline_mut(&account, key) {
+            if let Some(timeline) = self.accounts.kept_timeline_mut(&account, key) {
                 timeline.history_error = None;
             }
             self.sync_timeline();
             return;
         }
-        let Some(timeline) = self.accounts.timeline_mut(&account, key) else { return };
+        let Some(timeline) = self.accounts.kept_timeline_mut(&account, key) else { return };
         timeline.history_error = None;
         timeline.loading = true;
         let purpose = Purpose::History { account: account.clone(), key: key.clone() };
@@ -2346,6 +2365,9 @@ impl State {
         self.retry_at = None;
         self.request_timeline_media_at(now);
         self.fetch_linked(now);
+        // The lists' pictures that failed are asked for again too.
+        self.avatars_listed = None;
+        self.listed_pictures = None;
         self.request_avatars();
         self.schedule_retry_after(now);
         if let Some(at) = self.retry_at {
@@ -2369,16 +2391,11 @@ impl State {
     /// [`State::request_timeline_media`]): every account's, and the active account's spaces,
     /// rooms, members, pinned-message senders, people typing and people found.
     fn request_avatars(&mut self) {
-        let mut wanted: Vec<(AccountId, MediaRef)> = self
-            .accounts
-            .iter()
-            .filter_map(|account| Some((account.summary.id.clone(), account.summary.avatar.clone()?)))
-            .collect();
+        let now = std::time::Instant::now();
+        self.request_listed_avatars(now);
+        let mut wanted: Vec<(AccountId, MediaRef)> = Vec::new();
         if let Some(account) = self.active_account() {
             let id = &account.summary.id;
-            let rooms = account.rooms.iter().filter_map(|room| room.avatar.clone());
-            let spaces = account.spaces.iter().filter_map(|space| space.avatar.clone());
-            let invitations = account.invitations.iter().filter_map(|invite| invite.avatar.clone());
             // The header shows three faces; the open list, those near its top. A room of
             // thousands doesn't ask for thousands of pictures.
             let shown = if self.side == Some(SidePanel::Members) { MEMBER_PICTURES } else { 3 };
@@ -2410,17 +2427,8 @@ impl State {
                         .take(6)
                         .filter_map(|room| room.avatar.clone())
                 });
-            wanted.extend(
-                rooms
-                    .chain(spaces)
-                    .chain(invitations)
-                    .chain(members)
-                    .chain(pins)
-                    .chain(typing)
-                    .chain(found)
-                    .chain(public)
-                    .map(|media| (id.clone(), media)),
-            );
+            wanted
+                .extend(members.chain(pins).chain(typing).chain(found).chain(public).map(|media| (id.clone(), media)));
         }
         // The faces of the call and of whoever rings, from any account.
         if let Some(call) = &self.call {
@@ -2430,10 +2438,58 @@ impl State {
         wanted.extend(self.rings.iter().filter_map(|ring| Some((ring.account.clone(), ring.caller.avatar.clone()?))));
         wanted.extend(self.reader_pictures());
         wanted.extend(self.link_pictures());
-        let mut seen = HashSet::new();
-        let now = std::time::Instant::now();
         // Pictures on screen count as just used, so making room for previews keeps them.
         self.media.touch(wanted.iter().map(|(_, media)| media));
+        self.fetch_avatars(wanted, now);
+    }
+
+    /// Fetches the pictures the lists show (every account's own, and the active account's
+    /// rooms, spaces and invitations) once those lists change: they are kept over other images
+    /// while room is made, so nothing needs to touch them in between. When they alone outgrow
+    /// the media budget, those let go of come back once the lists change.
+    fn request_listed_avatars(&mut self, now: std::time::Instant) {
+        if !self.media.can_load() {
+            return;
+        }
+        let listed = (self.nav.account.clone(), self.accounts.revision());
+        if self.avatars_listed.as_ref() == Some(&listed) {
+            return;
+        }
+        self.avatars_listed = Some(listed);
+        let pictures = || {
+            let own = self
+                .accounts
+                .iter()
+                .filter_map(|account| Some((&account.summary.id, account.summary.avatar.as_ref()?)));
+            let active = self.active_account().into_iter().flat_map(|account| {
+                let id = &account.summary.id;
+                let rooms = account.rooms.iter().filter_map(|room| room.avatar.as_ref());
+                let spaces = account.spaces.iter().filter_map(|space| space.avatar.as_ref());
+                let invitations = account.invitations.iter().filter_map(|invite| invite.avatar.as_ref());
+                rooms.chain(spaces).chain(invitations).map(move |media| (id, media))
+            });
+            own.chain(active)
+        };
+        let fingerprint = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            pictures().for_each(|picture| picture.hash(&mut hasher));
+            hasher.finish()
+        };
+        if self.listed_pictures == Some(fingerprint) {
+            return;
+        }
+        let wanted: Vec<(AccountId, MediaRef)> =
+            pictures().map(|(account, media)| (account.clone(), media.clone())).collect();
+        self.listed_pictures = Some(fingerprint);
+        self.media.keep(wanted.iter().map(|(_, media)| media.clone()).collect());
+        self.media.touch(wanted.iter().map(|(_, media)| media));
+        self.fetch_avatars(wanted, now);
+    }
+
+    /// Asks for each picture of `wanted` that isn't here and may be asked for at `now`, once.
+    fn fetch_avatars(&mut self, mut wanted: Vec<(AccountId, MediaRef)>, now: std::time::Instant) {
+        let mut seen = HashSet::new();
         wanted.retain(|(_, media)| self.media.wants(media, now) && seen.insert(media.clone()));
         for (account, media) in wanted {
             self.media.loading(media.clone());
@@ -2627,12 +2683,22 @@ impl State {
 
     /// Where a sidebar room row is drawn, for placing a dropped room among its neighbours.
     pub fn row_zone(&mut self, room_id: &str, rect: [f32; 4]) {
-        self.row_zones.insert(room_id.to_owned(), rect);
+        match self.row_zones.get_mut(room_id) {
+            Some(zone) => *zone = rect,
+            None => {
+                self.row_zones.insert(room_id.to_owned(), rect);
+            }
+        }
     }
 
     /// Where a space's tile is drawn on the rail, for placing a dropped space among the others.
     pub fn space_zone(&mut self, room_id: &str, rect: [f32; 4]) {
-        self.space_zones.insert(room_id.to_owned(), rect);
+        match self.space_zones.get_mut(room_id) {
+            Some(zone) => *zone = rect,
+            None => {
+                self.space_zones.insert(room_id.to_owned(), rect);
+            }
+        }
     }
 
     /// The spaces on the rail now, in order.

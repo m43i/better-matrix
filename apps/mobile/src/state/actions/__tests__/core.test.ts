@@ -1,9 +1,20 @@
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 
-import { cyclePlaybackSpeed, loadOlder, markRead, openTimeline, visitRoom } from '../core';
+import {
+  closeTimeline,
+  COLD_ENTRIES,
+  coldTimeline,
+  cyclePlaybackSpeed,
+  loadOlder,
+  markRead,
+  openTimeline,
+  visitRoom,
+  WARM_TIMELINES,
+} from '../core';
 import { timeline } from '../../selectors';
 import { Store } from '../../store';
-import { ADA, summary } from '../../../test/fixtures';
+import { roomKey } from '../../timeline';
+import { ADA, entry, person, roomEventEntry, summary, timelineOf } from '../../../test/fixtures';
 
 function setup() {
   const detached = detachedEngine();
@@ -120,5 +131,71 @@ describe('cyclePlaybackSpeed', () => {
     });
 
     expect(speeds).toEqual([1.5, 2, 1]);
+  });
+});
+
+describe('closed timelines', () => {
+  const entries = (count: number) => Array.from({ length: count }, (_, i) => entry(`$${i}`));
+
+  /** Opens room `i`, fills it with `count` entries to its start as the engine would, and closes it. */
+  function visit({ store, engine }: ReturnType<typeof setup>, i: number, count = 50) {
+    const key = roomKey(`!${i}:x`);
+    openTimeline(store, ADA, key);
+    engine.emit({
+      type: 'TimelineChanged',
+      data: { account: ADA, key, diffs: [{ type: 'Reset', data: entries(count) }] },
+    });
+    engine.emit({ type: 'HistoryLoaded', data: { account: ADA, key, reached_start: true } });
+    closeTimeline(store, ADA, key);
+  }
+
+  const entriesOf = (app: ReturnType<typeof setup>, i: number) =>
+    timeline(app.store.getState(), ADA, roomKey(`!${i}:x`)).entries;
+
+  it('the timelines the engine keeps warm should keep all their entries', () => {
+    const app = setup();
+
+    for (let i = 0; i < WARM_TIMELINES; i++) visit(app, i);
+    expect(entriesOf(app, 0)).toHaveLength(50);
+  });
+
+  it('a timeline closed longer ago than the engine keeps should keep only its newest entries', () => {
+    const app = setup();
+
+    for (let i = 0; i <= WARM_TIMELINES; i++) visit(app, i);
+    expect(entriesOf(app, 0).map((e) => e.id)).toEqual(
+      entries(50)
+        .slice(-COLD_ENTRIES)
+        .map((e) => e.id),
+    );
+    expect(timeline(app.store.getState(), ADA, roomKey('!0:x')).reachedStart).toBe(false);
+    expect(entriesOf(app, 1)).toHaveLength(50);
+  });
+
+  it('a timeline opened again should count as closed only from its next close', () => {
+    const app = setup();
+
+    for (let i = 0; i < WARM_TIMELINES; i++) visit(app, i);
+    visit(app, 0);
+    visit(app, WARM_TIMELINES);
+    expect(entriesOf(app, 0)).toHaveLength(50);
+    expect(entriesOf(app, 1)).toHaveLength(COLD_ENTRIES);
+  });
+
+  it('a cold timeline should keep its newest message for the room list', () => {
+    const grace = person('@grace:x');
+
+    const events = Array.from({ length: COLD_ENTRIES + 5 }, (_, i) =>
+      roomEventEntry(`e${i}`, grace, { type: 'Joined' }),
+    );
+
+    const cold = coldTimeline(timelineOf([...entries(10), ...events]));
+    expect(cold.entries[0]?.id).toBe('$9');
+    expect(cold.entries).toHaveLength(COLD_ENTRIES + 6);
+  });
+
+  it('a short timeline should stay as it is', () => {
+    const short = timelineOf(entries(COLD_ENTRIES), { reachedStart: true });
+    expect(coldTimeline(short)).toBe(short);
   });
 });

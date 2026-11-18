@@ -22,8 +22,38 @@ const ROW: f32 = 52.0;
 const INVITE_ROW: &str = "member-menu-invite";
 const ROLE_ROW: &str = "member-menu-role";
 
-/// Where the members the search lets through sit in the room's list, in its order. Worked out
-/// once per build; the rows look members up by it.
+/// What [`shown`] was worked out for: the account, the room, the search and the account's
+/// [`AccountData::members_revision`].
+type ShownKey = (String, String, String, u64);
+
+thread_local! {
+    /// The members [`shown`] let through last, by what it was worked out for: a commit that
+    /// changes none of that (most of them) filters no one again.
+    static SHOWN: std::cell::RefCell<Option<(ShownKey, std::sync::Arc<Vec<usize>>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// [`shown`], worked out again only when the room's members or the search changed, and what it
+/// was worked out for.
+fn shown_cached(s: &State, account: &AccountData, room_id: &str) -> (ShownKey, std::sync::Arc<Vec<usize>>) {
+    let key = (
+        account.summary.id.to_string(),
+        room_id.to_owned(),
+        s.member_search.text.trim().to_owned(),
+        account.members_revision,
+    );
+    SHOWN.with_borrow_mut(|cache| match cache {
+        Some((known, found)) if *known == key => (key, std::sync::Arc::clone(found)),
+        _ => {
+            let found = std::sync::Arc::new(shown(s, room_id));
+            *cache = Some((key.clone(), std::sync::Arc::clone(&found)));
+            (key, found)
+        }
+    })
+}
+
+/// Where the members the search lets through sit in the room's list, in its order. The rows
+/// look members up by it.
 fn shown(s: &State, room_id: &str) -> Vec<usize> {
     let query = s.member_search.text.trim();
     let id_query = query.to_lowercase();
@@ -120,24 +150,30 @@ pub fn panel(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
         Some(_) => {
             let (room_id, palette, me) = (room.room_id.clone(), *p, account.summary.id.to_string());
             let key_room = room_id.clone();
-            let found = std::sync::Arc::new(shown(s, &room.room_id));
+            let (version, found) = shown_cached(s, account, &room.room_id);
             let key_found = std::sync::Arc::clone(&found);
-            col().key("member-list").w_full().growth(rune::GrowthSpec::default()).virtual_rows(
-                found.len(),
-                ROW,
-                move |s: &State, i| {
-                    let member = member_at(s, &key_room, key_found.get(i));
-                    let id = member.map(|member| member.person.id.as_str()).unwrap_or_default();
-                    std::borrow::Cow::Owned(format!("member-{id}"))
-                },
-                move |s: &State, i| match member_at(s, &room_id, found.get(i)) {
-                    Some(member) => {
-                        let shown = s.active_account().and_then(|account| account.presence.get(&member.person.id));
-                        member_row(member, shown, member.person.id == me, &s.media, &palette)
-                    }
-                    None => el(),
-                },
-            )
+            col()
+                .key("member-list")
+                .w_full()
+                .growth(rune::GrowthSpec::default())
+                .virtual_rows(
+                    found.len(),
+                    ROW,
+                    move |s: &State, i| {
+                        let member = member_at(s, &key_room, key_found.get(i));
+                        let id = member.map(|member| member.person.id.as_str()).unwrap_or_default();
+                        std::borrow::Cow::Owned(format!("member-{id}"))
+                    },
+                    move |s: &State, i| match member_at(s, &room_id, found.get(i)) {
+                        Some(member) => {
+                            let shown = s.active_account().and_then(|account| account.presence.get(&member.person.id));
+                            member_row(member, shown, member.person.id == me, &s.media, &palette)
+                        }
+                        None => el(),
+                    },
+                )
+                // The keys change only with the members or the search.
+                .virtual_rows_version(version)
         }
     };
     col()

@@ -4,7 +4,12 @@
 // ADR 0010 records the design.
 
 import { z } from 'zod';
-import type { AccountId, Pusher, PushTarget } from '@better-matrix/matrix-native/types';
+import type {
+  AccountId,
+  Pusher,
+  PushTarget,
+  RoomSummary,
+} from '@better-matrix/matrix-native/types';
 
 import { wantsAttention } from '../state/sections';
 import type { Settings } from '../state/settings';
@@ -346,9 +351,23 @@ export function leftToPush(ios: boolean, foreground: boolean, pushed: boolean): 
 /** How often the app, in front, tells the Notification Service Extension so (`app-active`). */
 export const ACTIVE_EVERY_MS = 30_000;
 
+/** How many rooms of a list want attention, per list (lists are replaced, never changed). */
+const attention = new WeakMap<readonly RoomSummary[], number>();
+
+function attentionIn(rooms: readonly RoomSummary[]): number {
+  let count = attention.get(rooms);
+
+  if (count === undefined) {
+    count = rooms.filter(wantsAttention).length;
+    attention.set(rooms, count);
+  }
+
+  return count;
+}
+
 /** The app icon's badge: how many conversations want attention, over every account. */
 export function badgeCount(accounts: readonly AccountData[]): number {
-  return accounts.reduce((sum, account) => sum + account.rooms.filter(wantsAttention).length, 0);
+  return accounts.reduce((sum, account) => sum + attentionIn(account.rooms), 0);
 }
 
 /** What the app writes for the Notification Service Extension to word its notifications. */

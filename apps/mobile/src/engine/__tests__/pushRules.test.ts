@@ -331,4 +331,22 @@ describe('badgeCount', () => {
     state = rooms(GRACE, [1]);
     expect(badgeCount(state.accounts)).toBe(2);
   });
+
+  it('the badge should follow an account whose rooms changed', () => {
+    let state = apply(initialState(), { type: 'AccountAdded', data: summary(ADA) });
+
+    const withUnread = (unread: number) =>
+      apply(state, {
+        type: 'RoomsUpdated',
+        data: {
+          account: ADA,
+          list: { rooms: [{ ...roomSummary('!a'), unread }], spaces: [], invitations: [] },
+        },
+      });
+
+    state = withUnread(0);
+    badgeCount(state.accounts);
+    state = withUnread(3);
+    expect(badgeCount(state.accounts)).toBe(1);
+  });
 });

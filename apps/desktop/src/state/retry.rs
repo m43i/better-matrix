@@ -59,11 +59,33 @@ impl<K: Hash + Eq> Retries<K> {
     pub fn retain(&mut self, mut kept: impl FnMut(&K) -> bool) {
         self.failed.retain(|key, _| kept(key));
     }
+
+    /// Forgets all but the `most` failures that may be tried again last.
+    pub fn keep_latest(&mut self, most: usize) {
+        if self.failed.len() <= most {
+            return;
+        }
+        let mut times: Vec<Instant> = self.failed.values().map(|(_, at)| *at).collect();
+        times.sort_unstable();
+        match times.len().checked_sub(most).and_then(|at| times.get(at)).copied() {
+            Some(cutoff) if most > 0 => self.failed.retain(|_, (_, at)| *at >= cutoff),
+            _ => self.failed.clear(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn past_the_limit_the_failures_tried_again_soonest_should_be_forgotten() {
+        let (mut retries, now) = (Retries::default(), Instant::now());
+        retries.failed("old", now);
+        retries.failed("new", now + FIRST_WAIT);
+        retries.keep_latest(1);
+        assert_eq!((retries.has_failed(&"old"), retries.has_failed(&"new")), (false, true));
+    }
 
     #[test]
     fn a_failed_download_should_wait_before_it_is_tried_again() {

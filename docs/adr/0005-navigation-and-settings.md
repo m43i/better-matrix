@@ -113,6 +113,10 @@ Date: 2026-11-14
   - Skipped when the window is focused on that room.
   - Rune's notifier on macOS and Windows, freedesktop on Linux. A click opens the room,
     switching account and scope.
+  - On Linux one session-bus connection (zbus), opened by the first notification, shows them
+    all and one thread hears every click and close; the rooms of the last 256 shown are kept
+    by notification id. A thread and connection per notification, waiting for its click, piled
+    up with the notification history.
 - **Wants attention:** one rule (`wants_attention`) for sidebar, rail and account menu.
   - Unread messages or mentions, or only mentions for mentions-only and muted rooms.
   - The engine re-reads rooms on the SDK's room-info updates, so badges follow its counts.

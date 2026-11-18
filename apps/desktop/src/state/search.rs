@@ -360,7 +360,7 @@ impl super::State {
             return true;
         }
         let (account, key) = (jump.account.clone(), jump.key.clone());
-        if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
+        if let Some(timeline) = self.accounts.kept_timeline_mut(&account, &key) {
             timeline.loading = true;
         }
         self.dispatch(

@@ -1,7 +1,7 @@
 import type { Members, ReadReceipt } from '@better-matrix/matrix-native/types';
 
 import { ADA, GRACE, messageEntry, person, summary } from '../../test/fixtures';
-import { READER_FACES, readerOf, readerOverflow, readersOf } from '../readers';
+import { READER_FACES, readerOf, readerOverflow, readersOf, samePeople } from '../readers';
 import { apply, initialState } from '../reducer';
 import { account as accountOf } from '../selectors';
 import type { State } from '../types';
@@ -102,5 +102,26 @@ describe('readerOverflow', () => {
 
   it('should stop counting past 99 so it fits its column', () => {
     expect(readerOverflow(READER_FACES + 150)).toBe('99+');
+  });
+});
+
+describe('samePeople', () => {
+  it('a reader known only by ID should be the same reader each time', () => {
+    const state = apply(initialState(), { type: 'AccountAdded', data: summary(ADA) });
+    const read = () => [readerOf(accountOf(state, ADA), '!r', GRACE)];
+
+    expect(samePeople(read(), read())).toBe(true);
+  });
+
+  it('a reader whose name changed should not be the same', () => {
+    expect(samePeople([person(GRACE, 'Grace')], [person(GRACE, 'Grace H')])).toBe(false);
+  });
+
+  it('a reader whose picture changed should not be the same', () => {
+    expect(samePeople([person(GRACE)], [{ ...person(GRACE), avatar: 'mxc://x/new' }])).toBe(false);
+  });
+
+  it('readers in another order should not be the same', () => {
+    expect(samePeople([person(ADA), person(GRACE)], [person(GRACE), person(ADA)])).toBe(false);
   });
 });
