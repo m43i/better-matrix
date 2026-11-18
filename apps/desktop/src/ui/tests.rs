@@ -841,10 +841,9 @@ fn a_read_indicator_should_not_make_its_message_taller() {
     assert_eq!(height(&rt), with_readers);
 }
 
-/// Sets a message long enough to wrap from the demo message's sender after it, so its row
-/// continues the sender's run (no name line), with or without a reader; gives back the row's
-/// height.
-fn set_continued_message(rt: &mut Runtime<State>, read: bool) -> f32 {
+/// Sets a message with `body` from the demo message's sender after it, so its row continues the
+/// sender's run (no name line), with or without a reader; gives back the row's height.
+fn set_continued_message(rt: &mut Runtime<State>, body: &str, read: bool) -> f32 {
     rt.update(|s, tx| {
         let account = s.nav.account.clone().unwrap();
         let key = TimelineKey::room(demo::DEMO_THREAD.0);
@@ -859,7 +858,7 @@ fn set_continued_message(rt: &mut Runtime<State>, read: bool) -> f32 {
             sender_id: demo::ADA.into(),
             sender_name: "Ada Lovelace".into(),
             timestamp_ms: demo::DEMO_DAY_MS + 13 * 3_600_000 + 60_000,
-            content: MessageContent::Text { body: "Ready to try. ".repeat(40), html: None },
+            content: MessageContent::Text { body: body.to_owned(), html: None },
             read_receipts,
             ..Message::default()
         };
@@ -875,9 +874,24 @@ fn set_continued_message(rt: &mut Runtime<State>, read: bool) -> f32 {
 #[test]
 fn a_read_indicator_should_not_rewrap_a_long_message() {
     let mut rt = readers_runtime();
-    let with_reader = set_continued_message(&mut rt, true);
+    let body = "Ready to try. ".repeat(40);
+    let with_reader = set_continued_message(&mut rt, &body, true);
     assert!(rt.find(&format!("readers-{}-$continued", demo::DEMO_THREAD.0)).is_some());
-    assert_eq!(set_continued_message(&mut rt, false), with_reader);
+    assert_eq!(set_continued_message(&mut rt, &body, false), with_reader);
+}
+
+#[test]
+fn a_read_indicator_on_a_one_line_message_should_open_readers_not_its_actions() {
+    let mut rt = readers_runtime();
+    set_continued_message(&mut rt, "Ready.", true);
+    let (x, y) = rt.find(&format!("readers-{}-$continued", demo::DEMO_THREAD.0)).unwrap();
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, &format!("readers-{}-$continued", demo::DEMO_THREAD.0));
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("readers-panel").is_some());
+    assert!(rt.find("message-menu").is_none());
 }
 
 #[test]

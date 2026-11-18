@@ -30,6 +30,8 @@ const ESTIMATED_ROW: f32 = 64.0;
 /// Messages from one sender this close together share one header.
 const GROUP_WINDOW_MS: u64 = 5 * 60_000;
 const AVATAR: f32 = 36.0;
+/// A message row's side padding.
+const MESSAGE_PAD_X: f32 = 20.0;
 
 /// What every message row in one timeline needs.
 pub struct Context<'a> {
@@ -686,7 +688,7 @@ fn message_row(
     let mut row = row()
         .key(key.to_owned())
         .w_full()
-        .px(20.0)
+        .px(MESSAGE_PAD_X)
         .pt(if continues { 2.0 } else { 10.0 })
         .pb(2.0)
         .gap(10.0)
@@ -726,8 +728,14 @@ fn message_row(
     row
 }
 
+/// The message toolbar's distance from its row's right edge.
+fn toolbar_right(cx: &Context<'_>) -> f32 {
+    if cx.in_thread() { 16.0 } else { MESSAGE_PAD_X + super::readers::column_width(cx.reader_faces) }
+}
+
 /// React, reply and reply in thread, at the message's top right while it is hovered (or its
-/// reaction picker is open).
+/// reaction picker is open): in a room, left of the readers' column, so the toolbar never covers
+/// a one-line message's read indicator.
 fn toolbar(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
     let event_id = message.event_id.clone();
     let open = cx.picking == Some(event_id.as_str());
@@ -747,7 +755,7 @@ fn toolbar(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
     let (key, quoted) = (cx.key.clone(), message.clone());
     let mut bar = row()
         .key(cx.key(&format!("actions-{event_id}")))
-        .pin(None, Some(-14.0), Some(16.0), None)
+        .pin(None, Some(-14.0), Some(toolbar_right(cx)), None)
         .px(2.0)
         .py(2.0)
         .gap(2.0)
