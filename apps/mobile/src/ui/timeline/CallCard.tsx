@@ -54,22 +54,27 @@ export function CallCardView({ card, latest }: { card: Card; latest: boolean }) 
         },
       ]}
     >
-      <View
-        style={[styles.tile, { backgroundColor: status.ongoing ? palette.success : palette.hover }]}
-      >
-        <Icon
-          name={card.video === true ? 'video' : 'call'}
-          size={20}
-          color={status.ongoing ? palette.onAccent : palette.textMuted}
-        />
-      </View>
-      <View style={styles.words}>
-        <Text style={[font.bodyStrong, { color: palette.text }]} numberOfLines={1}>
-          {callTitle(card)}
-        </Text>
-        <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
-          {status.label}
-        </Text>
+      <View style={styles.head}>
+        <View
+          style={[
+            styles.tile,
+            { backgroundColor: status.ongoing ? palette.success : palette.hover },
+          ]}
+        >
+          <Icon
+            name={card.video === true ? 'video' : 'call'}
+            size={20}
+            color={status.ongoing ? palette.onAccent : palette.textMuted}
+          />
+        </View>
+        <View style={styles.words}>
+          <Text style={[font.bodyStrong, { color: palette.text }]} numberOfLines={1}>
+            {callTitle(card)}
+          </Text>
+          <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
+            {status.label}
+          </Text>
+        </View>
       </View>
       {status.joined ? (
         <Text style={[font.meta, styles.joined, { color: palette.textMuted }]}>
@@ -95,6 +100,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     maxWidth: 460,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 12,
     padding: 12,
@@ -102,6 +108,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   tile: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  // The picture and words keep a readable width; on a narrow phone, Join takes a line under
+  // them.
+  head: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 120,
+  },
   words: { flex: 1, gap: 2 },
   joined: { flexShrink: 1, textAlign: 'right' },
   join: {
