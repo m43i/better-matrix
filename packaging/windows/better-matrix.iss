@@ -51,6 +51,11 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "de"; MessagesFile: "compiler:Languages\German.isl"
 Name: "fr"; MessagesFile: "compiler:Languages\French.isl"
 
+[CustomMessages]
+en.MatrixLink=Matrix link
+de.MatrixLink=Matrix-Link
+fr.MatrixLink=Lien Matrix
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
@@ -64,9 +69,10 @@ Source: "{#Root}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{autoprograms}\Better Matrix"; Filename: "{app}\better-matrix.exe"; IconFilename: "{app}\better-matrix.ico"
 Name: "{autodesktop}\Better Matrix"; Filename: "{app}\better-matrix.exe"; IconFilename: "{app}\better-matrix.ico"; Tasks: desktopicon
 
-; `matrix:` links open the app (ADR 0001).
+; `matrix:` links open the app (ADR 0001). Uninstalling removes them in [Code], only while they
+; still open this install.
 [Registry]
-Root: HKCU; Subkey: "Software\Classes\matrix"; ValueType: string; ValueData: "URL:Matrix link"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\matrix"; ValueType: string; ValueData: "URL:{cm:MatrixLink}"
 Root: HKCU; Subkey: "Software\Classes\matrix"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKCU; Subkey: "Software\Classes\matrix\DefaultIcon"; ValueType: string; ValueData: """{app}\better-matrix.ico"""
 Root: HKCU; Subkey: "Software\Classes\matrix\shell\open\command"; ValueType: string; ValueData: """{app}\better-matrix.exe"" ""%1"""
@@ -78,3 +84,15 @@ Filename: "{app}\better-matrix.exe"; Description: "{cm:LaunchProgram,Better Matr
 ; in the user's profile, not here, and stay.
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.better-matrix-update-*"
+
+[Code]
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Command: String;
+begin
+  // Another app may have claimed matrix: links since; leave its handler alone.
+  if (CurUninstallStep = usUninstall) and
+    RegQueryStringValue(HKCU, 'Software\Classes\matrix\shell\open\command', '', Command) and
+    (CompareText(Command, '"' + ExpandConstant('{app}\better-matrix.exe') + '" "%1"') = 0) then
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\matrix');
+end;

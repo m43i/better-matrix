@@ -83,8 +83,9 @@ start it with `--appimage-extract-and-run`.
 Download
 [`better-matrix-macos-arm64.dmg`](https://github.com/m43i/better-matrix/releases/latest/download/better-matrix-macos-arm64.dmg),
 open it and drag Better Matrix to Applications. The app isn't signed with an Apple Developer ID or
-notarized yet, so macOS won't open it the first time: open **System Settings → Privacy & Security**,
-scroll down to the message about Better Matrix and choose **Open Anyway**. You only do this once;
+notarized yet, so macOS blocks it the first time you open it. Then open **System Settings → Privacy
+& Security**, scroll down to the message about Better Matrix, choose **Open Anyway** and confirm
+with **Open**. You only do this once;
 updates from inside the app open straight away. Because of the missing signature, macOS asks
 again for keychain, camera and microphone access after each update.
 

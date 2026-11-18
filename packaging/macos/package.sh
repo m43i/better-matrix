@@ -27,7 +27,7 @@ codesign --force --deep --sign - "$app"
 # Self-updates replace the complete signed bundle; ditto preserves its metadata.
 ditto -c -k --sequesterRsrc --keepParent "$app" dist/out/better-matrix-macos-arm64.zip
 # The disk image opens on a window to drag the app to Applications (dmg-settings.py), built by
-# dmgbuild (Python 3.11+) from a hash-pinned install in a virtual environment.
+# dmgbuild (Python 3.11+, macOS 14+) from a hash-pinned install in a virtual environment.
 python3 -m venv dist/dmgbuild
 dist/dmgbuild/bin/pip install --quiet --disable-pip-version-check --require-hashes \
   --only-binary=:all: -r packaging/macos/dmgbuild-requirements.txt

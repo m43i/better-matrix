@@ -23,11 +23,13 @@ try {
     }
     Move-Item -LiteralPath $Staged -Destination $Target
     Start-Process -FilePath $Target -WorkingDirectory (Split-Path -Parent $Target)
-    # An install from the installer lists its version in Installed apps: keep it current. The ID
-    # is packaging\windows\better-matrix.iss's AppId. A failure here leaves the update in place.
+    # An install from the installer lists its version in Installed apps: keep it current, unless
+    # this is a separate copy. The ID is packaging\windows\better-matrix.iss's AppId. A failure
+    # here leaves the update in place.
     try {
         $entry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{DB776B2C-C930-4C78-B82D-3BACD4B141C9}_is1'
-        if ($Version -and (Test-Path -LiteralPath $entry)) {
+        $installed = (Get-ItemProperty -LiteralPath $entry -ErrorAction SilentlyContinue).InstallLocation
+        if ($Version -and $installed -and $installed.TrimEnd('\') -eq (Split-Path -Parent $Target).TrimEnd('\')) {
             Set-ItemProperty -LiteralPath $entry -Name DisplayVersion -Value $Version
         }
     } catch {}
