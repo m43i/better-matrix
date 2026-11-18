@@ -35,7 +35,7 @@ const GRACE: &str = "@grace:example.org";
 const ALAN: &str = "@alan:example.org";
 pub const ADA: &str = "@ada:example.org";
 
-fn demo_attachment() -> Attachment {
+pub fn demo_attachment() -> Attachment {
     Attachment {
         kind: AttachmentKind::Image,
         name: "better-matrix.png".into(),
@@ -48,9 +48,13 @@ fn demo_attachment() -> Attachment {
 
 /// A sent image for exercising its file actions without an account or network.
 pub fn attachment_message(s: &mut State) {
+    image_message(s, demo_attachment());
+}
+
+/// `file`, a sent picture of the app's icon, as the room's only message.
+pub fn image_message(s: &mut State, file: Attachment) {
     seed(s);
     s.select_room(DEMO_THREAD.0);
-    let file = demo_attachment();
     apply(
         s,
         Event::TimelineChanged {

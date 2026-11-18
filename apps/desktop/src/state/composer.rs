@@ -376,7 +376,10 @@ impl Composer {
             outgoing.push(Outgoing::Text { body, html: html_of(&self.edit) });
         }
         outgoing.extend(self.attachments.drain(..).map(Outgoing::File));
+        // The emptied field keeps its focus, so the next message can follow straight away.
+        let focused = self.edit.focused;
         self.edit = new_edit();
+        self.edit.focused = focused;
         self.link = None;
         (self.reply_to.take(), outgoing)
     }
@@ -477,6 +480,14 @@ mod tests {
         let mut c = composer("hi");
         c.take_outgoing();
         assert!(c.is_empty());
+    }
+
+    #[test]
+    fn sending_should_keep_the_field_focused() {
+        let mut c = composer("hi");
+        c.edit.focused = true;
+        c.take_outgoing();
+        assert!(c.edit.focused);
     }
 
     #[test]

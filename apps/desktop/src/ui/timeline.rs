@@ -1103,9 +1103,12 @@ fn link_card(key: &str, url: &str, card: &LinkPreview, max_width: f32, media: &M
 }
 
 /// An image, scaled to fit [`PREVIEW_BOX`] and `max_width` by the sender's dimensions so the
-/// timeline doesn't jump when it loads; a placeholder of the same size until then.
+/// timeline doesn't jump when it loads; a placeholder of the same size until then. Without the
+/// sender's dimensions, or with ones the picture doesn't match, the loaded picture's own decide.
 fn image_preview(attachment: &Attachment, max_width: f32, media: &MediaCache, p: &Palette) -> El {
-    let (w, h) = preview_size(attachment.dimensions);
+    let image = attachment.preview().and_then(|(media_ref, _)| media.image(&media_ref));
+    let loaded = image.and_then(|image| image.size()).map(|[w, h]| (w, h));
+    let (w, h) = preview_size(shown_dimensions(attachment.dimensions, loaded));
     let scale = (max_width / w).clamp(0.0, 1.0);
     let (w, h) = (w * scale, h * scale);
     let opened = attachment.clone();
@@ -1118,12 +1121,22 @@ fn image_preview(attachment: &Attachment, max_width: f32, media: &MediaCache, p:
         .label(attachment.name.clone())
         .cursor(rune::Cursor::Pointer)
         .on_press(move |s: &mut State| s.open_attachment(&opened));
-    let image = attachment.preview().and_then(|(media_ref, _)| media.image(&media_ref));
     match image {
-        Some(image) => frame.pixels_fit(image.pixels(), SurfaceFit::Fill),
+        Some(image) => frame.pixels_fit(image.pixels(), SurfaceFit::Fit),
         None => {
             frame.fill(p.surface).border(1.0, p.divider).center().child(icon(&icons::IMAGE, 24.0).color(p.text_muted))
         }
+    }
+}
+
+/// The dimensions an image preview is sized by: the sender's, unless the `loaded` picture
+/// has none to compare or a different shape, so a picture is never cropped to a box it
+/// doesn't fit.
+fn shown_dimensions(declared: Option<(u32, u32)>, loaded: Option<(u32, u32)>) -> Option<(u32, u32)> {
+    let aspect = |(w, h): (u32, u32)| w as f32 / h.max(1) as f32;
+    match (declared.filter(|(w, h)| *w > 0 && *h > 0), loaded.filter(|(w, h)| *w > 0 && *h > 0)) {
+        (Some(declared), Some(loaded)) if (aspect(declared) / aspect(loaded) - 1.0).abs() > 0.02 => Some(loaded),
+        (declared, loaded) => declared.or(loaded),
     }
 }
 
@@ -1253,6 +1266,21 @@ mod tests {
     #[test]
     fn preview_size_should_not_upscale_small_images() {
         assert_eq!(preview_size(Some((100, 50))), (100.0, 50.0));
+    }
+
+    #[test]
+    fn an_image_should_be_sized_by_its_senders_dimensions_when_the_picture_matches() {
+        assert_eq!(shown_dimensions(Some((1440, 720)), Some((720, 360))), Some((1440, 720)));
+    }
+
+    #[test]
+    fn an_image_without_its_senders_dimensions_should_be_sized_by_its_picture() {
+        assert_eq!(shown_dimensions(None, Some((800, 120))), Some((800, 120)));
+    }
+
+    #[test]
+    fn an_image_whose_picture_has_another_shape_should_be_sized_by_its_picture() {
+        assert_eq!(shown_dimensions(Some((400, 400)), Some((800, 120))), Some((800, 120)));
     }
 
     #[test]

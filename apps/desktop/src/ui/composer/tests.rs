@@ -133,3 +133,44 @@ fn dragging_the_composer_scrollbar_should_reveal_earlier_lines_without_losing_fo
         assert!(rt.state.composer(target).edit.focused);
     }
 }
+
+#[test]
+fn a_composer_should_stay_focused_after_sending_so_the_next_message_can_follow() {
+    for target in [ComposerTarget::Room, ComposerTarget::Thread] {
+        let mut state = State::detached();
+        demo::seed(&mut state);
+        state.select_room(demo::DEMO_THREAD.0);
+        state.open_thread(demo::DEMO_THREAD.1);
+        let mut rt = Runtime::new(state, ui::view, (1200.0, 760.0), Env { system_dark: true, scale: 1.0 });
+        rt.frame(0.0);
+        rt.update(move |_, tx| tx.focus(composer_field(target), false));
+        rt.frame(1.0 / 60.0);
+        rt.paste("First");
+        rt.frame(1.0 / 60.0);
+        rt.key(KeyEvent { key: rune::Key::Enter, mods: Mods::default() });
+        rt.frame(1.0 / 60.0);
+        assert!(rt.state.composer(target).is_empty(), "the first message is sent");
+        rt.paste("Second");
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.state.composer(target).edit.text, "Second");
+    }
+}
+
+#[test]
+fn a_touchpad_gesture_should_scroll_a_long_draft() {
+    for target in [ComposerTarget::Room, ComposerTarget::Thread] {
+        let mut rt = long_draft(target);
+        let before = field(&rt, target).scrolled[1];
+        let scroll = rt.presented(&key(target, "composer-scroll")).unwrap().0;
+        let (x, y) = (scroll[0] + scroll[2] / 2.0, scroll[1] + scroll[3] / 2.0);
+        let finger = |phase, dy| rune::WheelEvent::new(0.0, dy).at(x, y).phase(phase).precise(true);
+        rt.wheel_event(finger(rune::GesturePhase::Began, 0.0));
+        for _ in 0..20 {
+            rt.wheel_event(finger(rune::GesturePhase::Moved, 4.0));
+            rt.frame(1.0 / 60.0);
+        }
+        rt.wheel_event(finger(rune::GesturePhase::Ended, 0.0));
+        rt.settle_all();
+        assert!(field(&rt, target).scrolled[1] < before, "two fingers reach earlier draft lines");
+    }
+}

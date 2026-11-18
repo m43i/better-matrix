@@ -960,6 +960,18 @@ fn an_image_should_leave_the_readers_column_clear_in_the_narrowest_window() {
 }
 
 #[test]
+fn an_image_without_its_dimensions_should_take_the_shape_of_its_picture() {
+    let file = matrix_core::Attachment { dimensions: None, ..demo::demo_attachment() };
+    let mut rt = runtime(move |s| demo::image_message(s, file));
+    rt.set_viewport((1280.0, 800.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    let image = rt.presented("image-better-matrix.png").expect("the image").0;
+    assert_eq!((image[2], image[3]), (256.0, 256.0), "the square picture shows in a square");
+}
+
+#[test]
 fn a_linked_gif_should_leave_the_readers_column_clear_in_the_narrowest_window() {
     let mut rt = readers_runtime();
     set_continued_message(&mut rt, plain("https://x.org/a.gif"), 0);
