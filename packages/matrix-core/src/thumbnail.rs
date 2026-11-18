@@ -18,17 +18,25 @@ use image::{
 /// The largest image scaled, a side: what the apps' decoders take too (Rune's limit). Larger
 /// ones pass through for the app to refuse.
 const MAX_SIDE: u32 = 8192;
-/// The most a decode may allocate.
+/// The largest decoded image scaled (Rune's limit too).
 const MAX_ALLOC: u64 = 256 << 20;
+/// What a decoder may allocate for itself while it reads a header (an embedded colour profile,
+/// say): the png crate's own default.
+const DECODER_ALLOC: u64 = 64 << 20;
 /// Images scaled at once: a large photo takes a few hundred megabytes while it decodes.
 static SCALING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
 /// [`fit`] on a blocking thread, a couple at a time.
 pub(crate) async fn fit_off_thread(bytes: Vec<u8>, width: u32, height: u32) -> Vec<u8> {
-    let _permit = SCALING.acquire().await;
+    let permit = SCALING.acquire().await;
     let bytes = Arc::new(bytes);
     let source = Arc::clone(&bytes);
-    let scaled = tokio::task::spawn_blocking(move || scaled_safely(&source, width, height)).await.ok().flatten();
+    // The permit goes with the work: a fetch given up on leaves its decode counted until it ends.
+    let scaling = move || {
+        let _permit = permit;
+        scaled_safely(&source, width, height)
+    };
+    let scaled = tokio::task::spawn_blocking(scaling).await.ok().flatten();
     scaled.unwrap_or_else(|| Arc::try_unwrap(bytes).unwrap_or_else(|shared| shared.as_ref().clone()))
 }
 
@@ -48,11 +56,17 @@ fn scaled_safely(bytes: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
 }
 
 fn scaled(bytes: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
-    let reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?;
+    let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?;
     let format = reader.format().filter(|format| matches!(format, ImageFormat::Png | ImageFormat::Jpeg))?;
     if format == ImageFormat::Png && animated_png(bytes) {
         return None;
     }
+    // Bounded from the start: a decoder reads a header with the limits it is made with.
+    let mut header_limits = Limits::default();
+    header_limits.max_image_width = Some(MAX_SIDE);
+    header_limits.max_image_height = Some(MAX_SIDE);
+    header_limits.max_alloc = Some(DECODER_ALLOC);
+    reader.limits(header_limits);
     let mut decoder = reader.into_decoder().ok()?;
     // Read from the header: an image that already fits is never decoded.
     let (w, h) = decoder.dimensions();
@@ -77,20 +91,21 @@ fn scaled(bytes: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     let mut image = DynamicImage::from_decoder(decoder).ok()?;
     image.apply_orientation(orientation);
     let side = |side: u32| ((f64::from(side) * scale).round() as u32).max(1);
-    let image = resized(&image, side(shown_w), side(shown_h));
+    let image = resized(image, side(shown_w), side(shown_h));
     let mut out = Vec::new();
     match format {
         ImageFormat::Jpeg => {
-            let rgb = image.to_rgb8();
+            let rgb = image.into_rgb8();
             let mut encoder = JpegEncoder::new_with_quality(&mut out, 85);
-            if let Some(icc) = icc {
+            if let Some(icc) = icc.filter(|icc| profile_fits(icc, false)) {
                 let _ = encoder.set_icc_profile(icc);
             }
             encoder.write_image(&rgb, rgb.width(), rgb.height(), ExtendedColorType::Rgb8).ok()?;
         }
         _ => {
             let mut encoder = PngEncoder::new(&mut out);
-            if let Some(icc) = icc {
+            let grey = !image.color().has_color();
+            if let Some(icc) = icc.filter(|icc| profile_fits(icc, grey)) {
                 let _ = encoder.set_icc_profile(icc);
             }
             let (w, h) = (image.width(), image.height());
@@ -102,11 +117,11 @@ fn scaled(bytes: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
 
 /// `image` at `width`×`height`. One with alpha is scaled premultiplied, so its transparent
 /// pixels don't darken the edges of what shows.
-fn resized(image: &DynamicImage, width: u32, height: u32) -> DynamicImage {
+fn resized(image: DynamicImage, width: u32, height: u32) -> DynamicImage {
     if !image.color().has_alpha() {
         return image.resize_exact(width, height, FilterType::Triangle);
     }
-    let mut rgba = image.to_rgba8();
+    let mut rgba = image.into_rgba8();
     for pixel in rgba.pixels_mut() {
         let alpha = u16::from(pixel[3]);
         for channel in &mut pixel.0[..3] {
@@ -136,9 +151,22 @@ fn animated_png(bytes: &[u8]) -> bool {
             _ => {}
         }
         let Ok(length) = <[u8; 4]>::try_from(&header[..4]) else { return false };
-        at += 12 + u32::from_be_bytes(length) as usize;
+        let Some(next) = usize::try_from(u32::from_be_bytes(length))
+            .ok()
+            .and_then(|length| length.checked_add(12))
+            .and_then(|length| at.checked_add(length))
+        else {
+            return false;
+        };
+        at = next;
     }
     false
+}
+
+/// Whether an ICC profile describes the colour model a scaled image is written in: grey, or
+/// RGB. One for another (a CMYK photo's, a grey one's on an image now in colour) is left out.
+fn profile_fits(icc: &[u8], grey: bool) -> bool {
+    icc.get(16..20) == Some(if grey { b"GRAY" } else { b"RGB " })
 }
 
 /// Whether showing an image upright swaps its width and height.
@@ -233,6 +261,58 @@ mod tests {
         animated.extend(chunk(b"acTL", &[0, 0, 0, 2, 0, 0, 0, 0]));
         animated.extend_from_slice(&still[8..]);
         assert_eq!((animated_png(&still), animated_png(&animated)), (false, true));
+    }
+
+    /// A stand-in ICC profile of `space` (`b"RGB "` or `b"GRAY"`): only its header is read.
+    fn profile(space: &[u8; 4]) -> Vec<u8> {
+        let mut icc = vec![0; 128];
+        icc[16..20].copy_from_slice(space);
+        icc
+    }
+
+    fn png_with_profile(width: u32, height: u32, icc: Vec<u8>) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut encoder = PngEncoder::new(&mut out);
+        encoder.set_icc_profile(icc).expect("takes a profile");
+        let pixels = vec![200; (width * height * 3) as usize];
+        encoder.write_image(&pixels, width, height, ExtendedColorType::Rgb8).expect("encodes");
+        out
+    }
+
+    fn profile_of(bytes: &[u8]) -> Option<Vec<u8>> {
+        let mut decoder = ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?.into_decoder().ok()?;
+        decoder.icc_profile().ok().flatten()
+    }
+
+    #[test]
+    fn a_scaled_image_should_keep_its_colour_profile() {
+        let rgb = profile(b"RGB ");
+        assert_eq!(profile_of(&fit(png_with_profile(256, 256, rgb.clone()), 64, 64)), Some(rgb));
+    }
+
+    #[test]
+    fn a_profile_for_another_colour_model_should_be_left_out() {
+        assert_eq!(profile_of(&fit(png_with_profile(256, 256, profile(b"CMYK")), 64, 64)), None);
+    }
+
+    #[test]
+    fn an_image_too_large_to_hold_decoded_should_pass_through() {
+        // 8192 a side at 16-bit RGBA: 512 MiB decoded, past the limit, though its sides are not.
+        let mut huge = b"\x89PNG\r\n\x1a\n".to_vec();
+        let mut header = 8192u32.to_be_bytes().to_vec();
+        header.extend_from_slice(&8192u32.to_be_bytes());
+        header.extend_from_slice(&[16, 6, 0, 0, 0]);
+        huge.extend(chunk(b"IHDR", &header));
+        huge.extend(chunk(b"IEND", &[]));
+        assert_eq!(fit(huge.clone(), 128, 128), huge);
+    }
+
+    #[test]
+    fn a_chunk_claiming_more_bytes_than_there_are_should_end_the_scan() {
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend_from_slice(&u32::MAX.to_be_bytes());
+        png.extend_from_slice(b"tEXt");
+        assert!(!animated_png(&png));
     }
 
     #[test]

@@ -185,9 +185,9 @@ screenshots, voice memos, and images and PDFs that open large.
     with the original, so the engine scales a still PNG or JPEG larger than the box down to
     fit it (upright, premultiplied, keeping its colour profile), two at a time on blocking
     threads, before `MediaLoaded` (`thumbnail::fit_off_thread`). Decoding is bounded like
-    Rune's (8192 pixels a side, 256 MiB); a larger image, another format (animated PNGs among
-    them) or a failure passes through unchanged. An encrypted original is scaled again on each
-    fetch: the SDK caches the original.
+    Rune's: 8192 pixels a side, 256 MiB decoded, 64 MiB for a header's own buffers. A larger
+    image, another format (animated PNGs among them) or a failure passes through unchanged. An
+    encrypted original is scaled again on each fetch: the SDK caches the original.
   - It counts at an estimate until Rune decodes it, then `MediaCache::measure` (from `poll`)
     counts what Rune holds: RGBA at every mip level.
   - Animated frames are counted from the file without decoding (GIF image blocks, APNG `acTL`,
