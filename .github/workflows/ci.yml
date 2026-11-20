@@ -107,7 +107,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Remove-Item -Recurse -Force dist
-          Copy-Item -Force "$env:SystemRoot\System32\whoami.exe" target\release\better-matrix.exe
+          # Not a System32 file: Windows' catalogs vouch for those, which hides a signature added
+          # to them from Get-AuthenticodeSignature.
+          Copy-Item -Force (Get-Command pwsh).Source target\release\better-matrix.exe
           $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Better Matrix CI' `
             -KeyExportPolicy Exportable -CertStoreLocation Cert:\CurrentUser\My
           $env:WINDOWS_CERTIFICATE = [Convert]::ToBase64String($certificate.Export('Pfx', 'ci'))
