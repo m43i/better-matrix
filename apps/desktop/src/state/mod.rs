@@ -1203,9 +1203,10 @@ impl State {
                     )
                 });
                 // A timeline's first content lands as it is, rather than easing in row by row,
-                // and so does the history that fills it after (a room opened with a few cached
-                // messages builds up from the bottom otherwise): only what comes once it is
-                // loaded eases in.
+                // and so does the history that fills it after: a room opened with a few cached
+                // messages would otherwise build up from the bottom whenever the frame its page
+                // arrives in animates (input in it, or the read marker's fade). Only news, at
+                // the end, eases in.
                 if diffs.iter().any(|diff| matches!(diff, matrix_core::TimelineDiff::Reset(_))) {
                     if key.thread.is_none() {
                         tx.settle();
@@ -1217,7 +1218,7 @@ impl State {
                     .accounts
                     .get(&account)
                     .and_then(|data| data.timeline(&key))
-                    .is_some_and(|timeline| timeline.loading)
+                    .is_some_and(|timeline| timeline.adds_history(&diffs))
                 {
                     tx.instant();
                 }
@@ -2421,6 +2422,15 @@ impl State {
                 .and_then(|room| account.pins.get(room))
                 .into_iter()
                 .flat_map(|pins| pins.iter().take(MEMBER_PICTURES).filter_map(|pin| pin.sender_avatar.clone()));
+            // The open person panel's picture: the member list's, else the message's.
+            let person = match (&self.side, self.active_room_id()) {
+                (Some(SidePanel::Person(shown_as)), Some(room_id)) => account
+                    .members
+                    .get(room_id)
+                    .and_then(|members| members.people.iter().find(|member| member.person.id == shown_as.id))
+                    .map_or(shown_as.avatar.clone(), |member| member.person.avatar.clone()),
+                _ => None,
+            };
             let typing = self
                 .active_room_id()
                 .and_then(|room_id| account.typing.get(room_id))
@@ -2440,8 +2450,15 @@ impl State {
                         .take(6)
                         .filter_map(|room| room.avatar.clone())
                 });
-            wanted
-                .extend(members.chain(pins).chain(typing).chain(found).chain(public).map(|media| (id.clone(), media)));
+            wanted.extend(
+                members
+                    .chain(person)
+                    .chain(pins)
+                    .chain(typing)
+                    .chain(found)
+                    .chain(public)
+                    .map(|media| (id.clone(), media)),
+            );
         }
         // The faces of the call and of whoever rings, from any account.
         if let Some(call) = &self.call {
@@ -3338,7 +3355,13 @@ impl State {
                 self.side_loaded = None;
                 self.sync_side();
             }
-            Some(SidePanel::Info | SidePanel::Person(_)) | None => {}
+            // Their role and whether they are verified come from the member list, as complete
+            // as the readers' list asks for; their picture may be one no row has fetched.
+            Some(SidePanel::Person(_)) => {
+                self.list_all_members();
+                self.request_avatars();
+            }
+            Some(SidePanel::Info) | None => {}
         }
     }
 

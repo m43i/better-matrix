@@ -184,7 +184,8 @@ Date: 2026-11-14
     presence, name, user ID, presence in words, verified and role; then Message, Call and Video
     call (as the member menu offers them) and More, which opens the member menu beside it. The
     member list's entry wins over the `Person` the message showed, which stands in for someone
-    it doesn't list. The user's own shows Edit profile.
+    it doesn't list; opening it asks for the complete member list and the picture it shows. The
+    user's own shows Edit profile.
   - Info (the header's info button): the room's picture, name and topic, rows leading to the
     members, pinned messages, threads and files, and leave room (or delete chat).
   - Threads: the server's thread list (`Command::ListThreads`, `Account::threads`); a press

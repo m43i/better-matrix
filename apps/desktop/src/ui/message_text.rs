@@ -7,8 +7,9 @@ use super::theme::{Palette, font};
 use crate::state::State;
 
 /// How far beside a message's text a press still lands on the text: a click or drag that
-/// starts just left or right of the words selects them rather than opening the thread.
-const REACH: f32 = 12.0;
+/// starts just left or right of the words selects them rather than opening the thread. Less
+/// than the gap to the sender's picture and the readers' column, which keep their own presses.
+const REACH: f32 = 8.0;
 
 /// Widens a message text's press target by [`REACH`] on each side without moving its words.
 pub fn reach(text: El) -> El {

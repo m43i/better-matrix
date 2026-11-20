@@ -1749,8 +1749,8 @@ fn a_press_just_left_of_message_text_should_not_open_the_thread() {
     // The words start where the sender's name does.
     let words = element_rect(&rt, "sender-name-$short-0")[0];
     let text = element_rect(&rt, "text-$short-0");
-    rt.pointer_down(words - 6.0, text[1] + text[3] / 2.0);
-    rt.pointer_up(words - 6.0, text[1] + text[3] / 2.0);
+    rt.pointer_down(words - 5.0, text[1] + text[3] / 2.0);
+    rt.pointer_up(words - 5.0, text[1] + text[3] / 2.0);
     rt.frame(1.0 / 60.0);
     assert!(rt.state.active_thread().is_none());
 }
@@ -1807,34 +1807,85 @@ fn a_profile_should_offer_the_member_menu_beside_its_more_button() {
     assert!(rt.find("member-menu-invite").is_some());
 }
 
-/// How tall the message pushed into the short room shows on the first frame after it
-/// arrives, against a message already there, with the room's history `loading` or not.
-fn arriving_height(loading: bool) -> (f32, f32) {
+/// How tall `entry` shows on the first frame after `diff` brings it into the short room,
+/// against a message already there. The test runtime animates every change, as a window does
+/// in a frame with input or asked motion.
+fn arriving_height(diff: TimelineDiff, entry: &str) -> (f32, f32) {
     let mut rt = runtime(|s| short_room(s, 2));
     rt.update(|s, tx| {
         let key = TimelineKey::room(demo::DEMO_THREAD.0);
-        s.accounts.timeline_mut(&AccountId::new(demo::ADA), &key).unwrap().loading = loading;
-        s.apply(
-            Event::TimelineChanged {
-                account: AccountId::new(demo::ADA),
-                key,
-                diffs: vec![TimelineDiff::PushBack(short_message("arriving", 30))],
-            },
-            tx,
-        );
+        s.apply(Event::TimelineChanged { account: AccountId::new(demo::ADA), key, diffs: vec![diff] }, tx);
     });
     rt.frame(1.0 / 60.0);
-    (rt.presented("msg-arriving").expect("the new message").0[3], rt.presented("msg-short-1").unwrap().0[3])
+    (rt.presented(&format!("msg-{entry}")).expect("the new message").0[3], rt.presented("msg-short-1").unwrap().0[3])
 }
 
 #[test]
-fn history_filling_a_newly_opened_room_should_land_at_once() {
-    let (arriving, settled) = arriving_height(true);
+fn older_messages_filling_an_opened_room_should_land_at_once() {
+    let (arriving, settled) = arriving_height(TimelineDiff::PushFront(short_message("older", 0)), "older");
     assert!((arriving - settled).abs() < 0.5, "it eased in: {arriving} of {settled}");
 }
 
 #[test]
-fn a_message_arriving_once_history_loaded_should_still_ease_in() {
-    let (arriving, settled) = arriving_height(false);
+fn a_new_message_at_the_end_should_still_ease_in() {
+    let (arriving, settled) = arriving_height(TimelineDiff::PushBack(short_message("new", 30)), "new");
     assert!(arriving < settled - 10.0, "it landed at once: {arriving} of {settled}");
+}
+
+/// The demo room holding one message, from `sender`, with `html` formatting when given.
+fn one_message_from(s: &mut State, sender: &str, html: Option<&str>) {
+    s.select_room(demo::DEMO_THREAD.0);
+    let mut entry = short_message("only", 0);
+    if let EntryKind::Message(message) = &mut entry.kind {
+        message.sender_id = sender.to_owned();
+        message.sender_name = sender.to_owned();
+        message.content = MessageContent::Text { body: "Short".into(), html: html.map(str::to_owned) };
+    }
+    s.apply(
+        Event::TimelineChanged {
+            account: AccountId::new(demo::ADA),
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(vec![entry])],
+        },
+        &mut rune::Tx::default(),
+    );
+}
+
+#[test]
+fn the_right_edge_of_a_senders_picture_should_open_their_profile() {
+    let mut rt = runtime(|s| short_room(s, 1));
+    let face = element_rect(&rt, "sender-face-$short-0");
+    let (x, y) = (face[0] + face[2] - 1.0, face[1] + face[3] - 4.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert!(matches!(&rt.state.side, Some(SidePanel::Person(_))), "{:?}", rt.state.side);
+}
+
+#[test]
+fn a_press_just_left_of_formatted_text_should_not_open_the_thread() {
+    let mut rt = runtime(|s| one_message_from(s, "@grace:example.org", Some("<b>Short</b>")));
+    let words = element_rect(&rt, "sender-name-$only")[0];
+    let text = element_rect(&rt, "rich-$only-0");
+    rt.pointer_down(words - 5.0, text[1] + text[3] / 2.0);
+    rt.pointer_up(words - 5.0, text[1] + text[3] / 2.0);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.active_thread().is_none());
+}
+
+#[test]
+fn the_users_own_profile_should_offer_editing_instead_of_a_chat() {
+    let mut rt = runtime(|s| one_message_from(s, demo::ADA, None));
+    press(&mut rt, "sender-name-$only");
+    assert!(rt.find("person-edit").is_some());
+    assert!(rt.find("person-chat").is_none());
+    assert!(rt.find("person-more").is_none());
+}
+
+#[test]
+fn the_profile_of_someone_the_member_list_lacks_should_still_offer_the_member_menu() {
+    let mut rt = runtime(|s| one_message_from(s, "@stranger:example.org", None));
+    press(&mut rt, "sender-name-$only");
+    press(&mut rt, "person-more");
+    assert!(rt.find("member-menu-chat").is_some());
 }

@@ -332,6 +332,46 @@ impl RoomTimeline {
         }
     }
 
+    /// Whether `diffs` bring history rather than news: entries above every message the timeline
+    /// holds (a page of older messages), or its first messages. A timeline fills with these
+    /// as it opens; they land as they are rather than easing in one by one.
+    pub fn adds_history(&self, diffs: &[TimelineDiff]) -> bool {
+        let mut len = self.entries.len();
+        // Where the first message sits, followed through the diffs before the one looked at.
+        let mut first =
+            self.entries.iter().position(|entry| matches!(entry.kind, EntryView::Message(_))).unwrap_or(len);
+        for diff in diffs {
+            match diff {
+                TimelineDiff::PushFront(_) => return true,
+                TimelineDiff::Insert { index, .. } if *index <= first => return true,
+                TimelineDiff::PushBack(_) | TimelineDiff::Append(_) | TimelineDiff::Insert { .. } if first == len => {
+                    return true;
+                }
+                TimelineDiff::PushBack(_) | TimelineDiff::Insert { .. } => len += 1,
+                TimelineDiff::Append(more) => len += more.len(),
+                TimelineDiff::PopFront | TimelineDiff::Remove { index: 0 } if len > 0 => {
+                    len -= 1;
+                    first = first.saturating_sub(1);
+                }
+                TimelineDiff::Remove { index } if *index < len => {
+                    len -= 1;
+                    first -= usize::from(*index < first);
+                }
+                TimelineDiff::PopBack if len > 0 => {
+                    len -= 1;
+                    first = first.min(len);
+                }
+                TimelineDiff::Truncate { length } => {
+                    len = len.min(*length);
+                    first = first.min(len);
+                }
+                TimelineDiff::Clear | TimelineDiff::Reset(_) => (len, first) = (0, 0),
+                _ => {}
+            }
+        }
+        false
+    }
+
     /// Applies the engine's diffs, in order. Indices outside the list are ignored rather than
     /// trusted: a stray diff can't crash the app.
     pub fn apply(&mut self, diffs: Vec<TimelineDiff>) {

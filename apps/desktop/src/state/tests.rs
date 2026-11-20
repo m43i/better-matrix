@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use matrix_core::{
-    AccountSummary, DetachedCommands, Homeserver, LoginMethods, Message, Notification, Outgoing, RoomKind, RoomList,
-    RoomSummary, SpaceSummary, TimelineKey,
+    AccountSummary, DetachedCommands, EntryKind, Homeserver, LoginMethods, Message, Notification, Outgoing, RoomKind,
+    RoomList, RoomSummary, SpaceSummary, TimelineDiff, TimelineEntry, TimelineKey,
 };
 use rune::TextEdit;
 
@@ -5195,4 +5195,67 @@ fn switching_threads_while_recording_should_not_mix_their_drafts() {
     assert_eq!(s.thread_composer.edit.text, "");
     s.open_thread("$a");
     assert_eq!(s.thread_composer.edit.text, "draft in a");
+}
+
+/// A timeline holding a date divider and then `messages`.
+fn history_timeline(messages: &[&str]) -> RoomTimeline {
+    let mut timeline = RoomTimeline::default();
+    let mut entries = vec![history_entry("day", EntryKind::DateDivider(0))];
+    entries.extend(messages.iter().map(|id| history_message(id)));
+    timeline.apply(vec![TimelineDiff::Reset(entries)]);
+    timeline
+}
+
+fn history_entry(id: &str, kind: EntryKind) -> TimelineEntry {
+    TimelineEntry { id: id.to_owned(), kind }
+}
+
+fn history_message(id: &str) -> TimelineEntry {
+    history_entry(id, EntryKind::Message(Box::new(Message { event_id: format!("${id}"), ..Message::default() })))
+}
+
+#[test]
+fn older_messages_above_the_first_should_count_as_history() {
+    let timeline = history_timeline(&["a", "b"]);
+    assert!(timeline.adds_history(&[TimelineDiff::PushFront(history_message("older"))]));
+    assert!(timeline.adds_history(&[TimelineDiff::Insert { index: 1, entry: history_message("older") }]));
+}
+
+#[test]
+fn a_new_message_at_the_end_should_not_count_as_history() {
+    let timeline = history_timeline(&["a", "b"]);
+    assert!(!timeline.adds_history(&[TimelineDiff::PushBack(history_message("new"))]));
+    assert!(!timeline.adds_history(&[
+        TimelineDiff::Remove { index: 2 },
+        TimelineDiff::Insert { index: 2, entry: history_message("b") },
+    ]));
+}
+
+#[test]
+fn a_timelines_first_messages_should_count_as_history() {
+    let timeline = history_timeline(&[]);
+    assert!(timeline.adds_history(&[TimelineDiff::Append(vec![history_message("a"), history_message("b")])]));
+}
+
+#[test]
+fn history_after_a_removed_divider_should_still_count_as_history() {
+    let timeline = history_timeline(&["a"]);
+    assert!(timeline.adds_history(&[
+        TimelineDiff::Remove { index: 0 },
+        TimelineDiff::Insert { index: 0, entry: history_message("older") },
+    ]));
+}
+
+#[test]
+fn opening_someones_profile_should_request_the_complete_member_list() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    drain(&mut commands);
+    s.show_side(SidePanel::Person(matrix_core::Person { id: "@b:x".into(), ..Default::default() }));
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|command| matches!(command, Command::ListMembers { room_id, all: true, .. } if room_id == "!one:x"))
+    );
 }
