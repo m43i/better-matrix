@@ -410,11 +410,15 @@ fn build_row(cx: &Context<'_>, timeline: &RoomTimeline, key: &str, row: &Row, p:
             }
             _ => el().key(key.to_owned()),
         },
-        Row::ReadMarker(id) => rule_with_label(key, t!("timeline.new"), p.mention, p)
-            .opacity(timeline.read_marker_opacity(id))
-            .opacity_motion(rune::Spring::new(crate::state::READ_MARKER_FADE, 0.0))
-            // Its fade runs on through history landing around it.
-            .animated_changes(),
+        Row::ReadMarker(id) => {
+            let opacity = timeline.read_marker_opacity(id);
+            let divider = rule_with_label(key, t!("timeline.new"), p.mention, p)
+                .opacity(opacity)
+                .opacity_motion(rune::Spring::new(crate::state::READ_MARKER_FADE, 0.0));
+            // A fade runs on through history landing around it; a divider a page brings lands
+            // with the page.
+            if opacity < 1.0 { divider.animated_changes() } else { divider }
+        }
     }
 }
 

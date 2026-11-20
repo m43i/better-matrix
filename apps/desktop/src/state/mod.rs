@@ -1218,14 +1218,8 @@ impl State {
                         tx.instant();
                     }
                 }
-                let history = reset
-                    || self
-                        .accounts
-                        .get(&account)
-                        .and_then(|data| data.timeline(&key))
-                        .is_some_and(|timeline| timeline.adds_history(&diffs));
                 if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
-                    if history {
+                    if reset || timeline.adds_history(&diffs) {
                         timeline.landing = Landing::Due;
                     }
                     timeline.apply(diffs);
