@@ -1119,6 +1119,18 @@ fn switching_rooms_should_close_the_open_thread() {
 }
 
 #[test]
+fn showing_someones_profile_should_take_the_open_threads_place() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    s.open_thread("$root");
+    let person = matrix_core::Person { id: "@b:x".into(), name: "B".into(), avatar: None };
+    s.show_side(SidePanel::Person(person.clone()));
+    assert_eq!(s.active_thread(), None);
+    assert_eq!(s.side, Some(SidePanel::Person(person)));
+}
+
+#[test]
 fn a_reply_should_be_sent_with_the_message_it_answers() {
     let (mut s, mut commands) = state();
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());

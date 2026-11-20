@@ -111,9 +111,13 @@ fn every_side_panel_should_keep_the_chosen_width() {
         (SidePanel::Files, "files-panel"),
         (SidePanel::Pins, "pins-panel"),
         (SidePanel::Info, "info-panel"),
+        (
+            SidePanel::Person(matrix_core::Person { id: "@grace:example.org".into(), ..Default::default() }),
+            "person-panel",
+        ),
     ] {
         rt.update(|s, tx| {
-            s.show_side(panel);
+            s.show_side(panel.clone());
             tx.instant();
         });
         rt.frame(0.0);

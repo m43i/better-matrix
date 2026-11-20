@@ -6,6 +6,15 @@ use rune::{Block, Cursor, El, Link, Mark, Span, TextEdit, col, row, text};
 use super::theme::{Palette, font};
 use crate::state::State;
 
+/// How far beside a message's text a press still lands on the text: a click or drag that
+/// starts just left or right of the words selects them rather than opening the thread.
+const REACH: f32 = 12.0;
+
+/// Widens a message text's press target by [`REACH`] on each side without moving its words.
+pub fn reach(text: El) -> El {
+    text.px(REACH).mx(-REACH)
+}
+
 pub fn formatted(key: &str, edit: &TextEdit, p: &Palette) -> El {
     let mut body = col().key(key.to_owned()).w_full().selection_group(true);
     let mut paragraphs = edit.paragraphs().into_iter().peekable();
@@ -97,6 +106,7 @@ fn inline(key: &str, edit: &TextEdit, range: std::ops::Range<usize>, block: Bloc
         .cursor(Cursor::Text)
         .on_press(|_: &mut State| {})
         .on_link(|s: &mut State, url, tx| s.open_link(url, tx));
+    content = reach(content);
     for link in links {
         content = content.link(link);
     }
@@ -169,7 +179,8 @@ mod tests {
             rt.elements().into_iter().filter(|e| e.text.as_ref().is_some_and(|text| text.len() > 50)).collect();
         assert_eq!(blocks.len(), 4);
         for block in blocks {
-            assert!(block.rect[0] + block.rect[2] <= 300.5, "overflow: {:?}", block.rect);
+            // The box reaches past the words; the words stay within the message.
+            assert!(block.rect[0] + block.rect[2] - REACH <= 300.5, "overflow: {:?}", block.rect);
             assert!(block.rect[3] > 22.0, "the block must wrap");
         }
     }

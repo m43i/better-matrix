@@ -38,6 +38,10 @@ see who is typing there.
     Opening a thread keeps that anchor through the room's narrower layout; it does not settle
     the whole window, including when the SDK sends initial or bootstrap thread snapshots.
     Thread snapshots use an instant commit, without repinning the room's sticky viewport.
+  - A timeline's first content settles, and so does every change while a page of history is
+    loading (`RoomTimeline::loading`, an instant commit): a room opened with a few cached
+    messages fills at once rather than building up row by row. Changes once it has loaded
+    ease in.
   - Gaps from time offline fill in place through the same pagination.
 - **Start of history:** the server enforces history visibility; paging back returns only what
   the user may read.
@@ -157,7 +161,9 @@ see who is typing there.
   - The composer holds the message it answers (`ReplyTarget`); a reply shows its sender and
     excerpt above the body (`Quote`).
   - Clicking a message, or its thread button, opens its thread in the right panel with its own
-    composer. A message with replies shows "3 replies · last from …".
+    composer. A message with replies shows "3 replies · last from …". Clicking the sender's
+    name or picture opens their person panel instead
+    ([0008](0008-people-and-rooms.md)).
   - The hover toolbar fades in through the row's hover group, so hovering never rebuilds the
     view.
   - Room events and call cards are informational rows: no message toolbar, reactions, replies
@@ -166,7 +172,9 @@ see who is typing there.
     text fields. Links show the pointer; surrounding text keeps the text cursor.
     Plain and formatted text boxes fit their widest rendered line instead of filling the row:
     message text keeps selection, while row space outside that box shows the pointer and opens
-    the thread. Links and media keep their own actions. The pinned framework hit-tests the full
+    the thread. The box reaches 12 pt past the words on each side without moving them
+    (padding with a matching negative margin, `message_text::reach`), so a click or drag that
+    starts just beside the text selects it rather than opening the thread. Links and media keep their own actions. The pinned framework hit-tests the full
     text rectangle, so space following shorter lines within a multiline box stays selectable.
     Per-line hit regions require framework support and are not enabled.
 - **Polls** (MSC3381, unstable events as clients send them): `MessageContent::Poll` from the

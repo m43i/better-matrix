@@ -628,7 +628,8 @@ fn status_emoji(event_id: &str, message: Option<&str>) -> Option<El> {
 
 /// One message: avatar and name (unless it continues the sender's run), the quoted message it
 /// answers, its content, a linked GIF, reactions and thread; the toolbar shows on hover.
-/// Clicking a room message opens its thread.
+/// Clicking a room message opens its thread; clicking the sender's name or picture, their
+/// person panel.
 fn message_row(
     cx: &Context<'_>,
     key: &str,
@@ -695,11 +696,17 @@ fn message_row(
         content
     } else {
         // A long name is cut short, keeping the time beside it within the message's width.
+        let name = text(message.sender_name.clone())
+            .key(cx.key(&format!("sender-name-{}", message.event_id)))
+            .font(font::BODY_STRONG)
+            .color(p.text)
+            .shrink()
+            .truncate();
         let mut meta = row()
             .gap(8.0)
             .center_y()
             .min_w(0.0)
-            .child(text(message.sender_name.clone()).font(font::BODY_STRONG).color(p.text).shrink().truncate())
+            .child(opens_person(name, message))
             .children(status_emoji(&message.event_id, cx.data.status_message_of(&message.sender_id)))
             .child(text(clock_time(local_ms(message.timestamp_ms))).font(font::META).color(p.text_muted));
         if let Some(status) = status {
@@ -731,11 +738,13 @@ fn message_row(
         let shown = cx.data.presence.get(&message.sender_id);
         let face =
             media_avatar(&message.sender_id, &message.sender_name, message.sender_avatar.as_ref(), cx.media, AVATAR);
-        let face = with_presence(face, AVATAR, shown, p.bg, p);
-        match shown.and_then(presence_text) {
-            Some(words) => face.key(format!("presence-{}", message.event_id)).help(words),
+        let face =
+            with_presence(face, AVATAR, shown, p.bg, p).key(cx.key(&format!("sender-face-{}", message.event_id)));
+        let face = match shown.and_then(presence_text) {
+            Some(words) => face.help(words),
             None => face,
-        }
+        };
+        opens_person(face, message)
     };
     let mut row = row()
         .key(key.to_owned())
@@ -783,6 +792,20 @@ fn message_row(
         }
     }
     row
+}
+
+/// The sender's name or picture on a message, opening their person panel rather than the thread.
+fn opens_person(sender: El, message: &Message) -> El {
+    let person = matrix_core::Person {
+        id: message.sender_id.clone(),
+        name: message.sender_name.clone(),
+        avatar: message.sender_avatar.clone(),
+    };
+    sender
+        .role("button")
+        .label(message.sender_name.clone())
+        .cursor(rune::Cursor::Pointer)
+        .on_press(move |s: &mut State| s.show_side(crate::state::SidePanel::Person(person.clone())))
 }
 
 /// The message toolbar's distance from its row's right edge.
@@ -1053,18 +1076,21 @@ fn call_card(cx: &Context<'_>, event_id: &str, card: &CallCard, latest_call: boo
 fn text_body(event_id: &str, plain: &str, rich: Option<&rune::TextEdit>, p: &Palette) -> El {
     match rich {
         Some(rich) => super::message_text::formatted(&format!("rich-{event_id}"), rich, p),
-        // Its own handler keeps the clicks: a double-click takes a word, a triple-click the
-        // paragraph, rather than opening the thread.
-        None => text(plain.to_owned())
-            .key(format!("text-{event_id}"))
-            .font(font::BODY)
-            .color(p.text)
-            .self_start()
-            // A word longer than the line (a hash, say) breaks rather than runs out of the message.
-            .wrap_anywhere()
-            .selectable(true)
-            .cursor(rune::Cursor::Text)
-            .on_press(|_: &mut State| {}),
+        // Its own handler keeps the clicks, and those just beside it: a double-click takes a
+        // word, a triple-click the paragraph, rather than opening the thread.
+        None => super::message_text::reach(
+            text(plain.to_owned())
+                .key(format!("text-{event_id}"))
+                .font(font::BODY)
+                .color(p.text)
+                .self_start()
+                // A word longer than the line (a hash, say) breaks rather than runs out of the
+                // message.
+                .wrap_anywhere()
+                .selectable(true)
+                .cursor(rune::Cursor::Text)
+                .on_press(|_: &mut State| {}),
+        ),
     }
 }
 

@@ -2,9 +2,9 @@
 //! count, and everyone (those around first, then by role, then by name) with their presence,
 //! whether the user verified them, and their role. Pressing someone opens what can be done with
 //! them: start a chat, call, invite to another room, and with the rights, change their role,
-//! kick or ban.
+//! kick or ban. Someone's name or picture on a message opens their person panel in its place.
 
-use matrix_core::{MemberRole, Members, Moderation, PersonPresence, RoomKind, RoomMember, RoomSummary};
+use matrix_core::{MemberRole, Members, Moderation, Person, PersonPresence, RoomKind, RoomMember, RoomSummary};
 use rune::{Align, El, ScrollSpec, Side, col, el, icon, row, text, text_input};
 
 use super::components::{
@@ -189,6 +189,125 @@ pub fn panel(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
         .child(col().w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list))
 }
 
+/// What the member list says of someone's presence, until the engine reports newer. The user's
+/// own message is the engine's to report: the list's may predate a save.
+fn listed_presence(member: &RoomMember, me: bool) -> PersonPresence {
+    PersonPresence {
+        user_id: member.person.id.clone(),
+        presence: member.presence,
+        status_message: if me { None } else { member.status_message.clone() },
+    }
+}
+
+/// The person panel's picture side.
+const PERSON_PICTURE: f32 = 96.0;
+/// The person panel's More button, which the member menu opens beside.
+pub const PERSON_MORE: &str = "person-more";
+
+/// Someone's profile beside the room, from their name or picture on a message: their picture,
+/// name, user ID, presence, role and whether the user verified them, then a chat, calls and the
+/// member menu. The member list's entry wins over how the message showed them.
+pub fn person(s: &State, account: &AccountData, room: &RoomSummary, shown_as: &Person, p: &Palette) -> El {
+    let member = account
+        .members
+        .get(&room.room_id)
+        .and_then(|members| members.people.iter().find(|member| member.person.id == shown_as.id));
+    let person = member.map_or(shown_as, |member| &member.person);
+    let me = person.id == account.summary.id.as_str();
+    let listed = member.map(|member| listed_presence(member, me));
+    let shown = account.presence.get(&person.id).or(listed.as_ref());
+    let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), &s.media, PERSON_PICTURE);
+    let mut head = col()
+        .w_full()
+        .padding(20.0)
+        .gap(6.0)
+        .items_center()
+        .child(with_presence(face, PERSON_PICTURE, shown, p.bg, p).mb(8.0))
+        .child(text(person.name.clone()).key("person-name").font(font::HEADER).color(p.text).wrap().selectable(true))
+        .child(
+            text(person.id.clone())
+                .key("person-id")
+                .font(font::META)
+                .color(p.text_muted)
+                .wrap_anywhere()
+                .selectable(true),
+        );
+    if let Some(words) = shown.and_then(super::components::presence_text) {
+        head = head.child(text(words).key("person-presence").font(font::BODY).color(p.text_muted).wrap());
+    }
+    let role = member.and_then(|member| role_label(member.role));
+    let verified = member.is_some_and(|member| member.verified);
+    if role.is_some() || verified {
+        head = head.child(
+            row()
+                .gap(6.0)
+                .center_y()
+                .children(verified.then(|| icon(&icons::VERIFIED, 16.0).color(p.success)))
+                .children(verified.then(|| text(t!("members.verified")).font(font::META).color(p.text_muted)))
+                .children((role.is_some() && verified).then(|| text("·").font(font::META).color(p.text_muted)))
+                .children(role.map(|role| text(role).font(font::META).color(p.text_muted))),
+        );
+    }
+    let content = col().w_full().child(head).child(person_actions(account, &person.id, me, p));
+    super::info::frame("person-panel", t!("person.title"), content, None, p)
+}
+
+/// What the person panel offers: for someone else a chat, calls where their direct chat allows
+/// them, and the member menu for the rest; for the user, their own profile.
+fn person_actions(account: &AccountData, user_id: &str, me: bool, p: &Palette) -> El {
+    let actions = row().w_full().px(20.0).pb(20.0).gap(8.0).center_y();
+    let framed = |key: &str, label: &str| {
+        row()
+            .key(key.to_owned())
+            .h(36.0)
+            .radius(8.0)
+            .center()
+            .border(1.0, p.divider)
+            .hover(p.hover.alpha(p.hover.a * 2.0))
+            .role("button")
+            .cursor(rune::Cursor::Pointer)
+            .focusable(true)
+            .label(label.to_owned())
+    };
+    let labelled = |glyph: &'static rune::Icon, label: &str, key: &str| {
+        framed(key, label)
+            .grow(1.0)
+            .min_w(0.0)
+            .px(12.0)
+            .gap(8.0)
+            .child(icon(glyph, 16.0).color(p.text))
+            .child(text(label.to_owned()).font(font::BODY_STRONG).color(p.text).shrink().truncate())
+    };
+    let square = |glyph: &'static rune::Icon, label: &str, key: &str| {
+        framed(key, label).w(36.0).help(label.to_owned()).child(icon(glyph, 18.0).color(p.text))
+    };
+    if me {
+        return actions
+            .child(labelled(&icons::PENCIL, t!("person.edit_profile"), "person-edit").on_press(State::open_profile));
+    }
+    let id = user_id.to_owned();
+    let mut actions = actions.child({
+        let id = id.clone();
+        labelled(&icons::CHAT, t!("person.message"), "person-chat")
+            .on_press(move |s: &mut State| s.open_direct_chat(&id))
+    });
+    // Calls go through the direct chat with them, as from the member menu.
+    if account.direct_chat_with(user_id).is_none_or(|room| room.call.via.is_some()) {
+        for (video, glyph, label, key) in [
+            (false, &icons::CALL, t!("call.start"), "person-call"),
+            (true, &icons::VIDEO, t!("call.start_video"), "person-video"),
+        ] {
+            let id = id.clone();
+            actions = actions.child(
+                square(glyph, label, key).on_press_tx(crate::state::navigate(move |s| s.call_person(&id, video))),
+            );
+        }
+    }
+    actions.child(
+        square(&icons::MORE, t!("actions.more"), PERSON_MORE).on_press(move |s: &mut State| s.toggle_member_menu(&id)),
+    )
+}
+
 /// One member: their picture with a presence dot, their name, a badge when verified, their role.
 fn member_row(
     member: &RoomMember,
@@ -199,12 +318,7 @@ fn member_row(
 ) -> El {
     let person = &member.person;
     // What the engine reported since is newer than the list.
-    let listed = PersonPresence {
-        user_id: person.id.clone(),
-        presence: member.presence,
-        // The user's own message is the engine's to report: the list's may predate a save.
-        status_message: if me { None } else { member.status_message.clone() },
-    };
+    let listed = listed_presence(member, me);
     let shown = shown.unwrap_or(&listed);
     let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, 36.0).radius(18.0);
     let face = with_presence(face, 36.0, Some(shown), p.bg, p);

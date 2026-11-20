@@ -1710,3 +1710,131 @@ fn changing_the_member_search_should_change_the_list_shown() {
     rt.frame(1.0 / 60.0);
     assert!(rt.find("member-@kai:example.org").is_some());
 }
+
+/// The demo room holding only `count` short messages from Grace, all on screen.
+fn short_room(s: &mut State, count: u64) {
+    s.select_room(demo::DEMO_THREAD.0);
+    let entries = (0..count).map(|i| short_message(&format!("short-{i}"), i)).collect();
+    s.apply(
+        Event::TimelineChanged {
+            account: AccountId::new(demo::ADA),
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(entries)],
+        },
+        &mut rune::Tx::default(),
+    );
+}
+
+fn short_message(id: &str, minute: u64) -> TimelineEntry {
+    TimelineEntry {
+        id: id.to_owned(),
+        kind: EntryKind::Message(Box::new(Message {
+            event_id: format!("${id}"),
+            sender_id: "@grace:example.org".into(),
+            sender_name: "Grace Hopper".into(),
+            timestamp_ms: demo::DEMO_DAY_MS + minute * 600_000,
+            content: MessageContent::Text { body: "Short".into(), html: None },
+            ..Message::default()
+        })),
+    }
+}
+
+fn element_rect(rt: &Runtime<State>, key: &str) -> [f32; 4] {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect
+}
+
+#[test]
+fn a_press_just_left_of_message_text_should_not_open_the_thread() {
+    let mut rt = runtime(|s| short_room(s, 1));
+    // The words start where the sender's name does.
+    let words = element_rect(&rt, "sender-name-$short-0")[0];
+    let text = element_rect(&rt, "text-$short-0");
+    rt.pointer_down(words - 6.0, text[1] + text[3] / 2.0);
+    rt.pointer_up(words - 6.0, text[1] + text[3] / 2.0);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.active_thread().is_none());
+}
+
+#[test]
+fn a_drag_from_beside_message_text_should_select_it() {
+    let mut rt = runtime(|s| short_room(s, 3));
+    let text = element_rect(&rt, "text-$short-2");
+    let y = text[1] + text[3] / 2.0;
+    rt.pointer_move(text[0] + text[2] - 3.0, y);
+    rt.pointer_down(text[0] + text[2] - 3.0, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(text[0] - 20.0, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(text[0] - 20.0, y);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.selected_text().as_deref(), Some("Short"));
+    assert!(rt.state.active_thread().is_none());
+}
+
+#[test]
+fn pressing_a_message_beside_its_text_should_still_open_the_thread() {
+    let mut rt = runtime(|s| short_room(s, 3));
+    let text = element_rect(&rt, "text-$short-2");
+    rt.pointer_down(text[0] + text[2] + 40.0, text[1] + text[3] / 2.0);
+    rt.pointer_up(text[0] + text[2] + 40.0, text[1] + text[3] / 2.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.active_thread(), Some("$short-2"));
+}
+
+#[test]
+fn pressing_a_senders_name_should_open_their_profile_rather_than_the_thread() {
+    let mut rt = runtime(|s| short_room(s, 1));
+    press(&mut rt, "sender-name-$short-0");
+    assert!(rt.state.active_thread().is_none());
+    assert!(matches!(&rt.state.side, Some(SidePanel::Person(person)) if person.id == "@grace:example.org"));
+    assert!(rt.find("person-panel").is_some());
+}
+
+#[test]
+fn pressing_a_senders_picture_should_open_their_profile_rather_than_the_thread() {
+    let mut rt = runtime(|s| short_room(s, 1));
+    press(&mut rt, "sender-face-$short-0");
+    assert!(rt.state.active_thread().is_none());
+    assert!(matches!(&rt.state.side, Some(SidePanel::Person(person)) if person.id == "@grace:example.org"));
+}
+
+#[test]
+fn a_profile_should_offer_the_member_menu_beside_its_more_button() {
+    let mut rt = runtime(|s| short_room(s, 1));
+    press(&mut rt, "sender-name-$short-0");
+    press(&mut rt, "person-more");
+    assert!(rt.find("member-menu").is_some());
+    assert!(rt.find("member-menu-invite").is_some());
+}
+
+/// How tall the message pushed into the short room shows on the first frame after it
+/// arrives, against a message already there, with the room's history `loading` or not.
+fn arriving_height(loading: bool) -> (f32, f32) {
+    let mut rt = runtime(|s| short_room(s, 2));
+    rt.update(|s, tx| {
+        let key = TimelineKey::room(demo::DEMO_THREAD.0);
+        s.accounts.timeline_mut(&AccountId::new(demo::ADA), &key).unwrap().loading = loading;
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key,
+                diffs: vec![TimelineDiff::PushBack(short_message("arriving", 30))],
+            },
+            tx,
+        );
+    });
+    rt.frame(1.0 / 60.0);
+    (rt.presented("msg-arriving").expect("the new message").0[3], rt.presented("msg-short-1").unwrap().0[3])
+}
+
+#[test]
+fn history_filling_a_newly_opened_room_should_land_at_once() {
+    let (arriving, settled) = arriving_height(true);
+    assert!((arriving - settled).abs() < 0.5, "it eased in: {arriving} of {settled}");
+}
+
+#[test]
+fn a_message_arriving_once_history_loaded_should_still_ease_in() {
+    let (arriving, settled) = arriving_height(false);
+    assert!(arriving < settled - 10.0, "it landed at once: {arriving} of {settled}");
+}

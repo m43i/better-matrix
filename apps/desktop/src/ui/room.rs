@@ -80,8 +80,9 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
         .on_drop_files(|s: &mut State, files, _| s.attach_files_to(ComposerTarget::Room, files))
         .on_drop_hover(|s: &mut State, over, _| s.drop_hover = over);
     let pane = row().grow(1.0).h_full().min_w(0.0).child(main);
-    let panel = match s.side {
+    let panel = match &s.side {
         Some(SidePanel::Info) => Some(super::info::overview(s, room, p)),
+        Some(SidePanel::Person(person)) => Some(super::members::person(s, account, room, person, p)),
         Some(SidePanel::Members) => Some(super::members::panel(s, account, room, p)),
         Some(SidePanel::Threads) => Some(super::info::threads(account, room, p)),
         Some(SidePanel::Pins) => Some(super::info::pins(s, account, room, p)),

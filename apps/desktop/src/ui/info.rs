@@ -13,7 +13,7 @@ use crate::state::{AccountData, SidePanel, State};
 
 /// A panel's frame: a title and a close button, then its content, which scrolls, and a footer
 /// that stays at the bottom.
-fn frame(key: &str, title: &str, content: El, footer: Option<El>, p: &Palette) -> El {
+pub(super) fn frame(key: &str, title: &str, content: El, footer: Option<El>, p: &Palette) -> El {
     let header = row()
         .w_full()
         .h(super::theme::HEADER_HEIGHT)

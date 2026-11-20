@@ -152,7 +152,7 @@ pub enum SelectFor {
 }
 
 /// What the panel beside the open room shows (the thread shows there when none is open).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SidePanel {
     /// The room's overview: name, topic, and the ways to its members, threads and files.
     Info,
@@ -160,6 +160,9 @@ pub enum SidePanel {
     Threads,
     Files,
     Pins,
+    /// Someone's profile, from their name or picture on a message: as the message shows them,
+    /// for when the member list doesn't know them.
+    Person(matrix_core::Person),
 }
 
 /// A submenu of the member menu.
@@ -1199,7 +1202,10 @@ impl State {
                             | matrix_core::TimelineDiff::Insert { .. }
                     )
                 });
-                // A timeline's first content lands as it is, rather than easing in row by row.
+                // A timeline's first content lands as it is, rather than easing in row by row,
+                // and so does the history that fills it after (a room opened with a few cached
+                // messages builds up from the bottom otherwise): only what comes once it is
+                // loaded eases in.
                 if diffs.iter().any(|diff| matches!(diff, matrix_core::TimelineDiff::Reset(_))) {
                     if key.thread.is_none() {
                         tx.settle();
@@ -1207,6 +1213,13 @@ impl State {
                         // A thread snapshot must not repin the room's sticky viewport.
                         tx.instant();
                     }
+                } else if self
+                    .accounts
+                    .get(&account)
+                    .and_then(|data| data.timeline(&key))
+                    .is_some_and(|timeline| timeline.loading)
+                {
+                    tx.instant();
                 }
                 if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
                     timeline.apply(diffs);
@@ -1841,7 +1854,7 @@ impl State {
                     SidePanel::Pins => {
                         self.accounts.pins_failed(&account, room_id, error.clone());
                     }
-                    SidePanel::Info | SidePanel::Members => {}
+                    SidePanel::Info | SidePanel::Members | SidePanel::Person(_) => {}
                 }
                 if panel != SidePanel::Pins {
                     self.notice = Some(tf!("notice.side", error = error));
@@ -1947,16 +1960,16 @@ impl State {
     /// Asks for the open side panel's list (threads or files) of the room shown, once per room.
     fn sync_side(&mut self) {
         let (Some(account), Some(room_id), Some(panel @ (SidePanel::Threads | SidePanel::Files | SidePanel::Pins))) =
-            (self.nav.account.clone(), self.active_room_id().map(str::to_owned), self.side)
+            (self.nav.account.clone(), self.active_room_id().map(str::to_owned), self.side.clone())
         else {
             return;
         };
-        let wanted = (account.clone(), room_id.clone(), panel);
+        let wanted = (account.clone(), room_id.clone(), panel.clone());
         if self.side_loaded.as_ref() == Some(&wanted) {
             return;
         }
         self.side_loaded = Some(wanted);
-        let purpose = Purpose::SidePanel(account.clone(), room_id.clone(), panel);
+        let purpose = Purpose::SidePanel(account.clone(), room_id.clone(), panel.clone());
         let command = match panel {
             SidePanel::Threads => Command::ListThreads { account, room_id },
             SidePanel::Pins => Command::ListPinnedMessages { account, room_id },
@@ -3302,7 +3315,7 @@ impl State {
 
     /// Shows or hides a panel beside the open room.
     pub fn toggle_side(&mut self, panel: SidePanel) {
-        if self.side == Some(panel) {
+        if self.side.as_ref() == Some(&panel) {
             self.side = None;
         } else {
             self.show_side(panel);
@@ -3314,18 +3327,18 @@ impl State {
         self.popover = None;
         self.close_thread();
         self.side = Some(panel);
-        match panel {
-            SidePanel::Members => {
+        match &self.side {
+            Some(SidePanel::Members) => {
                 self.member_search = TextEdit::default();
                 self.member_search.focused = true;
                 self.list_all_members();
             }
             // Opened again, its list is fresh.
-            SidePanel::Threads | SidePanel::Files | SidePanel::Pins => {
+            Some(SidePanel::Threads | SidePanel::Files | SidePanel::Pins) => {
                 self.side_loaded = None;
                 self.sync_side();
             }
-            SidePanel::Info => {}
+            Some(SidePanel::Info | SidePanel::Person(_)) | None => {}
         }
     }
 

@@ -401,6 +401,15 @@ fn spec() -> AppSpec<State> {
                 s.toggle_member_menu("@kai:example.org");
                 s.toggle_member_submenu(state::MemberSubmenu::Role);
             }),
+            ("demo-person", |s| {
+                demo::seed(s);
+                s.select_room(demo::DEMO_THREAD.0);
+                s.show_side(state::SidePanel::Person(matrix_core::Person {
+                    id: "@grace:example.org".into(),
+                    name: "Grace Hopper".into(),
+                    avatar: None,
+                }));
+            }),
             ("demo-room-info", |s| {
                 demo::seed(s);
                 s.select_room(demo::DEMO_THREAD.0);

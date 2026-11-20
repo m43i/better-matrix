@@ -41,7 +41,7 @@ mod tests;
 use crate::i18n::t;
 use rune::{Color, Cx, El, col, el, row, text};
 
-use crate::state::{EmojiFor, Modal, Pane, Popover, Screen, State};
+use crate::state::{EmojiFor, Modal, Pane, Popover, Screen, SidePanel, State};
 use theme::{Palette, font, palette};
 
 pub fn view(s: &State, cx: &mut Cx<State>) -> El {
@@ -107,9 +107,13 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         (Some(Popover::SpaceMenu(id)), Some(account)) => vec![rail::space_menu(account, id, &p)],
         (Some(Popover::CallDevices(kind)), _) => vec![call::device_menu(s, *kind, &p)],
         (Some(Popover::CallLayout), _) => s.call_here().map(|call| call::layout_menu(call, &p)).into_iter().collect(),
-        (Some(Popover::MemberMenu { user_id, submenu }), Some(account)) => {
-            members::menu(s, account, user_id, *submenu, &format!("member-{user_id}"), None, &p)
-        }
+        (Some(Popover::MemberMenu { user_id, submenu }), Some(account)) => match &s.side {
+            // From the person panel's More: beside it, for someone the member list may not know.
+            Some(SidePanel::Person(person)) if person.id == *user_id => {
+                members::menu(s, account, user_id, *submenu, members::PERSON_MORE, Some(person), &p)
+            }
+            _ => members::menu(s, account, user_id, *submenu, &format!("member-{user_id}"), None, &p),
+        },
         (Some(Popover::ReadReceipts { key, event_id, member, .. }), Some(account)) => {
             readers::panels(s, account, key, event_id, member.as_ref(), &p)
         }

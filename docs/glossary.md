@@ -415,7 +415,12 @@ device until the user signs in as it again (which takes them back) or removes it
 
 **Side panel**
 : The panel beside the open room, in the thread's place: the room's info, its members, its
-threads or its files (`SidePanel`). See [ADR 0008](adr/0008-people-and-rooms.md).
+threads or its files, or someone's person panel (`SidePanel`). See [ADR 0008](adr/0008-people-and-rooms.md).
+
+**Person panel**
+: Someone's profile in the side panel, from their name or picture on a message: picture,
+name, user ID, presence and role, with Message, calls and the member menu
+(`SidePanel::Person`).
 
 **Member menu**
 : What a press on someone in the member list offers: chat, call, invite elsewhere, and with the
