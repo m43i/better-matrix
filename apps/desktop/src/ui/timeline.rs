@@ -13,7 +13,9 @@ use matrix_core::{
 };
 use rune::{Color, El, ScrollSpec, SurfaceFit, col, el, icon, row, row as row_el, text};
 
-use super::components::{ButtonKind, button, clock_time, local_ms, media_avatar, presence_text, with_presence};
+use super::components::{
+    ButtonKind, PRESENCE_OVERHANG, button, clock_time, local_ms, media_avatar, presence_text, with_presence,
+};
 use super::icons;
 use super::room::{display_name, inline_name};
 use super::theme::{Palette, font};
@@ -750,7 +752,14 @@ fn message_row(
         let shown = cx.data.presence.get(&message.sender_id);
         let face =
             media_avatar(&message.sender_id, &message.sender_name, message.sender_avatar.as_ref(), cx.media, AVATAR);
-        let face = with_presence(face, AVATAR, shown, p.bg, p).key(format!("{key}-sender-face"));
+        // Pressable out to the dot's overhang, which the layout doesn't count.
+        let reach = AVATAR + PRESENCE_OVERHANG;
+        let face = el()
+            .key(format!("{key}-sender-face"))
+            .size(reach, reach)
+            .mr(-PRESENCE_OVERHANG)
+            .mb(-PRESENCE_OVERHANG)
+            .child(with_presence(face, AVATAR, shown, p.bg, p));
         let face = match shown.and_then(presence_text) {
             Some(words) => face.help(words),
             None => face,

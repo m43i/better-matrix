@@ -212,8 +212,14 @@ pub fn person(s: &State, account: &AccountData, room: &RoomSummary, shown_as: &P
         .members
         .get(&room.room_id)
         .and_then(|members| members.people.iter().find(|member| member.person.id == shown_as.id));
-    let person = member.map_or(shown_as, |member| &member.person);
-    let me = person.id == account.summary.id.as_str();
+    let me = shown_as.id == account.summary.id.as_str();
+    // The user's own name and picture are the account's, which a save updates at once.
+    let own = me.then(|| Person {
+        id: shown_as.id.clone(),
+        name: account.summary.display_name.clone(),
+        avatar: account.summary.avatar.clone(),
+    });
+    let person = own.as_ref().or(member.map(|member| &member.person)).unwrap_or(shown_as);
     let listed = member.map(|member| listed_presence(member, me));
     let shown = account.presence.get(&person.id).or(listed.as_ref());
     let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), &s.media, PERSON_PICTURE);

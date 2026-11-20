@@ -2021,3 +2021,60 @@ fn history_landing_as_the_new_marker_starts_fading_should_keep_the_fade() {
     assert!((older - settled).abs() < 0.5, "the history eased in: {older} of {settled}");
     assert!(seen.iter().any(|opacity| *opacity > 0.05 && *opacity < 0.95), "the fade was cut: {seen:?}");
 }
+
+#[test]
+fn the_presence_dots_overhang_should_open_the_profile() {
+    let mut rt = runtime(|s| short_room(s, 1));
+    let face = element_rect(&rt, "msg-short-0-sender-face");
+    // One point past the 36 pt picture, on the dot that reaches beyond it.
+    let (x, y) = (face[0] + 37.0, face[1] + 37.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.active_thread().is_none());
+    assert!(matches!(&rt.state.side, Some(SidePanel::Person(_))), "{:?}", rt.state.side);
+}
+
+#[test]
+fn the_users_own_profile_should_show_a_saved_name_before_the_member_list_has_it() {
+    let mut rt = runtime(|s| {
+        one_message_from(s, demo::ADA, None);
+        let mut summary = s.active_account().unwrap().summary.clone();
+        summary.display_name = "Ada, renamed".into();
+        s.apply(Event::AccountChanged(summary), &mut rune::Tx::default());
+    });
+    press(&mut rt, "msg-only-sender-name");
+    let shown = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("person-name")).and_then(|e| e.text);
+    assert_eq!(shown.as_deref(), Some("Ada, renamed"));
+}
+
+#[test]
+fn switching_to_a_room_should_show_its_first_page_whole_on_its_first_frame() {
+    let mut rt = window_runtime(|s| s.select_room(demo::DEMO_THREAD.0));
+    press(&mut rt, "room-!dm-grace:example.org");
+    let key = TimelineKey::room("!dm-grace:example.org");
+    let cached = vec![TimelineDiff::Reset(vec![short_message("cached-0", 10), short_message("cached-1", 11)])];
+    rt.update(|s, tx| {
+        s.apply(Event::TimelineChanged { account: AccountId::new(demo::ADA), key: key.clone(), diffs: cached }, tx)
+    });
+    rt.frame(1.0 / 60.0);
+    // The page arrives in a frame that asked for motion, as the New divider's fade does.
+    rt.update(|_, tx| tx.animated());
+    let page = (0..3).map(|i| TimelineDiff::PushFront(short_message(&format!("page-{i}"), 0))).collect();
+    rt.update(|s, tx| s.apply(Event::TimelineChanged { account: AccountId::new(demo::ADA), key, diffs: page }, tx));
+    rt.frame(1.0 / 60.0);
+    let entries = ["msg-page-0", "msg-page-1", "msg-page-2"];
+    let viewport = rt.presented("timeline").expect("viewport").0;
+    let first: Vec<[f32; 4]> = entries.iter().map(|entry| rt.presented(entry).expect(entry).0).collect();
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    for (entry, row) in entries.iter().zip(first) {
+        let settled = rt.presented(entry).unwrap().0[3];
+        assert!((row[3] - settled).abs() < 0.5, "{entry} eased in: {} of {settled}", row[3]);
+        assert!(
+            row[1] >= viewport[1] - 0.5 && row[1] + row[3] <= viewport[1] + viewport[3] + 0.5,
+            "{entry} {row:?} outside {viewport:?}"
+        );
+    }
+}
