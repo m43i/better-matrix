@@ -1807,11 +1807,26 @@ fn a_profile_should_offer_the_member_menu_beside_its_more_button() {
     assert!(rt.find("member-menu-invite").is_some());
 }
 
-/// How tall `entry` shows on the first frame after `diff` brings it into the short room,
-/// against a message already there. The test runtime animates every change, as a window does
-/// in a frame with input or asked motion.
-fn arriving_height(diff: TimelineDiff, entry: &str) -> (f32, f32) {
-    let mut rt = runtime(|s| short_room(s, 2));
+/// As [`runtime`], built the way a window builds it: a change no input in its frame caused
+/// lands at once unless something in that frame asks for motion.
+fn window_runtime(scene: impl FnOnce(&mut State)) -> Runtime<State> {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    scene(&mut state);
+    let mut rt =
+        rune::App::new(crate::spec()).init(move || state).headless_runtime((1200.0, 760.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    rt
+}
+
+/// How tall `entry` shows in a window on the first frame after `diff` brings it, in a frame
+/// that asked for motion (as the read marker's fade does when a room switch shows it).
+fn arriving_height_in_a_window(diff: TimelineDiff, entry: &str) -> (f32, f32) {
+    let mut rt = window_runtime(|s| short_room(s, 2));
+    rt.update(|_, tx| tx.animated());
     rt.update(|s, tx| {
         let key = TimelineKey::room(demo::DEMO_THREAD.0);
         s.apply(Event::TimelineChanged { account: AccountId::new(demo::ADA), key, diffs: vec![diff] }, tx);
@@ -1821,14 +1836,14 @@ fn arriving_height(diff: TimelineDiff, entry: &str) -> (f32, f32) {
 }
 
 #[test]
-fn older_messages_filling_an_opened_room_should_land_at_once() {
-    let (arriving, settled) = arriving_height(TimelineDiff::PushFront(short_message("older", 0)), "older");
+fn older_messages_in_a_window_frame_that_asked_for_motion_should_land_at_once() {
+    let (arriving, settled) = arriving_height_in_a_window(TimelineDiff::PushFront(short_message("older", 0)), "older");
     assert!((arriving - settled).abs() < 0.5, "it eased in: {arriving} of {settled}");
 }
 
 #[test]
-fn a_new_message_at_the_end_should_still_ease_in() {
-    let (arriving, settled) = arriving_height(TimelineDiff::PushBack(short_message("new", 30)), "new");
+fn a_new_message_in_a_window_frame_that_asked_for_motion_should_ease_in() {
+    let (arriving, settled) = arriving_height_in_a_window(TimelineDiff::PushBack(short_message("new", 30)), "new");
     assert!(arriving < settled - 10.0, "it landed at once: {arriving} of {settled}");
 }
 

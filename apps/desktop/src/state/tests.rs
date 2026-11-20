@@ -5247,6 +5247,53 @@ fn history_after_a_removed_divider_should_still_count_as_history() {
 }
 
 #[test]
+fn a_read_marker_above_the_first_message_should_not_count_as_history() {
+    let timeline = history_timeline(&["a"]);
+    assert!(!timeline.adds_history(&[
+        TimelineDiff::Insert { index: 1, entry: history_entry("marker", EntryKind::ReadMarker) },
+        TimelineDiff::PushBack(history_message("new")),
+    ]));
+}
+
+#[test]
+fn history_above_the_next_message_should_count_once_the_first_is_removed() {
+    let mut timeline = history_timeline(&["a"]);
+    timeline.apply(vec![
+        TimelineDiff::PushBack(history_entry("day-2", EntryKind::DateDivider(1))),
+        TimelineDiff::PushBack(history_message("b")),
+    ]);
+    assert!(timeline.adds_history(&[
+        TimelineDiff::Remove { index: 1 },
+        TimelineDiff::Insert { index: 2, entry: history_message("older") },
+    ]));
+}
+
+#[test]
+fn an_insert_past_the_end_should_not_count_as_history() {
+    let timeline = history_timeline(&[]);
+    assert!(!timeline.adds_history(&[TimelineDiff::Insert { index: 9, entry: history_message("stray") }]));
+}
+
+#[test]
+fn opening_someones_profile_should_fetch_their_picture() {
+    let (mut s, mut commands) = state();
+    s.media.attach(Arc::new(|| {}));
+    let account = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &account, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    drain(&mut commands);
+    let avatar = MediaRef::opaque("person-avatar");
+    s.show_side(SidePanel::Person(matrix_core::Person {
+        id: "@b:x".into(),
+        name: "B".into(),
+        avatar: Some(avatar.clone()),
+    }));
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(command,
+        Command::FetchMedia { account: owner, media, .. } if owner == &account && media == &avatar
+    )));
+}
+
+#[test]
 fn opening_someones_profile_should_request_the_complete_member_list() {
     let (mut s, mut commands) = state();
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());

@@ -2428,7 +2428,7 @@ impl State {
                     .members
                     .get(room_id)
                     .and_then(|members| members.people.iter().find(|member| member.person.id == shown_as.id))
-                    .map_or(shown_as.avatar.clone(), |member| member.person.avatar.clone()),
+                    .map_or_else(|| shown_as.avatar.clone(), |member| member.person.avatar.clone()),
                 _ => None,
             };
             let typing = self

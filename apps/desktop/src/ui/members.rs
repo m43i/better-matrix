@@ -223,7 +223,14 @@ pub fn person(s: &State, account: &AccountData, room: &RoomSummary, shown_as: &P
         .gap(6.0)
         .items_center()
         .child(with_presence(face, PERSON_PICTURE, shown, p.bg, p).mb(8.0))
-        .child(text(person.name.clone()).key("person-name").font(font::HEADER).color(p.text).wrap().selectable(true))
+        .child(
+            text(person.name.clone())
+                .key("person-name")
+                .font(font::HEADER)
+                .color(p.text)
+                .wrap_anywhere()
+                .selectable(true),
+        )
         .child(
             text(person.id.clone())
                 .key("person-id")

@@ -39,9 +39,9 @@ see who is typing there.
     the whole window, including when the SDK sends initial or bootstrap thread snapshots.
     Thread snapshots use an instant commit, without repinning the room's sticky viewport.
   - A timeline's first content settles, and history lands at once too
-    (`RoomTimeline::adds_history`: entries above every message, or a timeline's first messages,
-    in an instant commit). A window animates engine changes only in a frame with input or asked
-    motion (the read marker's fade, which a room switch starts), so a room opened with a few
+    (`RoomTimeline::adds_history`: a message or room event above all the timeline holds, or its
+    first one, in an instant commit; dividers and markers count for neither). A window animates engine changes only in a frame with input or asked
+    motion (the read marker's fade asks for it as it starts, as a room switch shows the marker), so a room opened with a few
     cached messages would otherwise build up row by row as its first page arrives. News at the
     end eases in. The rule looks at the diffs, not at `HistoryLoaded`, which can arrive before
     the page's diffs.

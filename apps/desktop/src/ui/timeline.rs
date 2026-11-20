@@ -706,7 +706,7 @@ fn message_row(
             .gap(8.0)
             .center_y()
             .min_w(0.0)
-            .child(opens_person(name, message))
+            .child(opens_person(name, message).focusable(true))
             .children(status_emoji(&message.event_id, cx.data.status_message_of(&message.sender_id)))
             .child(text(clock_time(local_ms(message.timestamp_ms))).font(font::META).color(p.text_muted));
         if let Some(status) = status {
@@ -795,6 +795,7 @@ fn message_row(
 }
 
 /// The sender's name or picture on a message, opening their person panel rather than the thread.
+/// The name is the keyboard's stop for it; the picture is the same action for the pointer.
 fn opens_person(sender: El, message: &Message) -> El {
     let person = matrix_core::Person {
         id: message.sender_id.clone(),

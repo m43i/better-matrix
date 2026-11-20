@@ -332,40 +332,63 @@ impl RoomTimeline {
         }
     }
 
-    /// Whether `diffs` bring history rather than news: entries above every message the timeline
-    /// holds (a page of older messages), or its first messages. A timeline fills with these
-    /// as it opens; they land as they are rather than easing in one by one.
+    /// Whether `diffs` bring history rather than news: a message or room event above all the
+    /// timeline holds (a page of older messages), or its first one. A timeline fills with these
+    /// as it opens; they land as they are rather than easing in one by one. Dividers and
+    /// markers count for neither.
     pub fn adds_history(&self, diffs: &[TimelineDiff]) -> bool {
-        let mut len = self.entries.len();
-        // Where the first message sits, followed through the diffs before the one looked at.
-        let mut first =
-            self.entries.iter().position(|entry| matches!(entry.kind, EntryView::Message(_))).unwrap_or(len);
+        let content = |kind: &EntryKind| matches!(kind, EntryKind::Message(_) | EntryKind::RoomEvent(_));
+        if !diffs.iter().any(|diff| match diff {
+            TimelineDiff::PushFront(entry) | TimelineDiff::PushBack(entry) | TimelineDiff::Insert { entry, .. } => {
+                content(&entry.kind)
+            }
+            TimelineDiff::Append(entries) => entries.iter().any(|entry| content(&entry.kind)),
+            _ => false,
+        }) {
+            return false;
+        }
+        // Which entries are content, followed through the diffs as `apply` takes them.
+        let mut shown: Vec<bool> = self
+            .entries
+            .iter()
+            .map(|entry| matches!(entry.kind, EntryView::Message(_) | EntryView::RoomEvent(_)))
+            .collect();
+        let above_all = |shown: &[bool], index: usize| !shown[..index].contains(&true);
         for diff in diffs {
             match diff {
-                TimelineDiff::PushFront(_) => return true,
-                TimelineDiff::Insert { index, .. } if *index <= first => return true,
-                TimelineDiff::PushBack(_) | TimelineDiff::Append(_) | TimelineDiff::Insert { .. } if first == len => {
-                    return true;
+                TimelineDiff::PushFront(entry) if content(&entry.kind) => return true,
+                TimelineDiff::PushFront(_) => shown.insert(0, false),
+                TimelineDiff::Insert { index, entry } if *index <= shown.len() => {
+                    if content(&entry.kind) && above_all(&shown, *index) {
+                        return true;
+                    }
+                    shown.insert(*index, content(&entry.kind));
                 }
-                TimelineDiff::PushBack(_) | TimelineDiff::Insert { .. } => len += 1,
-                TimelineDiff::Append(more) => len += more.len(),
-                TimelineDiff::PopFront | TimelineDiff::Remove { index: 0 } if len > 0 => {
-                    len -= 1;
-                    first = first.saturating_sub(1);
+                TimelineDiff::PushBack(entry) => {
+                    if content(&entry.kind) && above_all(&shown, shown.len()) {
+                        return true;
+                    }
+                    shown.push(content(&entry.kind));
                 }
-                TimelineDiff::Remove { index } if *index < len => {
-                    len -= 1;
-                    first -= usize::from(*index < first);
+                TimelineDiff::Append(entries) => {
+                    if entries.iter().any(|entry| content(&entry.kind)) && above_all(&shown, shown.len()) {
+                        return true;
+                    }
+                    shown.extend(entries.iter().map(|entry| content(&entry.kind)));
                 }
-                TimelineDiff::PopBack if len > 0 => {
-                    len -= 1;
-                    first = first.min(len);
+                TimelineDiff::Set { index, entry } if *index < shown.len() => shown[*index] = content(&entry.kind),
+                TimelineDiff::Remove { index } if *index < shown.len() => {
+                    shown.remove(*index);
                 }
-                TimelineDiff::Truncate { length } => {
-                    len = len.min(*length);
-                    first = first.min(len);
+                TimelineDiff::PopFront if !shown.is_empty() => {
+                    shown.remove(0);
                 }
-                TimelineDiff::Clear | TimelineDiff::Reset(_) => (len, first) = (0, 0),
+                TimelineDiff::PopBack => {
+                    shown.pop();
+                }
+                TimelineDiff::Truncate { length } => shown.truncate(*length),
+                TimelineDiff::Clear => shown.clear(),
+                TimelineDiff::Reset(entries) => shown = entries.iter().map(|entry| content(&entry.kind)).collect(),
                 _ => {}
             }
         }
