@@ -240,7 +240,7 @@ pub fn person(s: &State, account: &AccountData, room: &RoomSummary, shown_as: &P
                 .selectable(true),
         );
     if let Some(words) = shown.and_then(super::components::presence_text) {
-        head = head.child(text(words).key("person-presence").font(font::BODY).color(p.text_muted).wrap());
+        head = head.child(text(words).key("person-presence").font(font::BODY).color(p.text_muted).wrap_anywhere());
     }
     let role = member.and_then(|member| role_label(member.role));
     let verified = member.is_some_and(|member| member.verified);
