@@ -208,10 +208,7 @@ pub const PERSON_MORE: &str = "person-more";
 /// name, user ID, presence, role and whether the user verified them, then a chat, calls and the
 /// member menu. The member list's entry wins over how the message showed them.
 pub fn person(s: &State, account: &AccountData, room: &RoomSummary, shown_as: &Person, p: &Palette) -> El {
-    let member = account
-        .members
-        .get(&room.room_id)
-        .and_then(|members| members.people.iter().find(|member| member.person.id == shown_as.id));
+    let member = account.member(&room.room_id, &shown_as.id);
     let me = shown_as.id == account.summary.id.as_str();
     // The user's own name and picture are the account's, which a save updates at once.
     let own = me.then(|| Person {

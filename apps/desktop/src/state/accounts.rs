@@ -360,6 +360,13 @@ impl RoomTimeline {
     /// markers count for neither.
     pub fn adds_history(&self, diffs: &[TimelineDiff]) -> bool {
         let content = |kind: &EntryKind| matches!(kind, EntryKind::Message(_) | EntryKind::RoomEvent(_));
+        // News at the end of a timeline holding content, the usual change, needs no more look.
+        let appends = diffs.iter().all(|diff| matches!(diff, TimelineDiff::PushBack(_) | TimelineDiff::Append(_)));
+        if appends
+            && self.entries.iter().any(|entry| matches!(entry.kind, EntryView::Message(_) | EntryView::RoomEvent(_)))
+        {
+            return false;
+        }
         if !diffs.iter().any(|diff| match diff {
             TimelineDiff::PushFront(entry) | TimelineDiff::PushBack(entry) | TimelineDiff::Insert { entry, .. } => {
                 content(&entry.kind)

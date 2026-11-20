@@ -76,11 +76,11 @@ pub fn presence_dot(presence: matrix_core::Presence, size: f32, ring: Color, p: 
     Some(status_dot(status, size, ring, p))
 }
 
-/// `face`, an avatar `size` across, with the dot of what its person `shown` over its
-/// bottom-right corner. `ring` is the surface it sits on.
 /// How far a presence dot reaches past its picture's bottom right corner.
 pub const PRESENCE_OVERHANG: f32 = 2.0;
 
+/// `face`, an avatar `size` across, with the dot of what its person `shown` over its
+/// bottom-right corner. `ring` is the surface it sits on.
 pub fn with_presence(face: El, size: f32, shown: Option<&matrix_core::PersonPresence>, ring: Color, p: &Palette) -> El {
     let dot = (size * 0.33).round().clamp(9.0, 14.0);
     let at = size - dot + PRESENCE_OVERHANG;

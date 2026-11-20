@@ -2026,8 +2026,8 @@ fn history_landing_as_the_new_marker_starts_fading_should_keep_the_fade() {
 fn the_presence_dots_overhang_should_open_the_profile() {
     let mut rt = runtime(|s| short_room(s, 1));
     let face = element_rect(&rt, "msg-short-0-sender-face");
-    // One point past the 36 pt picture, on the dot that reaches beyond it.
-    let (x, y) = (face[0] + 37.0, face[1] + 37.0);
+    // One point past the 36 pt picture, on the part of the dot that reaches beyond it.
+    let (x, y) = (face[0] + 37.0, face[1] + 32.0);
     rt.pointer_down(x, y);
     rt.pointer_up(x, y);
     rt.frame(1.0 / 60.0);

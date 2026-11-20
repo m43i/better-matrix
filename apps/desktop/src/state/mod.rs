@@ -2424,9 +2424,7 @@ impl State {
             // The open person panel's picture: the member list's, else the message's.
             let person = match (&self.side, self.active_room_id()) {
                 (Some(SidePanel::Person(shown_as)), Some(room_id)) => account
-                    .members
-                    .get(room_id)
-                    .and_then(|members| members.people.iter().find(|member| member.person.id == shown_as.id))
+                    .member(room_id, &shown_as.id)
                     .map_or_else(|| shown_as.avatar.clone(), |member| member.person.avatar.clone()),
                 _ => None,
             };
