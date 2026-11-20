@@ -44,11 +44,14 @@ see who is typing there.
     motion (the read marker's fade asks for it as it starts, as a room switch shows the
     marker), so a room opened with a few cached messages would otherwise build up row by row as
     its first page arrives. The change marks its timeline `Landing::Due`; the next poll makes it
-    `Now`, and that frame's view lands the timeline's list (`El::instant_changes`), so the rest
-    of the window keeps its motion; the poll after makes it `Idle`, and news at the end eases in
-    again. The rule looks at the diffs, not at `HistoryLoaded`, which can arrive before the
-    page's diffs. A read marker's fade due to start while a timeline is `Due` waits a frame:
-    starting with the landing would land the fade, its row left blank until it closes.
+    `Now`, and that frame's view lands the timeline's viewport and list
+    (`El::instant_changes`; a short timeline's viewport easing taller would uncover the rows
+    from the bottom), so the rest of the window keeps its motion; the poll after makes it
+    `Idle`, and news at the end eases in again. The rule looks at the diffs, not at
+    `HistoryLoaded`, which can arrive before the page's diffs. The "New" divider keeps its fade
+    through a landing (`El::animated_changes`), and a fade due to start while a timeline is
+    `Due` waits a frame: starting with a settled Reset would land it, its row left blank until
+    it closes.
   - Gaps from time offline fill in place through the same pagination.
 - **Start of history:** the server enforces history visibility; paging back returns only what
   the user may read.

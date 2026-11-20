@@ -412,7 +412,9 @@ fn build_row(cx: &Context<'_>, timeline: &RoomTimeline, key: &str, row: &Row, p:
         },
         Row::ReadMarker(id) => rule_with_label(key, t!("timeline.new"), p.mention, p)
             .opacity(timeline.read_marker_opacity(id))
-            .opacity_motion(rune::Spring::new(crate::state::READ_MARKER_FADE, 0.0)),
+            .opacity_motion(rune::Spring::new(crate::state::READ_MARKER_FADE, 0.0))
+            // Its fade runs on through history landing around it.
+            .animated_changes(),
     }
 }
 
@@ -503,15 +505,11 @@ pub fn timeline(
     if revision != 0 {
         list = list.virtual_rows_version(revision);
     }
-    // History lands whole, in this timeline only: news elsewhere in the window keeps its motion.
-    if timeline.is_some_and(|t| t.landing != crate::state::Landing::Idle) {
-        list = list.instant_changes();
-    }
     let flag = Arc::clone(near_top);
     let bottom = at_bottom.map(Arc::clone);
     // Short timelines sit at the bottom, by the composer, as in chat apps: the frame takes the
     // space and pushes the viewport down; the viewport is as tall as its content, up to all of it.
-    let viewport = col()
+    let mut viewport = col()
         .key(view_key.to_owned())
         .w_full()
         .shrink()
@@ -529,6 +527,12 @@ pub fn timeline(
             }
         })
         .child(list);
+    // History lands whole, in this timeline only, and the viewport with it: a short timeline's
+    // viewport easing taller would uncover the rows from the bottom. News elsewhere in the
+    // window keeps its motion.
+    if timeline.is_some_and(|t| t.landing != crate::state::Landing::Idle) {
+        viewport = viewport.instant_changes();
+    }
     col().key(format!("{view_key}-frame")).w_full().grow(1.0).min_h(0.0).justify_end().child(viewport)
 }
 

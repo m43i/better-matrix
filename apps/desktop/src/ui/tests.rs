@@ -1848,6 +1848,25 @@ fn arriving_in_a_window(
     entries.iter().zip(first).map(|(entry, first)| (first, rt.presented(entry).unwrap().0[3])).collect()
 }
 
+/// Whether `entry`'s row shows whole inside the room's viewport on the first frame after
+/// `diffs` bring it, in a window frame that asked for motion.
+fn shown_whole_at_once(scene: impl FnOnce(&mut State), diffs: Vec<TimelineDiff>, entry: &str) -> bool {
+    let mut rt = window_runtime(scene);
+    rt.update(|_, tx| tx.animated());
+    rt.update(|s, tx| {
+        s.apply(Event::TimelineChanged { account: AccountId::new(demo::ADA), key: room_key(), diffs }, tx);
+    });
+    rt.frame(1.0 / 60.0);
+    let (row, viewport) = (rt.presented(entry).expect(entry).0, rt.presented("timeline").expect("viewport").0);
+    row[1] >= viewport[1] - 0.5 && row[1] + row[3] <= viewport[1] + viewport[3] + 0.5
+}
+
+#[test]
+fn older_messages_in_a_short_room_should_show_whole_on_their_first_frame() {
+    let page = (0..3).map(|i| TimelineDiff::PushFront(short_message(&format!("older-{i}"), 0))).collect();
+    assert!(shown_whole_at_once(|s| short_room(s, 2), page, "msg-older-2"), "the viewport uncovered the page");
+}
+
 fn room_key() -> TimelineKey {
     TimelineKey::room(demo::DEMO_THREAD.0)
 }
@@ -1965,6 +1984,23 @@ fn the_profile_of_someone_the_member_list_lacks_should_still_offer_the_member_me
     press(&mut rt, "msg-only-sender-name");
     press(&mut rt, "person-more");
     assert!(rt.find("member-menu-chat").is_some());
+}
+
+#[test]
+fn history_landing_while_the_new_marker_fades_should_keep_the_fade() {
+    let mut rt = window_runtime(unread_timeline);
+    rt.update(|s, _| s.focus_changed(true));
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    let before = rt.presented("new-marker").expect("the divider").1;
+    assert!(before > 0.1 && before < 0.95, "the fade should be under way: {before}");
+    // In a frame that asked for motion, where the landing would otherwise take the fade along.
+    rt.update(|_, tx| tx.animated());
+    rt.update(|s, tx| marker_changed(s, tx, vec![TimelineDiff::PushFront(short_message("older", 0))]));
+    rt.frame(1.0 / 60.0);
+    let after = rt.presented("new-marker").expect("the divider").1;
+    assert!(after > before - 0.2, "the fade jumped from {before} to {after}");
 }
 
 #[test]
