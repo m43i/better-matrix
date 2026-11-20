@@ -38,7 +38,7 @@ jobs:
       matrix:
         os: [macos-26, windows-2025]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -99,6 +99,40 @@ jobs:
           if (Test-Path $app) { throw "Uninstalling left $(Get-ChildItem -Recurse -Name $app)" }
           if (Test-Path 'HKCU:\Software\Classes\matrix') { throw 'Uninstalling left the matrix: handler' }
           if (Test-Path $entry) { throw 'Uninstalling left the Installed apps entry' }
+      # A self-signed certificate stands in for a real one. Windows doesn't trust it, so the checks
+      # compare the signer rather than asking for a trusted signature.
+      - name: Check Windows signing with signtool
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Recurse -Force dist
+          Copy-Item -Force "$env:SystemRoot\System32\whoami.exe" target\release\better-matrix.exe
+          $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Better Matrix CI' `
+            -KeyExportPolicy Exportable -CertStoreLocation Cert:\CurrentUser\My
+          $env:WINDOWS_CERTIFICATE = [Convert]::ToBase64String($certificate.Export('Pfx', 'ci'))
+          $env:WINDOWS_CERTIFICATE_PASSWORD = 'ci'
+          Remove-Item "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -DeleteKey
+          packaging/windows/package.ps1 0.0.0-rc.1
+          if (Test-Path "Cert:\CurrentUser\My\$($certificate.Thumbprint)") { throw 'Packaging left the certificate installed' }
+          function Assert-Signed([string]$File) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $File
+            if ($signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
+              throw "$File isn't signed with the certificate: $($signature.Status) $($signature.StatusMessage)"
+            }
+            if (!$signature.TimeStamperCertificate) { throw "$File has no timestamp" }
+          }
+          Expand-Archive dist\out\better-matrix-windows-x86_64.zip dist\check
+          Assert-Signed dist\check\better-matrix.exe
+          Assert-Signed dist\out\better-matrix-windows-x86_64-setup.exe
+          $setup = Start-Process dist\out\better-matrix-windows-x86_64-setup.exe -Wait -PassThru `
+            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          if ($setup.ExitCode -ne 0) { throw "Setup failed with exit code $($setup.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Programs\Better Matrix"
+          Assert-Signed "$app\unins000.exe"
+          $uninstall = Start-Process "$app\unins000.exe" -Wait -PassThru `
+            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstall failed with exit code $($uninstall.ExitCode)" }
       - name: Check macOS update archive
         if: runner.os == 'macOS'
         shell: bash
@@ -119,6 +153,44 @@ jobs:
           test -f dist/volume/.background.tiff
           test -f dist/volume/.VolumeIcon.icns
           hdiutil detach dist/volume
+      # A self-signed certificate stands in for a Developer ID; without an API key nothing is
+      # notarized.
+      - name: Check macOS Developer ID signing
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          rm -rf dist
+          cat > "$RUNNER_TEMP/certificate.cnf" <<'EOF'
+          [req]
+          distinguished_name = name
+          x509_extensions = extensions
+          prompt = no
+          [name]
+          CN = Better Matrix CI
+          [extensions]
+          keyUsage = critical, digitalSignature
+          extendedKeyUsage = critical, codeSigning
+          EOF
+          # macOS's own LibreSSL writes a .p12 that `security import` reads.
+          /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 1 -config "$RUNNER_TEMP/certificate.cnf" \
+            -keyout "$RUNNER_TEMP/key.pem" -out "$RUNNER_TEMP/certificate.pem"
+          /usr/bin/openssl pkcs12 -export -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/certificate.pem" \
+            -out "$RUNNER_TEMP/certificate.p12" -passout pass:ci
+          MACOS_CERTIFICATE=$(base64 < "$RUNNER_TEMP/certificate.p12") MACOS_CERTIFICATE_PASSWORD=ci \
+            packaging/macos/package.sh 0.0.0
+          if security list-keychains -d user | grep -q signing.keychain; then
+            echo 'Packaging left its keychain in the search list'; exit 1
+          fi
+          test ! -e dist/signing.keychain-db
+          ditto -x -k dist/out/better-matrix-macos-arm64.zip dist/check
+          app='dist/check/Better Matrix.app'
+          codesign --verify --deep --strict "$app"
+          details=$(codesign -dvv "$app" 2>&1)
+          grep -q 'Authority=Better Matrix CI' <<<"$details"
+          grep -q 'flags=.*runtime' <<<"$details"
+          grep -q 'Timestamp=' <<<"$details"
+          codesign -d --entitlements - "$app" 2>/dev/null | grep -q com.apple.security.device.audio-input
+          codesign -dvv dist/out/better-matrix-macos-arm64.dmg 2>&1 | grep -q 'Authority=Better Matrix CI'
 
   test:
     name: Lint and test

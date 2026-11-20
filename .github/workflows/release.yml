@@ -6,15 +6,22 @@
 # the tag is only made when the release is published, so a run that fails leaves no tag behind
 # and can simply be started again. Then: tests (unless the commit already passed CI on main, a
 # version-only change counting as the same commit), builds for macOS (arm64), Windows (x86_64:
-# an installer, and the ZIP the self-update downloads, signed once SignPath is set up, see below)
-# and Linux (x86_64, aarch64: .deb, .rpm, .pkg.tar.xz with a PKGBUILD, AppImage), and publishes
-# them with notes from the merged pull requests' labels (.github/release.yml).
+# an installer, and the ZIP the self-update downloads) and Linux (x86_64, aarch64: .deb, .rpm,
+# .pkg.tar.xz with a PKGBUILD, AppImage), and publishes them with notes from the merged pull
+# requests' labels (.github/release.yml).
 #
-# Windows signing (ADR 0001) turns on with the repository variable SIGNPATH_ORGANIZATION_ID and
-# the secret SIGNPATH_API_TOKEN (a SignPath CI user that may submit to the project). Optional
-# variables: SIGNPATH_PROJECT_SLUG (default better-matrix) and SIGNPATH_SIGNING_POLICY_SLUG
-# (default release-signing). The project needs the artifact configurations "app" and "installer"
-# from packaging/windows/signpath. Each request waits for an approver in SignPath, up to an hour.
+# Signing (ADR 0001) uses whatever the repository has set up, and builds as before without it:
+# - macOS: the secrets MACOS_CERTIFICATE (base64 .p12 with a Developer ID Application certificate)
+#   and MACOS_CERTIFICATE_PASSWORD sign with the Developer ID; APPLE_API_KEY (base64 App Store
+#   Connect .p8), APPLE_API_KEY_ID and APPLE_API_ISSUER_ID notarize too. Otherwise: ad hoc.
+# - Windows, through SignPath: the variable SIGNPATH_ORGANIZATION_ID and the secret
+#   SIGNPATH_API_TOKEN (a SignPath CI user that may submit to the project); optional variables
+#   SIGNPATH_PROJECT_SLUG (default better-matrix) and SIGNPATH_SIGNING_POLICY_SLUG (default
+#   release-signing). The project needs the artifact configurations "app" and "installer" from
+#   packaging/windows/signpath. Each request waits for an approver in SignPath, up to an hour.
+# - Windows, with signtool, when SignPath isn't set up: the secrets WINDOWS_CERTIFICATE (base64
+#   .pfx) and WINDOWS_CERTIFICATE_PASSWORD; optional variable WINDOWS_TIMESTAMP_URL.
+#   Otherwise: unsigned.
 name: Release
 
 on:
@@ -140,7 +147,7 @@ jobs:
     env:
       # libwebrtc links ScreenCaptureKit, which macOS has from 12.3.
       MACOSX_DEPLOYMENT_TARGET: '12.3'
-      SIGN_WINDOWS: ${{ startsWith(matrix.os, 'windows') && vars.SIGNPATH_ORGANIZATION_ID != '' }}
+      SIGNPATH: ${{ startsWith(matrix.os, 'windows') && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -156,14 +163,14 @@ jobs:
       # both carry the signed one; the installer is signed after.
       - name: Upload the executable for signing
         id: unsigned-app
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGNPATH == 'true'
         uses: actions/upload-artifact@v7
         with:
           path: target/release/better-matrix.exe
           archive: false
           retention-days: 1
       - name: Sign the executable
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGNPATH == 'true'
         uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -178,7 +185,7 @@ jobs:
           parameters: |
             version: "${{ needs.verify.outputs.version }}"
       - name: Use the signed executable
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGNPATH == 'true'
         shell: pwsh
         run: packaging/windows/use-signed.ps1 dist\signed\better-matrix.exe target\release\better-matrix.exe
       - name: Package (Linux)
@@ -190,21 +197,32 @@ jobs:
           packaging/linux/package.sh "${{ matrix.arch }}" "${{ needs.verify.outputs.version }}"
       - name: Package (macOS)
         if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: packaging/macos/package.sh "${{ needs.verify.outputs.version }}"
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          # signtool signs here only when SignPath doesn't (it signed the executable already).
+          WINDOWS_CERTIFICATE: ${{ env.SIGNPATH != 'true' && secrets.WINDOWS_CERTIFICATE || '' }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
         run: packaging/windows/package.ps1 "${{ needs.verify.outputs.version }}"
       - name: Upload the installer for signing
         id: unsigned-setup
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGNPATH == 'true'
         uses: actions/upload-artifact@v7
         with:
           path: dist/out/better-matrix-windows-x86_64-setup.exe
           archive: false
           retention-days: 1
       - name: Sign the installer
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGNPATH == 'true'
         uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -219,7 +237,7 @@ jobs:
           parameters: |
             version: "${{ needs.verify.outputs.version }}"
       - name: Use the signed installer
-        if: env.SIGN_WINDOWS == 'true'
+        if: env.SIGNPATH == 'true'
         shell: pwsh
         run: packaging/windows/use-signed.ps1 dist\signed\better-matrix-windows-x86_64-setup.exe dist\out\better-matrix-windows-x86_64-setup.exe
       # Named apart from the unsigned uploads above, which publishing leaves out.

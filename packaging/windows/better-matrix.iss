@@ -48,6 +48,12 @@ Compression=lzma2/max
 SolidCompression=yes
 OutputDir={#Root}\dist\out
 OutputBaseFilename=better-matrix-windows-x86_64-setup
+#ifdef Sign
+; package.ps1 defines Sign and passes the signtool command (/Ssigntool=…) when a certificate is set:
+; the installer and its uninstaller are then signed while they are built.
+SignTool=signtool
+SignedUninstaller=yes
+#endif
 ShowLanguageDialog=auto
 
 ; The app's own languages; the wizard follows the system's.

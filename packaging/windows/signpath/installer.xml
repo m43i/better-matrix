@@ -3,7 +3,9 @@
   SignPath artifact configuration "installer": better-matrix-windows-x86_64-setup.exe, built by
   Inno Setup around the executable signed with "app" (.github/workflows/release.yml). SignPath
   keeps its own copy; paste this into the project's artifact configuration with the slug
-  "installer" when it changes. The product name and version come from better-matrix.iss.
+  "installer" when it changes. The product name and version come from better-matrix.iss; Inno
+  Setup pads them with spaces, and SignPath's docs don't say whether it trims them. If the first
+  request fails on them, adjust these restrictions.
 -->
 <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
   <parameters>

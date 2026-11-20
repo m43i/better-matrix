@@ -89,8 +89,8 @@ Date: 2026-11-14
     tests use a local remote that rejects direct pushes to `main`, run in CI before Cargo.
     The tag is made only when the release is published, so a failed run leaves none behind. It tests the commit
     unless it already passed CI on `main` (a version-only change counts as the same commit),
-    then builds macOS arm64 (`.dmg`, signed ad hoc), Windows x86_64 (an installer and a `.zip`,
-    signed below)
+    then builds macOS arm64 (a `.dmg`) and Windows x86_64 (an installer and a `.zip`), both
+    signed as below,
     and Linux x86_64 and aarch64 on Ubuntu 22.04 (glibc 2.35, which the packages require): `.deb`, `.rpm` and an
     Arch `.pkg.tar.xz` from one nfpm description, an AppImage (linuxdeploy) and a tarball the
     release's `PKGBUILD` installs. Asset names carry no version, so `releases/latest/download/…`
@@ -105,36 +105,56 @@ Date: 2026-11-14
     replacing it. The `.zip` stays beside it with the same files: the self-update downloads it,
     and it serves as the portable build.
     CI installs, self-updates and uninstalls the installer with a stand-in executable.
-  - Windows signing goes through SignPath Foundation's free open-source programme: the
-    certificate is issued to SignPath Foundation, which is shown as the publisher; keys must
-    live in hardware now, so a certificate file in a secret is no longer possible. Two signing
-    requests run per release, from the Windows build job on a GitHub-hosted runner: the bare
-    `better-matrix.exe` before packaging (the ZIP and the installer then carry the signed one)
-    and the installer after. Each is uploaded unzipped (`archive: false`) as its own artifact,
-    which SignPath fetches from the run itself (origin verification), and each waits up to an
-    hour for an approver's manual approval in SignPath, as the programme requires; the
-    Windows build job gets three hours. `packaging/windows/use-signed.ps1` swaps a signed file
-    in only when Windows trusts its signature. The release's own artifacts are named
-    `release-*` so publishing leaves the unsigned uploads out. Signing turns on with the
-    `SIGNPATH_ORGANIZATION_ID` variable and `SIGNPATH_API_TOKEN` secret; without them the
-    release builds unsigned as before.
+  - **Signing follows what the repository has set up**, and a release without any of it builds as
+    before (macOS ad hoc, Windows unsigned). The secrets and variables are listed at the top of
+    `release.yml`; each package step gets only its own platform's secrets.
+  - macOS, with a Developer ID Application certificate (`.p12` secret): `package.sh` imports it
+    into a keychain of its own (removed again, with the search list restored, when it exits),
+    signs the app with the hardened runtime and `packaging/macos/entitlements.plist` (microphone
+    and camera, which the hardened runtime blocks otherwise) and signs the disk image. With an App
+    Store Connect API key as well, it notarizes both with `notarytool` and staples them; the
+    self-update's ZIP is made from the stapled app. A certificate without a key signs but warns
+    that macOS still blocks the unnotarized app.
+  - Windows, first choice SignPath Foundation's free open-source programme: the certificate is
+    issued to SignPath Foundation, which is shown as the publisher. Two signing requests run per
+    release, from the Windows build job on a GitHub-hosted runner: the bare `better-matrix.exe`
+    before packaging (the ZIP and the installer then carry the signed one) and the installer
+    after. Each is uploaded unzipped (`archive: false`) as its own artifact, which SignPath
+    fetches from the run itself (origin verification), and each waits up to an hour for an
+    approver's manual approval in SignPath, as the programme requires; the Windows build job
+    gets three hours. `packaging/windows/use-signed.ps1` swaps a signed file in only when Windows
+    trusts its signature. The release's own artifacts are named `release-*` so publishing leaves
+    the unsigned uploads out. SignPath leaves Inno Setup's uninstaller unsigned: signing it needs
+    a signing tool while ISCC runs.
   - SignPath checks file metadata before it signs: `apps/desktop/build.rs` gives the executable a
     version resource (`embed-resource`, through `rc.exe` on Windows and `llvm-rc` when
     cross-compiling) with the product name and the version as text, and the installer sets the
-    same in `better-matrix.iss`. The artifact configurations SignPath applies are kept in
-    `packaging/windows/signpath` and pasted into SignPath when they change. Inno Setup's
-    uninstaller stays unsigned: signing it needs a local signing tool while ISCC runs.
-  - The README carries the programme's code signing policy (roles, approval) and a privacy
-    section; releases with signing on credit SignPath in their notes.
+    same in `better-matrix.iss`. Inno Setup pads the installer's values with spaces; SignPath's
+    docs don't say whether it trims them, so the first SignPath-signed release confirms it. The
+    artifact configurations SignPath applies are kept in `packaging/windows/signpath` and pasted
+    into SignPath when they change.
+  - Windows otherwise, with a code signing certificate (`.pfx` secret): `package.ps1` adds it to
+    the user's certificate store for the run (no password on a command line; only what it added
+    is removed after), signs the executable with signtool, timestamped, and passes the same
+    command to ISCC, which signs the installer and its uninstaller. Public CAs no longer issue
+    exportable keys, so this suits a certificate that has one; SignPath is the route for a free,
+    trusted one.
+  - CI checks both certificate routes with a self-signed certificate: on Windows the executable,
+    installer and installed uninstaller carry its timestamped signature; on macOS the app has
+    the hardened runtime, its entitlements and a timestamp, the disk image is signed, and the
+    keychain is gone afterwards. SignPath and notarization need the real accounts and are
+    checked by the first release that uses them.
+  - The README carries SignPath's code signing policy (roles, approval) and a privacy section;
+    releases signed through SignPath credit it in their notes.
   - SmartScreen still warns until a signed release has earned download reputation.
   - The macOS `.dmg` opens on a window to drag the app to Applications: the app, an arrow
     (`packaging/macos/dmg-background.svg`, rendered to PNGs at 1x and 2x) and an Applications
     link. dmgbuild writes the window's layout (`packaging/macos/dmg-settings.py`) without
     driving Finder, which is unreliable on hosted runners; it is installed hash-pinned into a
     virtual environment (`dmgbuild-requirements.txt`). The README gives no install command for
-    macOS or Windows: people download the disk image or the installer. Opening the ad-hoc-signed
-    app the first time takes **Open Anyway** in Privacy & Security; in-app updates carry no
-    quarantine flag, so they open without it. CI checks the image's contents and layout files.
+    macOS or Windows: people download the disk image or the installer. Opening an ad-hoc-signed
+    app the first time takes **Open Anyway** in Privacy & Security (a notarized one opens
+    straight away); in-app updates carry no quarantine flag, so they open without it. CI checks the image's contents and layout files.
   - libwebrtc's link settings (`.cargo/config.toml`, as LiveKit's own): `-ObjC` on macOS (or it
     aborts at startup), the static C runtime on Windows; on ARM Linux, lld (with clang driving the
     link in CI). Cargo doesn't pass a dependency's link arguments on, so the app sets them.
@@ -149,7 +169,7 @@ Date: 2026-11-14
     asset ID over HTTPS and verifies GitHub's SHA-256 digest before extracting it. This trusts
     the repository's release permissions and GitHub HTTPS; it is not a separate signing key.
   - Stage beside the install so permissions and disk failures are reported before quitting.
-    macOS publishes a ditto ZIP of the complete ad-hoc-signed bundle as well as the DMG, and
+    macOS publishes a ditto ZIP of the complete signed bundle as well as the DMG, and
     verifies its code signature. Windows extracts only `better-matrix.exe` from the existing ZIP,
     and its helper sets the installer's `DisplayVersion` (under the `AppId`) when that entry
     exists, so Installed apps shows the running version.
@@ -159,8 +179,8 @@ Date: 2026-11-14
     reports the error on the next launch. Paths are arguments, never generated script source.
   - Development/headless builds and Linux do not self-update. Linux remains package-managed.
     The install directory must be writable; there is no elevation flow. macOS must run from an
-    installed `.app`, not a standalone executable or read-only disk image. Ad-hoc signing's
-    existing macOS permission prompts still apply.
+    installed `.app`, not a standalone executable or read-only disk image. With ad-hoc signing,
+    macOS asks for its permissions again after each update; a Developer ID keeps them.
 - **`matrix:` links and one process** (desktop):
   - The installs claim the `matrix` scheme: the Linux desktop entry (`packaging/linux`, and
     `bun run install:linux`) has `MimeType=x-scheme-handler/matrix;` and `Exec=… %u`; the macOS
