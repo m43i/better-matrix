@@ -44,7 +44,9 @@ see who is typing there.
     motion (the read marker's fade asks for it as it starts, as a room switch shows the marker), so a room opened with a few
     cached messages would otherwise build up row by row as its first page arrives. News at the
     end eases in. The rule looks at the diffs, not at `HistoryLoaded`, which can arrive before
-    the page's diffs.
+    the page's diffs. A read marker's fade due to start in a frame that lands at once waits for
+    the next frame (`State::landed_at_once`): starting with it would land the fade, its row
+    left blank until it closes.
   - Gaps from time offline fill in place through the same pagination.
 - **Start of history:** the server enforces history visibility; paging back returns only what
   the user may read.

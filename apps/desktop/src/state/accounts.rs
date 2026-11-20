@@ -236,10 +236,17 @@ impl RoomTimeline {
         }
     }
 
-    fn poll_read_marker(&mut self, tx: &mut Tx, reduced_motion: bool) -> bool {
+    /// Starts or ends the "New" divider's fade. `hold` keeps a fade from starting in a frame
+    /// whose change lands at once, which would land the fade too: it starts the next frame.
+    fn poll_read_marker(&mut self, tx: &mut Tx, reduced_motion: bool, hold: bool) -> bool {
         let Some(fade) = self.read_marker_fade.take() else { return false };
         let mut started = false;
         let (marker, until) = match fade {
+            ReadMarkerFade::Pending(marker) if hold => {
+                self.read_marker_fade = Some(ReadMarkerFade::Pending(marker));
+                tx.wake_at(tx.clock());
+                return false;
+            }
             ReadMarkerFade::Pending(marker) => {
                 // Viewport reports are not input. Explicitly animate this acknowledgement,
                 // including when the marker was visible on the room's first frame.
@@ -1007,11 +1014,11 @@ pub struct Accounts {
 }
 
 impl Accounts {
-    pub fn poll_read_markers(&mut self, tx: &mut Tx, reduced_motion: bool) -> bool {
+    pub fn poll_read_markers(&mut self, tx: &mut Tx, reduced_motion: bool, hold: bool) -> bool {
         let mut changed = false;
         for account in &mut self.list {
             for timeline in account.timelines.values_mut() {
-                changed |= timeline.poll_read_marker(tx, reduced_motion);
+                changed |= timeline.poll_read_marker(tx, reduced_motion, hold);
             }
         }
         changed

@@ -1760,8 +1760,10 @@ fn a_drag_from_beside_message_text_should_select_it() {
     let mut rt = runtime(|s| short_room(s, 3));
     let text = element_rect(&rt, "text-$short-2");
     let y = text[1] + text[3] / 2.0;
-    rt.pointer_move(text[0] + text[2] - 3.0, y);
-    rt.pointer_down(text[0] + text[2] - 3.0, y);
+    // Past the last glyph: the box ends `REACH` beyond the words.
+    let beside = text[0] + text[2] - super::message_text::REACH + 4.0;
+    rt.pointer_move(beside, y);
+    rt.pointer_down(beside, y);
     rt.frame(1.0 / 60.0);
     rt.pointer_move(text[0] - 20.0, y);
     rt.frame(1.0 / 60.0);
@@ -1903,4 +1905,23 @@ fn the_profile_of_someone_the_member_list_lacks_should_still_offer_the_member_me
     press(&mut rt, "sender-name-$only");
     press(&mut rt, "person-more");
     assert!(rt.find("member-menu-chat").is_some());
+}
+
+#[test]
+fn history_landing_as_the_new_marker_starts_fading_should_keep_the_fade() {
+    let mut rt = window_runtime(unread_timeline);
+    rt.update(|s, tx| {
+        s.focus_changed(true);
+        marker_changed(s, tx, vec![TimelineDiff::PushFront(short_message("older", 0))]);
+    });
+    rt.frame(1.0 / 60.0);
+    let older = rt.presented("msg-older").expect("the older message").0[3];
+    let mut seen = Vec::new();
+    for _ in 0..20 {
+        rt.frame(1.0 / 60.0);
+        seen.push(rt.presented("new-marker").expect("the divider should still be fading").1);
+    }
+    let settled = rt.presented("msg-older").unwrap().0[3];
+    assert!((older - settled).abs() < 0.5, "the history eased in: {older} of {settled}");
+    assert!(seen.iter().any(|opacity| *opacity > 0.05 && *opacity < 0.95), "the fade was cut: {seen:?}");
 }

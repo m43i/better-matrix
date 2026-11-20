@@ -794,6 +794,9 @@ pub struct State {
     pub at_bottom: Arc<AtomicBool>,
     /// The same for the thread panel.
     pub thread_near_top: Arc<AtomicBool>,
+    /// A timeline's change in this frame lands at once (its first content, or history): a read
+    /// marker's fade waits a frame rather than landing with it, its row left blank.
+    landed_at_once: bool,
     /// The timelines the engine is following: the room on screen and its open thread.
     open_timelines: Vec<(AccountId, TimelineKey)>,
     /// Subscriptions that have delivered their first snapshot; warm UI rows can precede it.
@@ -874,6 +877,7 @@ impl State {
             near_top: Arc::new(AtomicBool::new(false)),
             at_bottom: Arc::new(AtomicBool::new(false)),
             thread_near_top: Arc::new(AtomicBool::new(false)),
+            landed_at_once: false,
             open_timelines: Vec::new(),
             timelines_ready: HashSet::new(),
             engine,
@@ -1214,6 +1218,7 @@ impl State {
                         // A thread snapshot must not repin the room's sticky viewport.
                         tx.instant();
                     }
+                    self.landed_at_once = true;
                 } else if self
                     .accounts
                     .get(&account)
@@ -1221,6 +1226,7 @@ impl State {
                     .is_some_and(|timeline| timeline.adds_history(&diffs))
                 {
                     tx.instant();
+                    self.landed_at_once = true;
                 }
                 if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
                     timeline.apply(diffs);
@@ -2007,7 +2013,8 @@ impl State {
     /// scrolled near its top. True when it changed state.
     pub fn poll(&mut self, tx: &mut Tx) -> bool {
         let mut changed = self.expire_notice(tx);
-        changed |= self.accounts.poll_read_markers(tx, self.reduced_motion.get());
+        let hold = std::mem::take(&mut self.landed_at_once);
+        changed |= self.accounts.poll_read_markers(tx, self.reduced_motion.get(), hold);
         let now = std::time::Instant::now();
         for command in self.receipts.due(now) {
             self.dispatch(command, Purpose::Read);
