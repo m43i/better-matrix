@@ -503,6 +503,10 @@ pub fn timeline(
     if revision != 0 {
         list = list.virtual_rows_version(revision);
     }
+    // History lands whole, in this timeline only: news elsewhere in the window keeps its motion.
+    if timeline.is_some_and(|t| t.landing != crate::state::Landing::Idle) {
+        list = list.instant_changes();
+    }
     let flag = Arc::clone(near_top);
     let bottom = at_bottom.map(Arc::clone);
     // Short timelines sit at the bottom, by the composer, as in chat apps: the frame takes the
@@ -697,7 +701,7 @@ fn message_row(
     } else {
         // A long name is cut short, keeping the time beside it within the message's width.
         let name = text(message.sender_name.clone())
-            .key(cx.key(&format!("sender-name-{}", message.event_id)))
+            .key(format!("{key}-sender-name"))
             .font(font::BODY_STRONG)
             .color(p.text)
             .shrink()
@@ -738,8 +742,7 @@ fn message_row(
         let shown = cx.data.presence.get(&message.sender_id);
         let face =
             media_avatar(&message.sender_id, &message.sender_name, message.sender_avatar.as_ref(), cx.media, AVATAR);
-        let face =
-            with_presence(face, AVATAR, shown, p.bg, p).key(cx.key(&format!("sender-face-{}", message.event_id)));
+        let face = with_presence(face, AVATAR, shown, p.bg, p).key(format!("{key}-sender-face"));
         let face = match shown.and_then(presence_text) {
             Some(words) => face.help(words),
             None => face,

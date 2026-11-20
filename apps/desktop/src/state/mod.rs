@@ -51,7 +51,9 @@ use matrix_core::{
 use rune::{TextEdit, Tx};
 
 pub use accounts::READ_MARKER_FADE;
-pub use accounts::{AccountData, Accounts, EntryView, RoomTimeline, Scope, TimelineItem, now_ms, wants_attention};
+pub use accounts::{
+    AccountData, Accounts, EntryView, Landing, RoomTimeline, Scope, TimelineItem, now_ms, wants_attention,
+};
 pub use attachments::{AttachmentAction, can_open_attachment};
 pub use call::Call;
 pub use call_layout::{CallLayout, CallTile};
@@ -794,9 +796,6 @@ pub struct State {
     pub at_bottom: Arc<AtomicBool>,
     /// The same for the thread panel.
     pub thread_near_top: Arc<AtomicBool>,
-    /// A timeline's change in this frame lands at once (its first content, or history): a read
-    /// marker's fade waits a frame rather than landing with it, its row left blank.
-    landed_at_once: bool,
     /// The timelines the engine is following: the room on screen and its open thread.
     open_timelines: Vec<(AccountId, TimelineKey)>,
     /// Subscriptions that have delivered their first snapshot; warm UI rows can precede it.
@@ -877,7 +876,6 @@ impl State {
             near_top: Arc::new(AtomicBool::new(false)),
             at_bottom: Arc::new(AtomicBool::new(false)),
             thread_near_top: Arc::new(AtomicBool::new(false)),
-            landed_at_once: false,
             open_timelines: Vec::new(),
             timelines_ready: HashSet::new(),
             engine,
@@ -1209,26 +1207,27 @@ impl State {
                 // A timeline's first content lands as it is, rather than easing in row by row,
                 // and so does the history that fills it after: a room opened with a few cached
                 // messages would otherwise build up from the bottom whenever the frame its page
-                // arrives in animates (input in it, or the read marker's fade). Only news, at
-                // the end, eases in.
-                if diffs.iter().any(|diff| matches!(diff, matrix_core::TimelineDiff::Reset(_))) {
+                // arrives in animates (input in it, or the read marker's fade). The history
+                // lands in its own timeline only; news, at the end, eases in.
+                let reset = diffs.iter().any(|diff| matches!(diff, matrix_core::TimelineDiff::Reset(_)));
+                if reset {
                     if key.thread.is_none() {
                         tx.settle();
                     } else {
                         // A thread snapshot must not repin the room's sticky viewport.
                         tx.instant();
                     }
-                    self.landed_at_once = true;
-                } else if self
-                    .accounts
-                    .get(&account)
-                    .and_then(|data| data.timeline(&key))
-                    .is_some_and(|timeline| timeline.adds_history(&diffs))
-                {
-                    tx.instant();
-                    self.landed_at_once = true;
                 }
+                let history = reset
+                    || self
+                        .accounts
+                        .get(&account)
+                        .and_then(|data| data.timeline(&key))
+                        .is_some_and(|timeline| timeline.adds_history(&diffs));
                 if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
+                    if history {
+                        timeline.landing = Landing::Due;
+                    }
                     timeline.apply(diffs);
                     if incoming_while_away {
                         timeline.show_read_marker();
@@ -2013,8 +2012,7 @@ impl State {
     /// scrolled near its top. True when it changed state.
     pub fn poll(&mut self, tx: &mut Tx) -> bool {
         let mut changed = self.expire_notice(tx);
-        let hold = std::mem::take(&mut self.landed_at_once);
-        changed |= self.accounts.poll_read_markers(tx, self.reduced_motion.get(), hold);
+        changed |= self.accounts.poll_timelines(tx, self.reduced_motion.get());
         let now = std::time::Instant::now();
         for command in self.receipts.due(now) {
             self.dispatch(command, Purpose::Read);

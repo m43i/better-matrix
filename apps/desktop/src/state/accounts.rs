@@ -186,9 +186,24 @@ pub struct RoomTimeline {
     /// Changes whenever the timeline may have, and is never the same for two timelines: the
     /// view replans its rows only when it does. 0 for one never changed.
     pub revision: u64,
+    /// Whether the view lands this frame's rows whole rather than easing them in: history and
+    /// a timeline's first content do ([`RoomTimeline::adds_history`]).
+    pub landing: Landing,
     /// Each sender's latest name and picture, for read indicators, at the revision it was
     /// built for.
     senders: std::sync::Mutex<Option<(u64, SenderIndex)>>,
+}
+
+/// Where a timeline's whole-landing change stands, frame by frame: it lands in the view of the
+/// frame after it arrives, and only that one, so news after it eases in again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Landing {
+    #[default]
+    Idle,
+    /// Arrived since the last frame began.
+    Due,
+    /// Landing in this frame's view.
+    Now,
 }
 
 /// Senders by user ID, as [`RoomTimeline::sender`] keeps them.
@@ -1014,10 +1029,17 @@ pub struct Accounts {
 }
 
 impl Accounts {
-    pub fn poll_read_markers(&mut self, tx: &mut Tx, reduced_motion: bool, hold: bool) -> bool {
+    /// Moves each timeline's [`Landing`] on a frame, and starts or ends read markers' fades: a
+    /// fade waits while a change lands whole, which would land it too.
+    pub fn poll_timelines(&mut self, tx: &mut Tx, reduced_motion: bool) -> bool {
+        let hold = self.list.iter().any(|account| account.timelines.values().any(|t| t.landing == Landing::Due));
         let mut changed = false;
         for account in &mut self.list {
             for timeline in account.timelines.values_mut() {
+                timeline.landing = match timeline.landing {
+                    Landing::Due => Landing::Now,
+                    Landing::Now | Landing::Idle => Landing::Idle,
+                };
                 changed |= timeline.poll_read_marker(tx, reduced_motion, hold);
             }
         }
