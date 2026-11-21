@@ -1815,6 +1815,33 @@ fn opening_a_batch_should_fetch_the_previews_its_strip_shows() {
 }
 
 #[test]
+fn a_failed_fetch_from_an_earlier_showing_should_not_fail_the_item_shown_again() {
+    let (mut s, mut commands) = batch_preview(0);
+    let original = |sent: Vec<(RequestId, Command)>| {
+        sent.into_iter()
+            .find(|(_, c)| matches!(c, Command::FetchMedia { size: MediaSize::Original, .. }))
+            .map(|(request, _)| request)
+            .unwrap()
+    };
+    let earlier = original(drain(&mut commands));
+    s.step_preview(1);
+    s.step_preview(-1);
+    let latest = original(drain(&mut commands));
+    apply(&mut s, Event::Finished { request: earlier, result: Err("gone".into()) });
+    assert!(matches!(
+        &s.preview,
+        Some(Preview { content: PreviewContent::Image { status: ImageStatus::Downloading, .. }, .. })
+    ));
+    let bytes: Arc<[u8]> = include_bytes!("../../../../packaging/icons/better-matrix-256.png").as_slice().into();
+    let media = MediaRef::opaque("better-matrix.png");
+    apply(&mut s, Event::MediaLoaded { request: latest, media, size: MediaSize::Original, bytes });
+    assert!(matches!(
+        &s.preview,
+        Some(Preview { content: PreviewContent::Image { status: ImageStatus::Decoding(_), .. }, .. })
+    ));
+}
+
+#[test]
 fn moving_on_from_a_clip_playing_in_the_preview_should_pause_it() {
     let (mut s, _) = batch_preview(2);
     s.toggle_preview_playback();

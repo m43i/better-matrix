@@ -67,7 +67,7 @@ export default function PreviewScreen() {
   );
 
   const gallery = useStore(
-    (s) => previewGallery(timeline(s, account, key).entries, eventId),
+    (s) => previewGallery(timeline(s, account, key).entries, eventId, thread ?? null),
     shallow,
   );
 

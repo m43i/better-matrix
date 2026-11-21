@@ -317,7 +317,8 @@ Date: 2026-11-16
     (`state/gallery.ts`, the desktop's rule): from the opened message, backwards and forwards
     while the neighbour is an attachment from the same sender, the later of each pair within
     5 minutes of the earlier and not a reply. Read markers and entries the timeline doesn't
-    draw don't break it; a date divider, a room event or any other message does. Of the run the
+    draw don't break it; a date divider, a room event, any other message or a thread's root
+    (its replies start their own run under it) does. Of the run the
     previewable items stay (images with a picture, videos and audio with a file). Two or more
     get a strip of thumbnails along the bottom (`ui/preview/GalleryStrip.tsx`, the timeline's
     preview sizes, so they are usually cached; the current one ringed in the accent and

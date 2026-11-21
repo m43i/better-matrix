@@ -241,8 +241,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     nothing drawn between them (read markers and undrawn entries don't break it; any other
     message, a room event or a date divider does), the previewable ones kept. Two or more get a
     strip of thumbnails along the bottom (the batch's previews, fetched like the timeline's
-    rows on screen; else the kind's icon; it scrolls sideways when they don't fit, and the arrow keys keep the current one in
-    view), arrows at the sides, and "2 of 4" beside the name. Left and Right (when nothing
+    rows on screen; else the kind's icon; it scrolls sideways when they don't fit, and whatever moves the
+    preview, opening included, scrolls the current one into view on the next `poll`), arrows at the sides, and "2 of 4" beside the name. Left and Right (when nothing
     focused takes them, as a scrubber does), the side arrows or a thumbnail step through it,
     round past either end (`State::step_preview`, `State::show_preview_item`). Leaving an item
     lets go of it: a PDF render stops, a video's player is dropped, a clip pauses; closing does
@@ -252,6 +252,13 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     the timeline's voice card at 420 points under a large audio glyph
     (`timeline::audio_player`): it plays through `State::audio` like any card, so speed,
     scrubbing and the saved copy are the same. It waits for play; moving past it stays quiet.
+  - Each showing of an item is numbered (`Preview::visit`) and its file's fetch carries the
+    number (`Purpose::Preview`): what an earlier showing of the same file asked for, failed or
+    not, is dropped. A PDF render's pages carry the render's number
+    (`DocumentStatus::Rendering`), so pages an earlier render still sends are dropped too.
+  - Linux packages require GStreamer's base and good plugins (playbin, MP4, WebM, VP8/VP9) and
+    recommend libav (H.264, HEVC; required on Arch). The AppImage bundles GStreamer whole
+    (linuxdeploy's GStreamer plugin): its core with the build machine's plugins, and nothing else.
   - Video saves the original to the scratch folder once a run (`SaveMedia`, the scratch file
     map clips use), then plays from there, at once (`platform::video::Player`). Rune's player
     covers macOS (AVFoundation) and Windows (Media Foundation), on the system's default

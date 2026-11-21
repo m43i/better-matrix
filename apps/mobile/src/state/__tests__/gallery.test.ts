@@ -80,6 +80,15 @@ describe('attachmentBatch', () => {
     expect(ids(attachmentBatch(entries, 'a'))).toEqual(['a', 'b']);
   });
 
+  it('should end the run at a thread’s root, above its replies', () => {
+    const entries = [sent('root', 0), sent('a', 1), sent('b', 2)];
+
+    expect([
+      ids(attachmentBatch(entries, 'a', 'root')),
+      ids(attachmentBatch(entries, 'root', 'root')),
+    ]).toEqual([['a', 'b'], ['root']]);
+  });
+
   it('should end the run at a reply', () => {
     const entries = [sent('a', 0), sent('b', 1, 'Image', { reply_to: quote }), sent('c', 2)];
 

@@ -83,6 +83,9 @@ pub struct Preview {
     /// it stands alone.
     pub batch: Vec<PreviewItem>,
     pub index: usize,
+    /// Which showing of an item this is, counted across previews: what its file's fetch carries,
+    /// so a fetch from an earlier showing of the same file is told apart.
+    pub visit: u64,
 }
 
 /// One attachment of a preview's batch.

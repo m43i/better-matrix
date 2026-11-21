@@ -41,10 +41,11 @@ overrides:
       - libglib2.0-0t64 | libglib2.0-0
       - libgstreamer1.0-0
       - libgstreamer-plugins-base1.0-0
-      # playbin, the player itself.
+      # playbin, the player itself, and MP4, WebM and VP8/VP9.
       - gstreamer1.0-plugins-base
-    recommends:
       - gstreamer1.0-plugins-good
+    recommends:
+      # H.264 and HEVC, which phones record.
       - gstreamer1.0-libav
       - libxkbcommon0
       - libwayland-client0
@@ -58,8 +59,8 @@ overrides:
       - glib2
       - gstreamer1
       - gstreamer1-plugins-base
-    recommends:
       - gstreamer1-plugins-good
+    recommends:
       - libxkbcommon
       - libwayland-client
       - vulkan-loader
@@ -71,10 +72,10 @@ overrides:
       - glib2
       - gstreamer
       - gst-plugins-base
+      - gst-plugins-good
+      - gst-libav
       - libxkbcommon
       - wayland
       - vulkan-icd-loader
     suggests:
       - pipewire
-      - gst-plugins-good
-      - gst-libav

@@ -26,6 +26,7 @@ fn the_cached_thumbnail_should_stay_in_place_when_the_original_arrives() {
         media: MediaRef::opaque("picture"),
         batch: Vec::new(),
         index: 0,
+        visit: 0,
         content: PreviewContent::Image { thumbnail: Some(image.clone()), status: ImageStatus::Downloading },
     };
     let mut state = State::detached();
@@ -140,4 +141,29 @@ fn pressing_an_audio_card_beside_its_controls_should_open_it_in_the_preview() {
     rt.frame(1.0 / 60.0);
     assert!(matches!(&rt.state.preview, Some(Preview { index: 2, content: PreviewContent::Audio, .. })));
     assert!(rt.state.audio.is_none(), "opening it should not play it");
+}
+
+#[test]
+fn opening_the_last_of_a_long_batch_should_scroll_its_thumbnail_into_view() {
+    let files: Vec<Attachment> = (0..40)
+        .map(|i| Attachment {
+            kind: AttachmentKind::Image,
+            name: format!("photo-{i}.png"),
+            size: None,
+            media: Some(MediaRef::opaque(&format!("photo-{i}"))),
+            thumbnail: None,
+            dimensions: Some((100, 100)),
+            audio: None,
+        })
+        .collect();
+    let last = files[39].clone();
+    let mut rt = runtime(move |s| {
+        demo::post_batch(s, files);
+        s.open_attachment(&matrix_core::TimelineKey::room(demo::DEMO_THREAD.0), "$batch-39", &last);
+    });
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    let ([strip_x, _, strip_w, _], _) = rt.presented("preview-strip").expect("the strip");
+    let ([x, _, w, _], _) = rt.presented("preview-thumb-39").expect("the last thumbnail");
+    assert!(x >= strip_x - 0.5 && x + w <= strip_x + strip_w + 0.5, "{x}+{w} outside {strip_x}+{strip_w}");
 }

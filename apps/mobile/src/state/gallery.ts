@@ -67,10 +67,15 @@ function neighbour(entries: readonly TimelineEntry[], index: number, step: 1 | -
 /**
  * The batch the attachment message `eventId` belongs to, oldest first: the run of attachment
  * messages around it from its sender, each within the batch window of the one before and none a
- * reply. A date divider, a room event or another message ends the run. Empty when `eventId`
- * isn't an attachment message in `entries`.
+ * reply. A date divider, a room event or another message ends the run, as does a thread's
+ * `root` (the replies start their own run under it, as the timeline draws them). Empty when
+ * `eventId` isn't an attachment message in `entries`.
  */
-export function attachmentBatch(entries: readonly TimelineEntry[], eventId: string): Message[] {
+export function attachmentBatch(
+  entries: readonly TimelineEntry[],
+  eventId: string,
+  root: string | null = null,
+): Message[] {
   const at = entries.findIndex(
     (e) => e.kind.type === 'Message' && e.kind.data.event_id === eventId,
   );
@@ -90,7 +95,8 @@ export function attachmentBatch(entries: readonly TimelineEntry[], eventId: stri
       next;
       next = neighbour(entries, next.index, step)
     ) {
-      const linked = step < 0 ? sameBatch(next.message, current) : sameBatch(current, next.message);
+      const [earlier, later] = step < 0 ? [next.message, current] : [current, next.message];
+      const linked = earlier.event_id !== root && sameBatch(earlier, later);
 
       if (!linked) break;
       run.push(next.message);
@@ -107,8 +113,12 @@ export function attachmentBatch(entries: readonly TimelineEntry[], eventId: stri
  * What the preview opened at `eventId` steps through: the previewable attachments of its batch,
  * the opened one always among them. Two or more get the preview's strip of thumbnails.
  */
-export function previewGallery(entries: readonly TimelineEntry[], eventId: string): Message[] {
-  return attachmentBatch(entries, eventId).filter((message) => {
+export function previewGallery(
+  entries: readonly TimelineEntry[],
+  eventId: string,
+  root: string | null = null,
+): Message[] {
+  return attachmentBatch(entries, eventId, root).filter((message) => {
     const attachment = attachmentOf(message);
 
     return message.event_id === eventId || (attachment !== null && previewable(attachment));

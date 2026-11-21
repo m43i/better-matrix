@@ -129,9 +129,15 @@ pub fn batch_attachments() -> Vec<Attachment> {
 /// [`batch_attachments`] as Grace's messages in #general, a minute apart, the picture and the
 /// video's poster loaded.
 pub fn batch_messages(s: &mut State) {
+    post_batch(s, batch_attachments());
+}
+
+/// `files` as Grace's messages in #general, a minute apart, the first two previews loaded.
+pub fn post_batch(s: &mut State, files: Vec<Attachment>) {
     seed(s);
     s.select_room(DEMO_THREAD.0);
-    let entries = batch_attachments()
+    let entries = files
+        .clone()
         .into_iter()
         .enumerate()
         .map(|(i, file)| TimelineEntry {
@@ -156,7 +162,7 @@ pub fn batch_messages(s: &mut State) {
     );
     s.media.attach(std::sync::Arc::new(|| {}));
     let icon: std::sync::Arc<[u8]> = include_bytes!("../../../packaging/icons/better-matrix-256.png").as_slice().into();
-    for file in batch_attachments().into_iter().take(2) {
+    for file in files.into_iter().take(2) {
         if let Some((media, _)) = file.preview() {
             s.media.loaded(media, icon.clone(), Some((256, 256)));
         }

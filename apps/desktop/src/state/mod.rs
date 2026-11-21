@@ -583,8 +583,8 @@ enum Purpose {
     /// Sending a phone number's code.
     ContactConfirm(ContactKind),
     AccountPage,
-    /// The full file behind the open preview.
-    Preview(MediaRef),
+    /// The full file behind the open preview, for the showing ([`Preview::visit`]) that asked.
+    Preview(u64),
     /// Saving a previewed video in scratch to play it.
     Video {
         media: MediaRef,
@@ -704,6 +704,10 @@ pub struct State {
     scratch_files: HashMap<MediaRef, ScratchFile>,
     /// The [`AudioClip::id`] of the clip picked last.
     last_audio_id: u64,
+    /// The [`Preview::visit`] of the item shown last.
+    preview_visits: u64,
+    /// The preview's item changed: the next `poll` scrolls the strip to its thumbnail.
+    reveal_thumbnail: bool,
     /// Accounts whose sidebar layout changed while a save was under way.
     layout_unsaved: HashSet<AccountId>,
     /// What [`State::clock`] read when the view last showed it.
@@ -836,6 +840,8 @@ impl State {
             decoded_audio: Vec::new(),
             scratch_files: HashMap::new(),
             last_audio_id: 0,
+            preview_visits: 0,
+            reveal_thumbnail: false,
             layout_unsaved: HashSet::new(),
             clock_shown: None,
             typing: typing::Typing::default(),
@@ -1371,7 +1377,10 @@ impl State {
                 }
             }
             Event::MediaLoaded { request, media, bytes, .. } => match self.pending.get(&request) {
-                Some(Purpose::Preview(_)) => self.preview_loaded(&media, bytes),
+                Some(Purpose::Preview(visit)) => {
+                    let visit = *visit;
+                    self.preview_loaded(visit, bytes);
+                }
                 Some(Purpose::CopyImage) => self.shell.copy_image(bytes),
                 Some(Purpose::Media { dimensions, .. }) => {
                     let dimensions = *dimensions;
@@ -1820,8 +1829,8 @@ impl State {
                 self.notice = Some(error);
             }
             Purpose::Profile | Purpose::AccountPage => self.notice = Some(error),
-            Purpose::Preview(media) => {
-                if let Some(preview) = self.preview.as_mut().filter(|preview| preview.media == media) {
+            Purpose::Preview(visit) => {
+                if let Some(preview) = self.preview.as_mut().filter(|preview| preview.visit == visit) {
                     match &mut preview.content {
                         PreviewContent::Document { status, .. } => *status = DocumentStatus::Failed(error),
                         PreviewContent::Image { status, .. } => *status = ImageStatus::Failed(error),
@@ -2040,6 +2049,12 @@ impl State {
         // Images decoded since the last frame count at their exact size from now on.
         changed |= self.media.measure();
         changed |= self.preview.as_mut().is_some_and(|preview| preview.content.poll());
+        // However the preview moved (a key, an arrow, a thumbnail, opening), its thumbnail shows.
+        if std::mem::take(&mut self.reveal_thumbnail)
+            && let Some(preview) = self.preview.as_ref().filter(|preview| preview.batch.len() > 1)
+        {
+            tx.scroll_into_view_in("preview-strip", format!("preview-thumb-{}", preview.index));
+        }
         changed |= self.call.as_mut().is_some_and(Call::measure_videos);
         self.retry_due(now, tx);
         changed |= self.search_people(now);
@@ -3154,7 +3169,10 @@ impl State {
         self.close_preview();
         let content = self.preview_content(attachment);
         let (attachment, item) = (attachment.clone(), batch[index].attachment.clone());
-        self.preview = Some(Preview { account, attachment, media, content, batch, index });
+        self.preview_visits += 1;
+        self.reveal_thumbnail = true;
+        let visit = self.preview_visits;
+        self.preview = Some(Preview { account, attachment, media, content, batch, index, visit });
         self.load_preview_item(&item);
         self.request_timeline_media();
     }
@@ -3180,7 +3198,10 @@ impl State {
         self.leave_preview_item();
         self.popover = None;
         let content = self.preview_content(&item.attachment);
+        self.preview_visits += 1;
+        self.reveal_thumbnail = true;
         let Some(preview) = self.preview.as_mut() else { return };
+        preview.visit = self.preview_visits;
         preview.index = index;
         preview.attachment = item.attachment.clone();
         preview.media = media;
@@ -3204,11 +3225,11 @@ impl State {
     /// video's saved to play (once a run, like a clip's). A clip waits for play.
     fn load_preview_item(&mut self, attachment: &matrix_core::Attachment) {
         let Some(preview) = &self.preview else { return };
-        let (account, media) = (preview.account.clone(), preview.media.clone());
+        let (account, media, visit) = (preview.account.clone(), preview.media.clone(), preview.visit);
         match preview.content {
             PreviewContent::Image { .. } | PreviewContent::Document { .. } => {
-                let command = Command::FetchMedia { account, media: media.clone(), size: MediaSize::Original };
-                self.dispatch(command, Purpose::Preview(media));
+                let command = Command::FetchMedia { account, media, size: MediaSize::Original };
+                self.dispatch(command, Purpose::Preview(visit));
             }
             PreviewContent::Video { .. } => match self.scratch_files.get(&media).cloned() {
                 Some(ScratchFile::Saved(path)) => self.open_video(&media, path),
@@ -3292,10 +3313,10 @@ impl State {
         }
     }
 
-    /// The previewed file is here: a picture decodes, a PDF renders. Only a preview still
-    /// waiting takes it, so a fetch from an earlier visit to the same file starts nothing twice.
-    fn preview_loaded(&mut self, media: &MediaRef, bytes: std::sync::Arc<[u8]>) {
-        let Some(preview) = self.preview.as_mut().filter(|preview| preview.media == *media) else { return };
+    /// The previewed file is here, for the showing `visit`: a picture decodes, a PDF renders.
+    /// What an earlier showing of the same file asked for is dropped, as is a second answer.
+    fn preview_loaded(&mut self, visit: u64, bytes: std::sync::Arc<[u8]>) {
+        let Some(preview) = self.preview.as_mut().filter(|preview| preview.visit == visit) else { return };
         match &mut preview.content {
             PreviewContent::Image { status: status @ ImageStatus::Downloading, .. } => {
                 if let Some(image) = self.media.decode(bytes) {
