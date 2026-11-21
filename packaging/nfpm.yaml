@@ -57,14 +57,14 @@ overrides:
       - libc.so.6(GLIBC_2.35)(64bit)
       - alsa-lib
       - glib2
-      # GStreamer by its libraries, which Fedora and openSUSE package under different names.
+      # GStreamer by its libraries, and its plugins (playbin; MP4, WebM, VP8/VP9) by either name:
+      # Fedora and openSUSE package them differently.
       - libgstreamer-1.0.so.0()(64bit)
       - libgstapp-1.0.so.0()(64bit)
       - libgstvideo-1.0.so.0()(64bit)
+      - (gstreamer1-plugins-base or gstreamer-plugins-base)
+      - (gstreamer1-plugins-good or gstreamer-plugins-good)
     recommends:
-      # playbin and the common formats (Fedora's names; elsewhere a weak dependency is skipped).
-      - gstreamer1-plugins-base
-      - gstreamer1-plugins-good
       - libxkbcommon
       - libwayland-client
       - vulkan-loader

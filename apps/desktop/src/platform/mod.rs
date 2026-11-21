@@ -52,6 +52,7 @@ impl std::fmt::Debug for Shell {
 impl Shell {
     /// The real services, delivering results to the app through `app`.
     pub fn native(app: AppHandle<State>, prefs: Prefs, scratch: std::path::PathBuf) -> Self {
+        video::prepare();
         let notifier = notify::system(app.clone());
         Self {
             updates: updates::start(app.clone(), scratch.with_file_name("updates")),

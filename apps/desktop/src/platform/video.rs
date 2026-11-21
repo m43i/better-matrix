@@ -22,6 +22,21 @@ pub enum Playback {
     Failed(String),
 }
 
+/// Readies the platform's player off the UI thread, at launch: GStreamer's first start scans
+/// its plugins (seconds with no registry cached yet), which the first video would otherwise
+/// wait for on the UI thread. Elsewhere, nothing to do.
+pub fn prepare() {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let started = std::thread::Builder::new().name("gstreamer".into()).spawn(|| {
+            if let Err(error) = gstreamer::init() {
+                eprintln!("better-matrix: GStreamer didn't start, so videos won't play: {error}");
+            }
+        });
+        drop(started);
+    }
+}
+
 /// How close to its end, in seconds, a video counts as at its end: play there starts it over.
 const END: f64 = 0.05;
 
@@ -562,7 +577,11 @@ mod tests {
              ! webmmux name=m ! filesink location={} audiotestsrc num-buffers=90 ! audioconvert ! opusenc ! m.",
             "clip.webm",
         );
+        // GStreamer started already (`encoded`, as `prepare` does at launch): opening is quick
+        // enough for the UI thread.
+        let opening = std::time::Instant::now();
         let player = Player::open(path, None, std::sync::Arc::new(|| {}));
+        assert!(opening.elapsed() < Duration::from_millis(250), "opening took {:?}", opening.elapsed());
         until(&player, &|p| p.playback() == Playback::Playing && p.natural_size().is_some());
         assert_eq!(player.natural_size(), Some((320, 240)));
         assert!(player.duration().is_some_and(|d| (d - 2.0).abs() < 0.2), "{:?}", player.duration());
