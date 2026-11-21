@@ -1,13 +1,15 @@
 // The attachment preview, full screen on black: an image to pinch, pan and double-tap to zoom,
-// or a video in the platform's player; who sent it and when at the top, with share, save and
-// close.
+// a video in the platform's player, or an audio clip in a player of our own; who sent it and
+// when at the top, with share, save and close. When the sender posted it in a batch with other
+// attachments (`state/gallery.ts`), a strip of thumbnails runs along the bottom and a swipe
+// sideways steps through them, round past either end.
 
 import type { Attachment } from '@better-matrix/matrix-native/types';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   GestureDetector,
@@ -22,8 +24,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { t } from '../i18n';
 import { routes } from '../routes';
-import { attachmentPreview, findMessage } from '../state/messages';
-import { useAppStore, useStore } from '../state/react';
+import { previewGallery, showsStrip, stepGallery } from '../state/gallery';
+import { attachmentPreview } from '../state/messages';
+import { shallow, useAppStore, useStore } from '../state/react';
 import { timeline } from '../state/selectors';
 import { roomKey, threadKey } from '../state/timeline';
 import { sentAt } from '../state/timelineText';
@@ -31,11 +34,20 @@ import { font } from '../theme/palette';
 import { Icon, type IconName } from '../ui/icons';
 import { useNow } from '../ui/shell/useNow';
 import { ORIGINAL, PREVIEW_SIZE, useMedia } from '../ui/media';
+import { AudioPreview } from '../ui/preview/AudioPreview';
+import { GalleryStrip, STRIP_HEIGHT } from '../ui/preview/GalleryStrip';
+import { useSwipe } from '../ui/preview/swipe';
 import { saveAttachment, shareAttachment } from '../ui/timeline/files';
 
 const MAX_ZOOM = 5;
 
 const DOUBLE_TAP_ZOOM = 2.5;
+
+/** The top bar's height under the status bar. */
+const BAR = 56;
+
+/** The bottom of a video the platform's controls take, which a swipe leaves to them. */
+const VIDEO_CONTROLS = 120;
 
 export default function PreviewScreen() {
   const { account, roomId, eventId, thread } = useLocalSearchParams<{
@@ -54,10 +66,35 @@ export default function PreviewScreen() {
     [roomId, thread],
   );
 
-  const message = useStore((s) => findMessage(timeline(s, account, key).entries, eventId));
+  const gallery = useStore(
+    (s) => previewGallery(timeline(s, account, key).entries, eventId),
+    shallow,
+  );
+
+  // The item on screen, which the strip and swipes move; the opened one at first.
+  const [current, setCurrent] = useState(eventId);
+  const found = gallery.findIndex((m) => m.event_id === current);
+  const index = found < 0 ? gallery.findIndex((m) => m.event_id === eventId) : found;
+  const message = gallery[index] ?? null;
   const attachment = message?.content.type === 'Attachment' ? message.content.data : null;
+  const strip = showsStrip(gallery);
   const [busy, setBusy] = useState(false);
-  const showActions = () => router.push(routes.attachmentActions(account, roomId, eventId, thread));
+
+  const showActions = () => {
+    if (message) router.push(routes.attachmentActions(account, roomId, message.event_id, thread));
+  };
+
+  const step = useCallback(
+    (by: 1 | -1) => {
+      const next = gallery[stepGallery(index, by, gallery.length)];
+
+      if (next) setCurrent(next.event_id);
+    },
+    [gallery, index],
+  );
+
+  const onSwipe = strip ? step : null;
+  const frame = { top: insets.top + BAR, bottom: insets.bottom + (strip ? STRIP_HEIGHT : 0) };
 
   const run = (action: typeof shareAttachment) => {
     if (!attachment) return;
@@ -68,11 +105,34 @@ export default function PreviewScreen() {
   return (
     <View style={styles.screen} testID="preview">
       <StatusBar style="light" />
-      {attachment ? (
+      {message && attachment ? (
+        // Keyed by message, so moving on releases the item before: a video or clip stops.
         attachment.kind === 'Video' ? (
-          <VideoContent account={account} attachment={attachment} />
+          <VideoContent
+            key={message.event_id}
+            account={account}
+            attachment={attachment}
+            frame={frame}
+            onSwipe={onSwipe}
+          />
+        ) : attachment.kind === 'Audio' ? (
+          <AudioPreview
+            key={message.event_id}
+            account={account}
+            attachment={attachment}
+            style={frame}
+            onSwipe={onSwipe}
+            onLongPress={showActions}
+          />
         ) : (
-          <ImageContent account={account} attachment={attachment} onLongPress={showActions} />
+          <ImageContent
+            key={message.event_id}
+            account={account}
+            attachment={attachment}
+            frame={strip ? { top: 0, bottom: frame.bottom } : null}
+            onSwipe={onSwipe}
+            onLongPress={showActions}
+          />
         )
       ) : (
         <Text style={[font.body, styles.status]}>{t('mobile.conversation.message_missing')}</Text>
@@ -122,6 +182,15 @@ export default function PreviewScreen() {
           </>
         ) : null}
       </View>
+      {strip && message ? (
+        <GalleryStrip
+          account={account}
+          items={gallery}
+          current={message.event_id}
+          bottom={insets.bottom}
+          onPick={setCurrent}
+        />
+      ) : null}
     </View>
   );
 }
@@ -151,34 +220,55 @@ function BarButton({
   );
 }
 
+/** Where content goes on screen: clear of the top bar and the gallery's strip. */
+interface Frame {
+  top: number;
+  bottom: number;
+}
+
+type Swipe = ((step: 1 | -1) => void) | null;
+
 /** The image full size, its preview shown while the original loads. */
 function ImageContent({
   account,
   attachment,
+  frame,
+  onSwipe,
   onLongPress,
 }: {
   account: string;
   attachment: Attachment;
+  /** Clear of the strip, when there is one; the whole screen otherwise. */
+  frame: Frame | null;
+  onSwipe: Swipe;
   onLongPress: () => void;
 }) {
   const preview = attachmentPreview(attachment);
   const small = useMedia(account, preview?.media ?? null, preview?.size ?? PREVIEW_SIZE);
   const original = useMedia(account, attachment.media, ORIGINAL);
   const uri = original ?? small;
+  const area = [StyleSheet.absoluteFill, frame];
 
-  if (!uri) return <ActivityIndicator color="#ffffff" style={StyleSheet.absoluteFill} />;
+  if (!uri) return <ActivityIndicator color="#ffffff" style={area} />;
 
-  return <Zoomable uri={uri} label={attachment.name} onLongPress={onLongPress} />;
+  return (
+    <View style={area}>
+      <Zoomable uri={uri} label={attachment.name} onSwipe={onSwipe} onLongPress={onLongPress} />
+    </View>
+  );
 }
 
 /** Pinch to zoom, pan while zoomed, double-tap to zoom in or back out. */
 function Zoomable({
   uri,
   label,
+  onSwipe,
   onLongPress,
 }: {
   uri: string;
   label: string;
+  /** Steps through the gallery while the image isn't zoomed in. */
+  onSwipe: Swipe;
   onLongPress: () => void;
 }) {
   const scale = useSharedValue(1);
@@ -243,7 +333,10 @@ function Zoomable({
     onActivate: onLongPress,
   });
 
-  const gesture = useSimultaneousGestures(pinch, pan, doubleTap, longPress);
+  // Zoomed in, a sideways drag pans the image instead of moving on.
+  const swipe = useSwipe(onSwipe, { canSwipe: () => scale.value <= 1 && savedScale.value <= 1 });
+
+  const gesture = useSimultaneousGestures(pinch, pan, doubleTap, longPress, swipe);
 
   const style = useAnimatedStyle(() => ({
     transform: [{ translateX: x.value }, { translateY: y.value }, { scale: scale.value }],
@@ -265,28 +358,47 @@ function Zoomable({
 }
 
 /** A video in the platform's own player, once its file is here. */
-function VideoContent({ account, attachment }: { account: string; attachment: Attachment }) {
+function VideoContent({
+  account,
+  attachment,
+  frame,
+  onSwipe,
+}: {
+  account: string;
+  attachment: Attachment;
+  frame: Frame;
+  onSwipe: Swipe;
+}) {
   const uri = useMedia(account, attachment.media, ORIGINAL);
 
-  if (!uri) return <ActivityIndicator color="#ffffff" style={StyleSheet.absoluteFill} />;
+  if (!uri) return <ActivityIndicator color="#ffffff" style={[StyleSheet.absoluteFill, frame]} />;
 
-  return <VideoPlayer uri={uri} />;
+  return <VideoPlayer uri={uri} frame={frame} onSwipe={onSwipe} />;
 }
 
-function VideoPlayer({ uri }: { uri: string }) {
-  const insets = useSafeAreaInsets();
-
+/**
+ * The player, made for this video and released when the preview moves on (the content is keyed
+ * by message). A swipe over the picture steps through the gallery; the controls at the bottom
+ * keep their own drags.
+ */
+function VideoPlayer({ uri, frame, onSwipe }: { uri: string; frame: Frame; onSwipe: Swipe }) {
   const player = useVideoPlayer(uri, (p) => {
     p.play();
   });
 
+  const swipe = useSwipe(onSwipe, { bottomInset: VIDEO_CONTROLS });
+
   return (
-    <VideoView
-      player={player}
-      style={[StyleSheet.absoluteFill, { top: insets.top + 56, bottom: insets.bottom }]}
-      contentFit="contain"
-      nativeControls
-    />
+    <GestureDetector gesture={swipe}>
+      <View style={[StyleSheet.absoluteFill, frame]}>
+        <VideoView
+          player={player}
+          style={StyleSheet.absoluteFill}
+          contentFit="contain"
+          nativeControls
+        />
+      </View>
+    </GestureDetector>
   );
 }
 

@@ -16,7 +16,8 @@ runs:
         sudo apt-get install -y -qq --no-install-recommends \
           clang-21 lld-21 pkg-config libclang-dev \
           libglib2.0-dev libasound2-dev \
-          libxkbcommon-dev libwayland-dev libpipewire-0.3-dev
+          libxkbcommon-dev libwayland-dev libpipewire-0.3-dev \
+          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
         {
           echo "CC=clang-21"
           echo "CXX=clang++-21"

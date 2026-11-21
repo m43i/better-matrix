@@ -76,6 +76,8 @@ export const DEMO_MEDIA = {
   screenshot: 'demo-screenshot',
   release: 'demo-release-notes',
   voice: 'demo-voice-memo',
+  /** A video the demo has no file for: its poster shows, the player waits. */
+  walkthrough: 'demo-walkthrough',
 } as const;
 
 /** The voice memo Grace sends: 14 seconds of speech, with the waveform a client sends along. */
@@ -394,6 +396,94 @@ export const READ_BY_SIX = `$demo-${ADA}-9`;
 
 /** Grace's screenshot in #design, an image the demo engine serves. */
 export const SCREENSHOT = `$demo-${GRACE}-1`;
+
+/** The batch Grace posts into #design after Ada asks for the review's material. */
+export const DEMO_BATCH = {
+  first: '$batch-0',
+  second: '$batch-1',
+  video: '$batch-2',
+  audio: '$batch-3',
+} as const;
+
+/**
+ * Ada asks in #design, and Grace answers with four attachments in a row (two images, a video
+ * and an audio clip): one batch, which the preview shows as a gallery.
+ */
+export function batchEvents(): EngineEvent[] {
+  const at = (minutes: number) => DEMO_DAY_MS + (9 * 60 + minutes) * 60_000;
+
+  const grace = (id: string, minutes: number, attachment: Attachment): Message => ({
+    ...blank(),
+    event_id: id,
+    sender_id: GRACE,
+    sender_name: 'Grace Hopper',
+    content: { type: 'Attachment', data: attachment },
+    timestamp_ms: at(minutes),
+  });
+
+  const list: Message[] = [
+    {
+      ...blank(),
+      event_id: '$batch-ask',
+      sender_id: ADA,
+      sender_name: 'Ada Lovelace',
+      content: text('Could you share what we went through in the review?'),
+      timestamp_ms: at(20),
+      editable: true,
+    },
+    grace(
+      DEMO_BATCH.first,
+      24,
+      file('sidebar-before.png', 'Image', {
+        media: DEMO_MEDIA.screenshot,
+        dimensions: [1024, 1024],
+        size: 346_467,
+      }),
+    ),
+    grace(
+      DEMO_BATCH.second,
+      24,
+      file('sidebar-after.png', 'Image', {
+        media: DEMO_MEDIA.release,
+        dimensions: [1200, 630],
+        size: 512_204,
+      }),
+    ),
+    grace(
+      DEMO_BATCH.video,
+      25,
+      file('walkthrough.mp4', 'Video', {
+        media: DEMO_MEDIA.walkthrough,
+        thumbnail: DEMO_MEDIA.release,
+        dimensions: [1280, 720],
+        size: 8_400_000,
+      }),
+    ),
+    grace(
+      DEMO_BATCH.audio,
+      26,
+      file('review-notes.m4a', 'Audio', {
+        media: DEMO_MEDIA.voice,
+        size: 670_000,
+        audio: { voice: false, duration_ms: 14_000, waveform: [] },
+      }),
+    ),
+  ];
+
+  return [
+    {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: { room_id: DESIGN, thread: null },
+        diffs: list.map((m) => ({
+          type: 'PushBack' as const,
+          data: { id: m.event_id, kind: { type: 'Message' as const, data: m } },
+        })),
+      },
+    },
+  ];
+}
 
 function work(): Fixture {
   const room0 = general();

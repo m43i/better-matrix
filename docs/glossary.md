@@ -183,10 +183,15 @@ name (`RoomEvent`, `RoomChange`). Shown as a small line; joins and leaves in a r
 [ADR 0006](adr/0006-timelines.md).
 
 **Attachment preview**
-: An image or PDF shown full size over the window, with download, close and right-click file
-actions (copy image, download, open in the default application; `State::preview`). On phones,
-the full-screen image/video viewer has the same file actions under More and an image long press.
-See [ADR 0007](adr/0007-composer-and-media.md).
+: An image, PDF, video or audio clip shown full size over the window, with download, close and
+right-click file actions (copy image, download, open in the default application;
+`State::preview`). On phones, the full-screen viewer has the same file actions under More and a
+long press. See [ADR 0007](adr/0007-composer-and-media.md).
+
+**Attachment batch**
+: The attachments a sender posted together: the run of their attachment messages the timeline
+groups under one header, with nothing else between them. The attachment preview steps through
+it with a strip of thumbnails, the arrow keys or a swipe (`preview::batch`, `state/gallery.ts`).
 
 **Upload**
 : A file to send: a path on disk or bytes in memory, such as a pasted screenshot (`Upload`).
@@ -255,7 +260,8 @@ reply and attachments while the app runs).
 : A file sent with a message: an image, video, audio clip or other file.
 
 **Preview**
-: The inline image shown for an image attachment: the sender's thumbnail, or a server thumbnail.
+: The inline image shown for an image attachment (the sender's thumbnail, or a server
+thumbnail), or a video's poster (only the sender's thumbnail).
 
 **Notification mode**
 : When a room notifies: all messages, mentions only, or mute. Stored as push rules on the server.

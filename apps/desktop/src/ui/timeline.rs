@@ -29,8 +29,6 @@ use matrix_core::links::LinkPreview;
 /// A timeline row's height before it is measured: a message with its header.
 const ESTIMATED_ROW: f32 = 64.0;
 
-/// Messages from one sender this close together share one header.
-const GROUP_WINDOW_MS: u64 = 5 * 60_000;
 const AVATAR: f32 = 36.0;
 /// A message row's side padding, and the gap between its parts.
 const MESSAGE_PAD_X: f32 = 20.0;
@@ -323,11 +321,7 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
             }
             EntryView::Message(item) => {
                 let message = &item.message;
-                let continues = previous.is_some_and(|prev| {
-                    prev.sender_id == message.sender_id
-                        && message.timestamp_ms.saturating_sub(prev.timestamp_ms) < GROUP_WINDOW_MS
-                        && message.reply_to.is_none()
-                });
+                let continues = previous.is_some_and(|prev| crate::state::continues_group(prev, message));
                 rows.push((row_key(cx.key, &entry.id), Row::Message { entry: at, continues, latest_call: false }));
                 previous = Some(message);
             }
@@ -1015,8 +1009,10 @@ fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Pa
             audio_card(&item.message.event_id, attachment, cx, p)
         }
         (MessageContent::Attachment(attachment), _) => match attachment.preview() {
-            Some((preview, _)) if !media.has_failed(&preview) => image_preview(attachment, cx.content_width, media, p),
-            _ => attachment_card(attachment, cx.content_width, p),
+            Some((preview, _)) if !media.has_failed(&preview) => {
+                image_preview(&item.message.event_id, attachment, cx, p)
+            }
+            _ => attachment_card(&item.message.event_id, attachment, cx, p),
         },
         (MessageContent::Redacted, _) => notice_text(t!("message.deleted"), p),
         (MessageContent::Undecryptable, _) => notice_text(t!("message.undecryptable"), p),
@@ -1172,16 +1168,18 @@ fn link_card(key: &str, url: &str, card: &LinkPreview, max_width: f32, media: &M
     entry.on_press_tx(move |s: &mut State, tx| s.open_link(&opened, tx))
 }
 
-/// An image, scaled to fit [`PREVIEW_BOX`] and `max_width` by the sender's dimensions so the
-/// timeline doesn't jump when it loads; a placeholder of the same size until then. Without the
-/// sender's dimensions, or with ones the picture doesn't match, the loaded picture's own decide.
-fn image_preview(attachment: &Attachment, max_width: f32, media: &MediaCache, p: &Palette) -> El {
-    let image = attachment.preview().and_then(|(media_ref, _)| media.image(&media_ref));
+/// An image or a video's poster, scaled to fit [`PREVIEW_BOX`] and the message's width by the
+/// sender's dimensions so the timeline doesn't jump when it loads; a placeholder of the same size
+/// until then. Without the sender's dimensions, or with ones the picture doesn't match, the loaded
+/// picture's own decide. A video's poster carries a play button.
+fn image_preview(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &Palette) -> El {
+    let max_width = cx.content_width;
+    let image = attachment.preview().and_then(|(media_ref, _)| cx.media.image(&media_ref));
     let loaded = image.and_then(|image| image.size()).map(|[w, h]| (w, h));
     let (w, h) = preview_size(shown_dimensions(attachment.dimensions, loaded));
     let scale = (max_width / w).clamp(0.0, 1.0);
     let (w, h) = (w * scale, h * scale);
-    let opened = attachment.clone();
+    let (opened, key, id) = (attachment.clone(), cx.key.clone(), event_id.to_owned());
     let frame = el()
         .key(format!("image-{}", attachment.name))
         .size(w, h)
@@ -1190,13 +1188,26 @@ fn image_preview(attachment: &Attachment, max_width: f32, media: &MediaCache, p:
         .role("img")
         .label(attachment.name.clone())
         .cursor(rune::Cursor::Pointer)
-        .on_press(move |s: &mut State| s.open_attachment(&opened));
-    match image {
-        Some(image) => frame.pixels_fit(image.pixels(), SurfaceFit::Fit),
+        .on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened));
+    let video = attachment.kind == AttachmentKind::Video;
+    let frame = match image {
+        Some(image) => frame.pixels_fit(image.pixels(), SurfaceFit::Fit).center(),
+        // A video's placeholder is its play button alone.
+        None if video => frame.fill(p.surface).border(1.0, p.divider).center(),
         None => {
             frame.fill(p.surface).border(1.0, p.divider).center().child(icon(&icons::IMAGE, 24.0).color(p.text_muted))
         }
-    }
+    };
+    if video { frame.child(play_badge()) } else { frame }
+}
+
+/// The play button over a video's poster.
+fn play_badge() -> El {
+    el().size(44.0, 44.0)
+        .radius(22.0)
+        .fill(rune::Color::BLACK.alpha(0.55))
+        .center()
+        .child(icon(&icons::PLAY, 22.0).color(rune::Color::WHITE))
 }
 
 /// The dimensions an image preview is sized by: the sender's, unless the `loaded` picture
@@ -1219,8 +1230,9 @@ pub fn preview_size(dimensions: Option<(u32, u32)>) -> (f32, f32) {
     ((w * scale).round(), (h * scale).round())
 }
 
-/// A file's card, up to `max_width` wide: a long name is cut short.
-fn attachment_card(attachment: &Attachment, max_width: f32, p: &Palette) -> El {
+/// A file's card, up to the message's width: a long name is cut short.
+fn attachment_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &Palette) -> El {
+    let max_width = cx.content_width;
     let glyph = match attachment.kind {
         AttachmentKind::Image => &icons::IMAGE,
         AttachmentKind::Video => &icons::VIDEO,
@@ -1232,7 +1244,7 @@ fn attachment_card(attachment: &Attachment, max_width: f32, p: &Palette) -> El {
     if let Some(size) = attachment.size {
         titles = titles.child(text(human_size(size)).font(font::META).color(p.text_muted));
     }
-    let opened = attachment.clone();
+    let (opened, key, id) = (attachment.clone(), cx.key.clone(), event_id.to_owned());
     row()
         .key(format!("file-{}", attachment.name))
         .max_w(max_width.clamp(0.0, 420.0))
@@ -1248,7 +1260,7 @@ fn attachment_card(attachment: &Attachment, max_width: f32, p: &Palette) -> El {
         .role("button")
         .label(attachment.name.clone())
         .cursor(rune::Cursor::Pointer)
-        .on_press(move |s: &mut State| s.open_attachment(&opened))
+        .on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened))
         .child(
             el().size(36.0, 36.0)
                 .radius(6.0)
@@ -1349,7 +1361,27 @@ fn wave_width(bars: usize) -> f32 {
 /// button beside the time steps its speed. A voice memo shows no file name; another audio file
 /// keeps its name above the bars.
 fn audio_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &Palette) -> El {
-    let clip = cx.audio.filter(|clip| Some(&clip.media) == attachment.media.as_ref());
+    let clips = Clips { audio: cx.audio, decoded: cx.decoded_audio, speed: cx.playback_speed };
+    // Beside play, the bars and the speed, a press opens the clip in the preview.
+    let (opened, key, id) = (attachment.clone(), cx.key.clone(), event_id.to_owned());
+    audio_player(event_id, attachment, &clips, cx.content_width, p)
+        .cursor(rune::Cursor::Pointer)
+        .on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened))
+}
+
+/// What an audio card needs to know of the clips playing and played.
+pub struct Clips<'a> {
+    /// The clip playing, if any.
+    pub audio: Option<&'a AudioClip>,
+    /// What clips played here read from their files.
+    pub decoded: &'a [crate::state::DecodedAudio],
+    pub speed: PlaybackSpeed,
+}
+
+/// [`audio_card`] at up to `max_width`, keyed by `event_id`: a message's card, or the preview's
+/// (keyed `preview`).
+pub fn audio_player(event_id: &str, attachment: &Attachment, clips: &Clips<'_>, max_width: f32, p: &Palette) -> El {
+    let clip = clips.audio.filter(|clip| Some(&clip.media) == attachment.media.as_ref());
     let player = clip.and_then(|clip| clip.player.as_ref());
     let playing = player.is_some_and(crate::platform::sound::Player::is_playing);
     // Pause while it plays, or is queued to play once its file comes.
@@ -1358,7 +1390,7 @@ fn audio_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &Pal
     let details = attachment.audio.as_ref();
     let voice = details.is_some_and(|details| details.voice);
     // The sender's waveform; else, once played here, the one read from the file.
-    let decoded = cx.decoded_audio.iter().find(|decoded| attachment.media.as_ref() == Some(&decoded.media));
+    let decoded = clips.decoded.iter().find(|decoded| attachment.media.as_ref() == Some(&decoded.media));
     let mut amplitudes = details.map(|details| details.waveform.clone()).unwrap_or_default();
     if amplitudes.is_empty() {
         amplitudes = player.map(crate::platform::sound::Player::waveform).unwrap_or_default();
@@ -1379,7 +1411,7 @@ fn audio_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &Pal
         _ if moved => duration.map(|duration| duration * f64::from(progress)),
         _ => duration,
     };
-    let (bars, fit) = wave_layout(cx.content_width);
+    let (bars, fit) = wave_layout(max_width);
     let width = wave_width(bars);
 
     let opened = attachment.clone();
@@ -1427,7 +1459,7 @@ fn audio_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &Pal
         footer = footer.child(text(minutes(time)).font(font::META).color(p.text_muted));
     }
     if clip.is_some() {
-        footer = footer.child(el().grow(1.0)).child(speed_button(event_id, cx.playback_speed, p));
+        footer = footer.child(el().grow(1.0)).child(speed_button(event_id, clips.speed, p));
     }
     let wave = waveform(event_id, attachment, &amplitudes, bars, progress, p);
     match fit {
@@ -1437,7 +1469,7 @@ fn audio_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &Pal
 }
 
 /// `seconds` as `m:ss`.
-fn minutes(seconds: f64) -> String {
+pub fn minutes(seconds: f64) -> String {
     let seconds = seconds.max(0.0) as u64;
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }

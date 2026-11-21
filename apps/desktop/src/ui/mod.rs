@@ -176,7 +176,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     // The preview goes over everything, dialogs included.
     let preview = s.preview.as_ref().map(|preview| {
         let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
-        preview::preview(preview, window)
+        preview::preview(s, preview, window, &p)
     });
     if let Some(dialog) = dialog {
         // A dialog stays inside the window, its content scrolling when the window is short.

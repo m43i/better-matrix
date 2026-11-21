@@ -47,6 +47,7 @@ async-stream	0.3.6	MIT
 async-stream-impl	0.3.6	MIT
 async-task	4.7.1	Apache-2.0 OR MIT
 async-trait	0.1.92	MIT OR Apache-2.0
+atomic_refcell	0.1.14	Apache-2.0 OR MIT
 atomic-waker	1.1.2	Apache-2.0 OR MIT
 atspi	0.29.0	Apache-2.0 OR MIT
 atspi-common	0.13.0	Apache-2.0 OR MIT
@@ -253,17 +254,30 @@ getrandom	0.3.4	MIT OR Apache-2.0
 getrandom	0.4.3	MIT OR Apache-2.0
 gif	0.14.2	MIT OR Apache-2.0
 gio-sys	0.21.5	MIT
+gio-sys	0.22.11	MIT
 glib	0.21.5	MIT
+glib	0.22.11	MIT
 glib-macros	0.21.5	MIT
+glib-macros	0.22.11	MIT
 glib-sys	0.21.5	MIT
+glib-sys	0.22.11	MIT
 glifo	0.4.0	Apache-2.0 OR MIT
 glob	0.3.4	MIT OR Apache-2.0
 gloo-timers	0.3.0	MIT OR Apache-2.0
 gloo-timers	0.4.0	MIT OR Apache-2.0
 gloo-utils	0.3.0	MIT OR Apache-2.0
 gobject-sys	0.21.5	MIT
+gobject-sys	0.22.9	MIT
 gpu-allocator	0.28.0	MIT OR Apache-2.0
 growable-bloom-filter	2.1.1	MIT
+gstreamer	0.25.4	MIT OR Apache-2.0
+gstreamer-app	0.25.2	MIT OR Apache-2.0
+gstreamer-app-sys	0.25.4	MIT
+gstreamer-base	0.25.4	MIT OR Apache-2.0
+gstreamer-base-sys	0.25.4	MIT
+gstreamer-sys	0.25.4	MIT
+gstreamer-video	0.25.4	MIT OR Apache-2.0
+gstreamer-video-sys	0.25.4	MIT
 guillotiere	0.7.0	MIT OR Apache-2.0
 h2	0.4.20	MIT
 half	2.7.1	MIT OR Apache-2.0
@@ -351,6 +365,7 @@ js_option	0.2.0	MIT
 js-sys	0.3.107	MIT OR Apache-2.0
 keyring	3.6.3	MIT OR Apache-2.0
 konst	0.4.3	Zlib
+kstring	2.0.5	MIT OR Apache-2.0
 kurbo	0.11.3	Apache-2.0 OR MIT
 kurbo	0.13.1	Apache-2.0 OR MIT
 language-tags	0.3.2	MIT OR Apache-2.0
@@ -421,6 +436,7 @@ miniz_oxide	0.8.9	MIT OR Zlib OR Apache-2.0
 miniz_oxide	0.9.1	MIT OR Zlib OR Apache-2.0
 mio	1.2.4	MIT
 moxcms	0.8.1	BSD-3-Clause OR Apache-2.0
+muldiv	1.0.1	MIT
 multimap	0.10.1	MIT OR Apache-2.0
 multiversion_no_op	1.0.0	Apache-2.0 OR MIT
 naga	30.0.2	MIT OR Apache-2.0
@@ -498,6 +514,7 @@ objc2-user-notifications	0.3.2	Zlib OR Apache-2.0 OR MIT
 object	0.39.1	Apache-2.0 OR MIT
 once_cell	1.21.4	MIT OR Apache-2.0
 openssl-probe	0.2.2	MIT OR Apache-2.0
+option-operations	0.6.1	MIT OR Apache-2.0
 opuscule	0.2.2	MPL-2.0
 orbclient	0.3.55	MIT
 ordered-float	5.5.1	MIT
@@ -513,6 +530,7 @@ parley_data	0.12.0	Apache-2.0 OR MIT
 parley_emoji	0.12.0	MIT
 parley_engine	0.12.0	Apache-2.0 OR MIT
 paste	1.0.15	MIT OR Apache-2.0
+pastey	0.2.3	MIT OR Apache-2.0
 pbjson	0.9.0	MIT
 pbjson-build	0.9.0	MIT
 pbjson-types	0.9.0	MIT
@@ -720,6 +738,7 @@ syn	3.0.10	MIT OR Apache-2.0
 sync_wrapper	1.0.2	Apache-2.0
 synstructure	0.14.0	MIT
 system-deps	7.0.8	MIT OR Apache-2.0
+system-deps	9.0.1	MIT OR Apache-2.0
 taffy	0.15.1	MIT
 target-lexicon	0.13.5	Apache-2.0 WITH LLVM-exception
 tempfile	3.27.0	MIT OR Apache-2.0

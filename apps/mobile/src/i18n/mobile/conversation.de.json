@@ -9,5 +9,7 @@
   "mobile.conversation.message_missing": "Diese Nachricht ist nicht mehr geladen.",
   "mobile.conversation.gif": "GIF",
   "mobile.conversation.play_video": "Video abspielen",
-  "mobile.conversation.open_thread": "Thread öffnen"
+  "mobile.conversation.open_thread": "Thread öffnen",
+  "mobile.conversation.preview_gallery": "Zusammen gesendet",
+  "mobile.conversation.preview_item": "{{name}}, {{index}} von {{count}}"
 }

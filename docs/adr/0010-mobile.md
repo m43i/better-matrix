@@ -304,12 +304,34 @@ Date: 2026-11-16
   the router; release builds never read it. A test boots every scene. The call scenes mirror the
   desktop's: `call-voice`, `call-video`, `call-gallery`, `call-many`, `call-direct`,
   `call-shares`, `call-focus`, `call-chat`, `call-voice-chat`, `call-bar`, `ringing`; the
-  layout menu is native and can't be opened by a scene.
+  layout menu is native and can't be opened by a scene. `preview-gallery` and `preview-audio`
+  open a batch Grace posts into #design (two images, a video the demo has no file for, an
+  audio clip).
+- **The attachment preview** (`app/preview.tsx`) shows one attachment full screen on black: an
+  image to pinch, pan and double-tap to zoom, a video in expo-video's player with the
+  platform's controls, or an audio clip in a player of ours (`ui/preview/AudioPreview.tsx`:
+  large play, a scrubber, time played and length, the timeline's speed setting; one clip at a
+  time through `audioFocus.ts`). Images and videos open it from the timeline; an audio card
+  plays in place from its play button, and a tap elsewhere on it opens it in the preview.
+  - _Gallery of a batch:_ Matrix carries one attachment per message, so a batch is a run
+    (`state/gallery.ts`, the desktop's rule): from the opened message, backwards and forwards
+    while the neighbour is an attachment from the same sender, the later of each pair within
+    5 minutes of the earlier and not a reply. Read markers and entries the timeline doesn't
+    draw don't break it; a date divider, a room event or any other message does. Of the run the
+    previewable items stay (images with a picture, videos and audio with a file). Two or more
+    get a strip of thumbnails along the bottom (`ui/preview/GalleryStrip.tsx`, the timeline's
+    preview sizes, so they are usually cached; the current one ringed in the accent and
+    scrolled into view); a sideways swipe steps through them, round past either end
+    (`ui/preview/swipe.ts`; not while an image is zoomed in, and not over a video's controls),
+    and tapping a thumbnail shows it. The route keeps its one event ID; the item on screen is
+    the screen's own state, and the top bar's sender, time and actions follow it. Each item's
+    content is keyed by its message, so moving on releases the video or clip before it.
 - **File actions:** message sheets offer Copy image only for images with media, plus Open,
   Share and Download; they never offer Copy message for an attachment filename or empty text.
   Attachment surfaces forward long presses to the message sheet, including image/video
   previews and audio controls. The full-screen preview opens a file-only fitted sheet from
-  More or an image long press (`attachment-actions`), preserving the preview when dismissed.
+  More or a long press on an image or audio clip (`attachment-actions`), preserving the
+  preview when dismissed.
   `attachmentActions` supplies both sheets’ file actions; `AttachmentActions` owns their busy
   state and suppresses repeated actions until completion. Copy image fetches the original and
   passes its base64 bytes to `expo-clipboard`. Open uses `File.preview`: Quick Look on iOS,

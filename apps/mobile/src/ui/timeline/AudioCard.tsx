@@ -5,6 +5,7 @@
 
 import type { Attachment, Message } from '@better-matrix/matrix-native/types';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -16,6 +17,7 @@ import {
 } from 'react-native';
 
 import { t } from '../../i18n';
+import { routes } from '../../routes';
 import { cyclePlaybackSpeed } from '../../state/actions/core';
 import { fetchOriginal } from '../../state/actions/timeline';
 import { playTime } from '../../state/messages';
@@ -331,7 +333,7 @@ function CardFace({
   onStep: (step: number) => void;
 }) {
   const palette = usePalette();
-  const { openActions } = useTimelineContext();
+  const { account, timelineKey, thread, openActions } = useTimelineContext();
   const media = attachment.media;
   const details = voiceDetails(attachment.audio);
   const { bars, width } = wave;
@@ -342,6 +344,12 @@ function CardFace({
 
   return (
     <Pressable
+      // Beside play, the bars and the speed, a tap opens the clip in the preview.
+      onPress={() =>
+        router.push(
+          routes.preview(account, timelineKey.room_id, message.event_id, thread ?? undefined),
+        )
+      }
       onLongPress={() => openActions(message)}
       delayLongPress={350}
       accessibilityLabel={details.voice ? t('audio.voice') : attachment.name}

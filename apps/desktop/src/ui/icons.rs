@@ -84,6 +84,8 @@ icons! {
     USER_PLUS = "user-plus": r#"<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/>"#;
     VERIFIED = "verified": r#"<path d="M12 2.5l2.3 1.7 2.9-.1 1 2.7 2.3 1.8-.8 2.8.8 2.8-2.3 1.8-1 2.7-2.9-.1L12 21.5l-2.3-1.7-2.9.1-1-2.7-2.3-1.8.8-2.8-.8-2.8 2.3-1.8 1-2.7 2.9.1z"/><path d="m8.5 12 2.4 2.4 4.6-4.8"/>"#;
     SPEAKER = "speaker": r#"<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/>"#;
+    SPEAKER_OFF = "speaker-off": r#"<path d="M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6"/>"#;
+    REPLAY = "replay": r#"<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>"#;
     PACKAGE = "package": r#"<path d="m21 7.5-9-5-9 5v9l9 5 9-5z"/><path d="m3 7.5 9 5 9-5M12 12.5v9"/>"#;
     PLAY = "play": r#"<path d="M8 5.5v13a1 1 0 0 0 1.5.9l10.4-6.5a1 1 0 0 0 0-1.8L9.5 4.6A1 1 0 0 0 8 5.5z"/>"#;
     PAUSE = "pause": r#"<path d="M8 5v14M16 5v14"/>"#;

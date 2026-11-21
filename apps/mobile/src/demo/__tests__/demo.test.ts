@@ -1,8 +1,18 @@
+import { previewGallery } from '../../state/gallery';
 import { activeAccount } from '../../state/selectors';
 import { timelineId } from '../../state/timeline';
 import { bootDemo } from '../boot';
 import { answer, demoEngine } from '../engine';
-import { ADA, ADA_HOBBY, DEMO_THREAD, GENERAL, TEST_PLAN } from '../fixtures';
+import {
+  ADA,
+  ADA_HOBBY,
+  DEMO_BATCH,
+  DEMO_THREAD,
+  DESIGN,
+  GENERAL,
+  SCREENSHOT,
+  TEST_PLAN,
+} from '../fixtures';
 import { demoScene } from '../link';
 import { scenes, isScene } from '../scenes';
 
@@ -30,6 +40,18 @@ describe('scenes', () => {
       [ADA, ADA_HOBBY],
       ADA,
     ]);
+  });
+
+  it('should post a batch of four attachments into #design for the gallery scene', () => {
+    const design = bootDemo('preview-gallery', noMedia).getState().accounts[0]!.timelines[DESIGN]!;
+    expect(previewGallery(design.entries, DEMO_BATCH.second).map((m) => m.event_id)).toEqual(
+      Object.values(DEMO_BATCH),
+    );
+  });
+
+  it('should leave the lone screenshot without a gallery', () => {
+    const design = bootDemo('preview', noMedia).getState().accounts[0]!.timelines[DESIGN]!;
+    expect(previewGallery(design.entries, SCREENSHOT)).toHaveLength(1);
   });
 
   it('should fill the general room’s timeline', () => {

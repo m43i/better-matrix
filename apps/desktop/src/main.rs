@@ -43,6 +43,9 @@ fn spec() -> AppSpec<State> {
                 });
             }),
             ("demo-attachment-preview", demo::attachment_preview),
+            ("demo-preview-batch", demo::preview_batch),
+            ("demo-preview-video", demo::preview_video),
+            ("demo-preview-audio", demo::preview_audio),
             ("demo-pinned-message", |s| {
                 demo::pinned_messages(s);
                 s.open_thread(demo::DEMO_THREAD.1);
@@ -589,6 +592,18 @@ fn on_key(s: &mut State, key: &KeyEvent, tx: &mut Tx) -> bool {
         }
         Key::Escape if s.preview.is_some() => {
             s.close_preview();
+            true
+        }
+        // The preview's batch, round from either end; a focused scrubber took them already.
+        Key::Left | Key::Right if s.popover.is_none() && s.preview.as_ref().is_some_and(|p| p.batch.len() > 1) => {
+            s.step_preview(if key.key == Key::Left { -1 } else { 1 });
+            if let Some(preview) = &s.preview {
+                tx.scroll_into_view_in("preview-strip", format!("preview-thumb-{}", preview.index));
+            }
+            true
+        }
+        Key::Text(ref typed) if typed == " " && s.popover.is_none() && s.preview.is_some() => {
+            s.toggle_preview_playback();
             true
         }
         Key::Escape if s.modal.is_some() => {

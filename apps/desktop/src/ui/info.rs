@@ -167,7 +167,8 @@ pub fn files(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
                 AttachmentKind::Audio => &icons::AUDIO,
                 AttachmentKind::File => &icons::FILE,
             };
-            let opened = file.attachment.clone();
+            let (opened, key, id) =
+                (file.attachment.clone(), matrix_core::TimelineKey::room(&room.room_id), file.event_id.clone());
             list.child(
                 row()
                     .key(format!("listed-file-{}", file.event_id))
@@ -201,7 +202,7 @@ pub fn files(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
                                     .truncate(),
                             ),
                     )
-                    .on_press(move |s: &mut State| s.open_attachment(&opened)),
+                    .on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened)),
             )
         }),
     };

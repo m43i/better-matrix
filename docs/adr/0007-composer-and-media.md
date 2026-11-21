@@ -8,7 +8,7 @@ Date: 2026-11-14
 Matrix carries formatting as HTML (`org.matrix.custom.html`) beside a plain body, and the
 timeline must render what others send safely. Media can be encrypted, large and numerous, so
 decoded pictures and PDF pages need memory limits. People expect Slack's composer, pasted
-screenshots, voice memos, and images and PDFs that open large.
+screenshots, voice memos, and images, PDFs, videos and recordings that open large.
 
 ## Decision
 
@@ -228,11 +228,48 @@ screenshots, voice memos, and images and PDFs that open large.
 - **Retries:** a failed download (media or linked GIF) waits 5 s, doubling up to 5 minutes, and
   is fetched again only if still on screen (`state::retry::Retries`). `poll` wakes when the
   next wait ends; a success forgets the failures.
-- **Attachment preview:** `State::open_attachment` asks `Opens`: an image or PDF opens the
-  preview, any other file goes straight to the save dialog.
+- **Attachment preview:** `State::open_attachment` asks `Opens`: an image, PDF, video or audio
+  clip opens the preview, any other file goes straight to the save dialog. It opens from a
+  message or the room's Files panel.
   - `State::preview` is its own slot, drawn over everything including dialogs, because it holds
     live resources. A black layer at 86% opacity, the name top left, Download and Close top
     right; Esc or a press beside the file closes it.
+  - _Attachment batch:_ Matrix carries one attachment per message, so files dropped in together
+    arrive as a run of messages. The batch of the opened one (`preview::batch`) is the run
+    around it of attachment messages the timeline groups under one header
+    (`continues_group`: one sender, each within 5 minutes of the one before, none a reply), with
+    nothing drawn between them (read markers and undrawn entries don't break it; any other
+    message, a room event or a date divider does), the previewable ones kept. Two or more get a
+    strip of thumbnails along the bottom (the batch's previews, fetched like the timeline's
+    rows on screen; else the kind's icon; it scrolls sideways when they don't fit, and the arrow keys keep the current one in
+    view), arrows at the sides, and "2 of 4" beside the name. Left and Right (when nothing
+    focused takes them, as a scrubber does), the side arrows or a thumbnail step through it,
+    round past either end (`State::step_preview`, `State::show_preview_item`). Leaving an item
+    lets go of it: a PDF render stops, a video's player is dropped, a clip pauses; closing does
+    the same. Phones use the same rule ([0010-mobile.md](0010-mobile.md)).
+  - Space plays or pauses the video or clip shown (`State::toggle_preview_playback`).
+  - A press on an audio card beside its controls opens the clip in the preview. Audio shows
+    the timeline's voice card at 420 points under a large audio glyph
+    (`timeline::audio_player`): it plays through `State::audio` like any card, so speed,
+    scrubbing and the saved copy are the same. It waits for play; moving past it stays quiet.
+  - Video saves the original to the scratch folder once a run (`SaveMedia`, the scratch file
+    map clips use), then plays from there, at once (`platform::video::Player`). Rune's player
+    covers macOS (AVFoundation) and Windows (Media Foundation), on the system's default
+    speaker; Rune has none for Linux at any version, so there GStreamer's `playbin` decodes
+    with whatever codecs the system has (hardware decoding where its plugins offer it) into
+    RGBA frames handed to `rune::Pixels` from its streaming thread, with sound on the picked
+    speaker (the GStreamer device whose name matches the settings', else the default). A bus
+    sync handler notes loading, a finished seek, the end and errors, and wakes the view (a seek
+    after the end pauses the pipeline first, which GStreamer leaves playing); a `videoflip` turns
+    pictures recorded sideways upright by their orientation tag; time and length are
+    queried on the UI thread when drawn. Stopping a pipeline happens on a thread of its own.
+    Headless runs get a stand-in that keeps what it is asked and plays nothing
+    (`video::Detached`). The timeline's thumbnail is the poster until the first frame; under
+    the picture, play/pause (replay once ended), time and length, a scrubber (drag, press, the
+    arrow keys and Home/End when focused) and mute. A playing video rebuilds the view as its
+    progress passes each of 120 steps, like a clip. A video whose sender uploaded a thumbnail
+    shows it in the timeline with a play button (`Attachment::preview`; servers don't make
+    video thumbnails); without one it keeps its file card.
   - Right-click opens the same file actions used by attachment messages: Copy image for
     images, Download and Open in the default application. The preview and its context menu
     each trap input above the background; Escape closes the menu before the preview.

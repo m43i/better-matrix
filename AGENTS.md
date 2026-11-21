@@ -70,7 +70,8 @@ the path generally and record it in its area's ADR.
   `[patch.crates-io]` entry use the same rev, and the patch table mirrors Rune's own. When
   bumping: update every rev, compare with Rune's root `Cargo.toml`, run `bun run agent-tools`.
 - `rust-toolchain.toml` matches Rune's toolchain.
-- Linux builds need `libxkbcommon`, `wayland`, `alsa`, `glib` and `pipewire` development packages
+- Linux builds need `libxkbcommon`, `wayland`, `alsa`, `glib`, `pipewire` and `gstreamer` (with
+  `gst-plugins-base`, for video) development packages
   and clang 21+ (libwebrtc's bundled libc++ requires it; `CC`/`CXX` pick it); the first build
   downloads a prebuilt libwebrtc for calls (ADR 0009).
 

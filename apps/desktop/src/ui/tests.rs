@@ -1348,6 +1348,8 @@ fn escape_should_close_an_attachment_preview_before_the_dialog_beneath_it() {
                     audio: None,
                 },
                 media: MediaRef::opaque("preview"),
+                batch: Vec::new(),
+                index: 0,
                 content: if document {
                     PreviewContent::Document { pages: Vec::new(), status: DocumentStatus::Downloading }
                 } else {

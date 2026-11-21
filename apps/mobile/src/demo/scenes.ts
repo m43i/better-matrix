@@ -17,9 +17,11 @@ import { roomKey, threadKey } from '../state/timeline';
 import {
   ADA,
   ADA_HOBBY,
+  batchEvents,
   callGallery,
   callInfo,
   callShares,
+  DEMO_BATCH,
   DEMO_THREAD,
   DESIGN,
   DESIGN_INVITE,
@@ -148,6 +150,18 @@ export const scenes = {
     about: 'An image full screen',
     setup: general,
     routes: [routes.room(ADA, DESIGN), routes.preview(ADA, DESIGN, SCREENSHOT)],
+  },
+  'preview-gallery': {
+    about: 'An image sent in a batch: the gallery’s strip of thumbnails along the bottom',
+    setup: general,
+    events: batchEvents(),
+    routes: [routes.room(ADA, DESIGN), routes.preview(ADA, DESIGN, DEMO_BATCH.second)],
+  },
+  'preview-audio': {
+    about: 'An audio clip of a batch in the preview’s player',
+    setup: general,
+    events: batchEvents(),
+    routes: [routes.room(ADA, DESIGN), routes.preview(ADA, DESIGN, DEMO_BATCH.audio)],
   },
   compose: {
     about: 'A formatted draft in the composer',

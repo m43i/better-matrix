@@ -88,13 +88,119 @@ pub fn image_message(s: &mut State, file: Attachment) {
 pub fn attachment_preview(s: &mut State) {
     attachment_message(s);
     let file = demo_attachment();
-    s.open_attachment(&file);
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$attachment", &file);
     let bytes = include_bytes!("../../../packaging/icons/better-matrix-256.png").as_slice().into();
     if let (Some(preview), Some(image)) = (&mut s.preview, s.media.decode(bytes)) {
         preview.content =
             crate::state::PreviewContent::Image { thumbnail: None, status: crate::state::ImageStatus::Decoding(image) };
     }
     s.popover = Some(crate::state::Popover::AttachmentMenu { at: (700, 350) });
+}
+
+/// The attachments Grace dropped into #general at once: a picture, a video, a recording and a
+/// PDF, each its own message, as Matrix sends them.
+pub fn batch_attachments() -> Vec<Attachment> {
+    let file = |kind, name: &str, dimensions| Attachment {
+        kind,
+        name: name.into(),
+        size: Some(1_200_000),
+        media: Some(matrix_core::MediaRef::opaque(name)),
+        thumbnail: None,
+        dimensions,
+        audio: None,
+    };
+    let mut recording = file(AttachmentKind::Audio, "standup.ogg", None);
+    recording.audio = Some(matrix_core::AudioDetails {
+        voice: false,
+        duration_ms: Some(83_000),
+        waveform: (0..100).map(|i| ((i * 37) % 100) as u16 * 10).collect(),
+    });
+    vec![
+        file(AttachmentKind::Image, "better-matrix.png", Some((256, 256))),
+        Attachment {
+            thumbnail: Some(matrix_core::MediaRef::opaque("launch-poster")),
+            ..file(AttachmentKind::Video, "launch.mp4", Some((1280, 720)))
+        },
+        recording,
+        file(AttachmentKind::File, "Release notes.pdf", None),
+    ]
+}
+
+/// [`batch_attachments`] as Grace's messages in #general, a minute apart, the picture and the
+/// video's poster loaded.
+pub fn batch_messages(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    let entries = batch_attachments()
+        .into_iter()
+        .enumerate()
+        .map(|(i, file)| TimelineEntry {
+            id: format!("batch-{i}"),
+            kind: EntryKind::Message(Box::new(Message {
+                event_id: format!("$batch-{i}"),
+                sender_id: GRACE.into(),
+                sender_name: "Grace Hopper".into(),
+                timestamp_ms: DEMO_DAY_MS + i as u64 * 60_000,
+                content: MessageContent::Attachment(file),
+                ..Message::default()
+            })),
+        })
+        .collect();
+    apply(
+        s,
+        Event::TimelineChanged {
+            account: AccountId::new(ADA),
+            key: TimelineKey::room(DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(entries)],
+        },
+    );
+    s.media.attach(std::sync::Arc::new(|| {}));
+    let icon: std::sync::Arc<[u8]> = include_bytes!("../../../packaging/icons/better-matrix-256.png").as_slice().into();
+    for file in batch_attachments().into_iter().take(2) {
+        if let Some((media, _)) = file.preview() {
+            s.media.loaded(media, icon.clone(), Some((256, 256)));
+        }
+    }
+    if let Some(image) = s.media.decode(icon) {
+        let _ = image.wait();
+    }
+    s.media.measure();
+}
+
+/// Opens the batch's `index`th attachment in the preview.
+fn open_batch(s: &mut State, index: usize) {
+    batch_messages(s);
+    let file = batch_attachments().swap_remove(index);
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), &format!("$batch-{index}"), &file);
+}
+
+/// The batch's picture full size, the strip of the others under it.
+pub fn preview_batch(s: &mut State) {
+    open_batch(s, 0);
+    let bytes = include_bytes!("../../../packaging/icons/better-matrix-256.png").as_slice().into();
+    if let (Some(preview), Some(image)) = (&mut s.preview, s.media.decode(bytes)) {
+        preview.content =
+            crate::state::PreviewContent::Image { thumbnail: None, status: crate::state::ImageStatus::Decoding(image) };
+    }
+}
+
+/// The batch's video, a third of the way through and paused, with its controls.
+pub fn preview_video(s: &mut State) {
+    open_batch(s, 1);
+    let player = crate::platform::video::Detached::new(Some(94.0), Some((1280, 720)));
+    let player = crate::platform::video::Player::Detached(player);
+    player.seek(1.0 / 3.0);
+    player.pause();
+    if let Some(crate::state::Preview { content: crate::state::PreviewContent::Video { status, .. }, .. }) =
+        &mut s.preview
+    {
+        *status = crate::state::VideoStatus::Open(player);
+    }
+}
+
+/// The batch's recording, ready to play.
+pub fn preview_audio(s: &mut State) {
+    open_batch(s, 2);
 }
 
 /// A divider between the last few messages, for inspecting its fade in place.

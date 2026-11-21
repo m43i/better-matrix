@@ -91,6 +91,11 @@ zbus = { version = "6", default-features = false, features = ["default-rt"] }
 futures-lite = "2"
 # PulseAudio's names for devices, which PipeWire serves too: the names calls see.
 cpal = { version = "0.18", features = ["pulseaudio"] }
+# Video in the attachment preview: Rune's player covers macOS and Windows only, so GStreamer
+# decodes here, with whatever codecs the system has, into frames Rune draws.
+gstreamer = "0.25"
+gstreamer-app = "0.25"
+gstreamer-video = "0.25"
 
 [lints]
 workspace = true

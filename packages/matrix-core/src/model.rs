@@ -730,15 +730,16 @@ impl AudioDetails {
 }
 
 impl Attachment {
-    /// The media to fetch for a preview and the size to ask for, if the attachment has one.
+    /// The media to fetch for a preview and the size to ask for, if the attachment has one: an
+    /// image's thumbnail (the sender's, else the server's), or the poster a video's sender
+    /// uploaded (servers don't make them).
     pub fn preview(&self) -> Option<(MediaRef, MediaSize)> {
-        if self.kind != AttachmentKind::Image {
-            return None;
-        }
-        match (&self.thumbnail, &self.media) {
-            (Some(thumbnail), _) => Some((thumbnail.clone(), MediaSize::Original)),
-            (None, Some(media)) => Some((media.clone(), MediaSize::PREVIEW)),
-            (None, None) => None,
+        match (self.kind, &self.thumbnail, &self.media) {
+            (AttachmentKind::Image | AttachmentKind::Video, Some(thumbnail), _) => {
+                Some((thumbnail.clone(), MediaSize::Original))
+            }
+            (AttachmentKind::Image, None, Some(media)) => Some((media.clone(), MediaSize::PREVIEW)),
+            _ => None,
         }
     }
 }

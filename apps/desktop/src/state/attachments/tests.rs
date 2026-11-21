@@ -85,7 +85,7 @@ fn opening_an_executable_attachment_should_not_launch_it_directly() {
 fn closing_a_preview_should_dismiss_its_context_menu() {
     let (mut s, _) = state();
     crate::demo::seed(&mut s);
-    s.open_attachment(&image());
+    s.open_attachment(&matrix_core::TimelineKey::room(crate::demo::DEMO_THREAD.0), "$attachment", &image());
     s.popover = Some(super::super::Popover::AttachmentMenu { at: (100, 100) });
     s.close_preview();
     assert!(s.popover.is_none());

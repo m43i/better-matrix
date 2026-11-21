@@ -51,6 +51,17 @@ pub struct Entry {
     pub kind: EntryView,
 }
 
+/// Messages from one sender this close together share one header.
+const GROUP_WINDOW_MS: u64 = 5 * 60_000;
+
+/// Whether `next` joins `previous`'s group, under its header, when nothing comes between them:
+/// the same sender, soon after, and not a reply (a reply shows what it answers above it).
+pub fn continues_group(previous: &Message, next: &Message) -> bool {
+    previous.sender_id == next.sender_id
+        && next.timestamp_ms.saturating_sub(previous.timestamp_ms) < GROUP_WINDOW_MS
+        && next.reply_to.is_none()
+}
+
 #[derive(Debug)]
 pub enum EntryView {
     Message(Box<TimelineItem>),

@@ -10,8 +10,10 @@ pkgdesc="A Matrix client built around several accounts side by side"
 arch=('x86_64' 'aarch64')
 url="https://github.com/m43i/better-matrix"
 license=('MIT')
-depends=('alsa-lib' 'glib2' 'libxkbcommon' 'wayland' 'vulkan-icd-loader')
-optdepends=('pipewire: screen sharing on Wayland')
+depends=('alsa-lib' 'glib2' 'gstreamer' 'gst-plugins-base' 'libxkbcommon' 'wayland' 'vulkan-icd-loader')
+optdepends=('pipewire: screen sharing on Wayland'
+            'gst-plugins-good: more video formats in the preview'
+            'gst-libav: H.264, HEVC and other video in the preview')
 # Already built and stripped: nothing to strip or split off as debug info.
 options=('!strip' '!debug')
 provides=('better-matrix')
