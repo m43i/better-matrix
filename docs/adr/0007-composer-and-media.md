@@ -278,8 +278,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     with either player.
     GStreamer starts on a worker at launch (`video::prepare`): its first start scans the
     plugins, seconds with no registry cached. Its players open on a worker too
-    (`Shell::open_video`, `VideoStatus::Opening`), handed back with the showing's number
-    (`State::video_opened`), so a video opened during that scan never waits on the UI thread. Stopping a pipeline happens on a thread of its own. A video starting pauses the clip playing.
+    (`Shell::open_video`, `VideoStatus::Opening`), handed back paused with the showing's number
+    (`State::video_opened`), so a video opened during that scan never waits on the UI thread;
+    it plays only if that showing is still on screen, after the clip playing pauses. Stopping a pipeline happens on a thread of its own. A video starting pauses the clip playing.
     Headless runs get a stand-in that keeps what it is asked and plays nothing
     (`video::Detached`). The timeline's thumbnail is the poster until the first frame; under
     the picture, play/pause (replay once ended), time and length, a scrubber (drag, press, the

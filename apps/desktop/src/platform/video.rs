@@ -58,8 +58,8 @@ pub enum Player {
 }
 
 impl Player {
-    /// A player for `path` on the picked `speaker`, starting at once; `changed` runs (from any
-    /// thread) when it loads, ends or fails.
+    /// A player for `path` on the picked `speaker`, paused until [`Player::play`]; `changed`
+    /// runs (from any thread) when it loads, ends or fails.
     pub fn open(path: PathBuf, speaker: Option<&str>, changed: rune::Waker) -> Self {
         Self::Native(Native::open(path, speaker, changed))
     }
@@ -182,7 +182,6 @@ mod rune_player {
             let player = rune::Player::file(path);
             player.set_muted(false);
             player.set_waker(changed);
-            player.play();
             Self { player }
         }
 
@@ -260,10 +259,9 @@ pub struct DetachedState {
 pub struct Detached(std::cell::RefCell<DetachedState>);
 
 impl Detached {
-    /// A stand-in that reports `duration` and `size`, as a loaded video would; it starts playing,
-    /// as an opened video does.
+    /// A stand-in that reports `duration` and `size`, as a loaded video would, paused.
     pub fn new(duration: Option<f64>, size: Option<(u32, u32)>) -> Self {
-        Self(std::cell::RefCell::new(DetachedState { playing: true, duration, size, ..DetachedState::default() }))
+        Self(std::cell::RefCell::new(DetachedState { duration, size, ..DetachedState::default() }))
     }
 
     fn get(&self) -> DetachedState {
@@ -326,7 +324,7 @@ mod gst_player {
     impl GstPlayer {
         pub fn open(path: PathBuf, speaker: Option<&str>, changed: rune::Waker) -> Self {
             let pixels = rune::Pixels::new();
-            let facts = Arc::new(Mutex::new(Facts { playing: true, ..Facts::default() }));
+            let facts = Arc::new(Mutex::new(Facts::default()));
             let pipeline = match build(&path, speaker, &pixels, &facts, &changed) {
                 Ok(pipeline) => Some(pipeline),
                 Err(error) => {
@@ -531,7 +529,8 @@ mod gst_player {
             }
             gst::BusSyncReply::Drop
         });
-        pipeline.set_state(gst::State::Playing).map_err(|error| error.to_string())?;
+        // Paused, it loads and shows its first frame; it plays once the app says so.
+        pipeline.set_state(gst::State::Paused).map_err(|error| error.to_string())?;
         Ok(pipeline)
     }
 
@@ -586,6 +585,8 @@ mod tests {
         let opening = std::time::Instant::now();
         let player = Player::open(path, None, std::sync::Arc::new(|| {}));
         assert!(opening.elapsed() < Duration::from_millis(250), "opening took {:?}", opening.elapsed());
+        until(&player, &|p| p.playback() == Playback::Paused && p.natural_size().is_some());
+        player.play();
         until(&player, &|p| p.playback() == Playback::Playing && p.natural_size().is_some());
         assert_eq!(player.natural_size(), Some((320, 240)));
         assert!(player.duration().is_some_and(|d| (d - 2.0).abs() < 0.2), "{:?}", player.duration());
@@ -657,6 +658,7 @@ mod tests {
     #[test]
     fn a_detached_player_should_keep_what_it_was_asked() {
         let player = Player::Detached(Detached::new(Some(10.0), Some((1280, 720))));
+        player.play();
         assert_eq!(player.playback(), Playback::Playing);
         player.pause();
         player.seek(0.5);

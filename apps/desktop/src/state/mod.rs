@@ -3271,13 +3271,21 @@ impl State {
         }
     }
 
-    /// The player for showing `visit` of a video is open: it plays, over no clip, if that
-    /// showing is still on screen; else it is dropped, which stops it.
+    /// The player for showing `visit` of a video is open, paused: it plays, over no clip, if that
+    /// showing is still on screen; else it is dropped unheard.
     pub fn video_opened(&mut self, visit: u64, player: crate::platform::video::Player) {
-        let Some(preview) = self.preview.as_mut().filter(|preview| preview.visit == visit) else { return };
-        let PreviewContent::Video { status: status @ VideoStatus::Opening, .. } = &mut preview.content else { return };
-        *status = VideoStatus::Open(player);
+        let opening = |preview: &Preview| {
+            preview.visit == visit
+                && matches!(preview.content, PreviewContent::Video { status: VideoStatus::Opening, .. })
+        };
+        if !self.preview.as_ref().is_some_and(opening) {
+            return;
+        }
         self.pause_audio();
+        player.play();
+        if let Some(Preview { content: PreviewContent::Video { status, .. }, .. }) = &mut self.preview {
+            *status = VideoStatus::Open(player);
+        }
     }
 
     /// The previewed video's file couldn't be saved: it says why.
