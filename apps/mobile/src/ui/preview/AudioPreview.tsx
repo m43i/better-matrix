@@ -19,13 +19,13 @@ import { GestureDetector } from 'react-native-gesture-handler';
 
 import { t } from '../../i18n';
 import { cyclePlaybackSpeed } from '../../state/actions/core';
+import { fetchOriginal } from '../../state/actions/timeline';
 import { playTime } from '../../state/messages';
 import { useAppStore, useStore } from '../../state/react';
 import { humanSize } from '../../state/timelineText';
 import { voiceDetails } from '../../state/voiceCard';
 import { font } from '../../theme/palette';
 import { Icon } from '../icons';
-import { ORIGINAL, useMedia } from '../media';
 import { usePalette } from '../theme';
 import { claimAudio, releaseAudio } from '../timeline/audioFocus';
 import { useSwipe } from './swipe';
@@ -58,9 +58,29 @@ interface Props {
 
 /** The clip, downloaded once the preview shows it, then played in a player of its own. */
 export function AudioPreview(props: Props) {
-  const uri = useMedia(props.account, props.attachment.media, ORIGINAL);
+  const store = useAppStore();
+  const media = props.attachment.media;
+  /** The clip's file once here, or why it couldn't be fetched. */
+  const [file, setFile] = useState<{ uri: string } | { error: string } | null>(null);
+  /** Counts presses on Try again: each fetches the file again. */
+  const [attempt, setAttempt] = useState(0);
 
-  if (!uri) {
+  // The timeline card's fetch, which fails rather than waiting for a file that won't come.
+  useEffect(() => {
+    if (!media) return;
+    let current = true;
+
+    fetchOriginal(store, props.account, media).then(
+      (uri) => current && setFile({ uri }),
+      (cause: unknown) => current && setFile({ error: String(cause) }),
+    );
+
+    return () => {
+      current = false;
+    };
+  }, [store, props.account, media, attempt]);
+
+  if (!file || 'error' in file) {
     const seconds = voiceDetails(props.attachment.audio).seconds;
 
     return (
@@ -70,13 +90,18 @@ export function AudioPreview(props: Props) {
         elapsed={null}
         total={seconds}
         playing={false}
-        loading
+        loading={file === null}
+        error={file?.error ?? null}
+        onRetry={() => {
+          setFile(null);
+          setAttempt((n) => n + 1);
+        }}
         speed={null}
       />
     );
   }
 
-  return <LoadedAudio {...props} uri={uri} />;
+  return <LoadedAudio {...props} uri={file.uri} />;
 }
 
 function LoadedAudio({ uri, ...props }: Props & { uri: string }) {
@@ -177,6 +202,8 @@ function AudioFace({
   total,
   playing,
   loading,
+  error = null,
+  onRetry,
   speed,
   onSpeed,
   onToggle,
@@ -195,6 +222,9 @@ function AudioFace({
   playing: boolean;
   /** The clip is downloading. */
   loading: boolean;
+  /** Why its file couldn't be fetched, with a way to try again. */
+  error?: string | null;
+  onRetry?: () => void;
   /** The playback speed, once the clip has loaded (its button shows then). */
   speed: number | null;
   onSpeed?: () => void;
@@ -232,6 +262,22 @@ function AudioFace({
           </Text>
           {attachment.size !== null ? (
             <Text style={[font.meta, styles.dim]}>{humanSize(attachment.size)}</Text>
+          ) : null}
+          {error !== null ? (
+            <>
+              <Text style={[font.body, styles.dim, styles.center]} testID="preview-audio-error">
+                {t('notice.audio', { error })}
+              </Text>
+              <Pressable
+                onPress={onRetry}
+                accessibilityRole="button"
+                hitSlop={8}
+                style={styles.speed}
+                testID="preview-audio-retry"
+              >
+                <Text style={[font.section, styles.white]}>{t('common.try_again')}</Text>
+              </Pressable>
+            </>
           ) : null}
         </Pressable>
       </GestureDetector>

@@ -57,10 +57,14 @@ overrides:
       - libc.so.6(GLIBC_2.35)(64bit)
       - alsa-lib
       - glib2
-      - gstreamer1
+      # GStreamer by its libraries, which Fedora and openSUSE package under different names.
+      - libgstreamer-1.0.so.0()(64bit)
+      - libgstapp-1.0.so.0()(64bit)
+      - libgstvideo-1.0.so.0()(64bit)
+    recommends:
+      # playbin and the common formats (Fedora's names; elsewhere a weak dependency is skipped).
       - gstreamer1-plugins-base
       - gstreamer1-plugins-good
-    recommends:
       - libxkbcommon
       - libwayland-client
       - vulkan-loader

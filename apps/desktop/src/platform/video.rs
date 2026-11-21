@@ -22,6 +22,9 @@ pub enum Playback {
     Failed(String),
 }
 
+/// How close to its end, in seconds, a video counts as at its end: play there starts it over.
+const END: f64 = 0.05;
+
 /// The platform's own player: GStreamer where Rune has none.
 #[cfg(all(unix, not(target_os = "macos")))]
 type Native = gst_player::GstPlayer;
@@ -164,7 +167,12 @@ mod rune_player {
             Self { player }
         }
 
+        /// Play at the end starts over: Rune does that once a video played to its end, but not
+        /// for one moved to its end while paused.
         pub fn play(&self) {
+            if self.player.duration().is_some_and(|duration| self.player.time() >= duration - super::END) {
+                self.player.seek(0.0);
+            }
             self.player.play();
         }
 
@@ -323,7 +331,7 @@ mod gst_player {
                 facts.playing = true;
                 std::mem::take(&mut facts.ended)
             };
-            let at_end = self.duration().is_some_and(|duration| self.time() >= duration - END);
+            let at_end = self.duration().is_some_and(|duration| self.time() >= duration - super::END);
             if ended || at_end {
                 seek_to(pipeline, 0.0);
             }
@@ -414,9 +422,6 @@ mod gst_player {
             }
         }
     }
-
-    /// How close to its end, in seconds, a video counts as at its end.
-    const END: f64 = 0.05;
 
     fn seek_to(pipeline: &gst::Element, seconds: f64) {
         let at = gst::ClockTime::from_nseconds((seconds.max(0.0) * 1e9) as u64);

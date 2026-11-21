@@ -311,7 +311,8 @@ Date: 2026-11-16
   image to pinch, pan and double-tap to zoom, a video in expo-video's player with the
   platform's controls, or an audio clip in a player of ours (`ui/preview/AudioPreview.tsx`:
   large play, a scrubber, time played and length, the timeline's speed setting; one clip at a
-  time through `audioFocus.ts`). Images and videos open it from the timeline; an audio card
+  time through `audioFocus.ts`; its file comes through the card's `fetchOriginal`, so a failed
+  download says why, with Try again). Images and videos open it from the timeline; an audio card
   plays in place from its play button, and a tap elsewhere on it opens it in the preview.
   - _Gallery of a batch:_ Matrix carries one attachment per message, so a batch is a run
     (`state/gallery.ts`, the desktop's rule): from the opened message, backwards and forwards
