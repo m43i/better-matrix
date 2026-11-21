@@ -315,6 +315,7 @@ mod gst_player {
             el.pixels_fit(&self.pixels, fit)
         }
 
+        /// Play at the end (played to it, or moved to it while paused) starts over.
         pub fn play(&self) {
             let Some(pipeline) = &self.pipeline else { return };
             let ended = {
@@ -322,7 +323,8 @@ mod gst_player {
                 facts.playing = true;
                 std::mem::take(&mut facts.ended)
             };
-            if ended {
+            let at_end = self.duration().is_some_and(|duration| self.time() >= duration - END);
+            if ended || at_end {
                 seek_to(pipeline, 0.0);
             }
             let _ = pipeline.set_state(gst::State::Playing);
@@ -412,6 +414,9 @@ mod gst_player {
             }
         }
     }
+
+    /// How close to its end, in seconds, a video counts as at its end.
+    const END: f64 = 0.05;
 
     fn seek_to(pipeline: &gst::Element, seconds: f64) {
         let at = gst::ClockTime::from_nseconds((seconds.max(0.0) * 1e9) as u64);
@@ -569,6 +574,13 @@ mod tests {
         std::thread::sleep(Duration::from_millis(500));
         assert_eq!(player.playback(), Playback::Paused);
         assert!((player.time() - 0.5).abs() < 0.1, "a seek after the end should stay put: {}", player.time());
+        player.seek(1.0);
+        std::thread::sleep(Duration::from_millis(500));
+        player.play();
+        until(&player, &|p| p.playback() == Playback::Playing && p.time() < 1.0);
+        player.pause();
+        player.seek(1.0);
+        std::thread::sleep(Duration::from_millis(500));
         player.play();
         until(&player, &|p| p.playback() == Playback::Playing && p.time() < 1.0);
     }

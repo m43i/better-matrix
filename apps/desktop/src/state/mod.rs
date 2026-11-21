@@ -3250,15 +3250,12 @@ impl State {
     fn leave_preview_item(&mut self) {
         self.shell.stop_document();
         let Some(preview) = &mut self.preview else { return };
-        if matches!(preview.content, PreviewContent::Audio)
-            && let Some(clip) = self.audio.as_mut().filter(|clip| clip.media == preview.media)
-        {
-            clip.play = false;
-            if let Some(player) = &clip.player {
-                player.pause();
-            }
-        }
+        let clip = matches!(preview.content, PreviewContent::Audio)
+            && self.audio.as_ref().is_some_and(|clip| clip.media == preview.media);
         preview.content = PreviewContent::Audio;
+        if clip {
+            self.pause_audio();
+        }
     }
 
     /// A previewed video's file is saved: it plays, if it is still the one shown.
@@ -3270,6 +3267,18 @@ impl State {
         }
         let speaker = self.settings.devices.speaker.as_deref();
         *status = VideoStatus::Open(self.shell.video_player(path, speaker, preview.attachment.dimensions));
+        // It plays at once, over no clip.
+        self.pause_audio();
+    }
+
+    /// Pauses the clip playing, or queued to play once its file comes.
+    fn pause_audio(&mut self) {
+        if let Some(clip) = &mut self.audio {
+            clip.play = false;
+            if let Some(player) = &clip.player {
+                player.pause();
+            }
+        }
     }
 
     /// The previewed video's player, once its file is here.
@@ -3287,8 +3296,13 @@ impl State {
             let attachment = preview.attachment.clone();
             return self.toggle_audio(&attachment);
         }
-        if let Some(player) = self.preview_video() {
-            if player.is_playing() { player.pause() } else { player.play() }
+        match self.preview_video() {
+            Some(player) if player.is_playing() => player.pause(),
+            Some(player) => {
+                player.play();
+                self.pause_audio();
+            }
+            None => {}
         }
     }
 

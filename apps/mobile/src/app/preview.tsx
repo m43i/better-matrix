@@ -10,7 +10,16 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  type StyleProp,
+  StyleSheet,
+  Text,
+  View,
+  type ViewStyle,
+} from 'react-native';
 import {
   GestureDetector,
   useLongPressGesture,
@@ -249,12 +258,25 @@ function ImageContent({
   const uri = original ?? small;
   const area = [StyleSheet.absoluteFill, frame];
 
-  if (!uri) return <ActivityIndicator color="#ffffff" style={area} />;
+  if (!uri) return <Loading style={area} onSwipe={onSwipe} />;
 
   return (
     <View style={area}>
       <Zoomable uri={uri} label={attachment.name} onSwipe={onSwipe} onLongPress={onLongPress} />
     </View>
+  );
+}
+
+/** A file still coming: a spinner, swiped past like the file itself. */
+function Loading({ style, onSwipe }: { style: StyleProp<ViewStyle>; onSwipe: Swipe }) {
+  const swipe = useSwipe(onSwipe);
+
+  return (
+    <GestureDetector gesture={swipe}>
+      <View style={[style, styles.loading]}>
+        <ActivityIndicator color="#ffffff" />
+      </View>
+    </GestureDetector>
   );
 }
 
@@ -371,7 +393,7 @@ function VideoContent({
 }) {
   const uri = useMedia(account, attachment.media, ORIGINAL);
 
-  if (!uri) return <ActivityIndicator color="#ffffff" style={[StyleSheet.absoluteFill, frame]} />;
+  if (!uri) return <Loading style={[StyleSheet.absoluteFill, frame]} onSwipe={onSwipe} />;
 
   return <VideoPlayer uri={uri} frame={frame} onSwipe={onSwipe} />;
 }
@@ -404,6 +426,7 @@ function VideoPlayer({ uri, frame, onSwipe }: { uri: string; frame: Frame; onSwi
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000000' },
+  loading: { alignItems: 'center', justifyContent: 'center' },
   status: { color: '#ffffffcc', textAlign: 'center', marginTop: 160 },
   bar: {
     position: 'absolute',

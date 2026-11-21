@@ -1842,6 +1842,20 @@ fn a_failed_fetch_from_an_earlier_showing_should_not_fail_the_item_shown_again()
 }
 
 #[test]
+fn a_video_starting_should_pause_the_clip_playing() {
+    let (mut s, mut commands) = state();
+    crate::demo::batch_messages(&mut s);
+    s.toggle_audio(&crate::demo::batch_attachments().swap_remove(2));
+    drain(&mut commands);
+    let video = crate::demo::batch_attachments().swap_remove(1);
+    s.open_attachment(&TimelineKey::room(crate::demo::DEMO_THREAD.0), "$batch-1", &video);
+    assert!(s.audio.as_ref().is_some_and(|clip| clip.play), "the clip plays on while the video downloads");
+    let saved = drain(&mut commands).into_iter().find(|(_, c)| matches!(c, Command::SaveMedia { .. }));
+    apply(&mut s, Event::Finished { request: saved.unwrap().0, result: Ok(()) });
+    assert!(s.audio.as_ref().is_some_and(|clip| !clip.play));
+}
+
+#[test]
 fn moving_on_from_a_clip_playing_in_the_preview_should_pause_it() {
     let (mut s, _) = batch_preview(2);
     s.toggle_preview_playback();

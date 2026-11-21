@@ -269,7 +269,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     sync handler notes loading, a finished seek, the end and errors, and wakes the view (a seek
     after the end pauses the pipeline first, which GStreamer leaves playing); a `videoflip` turns
     pictures recorded sideways upright by their orientation tag; time and length are
-    queried on the UI thread when drawn. Stopping a pipeline happens on a thread of its own.
+    queried on the UI thread when drawn; play at the end (played or moved there) starts over.
+    Stopping a pipeline happens on a thread of its own. A video starting pauses the clip playing.
     Headless runs get a stand-in that keeps what it is asked and plays nothing
     (`video::Detached`). The timeline's thumbnail is the poster until the first frame; under
     the picture, play/pause (replay once ended), time and length, a scrubber (drag, press, the
