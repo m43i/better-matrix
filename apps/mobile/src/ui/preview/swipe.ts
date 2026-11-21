@@ -23,6 +23,8 @@ export function useSwipe(
   return usePanGesture({
     enabled: onSwipe !== null,
     runOnJS: true,
+    // One finger: a pinch that ends back at 1× isn't a swipe.
+    maxPointers: 1,
     activeOffsetX: [-SLOP, SLOP],
     failOffsetY: [-SLOP, SLOP],
     hitSlop: bottomInset > 0 ? { bottom: -bottomInset } : undefined,

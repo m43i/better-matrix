@@ -248,21 +248,24 @@ function AudioFace({
   return (
     <View style={[styles.frame, style]} testID="preview-audio">
       <GestureDetector gesture={swipe}>
-        <Pressable
-          onLongPress={onLongPress}
-          delayLongPress={350}
-          accessibilityLabel={title}
-          style={styles.art}
-        >
-          <View style={[styles.tile, { backgroundColor: `${palette.accent}33` }]}>
-            <Icon name={details.voice ? 'mic' : 'audio'} size={72} color={palette.accent} />
-          </View>
-          <Text style={[font.header, styles.white, styles.center]} numberOfLines={2}>
-            {title}
-          </Text>
-          {attachment.size !== null ? (
-            <Text style={[font.meta, styles.dim]}>{humanSize(attachment.size)}</Text>
-          ) : null}
+        <View style={styles.art}>
+          <Pressable
+            onLongPress={onLongPress}
+            delayLongPress={350}
+            accessibilityLabel={title}
+            style={styles.artwork}
+          >
+            <View style={[styles.tile, { backgroundColor: `${palette.accent}33` }]}>
+              <Icon name={details.voice ? 'mic' : 'audio'} size={72} color={palette.accent} />
+            </View>
+            <Text style={[font.header, styles.white, styles.center]} numberOfLines={2}>
+              {title}
+            </Text>
+            {attachment.size !== null ? (
+              <Text style={[font.meta, styles.dim]}>{humanSize(attachment.size)}</Text>
+            ) : null}
+          </Pressable>
+          {/* Outside the artwork's press, so a screen reader reaches the error and the retry. */}
           {error !== null ? (
             <>
               <Text style={[font.body, styles.dim, styles.center]} testID="preview-audio-error">
@@ -279,7 +282,7 @@ function AudioFace({
               </Pressable>
             </>
           ) : null}
-        </Pressable>
+        </View>
       </GestureDetector>
       <View style={styles.controls}>
         <View
@@ -367,6 +370,7 @@ function AudioFace({
 const styles = StyleSheet.create({
   frame: { position: 'absolute', left: 0, right: 0, paddingHorizontal: 24, paddingBottom: 16 },
   art: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  artwork: { alignItems: 'center', gap: 10 },
   tile: {
     width: TILE,
     height: TILE,

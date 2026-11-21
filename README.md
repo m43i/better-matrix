@@ -122,7 +122,8 @@ it isn't your default compiler) and the development packages for `libxkbcommon`,
 
 ```sh
 sudo apt install build-essential pkg-config libclang-dev libglib2.0-dev libasound2-dev libxkbcommon-dev libwayland-dev libpipewire-0.3-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
 wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 21 && export CC=clang-21 CXX=clang++-21
 ```
 
