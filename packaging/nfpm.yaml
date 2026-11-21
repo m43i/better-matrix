@@ -65,6 +65,10 @@ overrides:
       - (gstreamer1-plugins-base or gstreamer-plugins-base)
       - (gstreamer1-plugins-good or gstreamer-plugins-good)
     recommends:
+      # H.264 and AAC, which phones record, by the GStreamer elements both distributions'
+      # packages provide; a weak dependency nothing provides is skipped.
+      - gstreamer1(element-openh264dec)()(64bit)
+      - gstreamer1(element-avdec_aac)()(64bit)
       - libxkbcommon
       - libwayland-client
       - vulkan-loader

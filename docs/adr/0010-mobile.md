@@ -326,8 +326,10 @@ Date: 2026-11-16
     scrolled into view); a sideways swipe steps through them, round past either end
     (`ui/preview/swipe.ts`; not while an image is zoomed in, and not over a video's controls),
     and tapping a thumbnail shows it. The route keeps its one event ID; the item on screen is
-    the screen's own state, and the top bar's sender, time and actions follow it. Each item's
-    content is keyed by its message, so moving on releases the video or clip before it.
+    the screen's own state, and the batch is the one around it (`galleryAround`), so an item
+    redacted meanwhile, the opened one included, leaves the rest; the top bar's sender, time and
+    actions follow it. Each item's content is keyed by its message, so moving on releases the
+    video or clip before it.
 - **File actions:** message sheets offer Copy image only for images with media, plus Open,
   Share and Download; they never offer Copy message for an attachment filename or empty text.
   Attachment surfaces forward long presses to the message sheet, including image/video

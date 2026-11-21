@@ -1,6 +1,7 @@
 import type { Attachment, Message, Quote, TimelineEntry } from '@better-matrix/matrix-native/types';
 
 import {
+  galleryAround,
   attachmentBatch,
   BATCH_WINDOW_MS,
   previewable,
@@ -194,5 +195,14 @@ describe('thumbnailOf', () => {
 
   it('should show an audio clip by its icon', () => {
     expect(thumbnailOf(attachment('Audio'))).toBeNull();
+  });
+});
+
+describe('galleryAround', () => {
+  it('should keep the item shown when the opened one is redacted', () => {
+    const redacted = messageEntry('a', { content: { type: 'Redacted' }, timestamp_ms: T });
+    const entries = [redacted, sent('b', 1), sent('c', 2)];
+
+    expect(ids(galleryAround(entries, 'c', 'a'))).toEqual(['b', 'c']);
   });
 });

@@ -37,6 +37,10 @@ pub fn prepare() {
     }
 }
 
+/// Whether the platform's player opens off the UI thread: GStreamer's start can wait on its
+/// plugin scan; Rune's player opens at once.
+pub const OPENS_ON_A_WORKER: bool = cfg!(all(unix, not(target_os = "macos")));
+
 /// How close to its end, in seconds, a video counts as at its end: play there starts it over.
 const END: f64 = 0.05;
 

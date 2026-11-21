@@ -259,7 +259,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   - Linux packages require GStreamer's base and good plugins (playbin, MP4, WebM, VP8/VP9) and
     recommend libav (H.264, HEVC; required on Arch). The RPM names GStreamer's libraries by
     soname and its plugins by either distribution's name (`(gstreamer1-plugins-good or
-    gstreamer-plugins-good)`), so Fedora and openSUSE both install it whole. The AppImage bundles GStreamer whole
+    gstreamer-plugins-good)`), so Fedora and openSUSE both install it whole, and recommends the
+    H.264 and AAC decoders by the elements they provide (`gstreamer1(element-openh264dec)`).
+  - A clip and a video that share one upload share its scratch download: saved or failed, both
+    hear it. The AppImage bundles GStreamer whole
     (linuxdeploy's GStreamer plugin): its core with the build machine's plugins, and nothing else.
   - Video saves the original to the scratch folder once a run (`SaveMedia`, the scratch file
     map clips use), then plays from there, at once (`platform::video::Player`). Rune's player
@@ -274,8 +277,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     queried on the UI thread when drawn; play at the end (played or moved there) starts over,
     with either player.
     GStreamer starts on a worker at launch (`video::prepare`): its first start scans the
-    plugins, seconds with no registry cached, which a video would otherwise wait for on the UI
-    thread. Stopping a pipeline happens on a thread of its own. A video starting pauses the clip playing.
+    plugins, seconds with no registry cached. Its players open on a worker too
+    (`Shell::open_video`, `VideoStatus::Opening`), handed back with the showing's number
+    (`State::video_opened`), so a video opened during that scan never waits on the UI thread. Stopping a pipeline happens on a thread of its own. A video starting pauses the clip playing.
     Headless runs get a stand-in that keeps what it is asked and plays nothing
     (`video::Detached`). The timeline's thumbnail is the poster until the first frame; under
     the picture, play/pause (replay once ended), time and length, a scrubber (drag, press, the

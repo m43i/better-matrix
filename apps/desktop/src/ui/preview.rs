@@ -286,7 +286,7 @@ fn video_view(
             Playback::Loading => Some(t!("preview.loading").to_owned()),
             _ => None,
         },
-        VideoStatus::Downloading => Some(t!("preview.loading").to_owned()),
+        VideoStatus::Downloading | VideoStatus::Opening => Some(t!("preview.loading").to_owned()),
     };
     let below = match message {
         Some(message) => row().h(CONTROLS).center().child(status(&message)),

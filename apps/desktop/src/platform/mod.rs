@@ -209,21 +209,35 @@ impl Shell {
     }
 
     /// A video player for a saved file on the picked speaker, playing at once; the view runs
-    /// again when it loads, ends or fails. Headless, a stand-in that plays nothing and reports
-    /// `dimensions` as its size.
-    pub fn video_player(
+    /// again when it loads, ends or fails. GStreamer's opens on a worker (its first start can
+    /// wait on the plugin scan begun at launch) and arrives through [`State::video_opened`] with
+    /// `visit`: `None` then. Rune's opens here. Headless, a stand-in that plays nothing and
+    /// reports `dimensions` as its size.
+    pub fn open_video(
         &self,
         path: std::path::PathBuf,
-        speaker: Option<&str>,
+        speaker: Option<String>,
         dimensions: Option<(u32, u32)>,
-    ) -> video::Player {
-        match self.app.clone() {
-            Some(app) => {
-                let changed: rune::Waker = Arc::new(move || app.update(|_: &mut State, _| {}));
-                video::Player::open(path, speaker, changed)
-            }
-            None => video::Player::Detached(video::Detached::new(None, dimensions)),
+        visit: u64,
+    ) -> Option<video::Player> {
+        let Some(app) = self.app.clone() else {
+            return Some(video::Player::Detached(video::Detached::new(None, dimensions)));
+        };
+        let changed: rune::Waker = {
+            let app = app.clone();
+            Arc::new(move || app.update(|_: &mut State, _| {}))
+        };
+        if !video::OPENS_ON_A_WORKER {
+            return Some(video::Player::open(path, speaker.as_deref(), changed));
         }
+        let spawned = std::thread::Builder::new().name("video-open".into()).spawn(move || {
+            let player = video::Player::open(path, speaker.as_deref(), changed);
+            app.update(move |s: &mut State, _| s.video_opened(visit, player));
+        });
+        if let Err(error) = spawned {
+            eprintln!("better-matrix: could not open the video: {error}");
+        }
+        None
     }
 
     /// A recording from the picked microphone; headless, Rune's recorder and its fake microphone.

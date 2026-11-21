@@ -125,6 +125,21 @@ export function previewGallery(
   });
 }
 
+/**
+ * The gallery of the item on screen, `current`, else of the one the preview opened at: an item
+ * shown stays though another of its batch is redacted meanwhile, the opened one included.
+ */
+export function galleryAround(
+  entries: readonly TimelineEntry[],
+  current: string,
+  opened: string,
+  root: string | null = null,
+): Message[] {
+  const gallery = previewGallery(entries, current, root);
+
+  return gallery.length > 0 ? gallery : previewGallery(entries, opened, root);
+}
+
 /** Whether a gallery shows its strip of thumbnails: when there is more than one to show. */
 export function showsStrip(gallery: readonly Message[]): boolean {
   return gallery.length > 1;

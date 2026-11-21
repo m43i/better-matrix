@@ -118,10 +118,11 @@ You need [Bun](https://bun.sh), [Node.js 26](https://nodejs.org) (Oxlint plugins
 [rustup](https://rustup.rs); the pinned Rust toolchain installs
 itself. On Linux, also clang 21 or newer (libwebrtc's C++ library needs it; set `CC` and `CXX` if
 it isn't your default compiler) and the development packages for `libxkbcommon`, `wayland`, `alsa`,
-`glib`, `pipewire` and `libclang`; on ARM also `lld` (libwebrtc links with it). On Debian or Ubuntu:
+`glib`, `pipewire`, `gstreamer` (with its base plugins, for video) and `libclang`; on ARM also `lld` (libwebrtc links with it). On Debian or Ubuntu:
 
 ```sh
-sudo apt install build-essential pkg-config libclang-dev libglib2.0-dev libasound2-dev libxkbcommon-dev libwayland-dev libpipewire-0.3-dev
+sudo apt install build-essential pkg-config libclang-dev libglib2.0-dev libasound2-dev libxkbcommon-dev libwayland-dev libpipewire-0.3-dev \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 21 && export CC=clang-21 CXX=clang++-21
 ```
 

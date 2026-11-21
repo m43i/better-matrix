@@ -1856,6 +1856,53 @@ fn a_video_starting_should_pause_the_clip_playing() {
 }
 
 #[test]
+fn a_video_sharing_an_upload_with_a_clip_saving_it_should_play_once_it_is_saved() {
+    let (mut s, mut commands) = state();
+    let file = |kind, name: &str| matrix_core::Attachment {
+        media: Some(MediaRef::opaque("shared")),
+        ..attachment(name, kind)
+    };
+    let (clip, video) =
+        (file(matrix_core::AttachmentKind::Audio, "a.mp4"), file(matrix_core::AttachmentKind::Video, "v.mp4"));
+    crate::demo::post_batch(&mut s, vec![clip.clone(), video.clone()]);
+    drain(&mut commands);
+    s.toggle_audio(&clip);
+    let (saving, _) = commands.try_next().unwrap();
+    s.open_attachment(&TimelineKey::room(crate::demo::DEMO_THREAD.0), "$batch-1", &video);
+    assert!(drain(&mut commands).iter().all(|(_, c)| !matches!(c, Command::SaveMedia { .. })), "one download");
+    apply(&mut s, Event::Finished { request: saving, result: Ok(()) });
+    assert!(matches!(
+        &s.preview,
+        Some(Preview { content: PreviewContent::Video { status: VideoStatus::Open(_), .. }, .. })
+    ));
+}
+
+#[test]
+fn a_video_player_opened_for_an_earlier_showing_should_be_dropped() {
+    use crate::platform::video;
+    let (mut s, _) = batch_preview(1);
+    let opening = |s: &mut State| {
+        let preview = s.preview.as_mut().unwrap();
+        preview.content = PreviewContent::Video { thumbnail: None, status: VideoStatus::Opening };
+        preview.visit
+    };
+    let earlier = opening(&mut s);
+    s.step_preview(1);
+    s.step_preview(-1);
+    let latest = opening(&mut s);
+    s.video_opened(earlier, video::Player::Detached(video::Detached::default()));
+    assert!(matches!(
+        &s.preview,
+        Some(Preview { content: PreviewContent::Video { status: VideoStatus::Opening, .. }, .. })
+    ));
+    s.video_opened(latest, video::Player::Detached(video::Detached::default()));
+    assert!(matches!(
+        &s.preview,
+        Some(Preview { content: PreviewContent::Video { status: VideoStatus::Open(_), .. }, .. })
+    ));
+}
+
+#[test]
 fn moving_on_from_a_clip_playing_in_the_preview_should_pause_it() {
     let (mut s, _) = batch_preview(2);
     s.toggle_preview_playback();

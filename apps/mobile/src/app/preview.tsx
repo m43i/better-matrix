@@ -33,7 +33,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { t } from '../i18n';
 import { routes } from '../routes';
-import { previewGallery, showsStrip, stepGallery } from '../state/gallery';
+import { galleryAround, showsStrip, stepGallery } from '../state/gallery';
 import { attachmentPreview } from '../state/messages';
 import { shallow, useAppStore, useStore } from '../state/react';
 import { timeline } from '../state/selectors';
@@ -75,13 +75,14 @@ export default function PreviewScreen() {
     [roomId, thread],
   );
 
+  // The item on screen, which the strip and swipes move; the opened one at first.
+  const [current, setCurrent] = useState(eventId);
+
   const gallery = useStore(
-    (s) => previewGallery(timeline(s, account, key).entries, eventId, thread ?? null),
+    (s) => galleryAround(timeline(s, account, key).entries, current, eventId, thread ?? null),
     shallow,
   );
 
-  // The item on screen, which the strip and swipes move; the opened one at first.
-  const [current, setCurrent] = useState(eventId);
   const found = gallery.findIndex((m) => m.event_id === current);
   const index = found < 0 ? gallery.findIndex((m) => m.event_id === eventId) : found;
   const message = gallery[index] ?? null;

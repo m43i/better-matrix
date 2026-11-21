@@ -1698,15 +1698,13 @@ impl State {
                 Purpose::StatusMessage { account } => {
                     self.accounts.status_message_saved(account, request);
                 }
-                Purpose::Audio { media, path } => {
+                // Messages of either kind may share one upload: whichever saved it, both wait.
+                Purpose::Audio { media, path } | Purpose::Video { media, path } => {
+                    let (media, path) = (media.clone(), path.clone());
                     self.scratch_files.insert(media.clone(), ScratchFile::Saved(path.clone()));
-                    if self.audio.as_ref().is_some_and(|clip| clip.media == *media) {
+                    if self.audio.as_ref().is_some_and(|clip| clip.media == media) {
                         self.open_audio(path.clone());
                     }
-                }
-                Purpose::Video { media, path } => {
-                    self.scratch_files.insert(media.clone(), ScratchFile::Saved(path.clone()));
-                    let (media, path) = (media.clone(), path.clone());
                     self.open_video(&media, path);
                 }
                 Purpose::Avatar => self.profile.saving_avatar = false,
@@ -1840,11 +1838,10 @@ impl State {
             }
             Purpose::Video { media, .. } => {
                 self.scratch_files.remove(&media);
-                if let Some(Preview { content: PreviewContent::Video { status, .. }, .. }) =
-                    self.preview.as_mut().filter(|preview| preview.media == media)
-                {
-                    *status = VideoStatus::Failed(error);
+                if self.audio.as_ref().is_some_and(|clip| clip.media == media) {
+                    self.audio_failed(&media, None, error.clone());
                 }
+                self.video_failed(&media, &error);
             }
             Purpose::Save => self.notice = Some(tf!("notice.save", error = error)),
             Purpose::CopyImage => self.notice = Some(tf!("notice.copy_image", error = error)),
@@ -1874,6 +1871,7 @@ impl State {
             Purpose::Rename => self.notice = Some(tf!("notice.rename", error = error)),
             Purpose::Audio { media, .. } => {
                 self.scratch_files.remove(&media);
+                self.video_failed(&media, &error);
                 self.audio_failed(&media, None, error);
             }
             Purpose::Invite => self.notice = Some(tf!("notice.invite", error = error)),
@@ -3265,10 +3263,31 @@ impl State {
         if !matches!(status, VideoStatus::Downloading) {
             return;
         }
-        let speaker = self.settings.devices.speaker.as_deref();
-        *status = VideoStatus::Open(self.shell.video_player(path, speaker, preview.attachment.dimensions));
-        // It plays at once, over no clip.
+        *status = VideoStatus::Opening;
+        let (speaker, dimensions, visit) =
+            (self.settings.devices.speaker.clone(), preview.attachment.dimensions, preview.visit);
+        if let Some(player) = self.shell.open_video(path, speaker, dimensions, visit) {
+            self.video_opened(visit, player);
+        }
+    }
+
+    /// The player for showing `visit` of a video is open: it plays, over no clip, if that
+    /// showing is still on screen; else it is dropped, which stops it.
+    pub fn video_opened(&mut self, visit: u64, player: crate::platform::video::Player) {
+        let Some(preview) = self.preview.as_mut().filter(|preview| preview.visit == visit) else { return };
+        let PreviewContent::Video { status: status @ VideoStatus::Opening, .. } = &mut preview.content else { return };
+        *status = VideoStatus::Open(player);
         self.pause_audio();
+    }
+
+    /// The previewed video's file couldn't be saved: it says why.
+    fn video_failed(&mut self, media: &MediaRef, error: &str) {
+        if let Some(Preview {
+            content: PreviewContent::Video { status: status @ VideoStatus::Downloading, .. }, ..
+        }) = self.preview.as_mut().filter(|preview| preview.media == *media)
+        {
+            *status = VideoStatus::Failed(error.to_owned());
+        }
     }
 
     /// Pauses the clip playing, or queued to play once its file comes.

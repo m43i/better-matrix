@@ -27,6 +27,8 @@ pub type Pages = Vec<(Pixels, (u32, u32))>;
 #[derive(Debug)]
 pub enum VideoStatus {
     Downloading,
+    /// Saved; its player opens on a worker (`Shell::open_video`).
+    Opening,
     Open(video::Player),
     Failed(String),
 }
