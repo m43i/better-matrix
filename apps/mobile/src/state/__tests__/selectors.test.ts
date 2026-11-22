@@ -2,7 +2,7 @@ import type { SavedMessage } from '@better-matrix/matrix-native/types';
 
 import { apply, initialState } from '../reducer';
 import { shallow } from '../react';
-import { activeRoomList, savedMessages, savedSignature } from '../selectors';
+import { activeRoomList, savedMessages, savedSignature, unnamedSenders } from '../selectors';
 import type { TimelineDiff } from '@better-matrix/matrix-native/types';
 
 import { ADA, messageEntry, person, roomSummary, summary } from '../../test/fixtures';
@@ -101,5 +101,21 @@ describe('activeRoomList', () => {
     const after = changed(before, [{ type: 'PushBack', data: messageEntry('$new') }]);
     expect(shallow(activeRoomList(before), activeRoomList(after))).toBe(false);
     expect(activeRoomList(after)?.newest['!r:x']?.event_id).toBe('$new');
+  });
+});
+
+describe('unnamedSenders', () => {
+  it('bubbles should name everyone in a room', () => {
+    expect(unnamedSenders(roomSummary('!r:x'))).toEqual([]);
+  });
+
+  it('bubbles should not name the other person of a one-to-one chat', () => {
+    const chat = { ...roomSummary('!d:x', 'Grace', 'Direct'), dm_users: ['@grace:x'] };
+    expect(unnamedSenders(chat)).toEqual(['@grace:x']);
+  });
+
+  it('bubbles should name everyone in a direct chat a third person joined', () => {
+    const chat = { ...roomSummary('!d:x', 'Grace', 'Direct'), dm_users: ['@grace:x'] };
+    expect(unnamedSenders({ ...chat, member_count: 3 })).toEqual([]);
   });
 });

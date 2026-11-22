@@ -3,7 +3,7 @@
 import type { NotificationMode } from '@better-matrix/matrix-native/types';
 
 import { type Key, type Language, LOCALES, resolve, t } from '../../i18n';
-import type { Appearance } from '../../state/settings';
+import type { Appearance, MessageLayout } from '../../state/settings';
 
 /** Each language the app offers: the system's first, named with what it resolves to. */
 export function languageChoices(): Array<{ id: Language; label: string }> {
@@ -16,6 +16,12 @@ export const APPEARANCES: ReadonlyArray<{ id: Appearance; label: Key }> = [
   { id: 'system', label: 'appearance.system' },
   { id: 'light', label: 'appearance.light' },
   { id: 'dark', label: 'appearance.dark' },
+];
+
+/** How messages lay out, as the desktop's Appearance settings list them. */
+export const MESSAGE_LAYOUTS: ReadonlyArray<{ id: MessageLayout; label: Key; hint: Key }> = [
+  { id: 'rows', label: 'message_layout.rows', hint: 'message_layout.rows_hint' },
+  { id: 'bubbles', label: 'message_layout.bubbles', hint: 'message_layout.bubbles_hint' },
 ];
 
 /** When rooms notify, as the desktop's room menu lists the modes. */

@@ -56,6 +56,7 @@ import {
   shownIgnored,
   shownTimeline,
   timeline as timelineOf,
+  unnamedSenders,
 } from '../../state/selectors';
 import { routes } from '../../routes';
 import { font } from '../../theme/palette';
@@ -148,6 +149,15 @@ export function Timeline({
   );
 
   const pinned = useMemo(() => new Set(pinnedIds), [pinnedIds]);
+
+  // Whom bubbles leave unnamed here, read alone: a room's other changes don't redraw the list.
+  const unnamedIds = useStore(
+    (s) => unnamedSenders(roomOf(s, account, timelineKey.room_id)),
+    shallow,
+  );
+
+  const unnamed = useMemo(() => new Set(unnamedIds), [unnamedIds]);
+
   // The "New" divider stays where it first showed and fades once read past (state/newMarker.ts),
   // derived during render so it is there on the first frame.
   const sdkMarker = useMemo(() => sdkBoundary(timeline.entries), [timeline.entries]);
@@ -333,6 +343,7 @@ export function Timeline({
       account,
       timelineKey,
       thread,
+      unnamed,
       scrollTo: (eventId) => void scrollTo(eventId),
       openActions: (message) => {
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -346,7 +357,7 @@ export function Timeline({
         );
       },
     }),
-    [account, timelineKey, thread, scrollTo],
+    [account, timelineKey, thread, unnamed, scrollTo],
   );
 
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {

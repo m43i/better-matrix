@@ -27,7 +27,7 @@ import { Icon } from '../icons';
 import { useMedia } from '../media';
 import { useNow } from '../shell/useNow';
 import { usePalette } from '../theme';
-import { useTimelineContext } from './context';
+import { useMessageSide, useTimelineContext } from './context';
 import { HiddenMedia, useHiddenMedia } from './HiddenMedia';
 import { useContentWidth } from './readersLayout';
 import { openLink } from './open';
@@ -69,9 +69,11 @@ export const Reactions = memo(function Reactions({
   const palette = usePalette();
   const store = useAppStore();
   const { account, timelineKey, thread } = useTimelineContext();
+  // Each wrapped line of chips keeps to the message's side.
+  const side = useMessageSide();
 
   return (
-    <View style={styles.chips}>
+    <View style={[styles.chips, { justifyContent: side }]}>
       {reactions.map((reaction) => (
         <Pressable
           key={reaction.key}
@@ -120,13 +122,14 @@ export function ThreadLink({ root, thread }: { root: string; thread: ThreadSumma
   const now = useNow();
   const palette = usePalette();
   const { account, timelineKey } = useTimelineContext();
+  const side = useMessageSide();
 
   return (
     <Pressable
       onPress={() => router.push(routes.thread(account, timelineKey.room_id, root))}
       accessibilityRole="button"
       accessibilityHint={t('mobile.conversation.open_thread')}
-      style={styles.thread}
+      style={[styles.thread, { alignSelf: side }]}
     >
       {thread.latest ? (
         <Avatar
@@ -226,6 +229,7 @@ export function LinkCard({ url, message }: { url: string; message: Message }) {
           style={styles.cardImage}
           width={CARD_IMAGE_SIDE}
           height={CARD_IMAGE_SIDE}
+          inCard
         />
       ) : null}
     </View>
@@ -249,6 +253,7 @@ export function LinkedGif({ url, message }: { url: string; message: Message }) {
   const [measured, setMeasured] = useState<{ url: string; aspect: number } | null>(null);
   const aspect = measured?.url === url ? measured.aspect : (gifAspects.get(url) ?? GIF_ASPECT);
   const width = Math.min(GIF_WIDTH, useContentWidth());
+  const side = useMessageSide();
   // A GIF the account keeps back is not fetched before Show (ADR 0011).
   const { hidden, reveal } = useHiddenMedia(message);
   const { openActions } = useTimelineContext();
@@ -271,7 +276,7 @@ export function LinkedGif({ url, message }: { url: string; message: Message }) {
       onPress={() => openLink(store, url)}
       accessibilityRole="imagebutton"
       accessibilityLabel={url}
-      style={styles.gif}
+      style={[styles.gif, { alignSelf: side }]}
     >
       {path ? (
         <Image
@@ -337,7 +342,6 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 4,
     paddingVertical: 3,
-    alignSelf: 'flex-start',
   },
   shrink: { flexShrink: 1 },
   card: {
@@ -355,6 +359,6 @@ const styles = StyleSheet.create({
   cardWords: { flex: 1, gap: 2 },
   cardImage: { width: CARD_IMAGE_SIDE, height: CARD_IMAGE_SIDE, borderRadius: 8 },
   center: { alignItems: 'center', justifyContent: 'center' },
-  gif: { marginTop: 4, alignSelf: 'flex-start' },
+  gif: { marginTop: 4 },
   gifImage: { maxHeight: 320, borderRadius: 8, overflow: 'hidden' },
 });

@@ -12,7 +12,7 @@ import { mediaHidden } from '../../state/selectors';
 import { font } from '../../theme/palette';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
-import { useTimelineContext } from './context';
+import { useMessageSide, useTimelineContext } from './context';
 import { hiddenLayout, minTap, tapArea } from './hiddenLayout';
 
 /** Whether this message's media waits for Show, and the way to show it. */
@@ -36,6 +36,7 @@ export function HiddenMedia({
   style,
   width,
   height,
+  inCard = false,
 }: {
   /** What is hidden ("Hidden picture"). */
   label: string;
@@ -45,9 +46,13 @@ export function HiddenMedia({
   /** The box's size, which decides what fits in it. */
   width: number;
   height: number;
+  /** Laid out in a link card's row, at its top, rather than on the message's side. */
+  inCard?: boolean;
 }) {
   const palette = usePalette();
   const layout = hiddenLayout(width, height);
+  // On the message's side, as the media it stands for (chat bubbles keep the user's own right).
+  const side = useMessageSide();
   const iconSize = Math.min(24, Math.min(width, height) - 8);
 
   const show = (
@@ -64,7 +69,11 @@ export function HiddenMedia({
       delayLongPress={350}
       accessibilityRole="button"
       accessibilityLabel={`${label}. ${t('safety.show_media')}`}
-      style={[styles.tap, tapArea(width, height, minTap(Platform.OS))]}
+      style={[
+        styles.tap,
+        { alignSelf: inCard ? 'flex-start' : side },
+        tapArea(width, height, minTap(Platform.OS)),
+      ]}
     >
       <View
         style={[
@@ -87,7 +96,7 @@ export function HiddenMedia({
 }
 
 const styles = StyleSheet.create({
-  tap: { alignItems: 'center', justifyContent: 'center', gap: 4, alignSelf: 'flex-start' },
+  tap: { alignItems: 'center', justifyContent: 'center', gap: 4 },
   box: {
     alignItems: 'center',
     justifyContent: 'center',

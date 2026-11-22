@@ -26,3 +26,12 @@ fn clearing_the_last_used_account_should_survive_saving_and_loading_settings() {
 
     assert_eq!(load_settings(&prefs).last_account, None);
 }
+
+#[test]
+fn the_message_layout_should_survive_saving_and_loading_settings() {
+    let settings = Settings { message_layout: MessageLayout::Bubbles, ..Settings::fixed_english() };
+    let mut prefs = Prefs::memory();
+    write_settings(&mut prefs, &settings).unwrap();
+
+    assert_eq!(load_settings(&prefs).message_layout, MessageLayout::Bubbles);
+}

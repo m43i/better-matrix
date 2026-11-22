@@ -2395,6 +2395,333 @@ fn the_source_dialog_should_show_both_the_decrypted_and_the_sent_event() {
 }
 
 #[test]
+fn choosing_chat_bubbles_in_the_appearance_settings_should_lay_messages_out_in_bubbles() {
+    let mut rt = runtime(|s| {
+        s.open_settings();
+        s.show_settings_section(SettingsSection::Appearance);
+    });
+    press(&mut rt, "message-layout-bubbles");
+    assert_eq!(rt.state.settings.message_layout, crate::state::MessageLayout::Bubbles);
+}
+
+#[test]
+fn classic_rows_should_hold_messages_in_no_bubble() {
+    let rt = runtime(|s| short_room(s, 1));
+    assert!(rt.find("msg-short-0-bubble").is_none());
+    assert!(rt.find("msg-short-0-sender-face").is_some());
+}
+
+/// [`short_room`] in chat bubbles, with Grace's message followed by one of Ada's own.
+fn bubble_room(s: &mut State) {
+    s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+    s.select_room(demo::DEMO_THREAD.0);
+    let mut own = short_message("own", 1);
+    if let EntryKind::Message(message) = &mut own.kind {
+        message.sender_id = demo::ADA.into();
+        message.sender_name = "Ada Lovelace".into();
+    }
+    s.apply(
+        Event::TimelineChanged {
+            account: AccountId::new(demo::ADA),
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(vec![short_message("short-0", 0), own])],
+        },
+        &mut rune::Tx::default(),
+    );
+}
+
+#[test]
+fn in_bubbles_other_peoples_messages_should_sit_at_the_left_beside_their_picture() {
+    let rt = runtime(bubble_room);
+    let face = element_rect(&rt, "msg-short-0-sender-face");
+    let bubble = element_rect(&rt, "msg-short-0-bubble");
+    let own = element_rect(&rt, "msg-own-bubble");
+    assert!(bubble[0] > face[0] + face[2] - 1.0, "the bubble follows the picture");
+    assert!(bubble[0] + bubble[2] < own[0] + own[2], "it ends short of the user's own");
+}
+
+#[test]
+fn in_bubbles_the_users_own_messages_should_sit_at_the_right_without_a_picture() {
+    let rt = runtime(bubble_room);
+    let other = element_rect(&rt, "msg-short-0-bubble");
+    let own = element_rect(&rt, "msg-own-bubble");
+    let row = element_rect(&rt, "msg-own");
+    assert!(rt.find("msg-own-sender-face").is_none());
+    assert!(rt.find("msg-own-sender-name").is_none());
+    assert!(own[0] > other[0] + other[2] / 2.0, "the user's own bubble starts right of the other's");
+    assert!(own[0] > row[0] + row[2] / 2.0, "and sits in the timeline's right half");
+}
+
+#[test]
+fn pressing_a_bubble_beside_its_text_should_open_its_thread() {
+    let mut rt = runtime(bubble_room);
+    // In the bubble's padding, under the words and left of the time: the text keeps its own
+    // presses for selecting.
+    let bubble = element_rect(&rt, "msg-own-bubble");
+    let (x, y) = (bubble[0] + 4.0, bubble[1] + bubble[3] - 3.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.active_thread(), Some("$own"));
+}
+
+#[test]
+fn in_bubbles_the_toolbar_of_the_users_own_message_should_keep_clear_of_its_bubble() {
+    let rt = runtime(bubble_room);
+    let toolbar = element_rect(&rt, "actions-$own");
+    let own = element_rect(&rt, "msg-own-bubble");
+    assert!(toolbar[0] + toolbar[2] < own[0], "the toolbar sits left of the bubble");
+}
+
+#[test]
+fn in_bubbles_the_users_own_voice_message_should_sit_at_the_right() {
+    use matrix_core::{Attachment, AttachmentKind, AudioDetails, MediaRef};
+
+    let rt = runtime(|s| {
+        bubble_room(s);
+        let mut voice = short_message("voice", 2);
+        if let EntryKind::Message(message) = &mut voice.kind {
+            message.sender_id = demo::ADA.into();
+            message.content = MessageContent::Attachment(Attachment {
+                kind: AttachmentKind::Audio,
+                name: "memo.ogg".into(),
+                size: None,
+                media: Some(MediaRef::opaque("memo")),
+                thumbnail: None,
+                dimensions: None,
+                audio: Some(AudioDetails { voice: true, duration_ms: Some(4_000), waveform: vec![500; 40] }),
+            });
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::PushBack(voice)],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let card = element_rect(&rt, "audio-$voice");
+    let text = element_rect(&rt, "msg-own-bubble");
+    assert!((card[0] + card[2] - (text[0] + text[2])).abs() < 1.0, "the card ends where the user's bubbles do");
+}
+
+#[test]
+fn bubbles_should_name_senders_in_a_direct_chat_a_third_person_joined() {
+    let mut room = demo_dm();
+    room.member_count = 3;
+    assert!(super::timeline::names_sender(&room, "@grace:example.org"));
+}
+
+#[test]
+fn bubbles_should_not_name_the_other_person_of_a_one_to_one_chat() {
+    assert!(!super::timeline::names_sender(&demo_dm(), "@grace:example.org"));
+}
+
+#[test]
+fn bubbles_should_name_someone_who_left_a_direct_chat() {
+    assert!(super::timeline::names_sender(&demo_dm(), "@alan:example.org"));
+}
+
+/// The demo's one-to-one chat with Grace.
+fn demo_dm() -> matrix_core::RoomSummary {
+    let mut s = State::detached();
+    demo::seed(&mut s);
+    s.accounts.get(&AccountId::new(demo::ADA)).and_then(|a| a.room("!dm-grace:example.org")).unwrap().clone()
+}
+
+#[test]
+fn in_bubbles_the_caption_of_the_users_own_gif_should_keep_to_the_gifs_side() {
+    let rt = runtime(|s| {
+        bubble_room(s);
+        let mut gif = short_message("gif", 2);
+        if let EntryKind::Message(message) = &mut gif.kind {
+            message.sender_id = demo::ADA.into();
+            message.content = MessageContent::Text { body: "Ha https://x.org/a.gif".into(), html: None };
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::PushBack(gif)],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let gif = element_rect(&rt, "gif-https://x.org/a.gif");
+    let caption = element_rect(&rt, "text-$gif");
+    // The words' box reaches `REACH` past them on either side.
+    let words_end = caption[0] + caption[2] - super::message_text::REACH;
+    assert!((words_end - (gif[0] + gif[2])).abs() < 1.0, "the caption ends where the GIF does");
+}
+
+#[test]
+fn in_bubbles_a_formatted_caption_of_the_users_own_gif_should_keep_to_the_gifs_side() {
+    let rt = runtime(|s| {
+        bubble_room(s);
+        let mut gif = short_message("gif", 2);
+        if let EntryKind::Message(message) = &mut gif.kind {
+            message.sender_id = demo::ADA.into();
+            message.content = MessageContent::Text {
+                body: "Ha https://x.org/a.gif".into(),
+                html: Some("<b>Ha</b> https://x.org/a.gif".into()),
+            };
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::PushBack(gif)],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let gif = element_rect(&rt, "gif-https://x.org/a.gif");
+    let caption = element_rect(&rt, "rich-$gif");
+    assert!(
+        caption[0] > gif[0],
+        "the caption starts within the GIF's span, not at the row's left: {caption:?} {gif:?}"
+    );
+}
+
+#[test]
+fn in_bubbles_the_users_own_card_should_be_no_wider_than_a_classic_rows() {
+    let rt = runtime(|s| {
+        bubble_room(s);
+        let mut poll = short_message("poll", 2);
+        if let EntryKind::Message(message) = &mut poll.kind {
+            message.sender_id = demo::ADA.into();
+            message.content = MessageContent::Poll(matrix_core::Poll {
+                question: "Lunch?".into(),
+                answers: vec![
+                    matrix_core::PollAnswer { id: "a".into(), text: "Yes".into(), votes: 0, mine: false },
+                    matrix_core::PollAnswer { id: "b".into(), text: "No".into(), votes: 0, mine: false },
+                ],
+                ..matrix_core::Poll::default()
+            });
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::PushBack(poll)],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let own = element_rect(&rt, "msg-poll-bubble");
+    let face = element_rect(&rt, "msg-short-0-sender-face");
+    assert!(own[0] >= face[0] + face[2] - 1.0, "the card leaves the picture's gutter free");
+}
+
+#[test]
+fn in_bubbles_the_picture_of_an_unnamed_sender_should_take_keyboard_focus() {
+    let rt = runtime(|s| {
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+        s.select_room("!dm-grace:example.org");
+    });
+    let faces: Vec<_> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.key.as_deref().is_some_and(|key| key.ends_with("-sender-face")))
+        .collect();
+    assert!(!faces.is_empty() && faces.iter().all(|face| face.focusable));
+}
+
+#[test]
+fn every_settings_section_should_be_reachable_in_the_smallest_window_at_a_large_size() {
+    // The smallest window, 720 by 480 points, at 125% zoom.
+    let mut rt = runtime(State::open_settings);
+    rt.set_viewport((576.0, 384.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    let nav = rt.presented("settings-nav").expect("the sections").0;
+    rt.wheel(nav[0] + nav[2] / 2.0, nav[1] + nav[3] / 2.0, -400.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    let info = rt.presented("settings-info").expect("Info").0;
+    let modal = rt.presented("settings-modal").expect("the dialog").0;
+    assert!(
+        info[1] + info[3] <= nav[1] + nav[3] + 0.5,
+        "Info scrolls into the dialog: info {info:?} nav {nav:?} modal {modal:?}"
+    );
+    press(&mut rt, "settings-info");
+    assert_eq!(rt.state.modal, Some(crate::state::Modal::Settings(SettingsSection::Info)));
+}
+
+#[test]
+fn in_bubbles_a_compact_timeline_should_keep_the_time_inside_the_bubble() {
+    // The smallest window, 720 by 480 points, at 150% zoom: a compact timeline.
+    let mut rt = runtime(|s| {
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+        s.select_room("!dm-grace:example.org");
+    });
+    rt.set_viewport((480.0, 320.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    let timeline = rt.presented("timeline").expect("the timeline").0;
+    let bubbles: Vec<_> = rt
+        .elements()
+        .into_iter()
+        .filter_map(|e| Some((e.key.clone()?, e.rect)))
+        .filter(|(key, _)| key.ends_with("-bubble"))
+        .collect();
+    assert!(!bubbles.is_empty(), "the timeline shows bubbles");
+    for (key, bubble) in bubbles {
+        let message = key.trim_end_matches("-bubble");
+        let Some(time) = rt.presented(&format!("{message}-time")) else { continue };
+        let time = time.0;
+        assert!(
+            time[0] >= bubble[0] - 0.5 && time[0] + time[2] <= bubble[0] + bubble[2] + 0.5,
+            "{message}: the time {time:?} leaves its bubble {bubble:?} in a timeline {timeline:?}"
+        );
+    }
+}
+
+#[test]
+fn in_bubbles_a_thread_link_should_stay_within_a_narrow_timeline() {
+    let mut rt = runtime(|s| {
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+        s.select_room(demo::DEMO_THREAD.0);
+    });
+    rt.set_viewport((640.0, 480.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    let timeline = rt.presented("timeline").expect("the timeline").0;
+    let link = rt.presented(&format!("thread-link-{}", demo::DEMO_THREAD.1)).expect("the thread link").0;
+    assert!(link[0] + link[2] <= timeline[0] + timeline[2], "the link {link:?} ends past the timeline {timeline:?}");
+}
+
+#[test]
+fn in_bubbles_wrapped_reactions_on_the_users_own_message_should_keep_to_the_right() {
+    let rt = runtime(|s| {
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+        s.select_room(demo::DEMO_THREAD.0);
+        let mut own = short_message("own", 1);
+        if let EntryKind::Message(message) = &mut own.kind {
+            message.sender_id = demo::ADA.into();
+            message.reactions =
+                (0..24).map(|i| matrix_core::Reaction { key: format!(":r{i}:"), count: 1, mine: false }).collect();
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::Reset(vec![own])],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let bubble = element_rect(&rt, "msg-own-bubble");
+    let last = element_rect(&rt, "reaction-$own-:r23:");
+    let first = element_rect(&rt, "reaction-$own-:r0:");
+    assert!(last[1] > first[1], "the chips wrap");
+    assert!((last[0] + last[2] - (bubble[0] + bubble[2])).abs() < 1.0, "the last line ends where the bubble does");
+}
+
+#[test]
 fn stop_ignoring_should_show_their_messages_only_once_saved() {
     let mut rt = runtime(|s| {
         demo::attachment_message(s);
@@ -2440,4 +2767,35 @@ fn stop_ignoring_should_show_their_messages_only_once_saved() {
     settle(&mut rt);
     assert!(rt.find("msg-late").is_some());
     assert_eq!(preview(&rt).as_deref(), Some("$late"));
+}
+
+#[test]
+fn held_back_media_in_bubbles_should_show_a_placeholder_until_show_is_pressed() {
+    let mut rt = runtime(|s| {
+        demo::hidden_media(s);
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+    });
+    assert!(rt.find("hidden-media-$attachment").is_some());
+    assert!(rt.find("image-better-matrix.png").is_none());
+    press(&mut rt, "show-media-$attachment");
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("hidden-media-$attachment").is_none());
+    assert!(rt.find("image-better-matrix.png").is_some());
+}
+
+#[test]
+fn bubbles_should_draw_no_messages_from_someone_ignored() {
+    let mut rt = runtime(|s| {
+        demo::attachment_message(s);
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+    });
+    assert!(rt.find("msg-attachment").is_some());
+    let safety = matrix_core::Safety { ignored: vec!["@grace:example.org".into()], ..matrix_core::Safety::default() };
+    rt.update(|s, tx| s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, tx));
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("msg-attachment").is_none());
 }

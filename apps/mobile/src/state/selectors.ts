@@ -7,6 +7,7 @@ import type {
   MediaSize,
   MessagePreview,
   RoomPreview,
+  RoomSummary,
   SavedMessage,
   SharedFile,
   ThreadInfo,
@@ -147,6 +148,17 @@ export function room(state: State, id: AccountId, roomId: string) {
 }
 
 /** A fetched media file's `file://` URI, once it's there. */
+const NO_ONE: string[] = [];
+
+/**
+ * Whom chat bubbles leave unnamed in `room`: the other person of a one-to-one direct chat, where
+ * who wrote what is plain. Once someone else is there, or for anyone who was and left, names
+ * show.
+ */
+export function unnamedSenders(room: RoomSummary | undefined): string[] {
+  return room?.kind === 'Direct' && room.member_count <= 2 ? room.dm_users : NO_ONE;
+}
+
 export function mediaUri(state: State, media: MediaRef, size: MediaSize): string | undefined {
   const path = state.media[mediaKey(media, size)];
 

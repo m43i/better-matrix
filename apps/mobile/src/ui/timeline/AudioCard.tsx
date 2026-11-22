@@ -37,7 +37,7 @@ import { font } from '../../theme/palette';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
 import { claimAudio, releaseAudio } from './audioFocus';
-import { useTimelineContext } from './context';
+import { useMessageSide, useTimelineContext } from './context';
 import { useContentWidth } from './readersLayout';
 
 const PLAY = 36;
@@ -334,6 +334,7 @@ function CardFace({
 }) {
   const palette = usePalette();
   const { account, timelineKey, thread, openActions } = useTimelineContext();
+  const side = useMessageSide();
   const media = attachment.media;
   const details = voiceDetails(attachment.audio);
   const { bars, width } = wave;
@@ -353,7 +354,10 @@ function CardFace({
       onLongPress={() => openActions(message)}
       delayLongPress={350}
       accessibilityLabel={details.voice ? t('audio.voice') : attachment.name}
-      style={[styles.card, { backgroundColor: palette.surface, borderColor: palette.divider }]}
+      style={[
+        styles.card,
+        { alignSelf: side, backgroundColor: palette.surface, borderColor: palette.divider },
+      ]}
       testID={`audio-${message.event_id}`}
     >
       {details.voice ? null : (
@@ -454,7 +458,6 @@ function CardFace({
 const styles = StyleSheet.create({
   card: {
     marginTop: 4,
-    alignSelf: 'flex-start',
     paddingLeft: PAD_LEFT,
     paddingRight: PAD_RIGHT,
     paddingVertical: 8,

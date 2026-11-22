@@ -164,6 +164,31 @@ see who is typing there.
   a list request finishes; phones run list requests one at a time). Opening a row uses the shared
   message jump; its bookmark button stops saving it. The desktop's rows act on the dialog's
   account, which need not be the one on screen.
+- **Message layout:** a device setting (`Settings::message_layout`, `messageLayout` on phones),
+  classic rows by default. Both layouts are built from the same plan and the same parts
+  (`message_parts`: what a message says, then what hangs off it), so a feature added to a
+  message shows in both.
+  - Classic rows: the sender's picture, name and time head a run; the row tints on hover.
+  - Chat bubbles: other people's messages sit at the left beside their picture (on the first of
+    a run) with their name in their identity colour inside the bubble; the user's own sit at the
+    right with neither (`Context::on_right`). Only the other person of a one-to-one direct chat
+    goes unnamed (`names_sender`, `unnamedSenders`): once someone else is there, or for anyone
+    who was and left, names show. The rule reads the summary's `dm_users` and joined count, not
+    live membership, so a partner who left while someone else stayed goes unnamed too.
+  - Words get a bubble (`bubble`, `bubble_own` palette roles), at most 80% of the content width
+    and 600 points on desktop, 85% of the row on phones, hugging short text. A compact desktop
+    timeline (content under 320 points) gives bubbles all of it, with 8 points of padding. At
+    the smallest window and 175% zoom (about 37 points of content) a time can still spill out,
+    as classic rows truncate there. Media and cards
+    bring their own frames and stand without one, in the width a classic row gives them, which
+    they are sized for, keeping to their message's side (phones: `MessageSideContext`). What a
+    bubble holds sizes itself to the bubble (desktop: `message_parts`'s card width; phones:
+    `ContentWidthContext`).
+  - The time (with "edited" or "sending") closes the bubble in `bubble_meta`, which keeps 4.5:1
+    on either bubble, as do muted words inside it (a quote, a notice; phones: `InBubble`); reactions and the thread hang below it, on its side. The readers' column,
+    menu and press-to-open-thread are the classic row's; the hover toolbar moves to the row's
+    left over the user's own bubbles, which take its usual place (in a timeline too narrow for
+    both it may cover a long first line, as it does a classic row's).
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
     reaction's count and whether the user is among them. The picker offers quick reactions,

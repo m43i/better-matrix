@@ -91,6 +91,10 @@ fn spec() -> AppSpec<State> {
             ("demo-safety", demo::safety),
             ("demo-report", demo::report),
             ("demo-hidden-media", demo::hidden_media),
+            ("demo-hidden-media-bubbles", |s| {
+                demo::hidden_media(s);
+                s.settings.message_layout = state::MessageLayout::Bubbles;
+            }),
             ("demo-public-rooms", |s| {
                 demo::discovery(s);
                 s.browse_public_rooms();
@@ -114,6 +118,27 @@ fn spec() -> AppSpec<State> {
             ("demo-light", |s| {
                 demo::seed(s);
                 s.settings.appearance = Appearance::Light;
+            }),
+            ("demo-bubbles", |s| {
+                demo::seed(s);
+                s.settings.message_layout = state::MessageLayout::Bubbles;
+                s.select_room(demo::DEMO_THREAD.0);
+            }),
+            ("demo-bubbles-light", |s| {
+                demo::seed(s);
+                s.settings.appearance = Appearance::Light;
+                s.settings.message_layout = state::MessageLayout::Bubbles;
+                s.select_room(demo::DEMO_THREAD.0);
+            }),
+            ("demo-bubbles-dm", |s| {
+                demo::seed(s);
+                s.settings.message_layout = state::MessageLayout::Bubbles;
+                s.select_room("!dm-grace:example.org");
+            }),
+            ("demo-settings-appearance", |s| {
+                demo::seed(s);
+                s.open_settings();
+                s.show_settings_section(SettingsSection::Appearance);
             }),
             ("demo-dm", |s| {
                 demo::seed(s);

@@ -304,6 +304,19 @@ the server, edited under each account in Settings, Notifications (`Event::Keywor
 : The modal for this device's preferences (language, appearance) and each account's default
 notification mode, in sections (`SettingsSection`).
 
+**Appearance** (settings section)
+: The settings section for how the app looks: the theme (light, dark or the system's;
+`Appearance`), the message layout and the interface size. On phones these sit under Preferences,
+less the interface size.
+
+**Message layout**
+: How timelines lay out messages (`MessageLayout`, `messageLayout`): **classic rows**, the
+default, every message under its sender's name and picture as in Slack, or **chat bubbles**,
+other people's messages at the left beside their picture and the user's own at the right. A
+bubble holds words (text, a deleted or undecryptable message) with the sender's name (left out
+in a one-to-one direct chat) and the time; pictures, files, clips, polls, call cards and GIFs stand without one. Reactions and the
+thread hang below. See [ADR 0006](adr/0006-timelines.md).
+
 **Interface size** (zoom)
 : How large the whole interface draws, as a browser's page zoom (`Zoom`). 100% is the design
 size. See [ADR 0005](adr/0005-navigation-and-settings.md).

@@ -22,6 +22,12 @@ pub struct Palette {
     pub text_muted: Color,
     pub divider: Color,
     pub hover: Color,
+    /// Behind other people's messages in chat bubbles.
+    pub bubble: Color,
+    /// Behind the user's own messages in chat bubbles.
+    pub bubble_own: Color,
+    /// The time and status inside a bubble: muted, yet clear on either bubble.
+    pub bubble_meta: Color,
     pub accent: Color,
     pub on_accent: Color,
     pub mention: Color,
@@ -56,6 +62,9 @@ pub fn palette(dark: bool) -> Palette {
                 text_muted: oklch(0.7155, 0.0, 0.0),
                 divider: oklch(0.3715, 0.0, 0.0),
                 hover: oklcha(1.0, 0.0, 0.0, 0.05),
+                bubble: oklch(0.2840, 0.0, 0.0),
+                bubble_own: oklch(0.2700, 0.0400, 262.0),
+                bubble_meta: oklch(0.7155, 0.0, 0.0),
             },
         )
     } else {
@@ -78,6 +87,9 @@ pub fn palette(dark: bool) -> Palette {
                 text_muted: oklch(0.5510, 0.0234, 264.3637),
                 divider: oklch(0.9276, 0.0058, 264.5313),
                 hover: oklcha(0.0, 0.0, 0.0, 0.04),
+                bubble: oklch(0.9550, 0.0040, 264.0),
+                bubble_own: oklch(0.9300, 0.0350, 255.0),
+                bubble_meta: oklch(0.4500, 0.0250, 264.0),
             },
         )
     };
@@ -97,6 +109,9 @@ pub fn palette(dark: bool) -> Palette {
         text_muted: content.text_muted,
         divider: content.divider,
         hover: content.hover,
+        bubble: content.bubble,
+        bubble_own: content.bubble_own,
+        bubble_meta: content.bubble_meta,
         accent: primary,
         on_accent: oklch(1.0, 0.0, 0.0),
         mention: destructive,
@@ -125,6 +140,9 @@ struct Content {
     text_muted: Color,
     divider: Color,
     hover: Color,
+    bubble: Color,
+    bubble_own: Color,
+    bubble_meta: Color,
 }
 
 /// A stable colour per Matrix ID, for avatars and sender names.

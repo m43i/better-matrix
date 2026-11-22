@@ -13,7 +13,7 @@ use super::room_menu::{mode_id, modes};
 use super::theme::{Palette, font};
 use crate::i18n::{Language, t, tf};
 use crate::state::{
-    AccountData, Appearance, ContactStep, MediaCache, Popover, SelectFor, SettingsSection, State, Zoom,
+    AccountData, Appearance, ContactStep, MediaCache, MessageLayout, Popover, SelectFor, SettingsSection, State, Zoom,
 };
 use crate::third_party;
 use matrix_core::{ContactDetail, ContactKind, RecoveryStatus, Session, SignInMethod};
@@ -27,6 +27,9 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
             .key("settings-nav")
             .w(220.0)
             .h_full()
+            .min_h(0.0)
+            // A short window at a large interface size scrolls the sections rather than cut Info off.
+            .scroll(ScrollSpec { stick_bottom: false })
             .padding(12.0)
             .gap(2.0)
             .fill(p.surface.mix(p.bg, 0.5))
@@ -36,6 +39,7 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
             let selected = item == section;
             let glyph = match item {
                 SettingsSection::General => &icons::SETTINGS,
+                SettingsSection::Appearance => &icons::SUN_MOON,
                 SettingsSection::Profile => &icons::USER,
                 SettingsSection::Notifications => &icons::BELL,
                 SettingsSection::Safety => &icons::EYE_OFF,
@@ -70,6 +74,7 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
 
     let body = match section {
         SettingsSection::General => general(s, p),
+        SettingsSection::Appearance => appearance(s, p),
         SettingsSection::Profile => profile(s, p),
         SettingsSection::Notifications => notifications(s, p),
         SettingsSection::Safety => safety(s, p),
@@ -192,13 +197,6 @@ fn component_row(component: &third_party::Component, p: &Palette) -> El {
 
 fn general(s: &State, p: &Palette) -> El {
     let languages = select(s, SelectFor::Language, &s.settings.language.label(), None, p);
-    let appearances = Appearance::ALL.into_iter().fold(col().w_full().gap(8.0), |list, appearance| {
-        list.child(
-            choice_row(appearance.label(), None, s.settings.appearance == appearance, p)
-                .key(format!("appearance-{}", appearance.id()))
-                .on_press(move |s: &mut State| s.set_appearance(appearance)),
-        )
-    });
     let gifs =
         [(true, t!("settings.gifs_on"), Some(t!("settings.gifs_on_hint"))), (false, t!("settings.gifs_off"), None)]
             .into_iter()
@@ -237,17 +235,33 @@ fn general(s: &State, p: &Palette) -> El {
         .w_full()
         .gap(32.0)
         .child(setting_group(&icons::LANGUAGE, t!("settings.language"), t!("settings.language_hint"), languages, p))
-        .child(setting_group(
-            &icons::SUN_MOON,
-            t!("settings.appearance"),
-            t!("settings.appearance_hint"),
-            appearances,
-            p,
-        ))
-        .child(setting_group(&icons::ZOOM, t!("settings.zoom"), t!("settings.zoom_hint"), zoom(s, p), p))
         .child(setting_group(&icons::LINK, t!("settings.previews"), t!("settings.previews_hint"), previews, p))
         .child(setting_group(&icons::IMAGE, t!("settings.gifs"), t!("settings.gifs_hint"), gifs, p))
         .child(setting_group(&icons::CODE, t!("settings.developer"), t!("settings.developer_hint"), hidden, p))
+}
+
+/// How the app looks: the theme, how messages lay out, and the interface size.
+fn appearance(s: &State, p: &Palette) -> El {
+    let themes = Appearance::ALL.into_iter().fold(col().w_full().gap(8.0), |list, appearance| {
+        list.child(
+            choice_row(appearance.label(), None, s.settings.appearance == appearance, p)
+                .key(format!("appearance-{}", appearance.id()))
+                .on_press(move |s: &mut State| s.set_appearance(appearance)),
+        )
+    });
+    let layouts = MessageLayout::ALL.into_iter().fold(col().w_full().gap(8.0), |list, layout| {
+        list.child(
+            choice_row(layout.label(), Some(layout.hint()), s.settings.message_layout == layout, p)
+                .key(format!("message-layout-{}", layout.id()))
+                .on_press(move |s: &mut State| s.set_message_layout(layout)),
+        )
+    });
+    col()
+        .w_full()
+        .gap(32.0)
+        .child(setting_group(&icons::SUN_MOON, t!("settings.theme"), t!("settings.theme_hint"), themes, p))
+        .child(setting_group(&icons::CHAT, t!("settings.messages"), t!("settings.messages_hint"), layouts, p))
+        .child(setting_group(&icons::ZOOM, t!("settings.zoom"), t!("settings.zoom_hint"), zoom(s, p), p))
 }
 
 /// Smaller, the current size, larger, and back to the default.

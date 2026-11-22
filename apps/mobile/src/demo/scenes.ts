@@ -95,6 +95,17 @@ export const scenes = {
     setup: general,
     routes: [routes.room(ADA, GENERAL)],
   },
+  'room-bubbles': {
+    about: 'The general room in chat bubbles: others at the left, yours at the right',
+    settings: { messageLayout: 'bubbles' },
+    setup: general,
+    routes: [routes.room(ADA, GENERAL)],
+  },
+  'dm-bubbles': {
+    about: 'A direct chat in chat bubbles, with a call card and a voice memo',
+    settings: { messageLayout: 'bubbles' },
+    routes: [routes.room(ADA, DM_GRACE)],
+  },
   design: { about: 'A room with an image', setup: general, routes: [routes.room(ADA, DESIGN)] },
   dm: {
     about: 'A direct chat with a call card and a voice memo',

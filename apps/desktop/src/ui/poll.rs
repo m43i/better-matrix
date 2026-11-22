@@ -100,6 +100,8 @@ pub fn card(poll: &Poll, event_id: &str, own: bool, key: &TimelineKey, p: &Palet
     }
     col()
         .key(format!("poll-{event_id}"))
+        // As wide as the message's column allows, whether it stretches its children or not.
+        .w_full()
         .max_w(460.0)
         .mt(4.0)
         .padding(14.0)

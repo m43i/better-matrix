@@ -18,7 +18,7 @@ import { Icon, type IconName } from '../icons';
 import { ORIGINAL, PREVIEW_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
 import { AudioCard } from './AudioCard';
-import { useTimelineContext } from './context';
+import { useMessageSide, useTimelineContext } from './context';
 import { HiddenMedia, useHiddenMedia } from './HiddenMedia';
 import { useContentWidth } from './readersLayout';
 import { shareAttachment } from './files';
@@ -86,6 +86,7 @@ function ImageAttachment({ message, attachment }: { message: Message; attachment
 
   const size = previewSize(attachment.dimensions, useMediaBox());
   const open = useOpenPreview(message);
+  const side = useMessageSide();
 
   if (hidden)
     return (
@@ -106,7 +107,7 @@ function ImageAttachment({ message, attachment }: { message: Message; attachment
       delayLongPress={350}
       accessibilityRole="imagebutton"
       accessibilityLabel={attachment.name}
-      style={styles.media}
+      style={[styles.media, { alignSelf: side }]}
     >
       {uri ? (
         <Image
@@ -140,6 +141,7 @@ function VideoAttachment({ message, attachment }: { message: Message; attachment
   const poster = useMedia(account, hidden ? null : attachment.thumbnail, ORIGINAL);
   const size = previewSize(attachment.dimensions, useMediaBox());
   const open = useOpenPreview(message);
+  const side = useMessageSide();
 
   if (hidden)
     return (
@@ -160,7 +162,7 @@ function VideoAttachment({ message, attachment }: { message: Message; attachment
       delayLongPress={350}
       accessibilityRole="button"
       accessibilityLabel={`${t('mobile.conversation.play_video')}: ${attachment.name}`}
-      style={styles.media}
+      style={[styles.media, { alignSelf: side }]}
     >
       <View
         style={[
@@ -278,7 +280,7 @@ function FileCard({ message, attachment }: { message: Message; attachment: Attac
 }
 
 const styles = StyleSheet.create({
-  media: { marginTop: 4, alignSelf: 'flex-start' },
+  media: { marginTop: 4 },
   rounded: { borderRadius: 8, overflow: 'hidden' },
   placeholder: {
     alignItems: 'center',

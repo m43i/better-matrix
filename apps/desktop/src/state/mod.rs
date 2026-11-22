@@ -79,7 +79,7 @@ pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches
 pub use sections::{
     DIRECT, FAVOURITES, INVITATIONS, LOW_PRIORITY, ROOMS, SectionView, is_builtin, ordered_spaces, sections,
 };
-pub use settings::{Appearance, PlaybackSpeed, Settings, SettingsSection, Zoom};
+pub use settings::{Appearance, MessageLayout, PlaybackSpeed, Settings, SettingsSection, Zoom};
 pub use sign_in::{SignInForm, SignInStep};
 pub use status_message::{leading_emoji, suggestions as status_suggestions};
 pub use updates::Update;
@@ -4503,6 +4503,12 @@ impl State {
 
     pub fn set_appearance(&mut self, appearance: Appearance) {
         self.settings.appearance = appearance;
+        self.shell.save_settings(self.settings.clone());
+    }
+
+    /// Lays messages out in classic rows or chat bubbles, in every timeline.
+    pub fn set_message_layout(&mut self, layout: MessageLayout) {
+        self.settings.message_layout = layout;
         self.shell.save_settings(self.settings.clone());
     }
 
