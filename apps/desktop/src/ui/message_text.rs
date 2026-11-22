@@ -18,6 +18,9 @@ pub struct Look<'a> {
     pub me: &'a str,
     pub revealed: &'a HashSet<String>,
     pub media: &'a MediaCache,
+    /// Whether its custom emoji show as pictures: not while the account keeps the message's
+    /// media back (ADR 0011), when they read as their short codes.
+    pub pictures: bool,
 }
 
 /// How far beside a message's text a press still lands on the text: a click or drag that
@@ -229,6 +232,9 @@ fn pill(id: &str, range: std::ops::Range<usize>, absolute: usize, words: &str, l
         };
     }
     if let Some(url) = id.strip_prefix("emote:") {
+        if !look.pictures {
+            return Inline::Plain;
+        }
         let pixels = matrix_core::MediaRef::from_mxc(url)
             .and_then(|media| look.media.image(&media).map(|image| image.pixels().clone()));
         return pixels.map_or(Inline::Plain, Inline::Emoji);
@@ -242,7 +248,7 @@ mod tests {
     use rune::{Env, Runtime};
 
     fn test_look(s: &State) -> Look<'_> {
-        Look { event_id: "$m", me: "@me:x", revealed: &s.revealed, media: &s.media }
+        Look { event_id: "$m", me: "@me:x", revealed: &s.revealed, media: &s.media, pictures: true }
     }
 
     fn view(s: &State, _: &mut rune::Cx<State>) -> El {

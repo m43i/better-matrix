@@ -81,8 +81,10 @@ Date: 2026-11-22
   same size with Show; a press reveals that message's media until the app restarts. Nothing is
   fetched before; the attachment preview applies the same rule wherever it opens from (a file
   whose sender isn't known counts as someone else's), as do every file action (download, copy,
-  open, share) and an open preview when the choice changes. The user's own media and avatars
-  always show.
+  open, share) and an open preview when the choice changes. Custom emoji (inline `mxc://`
+  pictures in a message's text) follow their message: held back, they aren't fetched and read
+  as their short codes (on phones, tapping one shows the message's media). The user's own
+  media and avatars always show.
 
 ## Consequences
 

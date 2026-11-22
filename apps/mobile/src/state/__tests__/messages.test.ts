@@ -8,6 +8,7 @@ import {
   cardLink,
   messageActions,
   forwardSections,
+  marksMention,
   messageText,
   nextVote,
   playTime,
@@ -481,5 +482,19 @@ describe('emotes and places', () => {
     });
 
     expect(messageText(place)).toBe('Home');
+  });
+});
+
+describe('marksMention', () => {
+  it('should mark someone else’s message that mentions the user', () => {
+    expect(marksMention({ ...message('$a'), highlighted: true }, ADA)).toBe(true);
+  });
+
+  it('should not mark the user’s own message, even highlighted', () => {
+    expect(marksMention({ ...message('$a'), sender_id: ADA, highlighted: true }, ADA)).toBe(false);
+  });
+
+  it('should not mark a message that doesn’t mention the user', () => {
+    expect(marksMention(message('$a'), ADA)).toBe(false);
   });
 });

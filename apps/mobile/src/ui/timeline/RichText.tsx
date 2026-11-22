@@ -1,14 +1,17 @@
 // A message's text, drawn from its parsed blocks (state/html.ts) with native text: formatting,
 // links that open in the browser, mention pills, spoilers hidden until tapped, formulas as
-// Unicode, custom emoji as inline pictures, code, quotes and lists. Never raw HTML.
+// Unicode, custom emoji as inline pictures, code, quotes and lists. Never raw HTML. Inline
+// pictures follow the message's media (ADR 0011): held back, each is its short code, fetched
+// only once the user shows the message's media (a tap on the code does).
 
-import { memo } from 'react';
+import { createContext, memo, useContext } from 'react';
 import { Image, Platform, ScrollView, StyleSheet, Text, type TextStyle, View } from 'react-native';
 
 import { t } from '../../i18n';
 import { type Block, type Inline, type Marks } from '../../state/html';
-import { mxcMedia } from '../../state/messages';
-import { useAppStore } from '../../state/react';
+import { revealMedia } from '../../state/actions/safety';
+import { useAppStore, useStore } from '../../state/react';
+import { inlinePicture } from '../../state/selectors';
 import { spoilerId } from '../../state/spoilers';
 import { font } from '../../theme/palette';
 import { AVATAR_SIZE, useMedia } from '../media';
@@ -18,22 +21,35 @@ import { openLink, openMention } from './open';
 
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
+/** The message whose media choice an inline picture follows: its sender and event. */
+export interface MediaOwner {
+  sender_id: string;
+  event_id: string;
+}
+
+/** The message the text being drawn belongs to, for its inline pictures; none fetches nothing. */
+const MediaOwnerContext = createContext<MediaOwner | null>(null);
+
 /**
  * `blocks` of the message `owner` (its event ID: a spoiler shown in it stays shown for it only).
- * `place` is where these blocks stand in the message, for blocks inside a quote or a list.
+ * `media` is the message whose media choice its inline pictures follow, given where the text
+ * starts; blocks inside a quote or a list keep their message's. `place` is where these blocks
+ * stand in the message, for blocks inside a quote or a list.
  */
 export const RichText = memo(function RichText({
   blocks,
   owner,
+  media,
   muted = false,
   place = '',
 }: {
   blocks: Block[];
   owner: string;
+  media?: MediaOwner;
   muted?: boolean;
   place?: string;
 }) {
-  return (
+  const view = (
     <View style={styles.blocks}>
       {blocks.map((block, index) => (
         <BlockView
@@ -45,6 +61,12 @@ export const RichText = memo(function RichText({
         />
       ))}
     </View>
+  );
+
+  return media ? (
+    <MediaOwnerContext.Provider value={media}>{view}</MediaOwnerContext.Provider>
+  ) : (
+    view
   );
 });
 
@@ -178,10 +200,37 @@ function MathText({ text, latex }: { text: string; latex: string }) {
 /** How tall custom emoji are drawn: the body's line. */
 const EMOTE = 20;
 
-/** A custom emoji, as a picture in the line once fetched; its short code until then. */
+/**
+ * A custom emoji, as a picture in the line once fetched; its short code until then, and while
+ * its message's media is held back, when a tap on the code shows the message's media.
+ */
 function Emote({ url, label }: { url: string; label: string }) {
-  const { account } = useTimelineContext();
-  const uri = useMedia(account, mxcMedia(url), AVATAR_SIZE);
+  const store = useAppStore();
+  const { account, timelineKey } = useTimelineContext();
+  const owner = useContext(MediaOwnerContext);
+
+  const media = useStore((s) =>
+    owner ? inlinePicture(s, account, timelineKey.room_id, owner, url) : null,
+  );
+
+  const uri = useMedia(account, media, AVATAR_SIZE);
+
+  if (!media) {
+    return (
+      <Text
+        accessibilityRole={owner ? 'button' : undefined}
+        accessibilityLabel={
+          owner
+            ? `${t('mobile.conversation.custom_emoji', { code: label })}. ${t('safety.show_media')}`
+            : undefined
+        }
+        onPress={owner ? () => revealMedia(store, account, owner.event_id) : undefined}
+        suppressHighlighting
+      >
+        {label}
+      </Text>
+    );
+  }
 
   if (!uri) return <Text>{label}</Text>;
 

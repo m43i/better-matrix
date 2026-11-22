@@ -69,22 +69,31 @@ export function listEdits(
   return store.run({ type: 'ListEdits', data: { account, room_id: roomId, event_id: eventId } });
 }
 
+/** Where a message shows (the room's timeline, or the thread it is in) and its ID there. */
+export interface Located {
+  key: TimelineKey;
+  /** The message: the one an edit edits, when asked for an edit. */
+  eventId: string;
+}
+
 /** Which timeline shows a message: the room's, or the thread it is in. */
 export async function locateMessage(
   store: Store,
   account: AccountId,
   roomId: string,
   eventId: string,
-): Promise<TimelineKey> {
-  let key: TimelineKey = { room_id: roomId, thread: null };
+): Promise<Located> {
+  let located: Located = { key: { room_id: roomId, thread: null }, eventId };
   await store.run(
     { type: 'LocateMessage', data: { account, room_id: roomId, event_id: eventId } },
     (event) => {
-      if (event.type === 'MessageLocated') key = event.data.key;
+      if (event.type === 'MessageLocated') {
+        located = { key: event.data.key, eventId: event.data.event_id };
+      }
     },
   );
 
-  return key;
+  return located;
 }
 
 /** Lists the account's scheduled messages. */

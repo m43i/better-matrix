@@ -110,8 +110,14 @@ impl<'a> Context<'a> {
     }
 
     /// What the text of the message `event_id` needs to draw.
-    fn look(&self, event_id: &'a str) -> super::message_text::Look<'a> {
-        super::message_text::Look { event_id, me: self.account.as_str(), revealed: self.spoilers, media: self.media }
+    fn look(&self, message: &'a Message) -> super::message_text::Look<'a> {
+        super::message_text::Look {
+            event_id: &message.event_id,
+            me: self.account.as_str(),
+            revealed: self.spoilers,
+            media: self.media,
+            pictures: !self.hides(message),
+        }
     }
 
     /// Whether a message's media waits for a press here (ADR 0011).
@@ -767,7 +773,7 @@ fn message_parts(
     match item.gif.as_ref().filter(|gif| cx.show_gifs && (cx.hides(message) || !cx.gifs.has_failed(&gif.url))) {
         Some(gif) => {
             if let Some(rest) = &gif.rest {
-                let caption = text_body(&message.event_id, &rest.plain, rest.rich.as_ref(), cx, said);
+                let caption = text_body(message, &rest.plain, rest.rich.as_ref(), cx, said);
                 // At the right, the caption hugs its words, so they end where the GIF does.
                 inside.push(if cx.on_right(message) {
                     col().self_end().max_w(cx.content_width).child(caption)
@@ -1097,9 +1103,11 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
         row = row.child(if continues { el().w(AVATAR) } else { sender_face(cx, key, message, p).focusable(!named) });
     }
     let mut row = row.child(column).children(readers_cell(cx, message, p));
-    // The message jumped to lights up a moment.
+    // The message jumped to lights up a moment; one mentioning the user keeps a warm mark.
     if cx.flash == Some(message.event_id.as_str()) {
         row = row.fill(p.accent.alpha(0.16));
+    } else if message.highlighted && message.sender_id != cx.account.as_str() {
+        row = row.fill(p.warning.alpha(0.10)).border_sides([0.0, 0.0, 0.0, 3.0], p.warning);
     }
     if interactive && !message.pending { message_actions(row.hover_group(), cx, message, p) } else { row }
 }
@@ -1319,7 +1327,7 @@ fn linked_gif(url: &str, max_width: f32, gifs: &GifCache, p: &Palette) -> El {
 fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Palette) -> El {
     let media = cx.media;
     match (&item.message.content, &item.rich) {
-        (MessageContent::Text { body, .. }, rich) => text_body(&item.message.event_id, body, rich.as_ref(), cx, p),
+        (MessageContent::Text { body, .. }, rich) => text_body(&item.message, body, rich.as_ref(), cx, p),
         (MessageContent::Emote { body, .. }, rich) => emote_body(item, body, rich.as_ref(), cx, p),
         (MessageContent::Location(location), _) => location_card(&item.message.event_id, location, cx, p),
         (MessageContent::Attachment(attachment), _)
@@ -1414,9 +1422,10 @@ fn call_card(cx: &Context<'_>, event_id: &str, card: &CallCard, latest_call: boo
 
 /// Message text, formatted when the sender formatted it. It selects, so it shows the text cursor
 /// even inside a row that opens its thread.
-fn text_body(event_id: &str, plain: &str, rich: Option<&rune::TextEdit>, cx: &Context<'_>, p: &Palette) -> El {
+fn text_body(message: &Message, plain: &str, rich: Option<&rune::TextEdit>, cx: &Context<'_>, p: &Palette) -> El {
+    let event_id = &message.event_id;
     match rich {
-        Some(rich) => super::message_text::formatted(&format!("rich-{event_id}"), rich, cx.look(event_id), p),
+        Some(rich) => super::message_text::formatted(&format!("rich-{event_id}"), rich, cx.look(message), p),
         // Its own handler keeps the clicks, and those just beside it: a double-click takes a
         // word, a triple-click the paragraph, rather than opening the thread.
         None => super::message_text::reach(
@@ -1444,7 +1453,9 @@ fn emote_body(item: &TimelineItem, body: &str, rich: Option<&rune::TextEdit>, cx
             .gap(4.0)
             .items_start()
             .child(text(format!("* {name}")).font(font::BODY.italic()).color(p.text_muted))
-            .child(super::message_text::formatted(&format!("rich-{event_id}"), rich, cx.look(event_id), p).shrink()),
+            .child(
+                super::message_text::formatted(&format!("rich-{event_id}"), rich, cx.look(&item.message), p).shrink(),
+            ),
         None => super::message_text::reach(
             text(format!("* {name} {body}"))
                 .key(format!("text-{event_id}"))

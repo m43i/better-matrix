@@ -71,6 +71,29 @@ describe('openJoined at a message', () => {
     ]);
   });
 
+  it('a link to an edit should open the message it edits', async () => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    openJoined(store, { type: 'room', account: ADA, roomId: '!r:x', eventId: '$edit' }, navigation);
+    const request = sent[0]!.request;
+
+    engine.emit({
+      type: 'MessageLocated',
+      data: {
+        request,
+        account: ADA,
+        key: { room_id: '!r:x', thread: null },
+        event_id: '$original',
+      },
+    });
+    engine.emit({ type: 'Finished', data: { request, result: { Ok: null } } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(navigation.push.mock.calls).toEqual([
+      [routes.room(ADA, '!r:x', '$original', 'located')],
+    ]);
+  });
+
   it('should open nothing once the user left the screen that asked', async () => {
     const { engine, sent } = detachedEngine();
     const store = new Store(engine);

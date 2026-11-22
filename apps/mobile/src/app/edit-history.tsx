@@ -12,7 +12,7 @@ import { listEdits } from '../state/actions/messages';
 import { htmlBlocks, plainBlocks } from '../state/html';
 import { shallow, useAppStore, useStore } from '../state/react';
 import { editsKey } from '../state/reducer';
-import { account as accountOf } from '../state/selectors';
+import { account as accountOf, messageSender } from '../state/selectors';
 import { roomKey } from '../state/timeline';
 import { sentAt } from '../state/timelineText';
 import { font } from '../theme/palette';
@@ -26,7 +26,7 @@ import {
   type TimelineContextValue,
   useSpoilers,
 } from '../ui/timeline/context';
-import { RichText } from '../ui/timeline/RichText';
+import { type MediaOwner, RichText } from '../ui/timeline/RichText';
 
 const NONE: EditVersion[] = [];
 
@@ -72,6 +72,15 @@ export default function EditHistoryScreen() {
 
   const spoilers = useSpoilers();
 
+  // Every version's inline pictures follow the message's media; a sender not in any timeline
+  // counts as someone else, whose pictures the account's choice may hold back.
+  const sender = useStore((s) => messageSender(s, account, eventId)) ?? '';
+
+  const media = useMemo<MediaOwner>(
+    () => ({ sender_id: sender, event_id: eventId }),
+    [sender, eventId],
+  );
+
   const newestFirst = useMemo(
     () => versions.map((version, index) => ({ version, original: index === 0 })).reverse(),
     [versions],
@@ -111,6 +120,7 @@ export default function EditHistoryScreen() {
               <RichText
                 blocks={version.html ? htmlBlocks(version.html) : plainBlocks(version.body)}
                 owner={version.event_id}
+                media={media}
               />
             </View>
           )}

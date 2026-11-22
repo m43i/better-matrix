@@ -26,12 +26,14 @@ export interface SendPlan {
 }
 
 /**
- * Why a draft didn't send: a command that doesn't exist, or lacks what it needs; or a draft
- * holding so many private-use characters that its pills can't be kept (`outgoingText`).
+ * Why a draft didn't send: a command that doesn't exist, lacks what it needs, or would show a
+ * spoiler in what it sets; or a draft holding so many private-use characters that its pills
+ * can't be kept (`outgoingText`).
  */
 export type SendProblem =
   | { type: 'unknown'; name: string }
   | { type: 'usage'; name: string; args: Key }
+  | { type: 'spoiler'; name: string }
   | { type: 'pills' };
 
 /** The text message a draft sends: its own text, or what its command makes of it. */
@@ -59,6 +61,7 @@ function draftMessage(composer: ComposerState, account: AccountId, key: Timeline
       return { type: 'command', command: slash.command, after: slash.after };
     case 'unknown':
     case 'usage':
+    case 'spoiler':
     case 'pills':
       return { type: 'problem', problem: slash };
   }

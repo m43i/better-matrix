@@ -615,7 +615,7 @@ account: AccountId,
  */
 key: TimelineKey, 
 /**
- * The message.
+ * The message: the one an edit edits, when asked for an edit.
  */
 event_id: string, } } | { "type": "ScheduledMessages", "data": { 
 /**

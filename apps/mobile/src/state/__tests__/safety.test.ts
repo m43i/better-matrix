@@ -11,11 +11,14 @@ import {
   showsMedia,
   withChange,
 } from '../safety';
+import { mxcMedia } from '../messages';
 import { lastMessage } from '../sections';
 import {
   activeRoomList,
   galleryThumbnail,
+  inlinePicture,
   mediaHidden,
+  messageSender,
   roomPreviewPicture,
   shownFiles,
   shownIgnored,
@@ -152,6 +155,51 @@ describe('safety in the state', () => {
     const state = signedIn({ ...DEFAULT_SAFETY, media: 'Never' });
     const shown = { ...state, revealedMedia: { [revealKey(ADA, '$a')]: true as const } };
     expect(mediaHidden(shown, ADA, PUBLIC, message('$a'))).toBe(false);
+  });
+});
+
+describe('inline pictures', () => {
+  const EMOJI = 'mxc://x/blobcat';
+
+  it('someone else’s inline picture should not be fetched while media shows nowhere', () => {
+    const state = signedIn({ ...DEFAULT_SAFETY, media: 'Never' });
+    expect(inlinePicture(state, ADA, PRIVATE, message('$a'), EMOJI)).toBeNull();
+  });
+
+  it('someone else’s inline picture should be fetched once the user shows the message’s media', () => {
+    const state = signedIn({ ...DEFAULT_SAFETY, media: 'Never' });
+    const shown = { ...state, revealedMedia: { [revealKey(ADA, '$a')]: true as const } };
+    expect(inlinePicture(shown, ADA, PRIVATE, message('$a'), EMOJI)).toBe(mxcMedia(EMOJI));
+  });
+
+  it('the user’s own inline picture should be fetched while media shows nowhere', () => {
+    const state = signedIn({ ...DEFAULT_SAFETY, media: 'Never' });
+    const own = { ...message('$a'), sender_id: ADA };
+    expect(inlinePicture(state, ADA, PUBLIC, own, EMOJI)).toBe(mxcMedia(EMOJI));
+  });
+
+  it('an inline picture in a public room should wait when media shows in private rooms only', () => {
+    const state = signedIn({ ...DEFAULT_SAFETY, media: 'Private' });
+    expect([
+      inlinePicture(state, ADA, PUBLIC, message('$a'), EMOJI),
+      inlinePicture(state, ADA, PRIVATE, message('$a'), EMOJI),
+    ]).toEqual([null, mxcMedia(EMOJI)]);
+  });
+
+  it('a message’s sender should be found in whichever timeline holds it', () => {
+    const state = apply(signedIn(), {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: roomKey(PRIVATE),
+        diffs: [{ type: 'Reset', data: [messageEntry('$hi')] }],
+      },
+    });
+
+    expect([messageSender(state, ADA, '$hi'), messageSender(state, ADA, '$gone')]).toEqual([
+      GRACE,
+      undefined,
+    ]);
   });
 });
 

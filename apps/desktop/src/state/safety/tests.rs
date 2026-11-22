@@ -321,6 +321,47 @@ fn media_in_a_public_room_should_wait_for_a_press_without_loading() {
 }
 
 #[test]
+fn a_custom_emoji_in_held_back_media_should_not_load_until_shown() {
+    let (mut s, mut commands) = state();
+    crate::demo::hidden_media(&mut s);
+    let content = matrix_core::MessageContent::Text {
+        body: "nice :blob:".into(),
+        html: Some("nice <img data-mx-emoticon src=\"mxc://example.org/blob\" alt=\":blob:\">".into()),
+    };
+    let message = Message {
+        event_id: "$emoji".into(),
+        sender_id: "@grace:example.org".into(),
+        sender_name: "Grace".into(),
+        content,
+        ..Message::default()
+    };
+    let entry =
+        matrix_core::TimelineEntry { id: "$emoji".into(), kind: matrix_core::EntryKind::Message(Box::new(message)) };
+    s.apply(
+        Event::TimelineChanged {
+            account: ada(),
+            key: TimelineKey::room(DEMO_THREAD.0),
+            diffs: vec![matrix_core::TimelineDiff::PushBack(entry)],
+        },
+        &mut Tx::default(),
+    );
+    s.media = crate::state::MediaCache::default();
+    s.media.attach(std::sync::Arc::new(|| {}));
+    drain(&mut commands);
+    let blob = matrix_core::MediaRef::from_mxc("mxc://example.org/blob").unwrap();
+    let fetched = |commands: &mut DetachedCommands| {
+        drain(commands)
+            .into_iter()
+            .any(|(_, command)| matches!(command, Command::FetchMedia { media, .. } if media == blob))
+    };
+    s.request_timeline_media();
+    assert!(!fetched(&mut commands));
+    s.reveal_media(&ada(), "$emoji");
+    s.request_timeline_media();
+    assert!(fetched(&mut commands));
+}
+
+#[test]
 fn opening_held_back_media_should_show_it_in_place_first() {
     let (mut s, _) = state();
     crate::demo::hidden_media(&mut s);

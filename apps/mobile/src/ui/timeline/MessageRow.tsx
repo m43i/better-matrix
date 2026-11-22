@@ -12,7 +12,7 @@ import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
-import { cardLink, isLocal, prepare } from '../../state/messages';
+import { cardLink, isLocal, marksMention, prepare } from '../../state/messages';
 import { routes } from '../../routes';
 import { useStore } from '../../state/react';
 import { Icon } from '../icons';
@@ -125,7 +125,7 @@ function ClassicRow({ message, continues, latestCall, highlighted }: MessageRowP
               backgroundColor: `${palette.accent}0F`,
             }
           : null,
-        message.highlighted
+        marksMention(message, account)
           ? {
               borderLeftWidth: 3,
               borderLeftColor: palette.warning,
@@ -208,7 +208,9 @@ function Said({
       {message.reply_to ? <QuoteBlock quote={message.reply_to} /> : null}
       {gif ? (
         <>
-          {gif.rest ? <RichText blocks={gif.rest} owner={message.event_id} /> : null}
+          {gif.rest ? (
+            <RichText blocks={gif.rest} owner={message.event_id} media={message} />
+          ) : null}
           <LinkedGif key={gif.url} url={gif.url} message={message} />
         </>
       ) : (
@@ -302,6 +304,9 @@ function BubbleRow({ message, continues, latestCall, highlighted }: MessageRowPr
   const shown = useShown(message);
   const own = message.sender_id === account;
   const named = !own && !continues && !unnamed.has(message.sender_id);
+  // Someone else's message that mentions the user keeps a warm mark, as a classic row does: a
+  // tint on the row and, on a bubble of words, a warm outline.
+  const mentions = marksMention(message, account);
   // Words get a bubble; media and cards bring their own frames.
   const bubbled = shown.gif === null && BUBBLED.has(message.content.type);
   // What a bubble leaves its words, for what sizes itself to them (a link's card): a share of
@@ -325,6 +330,7 @@ function BubbleRow({ message, continues, latestCall, highlighted }: MessageRowPr
       style={[
         styles.row,
         { paddingTop: continues ? 2 : 10, opacity: message.pending ? 0.6 : 1 },
+        mentions ? { backgroundColor: `${palette.warning}1A` } : null,
         highlighted ? { backgroundColor: `${palette.accent}26` } : null,
       ]}
     >
@@ -354,7 +360,11 @@ function BubbleRow({ message, continues, latestCall, highlighted }: MessageRowPr
             style={[
               styles.bubble,
               bubbled
-                ? [styles.filled, { backgroundColor: own ? palette.bubbleOwn : palette.bubble }]
+                ? [
+                    styles.filled,
+                    { backgroundColor: own ? palette.bubbleOwn : palette.bubble },
+                    mentions ? [styles.mentioned, { borderColor: palette.warning }] : null,
+                  ]
                 : // Cards and media take the width a classic row gives them, which they are sized
                   // for: a poll fills it, a picture keeps its size on the message's side.
                   // No wider than a classic row's content, though own rows leave out the picture.
@@ -408,7 +418,7 @@ function Body({ message, latestCall }: { message: Message; latestCall: boolean }
     case 'Emote': {
       const blocks = prepare(message).blocks;
 
-      return blocks ? <RichText blocks={blocks} owner={message.event_id} /> : null;
+      return blocks ? <RichText blocks={blocks} owner={message.event_id} media={message} /> : null;
     }
 
     case 'Location':
@@ -454,6 +464,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: BUBBLE_PAD_X,
     paddingVertical: 7,
+  },
+  // A bubble mentioning the user: a warm outline, inside its padding so its words don't move.
+  mentioned: {
+    borderWidth: 1.5,
+    paddingHorizontal: BUBBLE_PAD_X - 1.5,
+    paddingVertical: 7 - 1.5,
   },
   // As wide as a classic row's content, which media are sized for.
   unfilled: { width: '100%' },

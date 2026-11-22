@@ -7,7 +7,7 @@ import type { router as ExpoRouter } from 'expo-router';
 import { t } from '../../i18n';
 import { routes } from '../../routes';
 import { setActive, setScope } from '../../state/actions/core';
-import { locateMessage } from '../../state/actions/messages';
+import { type Located, locateMessage } from '../../state/actions/messages';
 import { type LinkRoute, routeLink } from '../../state/linkRoute';
 import { parsePermalink } from '../../state/permalinks';
 import { addNotice } from '../../state/reducer';
@@ -93,9 +93,10 @@ export function openJoined(
     return;
   }
 
+  // A link to an edit opens the message it edits.
   locateMessage(store, account, roomId, eventId).then(
-    (key) => {
-      if (wanted()) navigation.push(messageRoute(account, roomId, eventId, key.thread));
+    ({ key, eventId: message }) => {
+      if (wanted()) navigation.push(messageRoute(account, roomId, message, key.thread));
     },
     () => {
       if (wanted()) navigation.push(routes.room(account, roomId, eventId));
@@ -126,7 +127,7 @@ export async function openElsewhere(
   navigation: Pick<typeof ExpoRouter, 'push'> = appRouter(),
 ): Promise<Elsewhere> {
   if (!wanted()) return 'stale';
-  let located: TimelineKey;
+  let located: Located;
 
   try {
     located = await locateMessage(store, account, current.room_id, eventId);
@@ -135,10 +136,11 @@ export async function openElsewhere(
   }
 
   if (!wanted()) return 'stale';
-  const thread = located.thread !== null && located.thread !== eventId ? located.thread : null;
+  const { key, eventId: message } = located;
+  const thread = key.thread !== null && key.thread !== message ? key.thread : null;
 
   if (thread === current.thread) return 'here';
-  navigation.push(messageRoute(account, current.room_id, eventId, thread));
+  navigation.push(messageRoute(account, current.room_id, message, thread));
 
   return 'opened';
 }

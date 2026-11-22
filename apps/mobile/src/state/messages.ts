@@ -257,6 +257,14 @@ export function forwardSections(rooms: readonly RoomSummary[], query: string) {
   });
 }
 
+/**
+ * Whether a message keeps the warm mark of one that mentions the user: push rules highlighted
+ * it (`Message.highlighted`) and someone else sent it.
+ */
+export function marksMention(message: Message, account: AccountId): boolean {
+  return message.highlighted && message.sender_id !== account;
+}
+
 /** The message with this event ID among `entries`. */
 export function findMessage(
   entries: readonly TimelineEntry[],

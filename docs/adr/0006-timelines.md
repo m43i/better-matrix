@@ -251,7 +251,8 @@ see who is typing there.
 - **Message jump:** a link to a message (from a message, the OS or a typed link), a reply's
   quote, a pin, a saved message or a search hit goes to the message. One the timeline on screen
   holds is scrolled to; else the engine first finds where it shows
-  (`Command::LocateMessage`: the room's timeline, or the thread its relation names), then the
+  (`Command::LocateMessage`: the room's timeline, or the thread its relation names; a link to
+  an edit goes to the message it edits, which shows its latest version, as the spec has it), then the
   shared jump opens it there and loads history until it shows (`State::open_message`), unless
   the user has gone to another room or started another jump meanwhile (only the latest
   `LocateMessage` answer counts). The

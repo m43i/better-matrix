@@ -2792,8 +2792,9 @@ impl State {
             for media in entry.avatars() {
                 wanted.push((account.clone(), media.clone(), AVATAR_SIZE, Some(AVATAR_PIXELS)));
             }
-            // Custom emoji in its text, and the map of a place it shares.
-            for media in entry.emotes() {
+            // Custom emoji in its text (not while its media is kept back: they read as their
+            // short codes), and the map of a place it shares.
+            for media in entry.emotes().iter().filter(|_| !held) {
                 wanted.push((account.clone(), media.clone(), PACK_IMAGE_SIZE, Some((128, 128))));
             }
             if let Some(map) = entry.location_map().filter(|_| self.settings.show_maps) {
@@ -5431,8 +5432,10 @@ impl State {
                 return true;
             }
         }
-        // In a code block links can't be, so the address pastes as text.
-        if matrix_core::links::is_link(content.text()) && composer.edit.active_block() != rune::Block::Code {
+        // In a code block links can't be, so the address pastes as text; nor is a copied pill
+        // (a spoiler holding only an address) made a link: the field restores it as it was.
+        let pills = content.html().is_some_and(|html| html.contains("data-pill"));
+        if matrix_core::links::is_link(content.text()) && !pills && composer.edit.active_block() != rune::Block::Code {
             composer.paste_link(content.text().trim());
             return true;
         }

@@ -95,6 +95,9 @@ pub struct Account {
     pub(crate) drafts: crate::drafts::DraftQueue,
     /// The room list's sliding sync, while it runs (servers with MSC4186; ADR 0002).
     room_list: Arc<Mutex<Option<Arc<matrix_sdk_ui::RoomListService>>>>,
+    /// Rooms' image pack state as read from the server, by room, once a run: the room list's
+    /// sliding sync doesn't bring it (`crate::packs`).
+    pub(crate) pack_state: Arc<Mutex<std::collections::HashMap<String, Vec<serde_json::Value>>>>,
     /// The rooms open timelines show, which the room list's sliding sync subscribes to.
     followed: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Held while the room list's subscriptions are updated (`Account::subscribe_followed`).
@@ -437,6 +440,7 @@ impl Account {
             admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
+            pack_state: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
@@ -478,6 +482,7 @@ impl Account {
             admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
+            pack_state: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
@@ -615,6 +620,7 @@ impl Account {
             admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
+            pack_state: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
@@ -660,8 +666,13 @@ impl Account {
         }
     }
 
-    /// Asks the room list's sliding sync for a room's recent events and full state while it is
-    /// open, so its timeline gets every event rather than the list's last few.
+    /// Whether the room list's sliding sync runs: rooms then hold only the state it asks for.
+    pub(crate) fn sliding(&self) -> bool {
+        self.room_list.lock().is_ok_and(|room_list| room_list.is_some())
+    }
+
+    /// Asks the room list's sliding sync for a room's recent events and the state it keeps while
+    /// it is open, so its timeline gets every event rather than the list's last few.
     /// Nothing more to do over the long-poll sync, which brings every room whole.
     pub(crate) async fn follow_room(&self, room_id: &str) {
         if let Ok(mut followed) = self.followed.lock() {
@@ -1419,6 +1430,7 @@ mod tests {
             admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
+            pack_state: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),

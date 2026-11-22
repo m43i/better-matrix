@@ -241,6 +241,8 @@ function problemText(problem: SendProblem): string {
       return t('mobile.composer.command_unknown', { name: problem.name });
     case 'usage':
       return t('mobile.composer.command_usage', { name: problem.name, args: t(problem.args) });
+    case 'spoiler':
+      return t('slash.no_spoiler', { command: problem.name });
     case 'pills':
       return t('mobile.composer.pills_unkept');
   }

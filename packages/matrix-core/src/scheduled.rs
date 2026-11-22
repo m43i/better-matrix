@@ -191,6 +191,16 @@ impl Account {
             Some(listed) => self.waiting(listed).await,
             None => kept.iter().filter(|message| message.failed.is_none()).cloned().collect(),
         };
+        // One whose time came that the server couldn't be asked about yet stays listed, due, so
+        // the apps keep asking until its fate is known, rather than lose sight of it.
+        let now = now_ms();
+        let unsettled: Vec<_> = kept
+            .iter()
+            .filter(|message| message.failed.is_none() && message.send_at_ms <= now)
+            .filter(|message| messages.iter().all(|other| other.delay_id != message.delay_id))
+            .cloned()
+            .collect();
+        messages.extend(unsettled);
         messages.sort_by_key(|message| message.send_at_ms);
         let failed: Vec<_> = kept
             .into_iter()
@@ -219,7 +229,13 @@ impl Account {
         for delay_id in due {
             let fate = match listed.iter().find(|event| event.delay_id == delay_id) {
                 Some(event) => Some(event.clone()),
-                None => match self.client().send(api::get::Request::new(delay_id.clone())).await {
+                // Once: one that fails is asked about at the next listing.
+                None => match self
+                    .client()
+                    .send(api::get::Request::new(delay_id.clone()))
+                    .with_request_config(matrix_sdk::config::RequestConfig::new().disable_retry())
+                    .await
+                {
                     Ok(response) => api::Listed::read(&response.event),
                     Err(error) if unrecognized(&error) => None,
                     Err(_) => continue,
@@ -547,6 +563,8 @@ mod tests {
                 // One asked for by ID: `lost` failed, `sent` went, any other is unknown.
                 let finalised = if first.contains("/delayed_events/lost ") {
                     json!({ "error": { "errcode": "M_FORBIDDEN", "error": "You may not post here" }, "finalised_ts": 2 })
+                } else if first.contains("/delayed_events/flaky ") {
+                    return json!({ "errcode": "M_UNKNOWN", "error": "Try again later", crate::test_server::SERVER_ERROR_STATUS: true });
                 } else if first.contains("/delayed_events/sent ") {
                     json!({ "event_id": "$sent", "finalised_ts": 2 })
                 } else {
@@ -781,6 +799,17 @@ mod tests {
         account.scheduled_messages().await.expect("listed");
         let kept = account.keep_scheduled(|_| {}).await;
         assert_eq!(kept.first().and_then(|message| message.failed.as_deref()), Some("You may not post here"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_whose_fate_cant_be_asked_now_should_stay_listed_as_due() {
+        let (server, _) = server(false, Endpoints::Current);
+        let account = account(&server, "unsettled").await;
+        kept_due(&account, "flaky").await;
+        let listed = account.scheduled_messages().await.expect("listed");
+        let flaky = listed.iter().find(|message| message.delay_id == "flaky").expect("still listed");
+        assert!(flaky.failed.is_none() && flaky.send_at_ms <= now_ms());
+        assert_eq!(kept_ids(&account.keep_scheduled(|_| {}).await), ["flaky"]);
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -40,7 +40,10 @@ describe('message actions', () => {
       data: { request, account: ADA, key: { room_id: '!r', thread: '$root' }, event_id: '$reply' },
     });
     finish(0);
-    await expect(located).resolves.toEqual({ room_id: '!r', thread: '$root' });
+    await expect(located).resolves.toEqual({
+      key: { room_id: '!r', thread: '$root' },
+      eventId: '$reply',
+    });
   });
 
   it('should hand back the places found', async () => {

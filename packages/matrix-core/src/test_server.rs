@@ -9,6 +9,9 @@ use std::thread::JoinHandle;
 /// A key a reply sets to answer 404 Not Found instead of 200 OK.
 pub(crate) const NOT_FOUND_STATUS: &str = "__not_found";
 
+/// A key a reply sets to answer 500 Internal Server Error: a server failing for a while.
+pub(crate) const SERVER_ERROR_STATUS: &str = "__server_error";
+
 pub(crate) struct Server {
     address: SocketAddr,
     stopped: Arc<AtomicBool>,
@@ -55,7 +58,9 @@ impl Server {
                 let mut reply = reply(&String::from_utf8_lossy(&request));
                 // A reply naming `NOT_FOUND_STATUS` answers 404 with the rest as its error body,
                 // as does a Matrix "not found", as servers send it.
+                let failing = reply.as_object_mut().and_then(|reply| reply.remove(SERVER_ERROR_STATUS)).is_some();
                 let status = match reply.as_object_mut().and_then(|reply| reply.remove(NOT_FOUND_STATUS)) {
+                    _ if failing => "500 Internal Server Error",
                     Some(_) => "404 Not Found",
                     None if reply["errcode"] == "M_NOT_FOUND" => "404 Not Found",
                     None => "200 OK",

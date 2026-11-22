@@ -1529,7 +1529,7 @@ pub enum Event {
         account: AccountId,
         /// The room's timeline, or the message's thread.
         key: TimelineKey,
-        /// The message.
+        /// The message: the one an edit edits, when asked for an edit.
         event_id: String,
     },
     /// The account's scheduled messages, soonest first.
@@ -2500,7 +2500,7 @@ impl State {
             Command::LocateMessage { account: id, room_id, event_id } => {
                 let account = self.account(&id);
                 Box::pin(async move {
-                    let key = account?.locate_message(&room_id, &event_id).await?;
+                    let (key, event_id) = account?.locate_message(&room_id, &event_id).await?;
                     sink.emit(Event::MessageLocated { request, account: id, key, event_id });
                     Ok(Outcome::Done)
                 })

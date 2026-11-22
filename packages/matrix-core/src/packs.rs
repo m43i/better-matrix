@@ -11,7 +11,9 @@
 //! (`user_emotes`, `room_emotes`, `emote_rooms`); a room's pack under both names shows once.
 //!
 //! Packs are read from this device's store (sync keeps them), the user's own falling back to
-//! the server when the store has none yet.
+//! the server when the store has none yet. A room's packs, under sliding sync, which asks for
+//! a fixed set of state that leaves packs out, also come from the room's state on the server,
+//! read once a run per room; what sync brought since wins for the same pack.
 
 use matrix_sdk::Room;
 use matrix_sdk::deserialized_responses::RawAnySyncOrStrippedState;
@@ -53,7 +55,7 @@ impl Account {
         if let Some(room) = room_id.and_then(|id| matrix_sdk::ruma::RoomId::parse(id).ok())
             && let Some(room) = self.client().get_room(&room)
         {
-            packs.extend(room_packs(&room, None).await);
+            packs.extend(room_packs(&room, None, &self.server_pack_state(&room).await).await);
         }
         for name in ENABLED_ROOMS {
             let Some(raw) = account.account_data_raw(GlobalAccountDataEventType::from(name)).await.ok().flatten()
@@ -69,7 +71,8 @@ impl Account {
                     continue;
                 };
                 let keys: Vec<String> = keys.as_object().map(|keys| keys.keys().cloned().collect()).unwrap_or_default();
-                for found in room_packs(&room, Some(&keys)).await {
+                let server = self.server_pack_state(&room).await;
+                for found in room_packs(&room, Some(&keys), &server).await {
                     if !packs.iter().any(|known| known.id == found.id) {
                         packs.push(found);
                     }
@@ -80,11 +83,39 @@ impl Account {
     }
 }
 
-/// A room's packs: all of them, or those under `keys`; a pack under both names once.
-async fn room_packs(room: &Room, keys: Option<&[String]>) -> Vec<ImagePack> {
+impl Account {
+    /// A room's pack state events as the server holds them, under sliding sync (read once a run
+    /// per room); none otherwise, or when the server can't be asked now (asked again next time).
+    async fn server_pack_state(&self, room: &Room) -> Vec<Value> {
+        if !self.sliding() {
+            return Vec::new();
+        }
+        let room_id = room.room_id().to_string();
+        if let Some(known) = self.pack_state.lock().ok().and_then(|known| known.get(&room_id).cloned()) {
+            return known;
+        }
+        let request =
+            matrix_sdk::ruma::api::client::state::get_state_events::v3::Request::new(room.room_id().to_owned());
+        let Ok(response) = self.client().send(request).await else { return Vec::new() };
+        let events: Vec<Value> = response
+            .room_state
+            .iter()
+            .filter_map(|raw| raw.deserialize_as_unchecked::<Value>().ok())
+            .filter(|event| event["type"].as_str().is_some_and(|kind| ROOM_PACK.contains(&kind)))
+            .collect();
+        if let Ok(mut known) = self.pack_state.lock() {
+            known.insert(room_id, events.clone());
+        }
+        events
+    }
+}
+
+/// A room's packs: all of them, or those under `keys`; a pack under both names once. `server`
+/// is pack state read from the server, for packs the store doesn't hold.
+async fn room_packs(room: &Room, keys: Option<&[String]>, server: &[Value]) -> Vec<ImagePack> {
     let mut packs: Vec<ImagePack> = Vec::new();
     for name in ROOM_PACK {
-        for found in room_packs_named(room, name, keys).await {
+        for found in room_packs_named(room, name, keys, server).await {
             if !packs.iter().any(|known| known.id == found.id) {
                 packs.push(found);
             }
@@ -94,17 +125,23 @@ async fn room_packs(room: &Room, keys: Option<&[String]>) -> Vec<ImagePack> {
 }
 
 /// A room's packs under one state event type.
-async fn room_packs_named(room: &Room, name: &str, keys: Option<&[String]>) -> Vec<ImagePack> {
-    let Ok(events) = room.get_state_events(StateEventType::from(name)).await else { return Vec::new() };
+async fn room_packs_named(room: &Room, name: &str, keys: Option<&[String]>, server: &[Value]) -> Vec<ImagePack> {
+    let events = room.get_state_events(StateEventType::from(name)).await.unwrap_or_default();
     let room_name =
         room.cached_display_name().map(|name| name.to_string()).unwrap_or_else(|| room.room_id().to_string());
-    let mut packs = Vec::new();
-    for event in events {
-        let json: Option<Value> = match &event {
+    let local: Vec<Value> = events
+        .iter()
+        .filter_map(|event| match event {
             RawAnySyncOrStrippedState::Sync(raw) => raw.deserialize_as_unchecked().ok(),
             RawAnySyncOrStrippedState::Stripped(raw) => raw.deserialize_as_unchecked().ok(),
-        };
-        let Some(json) = json else { continue };
+        })
+        .collect();
+    // The server's, for a pack the store doesn't hold: one sync brought since (changed or
+    // emptied) is the newer.
+    let held = |event: &Value| local.iter().any(|known| known["state_key"] == event["state_key"]);
+    let fetched = server.iter().filter(|event| event["type"].as_str() == Some(name) && !held(event)).cloned();
+    let mut packs = Vec::new();
+    for json in local.iter().cloned().chain(fetched) {
         let state_key = json["state_key"].as_str().unwrap_or_default().to_owned();
         if keys.is_some_and(|keys| !keys.contains(&state_key)) {
             continue;
@@ -248,6 +285,39 @@ mod tests {
         let packs = account.image_packs(Some("!room:example.org")).await.expect("packs");
         let found: Vec<_> = packs.iter().map(|pack| (pack.name.as_str(), pack.images[0].shortcode.as_str())).collect();
         assert_eq!(found, [("cats", "blobcat"), ("dogs", "dog")]);
+    }
+
+    #[tokio::test]
+    async fn a_pack_read_from_the_server_should_count_unless_sync_brought_it() {
+        let pack_event = |key: &str, shortcode: &str| {
+            json!({
+                "type": "m.room.image_pack", "state_key": key, "sender": "@a:example.org",
+                "event_id": format!("${key}{shortcode}"), "origin_server_ts": 1,
+                "content": { "pack": { "display_name": key }, "images": { shortcode: { "url": "mxc://x.org/i" } } }
+            })
+        };
+        let synced = pack_event("cats", "blobcat");
+        let server = crate::test_server::Server::new(move |request| {
+            let mut response = crate::test_server::thread_response(request);
+            if request.contains("/sync?") {
+                let state =
+                    response["rooms"]["join"]["!room:example.org"]["state"]["events"].as_array_mut().expect("state");
+                state.push(synced.clone());
+            }
+            response
+        });
+        let account = Account::for_test(&server.url()).await;
+        account
+            .client()
+            .sync_once(matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::ZERO))
+            .await
+            .expect("sync");
+        let room = account.client().get_room(matrix_sdk::ruma::room_id!("!room:example.org")).expect("room");
+        // The server's copy of `cats` is older than the one sync brought; `birds` sync never did.
+        let from_server = [pack_event("cats", "stalecat"), pack_event("birds", "bird")];
+        let packs = room_packs(&room, None, &from_server).await;
+        let found: Vec<_> = packs.iter().map(|pack| (pack.name.as_str(), pack.images[0].shortcode.as_str())).collect();
+        assert_eq!(found, [("cats", "blobcat"), ("birds", "bird")]);
     }
 
     #[test]

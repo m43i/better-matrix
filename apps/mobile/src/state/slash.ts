@@ -2,12 +2,14 @@
 // its text, as Element's and the desktop's composers do. Some send a message of another kind
 // (`/me` an emote, `/shrug` text after a shrug, `/plain` text without formatting, `/spoiler`
 // hidden text); the rest act on the room or account (`/invite`, `/join`, `/leave`, `/topic`,
-// `/nick`). `//text` sends `/text`. Decided as data here, sent by `state/actions/composer.ts`.
+// `/nick`). `//text` sends `/text`. A command that acts reads its arguments as plain words, so
+// it refuses a spoiler among them: what it sets is shown to everyone. A slash inside a pill (a
+// spoiler's words) is no command. Decided as data here, sent by `state/actions/composer.ts`.
 
 import type { AccountId, Command, Outgoing } from '@better-matrix/matrix-native/types';
 
 import type { Key } from '../i18n';
-import { type OutgoingText, outgoingText } from './format';
+import { holdsSpoiler, type OutgoingText, outgoingText } from './format';
 import { type Permalink, parseTyped } from './permalinks';
 import {
   type DraftPill,
@@ -95,6 +97,9 @@ const FACES = new Map([
   ['lenny', '( ͡° ͜ʖ ͡°)'],
 ]);
 
+/** The commands that send a message (the faces too); the rest act on the room or account. */
+const SENDS_MESSAGE = new Set(['me', 'plain', 'spoiler', ...FACES.keys()]);
+
 /** The commands that start with what was typed after `/`. */
 export function commandSuggestions(query: string): SlashCommandInfo[] {
   const lower = query.toLowerCase();
@@ -112,6 +117,8 @@ export type Slash =
   | { type: 'unknown'; name: string }
   /** The command needs something it wasn't given (`/invite` without a person). */
   | { type: 'usage'; name: string; args: Key }
+  /** The command acts, and its arguments hold a spoiler it would show (`/topic ||secret||`). */
+  | { type: 'spoiler'; name: string }
   /** Its pills can't be kept apart from the private-use characters it holds (`outgoingText`). */
   | { type: 'pills' };
 
@@ -147,6 +154,10 @@ export function slashOf(
   const trimmed = draft.replace(/^\s+/, '');
   const lead = draft.length - trimmed.length;
 
+  // A slash in a pill is its words (a spoiler's), sent as written.
+  if (placePills(draft, draftPills).some(({ start, end }) => start <= lead && lead < end))
+    return null;
+
   if (trimmed.startsWith('//'))
     return textSlash(
       'Text',
@@ -175,6 +186,9 @@ export function slashOf(
 
     return textSlash('Text', outgoingText(text, moved));
   }
+
+  // The commands that act rather than send a message read their arguments as plain words.
+  if (!SENDS_MESSAGE.has(name) && holdsSpoiler(rest, pills)) return { type: 'spoiler', name };
 
   switch (name) {
     case 'me':

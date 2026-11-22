@@ -194,6 +194,44 @@ describe('slashOf', () => {
     });
   });
 
+  it.each([
+    ['/topic', '/topic ||launch day||'],
+    ['/nick', '/nick Ada ||the spy||'],
+    ['/invite', '/invite @kai:x.org ||why||'],
+    ['/join', '/join #rust:x.org ||psst||'],
+    ['/leave', '/leave ||bye||'],
+  ])('should refuse %s with a spoiler marked in its arguments', (command, draft) => {
+    expect(slash(draft, [])).toEqual({ type: 'spoiler', name: command.slice(1) });
+  });
+
+  it('should refuse a topic holding a spoiler pill', () => {
+    expect(slash('/topic he dies', [pillAt(spoilerPill('dies'), 10)])).toEqual({
+      type: 'spoiler',
+      name: 'topic',
+    });
+  });
+
+  it('should refuse a topic whose spoiler spans lines', () => {
+    expect(slash('/topic ||he\ndies||', [])).toEqual({ type: 'spoiler', name: 'topic' });
+  });
+
+  it('should set a topic whose bars are in code, as written', () => {
+    expect(slash('/topic use `a || b`', [])).toMatchObject({
+      command: { data: { setting: { type: 'Topic', data: 'use `a || b`' } } },
+    });
+  });
+
+  it('should send a message command with a spoiler in it', () => {
+    expect(slash('/me hides ||the cake||', [])).toMatchObject({
+      type: 'message',
+      message: { type: 'Emote', data: { body: 'hides [Spoiler]' } },
+    });
+  });
+
+  it('should leave a draft starting inside a spoiler pill as text', () => {
+    expect(slash('/topic secret', [pillAt(spoilerPill('/topic secret'), 0)])).toBeNull();
+  });
+
   it('should say a command it doesn’t know', () => {
     expect(slash('/frobnicate now')).toEqual({ type: 'unknown', name: 'frobnicate' });
   });

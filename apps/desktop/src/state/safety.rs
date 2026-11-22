@@ -204,6 +204,18 @@ impl State {
     }
 
     /// Whether a message's media waits for a press in the active account's timeline.
+    /// Whether the custom emoji of the message `event_id` may show as pictures: when a timeline
+    /// on screen holds it and its media isn't kept back. One no timeline holds keeps them back.
+    pub fn shows_pictures_of(&self, account: &AccountId, room_id: &str, event_id: &str) -> bool {
+        let Some(data) = self.accounts.get(account) else { return false };
+        self.open_timelines
+            .iter()
+            .filter(|(open, key)| open == account && key.room_id == room_id)
+            .filter_map(|(_, key)| data.timeline(key))
+            .find_map(|timeline| timeline.messages().find(|message| message.event_id == event_id))
+            .is_some_and(|message| !self.hides_media(account, room_id, message))
+    }
+
     pub fn hides_media(&self, account: &AccountId, room_id: &str, message: &Message) -> bool {
         self.accounts.get(account).is_some_and(|data| data.hides_media(room_id, message, &self.revealed_media))
     }

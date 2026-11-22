@@ -1980,6 +1980,15 @@ fn pasting_a_spoiler_into_a_code_block_should_do_nothing() {
 }
 
 #[test]
+fn pasting_a_spoiler_holding_only_an_address_should_be_left_to_the_editor() {
+    let (mut s, _) = state();
+    let content = rune::clipboard::ClipboardContent::new("https://secret.example")
+        .with_html("<span data-pill=\"spoiler\">https://secret.example</span>");
+    assert!(!s.paste_into_composer(ComposerTarget::Room, &content));
+    assert_eq!(s.composer.edit.text, "");
+}
+
+#[test]
 fn pasting_a_spoiler_outside_code_should_be_left_to_the_editor() {
     let (mut s, _) = state();
     let content =

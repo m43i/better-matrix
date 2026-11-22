@@ -40,13 +40,33 @@ impl Account {
     }
 
     /// Where the message `event_id` in `room_id` shows: the room's timeline, or the thread it
-    /// replies in.
-    pub async fn locate_message(&self, room_id: &str, event_id: &str) -> Result<TimelineKey, Error> {
+    /// replies in; and the message's own ID there. An edit names the message it edits, which
+    /// shows its latest version (as the spec has a link to an edit go to the message).
+    pub async fn locate_message(&self, room_id: &str, event_id: &str) -> Result<(TimelineKey, String), Error> {
         let room = self.room(room_id)?;
-        let event = room.load_or_fetch_event(&matrix_sdk::ruma::EventId::parse(event_id)?, None).await?;
-        let event: Value = event.raw().deserialize_as_unchecked().map_err(|_| Error::MessageUnavailable)?;
-        Ok(TimelineKey { room_id: room_id.to_owned(), thread: thread_of(&event) })
+        let load = |event_id: matrix_sdk::ruma::OwnedEventId| {
+            let room = room.clone();
+            async move {
+                let event = room.load_or_fetch_event(&event_id, None).await?;
+                event.raw().deserialize_as_unchecked::<Value>().map_err(|_| Error::MessageUnavailable)
+            }
+        };
+        let mut event = load(matrix_sdk::ruma::EventId::parse(event_id)?).await?;
+        let mut event_id = event_id.to_owned();
+        if let Some(edited) = edited_by(&event) {
+            event = load(matrix_sdk::ruma::EventId::parse(&edited)?).await?;
+            event_id = edited;
+        }
+        Ok((TimelineKey { room_id: room_id.to_owned(), thread: thread_of(&event) }, event_id))
     }
+}
+
+/// The message `event` edits, when it is an edit.
+fn edited_by(event: &Value) -> Option<String> {
+    let relation = &event["content"]["m.relates_to"];
+    (relation["rel_type"].as_str() == Some("m.replace"))
+        .then(|| relation["event_id"].as_str().map(str::to_owned))
+        .flatten()
 }
 
 /// The thread root a message replies in, if it is in a thread.
@@ -136,6 +156,18 @@ mod tests {
     fn a_thread_reply_should_be_found_in_its_thread() {
         let reply = json!({ "content": { "m.relates_to": { "rel_type": "m.thread", "event_id": "$root" } } });
         assert_eq!(thread_of(&reply).as_deref(), Some("$root"));
+    }
+
+    #[test]
+    fn an_edit_should_name_the_message_it_edits() {
+        let edit = json!({ "content": { "m.relates_to": { "rel_type": "m.replace", "event_id": "$original" } } });
+        assert_eq!(edited_by(&edit).as_deref(), Some("$original"));
+    }
+
+    #[test]
+    fn a_reply_should_name_no_edited_message() {
+        let reply = json!({ "content": { "m.relates_to": { "m.in_reply_to": { "event_id": "$q" } } } });
+        assert_eq!(edited_by(&reply), None);
     }
 
     #[test]

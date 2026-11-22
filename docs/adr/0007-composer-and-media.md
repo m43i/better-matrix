@@ -85,14 +85,18 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
 - **Custom emoji and stickers** (MSC2545 image packs, `matrix_core::packs`): the user's pack
   (`m.image_pack`), the room's (`m.room.image_pack`, one per state key) and those enabled
   everywhere (`m.image_pack.rooms`), each also under the `im.ponies.*` name clients used before
-  (a room's pack under both names once), read from the store, listed per room once a run
+  (a room's pack under both names once), read from the store (under sliding sync, whose fixed
+  required state leaves packs out, also from the room's state on the server, once a run per
+  room, what sync brought since winning for the same pack), listed per room once a run
   (`Command::ListImagePacks`; the sticker picker lists again as it opens). The emoji picker
   leads with the room's custom emoji; a sticker button opens a grid of the packs' stickers, a
   press sends `Outgoing::Sticker` (`m.sticker`). A received image from `mxc://` is a custom
   emoji, `data-mx-emoticon` or not: the SDK's sanitiser drops that attribute, which the spec's
   list of allowed attributes lacks. Received custom emoji draw as their picture
   inline (`El::inline_icon`), their short code kept as unseen text so copying gives `:code:`;
-  pictures load like other media on screen (`TimelineItem::emotes`, 128 px). Adding to packs
+  pictures load like other media on screen (`TimelineItem::emotes`, 128 px), and like it wait
+  while the account keeps the message's media back (ADR 0011), reading as their short codes
+  until it is shown. Adding to packs
   stays with clients that edit them.
 - **Locations** (`matrix_core::geo`): `Outgoing::Location` sends `m.location` with a
   `geo:` URI, a pin asset (MSC3488) and the place's name as its body (else its coordinates).
@@ -116,7 +120,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
 - **Scheduled messages** (MSC4140 delayed events, `matrix_core::scheduled`): the button beside
   send (or right-clicking send) offers in 30 minutes, in an hour, tomorrow 09:00 and next Monday
   09:00, local time (on that day's clock, summer time and all); the server sends the message
-  then, whether or not the app runs. Text, emotes, stickers, places and polls can be scheduled,
+  then, whether or not the app runs. The engine schedules any message (`Command::Schedule`
+  takes an `Outgoing`: text, emotes, stickers, places, polls); the apps schedule the
+  composer's message (text and emotes, and the commands that make one), while the sticker
+  picker, the location dialog and the poll form send at once. Scheduled messages go
   with a reply (mentioning whom it answers) or into a thread (relations written as the SDK
   would); uploads can't (they go when sent), nor commands that do something rather than send
   (`/topic` waits, with a notice). The composer empties as sending does and, if the server

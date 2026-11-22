@@ -448,12 +448,13 @@ function placeholders(text: string): () => string | null {
 }
 
 /**
- * The body and HTML the desktop sends for the same text, formatting and pills; `null` when the
- * draft holds so many private-use characters that its pills can't each stand as one it lacks
- * (over 137,000 of them, past what a Matrix event carries): sent anyway, a spoiler's words would
- * go out as plain text, so it isn't sent at all.
+ * A draft parsed as `outgoingText` reads it: its blocks, each pill a private-use character
+ * (`found` says which); `null` when its pills can't each have one.
  */
-export function outgoingText(draft: string, given: readonly DraftPill[] = []): OutgoingText | null {
+function parseDraft(
+  draft: string,
+  given: readonly DraftPill[],
+): { blocks: Block[]; found: Placeholders } | null {
   const text = draft.replace(/\r\n?/g, '\n');
 
   // Line ends written as one character move the pills after them.
@@ -482,6 +483,33 @@ export function outgoingText(draft: string, given: readonly DraftPill[] = []): O
 
   source += text.slice(at);
   const blocks = parseBlocks(source);
+
+  return { blocks, found };
+}
+
+/**
+ * Whether a draft would send something hidden: a spoiler pill, or words between `||` markers
+ * as `outgoingText` reads them (in code they're the code's).
+ */
+export function holdsSpoiler(draft: string, given: readonly DraftPill[] = []): boolean {
+  if (placePills(draft, given).some((p) => isSpoiler(p.pill))) return true;
+  // Pills that can't be kept apart leave their labels as text, as a command would read them.
+  const blocks = parseDraft(draft, given)?.blocks ?? parseBlocks(draft.replace(/\r\n?/g, '\n'));
+
+  return blocks.some((block) => block.runs.some((run) => run.marks.spoiler));
+}
+
+/**
+ * The body and HTML the desktop sends for the same text, formatting and pills; `null` when the
+ * draft holds so many private-use characters that its pills can't each stand as one it lacks
+ * (over 137,000 of them, past what a Matrix event carries): sent anyway, a spoiler's words would
+ * go out as plain text, so it isn't sent at all.
+ */
+export function outgoingText(draft: string, given: readonly DraftPill[] = []): OutgoingText | null {
+  const parsed = parseDraft(draft, given);
+
+  if (!parsed) return null;
+  const { blocks, found } = parsed;
 
   // A spoiler over several lines is one `[Spoiler]`, its line breaks hidden with its words.
   const plain = blocks
