@@ -11,7 +11,7 @@ import type {
 
 import type { Key } from '../i18n';
 import { type ComposerState, emptied, endEdit, type PendingAttachment } from './composer';
-import { outgoingText } from './format';
+import { hasText as draftHasText, outgoingText } from './format';
 import { coordinatesText } from './geo';
 import { slashOf } from './slash';
 
@@ -25,10 +25,14 @@ export interface SendPlan {
   after?: 'stay' | 'joined' | 'left';
 }
 
-/** Why a draft didn't send: a command that doesn't exist, or lacks what it needs. */
+/**
+ * Why a draft didn't send: a command that doesn't exist, or lacks what it needs; or a draft
+ * holding so many private-use characters that its pills can't be kept (`outgoingText`).
+ */
 export type SendProblem =
   | { type: 'unknown'; name: string }
-  | { type: 'usage'; name: string; args: Key };
+  | { type: 'usage'; name: string; args: Key }
+  | { type: 'pills' };
 
 /** The text message a draft sends: its own text, or what its command makes of it. */
 type DraftMessage =
@@ -43,6 +47,8 @@ function draftMessage(composer: ComposerState, account: AccountId, key: Timeline
   if (slash === null) {
     const text = outgoingText(composer.draft, pills);
 
+    if (!text) return { type: 'problem', problem: { type: 'pills' } };
+
     return { type: 'message', message: text.body !== '' ? { type: 'Text', data: text } : null };
   }
 
@@ -53,6 +59,7 @@ function draftMessage(composer: ComposerState, account: AccountId, key: Timeline
       return { type: 'command', command: slash.command, after: slash.after };
     case 'unknown':
     case 'usage':
+    case 'pills':
       return { type: 'problem', problem: slash };
   }
 }
@@ -67,14 +74,18 @@ function draftMessage(composer: ComposerState, account: AccountId, key: Timeline
  */
 export function planSend(composer: ComposerState, account: AccountId, key: TimelineKey): SendPlan {
   if (composer.editing) {
-    const { body, html, mentions } = outgoingText(composer.draft, composer.pills ?? []);
+    const text = outgoingText(composer.draft, composer.pills ?? []);
+
+    // The edit stays under way, its draft as it is, and the user is told why.
+    if (!text) return { commands: [], composer, problem: { type: 'pills' } };
+    const { body, html, mentions } = text;
 
     const original = outgoingText(
       composer.setAside?.original ?? '',
       composer.setAside?.originalPills ?? [],
     );
 
-    const changed = body !== original.body || html !== original.html;
+    const changed = original === null || body !== original.body || html !== original.html;
 
     const commands: Command[] =
       body !== '' && changed
@@ -194,14 +205,14 @@ export function planSchedule(
 }
 
 function hasText(composer: ComposerState): boolean {
-  return outgoingText(composer.draft).body !== '';
+  return draftHasText(composer.draft);
 }
 
 /** Whether a composer has anything to send (or an edit to save). */
 export function canSend(composer: ComposerState): boolean {
-  if (composer.editing) return outgoingText(composer.draft).body !== '';
+  if (composer.editing) return hasText(composer);
 
-  return outgoingText(composer.draft).body !== '' || (composer.attachments?.length ?? 0) > 0;
+  return hasText(composer) || (composer.attachments?.length ?? 0) > 0;
 }
 
 /** A voice memo as the message that sends it, with its waveform (none when empty). */

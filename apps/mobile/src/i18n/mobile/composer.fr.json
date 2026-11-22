@@ -35,6 +35,7 @@
   "mobile.composer.command_unknown": "Commande inconnue /{{name}}. Commencez le message par // pour l’envoyer comme texte.",
   "mobile.composer.command_usage": "Utilisation : /{{name}} {{args}}",
   "mobile.composer.command_failed": "Cela n’a pas fonctionné : {{error}}",
+  "mobile.composer.pills_unkept": "Ce message contient trop de caractères à usage privé pour que ses mentions et ses spoilers restent distincts. Supprimez-en quelques-uns et réessayez.",
   "mobile.composer.mention_everyone": "Notifier tout le monde dans ce salon",
   "mobile.composer.suggestions": "Suggestions",
   "mobile.composer.sticker": "Autocollant",

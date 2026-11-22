@@ -236,9 +236,14 @@ export interface AfterCommand {
 
 /** What a command that can't be done says, as a notice. */
 function problemText(problem: SendProblem): string {
-  return problem.type === 'unknown'
-    ? t('mobile.composer.command_unknown', { name: problem.name })
-    : t('mobile.composer.command_usage', { name: problem.name, args: t(problem.args) });
+  switch (problem.type) {
+    case 'unknown':
+      return t('mobile.composer.command_unknown', { name: problem.name });
+    case 'usage':
+      return t('mobile.composer.command_usage', { name: problem.name, args: t(problem.args) });
+    case 'pills':
+      return t('mobile.composer.pills_unkept');
+  }
 }
 
 /**
