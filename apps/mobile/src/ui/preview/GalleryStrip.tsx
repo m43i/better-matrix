@@ -9,7 +9,7 @@ import { Pressable, ScrollView, type ScrollViewInstance, StyleSheet, View } from
 import { t } from '../../i18n';
 import { thumbnailOf } from '../../state/gallery';
 import { useStore } from '../../state/react';
-import { galleryThumbnail } from '../../state/selectors';
+import { galleryThumbnail, previewHidden } from '../../state/selectors';
 import { Icon, type IconName } from '../icons';
 import { PREVIEW_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
@@ -106,9 +106,11 @@ function Thumb({
   const media = useStore((s) => galleryThumbnail(s, account, roomId, message));
   const size = (attachment && thumbnailOf(attachment)?.size) ?? PREVIEW_SIZE;
   const uri = useMedia(account, media, size);
+  const held = useStore((s) => previewHidden(s, account, roomId, message));
 
-  const icon: IconName =
-    attachment?.kind === 'Video'
+  const icon: IconName = held
+    ? 'eyeOff'
+    : attachment?.kind === 'Video'
       ? 'video'
       : attachment?.kind === 'Audio'
         ? attachment.audio?.voice

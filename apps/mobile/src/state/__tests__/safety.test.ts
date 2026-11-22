@@ -234,9 +234,18 @@ describe('the attachment preview', () => {
     });
   }
 
-  it('should leave hidden media of the batch out of the gallery', () => {
-    const items = previewItems(batch(), ADA, roomKey(PUBLIC), '$one', '$one');
-    expect(items.map((m) => m.event_id)).toEqual(['$one']);
+  it('should keep hidden media in the batch, each held until shown', () => {
+    const state = batch();
+    const items = previewItems(state, ADA, roomKey(PUBLIC), '$one', '$one');
+    expect([
+      items.map((m) => m.event_id),
+      items.map((m) => previewHidden(state, ADA, PUBLIC, m)),
+      items.map((m) => galleryThumbnail(state, ADA, PUBLIC, m)),
+    ]).toEqual([
+      ['$one', '$two'],
+      [true, true],
+      [null, null],
+    ]);
   });
 
   it('should keep the opened item hidden until the user shows it, from wherever it opened', () => {

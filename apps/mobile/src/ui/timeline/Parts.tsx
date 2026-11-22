@@ -166,7 +166,7 @@ const CARD_WORDS_MIN = 100;
 export function LinkCard({ url, message }: { url: string; message: Message }) {
   const palette = usePalette();
   const store = useAppStore();
-  const { account } = useTimelineContext();
+  const { account, openActions } = useTimelineContext();
   const preview = useStore((s) => s.linkPreviews[previewKey(account, url)]);
   useEffect(() => wantLinkPreview(store, account, url), [store, account, url]);
   // The page's picture waits for Show where the account keeps media back (ADR 0011).
@@ -178,49 +178,57 @@ export function LinkCard({ url, message }: { url: string; message: Message }) {
 
   if (!preview) return null;
 
+  // The link and Show are siblings, so each is its own control; the card itself isn't one.
   return (
-    <Pressable
-      onPress={() => openLink(store, url, account)}
-      accessibilityRole="link"
-      accessibilityLabel={preview.title ?? url}
-      android_ripple={{ color: palette.hover }}
-      style={[styles.card, { backgroundColor: palette.surface, borderColor: palette.divider }]}
-    >
-      <View style={[styles.cardBar, { backgroundColor: palette.accent }]} />
-      <View style={styles.cardWords}>
-        {preview.site ? (
-          <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
-            {preview.site}
-          </Text>
+    <View style={[styles.card, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
+      <Pressable
+        onPress={() => openLink(store, url, account)}
+        onLongPress={() => openActions(message)}
+        delayLongPress={350}
+        accessibilityRole="link"
+        accessibilityLabel={preview.title ?? url}
+        android_ripple={{ color: palette.hover }}
+        style={styles.cardLink}
+      >
+        <View style={[styles.cardBar, { backgroundColor: palette.accent }]} />
+        <View style={styles.cardWords}>
+          {preview.site ? (
+            <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
+              {preview.site}
+            </Text>
+          ) : null}
+          {preview.title ? (
+            <Text style={[font.bodyStrong, { color: palette.accent }]} numberOfLines={2}>
+              {preview.title}
+            </Text>
+          ) : null}
+          {preview.description ? (
+            <Text style={[font.meta, { color: palette.text }]} numberOfLines={3}>
+              {preview.description}
+            </Text>
+          ) : null}
+        </View>
+        {showImage && !hidden ? (
+          image ? (
+            <Image source={{ uri: image }} style={styles.cardImage} contentFit="cover" />
+          ) : (
+            <View style={[styles.cardImage, styles.center, { backgroundColor: palette.hover }]}>
+              <Icon name="image" size={20} color={palette.textMuted} />
+            </View>
+          )
         ) : null}
-        {preview.title ? (
-          <Text style={[font.bodyStrong, { color: palette.accent }]} numberOfLines={2}>
-            {preview.title}
-          </Text>
-        ) : null}
-        {preview.description ? (
-          <Text style={[font.meta, { color: palette.text }]} numberOfLines={3}>
-            {preview.description}
-          </Text>
-        ) : null}
-      </View>
-      {showImage ? (
-        hidden ? (
-          <HiddenMedia
-            label={t('mobile.safety.hidden_picture')}
-            onShow={reveal}
-            style={styles.cardImage}
-            height={CARD_IMAGE_SIDE}
-          />
-        ) : image ? (
-          <Image source={{ uri: image }} style={styles.cardImage} contentFit="cover" />
-        ) : (
-          <View style={[styles.cardImage, styles.center, { backgroundColor: palette.hover }]}>
-            <Icon name="image" size={20} color={palette.textMuted} />
-          </View>
-        )
+      </Pressable>
+      {showImage && hidden ? (
+        <HiddenMedia
+          label={t('mobile.safety.hidden_picture')}
+          onShow={reveal}
+          onLongPress={() => openActions(message)}
+          style={styles.cardImage}
+          width={CARD_IMAGE_SIDE}
+          height={CARD_IMAGE_SIDE}
+        />
       ) : null}
-    </Pressable>
+    </View>
   );
 }
 
@@ -243,6 +251,7 @@ export function LinkedGif({ url, message }: { url: string; message: Message }) {
   const width = Math.min(GIF_WIDTH, useContentWidth());
   // A GIF the account keeps back is not fetched before Show (ADR 0011).
   const { hidden, reveal } = useHiddenMedia(message);
+  const { openActions } = useTimelineContext();
   useEffect(() => (hidden ? undefined : wantGif(store, url)), [store, url, hidden]);
 
   if (hidden)
@@ -251,7 +260,9 @@ export function LinkedGif({ url, message }: { url: string; message: Message }) {
         label={t('mobile.safety.hidden_gif')}
         onShow={reveal}
         style={[styles.gif, { width, aspectRatio: aspect }]}
+        width={width}
         height={width / aspect}
+        onLongPress={() => openActions(message)}
       />
     );
 
@@ -339,6 +350,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
+  cardLink: { flex: 1, flexDirection: 'row', gap: 12 },
   cardBar: { width: 3, borderRadius: 1.5 },
   cardWords: { flex: 1, gap: 2 },
   cardImage: { width: CARD_IMAGE_SIDE, height: CARD_IMAGE_SIDE, borderRadius: 8 },

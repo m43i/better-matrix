@@ -253,9 +253,9 @@ function listedMessage(file: SharedFile): Message {
 }
 
 /**
- * The attachment preview's gallery around `current`: the batch, without media the account keeps
- * back. The opened message and the one on screen stay, so the preview has its item, shown hidden
- * until the user taps Show (`previewHidden`), whichever screen opened it (ADR 0011). A file Room Info listed
+ * The attachment preview's gallery around `current`: the batch, media the account keeps back
+ * included, each shown hidden until the user taps Show (`previewHidden`), whichever screen
+ * opened it (ADR 0011). A file Room Info listed
  * that no timeline holds is its own gallery.
  */
 export function previewItems(
@@ -283,11 +283,9 @@ export function previewItems(
       : [];
   }
 
-  // The item on screen stays too: one held while viewed shows held, with Show, in its place.
-  return found.filter(
-    (m) =>
-      m.event_id === opened || m.event_id === current || !previewHidden(state, id, key.room_id, m),
-  );
+  // Held items stay in the batch: their thumbnails fetch nothing (`galleryThumbnail`), and the
+  // preview shows Show in place of one selected (`previewHidden`).
+  return found;
 }
 
 /**

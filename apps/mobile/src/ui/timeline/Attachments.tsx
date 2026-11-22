@@ -93,7 +93,9 @@ function ImageAttachment({ message, attachment }: { message: Message; attachment
         label={t('mobile.safety.hidden_picture')}
         onShow={reveal}
         style={[size, styles.media]}
+        width={size.width}
         height={size.height}
+        onLongPress={() => openActions(message)}
       />
     );
 
@@ -145,7 +147,9 @@ function VideoAttachment({ message, attachment }: { message: Message; attachment
         label={t('mobile.safety.hidden_video')}
         onShow={reveal}
         style={[size, styles.media]}
+        width={size.width}
         height={size.height}
+        onLongPress={() => openActions(message)}
       />
     );
 

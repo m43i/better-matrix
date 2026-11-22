@@ -79,8 +79,8 @@ export default function PreviewScreen() {
   // The item on screen, which the strip and swipes move; the opened one at first.
   const [current, setCurrent] = useState(eventId);
 
-  // Media the account keeps back stays out of the gallery (ADR 0011); the opened one shows as
-  // hidden, with Show, until revealed, from wherever it was opened (Room Info's files too).
+  // Media the account keeps back stays in the gallery, held (ADR 0011): its thumbnail shows an
+  // eye, and selected it shows Show until revealed, from wherever it was opened.
   const gallery = useStore((s) => previewItems(s, account, key, current, eventId), shallow);
 
   const found = gallery.findIndex((m) => m.event_id === current);

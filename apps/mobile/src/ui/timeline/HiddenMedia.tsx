@@ -13,7 +13,7 @@ import { font } from '../../theme/palette';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
-import { hiddenLayout, minTap, tapHeight } from './hiddenLayout';
+import { hiddenLayout, minTap, tapArea } from './hiddenLayout';
 
 /** Whether this message's media waits for Show, and the way to show it. */
 export function useHiddenMedia(message: Pick<Message, 'sender_id' | 'event_id'>) {
@@ -26,32 +26,45 @@ export function useHiddenMedia(message: Pick<Message, 'sender_id' | 'event_id'>)
 
 /**
  * The placeholder: an eye crossed out, what it hides and Show, at the media's size; Show alone
- * in a short box. The press reveals; a box smaller than a finger sits centred in a tap area of
- * the platform's least size.
+ * in a short box, and under a box too small for it. The press reveals, a long press opens the
+ * message's actions; the tap area is never smaller than a finger on either axis.
  */
 export function HiddenMedia({
   label,
   onShow,
+  onLongPress,
   style,
+  width,
   height,
 }: {
   /** What is hidden ("Hidden picture"). */
   label: string;
   onShow: () => void;
+  onLongPress?: () => void;
   style: ViewStyle | ViewStyle[];
-  /** The box's height, which decides what fits in it. */
+  /** The box's size, which decides what fits in it. */
+  width: number;
   height: number;
 }) {
   const palette = usePalette();
-  const layout = hiddenLayout(height);
+  const layout = hiddenLayout(width, height);
+  const iconSize = Math.min(24, Math.min(width, height) - 8);
+
+  const show = (
+    <Text style={[font.bodyStrong, { color: palette.accent }]} numberOfLines={1}>
+      {t('safety.show_media')}
+    </Text>
+  );
 
   return (
     <Pressable
       testID="hidden-media"
       onPress={onShow}
+      onLongPress={onLongPress}
+      delayLongPress={350}
       accessibilityRole="button"
       accessibilityLabel={`${label}. ${t('safety.show_media')}`}
-      style={[styles.tap, { minHeight: tapHeight(height, minTap(Platform.OS)) }]}
+      style={[styles.tap, tapArea(width, height, minTap(Platform.OS))]}
     >
       <View
         style={[
@@ -60,22 +73,21 @@ export function HiddenMedia({
           { backgroundColor: palette.surface, borderColor: palette.divider },
         ]}
       >
+        {layout === 'show' || iconSize < 12 ? null : (
+          <Icon name="eyeOff" size={iconSize} color={palette.textMuted} />
+        )}
         {layout === 'full' ? (
-          <>
-            <Icon name="eyeOff" size={24} color={palette.textMuted} />
-            <Text style={[font.meta, { color: palette.textMuted }]}>{label}</Text>
-          </>
+          <Text style={[font.meta, { color: palette.textMuted }]}>{label}</Text>
         ) : null}
-        <Text style={[font.bodyStrong, { color: palette.accent }]} numberOfLines={1}>
-          {t('safety.show_media')}
-        </Text>
+        {layout === 'outside' ? null : show}
       </View>
+      {layout === 'outside' ? show : null}
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  tap: { justifyContent: 'center', alignSelf: 'flex-start' },
+  tap: { alignItems: 'center', justifyContent: 'center', gap: 4, alignSelf: 'flex-start' },
   box: {
     alignItems: 'center',
     justifyContent: 'center',
