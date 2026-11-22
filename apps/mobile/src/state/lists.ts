@@ -11,6 +11,7 @@ import type {
 } from '@better-matrix/matrix-native/types';
 
 import { locale, t } from '../i18n';
+import { ignores } from './safety';
 import { fuzzyMatch } from './search';
 import { byRecency } from './sections';
 import { type Permalink, parseTyped } from './permalinks';
@@ -212,7 +213,12 @@ export function searchResults(
       )
       .slice(0, 6),
     messages: messages
-      .filter((hit) => account.rooms.some((r) => r.room_id === hit.room_id))
+      // What people the user ignores said stays out of the results (ADR 0011).
+      .filter(
+        (hit) =>
+          account.rooms.some((r) => r.room_id === hit.room_id) &&
+          !ignores(account.safety, hit.sender),
+      )
       .sort((a, b) => messageUsage(account.searchUsage, b) - messageUsage(account.searchUsage, a)),
   };
 }

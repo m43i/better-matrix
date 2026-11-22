@@ -200,6 +200,26 @@ describe('search interaction ranking', () => {
       searchResults(account, 'release', [], NOW, hits).messages.map((h) => h.event_id),
     ).toEqual(['$person', '$room', '$new']);
   });
+
+  it('should leave out message hits from people the user ignores', () => {
+    const account = accountWith([roomSummary('!room')]);
+    account.safety = { ...account.safety, ignored: [GRACE] };
+
+    const hit = {
+      room_id: '!room',
+      event_id: '$alan',
+      thread: null,
+      sender: '@alan:example.org',
+      timestamp_ms: NOW,
+      body: 'release',
+      highlights: [0],
+    };
+
+    const hits = [hit, { ...hit, sender: GRACE, event_id: '$grace' }];
+    expect(
+      searchResults(account, 'release', [], NOW, hits).messages.map((h) => h.event_id),
+    ).toEqual(['$alan']);
+  });
 });
 
 it('search usage events should only update their own account', () => {

@@ -211,7 +211,6 @@ export function LinkCard({ url, message }: { url: string; message: Message }) {
             onShow={reveal}
             style={styles.cardImage}
             height={CARD_IMAGE_SIDE}
-            compact
           />
         ) : image ? (
           <Image source={{ uri: image }} style={styles.cardImage} contentFit="cover" />

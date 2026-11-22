@@ -218,11 +218,16 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, window: [f3
     }
     let failed = s.search.message_status == SearchStatus::Failed;
     let searching = s.search.message_request().is_some();
-    if filter.includes(SearchFilter::Messages) && (!s.search.messages.is_empty() || searching || failed) {
+    // Hits from people the user ignores don't show, those found before the ignore included.
+    let mut messages: Vec<_> = s
+        .search
+        .messages
+        .iter()
+        .filter(|hit| account.room(&hit.room_id).is_some() && !account.ignores(&hit.sender))
+        .collect();
+    if filter.includes(SearchFilter::Messages) && (!messages.is_empty() || searching || failed) {
         any = true;
         list = list.child(section(t!("search.messages"), p));
-        let mut messages: Vec<_> =
-            s.search.messages.iter().filter(|hit| account.room(&hit.room_id).is_some()).collect();
         messages.sort_by_key(|hit| std::cmp::Reverse(account.search_usage.message(&hit.room_id, &hit.sender)));
         for hit in messages {
             let hit = hit.clone();

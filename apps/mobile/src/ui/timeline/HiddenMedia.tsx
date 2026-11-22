@@ -3,7 +3,7 @@
 // a tap shows that message's media until the app restarts.
 
 import type { Message } from '@better-matrix/matrix-native/types';
-import { Platform, Pressable, StyleSheet, Text, type ViewStyle } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 import { t } from '../../i18n';
 import { revealMedia } from '../../state/actions/safety';
@@ -13,7 +13,7 @@ import { font } from '../../theme/palette';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
-import { hiddenLayout, minTap, tapSlop } from './hiddenLayout';
+import { hiddenLayout, minTap, tapHeight } from './hiddenLayout';
 
 /** Whether this message's media waits for Show, and the way to show it. */
 export function useHiddenMedia(message: Pick<Message, 'sender_id' | 'event_id'>) {
@@ -24,13 +24,16 @@ export function useHiddenMedia(message: Pick<Message, 'sender_id' | 'event_id'>)
   return { hidden, reveal: () => revealMedia(store, account, message.event_id) };
 }
 
-/** The placeholder: an eye crossed out, what it hides and Show, at the media's size. */
+/**
+ * The placeholder: an eye crossed out, what it hides and Show, at the media's size; Show alone
+ * in a short box. The press reveals; a box smaller than a finger sits centred in a tap area of
+ * the platform's least size.
+ */
 export function HiddenMedia({
   label,
   onShow,
   style,
   height,
-  compact = false,
 }: {
   /** What is hidden ("Hidden picture"). */
   label: string;
@@ -38,43 +41,41 @@ export function HiddenMedia({
   style: ViewStyle | ViewStyle[];
   /** The box's height, which decides what fits in it. */
   height: number;
-  /** Too small for words (a link card's picture): the icon alone. */
-  compact?: boolean;
 }) {
   const palette = usePalette();
-  // A short box (a wide banner) fits Show alone; a box smaller than a finger still takes one.
-  const layout = hiddenLayout(height, compact);
-  const slop = tapSlop(height, minTap(Platform.OS));
+  const layout = hiddenLayout(height);
 
   return (
     <Pressable
       testID="hidden-media"
       onPress={onShow}
-      hitSlop={slop}
       accessibilityRole="button"
       accessibilityLabel={`${label}. ${t('safety.show_media')}`}
-      style={[
-        style,
-        styles.box,
-        { backgroundColor: palette.surface, borderColor: palette.divider },
-      ]}
+      style={[styles.tap, { minHeight: tapHeight(height, minTap(Platform.OS)) }]}
     >
-      {layout === 'show' ? null : (
-        <Icon name="eyeOff" size={layout === 'icon' ? 20 : 24} color={palette.textMuted} />
-      )}
-      {layout === 'full' ? (
-        <Text style={[font.meta, { color: palette.textMuted }]}>{label}</Text>
-      ) : null}
-      {layout === 'icon' ? null : (
+      <View
+        style={[
+          style,
+          styles.box,
+          { backgroundColor: palette.surface, borderColor: palette.divider },
+        ]}
+      >
+        {layout === 'full' ? (
+          <>
+            <Icon name="eyeOff" size={24} color={palette.textMuted} />
+            <Text style={[font.meta, { color: palette.textMuted }]}>{label}</Text>
+          </>
+        ) : null}
         <Text style={[font.bodyStrong, { color: palette.accent }]} numberOfLines={1}>
           {t('safety.show_media')}
         </Text>
-      )}
+      </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
+  tap: { justifyContent: 'center', alignSelf: 'flex-start' },
   box: {
     alignItems: 'center',
     justifyContent: 'center',

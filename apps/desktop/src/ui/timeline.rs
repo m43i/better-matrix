@@ -1215,7 +1215,14 @@ fn link_card(
                 .label(t!("safety.show_media").to_owned())
                 .help(t!("safety.show_media").to_owned())
                 .focusable(true)
-                .child(icon(&icons::EYE_OFF, 20.0).color(p.text_muted))
+                .cursor(rune::Cursor::Pointer)
+                .child(
+                    col()
+                        .gap(4.0)
+                        .items_center()
+                        .child(icon(&icons::EYE_OFF, 18.0).color(p.text_muted))
+                        .child(text(t!("safety.show_media")).font(font::META).color(p.accent)),
+                )
                 .on_press(move |s: &mut State| s.reveal_media(&account, &event_id)),
             (None, Some(image)) => thumb.pixels_fit(image.pixels(), SurfaceFit::Fill),
             (None, None) => thumb.fill(p.hover).center().child(icon(&icons::IMAGE, 20.0).color(p.text_muted)),

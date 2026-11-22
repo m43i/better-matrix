@@ -1,6 +1,6 @@
 // How hidden media's placeholder fits its box (ADR 0011): the icon, what it hides and Show where
-// there is room, Show alone in a short box (a wide banner), the icon alone where the caller asks;
-// and how far its touch reaches past a box smaller than a finger.
+// there is room, Show alone in a short box (a wide banner or a link card's picture); and the
+// tap area a box smaller than a finger sits in.
 
 /** The least height that fits the icon, the label and Show without clipping them. */
 export const FULL_HEIGHT = 88;
@@ -10,14 +10,15 @@ export function minTap(os: string): number {
   return os === 'android' ? 48 : 44;
 }
 
-/** What the placeholder draws in a box `height` tall: everything, Show alone, or the icon. */
-export function hiddenLayout(height: number, compact: boolean): 'full' | 'show' | 'icon' {
-  if (compact) return 'icon';
-
+/** What the placeholder draws in a box `height` tall: everything, or Show alone. */
+export function hiddenLayout(height: number): 'full' | 'show' {
   return height < FULL_HEIGHT ? 'show' : 'full';
 }
 
-/** How far a tap reaches past each edge of a box `height` tall, so it is at least `min`. */
-export function tapSlop(height: number, min: number): number {
-  return height >= min ? 0 : Math.ceil((min - height) / 2);
+/**
+ * How tall the tap area around a box `height` tall is: the box, or `min` around a smaller one
+ * (a touch can't reach past its parent, so the area is laid out, not stretched).
+ */
+export function tapHeight(height: number, min: number): number {
+  return Math.max(height, min);
 }
