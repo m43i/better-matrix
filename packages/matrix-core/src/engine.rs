@@ -2337,10 +2337,14 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            // Queued now, in the order the commands came: two quick choices end on the later.
             Command::SetSafety { account: id, change } => {
-                let account = self.account(&id);
+                let changed = self.account(&id).map(|account| {
+                    let queue = account.safety_queue.clone();
+                    queue.run(async move { account.change_safety(&change).await })
+                });
                 Box::pin(async move {
-                    let safety = account?.change_safety(&change).await?;
+                    let safety = changed?.await?;
                     sink.emit(Event::Safety { account: id, safety });
                     Ok(Outcome::Done)
                 })
@@ -3015,7 +3019,7 @@ async fn sync_until_error(
                 sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
             }
             if crate::safety::changed_in(&response.account_data)
-                && let Ok(Some(safety)) = account.synced_safety(&response.account_data).await
+                && let Some(safety) = account.synced_safety().await
             {
                 sink.emit(Event::Safety { account: account.id().clone(), safety });
             }

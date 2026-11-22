@@ -85,6 +85,9 @@ pub struct Account {
     /// Held while a safety choice changes: one change at a time, each on the server's latest
     /// copy; it holds the choices the server last confirmed (`crate::safety`).
     pub(crate) safety_changes: Arc<tokio::sync::Mutex<Option<crate::Safety>>>,
+    /// Safety changes, run in the order they were asked for: two quick choices of one setting
+    /// end on the later one (`crate::safety`).
+    pub(crate) safety_queue: crate::drafts::DraftQueue,
     /// Draft reads and writes, in the order they were asked for (`crate::drafts`).
     pub(crate) drafts: crate::drafts::DraftQueue,
 }
@@ -292,6 +295,7 @@ impl Account {
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
             safety_changes: Arc::default(),
+            safety_queue: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
         }
     }
@@ -406,6 +410,7 @@ impl Account {
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
             safety_changes: Arc::default(),
+            safety_queue: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
         })
     }
@@ -1003,6 +1008,7 @@ mod tests {
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
             safety_changes: Arc::default(),
+            safety_queue: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
         }
     }

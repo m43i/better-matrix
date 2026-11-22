@@ -128,12 +128,18 @@ describe('ignoreInviter', () => {
     await expect(answer).resolves.toEqual({ kind: 'declined' });
   });
 
-  it('should keep the invitation when ignoring fails', async () => {
+  it('should keep the invitation and say why in the sheet when ignoring fails', async () => {
     const { store, sent, finish } = setup();
     const answer = ignoreInviter(store, ADA, SPAM);
     finish(sent.at(-1)!.request, { Err: 'offline' });
-    await expect(answer).resolves.toEqual({ kind: 'failed', error: null });
-    expect(sent.map((s) => s.command.type)).toEqual(['SetSafety']);
+    await expect(answer).resolves.toEqual({
+      kind: 'failed',
+      error: "Couldn't save your safety choice: offline",
+    });
+    expect([sent.map((s) => s.command.type), store.getState().notices]).toEqual([
+      ['SetSafety'],
+      [],
+    ]);
   });
 });
 

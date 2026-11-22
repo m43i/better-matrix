@@ -24,12 +24,14 @@ Date: 2026-11-22
   `hide_stranger_invites`) is reported as `Event::Safety` once an account is ready, when a sync
   brings any of its account data events, and after `Command::SetSafety(SafetyChange)`, whose
   answer is read back from the server (the store's copy changes only with the next sync).
-  Changes run one at a time per account (`Account::safety_changes`), each read-modify-writing the
-  server's latest copy, so two made before a sync both hold. Should reading the answer back fail
-  after a save, the choices the server last confirmed stand in, with the change applied. A sync
-  that carries any of the events reads the choices from the server under the same lock (only
-  the parts it carried change should the server not answer), and reports nothing while a change
-  is being saved (that change's answer does), so a sync answered before a save can't undo it. Reports go
+  Changes run one at a time per account, in the order they were asked for
+  (`Account::safety_queue`), each read-modify-writing the server's latest copy, so two made
+  before a sync both hold and two choices of one setting end on the later. Should reading the
+  answer back fail after a save, the choices the server last confirmed stand in, with the change
+  applied. A sync that carries any of the events reads the choices from the server under the
+  changes' lock (`Account::safety_changes`), and reports nothing while a change is being saved
+  (that change's answer does) or when the server doesn't answer, so a sync answered before a
+  save can't undo it. Reports go
   through `Command::Report { target: ReportTarget::{Message, Room, Person}, reason }`; the reason
   may be empty and is trimmed. The apps decide with `Safety::shows_media`,
   `Safety::shows_invitation` and `Safety::ignores` (mirrored in the phones' selectors).
@@ -82,6 +84,9 @@ Date: 2026-11-22
   always show.
 
 ## Consequences
+
+- Ignoring hides what the ignored person sent, not what others wrote about it: a reply by
+  someone else may still quote them, as it does in other clients.
 
 - iOS can't drop a push without Apple's notification-filtering entitlement: a hidden
   invitation's push shows the push's own generic text there, as any push that turns out to show

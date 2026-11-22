@@ -175,29 +175,12 @@ pub enum ReportTarget {
 
 /// Whether a sync's account data changes the user's safety choices.
 pub(crate) fn changed_in(account_data: &[Raw<AnyGlobalAccountDataEvent>]) -> bool {
-    account_data.iter().any(|raw| carries(raw, &[IGNORED, MEDIA, MEDIA_UNSTABLE, INVITES]))
-}
-
-/// Whether an account data event is one of `types`.
-fn carries(raw: &Raw<AnyGlobalAccountDataEvent>, types: &[&str]) -> bool {
-    raw.get_field::<String>("type").ok().flatten().is_some_and(|kind| types.contains(&kind.as_str()))
-}
-
-/// `base` with the parts a sync carried taken from `synced`: what it didn't carry didn't change.
-fn merge_synced(base: Safety, synced: Safety, account_data: &[Raw<AnyGlobalAccountDataEvent>]) -> Safety {
-    let has = |types: &[&str]| account_data.iter().any(|raw| carries(raw, types));
-    let mut merged = base;
-    if has(&[IGNORED]) {
-        merged.ignored = synced.ignored;
-    }
-    if has(&[MEDIA, MEDIA_UNSTABLE]) {
-        merged.media = synced.media;
-        merged.invite_pictures = synced.invite_pictures;
-    }
-    if has(&[INVITES]) {
-        merged.hide_stranger_invites = synced.hide_stranger_invites;
-    }
-    merged
+    account_data.iter().any(|raw| {
+        matches!(
+            raw.get_field::<String>("type").ok().flatten().as_deref(),
+            Some(IGNORED | MEDIA | MEDIA_UNSTABLE | INVITES)
+        )
+    })
 }
 
 /// The choices in the three account data events' contents (absent ones are `Null`). An absent
@@ -264,29 +247,23 @@ impl Account {
         Ok(read(&ignored, &media, &invites))
     }
 
-    /// The choices after a sync that carried some of their events, or `None` while a change is
-    /// being saved (its answer, read from the server, reports them). They are read from the
-    /// server, under the same lock as changes: a sync answered before a save finished carries the
-    /// older event, which mustn't undo the save. Should the server not answer, the parts the sync
-    /// carried are taken from this device's copy onto the confirmed choices.
-    pub(crate) async fn synced_safety(
-        &self,
-        account_data: &[Raw<AnyGlobalAccountDataEvent>],
-    ) -> Result<Option<Safety>, Error> {
-        let Ok(mut confirmed) = self.safety_changes.try_lock() else { return Ok(None) };
-        let safety = match self.server_safety().await {
-            Ok(safety) => safety,
+    /// The choices after a sync that carried some of their events, read from the server under the
+    /// same lock as changes: a sync answered before a save finished carries the older event,
+    /// which mustn't undo the save. `None` while a change is being saved (its answer, read from
+    /// the server, reports them), and when the server doesn't answer (this device's copy may be
+    /// that older event; the next sync or change reads them again).
+    pub(crate) async fn synced_safety(&self) -> Option<Safety> {
+        let Ok(mut confirmed) = self.safety_changes.try_lock() else { return None };
+        match self.server_safety().await {
+            Ok(safety) => {
+                *confirmed = Some(safety.clone());
+                Some(safety)
+            }
             Err(error) => {
                 eprintln!("matrix-engine: could not read the safety choices a sync changed: {error}");
-                let synced = self.safety().await?;
-                match confirmed.take() {
-                    Some(base) => merge_synced(base, synced, account_data),
-                    None => synced,
-                }
+                None
             }
-        };
-        *confirmed = Some(safety.clone());
-        Ok(Some(safety))
+        }
     }
 
     /// Makes one change and returns the choices that hold after it, as the server has them.

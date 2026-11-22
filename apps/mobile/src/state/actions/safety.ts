@@ -27,6 +27,7 @@ export async function changeSafety(
   store: Store,
   account: AccountId,
   change: SafetyChange,
+  { quiet = false }: { quiet?: boolean } = {},
 ): Promise<void> {
   if (!store.getState().accounts.some((a) => a.summary.id === account)) return;
   const pending = { id: nextPending++, change };
@@ -38,8 +39,8 @@ export async function changeSafety(
     store.update((s) => {
       const back = settlePendingSafety(s, account, pending.id);
 
-      // A cancelled request says nothing: the user did it.
-      if (!(error instanceof CommandFailed) || error.cancelled) return back;
+      // A cancelled request says nothing: the user did it; a `quiet` caller says why itself.
+      if (quiet || !(error instanceof CommandFailed) || error.cancelled) return back;
 
       return addNotice(back, t('mobile.safety.save_failed', { error: error.message }), account);
     });
@@ -109,11 +110,21 @@ export async function ignoreInviter(
   invitation: Invitation,
 ): Promise<InvitationAnswer> {
   if (invitation.inviter) {
+    const change = {
+      type: 'Ignore' as const,
+      data: { user_id: invitation.inviter.id, ignored: true },
+    };
+
     try {
-      await setIgnored(store, account, invitation.inviter.id, true);
-    } catch {
-      // The notice said why; the invitation stays to try again.
-      return { kind: 'failed', error: null };
+      await changeSafety(store, account, change, { quiet: true });
+    } catch (error) {
+      // Said in the sheet, as a notice would draw beneath it on iOS; the invitation stays.
+      const why =
+        error instanceof CommandFailed && !error.cancelled
+          ? t('mobile.safety.save_failed', { error: error.message })
+          : null;
+
+      return { kind: 'failed', error: why };
     }
   }
 

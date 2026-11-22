@@ -296,24 +296,12 @@ async fn reporting_a_room_should_send_the_reason_to_the_server() {
     assert_eq!(server.sent("/report")[0]["reason"], "scam");
 }
 
-#[test]
-fn a_sync_should_change_only_the_parts_it_carried() {
-    let event = |kind: &str| Raw::new(&json!({ "type": kind, "content": {} })).unwrap().cast_unchecked();
-    let confirmed = Safety { media: ShowMedia::Never, ..Safety::default() };
-    let stale = Safety { hide_stranger_invites: true, ..Safety::default() };
-    let merged = merge_synced(confirmed, stale, &[event(INVITES)]);
-    assert_eq!(merged.media, ShowMedia::Never);
-    assert!(merged.hide_stranger_invites);
-}
-
 #[tokio::test]
 async fn a_sync_during_a_save_should_leave_reporting_to_the_save() {
     let server = Homeserver::new(json!([]));
     let account = server.synced_account().await;
     let _saving = account.safety_changes.lock().await;
-    let event: Raw<AnyGlobalAccountDataEvent> =
-        Raw::new(&json!({ "type": INVITES, "content": {} })).unwrap().cast_unchecked();
-    assert_eq!(account.synced_safety(&[event]).await.unwrap(), None);
+    assert_eq!(account.synced_safety().await, None);
 }
 
 #[tokio::test]
@@ -322,10 +310,28 @@ async fn a_sync_answered_before_a_save_should_not_undo_it() {
     let account = server.synced_account().await;
     account.change_safety(&SafetyChange::InvitePictures(false)).await.unwrap();
     account.change_safety(&SafetyChange::Media(ShowMedia::Never)).await.unwrap();
-    // The first save's sync, arriving late, carries the event without the second change.
-    let stale: Raw<AnyGlobalAccountDataEvent> =
-        Raw::new(&json!({ "type": MEDIA_UNSTABLE, "content": { "invite_avatars": "off" } })).unwrap().cast_unchecked();
-    let safety = account.synced_safety(&[stale]).await.unwrap().unwrap();
+    // The first save's sync arrives late; this device's copy has neither change yet.
+    let safety = account.synced_safety().await.unwrap();
     assert_eq!(safety.media, ShowMedia::Never);
     assert!(!safety.invite_pictures);
+}
+
+#[tokio::test]
+async fn two_quick_choices_of_one_setting_should_end_on_the_later() {
+    let server = Homeserver::new(json!([]));
+    let account = server.synced_account().await;
+    let queue = account.safety_queue.clone();
+    let slow = account.clone();
+    let first = queue.run(async move {
+        // The choice asked for first is slow to start; the later one must still land last.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        slow.change_safety(&SafetyChange::Media(ShowMedia::Always)).await
+    });
+    let fast = account.clone();
+    let second = queue.run(async move { fast.change_safety(&SafetyChange::Media(ShowMedia::Never)).await });
+    let (first, second) = tokio::join!(first, second);
+    first.unwrap();
+    assert_eq!(second.unwrap().media, ShowMedia::Never);
+    let saved = server.sent(&format!("/account_data/{MEDIA_UNSTABLE}"));
+    assert_eq!(saved.last().map(|body| body["media_previews"].clone()), Some(json!("off")));
 }
