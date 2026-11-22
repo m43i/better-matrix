@@ -1210,3 +1210,102 @@ pub fn update() -> crate::platform::updates::Release {
         digest: format!("sha256:{}", "a".repeat(64)),
     }
 }
+
+/// The general room with hidden events showing: room state the timeline otherwise leaves out.
+pub fn hidden_events(s: &mut State) {
+    seed(s);
+    let account = AccountId::new(ADA);
+    let hidden = |id: &str, kind: &str, name: &str, at: u64| matrix_core::TimelineEntry {
+        id: id.into(),
+        kind: matrix_core::EntryKind::Hidden(Box::new(matrix_core::HiddenEvent {
+            event_id: Some(format!("${id}")),
+            sender: matrix_core::Person {
+                id: format!("@{}:example.org", name.to_lowercase()),
+                name: name.into(),
+                avatar: None,
+            },
+            event_type: kind.into(),
+            timestamp_ms: at,
+        })),
+    };
+    let key = TimelineKey::room(DEMO_THREAD.0);
+    for (id, kind, name, at) in [
+        ("hidden-acl", "m.room.server_acl", "Grace", 1_700_000_000_000),
+        ("hidden-widget", "im.vector.modular.widgets", "Alan", 1_700_000_100_000),
+    ] {
+        seed_timeline(s, &account, &key, TimelineDiff::PushBack(hidden(id, kind, name, at)));
+    }
+    s.set_show_hidden_events(true);
+    s.select_room(DEMO_THREAD.0);
+}
+
+/// The general room's widgets panel: a board, a dashboard and a Jitsi meeting.
+pub fn widgets(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    s.show_side(crate::state::SidePanel::Widgets);
+    let widget = |id: &str, name: &str, kind: &str, url: &str, host: &str| matrix_core::Widget {
+        id: id.into(),
+        name: name.into(),
+        kind: kind.into(),
+        url: url.into(),
+        host: host.into(),
+        creator: Some("@grace:example.org".into()),
+        can_remove: true,
+    };
+    let widgets = matrix_core::Widgets {
+        widgets: vec![
+            widget("board", "Sprint board", "m.custom", "https://board.example.org/team", "board.example.org"),
+            widget(
+                "grafana",
+                "Server dashboard",
+                "m.grafana",
+                "https://grafana.example.org/d/1",
+                "grafana.example.org",
+            ),
+            widget("standup", "Standup", "jitsi", "https://meet.example.org/TeamStandup", "meet.example.org"),
+        ],
+        can_add: true,
+    };
+    s.accounts.set_widgets(&AccountId::new(ADA), DEMO_THREAD.0.into(), widgets);
+}
+
+/// The source of an encrypted message: as this device reads it, and as it was sent.
+pub fn event_source(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    let source = matrix_core::EventSource {
+        room_id: DEMO_THREAD.0.into(),
+        event_id: DEMO_THREAD.1.into(),
+        json: format!(
+            r#"{{
+  "type": "m.room.message",
+  "sender": "@alan:example.org",
+  "event_id": "{event}",
+  "origin_server_ts": 1700000000000,
+  "content": {{
+    "msgtype": "m.text",
+    "body": "Has anyone tried the new build?"
+  }}
+}}"#,
+            event = DEMO_THREAD.1
+        ),
+        encrypted: Some(format!(
+            r#"{{
+  "type": "m.room.encrypted",
+  "sender": "@alan:example.org",
+  "event_id": "{event}",
+  "origin_server_ts": 1700000000000,
+  "content": {{
+    "algorithm": "m.megolm.v1.aes-sha2",
+    "ciphertext": "AwgAEpABqOCzJ2Tp…",
+    "device_id": "ALANLAPTOP",
+    "sender_key": "Hc1gJ8i3y1cCi0ZmRp3K7XcfuF0pB6wd1Sx4nT2EYfQ",
+    "session_id": "3yv1Q3wN1cZ9u2lO0d5XG4WeV8m7n2Ck1lZ6aQpTb3Y"
+  }}
+}}"#,
+            event = DEMO_THREAD.1
+        )),
+    };
+    s.modal = Some(crate::state::Modal::Source(crate::state::SourceView::Shown(Box::new(source))));
+}

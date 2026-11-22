@@ -75,6 +75,7 @@ pub(crate) fn listen(
     client: &Client,
     account: &AccountId,
     signals: &UnboundedSender<Signal>,
+    sticky: &super::StickyMembers,
 ) -> Vec<EventHandlerHandle> {
     let to_device = {
         let (account, signals) = (account.clone(), signals.clone());
@@ -93,13 +94,19 @@ pub(crate) fn listen(
         })
     };
     let timeline = {
-        let (account, signals) = (account.clone(), signals.clone());
+        let (account, signals, sticky) = (account.clone(), signals.clone(), sticky.clone());
         client.add_event_handler(
             move |raw: Raw<AnySyncTimelineEvent>, room: matrix_sdk::Room, encryption: Option<EncryptionInfo>| {
-                let (account, signals) = (account.clone(), signals.clone());
+                let (account, signals, sticky) = (account.clone(), signals.clone(), sticky.clone());
                 async move {
                     // Most events are none of these: only theirs are read whole.
                     let kind = raw.get_field::<String>("type").ok().flatten().unwrap_or_default();
+                    if super::sticky::RTC_MEMBER_EVENTS.contains(&kind.as_str()) || kind == "m.room.redaction" {
+                        let Ok(event) = raw.deserialize_as_unchecked::<Value>() else { return };
+                        let trusted = encryption.is_some() || !room.encryption_state().is_encrypted();
+                        sticky_heard(&room, &event, trusted, &sticky);
+                        return;
+                    }
                     if !concerns_calls(&kind) {
                         return;
                     }
@@ -113,10 +120,10 @@ pub(crate) fn listen(
         )
     };
     let state = {
-        let (account, signals) = (account.clone(), signals.clone());
+        let (account, signals, sticky) = (account.clone(), signals.clone(), sticky.clone());
         let me = client.user_id().map(ToString::to_string).unwrap_or_default();
         client.add_event_handler(move |raw: Raw<AnySyncStateEvent>, room: matrix_sdk::Room| {
-            let (account, signals, me) = (account.clone(), signals.clone(), me.clone());
+            let (account, signals, me, sticky) = (account.clone(), signals.clone(), me.clone(), sticky.clone());
             async move {
                 let kind = raw.get_field::<String>("type").ok().flatten().unwrap_or_default();
                 let room_id = room.room_id().to_string();
@@ -124,11 +131,39 @@ pub(crate) fn listen(
                     let _ = signals.send(Signal::Members { account, room_id });
                 } else if kind == "m.room.member" && raw_left(&me, &raw) {
                     let _ = signals.send(Signal::Left { account, room_id });
+                } else if kind == "m.room.member" {
+                    // A matrix_2_0 member who left or was removed is out of the call, whatever
+                    // their sticky membership still says (the store reports it).
+                    // Large rooms' members arrive by the thousand: only a call member's is read.
+                    let user = raw.get_field::<String>("state_key").ok().flatten().unwrap_or_default();
+                    let now = crate::engine::now_ms();
+                    if !sticky.members(&room_id, now).iter().any(|member| member.user_id == user) {
+                        return;
+                    }
+                    let membership = raw
+                        .deserialize_as_unchecked::<Value>()
+                        .ok()
+                        .and_then(|event| event["content"]["membership"].as_str().map(str::to_owned));
+                    if membership.as_deref() != Some("join") {
+                        sticky.left(&room_id, &user);
+                    }
                 }
             }
         })
     };
     vec![to_device, timeline, state]
+}
+
+/// A matrix_2_0 membership (or the redaction of one) heard from the timeline: kept, and the
+/// change reported (`StickyMembers::report_to`).
+fn sticky_heard(room: &matrix_sdk::Room, event: &Value, trusted: bool, sticky: &super::StickyMembers) {
+    let room_id = room.room_id().to_string();
+    if event["type"] == "m.room.redaction" {
+        let redacts = event["redacts"].as_str().or_else(|| event["content"]["redacts"].as_str()).unwrap_or_default();
+        sticky.redacted(&room_id, redacts);
+    } else {
+        sticky.heard(&room_id, event, trusted, crate::engine::now_ms());
+    }
 }
 
 /// [`left`] for an event as it arrives. A large room's members arrive by the thousand: only the

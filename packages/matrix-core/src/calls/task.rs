@@ -289,7 +289,7 @@ pub(super) fn panicked(panic: &(dyn std::any::Any + Send)) -> CallError {
 /// Which standard a new call in the room speaks, by the same rule its summary shows.
 async fn decide(account: &Account, room: &Room) -> Option<CallVia> {
     let kind = if room.is_direct().await.unwrap_or(false) { crate::RoomKind::Direct } else { crate::RoomKind::Group };
-    crate::convert::room_call(room, kind, account.rtc_service().is_some()).await.via
+    crate::convert::room_call(room, kind, account.rtc_service().is_some(), &account.sticky).await.via
 }
 
 fn random_id() -> String {

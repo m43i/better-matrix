@@ -62,6 +62,7 @@ import {
   LoadingRow,
   NewMarker,
   RepliesDivider,
+  HiddenEventLine,
   RoomEventLine,
   StartBlock,
 } from './Rows';
@@ -157,9 +158,11 @@ export function Timeline({
   }, [fading, reducedMotion]);
   const shownMarker = marker.shown;
 
+  const showHidden = useStore((s) => s.settings.showHiddenEvents);
+
   const rows = useMemo(
-    () => planTimeline(timeline, { thread, root, marker: shownMarker }),
-    [timeline, thread, root, shownMarker],
+    () => planTimeline(timeline, { thread, root, marker: shownMarker, showHidden }),
+    [timeline, thread, root, shownMarker, showHidden],
   );
 
   const list = useRef<FlashListRef<Row>>(null);
@@ -358,6 +361,8 @@ export function Timeline({
         return <HistoryFailedRow error={item.error} />;
       case 'replies':
         return <RepliesDivider count={item.count} />;
+      case 'hidden':
+        return <HiddenEventLine event={item.event} />;
     }
   }, []);
 

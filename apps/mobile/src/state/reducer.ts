@@ -86,6 +86,7 @@ function newAccount(summary: AccountSummary): AccountData {
     members: {},
     threads: {},
     files: {},
+    widgets: {},
     pins: {},
     saved: null,
     sidebar: EMPTY_LAYOUT,
@@ -395,6 +396,11 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
         ...a,
         files: { ...a.files, [event.data.room_id]: event.data.files },
       }));
+    case 'Widgets':
+      return updateAccount(state, event.data.account, (a) => ({
+        ...a,
+        widgets: { ...a.widgets, [event.data.room_id]: event.data.widgets },
+      }));
     case 'SidebarLayout':
       return updateAccount(state, event.data.account, (a) =>
         // Of two layouts the later wins, so a sync with an older save never undoes a newer one.
@@ -511,6 +517,7 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'ContactCodeSent':
     case 'MessagesFound':
     case 'PeopleFound':
+    case 'EventSource':
     // Answers the composer's own read (`state/actions/drafts.ts`).
     case 'DraftLoaded':
     case 'DirectoryFound':

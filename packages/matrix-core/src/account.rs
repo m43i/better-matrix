@@ -84,6 +84,14 @@ pub struct Account {
     pub(crate) saved_changes: Arc<tokio::sync::Mutex<()>>,
     /// Draft reads and writes, in the order they were asked for (`crate::drafts`).
     pub(crate) drafts: crate::drafts::DraftQueue,
+    /// The room list's sliding sync, while it runs (servers with MSC4186; ADR 0002).
+    room_list: Arc<Mutex<Option<Arc<matrix_sdk_ui::RoomListService>>>>,
+    /// The rooms open timelines show, which the room list's sliding sync subscribes to.
+    followed: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Held while the room list's subscriptions are updated (`Account::subscribe_followed`).
+    subscribing: Arc<tokio::sync::Mutex<()>>,
+    /// Call memberships in Element Call's matrix_2_0 mode, which the SDK doesn't keep.
+    pub(crate) sticky: crate::calls::StickyMembers,
 }
 
 /// Where the browser comes back to after an OAuth sign-in.
@@ -286,6 +294,10 @@ impl Account {
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
+            room_list: Arc::default(),
+            followed: Arc::default(),
+            subscribing: Arc::default(),
+            sticky: crate::calls::StickyMembers::default(),
         }
     }
 
@@ -399,6 +411,10 @@ impl Account {
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
+            room_list: Arc::default(),
+            followed: Arc::default(),
+            subscribing: Arc::default(),
+            sticky: crate::calls::StickyMembers::default(),
         })
     }
 
@@ -420,6 +436,58 @@ impl Account {
     ) -> Result<matrix_sdk::sync::SyncResponse, matrix_sdk::Error> {
         let _store = self.client.encryption().spin_lock_store(None).await?;
         self.client.sync_once(settings).await
+    }
+
+    /// Names the room list's sliding sync while it runs, `None` once it stopped. A new one asks
+    /// at once for the rooms open timelines follow.
+    pub(crate) async fn set_room_list(&self, service: Option<Arc<matrix_sdk_ui::RoomListService>>) {
+        if let Ok(mut room_list) = self.room_list.lock() {
+            room_list.clone_from(&service);
+        }
+        if service.is_some() {
+            self.subscribe_followed().await;
+        }
+    }
+
+    /// Asks the room list's sliding sync for a room's recent events and full state while it is
+    /// open, so its timeline gets every event rather than the list's last few.
+    /// Nothing more to do over the long-poll sync, which brings every room whole.
+    pub(crate) async fn follow_room(&self, room_id: &str) {
+        if let Ok(mut followed) = self.followed.lock() {
+            followed.insert(room_id.to_owned());
+        }
+        self.subscribe_followed().await;
+    }
+
+    /// Stops following a room at once (its last timeline closed), then lets the room list's
+    /// sliding sync know.
+    pub(crate) fn unfollow_room(&self, room_id: &str) {
+        if let Ok(mut followed) = self.followed.lock() {
+            followed.remove(room_id);
+        }
+        let account = self.clone();
+        tokio::spawn(async move { account.subscribe_followed().await });
+    }
+
+    /// The rooms open timelines show.
+    pub(crate) fn followed_rooms(&self) -> Vec<String> {
+        self.followed.lock().map(|followed| followed.iter().cloned().collect()).unwrap_or_default()
+    }
+
+    /// Subscribes the room list's sliding sync to the rooms followed now, and only those: the
+    /// SDK replaces its whole set of subscriptions at once. One update at a time, each reading
+    /// the set when its turn comes, so the newest set is the one applied last.
+    async fn subscribe_followed(&self) {
+        let _turn = self.subscribing.lock().await;
+        let service = self.room_list.lock().ok().and_then(|room_list| room_list.clone());
+        let Some(service) = service else { return };
+        let followed: Vec<matrix_sdk::ruma::OwnedRoomId> = self
+            .followed
+            .lock()
+            .map(|followed| followed.iter().filter_map(|id| matrix_sdk::ruma::RoomId::parse(id).ok()).collect())
+            .unwrap_or_default();
+        let rooms: Vec<&matrix_sdk::ruma::RoomId> = followed.iter().map(AsRef::as_ref).collect();
+        service.set_room_subscriptions(&rooms).await;
     }
 
     /// Registers (or updates) this device's pusher: the homeserver sends the account's pushes
@@ -590,7 +658,8 @@ impl Account {
                     settings = Some(self.client.notification_settings().await);
                 }
                 if let Some(settings) = &settings {
-                    let summary = convert::room_summary(room, settings, self.rtc_service().is_some()).await;
+                    let summary =
+                        convert::room_summary(room, settings, self.rtc_service().is_some(), &self.sticky).await;
                     moved |= self::changed(&mut cache.rooms, id, summary);
                 }
             }
@@ -794,7 +863,7 @@ impl Account {
         Ok(self.joined_room(room_id)?.typing_notice(typing).await?)
     }
 
-    fn joined_room(&self, room_id: &str) -> Result<Room, Error> {
+    pub(crate) fn joined_room(&self, room_id: &str) -> Result<Room, Error> {
         let parsed = RoomId::parse(room_id)?;
         self.client
             .get_room(&parsed)
@@ -984,6 +1053,10 @@ mod tests {
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
+            room_list: Arc::default(),
+            followed: Arc::default(),
+            subscribing: Arc::default(),
+            sticky: crate::calls::StickyMembers::default(),
         }
     }
 

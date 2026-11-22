@@ -4,7 +4,8 @@
 //! the room's call and where they publish, the tokens for those services, the user's own
 //! membership (with a delayed leave so a crash still leaves the call), and the ring that starts
 //! a call in a direct chat. Memberships are read from raw JSON, so one in a shape this code
-//! doesn't know costs only that member, not the whole list.
+//! doesn't know costs only that member, not the whole list. Members in Element Call's newer
+//! "matrix_2_0" mode (sticky events, `calls::sticky`) are read too.
 
 use std::time::Duration;
 
@@ -40,26 +41,69 @@ const EXPIRES: u64 = 4 * 60 * 60 * 1000;
 use super::signals::MEMBER_EVENTS;
 use super::signals::RING_EVENT;
 
+/// Where a member publishes, and how to get a grant to it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Transport {
+    /// A LiveKit JWT service (`livekit_service_url`), asked with an OpenID token.
+    Service(String),
+    /// A LiveKit SFU that its homeserver (`server_name`) vouches for (MSC4195): the user's own
+    /// homeserver asks it for a grant over federation.
+    Sfu { url: String, server_name: String },
+}
+
+impl Transport {
+    /// A LiveKit transport a membership of `sender` names; `None` for any other kind. An SFU
+    /// that names no homeserver is the sender's (MSC4195).
+    pub(crate) fn read(focus: &Value, sender: &str) -> Option<Self> {
+        if !matches!(focus["type"].as_str(), Some("livekit" | "m.livekit")) {
+            return None;
+        }
+        if let Some(service) = focus["livekit_service_url"].as_str() {
+            return Some(Self::Service(service.to_owned()));
+        }
+        let url = focus["url"].as_str()?.to_owned();
+        let server_name = match focus["server_name"].as_str() {
+            Some(server) => server.to_owned(),
+            None => sender.split_once(':')?.1.to_owned(),
+        };
+        Some(Self::Sfu { url, server_name })
+    }
+
+    /// Its address: the service's, or the SFU's.
+    pub(crate) fn address(&self) -> &str {
+        match self {
+            Self::Service(url) | Self::Sfu { url, .. } => url,
+        }
+    }
+}
+
+impl std::fmt::Display for Transport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.address())
+    }
+}
+
 /// One device in the room's call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Member {
     pub user_id: String,
     pub device_id: String,
-    /// Its member ID: the membership's own, else `user:device`.
+    /// Its member ID: the membership's own, else `user:device` (a random one in matrix_2_0).
     pub member_id: String,
     /// When the device joined, in milliseconds since the epoch.
     pub since: u64,
-    /// The LiveKit service it prefers, where it publishes.
-    pub service: Option<String>,
+    /// Where it publishes.
+    pub transport: Option<Transport>,
     /// Whether it publishes on its own service (multi-SFU) rather than the oldest member's.
     pub multi_sfu: bool,
 }
 
-/// The devices in the room's call at `now`: unexpired, non-empty memberships of the room-wide
-/// `m.call`, from either membership event type.
-pub(crate) async fn members(room: &Room) -> Vec<Member> {
-    let now = MilliSecondsSinceUnixEpoch::now().get().into();
-    let mut members = Vec::new();
+/// The devices in the room's call now: unexpired, non-empty memberships of the room-wide
+/// `m.call`, from either membership state type and from matrix_2_0's sticky events (of members
+/// still in the room).
+pub(crate) async fn members(room: &Room, sticky: &super::StickyMembers) -> Vec<Member> {
+    let now: u64 = MilliSecondsSinceUnixEpoch::now().get().into();
+    let mut members = joined_sticky(room, sticky, true).await;
     for kind in MEMBER_EVENTS {
         let Ok(events) = room.get_state_events(StateEventType::from(kind)).await else { continue };
         for raw in events {
@@ -69,6 +113,26 @@ pub(crate) async fn members(room: &Room) -> Vec<Member> {
         }
     }
     members
+}
+
+/// The matrix_2_0 members still in the room. `ask`: a member lazy loading left out of the store
+/// is asked for (a call); otherwise only the store says (a room summary, which mustn't wait).
+pub(crate) async fn joined_sticky(room: &Room, sticky: &super::StickyMembers, ask: bool) -> Vec<Member> {
+    use matrix_sdk::ruma::events::room::member::MembershipState;
+    let now: u64 = MilliSecondsSinceUnixEpoch::now().get().into();
+    let mut joined = Vec::new();
+    for member in sticky.members(room.room_id().as_str(), now) {
+        let Ok(user) = matrix_sdk::ruma::UserId::parse(&member.user_id) else { continue };
+        let known = match room.get_member_no_sync(&user).await.ok().flatten() {
+            Some(known) => Some(known),
+            None if ask => room.get_member(&user).await.ok().flatten(),
+            None => None,
+        };
+        if known.is_some_and(|m| *m.membership() == MembershipState::Join) {
+            joined.push(member);
+        }
+    }
+    joined
 }
 
 /// The memberships one state event holds: one (session format), or a list (the oldest format).
@@ -96,12 +160,8 @@ fn parse_member(sender: &str, sent: u64, content: &Value, now: u64) -> Option<Me
     if now >= until {
         return None;
     }
-    let service = content["foci_preferred"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find_map(|focus| (focus["type"] == "livekit").then(|| focus["livekit_service_url"].as_str()).flatten())
-        .map(str::to_owned);
+    let transport =
+        content["foci_preferred"].as_array().into_iter().flatten().find_map(|focus| Transport::read(focus, sender));
     Some(Member {
         member_id: content["membershipID"]
             .as_str()
@@ -109,18 +169,19 @@ fn parse_member(sender: &str, sent: u64, content: &Value, now: u64) -> Option<Me
         user_id: sender.to_owned(),
         device_id,
         since,
-        service,
+        transport,
         multi_sfu: content["focus_active"]["focus_selection"] == "multi_sfu",
     })
 }
 
 /// The LiveKit services to subscribe to: the user's own first (where they publish), then each
 /// multi-SFU member's own, and the oldest member's for those who join wherever it is.
-pub(crate) fn subscriptions(members: &[Member], own: &str) -> Vec<String> {
-    let oldest = members.iter().filter(|m| m.service.is_some()).min_by_key(|m| m.since).and_then(|m| m.service.clone());
-    let mut services = vec![own.to_owned()];
+pub(crate) fn subscriptions(members: &[Member], own: &Transport) -> Vec<Transport> {
+    let oldest =
+        members.iter().filter(|m| m.transport.is_some()).min_by_key(|m| m.since).and_then(|m| m.transport.clone());
+    let mut services = vec![own.clone()];
     for member in members {
-        let service = if member.multi_sfu { member.service.clone() } else { oldest.clone() };
+        let service = if member.multi_sfu { member.transport.clone() } else { oldest.clone() };
         if let Some(service) = service.filter(|service| !services.contains(service)) {
             services.push(service);
         }
@@ -135,16 +196,24 @@ pub(crate) struct Grant {
     pub jwt: String,
 }
 
-/// Asks a call service for a grant to the room's call: an OpenID token proves who the user is.
-/// The older endpoint first (`user:device` identities, which every Element Call reads), then the
-/// newer one. On another homeserver's service the grant only subscribes.
+/// A grant to the room's call on `transport`. A service is asked with an OpenID token proving
+/// who the user is: the older endpoint first (`user:device` identities, which every Element Call
+/// reads), then the newer one. An SFU a homeserver vouches for is asked through the user's own
+/// homeserver, which asks the SFU's over federation (MSC4195). On another homeserver's service
+/// or SFU the grant only subscribes.
 pub(crate) async fn grant(
     http: &matrix_sdk::reqwest::Client,
     room: &Room,
-    service: &str,
+    transport: &Transport,
     user_id: OwnedUserId,
     device_id: &str,
 ) -> Result<Grant, CallError> {
+    let service = match transport {
+        Transport::Service(service) => service,
+        Transport::Sfu { url, server_name } => {
+            return vouched_grant(room, url, server_name, &default_member_id(user_id.as_str(), device_id)).await;
+        }
+    };
     let openid = room
         .client()
         .send(request_openid_token::v3::Request::new(user_id.clone()))
@@ -187,6 +256,21 @@ pub(crate) async fn grant(
         tracing::debug!(%service, "call: no grant from {failure}");
     }
     Err(CallError::Service(failure))
+}
+
+/// A grant to an SFU its homeserver vouches for, through the user's own homeserver (MSC4195).
+async fn vouched_grant(room: &Room, url: &str, server_name: &str, member_id: &str) -> Result<Grant, CallError> {
+    use matrix_sdk::ruma::api::client::rtc::livekit::get_token;
+    let mut request = get_token::v1::Request::new(
+        url.to_owned(),
+        room.room_id().to_owned(),
+        "m.call#ROOM".to_owned(),
+        member_id.to_owned(),
+    );
+    request.server_name =
+        Some(matrix_sdk::ruma::ServerName::parse(server_name).map_err(|error| CallError::Service(error.to_string()))?);
+    let response = room.client().send(request).await.map_err(|error| CallError::Service(error.to_string()))?;
+    Ok(Grant { url: url.to_owned(), jwt: response.jwt })
 }
 
 fn state_key(user_id: OwnedUserId, device_id: &str) -> String {
@@ -312,13 +396,17 @@ pub(crate) async fn ring(room: &Room, video: bool, ring: bool) {
 mod tests {
     use super::*;
 
+    fn on(service: &str) -> Transport {
+        Transport::Service(service.into())
+    }
+
     fn member(since: u64, service: &str, multi_sfu: bool) -> Member {
         Member {
             user_id: "@a:x".into(),
             device_id: "D".into(),
             member_id: "@a:x:D".into(),
             since,
-            service: Some(service.into()),
+            transport: Some(on(service)),
             multi_sfu,
         }
     }
@@ -326,13 +414,13 @@ mod tests {
     #[test]
     fn the_user_should_subscribe_to_their_own_service_and_each_multi_sfu_members() {
         let members = [member(10, "https://a", true), member(20, "https://b", true), member(30, "https://a", true)];
-        assert_eq!(subscriptions(&members, "https://own"), ["https://own", "https://a", "https://b"]);
+        assert_eq!(subscriptions(&members, &on("https://own")), [on("https://own"), on("https://a"), on("https://b")]);
     }
 
     #[test]
     fn a_member_joining_the_oldest_service_should_be_found_there() {
         let members = [member(10, "https://oldest", true), member(20, "https://theirs", false)];
-        assert_eq!(subscriptions(&members, "https://own"), ["https://own", "https://oldest"]);
+        assert_eq!(subscriptions(&members, &on("https://own")), [on("https://own"), on("https://oldest")]);
     }
 
     #[test]
@@ -348,7 +436,7 @@ mod tests {
         });
         let found = parse_members(&event, 2000);
         assert_eq!(found.len(), 1);
-        assert_eq!((found[0].service.as_deref(), found[0].multi_sfu), (Some("https://sfu"), true));
+        assert_eq!((found[0].transport.clone(), found[0].multi_sfu), (Some(on("https://sfu")), true));
     }
 
     #[test]

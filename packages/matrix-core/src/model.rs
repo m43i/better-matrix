@@ -164,8 +164,23 @@ pub enum EntryKind {
     ReadMarker,
     /// The start of what this user can see of the room.
     Start,
-    /// An event not drawn yet (membership changes, state, polls).
-    Other,
+    /// An event timelines don't draw (unknown or unsupported state, events that didn't parse,
+    /// membership events that changed nothing). Shown only with "Show hidden events".
+    Hidden(Box<HiddenEvent>),
+}
+
+/// An event timelines don't draw, as developer tools show it: its type and who sent it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct HiddenEvent {
+    /// Its event ID; `None` while it is being sent.
+    pub event_id: Option<String>,
+    /// Who sent it.
+    pub sender: Person,
+    /// Its type, e.g. `m.room.server_acl`.
+    pub event_type: String,
+    /// When it was sent, in milliseconds since the Unix epoch.
+    pub timestamp_ms: u64,
 }
 
 /// One change to a room's timeline, in the order the timeline applies them. Mirrors the

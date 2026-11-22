@@ -10,7 +10,7 @@ import {
   stepGallery,
   thumbnailOf,
 } from '../gallery';
-import { ADA, messageEntry, person, roomEventEntry } from '../../test/fixtures';
+import { ADA, hiddenEntry, messageEntry, person, roomEventEntry } from '../../test/fixtures';
 
 const T = 1_700_000_000_000;
 
@@ -116,7 +116,7 @@ describe('attachmentBatch', () => {
       sent('a', 0),
       { id: 'read-marker', kind: { type: 'ReadMarker' } },
       sent('b', 1),
-      { id: 'other', kind: { type: 'Other' } },
+      hiddenEntry('other'),
       sent('c', 2),
     ];
 

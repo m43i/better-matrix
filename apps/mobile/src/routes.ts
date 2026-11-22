@@ -53,6 +53,21 @@ export const routes = {
     pathname: '/pinned-messages',
     params: { account, roomId },
   }),
+  /** An event's source (developer tools). */
+  eventSource: (account: AccountId, roomId: string, eventId: string): Href => ({
+    pathname: '/event-source',
+    params: { account, roomId, eventId },
+  }),
+  /** A room's widgets: web apps pinned to it, opened in the browser. */
+  widgets: (account: AccountId, roomId: string): Href => ({
+    pathname: '/widgets',
+    params: { account, roomId },
+  }),
+  /** Pinning a web page to a room as a widget. */
+  addWidget: (account: AccountId, roomId: string): Href => ({
+    pathname: '/add-widget',
+    params: { account, roomId },
+  }),
   /** The messages the account saved, from the account menu. */
   saved: (account: AccountId): Href => ({ pathname: '/saved-messages', params: { account } }),
   /** File actions over an attachment preview. */

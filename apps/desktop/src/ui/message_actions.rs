@@ -125,6 +125,11 @@ pub fn menu(
             ));
         }
     }
+    let (owner, room_id, id) = (account.summary.id.clone(), key.room_id.clone(), event_id.to_owned());
+    panel = panel.child(
+        action(&icons::CODE, t!("actions.view_source"), "message-source")
+            .on_press(move |s: &mut State| s.view_source(owner.clone(), room_id.clone(), id.clone())),
+    );
     if message.sender_id == account.summary.id.as_str() {
         if let MessageContent::Poll(poll) = &message.content
             && !poll.ended

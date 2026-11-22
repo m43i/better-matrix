@@ -111,6 +111,10 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .child(
             link_row(&icons::FILE, t!("info.files"), None, "info-files", p)
                 .on_press(|s: &mut State| s.show_side(SidePanel::Files)),
+        )
+        .child(
+            link_row(&icons::LAYOUT, t!("widgets.title"), None, "info-widgets", p)
+                .on_press(|s: &mut State| s.show_side(SidePanel::Widgets)),
         );
     // Leaving sits apart from the rest, at the bottom, however long the topic.
     let footer = col().w_full().child(divider(p)).child(leave.mb(8.0));

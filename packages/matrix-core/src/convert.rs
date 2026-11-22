@@ -41,7 +41,12 @@ async fn partner_avatar(room: &Room, partner: Option<&String>) -> Option<MediaRe
 
 /// A room as the room list shows it. `settings` are the account's push rules, read once for the
 /// whole list: reading them per room cost two store reads each, on every sync.
-pub(crate) async fn room_summary(room: &Room, settings: &NotificationSettings, rtc_service: bool) -> RoomSummary {
+pub(crate) async fn room_summary(
+    room: &Room,
+    settings: &NotificationSettings,
+    rtc_service: bool,
+    sticky: &crate::calls::StickyMembers,
+) -> RoomSummary {
     let name = display_name(room).await;
     let custom = settings.get_user_defined_room_notification_mode(room.room_id()).await;
     let mode = match custom {
@@ -80,7 +85,7 @@ pub(crate) async fn room_summary(room: &Room, settings: &NotificationSettings, r
         history: history_visibility(room.history_visibility_or_default()),
         notifications: notification_mode(mode),
         custom_notifications: custom.is_some(),
-        call: call_in(room, kind, rtc_service, power.as_ref()),
+        call: call_in(room, kind, rtc_service, power.as_ref(), crate::calls::joined_sticky(room, sticky, false).await),
         activity_ms: room.latest_event_timestamp().map(|at| at.get().into()),
         encrypted: room.encryption_state().is_encrypted(),
         can_rename: may_send_state(StateEventType::RoomName),
@@ -91,21 +96,35 @@ pub(crate) async fn room_summary(room: &Room, settings: &NotificationSettings, r
 }
 
 /// How a call would start in the room, and who is in its call now.
-pub(crate) async fn room_call(room: &Room, kind: RoomKind, rtc_service: bool) -> crate::calls::RoomCall {
-    call_in(room, kind, rtc_service, room.power_levels().await.ok().as_ref())
+pub(crate) async fn room_call(
+    room: &Room,
+    kind: RoomKind,
+    rtc_service: bool,
+    sticky: &crate::calls::StickyMembers,
+) -> crate::calls::RoomCall {
+    let sticky = crate::calls::joined_sticky(room, sticky, false).await;
+    call_in(room, kind, rtc_service, room.power_levels().await.ok().as_ref(), sticky)
 }
 
 /// [`room_call`] with the room's power levels already read.
-fn call_in(room: &Room, kind: RoomKind, rtc_service: bool, power: Option<&RoomPowerLevels>) -> crate::calls::RoomCall {
+fn call_in(
+    room: &Room,
+    kind: RoomKind,
+    rtc_service: bool,
+    power: Option<&RoomPowerLevels>,
+    sticky: Vec<crate::calls::Member>,
+) -> crate::calls::RoomCall {
     use matrix_sdk::ruma::events::MessageLikeEventType;
     let me = room.own_user_id();
     let may_join = power.is_some_and(|power| power.user_can_send_state(me, StateEventType::CallMember));
     let may_call = power.is_some_and(|power| power.user_can_send_message(me, MessageLikeEventType::CallInvite));
     let one_to_one = kind == RoomKind::Direct && room.active_members_count() == 2 && may_call;
-    crate::calls::RoomCall {
-        via: crate::calls::via(rtc_service, may_join, one_to_one),
-        participants: room.active_room_call_participants().iter().map(ToString::to_string).collect(),
+    let mut participants: Vec<String> = room.active_room_call_participants().iter().map(ToString::to_string).collect();
+    // matrix_2_0 members, from their sticky memberships.
+    for member in sticky {
+        participants.push(member.user_id);
     }
+    crate::calls::RoomCall { via: crate::calls::via(rtc_service, may_join, one_to_one), participants }
 }
 
 pub(crate) async fn space_summary(room: &Room) -> SpaceSummary {

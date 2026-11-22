@@ -8,6 +8,7 @@ mod call;
 mod components;
 mod composer;
 mod confirm;
+mod developer;
 mod emoji;
 mod icons;
 mod info;
@@ -161,6 +162,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             Some(settings::settings(s, *section, window, &p))
         }
         Some(Modal::Confirm(action)) => Some(confirm::confirm(action, &p)),
+        Some(Modal::Source(view)) => Some(developer::source(view, &p)),
         Some(Modal::Forward { .. } | Modal::Translate(_)) => message_actions::dialog(s, &p),
         Some(Modal::Saved(id)) => s.accounts.get(id).map(|account| saved::saved(s, account, &p)),
         Some(Modal::Poll) => Some(poll::form(s, &p)),

@@ -69,8 +69,9 @@ pub enum EntryView {
     DateDivider(u64),
     ReadMarker,
     Start,
-    /// Not drawn; keeps diff indices aligned with the engine's.
-    Other,
+    /// Drawn only while hidden events show (`Settings::show_hidden_events`); otherwise it
+    /// only keeps diff indices aligned with the engine's.
+    Hidden(Box<matrix_core::HiddenEvent>),
 }
 
 impl From<TimelineEntry> for Entry {
@@ -81,7 +82,7 @@ impl From<TimelineEntry> for Entry {
             EntryKind::DateDivider(at) => EntryView::DateDivider(at),
             EntryKind::ReadMarker => EntryView::ReadMarker,
             EntryKind::Start => EntryView::Start,
-            EntryKind::Other => EntryView::Other,
+            EntryKind::Hidden(event) => EntryView::Hidden(event),
         };
         Self { id: entry.id, kind }
     }
@@ -641,6 +642,8 @@ pub struct AccountData {
     pub threads: HashMap<String, Vec<matrix_core::ThreadInfo>>,
     /// The files shared in rooms, by room ID, once listed for the info panel.
     pub files: HashMap<String, Vec<matrix_core::SharedFile>>,
+    /// Rooms' widgets, by room ID, once listed for the info panel.
+    pub widgets: HashMap<String, matrix_core::Widgets>,
     /// Shared pinned-message previews by room, including unavailable placeholders.
     pub pins: HashMap<String, Vec<matrix_core::MessagePreview>>,
     /// Pin-list failures shown inline, alongside cached previews and a retry.
@@ -705,6 +708,7 @@ impl AccountData {
             stale_members: HashSet::new(),
             threads: HashMap::new(),
             files: HashMap::new(),
+            widgets: HashMap::new(),
             pins: HashMap::new(),
             pin_errors: HashMap::new(),
             saved: None,
@@ -1047,6 +1051,16 @@ pub struct Accounts {
 }
 
 impl Accounts {
+    /// Marks every timeline changed, so views plan their rows again: after a setting that
+    /// changes which entries show.
+    pub fn replan_timelines(&mut self) {
+        for account in &mut self.list {
+            for timeline in account.timelines.values_mut() {
+                timeline.revision = next_revision();
+            }
+        }
+    }
+
     /// Moves each timeline's [`Landing`] on a frame, and starts or ends read markers' fades: a
     /// fade waits while a change lands whole, which would land it too.
     pub fn poll_timelines(&mut self, tx: &mut Tx, reduced_motion: bool) -> bool {
@@ -1353,6 +1367,12 @@ impl Accounts {
     pub fn set_files(&mut self, id: &AccountId, room_id: String, files: Vec<matrix_core::SharedFile>) {
         if let Some(account) = self.get_mut(id) {
             account.files.insert(room_id, files);
+        }
+    }
+
+    pub fn set_widgets(&mut self, id: &AccountId, room_id: String, widgets: matrix_core::Widgets) {
+        if let Some(account) = self.get_mut(id) {
+            account.widgets.insert(room_id, widgets);
         }
     }
 

@@ -15,6 +15,8 @@ mod call;
 mod call_glow;
 mod call_layout;
 mod composer;
+mod developer;
+pub use developer::SourceView;
 mod drafts;
 mod gifs;
 mod link_previews;
@@ -165,6 +167,8 @@ pub enum SidePanel {
     Threads,
     Files,
     Pins,
+    /// The room's widgets: web apps pinned to it, opened in the browser.
+    Widgets,
     /// Someone's profile, from their name or picture on a message: as the message shows them,
     /// for when the member list doesn't know them.
     Person(matrix_core::Person),
@@ -189,6 +193,10 @@ pub enum RoomForm {
     NewSpace,
     /// A new name for a room or space.
     Rename {
+        room_id: String,
+    },
+    /// A web page to pin to a room as a widget: its name, and its address in the second field.
+    AddWidget {
         room_id: String,
     },
 }
@@ -442,6 +450,8 @@ pub enum Modal {
         device_id: String,
         edit: TextEdit,
     },
+    /// An event's source, for developer tools.
+    Source(developer::SourceView),
 }
 
 /// An action that waits for the user's confirmation. New destructive actions are new variants.
@@ -465,6 +475,13 @@ pub enum Confirm {
         user_id: String,
         name: String,
         action: matrix_core::Moderation,
+    },
+    /// Take a widget off a room, for everyone in it.
+    RemoveWidget {
+        account: AccountId,
+        room_id: String,
+        widget_id: String,
+        name: String,
     },
     /// Delete one of the user's messages, for everyone.
     DeleteMessage {
@@ -638,6 +655,10 @@ enum Purpose {
     },
     /// Renaming a room or space.
     Rename,
+    /// Adding or removing a room's widget.
+    Widget,
+    /// An event's source, for the source dialog showing that request.
+    Source,
     /// Downloading audio to play from `path`.
     Audio {
         media: MediaRef,
@@ -1490,6 +1511,8 @@ impl State {
             }
             Event::DraftLoaded { account, key, draft, .. } => self.draft_loaded((account, key), draft),
             Event::Files { account, room_id, files } => self.accounts.set_files(&account, room_id, files),
+            Event::Widgets { account, room_id, widgets } => self.accounts.set_widgets(&account, room_id, widgets),
+            Event::EventSource { request, source } => self.source_loaded(request, source),
             // Pushes are for phones: the desktop syncs while it runs and never registers a pusher.
             Event::PushContent { .. } => {}
         }
@@ -1869,6 +1892,8 @@ impl State {
             }
             Purpose::Create { .. } => self.notice = Some(tf!("notice.create", error = error)),
             Purpose::Rename => self.notice = Some(tf!("notice.rename", error = error)),
+            Purpose::Widget => self.notice = Some(tf!("notice.widget", error = error)),
+            Purpose::Source => self.source_failed(request, &error),
             Purpose::Audio { media, .. } => {
                 self.scratch_files.remove(&media);
                 self.video_failed(&media, &error);
@@ -1881,6 +1906,7 @@ impl State {
                 match panel {
                     SidePanel::Threads => self.accounts.set_threads(&account, room_id, Vec::new()),
                     SidePanel::Files => self.accounts.set_files(&account, room_id, Vec::new()),
+                    SidePanel::Widgets => self.accounts.set_widgets(&account, room_id, matrix_core::Widgets::default()),
                     SidePanel::Pins => {
                         self.accounts.pins_failed(&account, room_id, error.clone());
                     }
@@ -1989,8 +2015,11 @@ impl State {
 
     /// Asks for the open side panel's list (threads or files) of the room shown, once per room.
     fn sync_side(&mut self) {
-        let (Some(account), Some(room_id), Some(panel @ (SidePanel::Threads | SidePanel::Files | SidePanel::Pins))) =
-            (self.nav.account.clone(), self.active_room_id().map(str::to_owned), self.side.clone())
+        let (
+            Some(account),
+            Some(room_id),
+            Some(panel @ (SidePanel::Threads | SidePanel::Files | SidePanel::Pins | SidePanel::Widgets)),
+        ) = (self.nav.account.clone(), self.active_room_id().map(str::to_owned), self.side.clone())
         else {
             return;
         };
@@ -2003,6 +2032,7 @@ impl State {
         let command = match panel {
             SidePanel::Threads => Command::ListThreads { account, room_id },
             SidePanel::Pins => Command::ListPinnedMessages { account, room_id },
+            SidePanel::Widgets => Command::ListWidgets { account, room_id },
             _ => Command::ListFiles { account, room_id },
         };
         self.dispatch(command, purpose);
@@ -2621,8 +2651,9 @@ impl State {
     pub fn submit_room_form(&mut self) {
         let Some(account) = self.nav.account.clone() else { return };
         let Some(Modal::RoomForm { form, name, topic }) = self.modal.take() else { return };
-        let name = name.text.trim().to_owned();
-        if name.is_empty() {
+        // A widget may go without a name (its host stands in); everything else needs one.
+        let name_text = name.text.trim().to_owned();
+        if name_text.is_empty() && !matches!(form, RoomForm::AddWidget { .. }) {
             self.modal = Some(Modal::RoomForm { form, name: Box::new(TextEdit::new("")), topic });
             return;
         }
@@ -2630,15 +2661,16 @@ impl State {
             RoomForm::NewRoom { space } => {
                 let topic = Some(topic.text.trim().to_owned()).filter(|t| !t.is_empty());
                 let purpose = Purpose::Create { account: account.clone(), space: false };
-                self.dispatch(Command::CreateRoom { account, name, topic, space }, purpose);
+                self.dispatch(Command::CreateRoom { account, name: name_text, topic, space }, purpose);
             }
             RoomForm::NewSpace => {
                 let purpose = Purpose::Create { account: account.clone(), space: true };
-                self.dispatch(Command::CreateSpace { account, name }, purpose);
+                self.dispatch(Command::CreateSpace { account, name: name_text }, purpose);
             }
             RoomForm::Rename { room_id } => {
-                self.dispatch(Command::RenameRoom { account, room_id, name }, Purpose::Rename);
+                self.dispatch(Command::RenameRoom { account, room_id, name: name_text }, Purpose::Rename);
             }
+            RoomForm::AddWidget { room_id } => self.add_widget(account, room_id, name, topic),
         }
     }
 
@@ -3589,7 +3621,7 @@ impl State {
                 self.list_all_members();
             }
             // Opened again, its list is fresh.
-            Some(SidePanel::Threads | SidePanel::Files | SidePanel::Pins) => {
+            Some(SidePanel::Threads | SidePanel::Files | SidePanel::Pins | SidePanel::Widgets) => {
                 self.side_loaded = None;
                 self.sync_side();
             }
@@ -3751,6 +3783,9 @@ impl State {
             }
             Confirm::DeleteMessage { account, key, event_id } => {
                 (Command::Redact { account, key, event_id }, Purpose::Delete)
+            }
+            Confirm::RemoveWidget { account, room_id, widget_id, .. } => {
+                (Command::RemoveWidget { account, room_id, widget_id }, Purpose::Widget)
             }
         };
         self.dispatch(command, purpose);

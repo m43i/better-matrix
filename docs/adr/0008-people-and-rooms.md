@@ -178,7 +178,7 @@ Date: 2026-11-14
     server, even when the directory doesn't know it or fails; the invite dialog, new-chat search
     and top bar all get it this way.
 - **Side panel:** beside the open room, in the thread's place, one of `SidePanel::{Info,
-  Members, Threads, Files, Pins, Person}` (`State::side`; opening a thread closes it, opening it
+  Members, Threads, Files, Pins, Widgets, Person}` (`State::side`; opening a thread closes it, opening it
   closes the thread). Each has a title and a close button, no back arrow.
   - Person (a message's sender name or picture): their picture with
     presence, name, user ID, presence in words, verified and role; then Message, Call and Video
@@ -188,12 +188,33 @@ Date: 2026-11-14
     user's own shows Edit profile, and their name and picture from the account, which a save
     updates at once.
   - Info (the header's info button): the room's picture, name and topic, rows leading to the
-    members, pinned messages, threads and files, and leave room (or delete chat).
+    members, pinned messages, threads, files and widgets, and leave room (or delete chat).
   - Threads: the server's thread list (`Command::ListThreads`, `Account::threads`); a press
     opens the thread. Files: messages with media, newest first (`Command::ListFiles`), the
     server filtering by URL in the clear, the device searching six pages in encrypted rooms.
     An open Threads or Files panel follows the room shown (`State::sync_side`, once per room);
     a list that fails to load shows as empty, with a notice.
+- **Widgets:** web apps pinned to a room as state, keyed by widget ID: `im.vector.modular.widgets`
+  (what Element writes, and this app) and `m.widget` (`matrix_core::widgets`), read from the
+  server's room state each time the list is asked for (the room list's sliding sync doesn't
+  bring widget state, and a change just sent may not have come back through sync). Listed by name
+  (`Command::ListWidgets`, `Event::Widgets`): `can_add` when the user's power level allows the
+  type adding writes, each widget's `can_remove` when it allows every type that widget is pinned
+  as. A write that succeeded counts even when reading the list again fails (it is tried three
+  times, a second apart), so a retry doesn't add a second widget. Rune has no web view and phones keep to the platform's own views, so a widget opens in
+  the browser (desktop: `Tx::open_url`; phones: `Linking.openURL`), its URL's template variables
+  filled in for the user and room (`$matrix_user_id`, `$matrix_room_id`, `$matrix_display_name`,
+  `$matrix_avatar_url`, `$matrix_widget_id`, the MSC2873 client ID, theme and language, the
+  device ID, the homeserver, then the widget's own `data`), each URL-encoded as Element does.
+  The panel says the browser learns the user ID and display name. A Jitsi widget opens its
+  meeting (`https://{domain}/{conferenceId}`) rather than Element's wrapper page, which works
+  only inside Element. A widget whose URL isn't `http` or `https` isn't listed.
+  - Adding (`Command::AddWidget`, an `m.custom` widget with a name, the host when blank) and
+    removing (`Command::RemoveWidget`, an empty state event under every type it is pinned as,
+    after a confirmation) answer with the room's widgets, read again from the server. The desktop adds through the room form (`RoomForm::AddWidget`); phones
+    through `app/add-widget.tsx`.
+  - Not supported: the widget API (MSC2762) and integration managers (bots, stickers), which
+    need an embedded web view.
 - **Members:**
   - The room header shows the name, up to three faces and the member count (opening the member
     list), and an info button.

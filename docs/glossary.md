@@ -182,6 +182,23 @@ louder.
 name (`RoomEvent`, `RoomChange`). Shown as a small line; joins and leaves in a row merge. See
 [ADR 0006](adr/0006-timelines.md).
 
+**Hidden event**
+: An event timelines leave out: room state the app draws no line for, an event that didn't
+parse, a membership event that changed nothing (`EntryKind::Hidden`, `HiddenEvent`). With "Show
+hidden events" (developer tools, a setting on this device) each shows as a small line naming its
+sender and type, which opens its event source. See [ADR 0006](adr/0006-timelines.md).
+
+**Event source**
+: An event's JSON, for developer tools: as this device reads it (decrypted) and, for an encrypted
+event, as it was sent (`EventSource`, `Command::ViewSource`). "View source" in a message's
+menu. See [ADR 0006](adr/0006-timelines.md).
+
+**Widget**
+: A web app pinned to a room as state (`im.vector.modular.widgets`, `m.widget`): a board, a
+dashboard, a Jitsi meeting (`Widget`). Listed in the room's details and opened in the browser
+with its URL's template variables filled in; whoever may change the room's state adds and removes
+them. See [ADR 0008](adr/0008-people-and-rooms.md).
+
 **Attachment preview**
 : An image, PDF, video or audio clip shown full size over the window, with download, close and
 right-click file actions (copy image, download, open in the default application;
@@ -441,6 +458,12 @@ once it ends. See [ADR 0006](adr/0006-timelines.md).
 LiveKit service, or a one-to-one call device to device in a direct chat. One runs at a time.
 See [ADR 0009](adr/0009-calls.md).
 
+**Sticky membership**
+: A call membership as Element Call's "matrix_2_0" mode writes it: a sticky `m.rtc.member`
+event (MSC4354) with a random member ID, current for at most an hour unless sent again, rather
+than a state event (`calls::sticky`). Read alongside state memberships. See
+[ADR 0009](adr/0009-calls.md).
+
 **Call stage**
 : What a room shows in place of its timeline during its call: faces (voice) or the video grid,
 over the call glow, with the controls. It can share the room pane with chat; on phones it is a
@@ -512,6 +535,12 @@ characters that scramble under the pointer (`state::backdrop`, `ui::backdrop`). 
 **Engine**
 : `matrix-core`'s actor: owns every account, runs their syncs and carries out commands on a
 background runtime. See [ADR 0002](adr/0002-engine-and-desktop-state.md).
+
+**Room list sync**
+: The SDK's `RoomListService`: rooms over sliding sync (MSC4186), newest first, a batch at a
+time, on servers that offer it. Beside it a long-poll sync that asks for no rooms carries
+to-device messages, keys, presence and account data. See
+[ADR 0002](adr/0002-engine-and-desktop-state.md).
 
 **Command**
 : A request from an app to the engine (`Command`). Gets a **request ID** (`RequestId`) and ends

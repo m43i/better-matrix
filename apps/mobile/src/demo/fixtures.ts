@@ -7,6 +7,7 @@ import type {
   AccountId,
   Attachment,
   CallInfo,
+  EventSource,
   IncomingCall,
   Invitation,
   MemberRole,
@@ -24,6 +25,7 @@ import type {
   SpaceSummary,
   ThreadInfo,
   TimelineEntry,
+  Widgets,
 } from '@better-matrix/matrix-native/types';
 
 export const ADA = '@ada:example.org';
@@ -922,5 +924,94 @@ export function typingPeople(): Person[] {
     person(ALAN, 'Alan Turing'),
     person(KAI, 'Kai'),
     person('@mira:example.org', 'Mira'),
+  ];
+}
+
+/** The widgets pinned to #general: a board, a dashboard and a Jitsi meeting. */
+export function demoWidgets(): Widgets {
+  const widget = (id: string, name: string, kind: string, host: string, path: string) => ({
+    id,
+    name,
+    kind,
+    url: `https://${host}${path}`,
+    host,
+    creator: GRACE,
+    can_remove: true,
+  });
+
+  return {
+    widgets: [
+      widget('board', 'Sprint board', 'm.custom', 'board.example.org', '/team'),
+      widget('grafana', 'Server dashboard', 'm.grafana', 'grafana.example.org', '/d/1'),
+      widget('standup', 'Standup', 'jitsi', 'meet.example.org', '/TeamStandup'),
+    ],
+    can_add: true,
+  };
+}
+
+/** A message's source, as an encrypted room's event reads decrypted and as it was sent. */
+export function demoSource(roomId: string, eventId: string): EventSource {
+  const envelope = { sender: ALAN, event_id: eventId, origin_server_ts: DEMO_DAY_MS };
+
+  return {
+    room_id: roomId,
+    event_id: eventId,
+    json: JSON.stringify(
+      {
+        type: 'm.room.message',
+        ...envelope,
+        content: { msgtype: 'm.text', body: 'Has anyone tried the new build?' },
+      },
+      null,
+      2,
+    ),
+    encrypted: JSON.stringify(
+      {
+        type: 'm.room.encrypted',
+        ...envelope,
+        content: {
+          algorithm: 'm.megolm.v1.aes-sha2',
+          ciphertext: 'AwgAEpABqOCzJ2Tp…',
+          device_id: 'ALANLAPTOP',
+          sender_key: 'Hc1gJ8i3y1cCi0ZmRp3K7XcfuF0pB6wd1Sx4nT2EYfQ',
+          session_id: '3yv1Q3wN1cZ9u2lO0d5XG4WeV8m7n2Ck1lZ6aQpTb3Y',
+        },
+      },
+      null,
+      2,
+    ),
+  };
+}
+
+/** Room state #general's timeline leaves out, drawn while hidden events show. */
+export function hiddenEvents(): EngineEvent[] {
+  const hidden = (id: string, kind: string, sender: Person, minutes: number): TimelineEntry => ({
+    id,
+    kind: {
+      type: 'Hidden',
+      data: {
+        event_id: `$${id}`,
+        sender,
+        event_type: kind,
+        timestamp_ms: DEMO_DAY_MS + 12 * 3_600_000 + minutes * 60_000,
+      },
+    },
+  });
+
+  const grace = { id: GRACE, name: 'Grace Hopper', avatar: null };
+  const alan = { id: ALAN, name: 'Alan Turing', avatar: null };
+
+  return [
+    {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: { room_id: GENERAL, thread: null },
+        diffs: [
+          { type: 'PushBack', data: hidden('hidden-acl', 'm.room.server_acl', grace, 1) },
+          { type: 'PushBack', data: hidden('hidden-widget', 'im.vector.modular.widgets', alan, 2) },
+        ],
+      },
+    },
   ];
 }

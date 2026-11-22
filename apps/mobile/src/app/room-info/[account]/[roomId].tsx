@@ -234,6 +234,13 @@ export default function RoomInfoScreen() {
           onPress={() => router.push(routes.pins(account, roomId))}
         />
         <Divider inset={52} />
+        <ListRow
+          icon="widgets"
+          title={t('widgets.title')}
+          testID="info-widgets"
+          onPress={() => router.push(routes.widgets(account, roomId))}
+        />
+        <Divider inset={52} />
         <ListRow icon="users" title={t('members.count', { count: room.member_count })} />
         <Divider inset={52} />
         <ListRow icon="eye" title={historyLabel(room.history)} />

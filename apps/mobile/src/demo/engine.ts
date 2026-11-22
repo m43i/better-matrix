@@ -24,7 +24,9 @@ import {
   demoFiles,
   demoMembers,
   demoSessions,
+  demoSource,
   demoThreads,
+  demoWidgets,
   seedEvents,
   GENERAL,
   DEMO_THREAD,
@@ -112,6 +114,25 @@ export function answer(
             room_id: command.data.room_id,
             files: command.data.room_id === GENERAL ? demoFiles() : [],
           },
+        },
+      ];
+    case 'ListWidgets':
+      return [
+        {
+          type: 'Widgets',
+          data: {
+            account: command.data.account,
+            room_id: command.data.room_id,
+            widgets:
+              command.data.room_id === GENERAL ? demoWidgets() : { widgets: [], can_add: true },
+          },
+        },
+      ];
+    case 'ViewSource':
+      return [
+        {
+          type: 'EventSource',
+          data: { request, source: demoSource(command.data.room_id, command.data.event_id) },
         },
       ];
     case 'ListSessions':

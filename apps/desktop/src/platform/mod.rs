@@ -291,6 +291,7 @@ const MICROPHONE: &str = "microphone";
 const SPEAKER: &str = "speaker";
 const CAMERA: &str = "camera";
 const LAST_ACCOUNT: &str = "last_account";
+const HIDDEN_EVENTS: &str = "hidden_events";
 
 fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::prefs::PrefsError> {
     prefs.set(LANGUAGE, &settings.language.id())?;
@@ -303,6 +304,7 @@ fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::pr
     prefs.set(MICROPHONE, &settings.devices.microphone)?;
     prefs.set(SPEAKER, &settings.devices.speaker)?;
     prefs.set(CAMERA, &settings.devices.camera)?;
+    prefs.set(HIDDEN_EVENTS, &settings.show_hidden_events)?;
     prefs.set(LAST_ACCOUNT, &settings.last_account.as_ref().map(matrix_core::AccountId::as_str))
 }
 
@@ -322,6 +324,7 @@ pub fn load_settings(prefs: &Prefs) -> Settings {
         },
         ring_sound: prefs.get::<bool>(RING_SOUND).unwrap_or(true),
         playback_speed: prefs.get::<u16>(PLAYBACK_SPEED).map_or_else(Default::default, PlaybackSpeed::from_percent),
+        show_hidden_events: prefs.get::<bool>(HIDDEN_EVENTS).unwrap_or(false),
     }
 }
 

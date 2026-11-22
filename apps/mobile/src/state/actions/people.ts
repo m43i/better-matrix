@@ -34,7 +34,7 @@ import { setScope } from './core';
  * Runs `command`; when it fails, tells the user in the desktop's words (`notice` takes the
  * error as `{{error}}`) and rejects. A cancelled command rejects without a word.
  */
-async function attempt(
+export async function attempt(
   store: Store,
   command: Command,
   notice: Key,

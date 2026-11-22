@@ -37,6 +37,7 @@ pub fn dialog_for(modal: &Modal, p: &Palette) -> Option<El> {
         | Modal::Invitation { .. }
         | Modal::PublicRooms { .. }
         | Modal::Poll
+        | Modal::Source(_)
         | Modal::Link(_) => return None,
     })
 }
@@ -298,16 +299,18 @@ fn room_form(form: &crate::state::RoomForm, name: &rune::TextEdit, topic: &rune:
         RoomForm::NewRoom { .. } => (t!("create.room_title"), t!("create.create")),
         RoomForm::NewSpace => (t!("create.space_title"), t!("create.create")),
         RoomForm::Rename { .. } => (t!("create.rename_title"), t!("common.save")),
+        RoomForm::AddWidget { .. } => (t!("widgets.add_title"), t!("widgets.add_confirm")),
     };
+    let widget = matches!(form, RoomForm::AddWidget { .. });
     let mut content = col().w_full().gap(10.0).child(
-        field_input(name, t!("create.name"), p)
+        field_input(name, if widget { t!("widgets.name") } else { t!("create.name") }, p)
             .key("room-form-name")
             .on_edit(|s: &mut State| s.room_form_field(false))
             .on_submit(|s: &mut State, _| s.submit_room_form()),
     );
-    if matches!(form, RoomForm::NewRoom { .. }) {
+    if matches!(form, RoomForm::NewRoom { .. } | RoomForm::AddWidget { .. }) {
         content = content.child(
-            field_input(topic, t!("create.topic"), p)
+            field_input(topic, if widget { t!("widgets.url") } else { t!("create.topic") }, p)
                 .key("room-form-topic")
                 .on_edit(|s: &mut State| s.room_form_field(true))
                 .on_submit(|s: &mut State, _| s.submit_room_form()),
@@ -321,9 +324,14 @@ fn room_form(form: &crate::state::RoomForm, name: &rune::TextEdit, topic: &rune:
             button(t!("common.cancel"), ButtonKind::Secondary, true, p)
                 .key("room-form-cancel")
                 .on_press(State::close_modal),
-            button(confirm, ButtonKind::Primary, !name.text.trim().is_empty(), p)
-                .key("room-form-submit")
-                .on_press(State::submit_room_form),
+            button(
+                confirm,
+                ButtonKind::Primary,
+                if widget { !topic.text.trim().is_empty() } else { !name.text.trim().is_empty() },
+                p,
+            )
+            .key("room-form-submit")
+            .on_press(State::submit_room_form),
         ],
         p,
     )

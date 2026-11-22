@@ -5541,3 +5541,131 @@ fn opening_someones_profile_should_request_the_complete_member_list() {
             .any(|command| matches!(command, Command::ListMembers { room_id, all: true, .. } if room_id == "!one:x"))
     );
 }
+
+// ----- developer tools and widgets -----------------------------------------------------------
+
+fn source(event_id: &str) -> matrix_core::EventSource {
+    matrix_core::EventSource {
+        room_id: "!one:x".into(),
+        event_id: event_id.into(),
+        json: "{\"type\": \"m.room.message\"}".into(),
+        encrypted: None,
+    }
+}
+
+#[test]
+fn viewing_a_source_should_show_it_once_the_engine_answers() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    drain(&mut commands);
+    s.view_source(id, "!one:x".into(), "$event".into());
+    let (request, command) = commands.try_next().expect("a command");
+    assert!(matches!(command, Command::ViewSource { event_id, .. } if event_id == "$event"));
+    assert_eq!(s.modal, Some(Modal::Source(SourceView::Loading(request))));
+    apply(&mut s, Event::EventSource { request, source: source("$event") });
+    assert_eq!(s.modal, Some(Modal::Source(SourceView::Shown(Box::new(source("$event"))))));
+}
+
+#[test]
+fn a_source_arriving_after_its_dialog_closed_should_open_nothing() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    drain(&mut commands);
+    s.view_source(id, "!one:x".into(), "$event".into());
+    let (request, _) = commands.try_next().expect("a command");
+    s.close_modal();
+    apply(&mut s, Event::EventSource { request, source: source("$event") });
+    assert_eq!(s.modal, None);
+}
+
+#[test]
+fn a_source_that_failed_should_close_its_dialog_and_say_why() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    drain(&mut commands);
+    s.view_source(id, "!one:x".into(), "$event".into());
+    let (request, _) = commands.try_next().expect("a command");
+    apply(&mut s, Event::Finished { request, result: Err("gone".into()) });
+    assert_eq!(s.modal, None);
+    assert!(s.notice.as_deref().is_some_and(|notice| notice.contains("gone")));
+}
+
+#[test]
+fn showing_hidden_events_should_be_kept_and_replan_timelines() {
+    let (mut s, _commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.select_room("!one:x");
+    let key = TimelineKey::room("!one:x");
+    apply(&mut s, Event::TimelineChanged { account: id, key: key.clone(), diffs: Vec::new() });
+    let before = s.active_account().and_then(|data| data.timeline(&key)).map(|timeline| timeline.revision);
+    s.set_show_hidden_events(true);
+    assert!(s.settings.show_hidden_events);
+    let after = s.active_account().and_then(|data| data.timeline(&key)).map(|timeline| timeline.revision);
+    assert_ne!(before, after, "the timeline plans its rows again");
+}
+
+#[test]
+fn opening_the_widgets_panel_should_list_the_rooms_widgets() {
+    let (mut s, mut commands) = state();
+    signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.select_room("!one:x");
+    drain(&mut commands);
+    s.show_side(SidePanel::Widgets);
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::ListWidgets { room_id, .. } if room_id == "!one:x"))
+    );
+}
+
+#[test]
+fn listed_widgets_should_be_kept_for_their_room() {
+    let (mut s, _commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    let widgets = matrix_core::Widgets { widgets: Vec::new(), can_add: true };
+    apply(&mut s, Event::Widgets { account: id.clone(), room_id: "!one:x".into(), widgets: widgets.clone() });
+    assert_eq!(s.accounts.get(&id).and_then(|data| data.widgets.get("!one:x")), Some(&widgets));
+}
+
+#[test]
+fn adding_a_widget_should_send_its_name_and_address() {
+    let (mut s, mut commands) = state();
+    signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.start_add_widget("!one:x");
+    s.room_form_field(false).text = "Board".into();
+    s.room_form_field(true).text = " https://board.example ".into();
+    drain(&mut commands);
+    s.submit_room_form();
+    assert_eq!(s.modal, None);
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(
+        c,
+        Command::AddWidget { room_id, name, url, .. } if room_id == "!one:x" && name == "Board" && url == "https://board.example"
+    )));
+}
+
+#[test]
+fn a_widget_without_an_address_should_keep_its_form_open() {
+    let (mut s, mut commands) = state();
+    signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.start_add_widget("!one:x");
+    s.room_form_field(false).text = "Board".into();
+    drain(&mut commands);
+    s.submit_room_form();
+    assert!(matches!(s.modal, Some(Modal::RoomForm { form: RoomForm::AddWidget { .. }, .. })));
+    assert!(all_commands(&mut commands).is_empty());
+}
+
+#[test]
+fn removing_a_widget_should_ask_first() {
+    let (mut s, mut commands) = state();
+    signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    drain(&mut commands);
+    s.ask_to_remove_widget("!one:x", "w1", "Board");
+    assert!(all_commands(&mut commands).is_empty(), "nothing goes before the user confirms");
+    s.confirm();
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::RemoveWidget { widget_id, .. } if widget_id == "w1"))
+    );
+}
