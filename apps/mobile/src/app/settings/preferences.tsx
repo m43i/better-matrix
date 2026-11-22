@@ -1,5 +1,5 @@
-// Preferences on this device: language, appearance, link previews and GIFs from links, as the
-// desktop's General settings.
+// Preferences on this device: language, appearance, link previews, GIFs from links and maps from
+// OpenStreetMap, as the desktop's General settings.
 
 import { Fragment } from 'react';
 
@@ -71,6 +71,22 @@ export default function PreferencesScreen() {
           toggle={{
             value: settings.showLinkGifs,
             onChange: (on) => updateSettings(store, { showLinkGifs: on }),
+          }}
+        />
+      </ListSection>
+      <ListSection
+        title={t('mobile.accounts.maps')}
+        footer={
+          settings.showMaps ? t('mobile.accounts.maps_on_hint') : t('mobile.accounts.maps_hint')
+        }
+      >
+        <ListRow
+          testID="maps"
+          icon="location"
+          title={t('mobile.accounts.maps_on')}
+          toggle={{
+            value: settings.showMaps,
+            onChange: (on) => updateSettings(store, { showMaps: on }),
           }}
         />
       </ListSection>

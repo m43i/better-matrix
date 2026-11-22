@@ -13,6 +13,11 @@ export interface Settings {
   appearance: Appearance;
   /** Play GIFs behind Giphy, Tenor and Imgur links inline. */
   showLinkGifs: boolean;
+  /**
+   * Draw shared places on a map from OpenStreetMap, which the device fetches (so OpenStreetMap
+   * sees its address and the area shown); off, places show without one and nothing is fetched.
+   */
+  showMaps: boolean;
   /** Show a card for the first link in a message. */
   showLinkPreviews: boolean;
   /** Ring aloud for incoming calls. */
@@ -31,6 +36,7 @@ export const DEFAULT_SETTINGS: Settings = {
   language: 'system',
   appearance: 'system',
   showLinkGifs: true,
+  showMaps: true,
   showLinkPreviews: true,
   ringSound: true,
   lastAccount: null,
@@ -43,6 +49,7 @@ const savedSettings = z.object({
   language: z.enum(['system', 'en', 'de', 'fr']).catch(DEFAULT_SETTINGS.language),
   appearance: z.enum(['system', 'light', 'dark']).catch(DEFAULT_SETTINGS.appearance),
   showLinkGifs: z.boolean().catch(DEFAULT_SETTINGS.showLinkGifs),
+  showMaps: z.boolean().catch(DEFAULT_SETTINGS.showMaps),
   showLinkPreviews: z.boolean().catch(DEFAULT_SETTINGS.showLinkPreviews),
   ringSound: z.boolean().catch(DEFAULT_SETTINGS.ringSound),
   lastAccount: z.string().nullable().catch(DEFAULT_SETTINGS.lastAccount),

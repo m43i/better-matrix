@@ -27,4 +27,14 @@ describe('parseSettings', () => {
   it('an unknown playback speed should play as recorded', () => {
     expect(parseSettings(JSON.stringify({ playbackSpeed: 3 })).playbackSpeed).toBe(1);
   });
+
+  it('maps from OpenStreetMap should be on by default', () => {
+    expect(parseSettings(JSON.stringify({ language: 'en' })).showMaps).toBe(true);
+  });
+
+  it('maps turned off should stay off', () => {
+    expect(parseSettings(JSON.stringify({ ...DEFAULT_SETTINGS, showMaps: false })).showMaps).toBe(
+      false,
+    );
+  });
 });

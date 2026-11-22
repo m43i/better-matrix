@@ -8,7 +8,7 @@ import type { AccountId, Command, Outgoing } from '@better-matrix/matrix-native/
 
 import type { Key } from '../i18n';
 import { outgoingText } from './format';
-import { mentionsOf, type Pill, placePills } from './pills';
+import { type DraftPill, escapeHtml, mentionsOf, pillHtml, placePills, slicePills } from './pills';
 
 /** One command the composer suggests: its name, what it takes, and what it does. */
 export interface SlashCommandInfo {
@@ -119,21 +119,30 @@ function escapeMarkers(text: string): string {
  */
 export function slashOf(
   draft: string,
-  pills: readonly Pill[],
+  draftPills: readonly DraftPill[],
   context: SlashContext,
 ): Slash | null {
   const trimmed = draft.replace(/^\s+/, '');
+  const lead = draft.length - trimmed.length;
 
   if (trimmed.startsWith('//'))
     return {
       type: 'message',
-      message: { type: 'Text', data: outgoingText(trimmed.slice(1), pills) },
+      message: {
+        type: 'Text',
+        data: outgoingText(trimmed.slice(1), slicePills(draftPills, lead + 1, draft.length)),
+      },
     };
-  const match = COMMAND.exec(trimmed.replace(/\s+$/, ''));
+  const line = trimmed.replace(/\s+$/, '');
+  const match = COMMAND.exec(line);
 
   if (!match) return null;
   const name = (match[1] ?? '').toLowerCase();
-  const rest = (match[2] ?? match[3] ?? '').trim();
+  const raw = match[2] ?? match[3] ?? '';
+  const rest = raw.trim();
+  // Where the arguments start in the draft: the pills in them are placed from there.
+  const from = lead + line.length - raw.length + (raw.length - raw.trimStart().length);
+  const pills = slicePills(draftPills, from, from + rest.length);
   const info = COMMANDS.find((command) => command.name === name);
 
   if (!info) return { type: 'unknown', name };
@@ -141,9 +150,11 @@ export function slashOf(
   const face = FACES.get(name);
 
   if (face !== undefined) {
-    const text = rest ? `${escapeMarkers(face)} ${rest}` : escapeMarkers(face);
+    const before = escapeMarkers(face);
+    const text = rest ? `${before} ${rest}` : before;
+    const moved = slicePills(draftPills, from, from + rest.length, before.length + 1);
 
-    return { type: 'message', message: { type: 'Text', data: outgoingText(text, pills) } };
+    return { type: 'message', message: { type: 'Text', data: outgoingText(text, moved) } };
   }
 
   switch (name) {
@@ -161,17 +172,10 @@ export function slashOf(
             },
           }
         : usage();
-    case 'spoiler': {
-      if (!rest) return usage();
-
-      // Each line hidden: markers work within a line.
-      const hidden = rest
-        .split('\n')
-        .map((line) => (line.trim() ? `||${line}||` : line))
-        .join('\n');
-
-      return { type: 'message', message: { type: 'Text', data: outgoingText(hidden, pills) } };
-    }
+    case 'spoiler':
+      return rest
+        ? { type: 'message', message: { type: 'Text', data: spoilerText(rest, pills) } }
+        : usage();
 
     case 'invite': {
       const userId = argumentId(rest, pills, 'user:', /^@\S+:\S+$/);
@@ -227,6 +231,29 @@ export function slashOf(
   }
 }
 
+/**
+ * `text` sent hidden, written as it stands: Markdown isn't read (so nothing in it can close the
+ * spoiler early), its pills go as links, line breaks as `<br />`, and the plain body says only
+ * `[Spoiler]`, as a formatted spoiler's does.
+ */
+export function spoilerText(text: string, pills: readonly DraftPill[]) {
+  let html = '';
+  let at = 0;
+
+  for (const placed of placePills(text, pills)) {
+    html += escapeHtml(text.slice(at, placed.start)) + pillHtml(placed.pill);
+    at = placed.end;
+  }
+
+  html += escapeHtml(text.slice(at));
+
+  return {
+    body: '[Spoiler]',
+    html: `<p><span data-mx-spoiler>${html.replace(/\r?\n/g, '<br />')}</span></p>`,
+    mentions: mentionsOf(text, pills),
+  };
+}
+
 function room(context: SlashContext) {
   return { account: context.account, room_id: context.roomId };
 }
@@ -237,7 +264,7 @@ function room(context: SlashContext) {
  */
 function argumentId(
   text: string,
-  pills: readonly Pill[],
+  pills: readonly DraftPill[],
   prefix: string,
   typed: RegExp,
 ): string | null {

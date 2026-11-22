@@ -6,7 +6,7 @@ import { composer, startEdit, startReply } from '../../composer';
 import { newPollForm } from '../../pollForm';
 import { Store } from '../../store';
 import { roomKey, threadKey } from '../../timeline';
-import { emotePill, userPill } from '../../pills';
+import { emotePill, pillAt, userPill } from '../../pills';
 import {
   addAttachments,
   cancelEdit,
@@ -167,6 +167,22 @@ describe('composer actions', () => {
     expect([after.editing?.event_id, after.draft]).toEqual(['$mine', 'hello']);
   });
 
+  it('a refused edit should come back with its pills and the message’s own', async () => {
+    const { store, fail } = setUp();
+    const grace = pillAt(userPill('@grace:x', 'Grace'), 3);
+    startEdit(store, ADA, KEY, message('$mine', 'hi Grace'), 'hi @Grace', [grace]);
+    setDraft(store, ADA, KEY, 'hi @Grace!');
+    sendComposer(store, ADA, KEY);
+    fail(0, 'offline');
+    await flush();
+    const after = composer(store.getState(), ADA, KEY);
+    expect([after.draft, after.pills, after.setAside?.originalPills]).toEqual([
+      'hi @Grace!',
+      [grace],
+      [grace],
+    ]);
+  });
+
   it('a refused edit should set aside what was typed since, bringing it back when dropped', async () => {
     const { store, fail } = setUp();
     startEdit(store, ADA, KEY, message('$mine', 'helo'), 'helo');
@@ -312,15 +328,54 @@ describe('composer actions', () => {
 describe('pills in the composer', () => {
   const grace = userPill('@grace:x', 'Grace');
 
+  const otherGrace = userPill('@grace:y', 'Grace');
+
   it('should keep the pill a picked suggestion inserted', () => {
     const { store } = setUp();
-    completeDraft(store, ADA, KEY, 'hi @Grace ', { start: 10, end: 10 }, grace);
-    expect(composer(store.getState(), ADA, KEY).pills).toEqual([grace]);
+    setDraft(store, ADA, KEY, 'hi @Gr');
+    completeDraft(store, ADA, KEY, 'hi @Grace ', { start: 10, end: 10 }, pillAt(grace, 3));
+    expect(composer(store.getState(), ADA, KEY).pills).toEqual([pillAt(grace, 3)]);
+  });
+
+  it('should bind a picked pill to the words it replaced, not the same words before them', () => {
+    const { store, commands } = setUp();
+    setDraft(store, ADA, KEY, '@Grace said @Gr');
+    completeDraft(store, ADA, KEY, '@Grace said @Grace', { start: 18, end: 18 }, pillAt(grace, 12));
+    sendComposer(store, ADA, KEY);
+    expect(commands()[0]).toMatchObject({
+      data: {
+        message: {
+          data: {
+            body: '@Grace said Grace',
+            html: '<p>@Grace said <a href="https://matrix.to/#/@grace:x">Grace</a></p>',
+          },
+        },
+      },
+    });
+  });
+
+  it('should keep two people with one name apart as the words around them change', () => {
+    const { store } = setUp();
+    setDraft(store, ADA, KEY, '@Gr');
+    completeDraft(store, ADA, KEY, '@Grace ', { start: 7, end: 7 }, pillAt(grace, 0));
+    setDraft(store, ADA, KEY, '@Grace and @Gr');
+    completeDraft(
+      store,
+      ADA,
+      KEY,
+      '@Grace and @Grace ',
+      { start: 18, end: 18 },
+      pillAt(otherGrace, 11),
+    );
+    setDraft(store, ADA, KEY, 'hi @Grace and @Grace ', undefined, 0);
+    setDraft(store, ADA, KEY, 'hi @Grace @Grace ', undefined, 13);
+    setDraft(store, ADA, KEY, 'hi @Grace ', undefined, 3);
+    expect(composer(store.getState(), ADA, KEY).pills).toEqual([pillAt(otherGrace, 3)]);
   });
 
   it('should drop a pill once its label is edited away', () => {
     const { store } = setUp();
-    completeDraft(store, ADA, KEY, 'hi @Grace ', { start: 10, end: 10 }, grace);
+    completeDraft(store, ADA, KEY, 'hi @Grace ', { start: 10, end: 10 }, pillAt(grace, 3));
     setDraft(store, ADA, KEY, 'hi @Gra');
     expect(composer(store.getState(), ADA, KEY).pills).toEqual([]);
   });
@@ -329,12 +384,22 @@ describe('pills in the composer', () => {
     const { store } = setUp();
     const cat = emotePill('mxc://x/cat', 'cat');
     insertIntoDraft(store, ADA, KEY, ':cat:', cat);
-    expect(composer(store.getState(), ADA, KEY)).toMatchObject({ draft: ':cat:', pills: [cat] });
+    expect(composer(store.getState(), ADA, KEY)).toMatchObject({
+      draft: ':cat:',
+      pills: [pillAt(cat, 0)],
+    });
+  });
+
+  it('should move the pills after an emoji picked before them', () => {
+    const { store } = setUp();
+    completeDraft(store, ADA, KEY, 'hi @Grace', { start: 0, end: 0 }, pillAt(grace, 3));
+    insertIntoDraft(store, ADA, KEY, '🎉 ');
+    expect(composer(store.getState(), ADA, KEY).pills).toEqual([pillAt(grace, 6)]);
   });
 
   it('should send a mention with whom it mentions and forget the pills', () => {
     const { store, commands } = setUp();
-    completeDraft(store, ADA, KEY, 'hi @Grace', { start: 9, end: 9 }, grace);
+    completeDraft(store, ADA, KEY, 'hi @Grace', { start: 9, end: 9 }, pillAt(grace, 3));
     sendComposer(store, ADA, KEY);
     expect([commands()[0], composer(store.getState(), ADA, KEY).pills]).toMatchObject([
       { data: { message: { data: { mentions: { user_ids: ['@grace:x'] } } } } },
@@ -418,10 +483,47 @@ describe('scheduling from the composer', () => {
     expect(composer(store.getState(), ADA, KEY).draft).toBe('later');
   });
 
+  it('should give the whole composer back when the server refused it: pills and reply too', async () => {
+    const { store, fail } = setUp();
+    const grace = pillAt(userPill('@grace:x', 'Grace'), 6);
+    startReply(store, ADA, KEY, message('$q', 'when?'));
+    completeDraft(store, ADA, KEY, 'later @Grace', { start: 12, end: 12 }, grace);
+    scheduleComposer(store, ADA, KEY, 1_000);
+    fail(0, 'unsupported');
+    await flush();
+    const after = composer(store.getState(), ADA, KEY);
+    expect([after.draft, after.pills, after.replyTo?.event_id]).toEqual([
+      'later @Grace',
+      [grace],
+      '$q',
+    ]);
+  });
+
   it('should not schedule attachments', () => {
     const { store, commands } = setUp();
     setDraft(store, ADA, KEY, 'x');
     addAttachments(store, ADA, KEY, [pdf]);
     expect([scheduleComposer(store, ADA, KEY, 1_000), commands()]).toEqual([false, []]);
+  });
+
+  it('should not run a command that acts when a time is picked, keeping the draft and saying why', () => {
+    const { store, commands } = setUp();
+    setDraft(store, ADA, KEY, '/leave');
+    expect([
+      scheduleComposer(store, ADA, KEY, 1_000),
+      commands(),
+      composer(store.getState(), ADA, KEY).draft,
+      store.getState().notices.map((n) => n.message),
+    ]).toEqual([false, [], '/leave', [t('mobile.composer.schedule_command')]]);
+  });
+
+  it('should schedule a command that makes a message', () => {
+    const { store, commands } = setUp();
+    setDraft(store, ADA, KEY, '/me waves');
+    scheduleComposer(store, ADA, KEY, 1_000);
+    expect(commands()[0]).toMatchObject({
+      type: 'Schedule',
+      data: { message: { type: 'Emote', data: { body: 'waves' } } },
+    });
   });
 });

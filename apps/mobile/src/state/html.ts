@@ -4,7 +4,8 @@
 // text. Bare web addresses become links too (but not inside code), as on the desktop. Matrix's
 // inline objects become their own inlines, as the engine's `html.rs` reads them: mentions
 // (pills), spoilers (`data-mx-spoiler`, hidden until tapped), maths (`data-mx-maths`, shown as
-// Unicode by `math.ts`) and custom emoji (`<img data-mx-emoticon src="mxc://…">`).
+// Unicode by `math.ts`) and custom emoji (`<img src="mxc://…">`: Matrix HTML's only images are
+// the homeserver's, and the SDK's sanitiser drops `data-mx-emoticon`, so the source marks one).
 //
 // The tokenizer is ours rather than htmlparser2's: htmlparser2 is ESM-only, which the app's Jest
 // setup doesn't load. Matrix HTML is a small, well-formed subset; anything unexpected reads as
@@ -54,30 +55,35 @@ export function htmlBlocks(html: string): Block[] {
   return toBlocks(buildTree(html).children, {});
 }
 
+/**
+ * The text inlines show, as plain words: for copying, accessibility, and a spoiler's hidden
+ * placeholder (which draws none of its links, mentions or pictures).
+ */
+export function inlinesText(inlines: Inline[]): string {
+  return inlines
+    .map((i) => {
+      switch (i.type) {
+        case 'text':
+          return i.text;
+        case 'spoiler':
+          return inlinesText(i.inlines);
+        case 'math':
+          return i.text;
+        default:
+          return i.label;
+      }
+    })
+    .join('');
+}
+
 /** The text a tree shows, for copying and accessibility. */
 export function blocksText(blocks: Block[]): string {
-  const inlineText = (inlines: Inline[]): string =>
-    inlines
-      .map((i) => {
-        switch (i.type) {
-          case 'text':
-            return i.text;
-          case 'spoiler':
-            return inlineText(i.inlines);
-          case 'math':
-            return i.text;
-          default:
-            return i.label;
-        }
-      })
-      .join('');
-
   return blocks
     .map((block): string => {
       switch (block.type) {
         case 'paragraph':
         case 'heading':
-          return inlineText(block.inlines);
+          return inlinesText(block.inlines);
         case 'code':
           return block.text;
         case 'quote':
@@ -467,11 +473,13 @@ function toInlines(node: Node, marks: Marks): Inline[] {
     case 'br':
       return [{ type: 'text', text: '\n', marks }];
     case 'img': {
-      const alt = node.attrs.alt ?? node.attrs.title ?? '';
+      const alt = node.attrs.alt;
       const src = node.attrs.src ?? '';
 
-      if (node.attrs['data-mx-emoticon'] !== undefined && src.startsWith('mxc://'))
-        return [{ type: 'emote', url: src, label: alt || ':emoji:' }];
+      // An image from the homeserver is a custom emoji, marked or not (the SDK's sanitiser
+      // drops `data-mx-emoticon`), as the engine's `to_pills` reads it.
+      if (src.startsWith('mxc://'))
+        return [{ type: 'emote', url: src, label: alt ?? node.attrs.title ?? ':emoji:' }];
 
       // Other images can't show inline: their description does.
       return alt ? [{ type: 'text', text: alt, marks }] : [];

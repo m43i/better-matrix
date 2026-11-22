@@ -11,7 +11,7 @@ import { routes } from '../routes';
 import { setCallLayout, showCallChat } from '../state/actions/calls';
 import { setActive, setScope } from '../state/actions/core';
 import { updateComposer } from '../state/composer';
-import { userPill } from '../state/pills';
+import { pillAt, userPill } from '../state/pills';
 import type { Settings } from '../state/settings';
 import type { Store } from '../state/store';
 import { roomKey, threadKey } from '../state/timeline';
@@ -248,7 +248,7 @@ export const scenes = {
       drafting('Thanks @Grace Hopper for the review')(store);
       updateComposer(store, ADA, roomKey(GENERAL), (c) => ({
         ...c,
-        pills: [userPill(GRACE, 'Grace Hopper')],
+        pills: [pillAt(userPill(GRACE, 'Grace Hopper'), 'Thanks '.length)],
       }));
     },
     routes: [routes.room(ADA, GENERAL)],

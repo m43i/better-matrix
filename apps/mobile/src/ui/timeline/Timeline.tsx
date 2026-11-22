@@ -54,6 +54,7 @@ import { room as roomOf, timeline as timelineOf } from '../../state/selectors';
 import { routes } from '../../routes';
 import { font } from '../../theme/palette';
 import { Icon } from '../icons';
+import { openElsewhere } from '../links/open';
 import { usePalette } from '../theme';
 import { PinnedContext, TimelineContext, type TimelineContextValue } from './context';
 import { MessageRow } from './MessageRow';
@@ -297,16 +298,21 @@ export function Timeline({
       targetPages.current += 1;
       loadMore();
     } else {
-      // Not found: the list stays where it is.
+      // Not found: the list stays where it is. A quoted message may live in another timeline
+      // (a reply in a thread, a room message quoted in one): it opens there, as a link's does.
       targetDone.current = wanted;
       setPositionedAt(wanted);
 
       if (wanted === jump)
-        store.update((s) => addNotice(s, t('mobile.conversation.message_missing'), account));
+        void openElsewhere(store, account, timelineKey, wanted).then((opened) => {
+          if (!opened)
+            store.update((s) => addNotice(s, t('mobile.conversation.message_missing'), account));
+        });
     }
   }, [
     store,
     account,
+    timelineKey,
     jump,
     wanted,
     target,

@@ -1,4 +1,4 @@
-import { userPill } from '../pills';
+import { type DraftPill, pillAt, userPill } from '../pills';
 import { commandSuggestions, slashOf } from '../slash';
 
 const CONTEXT = { account: '@ada:x.org', roomId: '!r:x.org' };
@@ -7,8 +7,13 @@ const ACCOUNT_ROOM = { account: CONTEXT.account, room_id: CONTEXT.roomId };
 
 const NOBODY = { user_ids: [], room: false };
 
-const slash = (draft: string, pills = [userPill('@grace:x.org', 'Grace')]) =>
-  slashOf(draft, pills, CONTEXT);
+const GRACE = userPill('@grace:x.org', 'Grace');
+
+/** Grace's pill where `@Grace` first stands in `draft`, as a picked suggestion puts it. */
+const graceIn = (draft: string): DraftPill[] =>
+  draft.includes(GRACE.label) ? [pillAt(GRACE, draft.indexOf(GRACE.label))] : [];
+
+const slash = (draft: string, pills = graceIn(draft)) => slashOf(draft, pills, CONTEXT);
 
 describe('slashOf', () => {
   it('should leave a draft that is no command as text', () => {
@@ -53,6 +58,51 @@ describe('slashOf', () => {
       message: {
         data: { body: '[Spoiler]', html: '<p><span data-mx-spoiler>the end</span></p>' },
       },
+    });
+  });
+
+  it.each([
+    ['several lines', '/spoiler he\ndies\n\nsadly', 'he<br />dies<br /><br />sadly'],
+    ['indented lines', '/spoiler he\n    - dies\n  ok', 'he<br />    - dies<br />  ok'],
+    ['its own markers', '/spoiler a||b|| **c** ||', 'a||b|| **c** ||'],
+    ['HTML', '/spoiler <b>x</b> & y', '&lt;b&gt;x&lt;/b&gt; &amp; y'],
+  ])('should send /spoiler with %s hidden whole, as written', (_, draft, hidden) => {
+    expect(slash(draft)).toEqual({
+      type: 'message',
+      message: {
+        type: 'Text',
+        data: {
+          body: '[Spoiler]',
+          html: `<p><span data-mx-spoiler>${hidden}</span></p>`,
+          mentions: NOBODY,
+        },
+      },
+    });
+  });
+
+  it('should send a mention in a spoiler as a link inside it', () => {
+    expect(slash('/spoiler @Grace did it')).toMatchObject({
+      message: {
+        data: {
+          body: '[Spoiler]',
+          html: '<p><span data-mx-spoiler><a href="https://matrix.to/#/@grace:x.org">Grace</a> did it</span></p>',
+          mentions: { user_ids: ['@grace:x.org'] },
+        },
+      },
+    });
+  });
+
+  it('should keep a pill where it stood after the command’s name', () => {
+    expect(slash('/shrug ask @Grace')).toMatchObject({
+      message: {
+        data: { body: '¯\\_(ツ)_/¯ ask Grace', mentions: { user_ids: ['@grace:x.org'] } },
+      },
+    });
+  });
+
+  it('should not take the same words typed without a pill for a mention', () => {
+    expect(slash('/me waves at @Grace', [])).toMatchObject({
+      message: { data: { body: 'waves at @Grace', mentions: NOBODY } },
     });
   });
 

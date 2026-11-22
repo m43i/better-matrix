@@ -1,7 +1,6 @@
 import { type ComposerState, EMPTY_COMPOSER, type PendingAttachment } from '../composer';
-import { userPill } from '../pills';
+import { pillAt, userPill } from '../pills';
 import {
-  canSchedule,
   canSend,
   excerpt,
   formatDuration,
@@ -9,6 +8,7 @@ import {
   MAX_SCHEDULE_MS,
   pathFromUri,
   planSchedule,
+  scheduleProblem,
   planSend,
   uploadName,
   voiceMessage,
@@ -231,14 +231,19 @@ describe('planSend with pills and commands', () => {
   const grace = userPill('@grace:x', 'Grace');
 
   it('should send whom the pills mention', () => {
-    const plan = planSend({ ...EMPTY_COMPOSER, draft: 'hi @Grace', pills: [grace] }, ADA, KEY);
+    const plan = planSend(
+      { ...EMPTY_COMPOSER, draft: 'hi @Grace', pills: [pillAt(grace, 3)] },
+      ADA,
+      KEY,
+    );
+
     expect(plan.commands[0]).toMatchObject({
       data: { message: { data: { mentions: { user_ids: ['@grace:x'], room: false } } } },
     });
   });
 
   it('should send an edit with whom it mentions', () => {
-    const composer = { ...editing('hi @Grace', 'hi'), pills: [grace] };
+    const composer = { ...editing('hi @Grace', 'hi'), pills: [pillAt(grace, 3)] };
     expect(planSend(composer, ADA, KEY).commands[0]).toMatchObject({
       type: 'Edit',
       data: { mentions: { user_ids: ['@grace:x'] } },
@@ -318,11 +323,38 @@ describe('planSchedule', () => {
 
   it('should not schedule attachments', () => {
     const composer = { ...EMPTY_COMPOSER, draft: 'x', attachments: [file('/a.png')] };
-    expect([canSchedule(composer), planSchedule(composer, ADA, KEY, 1)]).toEqual([false, null]);
+    expect([scheduleProblem(composer, ADA, KEY), planSchedule(composer, ADA, KEY, 1)]).toEqual([
+      { type: 'attachments' },
+      null,
+    ]);
   });
 
   it('should not schedule a command that isn’t a message', () => {
-    expect(planSchedule({ ...EMPTY_COMPOSER, draft: '/leave' }, ADA, KEY, 1)).toBeNull();
+    const composer = { ...EMPTY_COMPOSER, draft: '/leave' };
+    expect([scheduleProblem(composer, ADA, KEY), planSchedule(composer, ADA, KEY, 1)]).toEqual([
+      { type: 'command' },
+      null,
+    ]);
+  });
+
+  it('should not schedule a command that doesn’t exist', () => {
+    expect(scheduleProblem({ ...EMPTY_COMPOSER, draft: '/frob' }, ADA, KEY)).toEqual({
+      type: 'unknown',
+      name: 'frob',
+    });
+  });
+
+  it.each([
+    '/me waves',
+    '/plain *x*',
+    '/spoiler the end',
+    '/shrug',
+    '/tableflip',
+    '/unflip',
+    '/lenny',
+    '//path',
+  ])('should schedule %j, a command that makes a message', (draft) => {
+    expect(scheduleProblem({ ...EMPTY_COMPOSER, draft }, ADA, KEY)).toBeNull();
   });
 });
 

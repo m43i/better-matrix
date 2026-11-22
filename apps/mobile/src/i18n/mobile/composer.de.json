@@ -64,6 +64,7 @@
   "mobile.composer.schedule_time": "Uhrzeit",
   "mobile.composer.schedule_confirm": "Planen",
   "mobile.composer.schedule_attachments": "Nachrichten mit Anhängen können nicht geplant werden.",
+  "mobile.composer.schedule_command": "Nur Nachrichten lassen sich planen. Befehle wie dieser werden beim Senden ausgeführt.",
   "mobile.composer.schedule_range": "Wähle eine Zeit innerhalb der nächsten 30 Tage.",
   "mobile.composer.scheduled.one": "{{count}} geplante Nachricht",
   "mobile.composer.scheduled.other": "{{count}} geplante Nachrichten",
@@ -74,5 +75,7 @@
   "mobile.composer.scheduled_unreadable": "Auf einem anderen Gerät verschlüsselt",
   "mobile.composer.scheduled_none": "In dieser Unterhaltung ist nichts geplant.",
   "mobile.composer.scheduled_failed": "Die geplante Nachricht wurde nicht geändert: {{error}}",
-  "mobile.composer.date_tomorrow": "Morgen"
+  "mobile.composer.date_tomorrow": "Morgen",
+  "mobile.composer.location_use_mine": "Meinen Standort verwenden",
+  "mobile.composer.location_pick": "Verwende deinen Standort oder suche nach einem Ort."
 }
