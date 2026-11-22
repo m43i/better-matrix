@@ -232,6 +232,12 @@ export interface AfterCommand {
   joined?: (roomId: string) => void;
   /** The room was left (`/leave`): leave its screen. */
   left?: () => void;
+  /**
+   * `/leave` asks first, as the room menu does (`ui/askToLeave`): `leave` carries it out once the
+   * user agreed, told whether to forget the room (a direct chat is deleted). Without it, nothing
+   * is left.
+   */
+  confirmLeave?: (leave: (forget: boolean) => void) => void;
 }
 
 /** What a command that can't be done says, as a notice. */
@@ -309,7 +315,10 @@ export function sendComposer(
   return plan.commands.length > 0;
 }
 
-/** Sends a command from the composer, going where it says once it worked. */
+/**
+ * Sends a command from the composer, going where it says once it worked. The composer empties
+ * at once, as the desktop's does; `/leave` then asks, and cancelling it leaves nothing.
+ */
 function carryOut(
   store: Store,
   account: AccountId,
@@ -320,7 +329,36 @@ function carryOut(
 ): void {
   updateComposer(store, account, key, () => ({ ...plan.composer, touched: before.touched }));
 
-  for (const command of plan.commands) {
+  if (plan.after === 'left') {
+    after.confirmLeave?.((forget) =>
+      runCommands(
+        store,
+        account,
+        plan.commands.map((command) =>
+          command.type === 'LeaveRoom'
+            ? { ...command, data: { ...command.data, forget } }
+            : command,
+        ),
+        plan,
+        after,
+      ),
+    );
+
+    return;
+  }
+
+  runCommands(store, account, plan.commands, plan, after);
+}
+
+/** Runs a composer command's `commands`, going where `plan` says once each worked. */
+function runCommands(
+  store: Store,
+  account: AccountId,
+  commands: Command[],
+  plan: SendPlan,
+  after: AfterCommand,
+): void {
+  for (const command of commands) {
     let joined: string | null = null;
     store
       .run(command, (event) => {

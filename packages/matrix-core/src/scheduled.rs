@@ -45,6 +45,13 @@ struct Kept {
 /// past the week servers are asked to remember sent ones.
 const UNSETTLED_KEPT: u64 = 8 * 24 * 3_600_000;
 
+/// How long after its time a message the server no longer knows may still be on its way into
+/// the room, before its absence there means it wasn't sent.
+const POSTING_GRACE: u64 = 2 * 60_000;
+
+/// Why a message counts as not sent when the server no longer knows it and the room lacks it.
+pub const NOT_POSTED: &str = "It didn't appear in the room";
+
 /// How long a message the server failed to send stays to be seen, unless let go first.
 const FAILED_KEPT: u64 = 30 * 24 * 3_600_000;
 
@@ -228,26 +235,27 @@ impl Account {
     }
 
     /// Asks what became of this device's messages whose time came, where the list didn't
-    /// say: one the server failed to send stays, marked; one it sent, or no longer knows,
-    /// goes. One the server can't be asked about now is asked about next time. Returns what
-    /// is then kept.
+    /// say: one the server failed to send stays, marked; one it sent goes. A server that no
+    /// longer knows one (Synapse forgets them once it sends, or fails to) is answered by the
+    /// room: the message there means it went, its absence a while after its time that it
+    /// didn't. One that can't be settled now is asked about next time. Returns what is then
+    /// kept.
     async fn settle_due(&self, listed: &[api::Listed]) -> Vec<ScheduledMessage> {
         let now = now_ms();
-        let due: Vec<String> = self
+        let due: Vec<ScheduledMessage> = self
             .keep_scheduled(|_| {})
             .await
             .into_iter()
             .filter(|message| message.failed.is_none() && message.send_at_ms <= now)
-            .map(|message| message.delay_id)
             .collect();
         let mut fates = Vec::new();
-        for delay_id in due {
-            let fate = match listed.iter().find(|event| event.delay_id == delay_id) {
+        for message in due {
+            let event = match listed.iter().find(|event| event.delay_id == message.delay_id) {
                 Some(event) => Some(event.clone()),
                 // Once: one that fails is asked about at the next listing.
                 None => match self
                     .client()
-                    .send(api::get::Request::new(delay_id.clone()))
+                    .send(api::get::Request::new(message.delay_id.clone()))
                     .with_request_config(matrix_sdk::config::RequestConfig::new().disable_retry())
                     .await
                 {
@@ -256,23 +264,63 @@ impl Account {
                     Err(_) => continue,
                 },
             };
-            fates.push((delay_id, fate));
+            let fate = match event {
+                // Still to go: the server is sending it.
+                Some(event) if !event.finished => continue,
+                Some(api::Listed { error: Some(error), .. }) => Some(error),
+                Some(_) => None,
+                None => match self.appeared(&message).await {
+                    Some(true) => None,
+                    Some(false) if now >= message.send_at_ms.saturating_add(POSTING_GRACE) => {
+                        Some(NOT_POSTED.to_owned())
+                    }
+                    _ => continue,
+                },
+            };
+            fates.push((message.delay_id, fate));
         }
         self.keep_scheduled(|kept| {
             for (delay_id, fate) in fates {
                 match fate {
-                    // Still to go: the server is sending it.
-                    Some(event) if !event.finished => {}
-                    Some(api::Listed { error: Some(error), .. }) => {
+                    Some(error) => {
                         if let Some(message) = kept.iter_mut().find(|message| message.delay_id == delay_id) {
                             message.failed = Some(error);
                         }
                     }
-                    _ => kept.retain(|message| message.delay_id != delay_id),
+                    None => kept.retain(|message| message.delay_id != delay_id),
                 }
             }
         })
         .await
+    }
+
+    /// Whether `message` shows in its room: one from this account saying the same, posted since
+    /// a minute before its time, in the room's latest pages. `None` when the room can't be read
+    /// now, or it can't be told (no words of its own to look for, or too much said since).
+    async fn appeared(&self, message: &ScheduledMessage) -> Option<bool> {
+        use matrix_sdk::room::MessagesOptions;
+        let body = message.body.as_deref()?;
+        let room = self.client().get_room(&matrix_sdk::ruma::RoomId::parse(&message.room_id).ok()?)?;
+        let since = message.send_at_ms.saturating_sub(60_000);
+        let mut from = None;
+        for _ in 0..5 {
+            let mut options = MessagesOptions::backward().from(from.as_deref());
+            options.limit = 50u32.into();
+            let page = room.messages(options).await.ok()?;
+            for event in &page.chunk {
+                let Ok(event) = event.raw().deserialize_as_unchecked::<Value>() else { continue };
+                if event["sender"].as_str() == Some(self.id().as_str())
+                    && body_of(&event["content"]).as_deref() == Some(body)
+                {
+                    return Some(true);
+                }
+                if event["origin_server_ts"].as_u64().is_some_and(|at| at < since) {
+                    return Some(false);
+                }
+            }
+            from = Some(page.end?);
+        }
+        None
     }
 
     /// The messages a server's list holds that are still to go.
@@ -614,6 +662,21 @@ mod tests {
                 };
                 return json!({ "delayed_events": [delayed("waiting", false), delayed("sent", true)] });
             }
+            // The room's latest messages: one this account posted just now, then an old one.
+            if first.starts_with("GET") && first.contains("/messages?") {
+                let now = now_ms();
+                let posted = json!({
+                    "type": "m.room.message", "event_id": "$posted", "sender": "@a:example.org",
+                    "origin_server_ts": now, "room_id": "!room:example.org",
+                    "content": { "msgtype": "m.text", "body": "posted" }
+                });
+                let old = json!({
+                    "type": "m.room.message", "event_id": "$old", "sender": "@b:example.org",
+                    "origin_server_ts": 1, "room_id": "!room:example.org",
+                    "content": { "msgtype": "m.text", "body": "long ago" }
+                });
+                return json!({ "start": "t1", "end": "t0", "chunk": [posted, old] });
+            }
             if first.contains("/versions") {
                 let held = endpoints != Endpoints::None;
                 let features = json!({ "org.matrix.msc4140": held });
@@ -792,11 +855,16 @@ mod tests {
 
     /// Keeps a message this device scheduled, whose time came long ago.
     async fn kept_due(account: &Account, delay_id: &str) {
+        kept_due_saying(account, delay_id, "later", 60_000).await;
+    }
+
+    /// Keeps a message this device scheduled saying `body`, whose time came `ago_ms` ago.
+    async fn kept_due_saying(account: &Account, delay_id: &str, body: &str, ago_ms: u64) {
         let message = ScheduledMessage {
             delay_id: delay_id.into(),
             room_id: "!room:example.org".into(),
-            send_at_ms: now_ms() - 60_000,
-            body: Some("later".into()),
+            send_at_ms: now_ms() - ago_ms,
+            body: Some(body.into()),
             failed: None,
         };
         account.keep_scheduled(|kept| kept.push(message)).await;
@@ -870,12 +938,32 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_message_the_server_no_longer_knows_should_be_let_go() {
+    async fn a_message_the_server_no_longer_knows_but_the_room_shows_should_be_let_go() {
         let (server, _) = server(false, Endpoints::Current);
         let account = account(&server, "forgotten").await;
-        kept_due(&account, "forgotten").await;
+        kept_due_saying(&account, "forgotten", "posted", 60_000).await;
         account.scheduled_messages().await.expect("listed");
         assert!(account.keep_scheduled(|_| {}).await.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_the_server_no_longer_knows_nor_the_room_shows_should_count_as_failed() {
+        let (server, _) = server(false, Endpoints::Current);
+        let account = account(&server, "not-posted").await;
+        kept_due_saying(&account, "vanished", "never posted", 10 * 60_000).await;
+        let listed = account.scheduled_messages().await.expect("listed");
+        let vanished = listed.iter().find(|message| message.delay_id == "vanished").expect("listed");
+        assert_eq!(vanished.failed.as_deref(), Some(NOT_POSTED));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_just_due_and_not_yet_in_the_room_should_wait() {
+        let (server, _) = server(false, Endpoints::Current);
+        let account = account(&server, "on-its-way").await;
+        kept_due_saying(&account, "on-its-way", "never posted", 30_000).await;
+        let listed = account.scheduled_messages().await.expect("listed");
+        let waiting = listed.iter().find(|message| message.delay_id == "on-its-way").expect("listed");
+        assert_eq!(waiting.failed, None);
     }
 
     #[tokio::test(flavor = "multi_thread")]

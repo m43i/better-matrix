@@ -276,9 +276,12 @@ fn field_of(draft: &matrix_core::Draft) -> TextEdit {
     field
 }
 
-/// A field's text and formatting as the store keeps a draft, unless blank.
+/// A field's text and formatting as the store keeps a draft, unless blank. One holding pills
+/// keeps the field's own HTML, pills as they are (`@room` included, which Matrix HTML writes
+/// as plain words): drafts stay on this device, and restoring reads it as it reads a paste.
 fn stored_draft(edit: &TextEdit) -> Option<matrix_core::Draft> {
-    (!edit.text.trim().is_empty()).then(|| matrix_core::Draft { body: edit.text.clone(), html: html_of(edit) })
+    let html = if edit.pills().next().is_some() { Some(edit.to_html()) } else { html_of(edit) };
+    (!edit.text.trim().is_empty()).then(|| matrix_core::Draft { body: edit.text.clone(), html })
 }
 
 /// An edit on its way: the message, its new text and formatting, and the field as the user left
@@ -946,6 +949,18 @@ mod tests {
         let mut c = Composer::default();
         c.start_edit(target(), "same", None);
         assert!(c.take_edit().is_none());
+    }
+
+    #[test]
+    fn a_kept_draft_should_bring_its_room_mention_back() {
+        let mut c = composer("");
+        c.edit.insert_pill("everyone", "@room");
+        c.edit.insert(" release is out");
+        let draft = stored_draft(&c.edit).expect("a draft");
+        let mut restored = composer("");
+        restored.edit = field_of(&draft);
+        let (_, sent) = restored.take_outgoing();
+        assert!(matches!(sent.as_slice(), [Outgoing::Text { mentions, .. }] if mentions.room), "{sent:?}");
     }
 
     #[test]

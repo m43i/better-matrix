@@ -160,7 +160,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   went): the server finalises it with an error and lists it no more. So this device keeps what
   it scheduled past its time until the server says what became of it (from the list, else
   `GET …/delayed_events/{delay_id}`, the one read MSC4140 keeps since the bulk list moved to
-  MSC4486): a sent one, or one the server no longer knows, is let go; a failed one stays
+  MSC4486): a sent one is let go; one the server no longer knows (Synapse forgets them once it
+  sends, or fails to) is looked for in the room, a message from this account saying the same
+  since its time: there, it went; absent two minutes after its time, it counts as failed
+  (`NOT_POSTED`); a failed one stays
   (`ScheduledMessage::failed`, its error), with a notice once, shown first in the bar and in the
   list with why, until dismissed (cancelling it asks nothing of the server). Unanswered ones go
   after eight days (servers keep finalised ones for about a week), failed ones after 30.

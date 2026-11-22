@@ -35,6 +35,7 @@ import {
   shownThreads,
 } from '../../../state/selectors';
 import { font } from '../../../theme/palette';
+import { askToLeave } from '../../../ui/askToLeave';
 import { Avatar } from '../../../ui/Avatar';
 import { Divider, ListRow, ListSection } from '../../../ui/components';
 import { RequestRow } from '../../../ui/admin/RequestRow';
@@ -96,32 +97,12 @@ export default function RoomInfoScreen() {
   if (!room) return null;
   const direct = room.kind === 'Direct';
 
-  const askToLeave = () => {
-    const [title, body, confirm] = direct
-      ? [
-          t('confirm.delete_title', { name: room.name }),
-          t('confirm.delete_body', { name: room.name }),
-          t('confirm.delete'),
-        ]
-      : [
-          t('confirm.leave_title', { room: room.name }),
-          t('confirm.leave_body'),
-          t('confirm.leave'),
-        ];
-
-    Alert.alert(title, body, [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: confirm,
-        style: 'destructive',
-        onPress: () => {
-          // Back to the room list at once: the room leaves it once the engine left it.
-          router.dismissAll();
-          leaveRoom(store, account, roomId, direct).catch(() => {});
-        },
-      },
-    ]);
-  };
+  const confirmLeave = () =>
+    askToLeave(room, (forget) => {
+      // Back to the room list at once: the room leaves it once the engine left it.
+      router.dismissAll();
+      leaveRoom(store, account, roomId, forget).catch(() => {});
+    });
 
   const openFile = (file: SharedFile) => {
     if (fileOpens(file.attachment.kind) === 'preview') {
@@ -287,7 +268,7 @@ export default function RoomInfoScreen() {
           icon={direct ? 'trash' : 'leave'}
           label={direct ? t('mobile.people.action.delete') : t('mobile.people.action.leave')}
           danger
-          onPress={askToLeave}
+          onPress={confirmLeave}
         />
       </View>
       {modes ? (

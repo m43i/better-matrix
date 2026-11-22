@@ -541,14 +541,39 @@ describe('commands from the composer', () => {
     expect(joined).toHaveBeenCalledWith('!rust:x');
   });
 
-  it('should leave the room’s screen once /leave worked', async () => {
+  it('should leave the room’s screen once a confirmed /leave worked', async () => {
     const { store, succeed } = setUp();
     const left = jest.fn();
     setDraft(store, ADA, KEY, '/leave');
-    sendComposer(store, ADA, KEY, { left });
+    sendComposer(store, ADA, KEY, { left, confirmLeave: (leave) => leave(false) });
     succeed(0);
     await flush();
     expect(left).toHaveBeenCalled();
+  });
+
+  it('should ask before /leave leaves, and forget a deleted chat', () => {
+    const { store, commands } = setUp();
+    const asked: ((forget: boolean) => void)[] = [];
+    setDraft(store, ADA, KEY, '/leave');
+    sendComposer(store, ADA, KEY, { confirmLeave: (leave) => asked.push(leave) });
+    const beforeAgreeing = commands().length;
+    asked[0]?.(true);
+    expect([beforeAgreeing, commands()]).toEqual([
+      0,
+      [{ type: 'LeaveRoom', data: { account: ADA, room_id: ROOM, forget: true } }],
+    ]);
+  });
+
+  it('should stay in the room with an emptied composer when /leave is cancelled', () => {
+    const { store, commands } = setUp();
+    const left = jest.fn();
+    setDraft(store, ADA, KEY, '/leave');
+    sendComposer(store, ADA, KEY, { left, confirmLeave: () => {} });
+    expect([commands(), left.mock.calls, composer(store.getState(), ADA, KEY).draft]).toEqual([
+      [],
+      [],
+      '',
+    ]);
   });
 
   it('should say why a command failed', async () => {

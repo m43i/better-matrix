@@ -8,7 +8,7 @@
 import type { AccountId, NotificationMode, RoomSummary } from '@better-matrix/matrix-native/types';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../i18n';
 import { routes } from '../routes';
@@ -38,6 +38,7 @@ import {
 import { account as accountOf } from '../state/selectors';
 import type { AccountData, Scope } from '../state/types';
 import { font } from '../theme/palette';
+import { askToLeave } from '../ui/askToLeave';
 import { Avatar } from '../ui/Avatar';
 import { Button, Divider, EmptyState, ListRow, ListSection, TextField } from '../ui/components';
 import type { IconName } from '../ui/icons';
@@ -239,31 +240,11 @@ function RoomPages({
     );
   }
 
-  const confirmLeave = () => {
-    const [title, body, action] = direct
-      ? [
-          t('confirm.delete_title', { name: room.name }),
-          t('confirm.delete_body', { name: room.name }),
-          t('confirm.delete'),
-        ]
-      : [
-          t('confirm.leave_title', { room: room.name }),
-          t('confirm.leave_body'),
-          t('confirm.leave'),
-        ];
-
-    Alert.alert(title, body, [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: action,
-        style: 'destructive',
-        onPress: () => {
-          leaveRoom(store, id, room.room_id, direct);
-          done();
-        },
-      },
-    ]);
-  };
+  const confirmLeave = () =>
+    askToLeave(room, (forget) => {
+      leaveRoom(store, id, room.room_id, forget);
+      done();
+    });
 
   return (
     <>

@@ -70,6 +70,7 @@ import { account as accountOf, room } from '../../state/selectors';
 import { type Suggestion, suggestionsFor } from '../../state/suggestions';
 import { draftChanged, typingEnded, typingFor } from '../../state/typingNotices';
 import { font } from '../../theme/palette';
+import { askToLeave } from '../askToLeave';
 import { IconButton } from '../components';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
@@ -261,6 +262,11 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
         if (joined) router.push(routes.room(account, joined));
       },
       left: () => router.navigate(routes.home()),
+      confirmLeave: (leave) => {
+        const leaving = room(store.getState(), account, timelineKey.room_id);
+
+        if (leaving) askToLeave(leaving, leave);
+      },
     });
   };
 

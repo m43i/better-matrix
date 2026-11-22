@@ -219,7 +219,7 @@ Date: 2026-11-16
   nothing in it can end the spoiler early; `[Spoiler]` the whole body), `/invite`, `/join`
   (opens the room once joined; the argument is a picked pill or read as a typed link,
   `parseTyped`, so a room ID without a server, as room version 12 writes them, or a pasted
-  matrix.to link with its `via` servers works), `/leave` (back to Home), `/topic` (`ChangeRoom` with `RoomSetting::Topic`), `/nick`
+  matrix.to link with its `via` servers works), `/leave` (asks first with the room menu's confirmation, `ui/askToLeave`, deleting a direct chat as it does; the composer empties either way, as the desktop's; back to Home once left), `/topic` (`ChangeRoom` with `RoomSetting::Topic`), `/nick`
   (`SetDisplayName`). A command acts in the draft's place; the reply and attachments wait for
   the next send. An unknown command or one missing its argument keeps the draft and says so;
   `//text` sends `/text`. Each failure says what failed (`notice.invite`, `notice.join`, …).

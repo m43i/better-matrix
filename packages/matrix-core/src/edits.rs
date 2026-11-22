@@ -95,9 +95,14 @@ fn versions(original: &Value, edits: Vec<Value>) -> Vec<EditVersion> {
 /// One version: `event`'s ID and time, the text in `content`.
 fn version(event: &Value, content: &Value) -> Option<EditVersion> {
     let body = content["body"].as_str()?;
+    // Sanitised as the timeline's text is: the apps read it the same way.
     let html = (content["format"].as_str() == Some("org.matrix.custom.html"))
-        .then(|| content["formatted_body"].as_str().map(str::to_owned))
-        .flatten();
+        .then(|| content["formatted_body"].as_str())
+        .flatten()
+        .map(|html| {
+            use matrix_sdk::ruma::html::{HtmlSanitizerMode, RemoveReplyFallback, sanitize_html};
+            sanitize_html(html, HtmlSanitizerMode::Compat, RemoveReplyFallback::Yes)
+        });
     let body = match content["msgtype"].as_str() {
         Some("m.emote") => format!("* {body}"),
         _ => body.to_owned(),
@@ -150,6 +155,17 @@ mod tests {
         formatted["content"]["m.new_content"]["format"] = json!("org.matrix.custom.html");
         formatted["content"]["m.new_content"]["formatted_body"] = json!("<b>hello</b>");
         assert_eq!(versions(&original(), vec![formatted])[1].html.as_deref(), Some("<b>hello</b>"));
+    }
+
+    #[test]
+    fn a_versions_spoiler_should_be_read_as_the_timeline_reads_it() {
+        let mut formatted = edit("$2", "@ada:x", 20, "a secret");
+        formatted["content"]["m.new_content"]["format"] = json!("org.matrix.custom.html");
+        formatted["content"]["m.new_content"]["formatted_body"] =
+            json!("a <span title=\">\" DATA-MX-SPOILER>secret</span>");
+        let html = versions(&original(), vec![formatted])[1].html.clone().unwrap_or_default();
+        let pills = crate::html::to_pills(&html, crate::html::Pills::Display);
+        assert!(pills.contains("data-pill=\"spoiler\""), "{pills}");
     }
 
     #[test]
