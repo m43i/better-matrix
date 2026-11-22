@@ -174,8 +174,8 @@ pub struct RoomSettingsDialog {
     /// The name and topic the fields were last filled with, once read: a field still holding
     /// them takes the fresh ones a later read brings, one the user edited keeps their text.
     filled: Option<(String, String)>,
-    /// Name and topic saves on their way: the request, the field and the text it sent. A field
-    /// being saved isn't refreshed until its save answers.
+    /// The latest name and topic saves on their way: the request, the field and the text it
+    /// sent. A field being saved isn't refreshed until that save answers.
     saving: Vec<(RequestId, SettingsField, String)>,
 }
 
@@ -458,29 +458,27 @@ impl State {
         self.popover = None;
         let request = self.dispatch(Command::ChangeRoom { account, room_id, setting }, Purpose::RoomText);
         if let Some(dialog) = self.settings_dialog() {
+            // Only the latest save of a field is followed: an earlier one's answer is ignored.
+            dialog.saving.retain(|(_, saving, _)| *saving != field);
             dialog.saving.push((request, field, typed));
         }
     }
 
-    /// A name or topic save answered: on success the field takes the room's value unless the
-    /// user typed since; on failure the draft stays.
+    /// A name or topic save answered. Only a field's latest save counts (an older one's answer
+    /// is ignored): its answer makes the room's value the field's baseline, and on success the
+    /// field takes it unless the user typed since; on failure the draft stays.
     pub(super) fn room_text_saved(&mut self, request: RequestId, saved: bool) {
         let Some(Modal::RoomSettings(dialog)) = &self.modal else { return };
         let settings = self.shown_room_settings(dialog).cloned();
         let Some(dialog) = self.settings_dialog() else { return };
         let Some(at) = dialog.saving.iter().position(|(sent, _, _)| *sent == request) else { return };
         let (_, field, typed) = dialog.saving.remove(at);
-        // A later save of the same field answers for it: an earlier one leaves it alone.
-        if dialog.saving.iter().any(|(_, other, _)| *other == field) {
-            return;
-        }
-        let (Some(settings), true) = (settings, saved) else { return };
-        let Some((name, topic)) = dialog.filled.as_mut() else { return };
+        let (Some(settings), Some((name, topic))) = (settings, dialog.filled.as_mut()) else { return };
         let (edit, baseline, fresh) = match field {
             SettingsField::Name => (&mut dialog.name, name, settings.name.unwrap_or_default()),
             _ => (&mut dialog.topic, topic, settings.topic.unwrap_or_default()),
         };
-        if edit.text == typed && edit.text != fresh {
+        if saved && edit.text == typed && edit.text != fresh {
             *edit = TextEdit::new(fresh.clone());
         }
         *baseline = fresh;

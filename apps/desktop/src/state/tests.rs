@@ -6197,6 +6197,42 @@ fn an_earlier_save_answering_should_leave_a_field_to_the_later_one() {
 }
 
 #[test]
+fn an_older_save_answering_last_should_leave_the_field_alone() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    s.save_room_topic();
+    let (first, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("C");
+    s.save_room_topic();
+    let (second, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    let latest = matrix_core::RoomSettings { topic: Some("C".into()), ..admin_settings("!one:x") };
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(latest) });
+    apply(&mut s, Event::Finished { request: second, result: Ok(()) });
+    apply(&mut s, Event::Finished { request: first, result: Ok(()) });
+    assert_eq!(settings_dialog(&s).topic.text, "B");
+}
+
+#[test]
+fn a_draft_should_survive_a_refresh_after_the_latest_save_failed() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    s.save_room_topic();
+    let (first, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("C");
+    s.save_room_topic();
+    let (second, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("A");
+    let saved_b = matrix_core::RoomSettings { topic: Some("B".into()), ..admin_settings("!one:x") };
+    apply(&mut s, Event::RoomSettings { account: id.clone(), settings: Box::new(saved_b.clone()) });
+    apply(&mut s, Event::Finished { request: first, result: Ok(()) });
+    apply(&mut s, Event::Finished { request: second, result: Err("forbidden".into()) });
+    // A later refresh (a name saved, say) still finds the draft the user's.
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(saved_b) });
+    assert_eq!(settings_dialog(&s).topic.text, "A");
+}
+
+#[test]
 fn a_failed_save_should_keep_the_draft() {
     let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
     *s.room_settings_field(SettingsField::Name) = TextEdit::new("Renamed");
