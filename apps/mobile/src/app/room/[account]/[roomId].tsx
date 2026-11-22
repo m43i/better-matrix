@@ -8,6 +8,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../../i18n';
 import { useStore } from '../../../state/react';
+import { reachParam } from '../../../state/seek';
 import { account as accountOf, room as roomOf } from '../../../state/selectors';
 import { roomKey } from '../../../state/timeline';
 import { inlineName } from '../../../state/timelineText';
@@ -24,11 +25,11 @@ import { Timeline } from '../../../ui/timeline/Timeline';
 import { TypingLine } from '../../../ui/timeline/TypingLine';
 
 export default function RoomScreen() {
-  const { account, roomId, eventId, localTarget } = useLocalSearchParams<{
+  const { account, roomId, eventId, reach } = useLocalSearchParams<{
     account: string;
     roomId: string;
     eventId?: string;
-    localTarget?: string;
+    reach?: string;
   }>();
 
   const palette = usePalette();
@@ -85,7 +86,7 @@ export default function RoomScreen() {
       >
         <CompactCall account={account} roomId={roomId} />
         <Timeline
-          localTarget={localTarget === '1'}
+          targetReach={reachParam(reach)}
           account={account}
           timelineKey={key}
           target={eventId ?? null}

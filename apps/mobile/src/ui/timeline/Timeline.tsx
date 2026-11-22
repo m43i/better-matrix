@@ -51,7 +51,16 @@ import {
   shouldMarkRead,
 } from '../../state/plan';
 import { shallow, useAppStore, useStore } from '../../state/react';
-import { openSeek, quoteHere, quoteTapped, seekEnded, seekStep, sought } from '../../state/seek';
+import {
+  openSeek,
+  quoteHere,
+  quoteTapped,
+  type Reach,
+  seekEnded,
+  seekStep,
+  sought,
+  soughtReach,
+} from '../../state/seek';
 import { room as roomOf, timeline as timelineOf } from '../../state/selectors';
 import { routes } from '../../routes';
 import { font } from '../../theme/palette';
@@ -99,8 +108,11 @@ export interface TimelineProps {
   root?: Message | null;
   /** A message to scroll to and highlight once it is loaded (a link to it). */
   target?: string | null;
-  /** A hit known to be in local history: keep paging until it is found or history ends. */
-  localTarget?: boolean;
+  /**
+   * How far `target` is looked for (`state/seek.ts`): a few pages back, or on to the start of
+   * history for a search hit in local history or a message the engine located here.
+   */
+  targetReach?: Reach;
 }
 
 /** Whether the app is in front and this screen is the one on top. */
@@ -134,7 +146,7 @@ export function Timeline({
   timelineKey,
   root = null,
   target = null,
-  localTarget = false,
+  targetReach = 'near',
 }: TimelineProps) {
   const palette = usePalette();
   const store = useAppStore();
@@ -183,9 +195,10 @@ export function Timeline({
   // jumped there, gave up looking, or the reader moved on with a quote (state/seek.ts), so the
   // newest isn't marked read on the way. A quote's own search never holds read marking back.
   const [atLatest, setAtLatest] = useState(true);
-  const [seek, setSeek] = useState(() => openSeek(target));
+  const [seek, setSeek] = useState(() => openSeek(target, targetReach));
 
-  if (seek.target !== target) setSeek(openSeek(target));
+  if (seek.target !== target || seek.targetReach !== targetReach)
+    setSeek(openSeek(target, targetReach));
   const positioned = seek.positioned;
   const [farFromLatest, setFarFromLatest] = useState(false);
   const [highlighted, setHighlighted] = useState<string | null>(null);
@@ -295,16 +308,25 @@ export function Timeline({
   // The jump the quote's tap began (`beginJump`): through paging and the engine's answer, it
   // goes on only while no later jump began and this screen is on show.
   const quoteJump = useRef<Jump | null>(null);
+  // A target the engine located here (a quote's or a link's jump opened this screen at it) may
+  // page far back: it goes on as a jump of this screen's own, begun as the screen opens at it,
+  // so a jump begun since or leaving the screen stops it. Begun in an effect before the search's
+  // own, which runs after it (effects run in order).
+  const targetJump = useRef<Jump | null>(null);
+  useEffect(() => {
+    targetJump.current =
+      targetReach === 'located' && target !== null ? beginJump(() => shown.current) : null;
+  }, [target, targetReach, shown]);
 
   // A linked message: scroll to it once loaded, paging back a little to find it (on to the start
-  // of history for a hit known to be local, or a quote the engine says shows here).
-  const quoteShowsHere = seek.quoteHere;
+  // of history for a hit known to be local, or one the engine says shows here).
+  const reach = soughtReach(seek);
   const targetDone = useRef<string | null>(null);
   const targetPages = useRef(0);
   useEffect(() => {
     if (!wanted || targetDone.current === wanted) return;
     const ended = () => setSeek((now) => seekEnded(now, wanted));
-    const jump = quoteJump.current;
+    const jump = quote !== null ? quoteJump.current : targetJump.current;
 
     const step = seekStep({
       quote: quote !== null,
@@ -314,12 +336,12 @@ export function Timeline({
       atStart: reachedStart,
       pages: targetPages.current,
       budget: TARGET_PAGES,
-      unbounded: quote !== null ? quoteShowsHere : localTarget,
+      reach,
     });
 
     switch (step) {
       case 'stop':
-        // A later jump began, or the user left: the quote's search stops, quietly.
+        // A later jump began, or the user left: the search stops, quietly.
         targetDone.current = wanted;
         ended();
 
@@ -373,9 +395,8 @@ export function Timeline({
     account,
     timelineKey,
     quote,
-    quoteShowsHere,
+    reach,
     wanted,
-    localTarget,
     rows,
     reachedStart,
     timeline.opening,

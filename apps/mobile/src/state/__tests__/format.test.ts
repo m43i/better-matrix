@@ -326,6 +326,56 @@ describe('outgoingText with pills', () => {
     });
   });
 
+  it('should not mention the room for @room hidden in a spoiler', () => {
+    expect(outgoingText('||@room lunch||', [pillAt(EVERYONE, 2)])).toMatchObject({
+      body: '[Spoiler]',
+      mentions: { user_ids: [], room: false },
+    });
+  });
+
+  it('should still mention a person whose link is hidden in a spoiler', () => {
+    expect(outgoingText('||@Grace Hopper did it||', [pillAt(grace, 2)]).mentions).toEqual({
+      user_ids: ['@grace:x.org'],
+      room: false,
+    });
+  });
+
+  it('should not mention anyone for pills inside inline code', () => {
+    const draft = '`@Grace Hopper @room`';
+
+    expect(outgoingText(draft, [pillAt(grace, 1), pillAt(EVERYONE, 15)])).toMatchObject({
+      html: '<p><code>@Grace Hopper @room</code></p>',
+      mentions: { user_ids: [], room: false },
+    });
+  });
+
+  it('should not mention anyone for pills inside a code block', () => {
+    const draft = '```\n@Grace Hopper @room\n```';
+
+    expect(outgoingText(draft, [pillAt(grace, 4), pillAt(EVERYONE, 18)]).mentions).toEqual({
+      user_ids: [],
+      room: false,
+    });
+  });
+
+  it('should not mention anyone for pills inside a formula', () => {
+    const draft = '$$@Grace Hopper + @room$$';
+
+    expect(outgoingText(draft, [pillAt(grace, 2), pillAt(EVERYONE, 18)]).mentions).toEqual({
+      user_ids: [],
+      room: false,
+    });
+  });
+
+  it('should mention whom pills outside code still name when others are inside it', () => {
+    const draft = '@room `@Grace Hopper`';
+
+    expect(outgoingText(draft, [pillAt(EVERYONE, 0), pillAt(grace, 7)]).mentions).toEqual({
+      user_ids: [],
+      room: true,
+    });
+  });
+
   it('should send a custom emoji as an image, its short code in the body', () => {
     expect(outgoingText('yay :cat:', [pillAt(emotePill('mxc://x.org/c', 'cat'), 4)])).toEqual({
       body: 'yay :cat:',
