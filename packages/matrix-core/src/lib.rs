@@ -60,8 +60,8 @@ pub use model::{
     AccountId, AccountSummary, Attachment, AttachmentKind, AudioDetails, CallCard, EntryKind, HiddenEvent,
     HistoryVisibility, Invitation, LoginMethods, MediaRef, MediaSize, Message, MessageContent, Notification,
     NotificationMode, Outgoing, Password, Person, Poll, PollAnswer, PublicRoom, PushContent, PushTarget, Pusher, Quote,
-    Reaction, ReadReceipt, RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary,
-    ThreadSummary, TimelineDiff, TimelineEntry, TimelineKey, Upload,
+    Reaction, ReadReceipt, RoomChange, RoomEvent, RoomKind, RoomList, RoomPriority, RoomSummary, SignInMethod,
+    SpaceSummary, ThreadSummary, TimelineDiff, TimelineEntry, TimelineKey, Upload,
 };
 
 /// How many messages a timeline page holds: what a room shows when it opens, and what each
@@ -212,6 +212,9 @@ pub enum Error {
     /// Something about the account itself failed.
     #[error("{0}")]
     Account(String),
+    /// A room has unread messages but none this device can mark read yet.
+    #[error("there is no message to mark read yet")]
+    NothingToRead,
     /// A command needs a room's timeline open first.
     #[error("the timeline of {0} is not open")]
     TimelineClosed(String),

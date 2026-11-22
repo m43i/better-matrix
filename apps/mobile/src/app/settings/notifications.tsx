@@ -1,6 +1,6 @@
 // Notifications: whether this device gets pushes (for every account, or per account), how
-// incoming calls ring on this device, and each account's default notification mode (push rules
-// live on each account's server), as the desktop's page.
+// incoming calls ring on this device, and each account's default notification mode and keywords
+// (push rules live on each account's server), as the desktop's page.
 
 import * as Notifications from 'expo-notifications';
 import { Fragment, useEffect, useState } from 'react';
@@ -14,6 +14,7 @@ import { shallow, useAppStore, useStore } from '../../state/react';
 import { Avatar } from '../../ui/Avatar';
 import { Divider, ListRow, ListSection } from '../../ui/components';
 import { NOTIFICATION_MODES } from '../../ui/settings/choices';
+import { KeywordSection } from '../../ui/settings/KeywordSection';
 import { SettingsPage } from '../../ui/settings/common';
 
 /** Whether the system lets the app notify; null until known. */
@@ -80,63 +81,69 @@ export default function NotificationsScreen() {
         />
       </ListSection>
       {accounts.map((summary, index) => (
-        <ListSection
-          key={summary.id}
-          title={accounts.length > 1 ? summary.display_name : t('settings.notifications')}
-          footer={
-            index === accounts.length - 1 ? t('mobile.accounts.notifications_hint') : undefined
-          }
-        >
-          {accounts.length > 1 ? (
-            <>
-              <ListRow
-                leading={
-                  <Avatar
-                    account={summary.id}
-                    id={summary.id}
-                    name={summary.display_name}
-                    media={summary.avatar}
-                    size={28}
-                  />
-                }
-                title={summary.display_name}
-                subtitle={summary.id}
-              />
-              <Divider />
-            </>
-          ) : null}
-          {pushReady && push.pushEnabled && accounts.length > 1 ? (
-            <>
-              <ListRow
-                testID={`push-${summary.id}`}
-                icon="bell"
-                title={t('mobile.push.account')}
-                subtitle={t('mobile.push.account_hint')}
-                toggle={{
-                  value: accountPushOn(push, summary.id),
-                  onChange: (on) => setAccountPush(store, summary.id, on),
-                }}
-              />
-              <Divider />
-            </>
-          ) : null}
-          {NOTIFICATION_MODES.map((mode, i) => (
-            <Fragment key={mode.id}>
-              {i > 0 ? <Divider inset={52} /> : null}
-              <ListRow
-                testID={`default-${summary.id}-${mode.id}`}
-                icon={
-                  mode.id === 'AllMessages' ? 'bell' : mode.id === 'MentionsOnly' ? 'at' : 'bellOff'
-                }
-                title={t(mode.label)}
-                subtitle={t(mode.hint)}
-                selected={summary.default_notifications === mode.id}
-                chevron={false}
-                onPress={() => setDefaultNotificationMode(store, summary.id, mode.id)}
-              />
-            </Fragment>
-          ))}
-        </ListSection>
+        <Fragment key={summary.id}>
+          <ListSection
+            title={accounts.length > 1 ? summary.display_name : t('settings.notifications')}
+            footer={
+              index === accounts.length - 1 ? t('mobile.accounts.notifications_hint') : undefined
+            }
+          >
+            {accounts.length > 1 ? (
+              <>
+                <ListRow
+                  leading={
+                    <Avatar
+                      account={summary.id}
+                      id={summary.id}
+                      name={summary.display_name}
+                      media={summary.avatar}
+                      size={28}
+                    />
+                  }
+                  title={summary.display_name}
+                  subtitle={summary.id}
+                />
+                <Divider />
+              </>
+            ) : null}
+            {pushReady && push.pushEnabled && accounts.length > 1 ? (
+              <>
+                <ListRow
+                  testID={`push-${summary.id}`}
+                  icon="bell"
+                  title={t('mobile.push.account')}
+                  subtitle={t('mobile.push.account_hint')}
+                  toggle={{
+                    value: accountPushOn(push, summary.id),
+                    onChange: (on) => setAccountPush(store, summary.id, on),
+                  }}
+                />
+                <Divider />
+              </>
+            ) : null}
+            {NOTIFICATION_MODES.map((mode, i) => (
+              <Fragment key={mode.id}>
+                {i > 0 ? <Divider inset={52} /> : null}
+                <ListRow
+                  testID={`default-${summary.id}-${mode.id}`}
+                  icon={
+                    mode.id === 'AllMessages'
+                      ? 'bell'
+                      : mode.id === 'MentionsOnly'
+                        ? 'at'
+                        : 'bellOff'
+                  }
+                  title={t(mode.label)}
+                  subtitle={t(mode.hint)}
+                  selected={summary.default_notifications === mode.id}
+                  chevron={false}
+                  onPress={() => setDefaultNotificationMode(store, summary.id, mode.id)}
+                />
+              </Fragment>
+            ))}
+          </ListSection>
+          <KeywordSection account={summary.id} />
+        </Fragment>
       ))}
     </SettingsPage>
   );

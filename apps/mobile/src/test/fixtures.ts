@@ -54,6 +54,8 @@ export function roomSummary(
     can_pin: true,
     saved: [],
     can_rename: true,
+    priority: 'Normal',
+    marked_unread: false,
   };
 }
 

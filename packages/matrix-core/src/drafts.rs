@@ -16,9 +16,10 @@ use crate::model::TimelineKey;
 
 type Job = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-/// One account's draft reads and writes, run one at a time in the order they were asked for, so
-/// a write never lands after a later one (a draft written back after the clear that followed its
-/// send) and a read sees every write asked for before it.
+/// Jobs run one at a time in the order they were asked for. One account's draft reads and
+/// writes go through one, so a write never lands after a later one (a draft written back after
+/// the clear that followed its send) and a read sees every write asked for before it; its room
+/// tags, unread marks and keywords go through another (`Account::organising`).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct DraftQueue(Arc<OnceLock<mpsc::UnboundedSender<Job>>>);
 

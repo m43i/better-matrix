@@ -21,8 +21,8 @@ use matrix_sdk::{Client, Room, SessionChange};
 use tokio::sync::broadcast;
 
 use crate::model::{
-    AccountId, AccountSummary, MediaRef, MediaSize, NotificationMode, Outgoing, RoomList, SignInMethod, TimelineKey,
-    Upload,
+    AccountId, AccountSummary, MediaRef, MediaSize, NotificationMode, Outgoing, RoomList, RoomPriority, SignInMethod,
+    TimelineKey, Upload,
 };
 use crate::session::{Sessions, StoredAccount, StoredAuth, StoredSecrets, new_passphrase};
 use crate::store::StoreLayout;
@@ -92,6 +92,9 @@ pub struct Account {
     subscribing: Arc<tokio::sync::Mutex<()>>,
     /// Call memberships in Element Call's matrix_2_0 mode, which the SDK doesn't keep.
     pub(crate) sticky: crate::calls::StickyMembers,
+    /// Changes to rooms' tags and unread marks and to the keywords, run one at a time in the
+    /// order the engine was asked for them (queued as commands arrive, not as their tasks start).
+    pub(crate) organising: crate::drafts::DraftQueue,
 }
 
 /// Where the browser comes back to after an OAuth sign-in.
@@ -298,6 +301,7 @@ impl Account {
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
+            organising: crate::drafts::DraftQueue::default(),
         }
     }
 
@@ -415,6 +419,7 @@ impl Account {
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
+            organising: crate::drafts::DraftQueue::default(),
         })
     }
 
@@ -836,6 +841,123 @@ impl Account {
         Ok(())
     }
 
+    /// The words that notify the user wherever they are written (push rules matching message
+    /// content), as this device last synced them, sorted.
+    pub async fn keywords(&self) -> Vec<String> {
+        let rules = self.client.account().push_rules().await.unwrap_or_default();
+        keywords_in(&rules)
+    }
+
+    /// The keywords as the server has them now.
+    pub async fn server_keywords(&self) -> Result<Vec<String>, Error> {
+        use matrix_sdk::ruma::api::client::push::get_pushrules_global_scope;
+        let rules = self.client.send(get_pushrules_global_scope::v3::Request::new()).await?.global;
+        Ok(keywords_in(&rules))
+    }
+
+    /// Adds a notification keyword (trimmed), or removes one as listed (a rule another client made
+    /// may keep spaces around its word), and returns the keywords as they are then. Both work from
+    /// the server's rules as they are now rather than this device's copy, which a sync begun
+    /// before an earlier change may have left behind. Blank keywords are left alone.
+    pub async fn set_keyword(&self, keyword: &str, enabled: bool) -> Result<Vec<String>, Error> {
+        use matrix_sdk::ruma::api::client::push::{
+            delete_pushrule, get_pushrules_global_scope, set_pushrule, set_pushrule_enabled,
+        };
+        use matrix_sdk::ruma::push::{
+            Action, HighlightTweakValue, NewPatternedPushRule, NewPushRule, RuleKind, SoundTweakValue, Tweak,
+        };
+        let mut rules = self.client.send(get_pushrules_global_scope::v3::Request::new()).await?.global;
+        let keyword = if enabled { keyword.trim() } else { keyword };
+        if keyword.trim().is_empty() {
+            return Ok(keywords_in(&rules));
+        }
+        let matching: Vec<(String, bool)> = rules
+            .content
+            .iter()
+            .filter(|rule| notifies(rule) && rule.pattern == keyword)
+            .map(|rule| (rule.rule_id.clone(), rule.enabled))
+            .collect();
+        if !enabled {
+            for (rule_id, _) in &matching {
+                self.client.send(delete_pushrule::v3::Request::new(RuleKind::Content, rule_id.clone())).await?;
+            }
+            rules.content.retain(|rule| !(notifies(rule) && rule.pattern == keyword));
+            return Ok(keywords_in(&rules));
+        }
+        if matching.iter().any(|(_, on)| *on) {
+            // There already.
+        } else if let Some((rule_id, _)) = matching.first() {
+            self.client.send(set_pushrule_enabled::v3::Request::enable(RuleKind::Content, rule_id.clone())).await?;
+        } else {
+            // Notifying with the default sound, as the SDK makes them, and highlighted, so a match
+            // counts like a mention (also where only mentions draw attention); named after the
+            // word when that is a plain, unused name, else under a name of the app's own.
+            let actions = vec![
+                Action::Notify,
+                Action::SetTweak(Tweak::Sound(SoundTweakValue::Default)),
+                Action::SetTweak(Tweak::Highlight(HighlightTweakValue::Yes)),
+            ];
+            let taken = |id: &str| rules.content.iter().any(|rule| rule.rule_id == id);
+            let plain = keyword.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
+            let rule_id = if plain && !taken(keyword) {
+                keyword.to_owned()
+            } else {
+                // Random, so two sessions adding words at once don't pick the same name.
+                format!("chat.bettermatrix.keyword.{}", crate::random_hex(8)?)
+            };
+            let rule = NewPushRule::Content(NewPatternedPushRule::new(rule_id, keyword.to_owned(), actions));
+            self.client.send(set_pushrule::v3::Request::new(rule)).await?;
+        }
+        Ok(with_keyword(keywords_in(&rules), keyword))
+    }
+
+    /// Puts a room among the favourites or the low priority rooms, or takes it out of both
+    /// (room tags). Each tag is set or removed whatever this device last synced, so a change
+    /// right after another one still reaches the server.
+    pub async fn set_room_priority(&self, room_id: &str, priority: RoomPriority) -> Result<(), Error> {
+        use matrix_sdk::ruma::events::tag::{TagInfo, TagName};
+        let room = self.joined_room(room_id)?;
+        let (set, remove): (Option<TagName>, &[TagName]) = match priority {
+            RoomPriority::Favourite => (Some(TagName::Favorite), &[TagName::LowPriority]),
+            RoomPriority::Low => (Some(TagName::LowPriority), &[TagName::Favorite]),
+            RoomPriority::Normal => (None, &[TagName::Favorite, TagName::LowPriority]),
+        };
+        if let Some(tag) = set {
+            room.set_tag(tag, TagInfo::new()).await?;
+        }
+        for tag in remove {
+            room.remove_tag(tag.clone()).await?;
+        }
+        Ok(())
+    }
+
+    /// Marks a room unread (MSC2867's flag), or takes the mark away, whatever this device last
+    /// synced. Reads nothing: [`Account::mark_room_read`] does.
+    pub async fn set_unread(&self, room_id: &str, unread: bool) -> Result<(), Error> {
+        use matrix_sdk::ruma::events::marked_unread::MarkedUnreadEventContent;
+        self.joined_room(room_id)?.set_account_data(MarkedUnreadEventContent::new(unread)).await?;
+        Ok(())
+    }
+
+    /// Reads a room without opening it: its read receipt and fully-read marker moved to the latest
+    /// message the SDK knows, when there are unread ones, and the unread mark taken away. Fails when there are unread
+    /// messages but no message to mark read yet.
+    pub async fn mark_room_read(&self, room_id: &str) -> Result<(), Error> {
+        use matrix_sdk::ruma::events::marked_unread::MarkedUnreadEventContent;
+        let room = self.joined_room(room_id)?;
+        if room.num_unread_messages() > 0 || room.num_unread_mentions() > 0 {
+            let matrix_sdk_base::latest_event::LatestEventValue::Remote(event) = room.latest_event() else {
+                return Err(Error::NothingToRead);
+            };
+            let event_id = event.event_id().ok_or(Error::NothingToRead)?.to_owned();
+            let receipts =
+                matrix_sdk::room::Receipts::new().fully_read_marker(event_id.clone()).public_read_receipt(event_id);
+            room.send_multiple_receipts(receipts).await?;
+        }
+        room.set_account_data(MarkedUnreadEventContent::new(false)).await?;
+        Ok(())
+    }
+
     /// Leaves a room. With `forget`, also asks the server to forget it, so it disappears from
     /// every client's history list (deleting a direct chat).
     pub async fn leave_room(&self, room_id: &str, forget: bool) -> Result<(), Error> {
@@ -869,6 +991,28 @@ impl Account {
             .get_room(&parsed)
             .ok_or_else(|| Error::UnknownRoom { account: self.id.clone(), room_id: room_id.to_owned() })
     }
+}
+
+/// The keywords a ruleset holds: its enabled content rules the user made, by their word, sorted.
+fn keywords_in(rules: &matrix_sdk::ruma::push::Ruleset) -> Vec<String> {
+    let enabled = rules.content.iter().filter(|rule| notifies(rule) && rule.enabled);
+    with_keyword(enabled.map(|rule| rule.pattern.clone()).collect(), "")
+}
+
+/// Whether a content rule is one of the user's keywords: one they made that notifies. One that
+/// silences a word is not.
+fn notifies(rule: &matrix_sdk::ruma::push::PatternedPushRule) -> bool {
+    !rule.default && rule.actions.iter().any(|action| matches!(action, matrix_sdk::ruma::push::Action::Notify))
+}
+
+/// `keywords` with `keyword` too (a blank one adds nothing), once each, sorted.
+fn with_keyword(mut keywords: Vec<String>, keyword: &str) -> Vec<String> {
+    if !keyword.is_empty() {
+        keywords.push(keyword.to_owned());
+    }
+    keywords.sort_by_cached_key(|keyword| (keyword.to_lowercase(), keyword.clone()));
+    keywords.dedup();
+    keywords
 }
 
 impl PendingOAuth {
@@ -1057,6 +1201,7 @@ mod tests {
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
+            organising: crate::drafts::DraftQueue::default(),
         }
     }
 
@@ -1153,3 +1298,7 @@ mod tests {
         assert!(!same_server("https://matrix.example.org/", "https://matrix.other.org/"));
     }
 }
+
+#[cfg(test)]
+#[path = "organise_tests.rs"]
+mod organise_tests;

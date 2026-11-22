@@ -319,7 +319,15 @@ account: AccountId,
 /**
  * The arrangement.
  */
-layout: SidebarLayout, } } | { "type": "Status", "data": { 
+layout: SidebarLayout, } } | { "type": "Keywords", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The words.
+ */
+keywords: Array<string>, } } | { "type": "Status", "data": { 
 /**
  * Whose.
  */

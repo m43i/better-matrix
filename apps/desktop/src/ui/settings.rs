@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use rune::{Color, El, ScrollSpec, col, el, icon, row, text};
+use rune::{Color, El, ScrollSpec, TextEdit, col, el, icon, row, text};
 
 use super::components::{
     ButtonKind, account_avatar, button, choice_row, field_input, icon_button, select_button, select_menu,
@@ -294,7 +294,7 @@ fn notifications(s: &State, p: &Palette) -> El {
             .find(|(mode, ..)| *mode == summary.default_notifications)
             .map_or(("", ""), |(_, title, hint, _)| (title, hint));
         let choice = select(s, SelectFor::Notifications(summary.id.clone()), title, Some(hint), p);
-        list.child(col().w_full().gap(10.0).child(heading).child(choice))
+        list.child(col().w_full().gap(10.0).child(heading).child(choice).child(keywords(s, account, p)))
     });
     // How an incoming call rings: aloud, or only the notification and the card.
     let (title, hint) =
@@ -311,6 +311,63 @@ fn notifications(s: &State, p: &Palette) -> El {
             accounts,
             p,
         ))
+}
+
+/// An account's notification keywords, each with its remove button, then the field adding one.
+fn keywords(s: &State, account: &AccountData, p: &Palette) -> El {
+    let id = account.summary.id.clone();
+    let mut list = col()
+        .w_full()
+        .gap(8.0)
+        .child(text(t!("settings.keywords")).font(font::BODY_STRONG).color(p.text))
+        .child(text(t!("settings.keywords_hint")).font(font::META).color(p.text_muted).wrap());
+    match &account.keywords {
+        None => list = list.child(text(t!("profile.loading")).font(font::BODY).color(p.text_muted)),
+        Some(keywords) => {
+            for keyword in keywords {
+                let (account, removed) = (id.clone(), keyword.clone());
+                list = list.child(
+                    row()
+                        .key(format!("keyword-{id}-{keyword}"))
+                        .w_full()
+                        .h(40.0)
+                        .px(12.0)
+                        .gap(10.0)
+                        .center_y()
+                        .radius(8.0)
+                        .border(1.0, p.divider)
+                        .child(text(keyword.clone()).font(font::BODY).color(p.text).grow(1.0).truncate())
+                        .child(
+                            icon_button(
+                                &icons::TRASH,
+                                &tf!("settings.keyword_remove", keyword = keyword),
+                                false,
+                                p.text_muted,
+                                p,
+                            )
+                            .key(format!("keyword-remove-{id}-{keyword}"))
+                            .on_press(move |s: &mut State| s.remove_keyword(&account, &removed)),
+                        ),
+                );
+            }
+        }
+    }
+    let empty = TextEdit::default();
+    let draft = s.keyword_drafts.get(&id).unwrap_or(&empty);
+    let typed = !draft.text.trim().is_empty();
+    let (edit, submit, add) = (id.clone(), id.clone(), id.clone());
+    let field = field_input(draft, t!("settings.keyword_placeholder"), p)
+        .key(format!("keyword-new-{id}"))
+        .label(t!("settings.keyword_placeholder"))
+        .on_edit(move |s: &mut State| s.keyword_drafts.entry(edit.clone()).or_default())
+        .on_submit(move |s: &mut State, _| s.add_keyword(&submit));
+    list.child(
+        row().w_full().gap(8.0).center_y().child(col().grow(1.0).min_w(0.0).child(field)).child(
+            button(t!("settings.keyword_add"), ButtonKind::Secondary, typed, p)
+                .key(format!("keyword-add-{id}"))
+                .on_press(move |s: &mut State| s.add_keyword(&add)),
+        ),
+    )
 }
 
 fn ring_choices() -> [(bool, &'static str, &'static str); 2] {

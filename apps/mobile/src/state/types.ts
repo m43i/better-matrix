@@ -102,6 +102,8 @@ export interface AccountData {
   status: Status;
   /** The status as last saved: what a choice that fails to save falls back to. */
   savedStatus: Status;
+  /** The words that notify the user wherever they are written, once the engine reports them. */
+  keywords: string[] | null;
 }
 
 /** A verification running for one of the accounts. */

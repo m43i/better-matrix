@@ -1,9 +1,10 @@
 //! The sidebar's sections for one scope: the built-in Rooms and Direct messages, which always
-//! exist and list the latest conversation first, and the user's own, which hold the rooms and
-//! chats dragged into them in the order they were placed. Also the order of the spaces on the
-//! rail. Changes edit a [`SidebarLayout`]; the state saves it to the account.
+//! exist and list the latest conversation first; Favourites and Low priority, built in too,
+//! which hold the rooms tagged so (room tags every client shares); and the user's own, which
+//! hold the rooms and chats dragged into them in the order they were placed. Also the order of
+//! the spaces on the rail. Changes edit a [`SidebarLayout`]; the state saves it to the account.
 
-use matrix_core::{RoomKind, RoomSummary, ScopeLayout, Section, SidebarLayout, SpaceSummary};
+use matrix_core::{RoomKind, RoomPriority, RoomSummary, ScopeLayout, Section, SidebarLayout, SpaceSummary};
 
 use super::Scope;
 use super::accounts::AccountData;
@@ -13,6 +14,10 @@ pub const ROOMS: &str = "rooms";
 /// Invitations keep this collapse key, but always precede the reorderable sections.
 pub const INVITATIONS: &str = "invitations";
 pub const DIRECT: &str = "direct";
+/// The rooms tagged `m.favourite`: first unless the user moved it.
+pub const FAVOURITES: &str = "favourites";
+/// The rooms tagged `m.lowpriority`: last unless the user moved it.
+pub const LOW_PRIORITY: &str = "low_priority";
 
 /// Where a scope's layout is kept: `home`, or the space's room ID.
 pub fn scope_key(scope: &Scope) -> String {
@@ -32,17 +37,44 @@ pub struct SectionView<'a> {
     pub rooms: Vec<&'a RoomSummary>,
 }
 
-/// A scope's sections in order: the user's own, then Rooms and Direct messages with whatever
-/// isn't in one of the user's.
+/// A scope's sections in order: Favourites, the user's own, then Rooms and Direct messages with
+/// whatever isn't in another section, then Low priority. A favourite or low priority room shows
+/// there even when one of the user's sections holds it: its tag, which the user set on some
+/// client, is the newer choice.
 pub fn sections<'a>(account: &'a AccountData, layout: &SidebarLayout, scope: &Scope) -> Vec<SectionView<'a>> {
     let mut out = unordered(account, layout, scope);
     let order = layout.scopes.get(&scope_key(scope)).map(|l| l.order.as_slice()).unwrap_or_default();
-    // Named sections in the saved order; the rest keep their place after them.
-    out.sort_by_key(|view| order.iter().position(|id| *id == view.id).unwrap_or(usize::MAX));
+    // Named sections in the saved order; the rest keep their place after them, except
+    // Favourites, which an order saved before it existed leaves first.
+    out.sort_by_key(|view| match order.iter().position(|id| *id == view.id) {
+        Some(at) => at + 1,
+        None if view.id == FAVOURITES => 0,
+        None => usize::MAX,
+    });
     out
 }
 
-/// The sections before ordering: the user's own as kept, then the built-in ones.
+/// The built-in section a room's tag puts it in, if any.
+fn tagged(room: &RoomSummary) -> Option<&'static str> {
+    match room.priority {
+        RoomPriority::Favourite => Some(FAVOURITES),
+        RoomPriority::Low => Some(LOW_PRIORITY),
+        RoomPriority::Normal => None,
+    }
+}
+
+/// The tag a room dropped into section `to` takes: a favourite dropped anywhere else stops
+/// being one, so it shows where it was dropped.
+pub fn priority_in(to: &str) -> RoomPriority {
+    match to {
+        FAVOURITES => RoomPriority::Favourite,
+        LOW_PRIORITY => RoomPriority::Low,
+        _ => RoomPriority::Normal,
+    }
+}
+
+/// The sections before ordering: Favourites, the user's own as kept, Rooms, Direct messages,
+/// then Low priority.
 fn unordered<'a>(account: &'a AccountData, layout: &SidebarLayout, scope: &Scope) -> Vec<SectionView<'a>> {
     let scope_layout = layout.scopes.get(&scope_key(scope));
     let collapsed = |id: &str| scope_layout.is_some_and(|l| l.collapsed.iter().any(|c| c == id));
@@ -50,10 +82,11 @@ fn unordered<'a>(account: &'a AccountData, layout: &SidebarLayout, scope: &Scope
     let in_scope: Vec<(usize, &RoomSummary)> =
         [RoomKind::Group, RoomKind::Direct].into_iter().flat_map(|kind| account.rooms_at(scope, kind)).collect();
     let user_sections = scope_layout.map(|l| l.sections.as_slice()).unwrap_or_default();
-    // The scope's rooms by ID, for the user's sections to find theirs (the first of a repeated ID).
+    // The scope's untagged rooms by ID, for the user's sections to find theirs (the first of a
+    // repeated ID).
     let mut by_id = std::collections::HashMap::new();
     if !user_sections.is_empty() {
-        for (_, room) in &in_scope {
+        for (_, room) in in_scope.iter().filter(|(_, room)| tagged(room).is_none()) {
             by_id.entry(room.room_id.as_str()).or_insert(*room);
         }
     }
@@ -69,18 +102,23 @@ fn unordered<'a>(account: &'a AccountData, layout: &SidebarLayout, scope: &Scope
             rooms,
         });
     }
-    for (id, kind) in [(ROOMS, RoomKind::Group), (DIRECT, RoomKind::Direct)] {
-        let mut rooms: Vec<(usize, &RoomSummary)> = in_scope
-            .iter()
-            .filter(|(_, room)| room.kind == kind && (placed.is_empty() || !placed.contains(room.room_id.as_str())))
-            .copied()
-            .collect();
-        // The latest conversation first; rooms with nothing known yet after them, by name.
-        let now = super::accounts::now_ms();
+    // The built-in sections, each with the latest conversation first; rooms with nothing known
+    // yet after them, by name.
+    let now = super::accounts::now_ms();
+    let builtin = |id: &str, belongs: &dyn Fn(&RoomSummary) -> bool| {
+        let mut rooms: Vec<(usize, &RoomSummary)> =
+            in_scope.iter().filter(|(_, room)| belongs(room)).copied().collect();
         rooms.sort_by_cached_key(|(at, room)| (std::cmp::Reverse(account.activity(room, now)), account.sort_name(*at)));
         let rooms = rooms.into_iter().map(|(_, room)| room).collect();
-        out.push(SectionView { id: id.to_owned(), name: None, collapsed: collapsed(id), rooms });
+        SectionView { id: id.to_owned(), name: None, collapsed: collapsed(id), rooms }
+    };
+    out.insert(0, builtin(FAVOURITES, &|room| tagged(room) == Some(FAVOURITES)));
+    for (id, kind) in [(ROOMS, RoomKind::Group), (DIRECT, RoomKind::Direct)] {
+        let free =
+            |room: &RoomSummary| room.kind == kind && tagged(room).is_none() && !placed.contains(room.room_id.as_str());
+        out.push(builtin(id, &free));
     }
+    out.push(builtin(LOW_PRIORITY, &|room| tagged(room) == Some(LOW_PRIORITY)));
     out
 }
 
@@ -119,6 +157,33 @@ pub fn move_section(layout: &mut SidebarLayout, scope: &Scope, shown: &[String],
     let mut order: Vec<String> = shown.iter().filter(|known| *known != id).cloned().collect();
     order.insert(index.min(order.len()), id.to_owned());
     scope_mut(layout, scope).order = order;
+}
+
+/// Moves a section to `index` among those `shown`, out of `all` the scope's sections in order:
+/// the ones not shown (empty built-in sections) keep their place in the saved order.
+pub fn move_shown_section(
+    layout: &mut SidebarLayout,
+    scope: &Scope,
+    all: &[String],
+    shown: &[String],
+    id: &str,
+    index: usize,
+) {
+    let others: Vec<&String> = all.iter().filter(|known| *known != id).collect();
+    let visible: Vec<&String> = shown.iter().filter(|known| *known != id).collect();
+    // Dropped back where it was: nothing to save.
+    if shown.iter().position(|known| known == id) == Some(index) {
+        return;
+    }
+    let place = |section: &&String| others.iter().position(|known| known == section);
+    // Before the shown section it is dropped above; dropped last, right after the last shown one,
+    // so hidden ones after it stay after it.
+    let at = match visible.get(index) {
+        Some(before) => place(before),
+        None => visible.last().and_then(place).map(|last| last + 1),
+    }
+    .unwrap_or(others.len());
+    move_section(layout, scope, all, id, at);
 }
 
 /// The spaces in their rail order: those the layout names, in its order, then the rest as they
@@ -165,7 +230,7 @@ pub fn move_room(layout: &mut SidebarLayout, scope: &Scope, room_id: &str, to: &
 
 /// Whether a section is one of the built-in ones.
 pub fn is_builtin(id: &str) -> bool {
-    id == ROOMS || id == DIRECT || id == INVITATIONS
+    [ROOMS, DIRECT, INVITATIONS, FAVOURITES, LOW_PRIORITY].contains(&id)
 }
 
 #[cfg(test)]
@@ -210,6 +275,55 @@ mod tests {
             move_room(&mut layout, &Scope::Home, room, &a, index);
         }
         assert_eq!(layout.scopes["home"].sections[0].rooms, ["!x", "!z", "!y"]);
+    }
+
+    #[test]
+    fn a_room_dropped_into_favourites_or_low_priority_should_take_that_tag() {
+        assert_eq!(priority_in(FAVOURITES), RoomPriority::Favourite);
+        assert_eq!(priority_in(LOW_PRIORITY), RoomPriority::Low);
+    }
+
+    #[test]
+    fn a_room_dropped_anywhere_else_should_lose_its_tag() {
+        for section in [ROOMS, DIRECT, "section-1"] {
+            assert_eq!(priority_in(section), RoomPriority::Normal);
+        }
+    }
+
+    #[test]
+    fn a_hidden_section_should_keep_its_place_when_another_moves() {
+        let mut layout = SidebarLayout::default();
+        let all = [ROOMS.to_owned(), FAVOURITES.to_owned(), DIRECT.to_owned(), "mine".to_owned()];
+        let shown = [ROOMS.to_owned(), DIRECT.to_owned(), "mine".to_owned()];
+        move_shown_section(&mut layout, &Scope::Home, &all, &shown, "mine", 1);
+        assert_eq!(layout.scopes["home"].order, [ROOMS, FAVOURITES, "mine", DIRECT]);
+    }
+
+    #[test]
+    fn a_section_dropped_last_should_go_after_every_shown_one() {
+        let mut layout = SidebarLayout::default();
+        let all = [FAVOURITES.to_owned(), ROOMS.to_owned(), DIRECT.to_owned()];
+        let shown = [ROOMS.to_owned(), DIRECT.to_owned()];
+        move_shown_section(&mut layout, &Scope::Home, &all, &shown, ROOMS, 1);
+        assert_eq!(layout.scopes["home"].order, [FAVOURITES, DIRECT, ROOMS]);
+    }
+
+    #[test]
+    fn a_section_dropped_back_in_place_should_change_no_order() {
+        let mut layout = SidebarLayout::default();
+        let all = [ROOMS.to_owned(), LOW_PRIORITY.to_owned(), DIRECT.to_owned()];
+        let shown = [ROOMS.to_owned(), DIRECT.to_owned()];
+        move_shown_section(&mut layout, &Scope::Home, &all, &shown, ROOMS, 0);
+        assert!(!layout.scopes.contains_key("home"));
+    }
+
+    #[test]
+    fn a_section_dropped_last_should_stay_above_a_hidden_one_after_it() {
+        let mut layout = SidebarLayout::default();
+        let all = [ROOMS.to_owned(), DIRECT.to_owned(), LOW_PRIORITY.to_owned()];
+        let shown = [ROOMS.to_owned(), DIRECT.to_owned()];
+        move_shown_section(&mut layout, &Scope::Home, &all, &shown, ROOMS, 1);
+        assert_eq!(layout.scopes["home"].order, [DIRECT, ROOMS, LOW_PRIORITY]);
     }
 
     #[test]

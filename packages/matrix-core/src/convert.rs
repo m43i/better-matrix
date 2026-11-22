@@ -17,7 +17,7 @@ use matrix_sdk::{Room, RoomMemberships};
 use crate::Error;
 use crate::model::{
     AccountId, Attachment, AttachmentKind, AudioDetails, HistoryVisibility, MediaRef, MediaSize, Message,
-    MessageContent, Notification, NotificationMode, RoomKind, RoomSummary, SpaceSummary,
+    MessageContent, Notification, NotificationMode, RoomKind, RoomPriority, RoomSummary, SpaceSummary,
 };
 
 async fn display_name(room: &Room) -> String {
@@ -92,6 +92,14 @@ pub(crate) async fn room_summary(
         pinned: room.pinned_event_ids().unwrap_or_default().iter().map(ToString::to_string).collect(),
         saved: crate::saved::saved_ids(room).await,
         can_pin: may_send_state(StateEventType::RoomPinnedEvents),
+        priority: if room.is_favourite() {
+            RoomPriority::Favourite
+        } else if room.is_low_priority() {
+            RoomPriority::Low
+        } else {
+            RoomPriority::Normal
+        },
+        marked_unread: room.is_marked_unread(),
     }
 }
 

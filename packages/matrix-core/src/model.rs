@@ -113,6 +113,26 @@ pub struct RoomSummary {
     pub can_pin: bool,
     /// Event IDs the user saved in this room, most recently saved first. Private to the user.
     pub saved: Vec<String>,
+    /// Whether the user put the room among their favourites or their low priority rooms (room
+    /// tags, which every client shares).
+    pub priority: RoomPriority,
+    /// Whether the user marked the room unread (MSC2867); reading it clears the mark.
+    pub marked_unread: bool,
+}
+
+/// Where the user put a room: among their favourites, their low priority rooms, or neither.
+/// Kept as the room tags `m.favourite` and `m.lowpriority`, so every client groups it the same.
+/// A room tagged both counts as a favourite.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub enum RoomPriority {
+    /// A favourite (`m.favourite`).
+    Favourite,
+    /// Neither tag.
+    #[default]
+    Normal,
+    /// Low priority (`m.lowpriority`).
+    Low,
 }
 
 /// Who can read a room's messages from before they joined, by the room's settings. The server

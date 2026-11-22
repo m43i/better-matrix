@@ -7,11 +7,13 @@ import { ADA, GRACE, summary } from '../../../test/fixtures';
 import { Store } from '../../store';
 import {
   addContact,
+  addKeyword,
   editableName,
   installAccountEffects,
   nameChanged,
   parseSignInInput,
   removeEnded,
+  removeKeyword,
   requestContactCode,
   serverName,
   setStatus,
@@ -482,6 +484,59 @@ describe('setStatus', () => {
     expect(status(store)).toBe('Online');
     expect(store.getState().notices.map((n) => n.message)).toContain(
       t('notice.status', { error: 'offline' }),
+    );
+  });
+});
+
+describe('notification keywords', () => {
+  function withKeywords(keywords: string[]) {
+    const env = setup();
+    env.engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    env.engine.emit({ type: 'Keywords', data: { account: ADA, keywords } });
+
+    return { ...env, keywords: () => env.store.getState().accounts[0]!.keywords };
+  }
+
+  it('adding a keyword should show it at once, sorted, and tell the engine', () => {
+    const { store, commands, keywords } = withKeywords(['zebra']);
+    expect(addKeyword(store, ADA, '  Apple ')).toBe(true);
+    expect(keywords()).toEqual(['Apple', 'zebra']);
+    expect(commands().at(-1)).toEqual({
+      type: 'SetKeyword',
+      data: { account: ADA, keyword: 'Apple', enabled: true },
+    });
+  });
+
+  it('a blank keyword should not be added', () => {
+    const { store, commands } = withKeywords([]);
+    expect(addKeyword(store, ADA, '   ')).toBe(false);
+    expect(commands()).toEqual([]);
+  });
+
+  it('a keyword the account has already should be listed once but still checked with the server', () => {
+    const { store, commands } = withKeywords(['deploy']);
+    expect(addKeyword(store, ADA, 'deploy')).toBe(true);
+    expect(store.getState().accounts[0]!.keywords).toEqual(['deploy']);
+    expect(commands()).toHaveLength(1);
+  });
+
+  it('removing a keyword should hide it at once and tell the engine', () => {
+    const { store, commands, keywords } = withKeywords(['deploy', 'release']);
+    removeKeyword(store, ADA, 'deploy');
+    expect(keywords()).toEqual(['release']);
+    expect(commands().at(-1)).toEqual({
+      type: 'SetKeyword',
+      data: { account: ADA, keyword: 'deploy', enabled: false },
+    });
+  });
+
+  it('a keyword that failed to save should tell the user', async () => {
+    const { store, last, finish } = withKeywords([]);
+    addKeyword(store, ADA, 'deploy');
+    finish(last().request, 'offline');
+    await flush();
+    expect(store.getState().notices.at(-1)!.message).toBe(
+      t('notice.notification_setting', { error: 'offline' }),
     );
   });
 });

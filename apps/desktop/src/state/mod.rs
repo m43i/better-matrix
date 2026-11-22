@@ -75,7 +75,9 @@ pub use profile::{ContactStep, ProfileForm};
 pub use readers::{READER_FACES, ReaderMenu};
 pub use room_discovery::Directory;
 pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches};
-pub use sections::{DIRECT, INVITATIONS, ROOMS, SectionView, is_builtin, ordered_spaces, sections};
+pub use sections::{
+    DIRECT, FAVOURITES, INVITATIONS, LOW_PRIORITY, ROOMS, SectionView, is_builtin, ordered_spaces, sections,
+};
 pub use settings::{Appearance, PlaybackSpeed, Settings, SettingsSection, Zoom};
 pub use sign_in::{SignInForm, SignInStep};
 pub use status_message::{leading_emoji, suggestions as status_suggestions};
@@ -572,6 +574,13 @@ enum Purpose {
         dimensions: Option<(u32, u32)>,
     },
     NotificationMode,
+    /// Marking a room unread or read, or moving it among the favourites or low priority rooms:
+    /// failing, that change is taken back.
+    RoomMark {
+        account: AccountId,
+        room_id: String,
+        undo: accounts::RoomUndo,
+    },
     /// Setting the user's status to `chosen`; failing, the account shows its saved status again,
     /// unless another status was chosen or reported since.
     Status {
@@ -796,6 +805,8 @@ pub struct State {
     side_loaded: Option<(AccountId, String, SidePanel)>,
     /// What the member list is filtered by.
     pub member_search: TextEdit,
+    /// The notification keyword being typed in Settings, per account.
+    pub keyword_drafts: HashMap<AccountId, TextEdit>,
     /// The call under way, from any account.
     pub call: Option<Call>,
     /// Calls ringing for the user, oldest first.
@@ -895,6 +906,7 @@ impl State {
             panes: PaneWidths::default(),
             side_loaded: None,
             member_search: TextEdit::default(),
+            keyword_drafts: HashMap::new(),
             call: None,
             rings: Vec::new(),
             ring_sound: None,
@@ -1312,6 +1324,7 @@ impl State {
             Event::ContactDetails { account, contacts } => self.accounts.set_contacts(&account, contacts),
             Event::Status { account, status } => self.accounts.status_saved(&account, status),
             Event::Presence { account, people } => self.accounts.set_presence(&account, people),
+            Event::Keywords { account, keywords } => self.accounts.set_keywords(&account, keywords),
             Event::SidebarLayout { account, layout } => {
                 let newer = self
                     .accounts
@@ -1789,6 +1802,10 @@ impl State {
             Purpose::Delete => self.notice = Some(tf!("notice.not_deleted", error = error)),
             Purpose::Logout => self.notice = Some(tf!("notice.sign_out", error = error)),
             Purpose::NotificationMode => self.notice = Some(tf!("notice.notification_setting", error = error)),
+            Purpose::RoomMark { account, room_id, undo } => {
+                self.accounts.undo(&account, &room_id, &undo);
+                self.notice = Some(tf!("notice.room_mark", error = error));
+            }
             Purpose::Status { account, chosen } => {
                 if let Some(data) = self.accounts.get(&account)
                     && data.status == chosen
@@ -2050,6 +2067,7 @@ impl State {
         }
         self.breath.ask();
         for (account, key) in self.open_timelines.clone() {
+            self.unmark(&account, &key.room_id);
             self.accounts.mark_read(&account, &key.room_id);
             let marker = self
                 .accounts
@@ -2700,6 +2718,10 @@ impl State {
         }
         let mut layout = account.sidebar.clone();
         change(&mut layout, &scope);
+        // Nothing changed (a section dropped back in place): nothing to save over other sessions'.
+        if layout == account.sidebar {
+            return;
+        }
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
         // Later than the layout it changes, even when this device's clock is behind.
         layout.changed_at = u64::try_from(now).unwrap_or(u64::MAX).max(layout.changed_at + 1);
@@ -2819,9 +2841,14 @@ impl State {
     }
 
     /// The sections as shown now, in order.
+    /// The sections the sidebar draws, in order: built-in ones show once they hold something.
     fn shown_sections(&self) -> Vec<String> {
         let Some(account) = self.active_account() else { return Vec::new() };
-        sections(account, &account.sidebar, &self.active_scope()).into_iter().map(|view| view.id).collect()
+        sections(account, &account.sidebar, &self.active_scope())
+            .into_iter()
+            .filter(|view| !(is_builtin(&view.id) && view.rooms.is_empty()))
+            .map(|view| view.id)
+            .collect()
     }
 
     /// Where something dragged to `point` would land.
@@ -2855,6 +2882,13 @@ impl State {
                     shown.contains(id) && x >= *zx && x <= zx + zw && y >= *zy && y <= zy + zh
                 })?;
                 let account = self.active_account()?;
+                // Rooms and Direct messages take only their own kind.
+                let kind = account.room(room_id)?.kind;
+                if (section == ROOMS && kind != matrix_core::RoomKind::Group)
+                    || (section == DIRECT && kind != matrix_core::RoomKind::Direct)
+                {
+                    return None;
+                }
                 let view = sections(account, &account.sidebar, &self.active_scope());
                 let rooms = &view.iter().find(|s| s.id == *section)?.rooms;
                 let index = rooms
@@ -2885,13 +2919,29 @@ impl State {
             }
             rune::Phase::Up => {
                 let Some(SidebarDrag { item, target: Some(target), .. }) = self.dragging.take() else { return };
+                // A room dropped into Favourites or Low priority takes that tag; dropped anywhere
+                // else, it loses it, so it shows where it was dropped.
+                let loaded = self.active_account().is_some_and(|account| account.sidebar_loaded);
+                if let (Dragged::Room(room_id), DropTarget::Room { section, .. }) = (&item, &target)
+                    && let Some(account) = self.nav.account.clone()
+                    && loaded
+                {
+                    self.change_priority(account, room_id, sections::priority_in(section));
+                }
                 let (shown, spaces) = (self.shown_sections(), self.shown_spaces());
+                let all: Vec<String> = self.active_account().map_or_else(Vec::new, |account| {
+                    sections(account, &account.sidebar, &self.active_scope()).into_iter().map(|view| view.id).collect()
+                });
                 self.change_layout(|layout, scope| match (item, target) {
+                    // Into Favourites or Low priority only the tag changes: a section of the
+                    // user's that holds the room keeps it for when the tag goes.
+                    (Dragged::Room(_), DropTarget::Room { section, .. })
+                        if section == FAVOURITES || section == LOW_PRIORITY => {}
                     (Dragged::Room(room_id), DropTarget::Room { section, index }) => {
                         sections::move_room(layout, scope, &room_id, &section, index);
                     }
                     (Dragged::Section(id), DropTarget::Section { index }) => {
-                        sections::move_section(layout, scope, &shown, &id, index);
+                        sections::move_shown_section(layout, scope, &all, &shown, &id, index);
                     }
                     (Dragged::Space(id), DropTarget::Space { index }) => {
                         sections::move_space(layout, &spaces, &id, index);
@@ -3466,6 +3516,15 @@ impl State {
         }
     }
 
+    /// Switches to an account from the account menu: its conversation shows again, and seeing it
+    /// takes away its unread mark.
+    pub fn switch_account(&mut self, id: &AccountId) {
+        self.select_account(id);
+        if let Some(room_id) = self.nav.rooms.get(id).cloned() {
+            self.unmark(id, &room_id);
+        }
+    }
+
     pub fn select_account(&mut self, id: &AccountId) {
         if self.accounts.get(id).is_some() {
             if self.nav.account.as_ref() != Some(id) {
@@ -3545,6 +3604,7 @@ impl State {
 
     pub fn select_room(&mut self, room_id: &str) {
         let Some(account) = self.nav.account.clone() else { return };
+        self.unmark(&account, room_id);
         self.accounts.mark_read(&account, room_id);
         if self.nav.rooms.get(&account).map(String::as_str) != Some(room_id) {
             self.nav.threads.remove(&account);
@@ -3804,6 +3864,96 @@ impl State {
     pub fn set_default_notifications(&mut self, account: &AccountId, mode: NotificationMode) {
         self.accounts.set_default_notifications(account, mode);
         let command = Command::SetDefaultNotificationMode { account: account.clone(), mode };
+        self.dispatch(command, Purpose::NotificationMode);
+    }
+
+    /// Takes away the unread mark of a room the user sees (opened, or shown again as the window
+    /// comes back) on every session; its read receipt follows as the timeline shows its messages,
+    /// and may not be sent at all when nothing new came.
+    fn unmark(&mut self, account: &AccountId, room_id: &str) {
+        if !self.accounts.get(account).and_then(|data| data.room(room_id)).is_some_and(|room| room.marked_unread) {
+            return;
+        }
+        self.accounts.set_marked(account, room_id, false);
+        let command = Command::SetUnread { account: account.clone(), room_id: room_id.to_owned(), unread: false };
+        let undo = accounts::RoomUndo::Mark(true);
+        self.dispatch(command, Purpose::RoomMark { account: account.clone(), room_id: room_id.to_owned(), undo });
+    }
+
+    /// Marks a room unread, or read, on every session, and closes the menu.
+    pub fn set_unread(&mut self, room_id: &str, unread: bool) {
+        self.popover = None;
+        let Some(account) = self.nav.account.clone() else { return };
+        let Some(before) = self.accounts.get(&account).and_then(|data| data.room(room_id)).cloned() else { return };
+        let (id, room_id) = (room_id.to_owned(), room_id.to_owned());
+        // Reading a room with unread messages needs a receipt; one only marked loses the mark.
+        let (command, undo) = if unread {
+            self.accounts.set_marked(&account, &room_id, true);
+            (
+                Command::SetUnread { account: account.clone(), room_id, unread },
+                accounts::RoomUndo::Mark(before.marked_unread),
+            )
+        } else if before.unread > 0 || before.mentions > 0 {
+            self.accounts.mark_read(&account, &room_id);
+            let undo = accounts::RoomUndo::Read {
+                marked: before.marked_unread,
+                unread: before.unread,
+                mentions: before.mentions,
+            };
+            (Command::MarkRoomRead { account: account.clone(), room_id }, undo)
+        } else {
+            self.accounts.mark_read(&account, &room_id);
+            (
+                Command::SetUnread { account: account.clone(), room_id, unread },
+                accounts::RoomUndo::Mark(before.marked_unread),
+            )
+        };
+        self.dispatch(command, Purpose::RoomMark { account, room_id: id, undo });
+    }
+
+    /// Puts a room among the favourites or the low priority rooms, or neither, on every client,
+    /// and closes the menu.
+    pub fn set_room_priority(&mut self, room_id: &str, priority: matrix_core::RoomPriority) {
+        self.popover = None;
+        let Some(account) = self.nav.account.clone() else { return };
+        self.change_priority(account, room_id, priority);
+    }
+
+    fn change_priority(&mut self, account: AccountId, room_id: &str, priority: matrix_core::RoomPriority) {
+        let current = self.accounts.get(&account).and_then(|data| data.room(room_id)).map(|room| room.priority);
+        let Some(before) = current.filter(|current| *current != priority) else { return };
+        self.accounts.set_priority(&account, room_id, priority);
+        let command = Command::SetRoomPriority { account: account.clone(), room_id: room_id.to_owned(), priority };
+        let undo = accounts::RoomUndo::Priority(before);
+        self.dispatch(command, Purpose::RoomMark { account, room_id: room_id.to_owned(), undo });
+    }
+
+    /// Adds the keyword typed for an account, showing it at once.
+    pub fn add_keyword(&mut self, account: &AccountId) {
+        let Some(draft) = self.keyword_drafts.get_mut(account) else { return };
+        let keyword = draft.text.trim().to_owned();
+        if keyword.is_empty() {
+            return;
+        }
+        *draft = TextEdit::default();
+        // Sent even when listed: a sync older than a removal may still list it, and the engine
+        // checks the server's rules.
+        let mut keywords = self.accounts.get(account).and_then(|data| data.keywords.clone()).unwrap_or_default();
+        if !keywords.contains(&keyword) {
+            keywords.push(keyword.clone());
+            keywords.sort_by_cached_key(|keyword| (keyword.to_lowercase(), keyword.clone()));
+            self.accounts.set_keywords(account, keywords);
+        }
+        let command = Command::SetKeyword { account: account.clone(), keyword, enabled: true };
+        self.dispatch(command, Purpose::NotificationMode);
+    }
+
+    /// Removes one of an account's keywords, showing it gone at once.
+    pub fn remove_keyword(&mut self, account: &AccountId, keyword: &str) {
+        let mut keywords = self.accounts.get(account).and_then(|data| data.keywords.clone()).unwrap_or_default();
+        keywords.retain(|known| known != keyword);
+        self.accounts.set_keywords(account, keywords);
+        let command = Command::SetKeyword { account: account.clone(), keyword: keyword.to_owned(), enabled: false };
         self.dispatch(command, Purpose::NotificationMode);
     }
 

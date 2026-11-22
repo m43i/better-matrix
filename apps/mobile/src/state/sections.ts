@@ -1,7 +1,8 @@
 // The room list's sections for one scope, as the desktop's sidebar arranges them
 // (apps/desktop/src/state/sections.rs and accounts.rs): the built-in Rooms and Direct messages,
-// which always exist and list the latest conversation first, and the user's own sections, which
-// hold the rooms and chats moved into them in the order they were placed. Also which rooms a
+// which always exist and list the latest conversation first; Favourites and Low priority, built
+// in too, which hold the rooms tagged so (room tags every client shares); and the user's own
+// sections, which hold the rooms and chats moved into them in the order they were placed. Also which rooms a
 // scope shows, which "want attention", and the edits to a `SidebarLayout` the user can make.
 // Pure: every function takes what it needs; layout edits return new values, and what the scope
 // helpers derive is kept per list (`newestMessages`, per account) and must not be changed.
@@ -10,6 +11,7 @@ import type {
   AccountId,
   Message,
   RoomKind,
+  RoomPriority,
   RoomSummary,
   ScopeLayout,
   SidebarLayout,
@@ -26,9 +28,28 @@ export const ROOMS = 'rooms';
 
 export const DIRECT = 'direct';
 
+/** The rooms tagged `m.favourite`: first unless the user moved it. */
+export const FAVOURITES = 'favourites';
+
+/** The rooms tagged `m.lowpriority`: last unless the user moved it. */
+export const LOW_PRIORITY = 'low_priority';
+
 /** Whether a section is one of the built-in ones. */
 export function isBuiltin(id: string): boolean {
-  return id === ROOMS || id === DIRECT;
+  return id === ROOMS || id === DIRECT || id === FAVOURITES || id === LOW_PRIORITY;
+}
+
+/** The built-in section a room's tag puts it in, if any. */
+function tagged(room: RoomSummary): string | null {
+  return room.priority === 'Favourite' ? FAVOURITES : room.priority === 'Low' ? LOW_PRIORITY : null;
+}
+
+/**
+ * The tag a room moved into section `to` takes: a favourite moved anywhere else stops being one,
+ * so it shows where it was moved.
+ */
+export function priorityIn(to: string): RoomPriority {
+  return to === FAVOURITES ? 'Favourite' : to === LOW_PRIORITY ? 'Low' : 'Normal';
 }
 
 /** Where a scope's layout is kept: `home`, or the space's room ID. */
@@ -41,11 +62,14 @@ export function sameScope(a: Scope, b: Scope): boolean {
 }
 
 /**
- * Whether a room has something the user wants to see: unread messages when it notifies for all
- * of them, else mentions.
+ * Whether a room has something the user wants to see: the user marked it unread, or unread
+ * messages when it notifies for all of them, else mentions.
  */
 export function wantsAttention(room: RoomSummary): boolean {
-  return room.notifications === 'AllMessages' ? room.unread > 0 : room.mentions > 0;
+  return (
+    room.marked_unread ||
+    (room.notifications === 'AllMessages' ? room.unread > 0 : room.mentions > 0)
+  );
 }
 
 // What the room lists derive from the spaces and rooms is kept per array: state is never changed
@@ -376,8 +400,11 @@ function scopeLayout(layout: SidebarLayout, scope: Scope): ScopeLayout | undefin
 }
 
 /**
- * A scope's sections in order: the user's own, then Rooms and Direct messages with whatever isn't
- * in one of the user's; sections the saved order names come first, in its order.
+ * A scope's sections in order: Favourites, the user's own, then Rooms and Direct messages with
+ * whatever isn't in another section, then Low priority; sections the saved order names come
+ * first, in its order, except Favourites, which an order saved before it existed leaves first. A
+ * favourite or low priority room shows there even when one of the user's sections holds it: its
+ * tag, which the user set on some client, is the newer choice.
  */
 export function sections(
   account: Pick<AccountData, 'sidebar' | 'rooms' | 'spaces'> & RecencySource,
@@ -387,9 +414,16 @@ export function sections(
   const kept = scopeLayout(account.sidebar, scope);
   const collapsed = new Set(kept?.collapsed ?? []);
   const inScope = roomsInScope(account, scope);
-  const byId = new Map(inScope.map((r) => [r.room_id, r]));
+  const byId = new Map(inScope.filter((r) => tagged(r) === null).map((r) => [r.room_id, r]));
   const placed = new Set<string>();
   const out: SectionView[] = [];
+
+  const builtin = (id: string, belongs: (room: RoomSummary) => boolean): SectionView => ({
+    id,
+    name: null,
+    collapsed: collapsed.has(id),
+    rooms: byRecency(account, inScope.filter(belongs), now),
+  });
 
   for (const section of kept?.sections ?? []) {
     const rooms = section.rooms.flatMap((id) => byId.get(id) ?? []);
@@ -398,25 +432,30 @@ export function sections(
     out.push({ id: section.id, name: section.name, collapsed: collapsed.has(section.id), rooms });
   }
 
+  out.unshift(builtin(FAVOURITES, (room) => tagged(room) === FAVOURITES));
+
   for (const [id, kind] of [
     [ROOMS, 'Group'],
     [DIRECT, 'Direct'],
   ] as const) {
-    const rooms = inScope.filter((room) => room.kind === kind && !placed.has(room.room_id));
-    out.push({
-      id,
-      name: null,
-      collapsed: collapsed.has(id),
-      rooms: byRecency(account, rooms, now),
-    });
+    out.push(
+      builtin(
+        id,
+        (room) => room.kind === kind && tagged(room) === null && !placed.has(room.room_id),
+      ),
+    );
   }
+
+  out.push(builtin(LOW_PRIORITY, (room) => tagged(room) === LOW_PRIORITY));
 
   const order = kept?.order ?? [];
 
   const rank = (id: string) => {
     const at = order.indexOf(id);
 
-    return at < 0 ? Number.MAX_SAFE_INTEGER : at;
+    if (at >= 0) return at + 1;
+
+    return id === FAVOURITES ? 0 : Number.MAX_SAFE_INTEGER;
   };
 
   // A stable sort: sections the order doesn't name keep their place after the ones it does.

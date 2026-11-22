@@ -4,6 +4,7 @@ import type { MediaRef } from "./MediaRef";
 import type { NotificationMode } from "./NotificationMode";
 import type { RoomCall } from "./RoomCall";
 import type { RoomKind } from "./RoomKind";
+import type { RoomPriority } from "./RoomPriority";
 
 /**
  * A joined room as the room list shows it.
@@ -90,4 +91,13 @@ can_pin: boolean,
 /**
  * Event IDs the user saved in this room, most recently saved first. Private to the user.
  */
-saved: Array<string>, };
+saved: Array<string>, 
+/**
+ * Whether the user put the room among their favourites or their low priority rooms (room
+ * tags, which every client shares).
+ */
+priority: RoomPriority, 
+/**
+ * Whether the user marked the room unread (MSC2867); reading it clears the mark.
+ */
+marked_unread: boolean, };

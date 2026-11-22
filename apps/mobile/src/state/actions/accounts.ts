@@ -454,6 +454,65 @@ export function setDefaultNotificationMode(
   store.send({ type: 'SetDefaultNotificationMode', data: { account, mode } });
 }
 
+/** Keywords sorted as the engine reports them: case-insensitively. */
+function sortedKeywords(keywords: string[]): string[] {
+  return [...keywords].sort((a, b) => {
+    const [x, y] = [a.toLowerCase(), b.toLowerCase()];
+
+    if (x !== y) return x < y ? -1 : 1;
+
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+}
+
+/** Sends a keyword change; a failure tells the user, and the engine reports the keywords again. */
+function sendKeyword(store: Store, account: AccountId, keyword: string, enabled: boolean): void {
+  store.run({ type: 'SetKeyword', data: { account, keyword, enabled } }).catch((cause: unknown) => {
+    if (cause instanceof CommandFailed && cause.cancelled) return;
+    const message = cause instanceof Error ? cause.message : String(cause);
+    store.update((s) =>
+      addNotice(s, t('notice.notification_setting', { error: message }), account),
+    );
+  });
+}
+
+/**
+ * Adds a word that notifies the user wherever it is written, shown at once. Blank words and
+ * ones the account has already are left alone; returns whether it was added.
+ */
+export function addKeyword(store: Store, account: AccountId, keyword: string): boolean {
+  const word = keyword.trim();
+  const known = store.getState().accounts.find((a) => a.summary.id === account)?.keywords ?? [];
+
+  if (!word) return false;
+
+  // Sent even when listed: a sync older than a removal may still list it, and the engine checks
+  // the server's rules.
+  if (!known.includes(word)) {
+    store.update((s) =>
+      updateAccount(s, account, (a) => ({
+        ...a,
+        keywords: sortedKeywords([...(a.keywords ?? []), word]),
+      })),
+    );
+  }
+
+  sendKeyword(store, account, word, true);
+
+  return true;
+}
+
+/** Removes one of the account's notification keywords, shown gone at once. */
+export function removeKeyword(store: Store, account: AccountId, keyword: string): void {
+  store.update((s) =>
+    updateAccount(s, account, (a) => ({
+      ...a,
+      keywords: (a.keywords ?? []).filter((known) => known !== keyword),
+    })),
+  );
+  sendKeyword(store, account, keyword, false);
+}
+
 /**
  * Sets what others see of the user on an account (online, away, hidden), showing it at once;
  * if the server refuses, the saved status shows again (unless another was chosen since) with a

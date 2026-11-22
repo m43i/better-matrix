@@ -94,6 +94,7 @@ function newAccount(summary: AccountSummary): AccountData {
     sidebarLoaded: false,
     status: 'Online',
     savedStatus: 'Online',
+    keywords: null,
   };
 }
 
@@ -408,6 +409,11 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
           ? a
           : { ...a, sidebar: event.data.layout, sidebarLoaded: true },
       );
+    case 'Keywords':
+      return updateAccount(state, event.data.account, (a) => ({
+        ...a,
+        keywords: event.data.keywords,
+      }));
     case 'Status':
       return updateAccount(state, event.data.account, (a) => ({
         ...a,

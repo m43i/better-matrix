@@ -17,6 +17,7 @@ import type { Password } from "./Password";
 import type { PendingContact } from "./PendingContact";
 import type { Pusher } from "./Pusher";
 import type { RequestId } from "./RequestId";
+import type { RoomPriority } from "./RoomPriority";
 import type { SidebarLayout } from "./SidebarLayout";
 import type { Status } from "./Status";
 import type { TimelineKey } from "./TimelineKey";
@@ -273,7 +274,51 @@ account: AccountId,
 /**
  * The new default.
  */
-mode: NotificationMode, } } | { "type": "SetStatus", "data": { 
+mode: NotificationMode, } } | { "type": "SetKeyword", "data": { 
+/**
+ * Which account.
+ */
+account: AccountId, 
+/**
+ * The word.
+ */
+keyword: string, 
+/**
+ * Add when true, remove when false.
+ */
+enabled: boolean, } } | { "type": "SetRoomPriority", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room's ID.
+ */
+room_id: string, 
+/**
+ * Where it goes.
+ */
+priority: RoomPriority, } } | { "type": "SetUnread", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room's ID.
+ */
+room_id: string, 
+/**
+ * Mark unread when true, take the mark away when false.
+ */
+unread: boolean, } } | { "type": "MarkRoomRead", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room's ID.
+ */
+room_id: string, } } | { "type": "SetStatus", "data": { 
 /**
  * Which account.
  */

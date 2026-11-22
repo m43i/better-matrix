@@ -69,6 +69,7 @@ export type { RoomKind } from "./RoomKind";
 export type { RoomList } from "./RoomList";
 export type { RoomMember } from "./RoomMember";
 export type { RoomPreview } from "./RoomPreview";
+export type { RoomPriority } from "./RoomPriority";
 export type { RoomSummary } from "./RoomSummary";
 export type { SasEmoji } from "./SasEmoji";
 export type { SavedMessage } from "./SavedMessage";

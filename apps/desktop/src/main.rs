@@ -553,6 +553,16 @@ fn spec() -> AppSpec<State> {
                 s.toggle_room_menu("!lab:example.org");
                 s.show_room_notifications();
             }),
+            ("demo-organised", demo::organised),
+            ("demo-organised-menu", |s| {
+                demo::organised(s);
+                s.toggle_room_menu("!dm-grace:example.org");
+            }),
+            ("demo-settings-keywords", |s| {
+                demo::organised(s);
+                s.open_settings();
+                s.show_settings_section(SettingsSection::Notifications);
+            }),
             ("demo-dm-menu", |s| {
                 demo::seed(s);
                 s.toggle_room_menu("!dm-grace:example.org");
@@ -1879,6 +1889,54 @@ mod tests {
         press(&mut rt, "notify-mute");
         let room = rt.state.active_account().and_then(|a| a.room("!lab:example.org")).map(|r| r.notifications);
         assert_eq!(room, Some(matrix_core::NotificationMode::Mute));
+    }
+
+    fn open_room_menu(rt: &mut Runtime<State>, room_id: &str) {
+        let (x, y) = rt.find(&format!("room-{room_id}")).unwrap();
+        rt.secondary_down(x, y);
+        rt.secondary_up(x, y);
+        rt.frame(1.0 / 60.0);
+    }
+
+    #[test]
+    fn adding_a_room_to_favourites_from_its_menu_should_list_it_under_favourites() {
+        let mut rt = runtime(demo::seed);
+        assert!(rt.find("section-favourites").is_none());
+        open_room_menu(&mut rt, "!lab:example.org");
+        press(&mut rt, "room-menu-favourite");
+        assert!(rt.find("section-header-favourites").is_some());
+        let room = rt.state.active_account().and_then(|a| a.room("!lab:example.org")).map(|r| r.priority);
+        assert_eq!(room, Some(matrix_core::RoomPriority::Favourite));
+    }
+
+    #[test]
+    fn moving_a_room_to_low_priority_from_its_menu_should_list_it_under_low_priority() {
+        let mut rt = runtime(demo::seed);
+        open_room_menu(&mut rt, "!lab:example.org");
+        press(&mut rt, "room-menu-low-priority");
+        assert!(rt.find("section-header-low_priority").is_some());
+    }
+
+    #[test]
+    fn marking_a_quiet_room_unread_from_its_menu_should_draw_attention_to_it() {
+        let mut rt = runtime(demo::seed);
+        open_room_menu(&mut rt, "!lab:example.org");
+        press(&mut rt, "room-menu-unread");
+        let room = rt.state.active_account().and_then(|a| a.room("!lab:example.org")).cloned();
+        assert!(room.is_some_and(|room| state::wants_attention(&room)));
+    }
+
+    #[test]
+    fn keywords_in_settings_should_be_listed_with_a_way_to_add_more() {
+        let mut rt = runtime(|s| {
+            demo::organised(s);
+            s.open_settings();
+            s.show_settings_section(SettingsSection::Notifications);
+        });
+        assert!(rt.find("keyword-@ada:example.org-deploy").is_some());
+        assert!(rt.find("keyword-new-@ada:example.org").is_some());
+        press(&mut rt, "keyword-remove-@ada:example.org-deploy");
+        assert!(rt.find("keyword-@ada:example.org-deploy").is_none());
     }
 
     #[test]
