@@ -107,7 +107,7 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
   /** The draft as this view last wrote or took it: anything else in the store came from elsewhere. */
   const written = useRef(state.draft);
   const selection = useRef<Selection>({ start: state.draft.length, end: state.draft.length });
-  /** Where the caret is, while the formatting toolbar shows it. */
+  /** Where the caret is, while the formatting toolbar or a suggestion's sign needs it. */
   const [caret, setCaret] = useState(state.draft.length);
   /** Where the caret goes once the field shows a text this view changed. */
   const pendingSelection = useRef<Selection | null>(null);
