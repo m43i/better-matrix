@@ -144,14 +144,63 @@ Date: 2026-11-16
 - **The composer is one row:** + then the text field then the mic (send once there is something
   to send). The field grows with its text to about six lines, then scrolls, as the desktop's
   does. + opens every other option in the keyboard's place (photos and videos, camera, files,
-  poll, formatting, emoji); formatting, once picked, puts the toolbar above the row until it is
-  closed.
+  poll, location, sticker, formatting, emoji), four to a row; formatting, once picked, puts the
+  toolbar above the row until it is closed. A long press on Send schedules the message (below).
 - **The composer writes formatting as markers.** The native text field holds plain text;
   `Format`s insert and remove markdown-style markers (`**bold**`, `_italic_`, `~~strike~~`,
   `` `code` ``, `[text](url)`, `- `/`1. ` lists, `> ` quotes, ``` fences), and lists and quotes
-  continue on a line break. On send, `state/format.ts` turns the text into the body and the
-  Matrix HTML the desktop's rich field sends (as Rune's `to_html` writes it), HTML only when
-  formatted; `draftOf` writes a message's HTML back as markers for an edit. Sends are planned as
+  continue on a line break. Two markers the toolbar doesn't offer are Matrix's own:
+  `||spoiler||` (`<span data-mx-spoiler>`, `[Spoiler]` in the body) and `$$latex$$`
+  (`data-mx-maths`, its LaTeX the fallback). On send, `state/format.ts` turns the text into the
+  body and the Matrix HTML the desktop's rich field sends (as Rune's `to_html` writes it), HTML
+  only when formatted; `editDraft` writes a message's HTML back as markers and pills for an
+  edit.
+- **Mentions and custom emoji are pills beside the text** (`state/pills.ts`, the engine's
+  `html.rs` pill ids: `user:@…`, `room:!…`/`room:#…`, `everyone`, `emote:mxc://…`). A picked
+  suggestion inserts its label into the draft (`@Grace Hopper`, `#design`, `@room`,
+  `:party:`) and adds the pill to `ComposerState.pills`; pills are matched by label, not by
+  position, so formatting, emoji and edits elsewhere never move them: each pill takes the
+  earliest place where its label stands whole (not inside a longer word), and a pill whose label
+  was edited away is dropped on the next change (Slack's behaviour: a broken mention is text).
+  On send each placed label becomes one private-use character while the markers are parsed, so
+  markers around it format it and nothing in a name reads as a marker; it then goes as the
+  engine's HTML (`<a href="https://matrix.to/#/@…">Name</a>`, `<img data-mx-emoticon …>`,
+  `@room` as plain text) and its people as `Outgoing::Text.mentions` (`m.mentions`, always
+  sent, empty when nobody), edits included. The field draws placed pills in the accent
+  (`TextInput` children, no `value`).
+- **Suggestions** (`state/suggestions.ts`, pure, from the word before the caret,
+  `triggerAt`): `@` people in the room from its whole member list (fetched when first asked) and
+  `@room` in a group; `#` joined rooms; `:` and two letters the room's custom emoji
+  (`ListImagePacks`, user pack first) then standard emoji; `/` at the start the commands. They
+  list above the field, as Slack's do; the field reports the caret only while the draft holds
+  one of the signs, so plain typing still redraws once a keystroke.
+- **Slash commands** (`state/slash.ts`): `/me` (an emote), `/shrug`, `/tableflip`, `/unflip`,
+  `/lenny` (the face before the text), `/plain` (no formatting), `/spoiler`, `/invite`, `/join`
+  (opens the room once joined), `/leave` (back to Home), `/topic` (`SetTopic`), `/nick`
+  (`SetDisplayName`). A command acts in the draft's place; the reply and attachments wait for
+  the next send. An unknown command or one missing its argument keeps the draft and says so;
+  `//text` sends `/text`. Each failure says what failed (`notice.invite`, `notice.join`, …).
+- **Stickers and custom emoji** come from MSC2545 packs (`ListImagePacks`, kept per room in
+  `AccountData.packs`): the sticker sheet (`app/stickers.tsx`) sends `Outgoing::Sticker`; the
+  emoji picker, writing (not reacting), offers the custom emoji first as pills. Received
+  stickers arrive as images (the engine's conversion). Custom emoji in messages are drawn
+  inline from their `mxc://` URI, as a media handle written the engine's way
+  (`mxcMedia`: `MediaSource::Plain` as JSON), the one handle the app writes itself.
+- **Locations:** the sheet (`app/location.tsx`) takes the phone's position (expo-location,
+  when-in-use permission only, configured in `app.json`) or a place found by name
+  (`SearchPlaces`, only on submit: Nominatim's policy forbids searching as one types), previews
+  it on its map and sends `Outgoing::Location`. The timeline's card (`LocationCard`) draws the
+  map the engine renders from OpenStreetMap (`osm:<lat>,<lon>,15`, which the app also writes for
+  the phone's own position, `state/geo.ts` mirroring `geo.rs`), the description, the
+  coordinates and "© OpenStreetMap contributors" on every map; tapping opens openstreetmap.org.
+- **Scheduled messages** (MSC4140): a long press on Send (text only, not an edit, not with
+  attachments, which upload at once) opens the schedule sheet (`app/schedule.tsx`: in 30
+  minutes, in an hour, tomorrow at 9:00, next Monday at 9:00 with when each is, or a custom
+  date and time through `@expo/ui`'s date-time picker, at most 30 days ahead), which sends
+  `Schedule` with the delay worked out in local time (`state/schedule.ts`). The composer shows
+  "N scheduled messages" above itself for its room (`ListScheduled` whenever a conversation
+  opens); the bar opens the list (`app/scheduled.tsx`) to send each now or cancel it
+  (`UpdateScheduled`). A refused schedule gives the text back. Sends are planned as
   data (`state/outgoing.ts`): text with the reply first, then each attachment as
   `Upload::Path`; voice memos are AAC `.m4a` from expo-audio, sent with a 100-point waveform
   from the recorder's metering (read 20 times a second, `waveformFromLevels`, on the desktop's
@@ -297,6 +346,21 @@ Date: 2026-11-16
 - **Message HTML** is parsed by a small tokenizer of our own (`state/html.ts`) into a safe node
   tree: only the desktop's allowed tags become formatting, links keep `http(s)`, `mailto` and
   `ftp`, reply fallbacks and scripts are dropped, nesting is capped. Nothing renders raw HTML.
+  Matrix's inline objects become inlines of their own, as `html.rs` reads them: mention pills
+  (the user's own in the mention colour), spoilers hidden behind a block of the muted colour
+  until tapped, formulas as Unicode (`state/math.ts`, a line-for-line port of `math.rs` run
+  against its `math.json` vectors; a `<div>` formula gets its own line) and custom emoji as
+  pictures in the line.
+- **Message kinds:** emotes read "* Name action" (`prepare` puts the name before the first
+  paragraph); places are `LocationCard`s; a message the push rules say mentions the user
+  (`Message.highlighted`) has a warm tint and bar (`palette.warning`), as Slack marks mentions.
+  The "(edited)" label opens the edit history (`app/edit-history.tsx`, `ListEdits`, kept in
+  `AccountData.edits`, newest first, the original marked).
+- **Jumping to a message:** a quote's tap scrolls to the quoted message, and when it isn't
+  loaded pages back as a link's target does (`Timeline`'s `jump`), saying so if it isn't found;
+  the message flashes highlighted. A permalink to a message in a joined room asks the engine
+  where it is (`LocateMessage`) and opens its thread when it is a reply in one, else the room at
+  it (`openJoined`, the room when the engine can't tell).
 - **Demo scenes** (`src/demo`) are the mobile `--scene`: the desktop's fixtures as engine
   events through `apply`, on a demo engine that finishes every command and answers lists,
   searches, sends and calls from the fixtures (media from the app's own assets). Dev builds
@@ -306,7 +370,12 @@ Date: 2026-11-16
   `call-shares`, `call-focus`, `call-chat`, `call-voice-chat`, `call-bar`, `ringing`; the
   layout menu is native and can't be opened by a scene. `preview-gallery` and `preview-audio`
   open a batch Grace posts into #design (two images, a video the demo has no file for, an
-  audio clip).
+  audio clip). #releases holds every message kind the composer sends (`message-kinds`); the
+  composer scenes are `mention`, `mention-pill`, `commands`, `emoji-suggestions`,
+  `emoji-custom`, `stickers`, `location`, `schedule`, `scheduled-bar`, `scheduled` and
+  `edit-history`. The demo engine answers packs, place search, edit history, `LocateMessage`
+  and scheduled messages, and serves one stand-in map (`assets/demo/map.png`) for every place
+  and the demo pack's images from `assets/demo`.
 - **The attachment preview** (`app/preview.tsx`) shows one attachment full screen on black: an
   image to pinch, pan and double-tap to zoom, a video in expo-video's player with the
   platform's controls, or an audio clip in a player of ours (`ui/preview/AudioPreview.tsx`:
@@ -441,5 +510,11 @@ Date: 2026-11-16
   failed may still show a generic notification on iOS until it is removed. iOS may kill a suspended app that holds SQLite locks in the shared container
   (`0xdead10cc`). An extension can't drop a push, so one that turns out to be nothing still
   shows the generic text. Pushes don't update the badge. Calls still don't ring through push.
+- Composer extras, still open: a room mention is made by room ID (`RoomSummary` carries no
+  canonical alias, so `#` suggestions link `!id` without `via`); custom emoji in received HTML
+  need their media handle written by the app (`mxcMedia`), which ties it to the engine's
+  `MediaRef` encoding until the engine hands handles for them; reactions don't offer custom
+  emoji; formulas are only sent inline (`$$…$$`), never as blocks; the phone's position is
+  read once, with no live location sharing.
 - Watch: a new boundary type needs the `ffi` derives (the build fails without them); a new event
   needs a case in the reducer (the type check fails without it).
