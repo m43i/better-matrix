@@ -47,6 +47,10 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
             if s.suggestion_key(target, key) {
                 return true;
             }
+            // A key that would join a spoiler or mention onto a code block does nothing.
+            if s.composer(target).would_strip_pills(key) {
+                return true;
+            }
             s.composer_mut(target).before_key(key);
             let c = s.composer(target);
             match key.key {

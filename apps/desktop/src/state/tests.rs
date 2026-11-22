@@ -6066,3 +6066,21 @@ fn a_lookup_failing_after_leaving_its_room_should_say_nothing() {
     apply(&mut s, Event::Finished { request, result: Err("not found".into()) });
     assert!(s.notice.is_none());
 }
+
+#[test]
+fn a_refused_scheduled_draft_should_wait_for_its_composer_to_be_free() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.composer.edit.insert("later");
+    s.schedule_message(ComposerTarget::Room, When::Hour);
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::Schedule { .. }))
+        .expect("a scheduled message");
+    s.composer.edit.insert("next one");
+    apply(&mut s, Event::Finished { request, result: Err("delay too long".into()) });
+    assert_eq!(s.composer.edit.text, "next one");
+    s.send_message(ComposerTarget::Room, &mut Tx::default());
+    s.poll(&mut Tx::default());
+    assert_eq!(s.composer.edit.text, "later");
+}

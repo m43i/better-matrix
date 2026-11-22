@@ -344,6 +344,28 @@ impl Composer {
         }
     }
 
+    /// Whether `key` would join a paragraph holding a pill onto a code block, whose lines keep no
+    /// pills: a spoiler's words would then go as plain code. Such a key does nothing.
+    pub fn would_strip_pills(&self, key: &rune::KeyEvent) -> bool {
+        if self.edit.anchor != self.edit.focus {
+            return false;
+        }
+        let caret = self.edit.focus;
+        let paragraphs = self.edit.paragraphs();
+        let Some(at) = paragraphs.iter().position(|p| p.range.start <= caret && caret <= p.range.end) else {
+            return false;
+        };
+        let (joined, into) = match key.key {
+            rune::Key::Backspace if caret == paragraphs[at].range.start && at > 0 => (at, at - 1),
+            rune::Key::Delete if caret == paragraphs[at].range.end && at + 1 < paragraphs.len() => (at + 1, at),
+            _ => return false,
+        };
+        let (joined, into) = (&paragraphs[joined], &paragraphs[into]);
+        let holds_pill =
+            self.edit.pills().any(|(range, _)| joined.range.start <= range.start && range.end <= joined.range.end);
+        into.block == Block::Code && joined.block != Block::Code && holds_pill
+    }
+
     /// Whether a pill lies in the paragraphs the selection touches.
     fn pills_in_selected_paragraphs(&self) -> bool {
         let text = &self.edit.text;
@@ -867,6 +889,20 @@ mod tests {
         assert_eq!(c.edit.text, "helo!");
         c.cancel_edit();
         assert_eq!(c.edit.text, "draft");
+    }
+
+    #[test]
+    fn backspace_should_not_join_a_spoiler_onto_a_code_block() {
+        let mut c = composer("let x");
+        c.format(Format::CodeBlock);
+        c.edit.set_selection(5, 5);
+        c.edit.insert("\n");
+        c.edit.toggle_block(Block::Code);
+        c.edit.insert_pill("spoiler", "secret");
+        let start = c.edit.text.find("secret").unwrap_or_default();
+        c.edit.set_selection(start, start);
+        let backspace = rune::KeyEvent { key: rune::Key::Backspace, mods: rune::Mods::default() };
+        assert!(c.would_strip_pills(&backspace));
     }
 
     #[test]

@@ -51,7 +51,17 @@ pub fn mention_id(id: &str) -> Option<String> {
 /// ```
 pub fn mention_link(pill: &str) -> Option<String> {
     let id = pill.strip_prefix("user:").or_else(|| pill.strip_prefix("room:"))?;
-    Some(format!("https://matrix.to/#/{id}"))
+    // One segment of the fragment: a `/` in an ID (user IDs may hold one) would start another.
+    let encoded: String = id
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'@' | b'#' | b'!' | b':' => {
+                char::from(byte).to_string()
+            }
+            byte => format!("%{byte:02X}"),
+        })
+        .collect();
+    Some(format!("https://matrix.to/#/{encoded}"))
 }
 
 /// Matrix HTML with its mentions, spoilers, maths and custom emoji as pills. A link to a
@@ -414,6 +424,16 @@ fn escape(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mention_of_an_id_with_a_slash_should_link_it_as_one_segment() {
+        let link = mention_link("user:@team/bot:example.org").expect("a link");
+        assert_eq!(link, "https://matrix.to/#/@team%2Fbot:example.org");
+        assert_eq!(
+            to_pills(&format!("<a href=\"{link}\">Bot</a>"), Pills::Display),
+            "<span data-pill=\"user:@team/bot:example.org\">Bot</span>"
+        );
+    }
 
     #[test]
     fn a_room_mention_should_become_a_pill() {

@@ -12,8 +12,8 @@
 use std::time::Duration;
 
 use matrix_sdk::Room;
-use matrix_sdk::ruma::api::client::delayed_events::{DelayParameters, delayed_message_event, update_delayed_event};
-use matrix_sdk::ruma::events::{AnyMessageLikeEventContent, MessageLikeEventContent, MessageLikeEventType};
+use matrix_sdk::ruma::api::client::delayed_events::update_delayed_event;
+use matrix_sdk::ruma::events::{AnyMessageLikeEventContent, MessageLikeEventContent};
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::ruma::{OwnedUserId, TransactionId};
 use serde_json::Value;
@@ -26,6 +26,23 @@ mod api;
 
 /// What a server says in `/versions` when it holds delayed events.
 const FEATURE: &str = "org.matrix.msc4140";
+
+/// Where the account's store keeps the messages it scheduled.
+const KEPT: &[u8] = b"chat.bettermatrix.scheduled";
+
+/// A scheduled message as the store keeps it.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Kept {
+    delay_id: String,
+    room_id: String,
+    send_at_ms: u64,
+    body: Option<String>,
+}
+
+fn now_ms() -> u64 {
+    u64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis())
+        .unwrap_or(u64::MAX)
+}
 
 /// The longest wait the app offers: a server may allow less, and refuses a longer one.
 pub const LONGEST_DELAY: Duration = Duration::from_secs(60 * 60 * 24 * 30);
@@ -71,51 +88,65 @@ impl Account {
             false => (event_type, raw),
         };
         let delay_ms = u64::try_from(delay.min(LONGEST_DELAY).as_millis()).unwrap_or(u64::MAX);
-        let txn_id = TransactionId::new();
-        // MSC4140's own endpoint first; then the delay on `/send`, as Synapse took it first. Only
-        // on a server that says it holds delayed events: one that doesn't would ignore the delay
-        // on `/send` and post the message at once.
+        // MSC4140's own endpoint only. Synapse first took a delay on `/send`, but a server that
+        // ignores it posts the message at once, and nothing tells the two apart beforehand.
         let request = api::schedule::Request::new(
             room.room_id().to_owned(),
             event_type.as_str().into(),
-            txn_id.clone(),
+            TransactionId::new(),
             delay_ms,
-            raw.clone().cast_unchecked(),
+            raw.cast_unchecked(),
         );
         let delay_id = match self.client().send(request).await {
             Ok(response) => response.delay_id,
-            // `/send` with a delay only where the server says, asked again now, that it holds
-            // delayed events: a cached answer may be from before it stopped.
-            Err(error) if unrecognized(&error) => {
-                self.client().reset_supported_versions().await?;
-                if !self.can_schedule().await? {
-                    return Err(Error::Unsupported("scheduled messages"));
-                }
-                let request = delayed_message_event::unstable::Request::new_raw(
-                    room.room_id().to_owned(),
-                    txn_id,
-                    MessageLikeEventType::from(event_type),
-                    DelayParameters::Timeout { timeout: Duration::from_millis(delay_ms) },
-                    raw,
-                );
-                self.client().send(request).await?.delay_id
-            }
+            Err(error) if unrecognized(&error) => return Err(Error::Unsupported("scheduled messages")),
             Err(error) => return Err(error.into()),
         };
         // Kept, so it can be sent now or cancelled even where the server can't list it.
-        let now = u64::try_from(
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),
-        )
-        .unwrap_or(u64::MAX);
-        if let Ok(mut known) = self.scheduled_here.lock() {
-            known.push(ScheduledMessage {
-                delay_id: delay_id.clone(),
-                room_id: key.room_id.clone(),
-                send_at_ms: now.saturating_add(delay_ms),
-                body: body_of(&json),
-            });
-        }
+        let scheduled = ScheduledMessage {
+            delay_id: delay_id.clone(),
+            room_id: key.room_id.clone(),
+            send_at_ms: now_ms().saturating_add(delay_ms),
+            body: body_of(&json),
+        };
+        self.keep_scheduled(|kept| kept.push(scheduled)).await;
         Ok(delay_id)
+    }
+
+    /// The messages this account scheduled, as kept in its store (they outlive a restart),
+    /// changed by `change` and written back; those whose time has passed are let go.
+    async fn keep_scheduled(&self, change: impl FnOnce(&mut Vec<ScheduledMessage>)) -> Vec<ScheduledMessage> {
+        let _one = self.scheduled_here.lock().await;
+        let store = self.client().state_store();
+        let mut kept: Vec<ScheduledMessage> = match store.get_custom_value(KEPT).await {
+            Ok(Some(bytes)) => serde_json::from_slice::<Vec<Kept>>(&bytes)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|kept| ScheduledMessage {
+                    delay_id: kept.delay_id,
+                    room_id: kept.room_id,
+                    send_at_ms: kept.send_at_ms,
+                    body: kept.body,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        change(&mut kept);
+        let now = now_ms();
+        kept.retain(|message| message.send_at_ms > now);
+        let written: Vec<Kept> = kept
+            .iter()
+            .map(|message| Kept {
+                delay_id: message.delay_id.clone(),
+                room_id: message.room_id.clone(),
+                send_at_ms: message.send_at_ms,
+                body: message.body.clone(),
+            })
+            .collect();
+        if let Ok(bytes) = serde_json::to_vec(&written) {
+            let _ = store.set_custom_value_no_read(KEPT, bytes).await;
+        }
+        kept
     }
 
     /// Whether the account's server holds delayed events (`/versions` says so).
@@ -135,12 +166,7 @@ impl Account {
             // A server that holds delayed events but can't list them: those this session
             // scheduled, still to come.
             Err(error) if unrecognized(&error) => {
-                let now = u64::try_from(
-                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),
-                )
-                .unwrap_or(u64::MAX);
-                let mut known = self.scheduled_here.lock().map(|known| known.clone()).unwrap_or_default();
-                known.retain(|message| message.send_at_ms > now);
+                let mut known = self.keep_scheduled(|_| {}).await;
                 known.sort_by_key(|message| message.send_at_ms);
                 return Ok(known);
             }
@@ -187,9 +213,7 @@ impl Account {
             }
             Err(error) => return Err(error.into()),
         }
-        if let Ok(mut known) = self.scheduled_here.lock() {
-            known.retain(|message| message.delay_id != delay_id);
-        }
+        self.keep_scheduled(|kept| kept.retain(|message| message.delay_id != delay_id)).await;
         Ok(())
     }
 
@@ -392,8 +416,6 @@ mod tests {
         Older,
         /// None: `/versions` doesn't name MSC4140, and `/send` would post at once.
         None,
-        /// None any more: `/versions` named MSC4140 the first time it was asked, not since.
-        Stopped,
         /// The proposal's own, but no list of them all.
         NoList,
     }
@@ -406,7 +428,6 @@ mod tests {
         let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured = sent.clone();
         let unknown = || json!({ "errcode": "M_NOT_FOUND", "error": "Unrecognized request" });
-        let versions_asked = std::sync::atomic::AtomicUsize::new(0);
         let server = Server::new(move |request| {
             captured.lock().expect("requests").push(request.to_owned());
             let first = request.lines().next().unwrap_or_default();
@@ -423,12 +444,12 @@ mod tests {
                     Endpoints::Current | Endpoints::NoList => {
                         json!({ "errcode": "M_BAD_JSON", "error": "no delay_ms" })
                     }
-                    Endpoints::Older | Endpoints::None | Endpoints::Stopped => unknown(),
+                    Endpoints::Older | Endpoints::None => unknown(),
                 };
             }
             if first.contains("org.matrix.msc4140.delay=") {
                 return match endpoints {
-                    Endpoints::None | Endpoints::Stopped => json!({ "event_id": "$posted-at-once" }),
+                    Endpoints::None => json!({ "event_id": "$posted-at-once" }),
                     Endpoints::Current | Endpoints::Older | Endpoints::NoList => json!({ "delay_id": "d1" }),
                 };
             }
@@ -456,12 +477,7 @@ mod tests {
                 return json!({ "delayed_events": [delayed("waiting", false), delayed("sent", true)] });
             }
             if first.contains("/versions") {
-                let first_time = versions_asked.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0;
-                let held = match endpoints {
-                    Endpoints::Current | Endpoints::Older | Endpoints::NoList => true,
-                    Endpoints::None => false,
-                    Endpoints::Stopped => first_time,
-                };
+                let held = endpoints != Endpoints::None;
                 let features = json!({ "org.matrix.msc4140": held });
                 return json!({ "versions": ["v1.12"], "unstable_features": features });
             }
@@ -547,20 +563,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_server_that_stopped_holding_delayed_events_should_be_sent_nothing() {
-        let (server, sent) = server(false, Endpoints::Stopped);
-        let account = account(&server, "stopped").await;
-        // The account learned the server held them, and keeps that answer.
-        assert!(account.can_schedule().await.expect("asked"));
-        let id = account
-            .schedule(&TimelineKey::room("!room:example.org"), None, &text("later"), Duration::from_secs(90))
-            .await;
-        assert!(matches!(id, Err(Error::Unsupported(_))), "{id:?}");
-        let sent = sent.lock().expect("requests");
-        assert!(sent.iter().all(|request| !request.starts_with("PUT /_matrix/client/v3/")), "nothing may be posted");
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn a_message_scheduled_on_a_server_that_cant_list_should_still_be_listed_and_cancelled() {
         let (server, _) = server(false, Endpoints::NoList);
         let account = account(&server, "no-list").await;
@@ -576,17 +578,31 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_server_with_only_the_first_endpoint_should_still_schedule() {
+    async fn a_server_with_only_the_first_endpoint_should_be_refused_and_sent_nothing() {
         let (server, sent) = server(false, Endpoints::Older);
         let account = account(&server, "older").await;
-        let id = account
-            .schedule(&TimelineKey::room("!room:example.org"), None, &text("later"), Duration::from_secs(90))
-            .await;
-        assert_eq!(id.expect("scheduled"), "d1");
-        let (line, body) = scheduled(&sent);
-        assert!(line.starts_with("PUT /_matrix/client/v3/rooms/!room:example.org/send/m.room.message/"), "{line}");
-        assert!(line.contains("org.matrix.msc4140.delay=90000"), "{line}");
-        assert_eq!(body["body"], "later");
+        let key = TimelineKey::room("!room:example.org");
+        let id = account.schedule(&key, None, &text("later"), Duration::from_secs(90)).await;
+        assert!(matches!(id, Err(Error::Unsupported(_))), "{id:?}");
+        let sent = sent.lock().expect("requests");
+        assert!(sent.iter().all(|request| !request.starts_with("PUT /_matrix/client/v3/")), "nothing may be posted");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_scheduled_before_a_restart_should_still_be_listed_where_the_server_cant() {
+        let (server, _) = server(false, Endpoints::NoList);
+        let dir = std::env::temp_dir().join(format!("matrix-core-scheduled-restart-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let account = Account::for_test_with_store(&server.url(), &dir).await;
+            let sync = matrix_sdk::config::SyncSettings::default().timeout(Duration::ZERO);
+            account.client().sync_once(sync).await.expect("sync");
+            let key = TimelineKey::room("!room:example.org");
+            account.schedule(&key, None, &text("later"), Duration::from_secs(600)).await.expect("scheduled");
+        }
+        let account = Account::for_test_with_store(&server.url(), &dir).await;
+        let listed = account.scheduled_messages().await.expect("listed");
+        assert_eq!(listed.iter().map(|message| message.delay_id.as_str()).collect::<Vec<_>>(), ["d1"]);
     }
 
     #[tokio::test(flavor = "multi_thread")]

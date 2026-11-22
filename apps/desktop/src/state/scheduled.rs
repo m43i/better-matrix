@@ -186,9 +186,34 @@ impl State {
             Some(target) if self.composer(target).is_empty() && self.composer(target).editing.is_none() => {
                 self.composer_mut(target).put_draft(draft);
             }
-            Some(_) => {}
-            None => {
-                self.drafts.entry(owner).or_insert(draft);
+            // Something was written there since: the refused draft waits for the composer to
+            // be free again (`resume_refused`), as a refused edit does.
+            Some(_) => self.refused.push((owner, draft)),
+            None => match self.drafts.entry(owner) {
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(draft);
+                }
+                std::collections::hash_map::Entry::Occupied(entry) => self.refused.push((entry.key().clone(), draft)),
+            },
+        }
+    }
+
+    /// Brings refused scheduled drafts back into their composers once these are free: showing
+    /// their timeline, empty, no edit or memo under way. Called from `poll`.
+    pub(super) fn resume_refused(&mut self) {
+        for target in [ComposerTarget::Room, ComposerTarget::Thread] {
+            let composer = self.composer(target);
+            if !composer.is_empty()
+                || composer.editing.is_some()
+                || composer.voice.is_some()
+                || composer.reply_to.is_some()
+            {
+                continue;
+            }
+            let Some(owner) = composer.owner.clone() else { continue };
+            if let Some(index) = self.refused.iter().position(|(kept, _)| *kept == owner) {
+                let (_, draft) = self.refused.remove(index);
+                self.composer_mut(target).put_draft(draft);
             }
         }
     }

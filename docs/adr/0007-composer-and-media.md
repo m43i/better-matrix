@@ -67,7 +67,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   could show or act through it, and a link around a spoiler is no link, its words being hidden.
   A spoiler wins over everything else an element says (maths too), and a code block holding one
   shows as ordinary text, as fields keep no pills in code blocks; for the same reason the
-  composer makes no spoiler or formula inside a code block, nor a code block over a pill.
+  composer makes no spoiler or formula inside a code block, nor a code block over a pill, and a
+  Backspace or Delete that would join a paragraph holding a pill onto a code block does nothing.
   `/spoiler` writes its spoiler itself (`html::spoiler`), line breaks and all, whatever the field
   held its words as. Formulas
   (`data-mx-maths`) show as one line of Unicode on a chip, in italics (`matrix_core::math`:
@@ -115,15 +116,15 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   with a reply (mentioning whom it answers) or into a thread (relations written as the SDK
   would); uploads can't (they go when sent), nor commands that do something rather than send
   (`/topic` waits, with a notice). The composer empties as sending does and, if the server
-  refuses, what it held comes back with its reply (`Purpose::Scheduling`). Only a server whose
+  refuses, what it held comes back with its reply (`Purpose::Scheduling`), at once if the composer
+  is still empty, else as soon as it is free again (`State::refused`), as a refused edit does. Only a server whose
   `/versions` names `org.matrix.msc4140` is asked (one that doesn't is refused with a notice: it
-  would ignore a delay on `/send` and post at once), and before falling back to `/send` the
-  engine asks `/versions` afresh, as the SDK's cached answer may be from before the server
-  stopped. MSC4140's own endpoints come first, in the
-  proposal's current shape (`/delayed_event/…` with `delay_ms`, the action in the path; ruma 0.17
-  has an older shape, so `scheduled::api` defines these requests), then Synapse's first ones
-  (`org.matrix.msc4140.delay` on `/send`, the action in the body) when the server doesn't know
-  them; lists are read in either shape (`delay_ms`/`delayed_since_ts`/`finalised`, or
+  would ignore a delay on `/send` and post at once). Messages go only through MSC4140's own
+  endpoint, in the proposal's current shape (`/delayed_event/…` with `delay_ms`; ruma 0.17 has an
+  older shape, so `scheduled::api` defines these requests): Synapse first took a delay on
+  `/send`, but a server ignoring it posts at once and nothing tells the two apart beforehand, so
+  a server with only that is refused with a notice. Sending now and cancelling put the action in
+  the path, else in the body as Synapse first had it; lists are read in either shape (`delay_ms`/`delayed_since_ts`/`finalised`, or
   `delay`/`running_since`/`finalised_ts`). In an encrypted room
   the message is encrypted before the server holds it: the SDK encrypts only what it sends
   itself, so each account's client is built on a base client of the engine's own
@@ -137,8 +138,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   still lists it (sent ones aren't listed), and comes back after every change. Each account's
   lists are read and reported one at a time (`Account::listing_scheduled`), so an older answer
   never covers a newer. A server that holds delayed events but can't list them (the bulk list is
-  optional) shows the messages this session scheduled there, still to come, so they can still be
-  sent now or cancelled. One this device can't decrypt shows as "Encrypted message".
+  optional) shows the messages this account scheduled there, still to come, kept in its store
+  across restarts, so they can still be sent now or cancelled. One this device can't decrypt shows as "Encrypted message".
 - **Composer layout:**
   - Room and thread editors grow up to eight lines, then scroll inside their own viewport,
     keeping the caret visible while typing or pasting. Vertical padding and the bottom bar stay outside

@@ -735,15 +735,18 @@ pub struct State {
     pub message_jump: Option<search::MessageJump>,
     /// The message just jumped to, lit a moment.
     pub flash: Option<jump::Flash>,
-    /// The latest jump waiting for the engine to find its message, and its room: only its
-    /// answer goes.
-    locating: Option<(RequestId, String)>,
+    /// The latest jump waiting for the engine to find its message, and its account and room:
+    /// only its answer goes.
+    locating: Option<(RequestId, AccountId, String)>,
     /// Rooms' custom emoji and sticker packs.
     pub packs: packs::Packs,
     /// The location dialog, while [`Modal::Location`] shows.
     pub location: LocationForm,
     /// Each account's scheduled messages.
     pub scheduled: scheduled::Scheduled,
+    /// Scheduled drafts the server refused while their composer held something else, by timeline:
+    /// each comes back once its composer is free.
+    refused: Vec<(drafts::Owner, composer::Draft)>,
     /// Spoilers the user revealed, by the link id their words carry in a message.
     pub revealed: HashSet<String>,
     /// The invite dialog's search.
@@ -897,6 +900,7 @@ impl State {
             location: LocationForm::default(),
             scheduled: scheduled::Scheduled::default(),
             revealed: HashSet::new(),
+            refused: Vec::new(),
             invite_search: PeopleSearch::default(),
             chat_search: PeopleSearch::default(),
             audio: None,
@@ -1832,9 +1836,11 @@ impl State {
             Purpose::Packs | Purpose::ListScheduled => {}
             Purpose::Places => self.places_failed(request, error),
             // Only the latest jump says it found nothing, and only while its room shows.
-            Purpose::Locate if self.locating.as_ref().is_some_and(|(asked, _)| *asked == request) => {
-                let room = self.locating.take().map(|(_, room)| room);
-                if self.active_room_id() == room.as_deref() {
+            Purpose::Locate if self.locating.as_ref().is_some_and(|(asked, _, _)| *asked == request) => {
+                if let Some((_, account, room)) = self.locating.take()
+                    && self.nav.account.as_ref() == Some(&account)
+                    && self.active_room_id() == Some(room.as_str())
+                {
                     self.notice = Some(t!("search.message_unavailable").to_owned());
                 }
             }
@@ -2153,6 +2159,7 @@ impl State {
         changed |= self.search_people(now);
         changed |= self.position_message(tx);
         changed |= self.expire_flash(now, tx);
+        self.resume_refused();
         self.load_for_suggestions();
         if self.screen() == Screen::Chat
             && let Some(account) = self.nav.account.clone()
