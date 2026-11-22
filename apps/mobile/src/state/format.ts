@@ -14,9 +14,10 @@ import {
   applySplices,
   type DraftPill,
   emotePill,
+  EVERYONE,
   isSpoiler,
   livePills,
-  mentionsOf,
+  mentionsIn,
   type Pill,
   pillAt,
   pillFormats,
@@ -457,11 +458,36 @@ export function outgoingText(draft: string, given: readonly DraftPill[] = []): O
       (block) => block.kind.type !== 'paragraph' || block.runs.some((run) => !isPlain(run.marks)),
     );
 
-  const mentions = mentionsOf(text, pills);
+  const mentions = sentMentions(blocks, found);
 
   if (!formatted || body === '') return { body, html: null, mentions };
 
   return { body, html: serialize(trimBlocks(blocks), found), mentions };
+}
+
+/**
+ * Whom a parsed draft mentions as it is sent: each person whose pill goes as a matrix.to link,
+ * and the room when `@room` goes as words a reader sees. A pill in code or a formula is only its
+ * label, and `@room` in a spoiler is hidden behind `[Spoiler]`: neither mentions anyone.
+ */
+function sentMentions(blocks: readonly Block[], pills: readonly Pill[]): Mentions {
+  const sent: Pill[] = [];
+
+  for (const block of blocks) {
+    if (block.kind.type === 'code') continue;
+
+    for (const run of block.runs) {
+      if (run.marks.code || run.marks.math) continue;
+
+      for (const c of run.text) {
+        const pill = pillOf(c, pills);
+
+        if (pill && !(pill.id === EVERYONE.id && run.marks.spoiler)) sent.push(pill);
+      }
+    }
+  }
+
+  return mentionsIn(sent);
 }
 
 /**

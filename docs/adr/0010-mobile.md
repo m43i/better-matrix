@@ -187,7 +187,10 @@ Date: 2026-11-16
   markers around it format it and nothing in a name reads as a marker; it then goes as the
   engine's HTML (`<a href="https://matrix.to/#/@…">Name</a>`, `<img data-mx-emoticon …>`,
   `@room` as plain text) and its people as `Outgoing::Text.mentions` (`m.mentions`, always
-  sent, empty when nobody), edits included. The field draws placed pills in the accent
+  sent, empty when nobody), edits included. `m.mentions` comes from the parsed runs, not the
+  draft's pills: only a pill sent as a live mention counts (a person's matrix.to link, spoiler
+  or not; `@room` as words a reader sees), so one in code, a code block or a formula (sent as
+  its label) mentions nobody, nor does `@room` hidden in a spoiler (`/spoiler` alike). The field draws placed pills in the accent
   (`TextInput` children, no `value`).
 - **Suggestions** (`state/suggestions.ts`, pure, from the word before the caret,
   `triggerAt`): `@` people in the room from its whole member list (fetched when first asked) and
@@ -199,7 +202,9 @@ Date: 2026-11-16
   `/lenny` (the face before the text), `/plain` (no formatting), `/spoiler` (the text as
   written in one `<span data-mx-spoiler>`, line breaks as `<br />`, never through markers, so
   nothing in it can end the spoiler early; `[Spoiler]` the whole body), `/invite`, `/join`
-  (opens the room once joined), `/leave` (back to Home), `/topic` (`SetTopic`), `/nick`
+  (opens the room once joined; the argument is a picked pill or read as a typed link,
+  `parseTyped`, so a room ID without a server, as room version 12 writes them, or a pasted
+  matrix.to link with its `via` servers works), `/leave` (back to Home), `/topic` (`SetTopic`), `/nick`
   (`SetDisplayName`). A command acts in the draft's place; the reply and attachments wait for
   the next send. An unknown command or one missing its argument keeps the draft and says so;
   `//text` sends `/text`. Each failure says what failed (`notice.invite`, `notice.join`, …).
@@ -408,7 +413,13 @@ Date: 2026-11-16
   search pages on past its budget until it finds it or history starts (`seekStep`, `quoteHere`
   in `state/seek.ts`), stopping quietly once a later jump began or its screen left; the app
   says it isn't found when history starts without it or the engine can't find it; the message
-  flashes highlighted. A permalink to a message in a joined room asks the engine
+  flashes highlighted. How far a search pages is its `Reach`: `near` (a few pages), `local` (a
+  search hit in local history: to the start, then it ends quietly) or `located` (the engine
+  placed it in this timeline: to the start, then "missing"). A timeline the engine's answer
+  opened (`messageRoute`, from a quote or a permalink) carries `located` in its route's `reach`
+  parameter, so the confirmation survives navigation: its target search pages to the start of
+  history under a jump the screen begins as it opens at the target, stopping quietly once a
+  later jump began or the screen left. A permalink to a message in a joined room asks the engine
   where it is (`LocateMessage`) and opens its thread when it is a reply in one, else the room at
   it (`openJoined`, the room when the engine can't tell). Either answer navigates only while
   its jump is the latest one begun and the screen that asked is still on show (`ui/links/jumps.ts`;

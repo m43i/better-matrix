@@ -2,10 +2,12 @@ import {
   openSeek,
   quoteHere,
   quoteTapped,
+  reachParam,
   type SeekProgress,
   seekEnded,
   seekStep,
   sought,
+  soughtReach,
 } from '../seek';
 
 describe('openSeek', () => {
@@ -98,7 +100,7 @@ describe('seekStep', () => {
     atStart: false,
     pages: 0,
     budget: 10,
-    unbounded: false,
+    reach: 'near',
   };
 
   it('a quote whose jump was superseded should stop', () => {
@@ -122,22 +124,65 @@ describe('seekStep', () => {
   });
 
   it('a quote the engine places here should page on past its budget', () => {
-    expect(seekStep({ ...progress, pages: 50, unbounded: true })).toBe('page');
+    expect(seekStep({ ...progress, pages: 50, reach: 'located' })).toBe('page');
   });
 
   it('a quote the engine places here should be missing once history starts', () => {
-    expect(seekStep({ ...progress, atStart: true, unbounded: true })).toBe('missing');
+    expect(seekStep({ ...progress, atStart: true, reach: 'located' })).toBe('missing');
   });
 
   it('a local hit should page on until history starts, then end', () => {
-    const hit = { ...progress, quote: false, unbounded: true };
+    const hit: SeekProgress = { ...progress, quote: false, reach: 'local' };
     expect([seekStep({ ...hit, pages: 50 }), seekStep({ ...hit, atStart: true })]).toEqual([
       'page',
       'elsewhere',
     ]);
   });
 
-  it('a link’s target should go on looking when its search has no jump to supersede', () => {
-    expect(seekStep({ ...progress, quote: false, wanted: false })).toBe('page');
+  it('a target the engine located here should page on past its budget', () => {
+    const located: SeekProgress = { ...progress, quote: false, reach: 'located' };
+    expect(seekStep({ ...located, pages: 50 })).toBe('page');
+  });
+
+  it('a target the engine located here should be missing once history starts', () => {
+    const located: SeekProgress = { ...progress, quote: false, reach: 'located' };
+    expect(seekStep({ ...located, pages: 50, atStart: true })).toBe('missing');
+  });
+
+  it('a located target whose jump was superseded should stop', () => {
+    const located: SeekProgress = { ...progress, quote: false, reach: 'located' };
+    expect(seekStep({ ...located, wanted: false })).toBe('stop');
+  });
+
+  it('a link’s target out of pages should end', () => {
+    expect(seekStep({ ...progress, quote: false, pages: 10 })).toBe('elsewhere');
+  });
+});
+
+describe('soughtReach', () => {
+  it('a link’s target should be looked for as far as its route says', () => {
+    expect(soughtReach(openSeek('$a', 'located'))).toBe('located');
+  });
+
+  it('a target opened without a reach should be looked for a few pages back', () => {
+    expect(soughtReach(openSeek('$a'))).toBe('near');
+  });
+
+  it('a quote tapped should be looked for a few pages back, whatever the target’s reach', () => {
+    expect(soughtReach(quoteTapped(openSeek('$a', 'located'), '$b'))).toBe('near');
+  });
+
+  it('a quote the engine places here should be looked for to the start of history', () => {
+    expect(soughtReach(quoteHere(openSeek(null), '$b'))).toBe('located');
+  });
+});
+
+describe('reachParam', () => {
+  it('a route’s reach should read back as the reach it was written as', () => {
+    expect([reachParam('local'), reachParam('located')]).toEqual(['local', 'located']);
+  });
+
+  it('a missing or unknown reach should be near', () => {
+    expect([reachParam(undefined), reachParam('far')]).toEqual(['near', 'near']);
   });
 });

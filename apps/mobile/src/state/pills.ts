@@ -6,7 +6,8 @@
 // with one name keep their own IDs. Each edit of the draft moves the pills after it
 // (`trackPills`); a pill whose label the user broke by editing it, or that now sits inside a
 // longer word, is plain text again. On send each pill still standing goes as Matrix HTML
-// (`format.ts`) and its people as `m.mentions`. Pill ids:
+// (`format.ts`) and, when it goes as a live mention (not code, a formula or, for `@room`, hidden
+// in a spoiler), its people as `m.mentions`. Pill ids:
 //
 // - `user:@ada:example.org`, `room:!id:example.org` (or `room:#alias:example.org`): a mention.
 // - `everyone`: `@room`, which goes as plain text and mentions the room.
@@ -236,12 +237,21 @@ export function slicePills(
   );
 }
 
-/** Who the pills standing in a draft mention. */
+/**
+ * Who the pills standing in a draft mention, every one of them sent as a mention. A message
+ * whose pills may be sent as something else (code, a formula, a spoiler) counts them as
+ * `format.ts`'s `outgoingText` does.
+ */
 export function mentionsOf(draft: string, pills: readonly DraftPill[]): Mentions {
+  return mentionsIn(placePills(draft, pills).map((p) => p.pill));
+}
+
+/** Who `pills` mention: each person once, the room when `@room` is among them. */
+export function mentionsIn(pills: Iterable<Pill>): Mentions {
   const users: string[] = [];
   let room = false;
 
-  for (const { pill } of placePills(draft, pills)) {
+  for (const pill of pills) {
     if (pill.id === EVERYONE.id) room = true;
 
     if (pill.id.startsWith('user:')) {

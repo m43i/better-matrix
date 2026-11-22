@@ -1,4 +1,4 @@
-import { type DraftPill, pillAt, spoilerPill, userPill } from '../pills';
+import { type DraftPill, EVERYONE, pillAt, spoilerPill, userPill } from '../pills';
 import { commandSuggestions, slashOf } from '../slash';
 
 const CONTEXT = { account: '@ada:x.org', roomId: '!r:x.org' };
@@ -104,6 +104,12 @@ describe('slashOf', () => {
     });
   });
 
+  it('should not mention the room for @room hidden by /spoiler', () => {
+    expect(slash('/spoiler @room lunch', [pillAt(EVERYONE, 9)])).toMatchObject({
+      message: { data: { body: '[Spoiler]', mentions: NOBODY } },
+    });
+  });
+
   it('should keep a pill where it stood after the command’s name', () => {
     expect(slash('/shrug ask @Grace')).toMatchObject({
       message: {
@@ -147,6 +153,22 @@ describe('slashOf', () => {
       },
       after: 'joined',
     });
+  });
+
+  it('should join a room by an ID without a server, as room version 12 writes them', () => {
+    expect(slash('/join !31hneApxJ_1o-63DmFrpeqnkFfWppnzWso1JvH3ogLM', [])).toMatchObject({
+      command: { data: { room_id: '!31hneApxJ_1o-63DmFrpeqnkFfWppnzWso1JvH3ogLM', via: [] } },
+    });
+  });
+
+  it('should join the room a pasted link names, through the servers it names', () => {
+    expect(slash('/join https://matrix.to/#/!abc?via=x.org&via=y.org', [])).toMatchObject({
+      command: { data: { room_id: '!abc', via: ['x.org', 'y.org'] } },
+    });
+  });
+
+  it('should not join a user ID', () => {
+    expect(slash('/join @kai:x.org', [])).toMatchObject({ type: 'usage', name: 'join' });
   });
 
   it('should leave the room and its screen', () => {

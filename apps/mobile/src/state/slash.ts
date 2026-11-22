@@ -8,10 +8,13 @@ import type { AccountId, Command, Outgoing } from '@better-matrix/matrix-native/
 
 import type { Key } from '../i18n';
 import { outgoingText } from './format';
+import { type Permalink, parseTyped } from './permalinks';
 import {
   type DraftPill,
   escapeHtml,
+  EVERYONE,
   isSpoiler,
+  mentionsIn,
   mentionsOf,
   pillHtml,
   pillText,
@@ -188,7 +191,7 @@ export function slashOf(
         : usage();
 
     case 'invite': {
-      const userId = argumentId(rest, pills, 'user:', /^@\S+:\S+$/);
+      const userId = argument(rest, pills, 'user')?.id;
 
       return userId
         ? {
@@ -200,14 +203,14 @@ export function slashOf(
     }
 
     case 'join': {
-      const roomId = argumentId(rest, pills, 'room:', /^[#!]\S+:\S+$/);
+      const target = argument(rest, pills, 'room');
 
-      return roomId
+      return target
         ? {
             type: 'command',
             command: {
               type: 'JoinRoom',
-              data: { account: context.account, room_id: roomId, via: [] },
+              data: { account: context.account, room_id: target.id, via: target.via },
             },
             after: 'joined',
           }
@@ -250,11 +253,14 @@ export function spoilerText(text: string, pills: readonly DraftPill[]) {
   let html = '';
   let at = 0;
 
-  for (const placed of placePills(text, pills)) {
+  const placed = placePills(text, pills);
+
+  for (const { pill, start, end } of placed) {
     // A spoiler inside is its words: the whole is one spoiler already.
-    const pill = isSpoiler(placed.pill) ? spoilerHtml(placed.pill.label) : pillHtml(placed.pill);
-    html += escapeHtml(text.slice(at, placed.start)) + pill;
-    at = placed.end;
+    html +=
+      escapeHtml(text.slice(at, start)) +
+      (isSpoiler(pill) ? spoilerHtml(pill.label) : pillHtml(pill));
+    at = end;
   }
 
   html += escapeHtml(text.slice(at));
@@ -262,7 +268,8 @@ export function spoilerText(text: string, pills: readonly DraftPill[]) {
   return {
     body: '[Spoiler]',
     html: `<p><span data-mx-spoiler>${html.replace(/\r?\n/g, '<br />')}</span></p>`,
-    mentions: mentionsOf(text, pills),
+    // Its people go as links; `@room` is hidden with the rest, so it mentions no one.
+    mentions: mentionsIn(placed.flatMap(({ pill }) => (pill.id === EVERYONE.id ? [] : [pill]))),
   };
 }
 
@@ -285,20 +292,20 @@ function room(context: SlashContext) {
 }
 
 /**
- * The ID a command's argument names: the pill it is (a mention picked from the suggestions), or
- * the ID typed out.
+ * What a command's argument names: the pill it starts with (a mention picked from the
+ * suggestions), or the first word read as a typed link (`parseTyped`: an ID, an alias, a
+ * matrix.to link or `matrix:` URI, its servers with it), when it names a `kind`.
  */
-function argumentId(
+function argument(
   text: string,
   pills: readonly DraftPill[],
-  prefix: string,
-  typed: RegExp,
-): string | null {
-  const placed = placePills(text, pills).find((p) => p.pill.id.startsWith(prefix));
+  kind: Permalink['kind'],
+): { id: string; via: string[] } | null {
+  const placed = placePills(text, pills).find((p) => p.pill.id.startsWith(`${kind}:`));
 
   if (placed && text.slice(0, placed.start).trim() === '')
-    return placed.pill.id.slice(prefix.length);
-  const word = text.split(/\s+/)[0] ?? '';
+    return { id: placed.pill.id.slice(kind.length + 1), via: [] };
+  const link = parseTyped(text.split(/\s+/)[0] ?? '');
 
-  return typed.test(word) ? word : null;
+  return link?.kind === kind ? { id: link.id, via: link.via } : null;
 }

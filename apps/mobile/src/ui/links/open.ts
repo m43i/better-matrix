@@ -143,7 +143,10 @@ export async function openElsewhere(
   return 'opened';
 }
 
-/** Where a message shows: its thread (the root itself shows in the room), else the room. */
+/**
+ * Where a message the engine located shows: its thread (the root itself shows in the room), else
+ * the room. Located, it is looked for there until history starts, then said to be gone.
+ */
 export function messageRoute(
   account: AccountId,
   roomId: string,
@@ -151,6 +154,6 @@ export function messageRoute(
   thread: string | null,
 ): ReturnType<typeof routes.room> {
   return thread !== null && thread !== eventId
-    ? routes.thread(account, roomId, thread, eventId)
-    : routes.room(account, roomId, eventId);
+    ? routes.thread(account, roomId, thread, eventId, 'located')
+    : routes.room(account, roomId, eventId, 'located');
 }

@@ -185,8 +185,8 @@ export function SearchResults({
               onPicked();
 
               if (hit.thread)
-                router.push(routes.thread(id, hit.room_id, hit.thread, hit.event_id, true));
-              else router.push(routes.room(id, hit.room_id, hit.event_id, true));
+                router.push(routes.thread(id, hit.room_id, hit.thread, hit.event_id, 'local'));
+              else router.push(routes.room(id, hit.room_id, hit.event_id, 'local'));
             }}
           />
         );

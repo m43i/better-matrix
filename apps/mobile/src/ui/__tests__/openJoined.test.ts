@@ -66,7 +66,9 @@ describe('openJoined at a message', () => {
     });
     engine.emit({ type: 'Finished', data: { request, result: { Ok: null } } });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(navigation.push.mock.calls).toEqual([[routes.thread(ADA, '!r:x', '$root', '$reply')]]);
+    expect(navigation.push.mock.calls).toEqual([
+      [routes.thread(ADA, '!r:x', '$root', '$reply', 'located')],
+    ]);
   });
 
   it('should open nothing once the user left the screen that asked', async () => {
@@ -144,14 +146,19 @@ describe('openElsewhere', () => {
   it('a quoted reply in a thread should open in its thread', async () => {
     expect(await located({ thread: '$root' }, null)).toEqual([
       'opened',
-      [[routes.thread(ADA, '!r:x', '$root', '$q')]],
+      [[routes.thread(ADA, '!r:x', '$root', '$q', 'located')]],
     ]);
+  });
+
+  it('a quoted reply opened in its thread should carry that the engine located it there', async () => {
+    const [, calls] = await located({ thread: '$root' }, null);
+    expect(calls).toMatchObject([[{ params: { eventId: '$q', reach: 'located' } }]]);
   });
 
   it('a room message quoted in a thread should open in the room', async () => {
     expect(await located({ thread: null }, '$root')).toEqual([
       'opened',
-      [[routes.room(ADA, '!r:x', '$q')]],
+      [[routes.room(ADA, '!r:x', '$q', 'located')]],
     ]);
   });
 
