@@ -24,6 +24,7 @@ import { EmptyState, ListRow } from '../components';
 import { openPermalink } from '../links/open';
 import { usePeopleSearch } from '../people/usePeopleSearch';
 import { usePalette } from '../theme';
+import { useShown } from '../useShown';
 import { RoomRow } from './RoomRow';
 import { SearchHighlight } from './SearchHighlight';
 import { useMessageSearch } from './useMessageSearch';
@@ -53,6 +54,7 @@ export function SearchResults({
   onPicked: () => void;
 }) {
   const store = useAppStore();
+  const shown = useShown();
   const palette = usePalette();
   const now = useNow();
   const id = account.summary.id;
@@ -125,7 +127,7 @@ export function SearchResults({
             title={t('search.open_link', { target: item.link.id })}
             onPress={() => {
               onPicked();
-              openPermalink(store, permalinkUri(item.link), id);
+              openPermalink(store, permalinkUri(item.link), id, () => shown.current);
             }}
           />
         );

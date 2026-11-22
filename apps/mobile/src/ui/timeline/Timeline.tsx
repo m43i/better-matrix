@@ -56,6 +56,7 @@ import { font } from '../../theme/palette';
 import { Icon } from '../icons';
 import { openElsewhere } from '../links/open';
 import { usePalette } from '../theme';
+import { useShown } from '../useShown';
 import { PinnedContext, TimelineContext, type TimelineContextValue } from './context';
 import { MessageRow } from './MessageRow';
 import {
@@ -128,6 +129,8 @@ export function Timeline({
 }: TimelineProps) {
   const palette = usePalette();
   const store = useAppStore();
+  // Whether this screen is still on show when a jump elsewhere is answered.
+  const shown = useShown();
   const thread = timelineKey.thread;
   const timeline = useStore((s) => timelineOf(s, account, timelineKey));
 
@@ -304,10 +307,12 @@ export function Timeline({
       setPositionedAt(wanted);
 
       if (wanted === jump)
-        void openElsewhere(store, account, timelineKey, wanted).then((opened) => {
-          if (!opened)
-            store.update((s) => addNotice(s, t('mobile.conversation.message_missing'), account));
-        });
+        void openElsewhere(store, account, timelineKey, wanted, router, () => shown.current).then(
+          (outcome) => {
+            if (outcome === 'missing')
+              store.update((s) => addNotice(s, t('mobile.conversation.message_missing'), account));
+          },
+        );
     }
   }, [
     store,
@@ -324,6 +329,7 @@ export function Timeline({
     timeline.historyError,
     scrollTo,
     loadMore,
+    shown,
   ]);
 
   const context = useMemo<TimelineContextValue>(

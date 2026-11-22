@@ -9,6 +9,7 @@ import { parseTyped, permalinkUri } from '../../state/permalinks';
 import { useAppStore, useStore } from '../../state/react';
 import { account as accountOf } from '../../state/selectors';
 import { openPermalink } from '../links/open';
+import { useShown } from '../useShown';
 import { SearchResults } from './SearchResults';
 import { ShellSearch, type ShellSearchHandle } from './ShellSearch';
 
@@ -39,13 +40,14 @@ export function useShellSearch(account: AccountId | undefined): ShellSearchView 
   const handle = useRef<ShellSearchHandle>(null);
   const [term, setTerm] = useState('');
   const clear = () => handle.current?.clear();
+  const shown = useShown();
 
   const submit = (text: string) => {
     const link = parseTyped(text);
 
     if (link === null) return;
     clear();
-    openPermalink(store, permalinkUri(link), account ?? null);
+    openPermalink(store, permalinkUri(link), account ?? null, () => shown.current);
   };
 
   const bar = (

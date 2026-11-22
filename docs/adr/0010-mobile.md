@@ -404,7 +404,10 @@ Date: 2026-11-16
   timeline (a reply in a thread, a room message quoted in one), else the app says it isn't
   found; the message flashes highlighted. A permalink to a message in a joined room asks the engine
   where it is (`LocateMessage`) and opens its thread when it is a reply in one, else the room at
-  it (`openJoined`, the room when the engine can't tell).
+  it (`openJoined`, the room when the engine can't tell). Either answer navigates only while
+  its jump is the latest one begun and the screen that asked is still on show (`ui/links/jumps.ts`;
+  the link sheet stays up while it waits and goes as the message opens): an answer that comes
+  after the user went elsewhere or began another jump opens nothing, and says nothing.
 - **Demo scenes** (`src/demo`) are the mobile `--scene`: the desktop's fixtures as engine
   events through `apply`, on a demo engine that finishes every command and answers lists,
   searches, sends and calls from the fixtures (media from the app's own assets). Dev builds
