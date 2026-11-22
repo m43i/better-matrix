@@ -154,7 +154,11 @@ Date: 2026-11-16
   (`data-mx-maths`, its LaTeX the fallback). On send, `state/format.ts` turns the text into the
   body and the Matrix HTML the desktop's rich field sends (as Rune's `to_html` writes it), HTML
   only when formatted; `editDraft` writes a message's HTML back as markers and pills for an
-  edit.
+  edit. Markers are read a line at a time, except a spoiler: a `||` pair over several lines
+  (as `editDraft` writes a spoiler with line breaks, its markers tight against its words) is
+  closed and opened again on each line it covers, after the line's prefix, blank lines
+  included, never into a code block, and only when a later line closes it; the body gives the
+  whole a single `[Spoiler]`. A link or mention around a spoiler comes back as its content.
 - **Mentions and custom emoji are pills beside the text** (`state/pills.ts`, the engine's
   `html.rs` pill ids: `user:@…`, `room:!…`/`room:#…`, `everyone`, `emote:mxc://…`). A picked
   suggestion inserts its label into the draft (`@Grace Hopper`, `#design`, `@room`,
@@ -163,8 +167,12 @@ Date: 2026-11-16
   people with one name keep their own IDs. Each change of the draft moves the pills after it
   (`trackPills`: the edit is what lies between the old and new text's common start and end,
   the caret settling where that is ambiguous in repeated text; a suggestion, an emoji or an
-  edit's own text place theirs directly), and a pill whose label was edited, or that now sits
-  inside a longer word, is dropped (Slack's behaviour: a broken mention is text). A refused
+  edit's own text place theirs directly). A change the app makes at known places (the
+  toolbar's markers and prefixes, a list continued, a link) carries its exact `Splice`s and
+  moves the pills by them (`spliceDraft`), since a diff would see `**` put either side of a
+  pill as one change across it. A pill whose label was edited, or that now sits inside a
+  longer word (letters and digits; `_`, italic's marker, doesn't join), is dropped (Slack's
+  behaviour: a broken mention is text). A refused
   edit comes back with its pills and the message's own.
   On send each placed label becomes one private-use character while the markers are parsed, so
   markers around it format it and nothing in a name reads as a marker; it then goes as the
@@ -213,8 +221,11 @@ Date: 2026-11-16
   minutes, in an hour, tomorrow at 9:00, next Monday at 9:00 with when each is, or a custom
   date and time through `@expo/ui`'s date-time picker, at most 30 days ahead), which sends
   `Schedule` with the delay worked out in local time (`state/schedule.ts`). The composer shows
-  "N scheduled messages" above itself for its room (`ListScheduled` whenever a conversation
-  opens); the bar opens the list (`app/scheduled.tsx`) to send each now or cancel it
+  "N scheduled messages" above itself for its room, kept current while the conversation is
+  open (`ui/composer/useScheduledRefresh`, timed by `state/schedule.ts`: `ListScheduled` when
+  it opens, when the app returns to the foreground, and when the soonest message's send time
+  passes, once a due time, then every 30 s while the server still lists it, so a sent one
+  leaves the bar; a timer is capped at what JavaScript's can hold); the bar opens the list (`app/scheduled.tsx`) to send each now or cancel it
   (`UpdateScheduled`). A refused schedule gives the composer back: text, pills and the message
   it answered. Sends are planned as
   data (`state/outgoing.ts`): text with the reply first, then each attachment as
@@ -364,8 +375,10 @@ Date: 2026-11-16
   `ftp`, reply fallbacks and scripts are dropped, nesting is capped. Nothing renders raw HTML.
   Matrix's inline objects become inlines of their own, as `html.rs` reads them: mention pills
   (the user's own in the mention colour), spoilers hidden behind a block of the muted colour
-  until tapped (hidden, a spoiler is an inert placeholder of its plain words: nothing inside
-  shows its colour or picture or takes a tap), formulas as Unicode (`state/math.ts`, a
+  until tapped (a spoiler is only its plain words, custom emoji as their descriptions, hidden
+  or shown: nothing inside shows its colour or picture or takes a tap; a link or mention
+  around a spoiler is neither, its content drawn as it is, so its label or look can't give the
+  spoiler away; the engine reads them the same), formulas as Unicode (`state/math.ts`, a
   line-for-line port of `math.rs` run against its `math.json` vectors, bounded as it is: past
   2000 bytes, 32 nested groups or commands, or 8000 bytes of output, a formula shows as its
   LaTeX; a `<div>` formula gets its own line) and custom emoji as pictures in the line.

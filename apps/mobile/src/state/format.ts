@@ -11,6 +11,7 @@ import type { Mentions } from '@better-matrix/matrix-native/types';
 
 import { mentionOf } from './html';
 import {
+  applySplices,
   type DraftPill,
   emotePill,
   livePills,
@@ -22,6 +23,7 @@ import {
   pillText,
   placePills,
   roomPill,
+  type Splice,
   userPill,
 } from './pills';
 
@@ -46,11 +48,24 @@ export interface Selection {
   end: number;
 }
 
-/** The draft after a change, and where the caret or selection goes. */
+/**
+ * The draft after a change, where the caret or selection goes, and the exact changes made to the
+ * draft before it (in order), so its pills move by them (`splicePills`) rather than by a diff.
+ */
 export interface Edited {
   text: string;
   selection: Selection;
+  splices: Splice[];
 }
+
+/** `text` changed by `splices`, the caret or selection put at `selection`. */
+function edited(text: string, splices: Splice[], selection: Selection): Edited {
+  return { text: applySplices(text, splices), selection, splices };
+}
+
+const insertion = (at: number, insert: string): Splice => ({ at, remove: 0, insert });
+
+const removal = (at: number, remove: number): Splice => ({ at, remove, insert: '' });
 
 /** The markers of the inline formats. */
 const INLINE: Partial<Record<Format, string>> = {
@@ -89,7 +104,7 @@ export function applyFormat(text: string, selection: Selection, format: Format):
     case 'codeBlock':
       return toggleFence(text, ordered(selection));
     default:
-      return { text, selection };
+      return { text, selection, splices: [] };
   }
 }
 
@@ -98,15 +113,22 @@ export function applyLink(text: string, selection: Selection, url: string): Edit
   const address = url.trim();
   const { start, end } = ordered(selection);
 
-  if (!address || address === 'https://') return { text, selection };
-  const label = text.slice(start, end) || address;
-  const link = `[${label}](${address})`;
-  const caret = start + link.length;
+  if (!address || address === 'https://') return { text, selection, splices: [] };
 
-  return {
-    text: text.slice(0, start) + link + text.slice(end),
-    selection: { start: caret, end: caret },
-  };
+  if (start === end) {
+    const link = `[${address}](${address})`;
+    const caret = start + link.length;
+
+    return edited(text, [insertion(start, link)], { start: caret, end: caret });
+  }
+
+  // The selection stays where it is, between the link's brackets.
+  const caret = end + 1 + `](${address})`.length;
+
+  return edited(text, [insertion(end, `](${address})`), insertion(start, '[')], {
+    start: caret,
+    end: caret,
+  });
 }
 
 /** The block formats on the caret's line, for the toolbar to show as on. */
@@ -148,19 +170,15 @@ export function continueBlock(previous: string, next: string): Edited | null {
 
   if (line.slice(prefix.length).trim() === '') {
     // An empty item: the list ends here, and the line is left empty.
-    const text = previous.slice(0, start) + previous.slice(start + prefix.length);
-
-    return { text, selection: { start, end: start } };
+    return edited(previous, [removal(start, prefix.length)], { start, end: start });
   }
 
   const numbered = NUMBERED.exec(line);
   const following = numbered ? `${numbered[1]}${Number(numbered[2]) + 1}. ` : prefix;
   const caret = at + 1 + following.length;
 
-  return {
-    text: next.slice(0, at + 1) + following + next.slice(at + 1),
-    selection: { start: caret, end: caret },
-  };
+  // The splices are from `previous`: the line break typed, and the prefix after it.
+  return edited(previous, [insertion(at, `\n${following}`)], { start: caret, end: caret });
 }
 
 function blockPrefix(line: string): string | null {
@@ -203,15 +221,12 @@ function toggleInline(text: string, { start, end }: Selection, marker: string): 
     if (text.slice(start - m, start) === marker && text.slice(start, start + m) === marker) {
       const at = start - m;
 
-      return { text: text.slice(0, at) + text.slice(start + m), selection: { start: at, end: at } };
+      return edited(text, [removal(at, 2 * m)], { start: at, end: at });
     }
 
     const caret = start + m;
 
-    return {
-      text: text.slice(0, start) + marker + marker + text.slice(start),
-      selection: { start: caret, end: caret },
-    };
+    return edited(text, [insertion(start, marker + marker)], { start: caret, end: caret });
   }
 
   // Selecting a word often takes the space after it: the markers go around the word.
@@ -222,25 +237,18 @@ function toggleInline(text: string, { start, end }: Selection, marker: string): 
 
   while (e > s && /\s/.test(text[e - 1] ?? '')) e--;
 
-  if (s === e) return { text, selection: { start, end } };
+  if (s === e) return { text, selection: { start, end }, splices: [] };
 
-  if (text.slice(s - m, s) === marker && text.slice(e, e + m) === marker) {
-    const unwrapped = text.slice(0, s - m) + text.slice(s, e) + text.slice(e + m);
-
-    return { text: unwrapped, selection: { start: s - m, end: e - m } };
-  }
+  // Each pair of splices goes from the end, so the first's place still holds for the second.
+  if (text.slice(s - m, s) === marker && text.slice(e, e + m) === marker)
+    return edited(text, [removal(e, m), removal(s - m, m)], { start: s - m, end: e - m });
 
   const inner = text.slice(s, e);
 
-  if (inner.length > 2 * m && inner.startsWith(marker) && inner.endsWith(marker)) {
-    const unwrapped = text.slice(0, s) + inner.slice(m, -m) + text.slice(e);
+  if (inner.length > 2 * m && inner.startsWith(marker) && inner.endsWith(marker))
+    return edited(text, [removal(e - m, m), removal(s, m)], { start: s, end: e - 2 * m });
 
-    return { text: unwrapped, selection: { start: s, end: e - 2 * m } };
-  }
-
-  const wrapped = text.slice(0, s) + marker + inner + marker + text.slice(e);
-
-  return { text: wrapped, selection: { start: s + m, end: e + m } };
+  return edited(text, [insertion(e, marker), insertion(s, marker)], { start: s + m, end: e + m });
 }
 
 function toggleLines(
@@ -261,32 +269,44 @@ function toggleLines(
 
   const off = lines.every(has);
 
-  const changed = lines.map((line, index) => {
+  // Each line's prefix is replaced: what follows it (its text) is kept as it was.
+  const prefixes = lines.map((line, index) => {
     const bare = stripBlock(line);
+    const kept = off || format === 'quote' ? bare.text : bare.text.trimStart();
 
-    if (off) return bare.text;
+    const prefix = off
+      ? ''
+      : format === 'bullets'
+        ? `${bare.indent}- `
+        : format === 'numbers'
+          ? `${bare.indent}${index + 1}. `
+          : '> ';
 
-    switch (format) {
-      case 'bullets':
-        return `${bare.indent}- ${bare.text.trimStart()}`;
-      case 'numbers':
-        return `${bare.indent}${index + 1}. ${bare.text.trimStart()}`;
-      case 'quote':
-        return `> ${bare.text}`;
-    }
+    return { old: line.length - kept.length, prefix };
   });
 
-  const first = changed[0] ?? '';
-  const firstDelta = first.length - (lines[0] ?? '').length;
-  const replaced = changed.join('\n');
-  const totalDelta = replaced.length - (to - from);
+  const splices: Splice[] = [];
+  let lineAt = from;
+
+  lines.forEach((line, index) => {
+    const change = prefixes[index];
+
+    if (change) splices.push({ at: lineAt, remove: change.old, insert: change.prefix });
+    lineAt += line.length + 1;
+  });
+
+  // From the last line up, so each splice's place is still where the text had it.
+  splices.reverse();
+  const delta = (change: { old: number; prefix: string }) => change.prefix.length - change.old;
+  const firstDelta = prefixes[0] ? delta(prefixes[0]) : 0;
+  const totalDelta = prefixes.reduce((sum, change) => sum + delta(change), 0);
 
   const selection = {
     start: Math.max(from, start + firstDelta),
     end: Math.max(from, end + totalDelta),
   };
 
-  return { text: text.slice(0, from) + replaced + text.slice(to), selection: ordered(selection) };
+  return edited(text, splices, ordered(selection));
 }
 
 /** A line without its list or quote prefix, and the indentation a list item had. */
@@ -313,18 +333,21 @@ function toggleFence(text: string, { start, end }: Selection): Edited {
 
   if (above !== null && below !== null && FENCE.test(above) && FENCE.test(below)) {
     const aboveStart = lineStart(text, from - 1);
-    const inner = text.slice(from, to);
     const after = lineEnd(text, to + 1);
-    const removed = text.slice(0, aboveStart) + inner + text.slice(after);
     const shift = from - aboveStart;
 
-    return { text: removed, selection: { start: start - shift, end: end - shift } };
+    return edited(text, [removal(to, after - to), removal(aboveStart, shift)], {
+      start: start - shift,
+      end: end - shift,
+    });
   }
 
   const opening = from > 0 && text[from - 1] !== '\n' ? '\n```\n' : '```\n';
-  const fenced = text.slice(0, from) + opening + text.slice(from, to) + '\n```' + text.slice(to);
 
-  return { text: fenced, selection: { start: start + opening.length, end: end + opening.length } };
+  return edited(text, [insertion(to, '\n```'), insertion(from, opening)], {
+    start: start + opening.length,
+    end: end + opening.length,
+  });
 }
 
 // ----- sending ---------------------------------------------------------------------------------
@@ -365,6 +388,8 @@ type BlockKind =
 interface Block {
   kind: BlockKind;
   runs: Run[];
+  /** The line starts inside a spoiler the line before opened (`bridgeSpoilers`). */
+  continuesSpoiler?: boolean;
 }
 
 const PLAIN: Marks = {
@@ -409,8 +434,17 @@ export function outgoingText(draft: string, given: readonly DraftPill[] = []): O
   source += text.slice(at);
   const found = placed.map((p) => p.pill);
   const blocks = parseBlocks(source);
-  const plain = blocks.map((block) => plainRuns(block.runs));
-  const body = expandPills(plain.join('\n').trim(), found, pillText);
+
+  // A spoiler over several lines is one `[Spoiler]`, its line breaks hidden with its words.
+  const plain = blocks
+    .map((block, i) => {
+      const continued = block.continuesSpoiler === true;
+
+      return (i === 0 || continued ? '' : '\n') + plainRuns(block.runs, continued);
+    })
+    .join('');
+
+  const body = expandPills(plain.trim(), found, pillText);
 
   const formatted =
     found.some(pillFormats) ||
@@ -425,10 +459,13 @@ export function outgoingText(draft: string, given: readonly DraftPill[] = []): O
   return { body, html: serialize(trimBlocks(blocks), found), mentions };
 }
 
-/** A line's plain text: a spoiler's words hidden behind `[Spoiler]`, a formula as its LaTeX. */
-function plainRuns(runs: Run[]): string {
+/**
+ * A line's plain text: a spoiler's words hidden behind `[Spoiler]`, a formula as its LaTeX.
+ * `continued` when the line starts inside a spoiler the line before already wrote.
+ */
+function plainRuns(runs: Run[], continued: boolean): string {
   let out = '';
-  let hidden = false;
+  let hidden = continued;
 
   for (const run of runs) {
     if (run.marks.spoiler) {
@@ -485,9 +522,18 @@ function trimBlocks(blocks: Block[]): Block[] {
   return blocks.slice(from, to);
 }
 
+/** A line of the draft: its block, and its text after the block's prefix (`- `, `> `). */
+interface Line {
+  kind: BlockKind;
+  text: string;
+  /** Code, read as written; `null` for a fence, which ends what spoilers can span. */
+  code: boolean | null;
+}
+
 function parseBlocks(text: string): Block[] {
-  const blocks: Block[] = [];
+  const lines: Line[] = [];
   let fenced = false;
+  let previous: BlockKind | undefined;
 
   for (const line of text.split('\n')) {
     if (FENCE.test(line)) {
@@ -495,20 +541,21 @@ function parseBlocks(text: string): Block[] {
       const single = /^ *```(.+)```\s*$/.exec(line);
 
       if (!fenced && single) {
-        blocks.push({ kind: { type: 'code' }, runs: [{ text: single[1] ?? '', marks: PLAIN }] });
+        previous = { type: 'code' };
+        lines.push({ kind: previous, text: single[1] ?? '', code: true });
         continue;
       }
 
       fenced = !fenced;
+      lines.push({ kind: { type: 'code' }, text: '', code: null });
       continue;
     }
 
     if (fenced) {
-      blocks.push({ kind: { type: 'code' }, runs: [{ text: line, marks: PLAIN }] });
+      previous = { type: 'code' };
+      lines.push({ kind: previous, text: line, code: true });
       continue;
     }
-
-    const previous = blocks[blocks.length - 1]?.kind;
 
     const previousLevel =
       previous && (previous.type === 'bullet' || previous.type === 'numbered')
@@ -518,24 +565,147 @@ function parseBlocks(text: string): Block[] {
     const bullet = BULLET.exec(line);
     const numbered = bullet ? null : NUMBERED.exec(line);
     const quote = bullet || numbered ? null : QUOTE.exec(line);
+    const item = bullet ?? numbered;
 
-    if (bullet || numbered) {
-      const match = (bullet ?? numbered)!;
+    if (item) {
       // Two spaces a level, at most one level deeper than the item above.
-      const level = Math.min(Math.floor((match[1] ?? '').length / 2), previousLevel + 1);
-      const type = bullet ? 'bullet' : 'numbered';
-      blocks.push({ kind: { type, level }, runs: parseInline(line.slice(match[0].length)) });
+      const level = Math.min(Math.floor((item[1] ?? '').length / 2), previousLevel + 1);
+      previous = { type: bullet ? 'bullet' : 'numbered', level };
+      lines.push({ kind: previous, text: line.slice(item[0].length), code: false });
     } else if (quote) {
-      blocks.push({ kind: { type: 'quote' }, runs: parseInline(line.slice(quote[0].length)) });
+      previous = { type: 'quote' };
+      lines.push({ kind: previous, text: line.slice(quote[0].length), code: false });
     } else {
-      blocks.push({ kind: { type: 'paragraph' }, runs: parseInline(line) });
+      previous = { type: 'paragraph' };
+      lines.push({ kind: previous, text: line, code: false });
     }
   }
 
-  return blocks;
+  const continued = bridgeSpoilers(lines);
+
+  return lines.flatMap((line, i): Block[] => {
+    if (line.code === null) return [];
+
+    if (line.code) return [{ kind: line.kind, runs: [{ text: line.text, marks: PLAIN }] }];
+
+    return [{ kind: line.kind, runs: parseInline(line.text), continuesSpoiler: continued[i] }];
+  });
+}
+
+/**
+ * Spoilers that span lines (`||he` … `dies||`, as `editDraft` writes a spoiler with line breaks
+ * in it) closed at the end of each line they cover and opened again at the start of the next,
+ * after its prefix, so each line reads its part hidden. A spoiler spans only lines of text, not
+ * a code block, and only when a later line closes it: a lone `||` stays text. Which lines start
+ * inside such a spoiler.
+ */
+function bridgeSpoilers(lines: Line[]): boolean[] {
+  let open = false;
+
+  return lines.map((line, i) => {
+    if (line.code !== false) {
+      open = false;
+
+      return false;
+    }
+
+    const continued = open;
+
+    if (open) {
+      // A blank line inside a spoiler stays in it.
+      if (line.text.trim() === '') return true;
+      const lead = line.text.length - line.text.trimStart().length;
+      line.text = `${line.text.slice(0, lead)}||${line.text.slice(lead)}`;
+    }
+
+    open = unclosedSpoiler(line.text) >= 0 && closedLater(lines, i + 1);
+
+    if (open) {
+      const words = line.text.trimEnd();
+      line.text = `${words}||${line.text.slice(words.length)}`;
+    }
+
+    return continued;
+  });
+}
+
+/** Whether a line from `from` on, before a code block, closes a spoiler opened above it. */
+function closedLater(lines: readonly Line[], from: number): boolean {
+  for (const line of lines.slice(from)) {
+    if (line.code !== false) return false;
+    const text = `||${line.text.trimStart()}`;
+
+    if (line.text.trim() !== '' && findClose(text, 2, '||') >= 0) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Where one line opens a spoiler it doesn't close, as `inline` reads it (code, formulas and
+ * links skipped, other formatting's pairs passed over); -1 when it doesn't.
+ */
+function unclosedSpoiler(source: string): number {
+  let i = 0;
+
+  outer: while (i < source.length) {
+    const c = source[i]!;
+
+    if (c === '\\' && i + 1 < source.length && ESCAPABLE.includes(source[i + 1]!)) {
+      i += 2;
+      continue;
+    }
+
+    if (c === '`') {
+      const close = source.indexOf('`', i + 1);
+
+      if (close > i + 1) {
+        i = close + 1;
+        continue;
+      }
+    }
+
+    if (source.startsWith('$$', i)) {
+      const close = source.indexOf('$$', i + 2);
+
+      if (close > i + 2) {
+        i = close + 2;
+        continue;
+      }
+    }
+
+    if (c === '[') {
+      const link = LINK.exec(source.slice(i));
+
+      if (link) {
+        i += link[0].length;
+        continue;
+      }
+    }
+
+    for (const [delimiter, mark] of DELIMITERS) {
+      if (!source.startsWith(delimiter, i) || !canOpen(source, i, delimiter)) continue;
+      const close = findClose(source, i + delimiter.length, delimiter);
+
+      if (close < 0) {
+        if (mark === 'spoiler') return i;
+        continue;
+      }
+
+      i = close + delimiter.length;
+      continue outer;
+    }
+
+    i++;
+  }
+
+  return -1;
 }
 
 const ESCAPABLE = '\\`*_~[]()>#-.!|$';
+
+/** A link written in the draft: `[label](address)`. */
+const LINK = /^\[([^\]]+)\]\(([^)\s]+)\)/;
 
 /** The runs of one line: its text cut where the marks around it change. */
 export function parseInline(source: string): Run[] {
@@ -618,7 +788,7 @@ function inline(source: string, marks: Marks, out: Run[]): void {
     }
 
     if (c === '[') {
-      const link = /^\[([^\]]+)\]\(([^)\s]+)\)/.exec(source.slice(i));
+      const link = LINK.exec(source.slice(i));
 
       if (link) {
         flush();
@@ -920,7 +1090,8 @@ export function editDraft(body: string, html: string | null): EditDraft {
   let pre = false;
   let quote = 0;
   let skip = 0;
-  const links: string[] = [];
+  /** Each open link's address; `null` for a link around a spoiler, which is no link. */
+  const links: Array<string | null> = [];
 
   const breakLine = () => {
     lines.push(line);
@@ -949,7 +1120,7 @@ export function editDraft(body: string, html: string | null): EditDraft {
       }
 
       if (pre) {
-        const parts = decodeEntities(text).split('\n');
+        const parts = plainOf(text).split('\n');
         parts.forEach((part, index) => {
           if (index > 0) breakLine();
           line += part;
@@ -959,7 +1130,7 @@ export function editDraft(body: string, html: string | null): EditDraft {
 
       // Whitespace between blocks (`</p>\n<p>`) is layout, not text.
       if (/^\s*$/.test(text) && text.includes('\n')) continue;
-      line += decodeEntities(text.replace(/\s*\n\s*/g, ' '));
+      line += plainOf(text.replace(/\s*\n\s*/g, ' '));
       continue;
     }
 
@@ -1004,12 +1175,12 @@ export function editDraft(body: string, html: string | null): EditDraft {
       spans.push(spoiler ? 'spoiler' : 'other');
 
       if (spoiler) {
-        line += '||';
+        line += SPOILER_OPEN;
         continue;
       }
     } else if ((tag === 'span' || tag === 'div') && end) {
       if (spans.pop() === 'spoiler') {
-        line += '||';
+        line += SPOILER_CLOSE;
         continue;
       }
     }
@@ -1048,9 +1219,18 @@ export function editDraft(body: string, html: string | null): EditDraft {
       case 'a':
         if (end) {
           const href = links.pop();
-          line += href === undefined ? '' : `](${href})`;
+          line += href === undefined || href === null ? '' : `](${href})`;
         } else {
           const href = attribute(attrs ?? '', 'href') ?? '';
+          const inner = html.slice(tokens.lastIndex, elementEnd(html, 'a', tokens.lastIndex));
+
+          // A link around a spoiler is no link, nor a mention: its content stays as it is, the
+          // spoiler a spoiler, as `html.ts` reads it.
+          if (/data-mx-spoiler/i.test(inner)) {
+            links.push(null);
+            break;
+          }
+
           const target = mentionOf(href);
 
           if (target) {
@@ -1128,12 +1308,66 @@ export function editDraft(body: string, html: string | null): EditDraft {
 
   if (line !== '' && line !== continuation) lines.push(line);
 
-  const draft = lines
-    .join('\n')
+  const draft = spoilerMarkers(lines.join('\n'))
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
   return draft === '' ? { draft: body, pills: [] } : withPills(draft, pills);
+}
+
+/**
+ * Where a spoiler starts and ends while a message is written back as markers: control characters
+ * no message text keeps (`plainOf`), turned into `||` once the whole draft is known.
+ */
+const SPOILER_OPEN = '\u0002';
+
+const SPOILER_CLOSE = '\u0003';
+
+/** Text from a message's HTML, without the characters that mark spoilers here. */
+function plainOf(text: string): string {
+  return decodeEntities(text).replaceAll(SPOILER_OPEN, '').replaceAll(SPOILER_CLOSE, '');
+}
+
+/**
+ * `marked` with each spoiler's marks written as `||` pairs, each pair tight around the
+ * spoiler's words (`||` opens before a word and closes after one, so space or a line break at
+ * either end of the spoiler stays outside it, where it can't stop the markers reading as a
+ * spoiler). A spoiler over several lines keeps one pair, which `outgoingText` reads across the
+ * lines; nested spoilers are one; an empty one is gone.
+ */
+function spoilerMarkers(marked: string): string {
+  let out = '';
+  let depth = 0;
+  let inner = '';
+
+  const close = () => {
+    const words = inner.trim();
+    const start = inner.length - inner.trimStart().length;
+    out +=
+      words === ''
+        ? inner
+        : `${inner.slice(0, start)}||${words}||${inner.slice(start + words.length)}`;
+    inner = '';
+  };
+
+  for (const c of marked) {
+    if (c === SPOILER_OPEN) {
+      depth += 1;
+    } else if (c === SPOILER_CLOSE) {
+      if (depth === 0) continue;
+      depth -= 1;
+
+      if (depth === 0) close();
+    } else if (depth > 0) {
+      inner += c;
+    } else {
+      out += c;
+    }
+  }
+
+  if (depth > 0) close();
+
+  return out;
 }
 
 /**

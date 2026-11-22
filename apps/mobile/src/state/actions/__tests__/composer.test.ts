@@ -1,8 +1,10 @@
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 
 import { t } from '../../../i18n';
-import { ADA, message, summary } from '../../../test/fixtures';
+import { ADA, message, summary, withContent } from '../../../test/fixtures';
 import { composer, startEdit, startReply } from '../../composer';
+import { applyFormat, continueBlock } from '../../format';
+import { editDraftOf } from '../../messages';
 import { newPollForm } from '../../pollForm';
 import { Store } from '../../store';
 import { roomKey, threadKey } from '../../timeline';
@@ -21,6 +23,7 @@ import {
   sendTyping,
   sendVoiceMemo,
   setDraft,
+  spliceDraft,
 } from '../composer';
 
 /** `m.mentions` for a message that mentions nobody. */
@@ -137,6 +140,32 @@ describe('composer actions', () => {
         },
       },
     ]);
+  });
+
+  it('should keep a spoiler over several lines hidden through an edit of one of its words', () => {
+    const { store, commands } = setUp();
+    setDraft(store, ADA, KEY, '/spoiler he\ndies\n\nsadly');
+    sendComposer(store, ADA, KEY);
+    const sent = commands()[0];
+
+    if (sent?.type !== 'Send' || sent.data.message.type !== 'Text')
+      throw new Error(`not a text message: ${JSON.stringify(sent)}`);
+    const mine = withContent('$mine', { type: 'Text', data: sent.data.message.data });
+    const { draft, pills } = editDraftOf(mine);
+    startEdit(store, ADA, KEY, mine, draft, pills);
+    setDraft(store, ADA, KEY, draft.replace('dies', 'lives'));
+    sendComposer(store, ADA, KEY);
+    const edit = commands()[1];
+
+    expect(edit).toMatchObject({
+      type: 'Edit',
+      data: {
+        body: '[Spoiler]',
+        html:
+          '<p><span data-mx-spoiler>he</span></p><p><span data-mx-spoiler>lives</span></p>' +
+          '<p></p><p><span data-mx-spoiler>sadly</span></p>',
+      },
+    });
   });
 
   it('should bring the draft back when an edit is cancelled', () => {
@@ -395,6 +424,54 @@ describe('pills in the composer', () => {
     completeDraft(store, ADA, KEY, 'hi @Grace', { start: 0, end: 0 }, pillAt(grace, 3));
     insertIntoDraft(store, ADA, KEY, '🎉 ');
     expect(composer(store.getState(), ADA, KEY).pills).toEqual([pillAt(grace, 6)]);
+  });
+
+  it.each(['bold', 'italic', 'strike', 'code'] as const)(
+    'should keep a pill the toolbar makes %s around',
+    (format) => {
+      const { store } = setUp();
+      completeDraft(store, ADA, KEY, 'hi @Grace', { start: 9, end: 9 }, pillAt(grace, 3));
+      const marker = { bold: '**', italic: '_', strike: '~~', code: '`' }[format];
+      spliceDraft(store, ADA, KEY, applyFormat('hi @Grace', { start: 3, end: 9 }, format));
+      expect(composer(store.getState(), ADA, KEY)).toMatchObject({
+        draft: `hi ${marker}@Grace${marker}`,
+        pills: [pillAt(grace, 3 + marker.length)],
+      });
+    },
+  );
+
+  it('should send a mention made bold by the toolbar as a bold mention', () => {
+    const { store, commands } = setUp();
+    completeDraft(store, ADA, KEY, 'hi @Grace', { start: 9, end: 9 }, pillAt(grace, 3));
+    spliceDraft(store, ADA, KEY, applyFormat('hi @Grace', { start: 3, end: 9 }, 'bold'));
+    sendComposer(store, ADA, KEY);
+    expect(commands()[0]).toMatchObject({
+      data: {
+        message: {
+          data: {
+            html: '<p>hi <strong><a href="https://matrix.to/#/@grace:x">Grace</a></strong></p>',
+            mentions: { user_ids: ['@grace:x'] },
+          },
+        },
+      },
+    });
+  });
+
+  it('should keep a pill on a list item the toolbar continues', () => {
+    const { store } = setUp();
+    completeDraft(store, ADA, KEY, '- @Grace', { start: 8, end: 8 }, pillAt(grace, 2));
+    const continued = continueBlock('- @Grace', '- @Grace\n');
+
+    if (!continued) throw new Error('the list should continue');
+    spliceDraft(store, ADA, KEY, continued);
+    expect(composer(store.getState(), ADA, KEY).pills).toEqual([pillAt(grace, 2)]);
+  });
+
+  it('should keep a pill when the toolbar makes its line a bullet', () => {
+    const { store } = setUp();
+    completeDraft(store, ADA, KEY, '@Grace', { start: 6, end: 6 }, pillAt(grace, 0));
+    spliceDraft(store, ADA, KEY, applyFormat('@Grace', { start: 0, end: 0 }, 'bullets'));
+    expect(composer(store.getState(), ADA, KEY).pills).toEqual([pillAt(grace, 2)]);
   });
 
   it('should send a mention with whom it mentions and forget the pills', () => {

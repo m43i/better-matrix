@@ -77,6 +77,13 @@ class Parser {
       bytes += utf8Length(text);
     };
 
+    // The last thing pushed counts too: no sequence returns more than the bound.
+    const done = (): string => {
+      if (bytes > MOST_OUTPUT) this.overflow = true;
+
+      return out;
+    };
+
     for (let c = this.peek(); c !== undefined; c = this.peek()) {
       if (this.overflow || bytes > MOST_OUTPUT) {
         this.overflow = true;
@@ -87,7 +94,7 @@ class Parser {
       if (c === end) {
         this.at += 1;
 
-        return out;
+        return done();
       }
 
       if (c === '^' || c === '_') {
@@ -99,7 +106,7 @@ class Parser {
       }
     }
 
-    return out;
+    return done();
   }
 
   /** One thing: a group, a command with its arguments, or a character. */

@@ -1,4 +1,4 @@
-import { type Block, blocksText, htmlBlocks, inlinesText, plainBlocks } from '../html';
+import { type Block, blocksText, htmlBlocks, plainBlocks } from '../html';
 
 const paragraph = (blocks: Block[]) => {
   const first = blocks[0];
@@ -188,7 +188,7 @@ describe('htmlBlocks with Matrix’s inline objects', () => {
   it('should hide a spoiler’s words behind a spoiler', () => {
     expect(paragraph(htmlBlocks('he <span data-mx-spoiler="plot">dies</span>'))).toEqual([
       { type: 'text', text: 'he ', marks: {} },
-      { type: 'spoiler', reason: 'plot', inlines: [{ type: 'text', text: 'dies', marks: {} }] },
+      { type: 'spoiler', reason: 'plot', text: 'dies' },
     ]);
   });
 
@@ -243,15 +243,50 @@ describe('htmlBlocks with Matrix’s inline objects', () => {
     ).toBe('a b π');
   });
 
-  it('should read a hidden spoiler as plain words, its links, mentions and pictures as text', () => {
-    const [spoiler] = paragraph(
+  it('should read a spoiler as plain words, its links, mentions and pictures as text', () => {
+    expect(
+      paragraph(
+        htmlBlocks(
+          '<span data-mx-spoiler><a href="https://matrix.to/#/@grace:x.org">Grace</a> at <a href="https://x.org">x.org</a> <img src="mxc://x.org/c" alt=":cat:"></span>',
+        ),
+      ),
+    ).toEqual([{ type: 'spoiler', reason: '', text: 'Grace at x.org :cat:' }]);
+  });
+
+  it('should keep a spoiler’s formatting and line breaks out of it but its words', () => {
+    expect(
+      paragraph(htmlBlocks('<span data-mx-spoiler>he <b>dies</b><br />  sadly</span>')),
+    ).toEqual([{ type: 'spoiler', reason: '', text: 'he dies\nsadly' }]);
+  });
+
+  it('should not make a mention of a link around a spoiler, keeping the spoiler hidden', () => {
+    expect(
+      paragraph(
+        htmlBlocks(
+          '<a href="https://matrix.to/#/@x:y.org"><span data-mx-spoiler>secret</span></a>',
+        ),
+      ),
+    ).toEqual([{ type: 'spoiler', reason: '', text: 'secret' }]);
+  });
+
+  it('should not make a link of a web link around a spoiler', () => {
+    expect(
+      paragraph(
+        htmlBlocks('<a href="https://x.org/secret">see <span data-mx-spoiler>it</span></a>'),
+      ),
+    ).toEqual([
+      { type: 'text', text: 'see ', marks: {} },
+      { type: 'spoiler', reason: '', text: 'it' },
+    ]);
+  });
+
+  it('should not show a mention or custom emoji inside a spoiler, nor link a web address there', () => {
+    const inlines = paragraph(
       htmlBlocks(
-        '<span data-mx-spoiler><a href="https://matrix.to/#/@grace:x.org">Grace</a> at <a href="https://x.org">x.org</a> <img src="mxc://x.org/c" alt=":cat:"></span>',
+        '<span data-mx-spoiler><a href="https://matrix.to/#/@x:y.org">X</a> <img src="mxc://y.org/e" alt=":e:"> https://y.org</span>',
       ),
     );
 
-    expect(spoiler?.type === 'spoiler' ? inlinesText(spoiler.inlines) : null).toBe(
-      'Grace at x.org :cat:',
-    );
+    expect(inlines.map((inline) => inline.type)).toEqual(['spoiler']);
   });
 });

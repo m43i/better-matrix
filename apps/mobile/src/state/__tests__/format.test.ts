@@ -129,14 +129,14 @@ describe('outgoingText', () => {
 
 describe('applyFormat', () => {
   it('should wrap a selection in bold markers and keep it selected', () => {
-    expect(applyFormat('one two', { start: 4, end: 7 }, 'bold')).toEqual({
+    expect(applyFormat('one two', { start: 4, end: 7 }, 'bold')).toMatchObject({
       text: 'one **two**',
       selection: { start: 6, end: 9 },
     });
   });
 
   it('should unwrap a selection that is bold already', () => {
-    expect(applyFormat('one **two**', { start: 6, end: 9 }, 'bold')).toEqual({
+    expect(applyFormat('one **two**', { start: 6, end: 9 }, 'bold')).toMatchObject({
       text: 'one two',
       selection: { start: 4, end: 7 },
     });
@@ -147,11 +147,17 @@ describe('applyFormat', () => {
   });
 
   it('should insert a pair with the caret between when nothing is selected', () => {
-    expect(applyFormat('a ', caret(2), 'strike')).toEqual({ text: 'a ~~~~', selection: caret(4) });
+    expect(applyFormat('a ', caret(2), 'strike')).toMatchObject({
+      text: 'a ~~~~',
+      selection: caret(4),
+    });
   });
 
   it('should take an empty pair away when toggled again', () => {
-    expect(applyFormat('a ``', caret(3), 'code')).toEqual({ text: 'a ', selection: caret(2) });
+    expect(applyFormat('a ``', caret(3), 'code')).toMatchObject({
+      text: 'a ',
+      selection: caret(2),
+    });
   });
 
   it('should make every selected line a bullet', () => {
@@ -189,7 +195,7 @@ describe('applyFormat', () => {
 
 describe('applyLink', () => {
   it('should link the selection to the address', () => {
-    expect(applyLink('the blog', { start: 4, end: 8 }, 'https://matrix.org')).toEqual({
+    expect(applyLink('the blog', { start: 4, end: 8 }, 'https://matrix.org')).toMatchObject({
       text: 'the [blog](https://matrix.org)',
       selection: caret(30),
     });
@@ -206,7 +212,10 @@ describe('applyLink', () => {
 
 describe('continueBlock', () => {
   it('should start the next bullet after a line break in a list', () => {
-    expect(continueBlock('- one', '- one\n')).toEqual({ text: '- one\n- ', selection: caret(8) });
+    expect(continueBlock('- one', '- one\n')).toMatchObject({
+      text: '- one\n- ',
+      selection: caret(8),
+    });
   });
 
   it('should count on in a numbered list', () => {
@@ -218,7 +227,10 @@ describe('continueBlock', () => {
   });
 
   it('should end the list on an empty item', () => {
-    expect(continueBlock('- a\n- ', '- a\n- \n')).toEqual({ text: '- a\n', selection: caret(4) });
+    expect(continueBlock('- a\n- ', '- a\n- \n')).toMatchObject({
+      text: '- a\n',
+      selection: caret(4),
+    });
   });
 
   it('should leave a break in a plain line alone', () => {
@@ -359,6 +371,31 @@ describe('outgoingText with Matrix markers', () => {
     });
   });
 
+  it('should hide each line of a spoiler written over several, as one spoiler in the body', () => {
+    expect(sent('x ||he\ndies|| y')).toEqual({
+      body: 'x [Spoiler] y',
+      html: '<p>x <span data-mx-spoiler>he</span></p><p><span data-mx-spoiler>dies</span> y</p>',
+    });
+  });
+
+  it('should keep a blank line inside a spoiler hidden with it', () => {
+    expect(sent('||a\n\nb||').body).toBe('[Spoiler]');
+  });
+
+  it('should hide a spoiler’s lines inside their list items', () => {
+    expect(sent('- ||a\n- b||').html).toBe(
+      '<ul><li><span data-mx-spoiler>a</span></li><li><span data-mx-spoiler>b</span></li></ul>',
+    );
+  });
+
+  it('should not carry a spoiler into a code block', () => {
+    expect(sent('||a\n```\nb||\n```').html).toBe('<p>||a</p><pre><code>b||</code></pre>');
+  });
+
+  it('should leave bars no later line closes as text', () => {
+    expect(sent('a ||b\nc')).toEqual({ body: 'a ||b\nc', html: null });
+  });
+
   it('should take an escaped bar literally', () => {
     expect(sent('a \\|\\| b')).toEqual({ body: 'a || b', html: null });
   });
@@ -382,6 +419,25 @@ describe('editDraft', () => {
       draft: ':cat:',
       pills: [pillAt(emotePill('mxc://x.org/c', 'cat'), 0)],
     });
+  });
+
+  it('should bring a spoiler with line breaks back as one pair of markers around its lines', () => {
+    expect(editDraft('', '<span data-mx-spoiler>he<br />dies</span> sadly').draft).toBe(
+      '||he\ndies|| sadly',
+    );
+  });
+
+  it('should put a spoiler’s markers against its words, its spaces and breaks outside', () => {
+    expect(editDraft('', 'a<span data-mx-spoiler><br /> b </span>c').draft).toBe('a\n ||b|| c');
+  });
+
+  it('should bring a link around a spoiler back as its content, not a mention', () => {
+    expect(
+      editDraft(
+        '',
+        '<a href="https://matrix.to/#/@x:y.org"><span data-mx-spoiler>secret</span></a>',
+      ),
+    ).toEqual({ draft: '||secret||', pills: [] });
   });
 
   it('should bring a spoiler back as markers', () => {

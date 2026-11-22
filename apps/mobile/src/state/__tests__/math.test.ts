@@ -1,5 +1,5 @@
 import vectors from '../../../../../packages/matrix-core/src/math.json';
-import { MOST_INPUT, mathToUnicode } from '../math';
+import { MOST_INPUT, MOST_OUTPUT, mathToUnicode } from '../math';
 
 describe('mathToUnicode', () => {
   // The engine reads maths against the same vectors (packages/matrix-core/src/math.rs).
@@ -27,5 +27,18 @@ describe('mathToUnicode', () => {
     const latex = `${'\\vec{'.repeat(15)}${'x'.repeat(1900)}${'}'.repeat(15)}`;
 
     expect(mathToUnicode(latex)).toBe(latex);
+  });
+
+  it('a formula whose last part takes its output past the bound should show as its LaTeX', () => {
+    // Each half reads within the bound, the two together past it, and nothing follows the
+    // second to notice.
+    const half = `\\overline{\\overline{\\overline{${'x'.repeat(600)}}}}`;
+    const bytes = new TextEncoder().encode(mathToUnicode(half)).length;
+
+    expect([bytes <= MOST_OUTPUT, 2 * bytes > MOST_OUTPUT, mathToUnicode(half + half)]).toEqual([
+      true,
+      true,
+      half + half,
+    ]);
   });
 });

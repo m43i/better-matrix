@@ -6,7 +6,7 @@ import { memo, useState } from 'react';
 import { Image, Platform, ScrollView, StyleSheet, Text, type TextStyle, View } from 'react-native';
 
 import { t } from '../../i18n';
-import { type Block, type Inline, inlinesText, type Marks } from '../../state/html';
+import { type Block, type Inline, type Marks } from '../../state/html';
 import { mxcMedia } from '../../state/messages';
 import { useAppStore } from '../../state/react';
 import { font } from '../../theme/palette';
@@ -105,7 +105,7 @@ function Inlines({ inlines }: { inlines: Inline[] }) {
           case 'mention':
             return <Pill key={index} inline={inline} />;
           case 'spoiler':
-            return <Spoiler key={index} inlines={inline.inlines} />;
+            return <Spoiler key={index} text={inline.text} />;
           case 'math':
             return <MathText key={index} text={inline.text} latex={inline.latex} />;
           case 'emote':
@@ -117,15 +117,15 @@ function Inlines({ inlines }: { inlines: Inline[] }) {
 }
 
 /**
- * Hidden text: a block of the muted colour until tapped, then the text as sent. Hidden, it is
- * an inert placeholder of its plain words: no link or mention inside shows its colour or takes
- * the tap, and no custom emoji shows its picture.
+ * Hidden text: a block of the muted colour until tapped, then its words. A spoiler is only ever
+ * its plain words (`state/html.ts`): no link, mention or custom emoji inside it shows anything,
+ * hidden or not.
  */
-function Spoiler({ inlines }: { inlines: Inline[] }) {
+function Spoiler({ text }: { text: string }) {
   const palette = usePalette();
   const [shown, setShown] = useState(false);
 
-  if (shown) return <Inlines inlines={inlines} />;
+  if (shown) return <Text>{text}</Text>;
 
   return (
     <Text
@@ -135,7 +135,7 @@ function Spoiler({ inlines }: { inlines: Inline[] }) {
       suppressHighlighting
       style={{ color: palette.textMuted, backgroundColor: palette.textMuted }}
     >
-      {inlinesText(inlines)}
+      {text}
     </Text>
   );
 }
