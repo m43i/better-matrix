@@ -368,8 +368,10 @@ Date: 2026-11-16
   `ftp`, reply fallbacks and scripts are dropped, nesting is capped. Nothing renders raw HTML.
   Matrix's inline objects become inlines of their own, as `html.rs` reads them: mention pills
   (the user's own in the mention colour), spoilers hidden behind a block of the muted colour
-  until tapped (hidden, a spoiler is an inert placeholder of its plain words: nothing inside
-  shows its colour or picture or takes a tap), formulas as Unicode (`state/math.ts`, a
+  until tapped (a spoiler is only its plain words, custom emoji as their descriptions, hidden
+  or shown: nothing inside shows its colour or picture or takes a tap; a link or mention
+  around a spoiler is neither, its content drawn as it is, so its label or look can't give the
+  spoiler away; the engine reads them the same), formulas as Unicode (`state/math.ts`, a
   line-for-line port of `math.rs` run against its `math.json` vectors, bounded as it is: past
   2000 bytes, 32 nested groups or commands, or 8000 bytes of output, a formula shows as its
   LaTeX; a `<div>` formula gets its own line) and custom emoji as pictures in the line.

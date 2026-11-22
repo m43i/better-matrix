@@ -3,9 +3,11 @@
 // formatting, links keep web, mail and `matrix:` addresses only, and everything else is plain
 // text. Bare web addresses become links too (but not inside code), as on the desktop. Matrix's
 // inline objects become their own inlines, as the engine's `html.rs` reads them: mentions
-// (pills), spoilers (`data-mx-spoiler`, hidden until tapped), maths (`data-mx-maths`, shown as
-// Unicode by `math.ts`) and custom emoji (`<img src="mxc://…">`: Matrix HTML's only images are
-// the homeserver's, and the SDK's sanitiser drops `data-mx-emoticon`, so the source marks one).
+// (pills), spoilers (`data-mx-spoiler`, hidden until tapped, their content its plain words only;
+// a link or mention around one is neither, so nothing shows what it hides), maths
+// (`data-mx-maths`, shown as Unicode by `math.ts`) and custom emoji (`<img src="mxc://…">`:
+// Matrix HTML's only images are the homeserver's, and the SDK's sanitiser drops
+// `data-mx-emoticon`, so the source marks one).
 //
 // The tokenizer is ours rather than htmlparser2's: htmlparser2 is ESM-only, which the app's Jest
 // setup doesn't load. Matrix HTML is a small, well-formed subset; anything unexpected reads as
@@ -30,8 +32,12 @@ export type Inline =
   | { type: 'text'; text: string; marks: Marks }
   /** A person or a room, linked through matrix.to: drawn as a pill. */
   | { type: 'mention'; kind: 'user' | 'room'; id: string; label: string }
-  /** Hidden text (`data-mx-spoiler`), shown once tapped; `reason` is what the sender said of it. */
-  | { type: 'spoiler'; inlines: Inline[]; reason: string }
+  /**
+   * Hidden text (`data-mx-spoiler`), shown once tapped; `reason` is what the sender said of it.
+   * Its content is its plain words only (a custom emoji its description), so no link, mention
+   * or picture inside it shows anything before it is tapped.
+   */
+  | { type: 'spoiler'; text: string; reason: string }
   /** A formula: its LaTeX, and the Unicode line it reads as. A block formula has its own line. */
   | { type: 'math'; latex: string; text: string; block: boolean }
   /** A custom emoji: its `mxc://` image, and its short code (`:blobcat:`) to read. */
@@ -66,7 +72,7 @@ export function inlinesText(inlines: Inline[]): string {
         case 'text':
           return i.text;
         case 'spoiler':
-          return inlinesText(i.inlines);
+          return i.text;
         case 'math':
           return i.text;
         default:
@@ -308,6 +314,35 @@ export function mentionOf(href: string): { kind: 'user' | 'room'; id: string } |
   return { kind: link.kind, id: link.id };
 }
 
+/** Whether a spoiler lies within `node`. */
+function holdsSpoiler(node: Node): boolean {
+  return (
+    node.type === 'element' &&
+    !DROPPED.has(node.name) &&
+    (((node.name === 'span' || node.name === 'div') &&
+      node.attrs['data-mx-spoiler'] !== undefined) ||
+      node.children.some(holdsSpoiler))
+  );
+}
+
+/**
+ * A spoiler's content as its plain words, as the engine reads it: text, line breaks, and the
+ * descriptions of pictures (a custom emoji's short code); nothing a link, mention or picture
+ * would show.
+ */
+function spoilerText(node: Node): string {
+  if (node.type === 'text') return node.text.replace(/[ \t\n\r\f]+/g, ' ');
+
+  if (DROPPED.has(node.name)) return '';
+
+  if (node.name === 'br') return '\n';
+
+  if (node.name === 'img') return node.attrs.alt ?? node.attrs.title ?? '';
+  const inner = node.children.map(spoilerText).join('');
+
+  return isBlock(node.name) ? `${inner}\n` : inner;
+}
+
 /** The text an element holds, as written (for code blocks). */
 function rawText(node: Node): string {
   if (node.type === 'text') return node.text;
@@ -491,14 +526,28 @@ function toInlines(node: Node, marks: Marks): Inline[] {
 
       if (latex !== undefined) return [mathInline(latex, node.name === 'div')];
       const reason = node.attrs['data-mx-spoiler'];
-      const inlines = node.children.flatMap((child) => toInlines(child, marks));
 
-      if (reason !== undefined) return [{ type: 'spoiler', inlines: tidy(inlines), reason }];
+      if (reason !== undefined) {
+        const text = node.children
+          .map(spoilerText)
+          .join('')
+          .replace(/ *\n */g, '\n')
+          .replace(/ {2,}/g, ' ')
+          .trim();
+
+        return text === '' ? [] : [{ type: 'spoiler', text, reason }];
+      }
+
+      const inlines = node.children.flatMap((child) => toInlines(child, marks));
 
       return node.name === 'div' ? [...inlines, { type: 'text', text: '\n', marks }] : inlines;
     }
 
     case 'a': {
+      // A link around a spoiler is no link (nor a mention): its content shows as it is, the
+      // spoiler still hidden, so neither the link's look nor its label gives the words away.
+      if (node.children.some(holdsSpoiler))
+        return node.children.flatMap((child) => toInlines(child, marks));
       const href = node.attrs.href ?? '';
       const label = node.children.map(rawText).join('').trim();
       const mention = mentionOf(href);
@@ -591,8 +640,6 @@ function tidy(inlines: Inline[]): Inline[] {
 /** Inlines with every bare web address made a link, except in code and existing links. */
 export function linkify(inlines: Inline[]): Inline[] {
   return inlines.flatMap((inline): Inline[] => {
-    if (inline.type === 'spoiler') return [{ ...inline, inlines: linkify(inline.inlines) }];
-
     if (inline.type !== 'text' || inline.marks.code || inline.marks.link) return [inline];
     const ranges = linkRanges(inline.text);
 
