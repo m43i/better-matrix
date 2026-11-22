@@ -51,7 +51,7 @@ import {
   shouldMarkRead,
 } from '../../state/plan';
 import { shallow, useAppStore, useStore } from '../../state/react';
-import { openSeek, quoteTapped, seekEnded, sought } from '../../state/seek';
+import { openSeek, quoteHere, quoteTapped, seekEnded, seekStep, sought } from '../../state/seek';
 import { room as roomOf, timeline as timelineOf } from '../../state/selectors';
 import { routes } from '../../routes';
 import { font } from '../../theme/palette';
@@ -296,53 +296,84 @@ export function Timeline({
   // goes on only while no later jump began and this screen is on show.
   const quoteJump = useRef<Jump | null>(null);
 
-  // A linked message: scroll to it once loaded, paging back a little to find it.
+  // A linked message: scroll to it once loaded, paging back a little to find it (on to the start
+  // of history for a hit known to be local, or a quote the engine says shows here).
+  const quoteShowsHere = seek.quoteHere;
   const targetDone = useRef<string | null>(null);
   const targetPages = useRef(0);
   useEffect(() => {
     if (!wanted || targetDone.current === wanted) return;
     const ended = () => setSeek((now) => seekEnded(now, wanted));
+    const jump = quoteJump.current;
 
-    if (quote !== null && quoteJump.current?.() === false) {
-      // A later jump began, or the user left: the quote's search stops, quietly.
-      targetDone.current = wanted;
-      ended();
-    } else if (rowOf(rows, wanted) >= 0) {
-      targetDone.current = wanted;
-      // Once the list laid the rows out; the search ends once the jump's scroll was reported.
-      requestAnimationFrame(() => {
-        scrollTo(wanted, quote !== null);
+    const step = seekStep({
+      quote: quote !== null,
+      wanted: jump?.() !== false,
+      loaded: rowOf(rows, wanted) >= 0,
+      busy: timeline.opening || timeline.loadingOlder || timeline.historyError !== null,
+      atStart: reachedStart,
+      pages: targetPages.current,
+      budget: TARGET_PAGES,
+      unbounded: quote !== null ? quoteShowsHere : localTarget,
+    });
 
-        if (settleTimer.current) clearTimeout(settleTimer.current);
-        settleTimer.current = setTimeout(ended, SETTLE_MS);
-      });
-    } else if (timeline.opening || timeline.loadingOlder || timeline.historyError !== null) {
-      // Wait: for the timeline to open, for the page coming, or for Try again after a failure
-      // (until then nothing is marked read under the reader).
-    } else if (
-      !reachedStart &&
-      ((localTarget && quote === null) || targetPages.current < TARGET_PAGES)
-    ) {
-      targetPages.current += 1;
-      loadMore();
-    } else {
-      // Not found: the list stays where it is. A quoted message may live in another timeline
-      // (a reply in a thread, a room message quoted in one): it opens there, as a link's does.
-      targetDone.current = wanted;
-      ended();
-      const jump = quoteJump.current;
+    switch (step) {
+      case 'stop':
+        // A later jump began, or the user left: the quote's search stops, quietly.
+        targetDone.current = wanted;
+        ended();
 
-      if (quote !== null && jump !== null)
-        void openElsewhere(store, account, timelineKey, wanted, jump, router).then((outcome) => {
-          if (outcome === 'missing')
-            store.update((s) => addNotice(s, t('mobile.conversation.message_missing'), account));
+        return;
+      case 'scroll':
+        targetDone.current = wanted;
+        // Once the list laid the rows out; the search ends once the jump's scroll was reported.
+        requestAnimationFrame(() => {
+          scrollTo(wanted, quote !== null);
+
+          if (settleTimer.current) clearTimeout(settleTimer.current);
+          settleTimer.current = setTimeout(ended, SETTLE_MS);
         });
+
+        return;
+      case 'wait':
+        // For the timeline to open, for the page coming, or for Try again after a failure
+        // (until then nothing is marked read under the reader).
+        return;
+      case 'page':
+        targetPages.current += 1;
+        loadMore();
+
+        return;
+      case 'missing':
+        // History started without it, though the engine said it shows here: it is gone.
+        targetDone.current = wanted;
+        ended();
+        store.update((s) => addNotice(s, t('mobile.conversation.message_missing'), account));
+
+        return;
+      case 'elsewhere':
+        // Not found: the list stays where it is. A quoted message may live in another timeline
+        // (a reply in a thread, a room message quoted in one): it opens there, as a link's does;
+        // one the engine says shows here is looked for further back.
+        targetDone.current = wanted;
+        ended();
+
+        if (quote !== null && jump !== null)
+          void openElsewhere(store, account, timelineKey, wanted, jump, router).then((outcome) => {
+            if (outcome === 'here') {
+              targetDone.current = null;
+              setSeek((now) => quoteHere(now, wanted));
+            } else if (outcome === 'missing') {
+              store.update((s) => addNotice(s, t('mobile.conversation.message_missing'), account));
+            }
+          });
     }
   }, [
     store,
     account,
     timelineKey,
     quote,
+    quoteShowsHere,
     wanted,
     localTarget,
     rows,

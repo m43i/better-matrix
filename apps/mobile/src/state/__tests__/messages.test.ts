@@ -17,6 +17,7 @@ import {
   previewSize,
   editText,
 } from '../messages';
+import { translationUrl } from '../actions/message-actions';
 import { ADA, GRACE, message, roomSummary, withContent } from '../../test/fixtures';
 
 const text = (body: string, html: string | null = null) =>
@@ -71,6 +72,29 @@ describe('prepare', () => {
 describe('messageText', () => {
   it('should copy formatted text as it reads', () => {
     expect(messageText(text('**hi**', '<b>hi</b>'))).toBe('hi');
+  });
+
+  it('should copy a spoiler as [Spoiler], never its words', () => {
+    expect(
+      messageText(text('the end: [Spoiler]', 'the end: <span data-mx-spoiler>he dies</span>')),
+    ).toBe('the end: [Spoiler]');
+  });
+
+  it('should translate a spoiler as [Spoiler], never its words', () => {
+    const spoiled = text('[Spoiler]', '<span data-mx-spoiler>the butler did it</span>');
+    const url = translationUrl(messageText(spoiled) ?? '', 'en');
+
+    expect(url).toContain(encodeURIComponent('[Spoiler]'));
+    expect(url).not.toContain('butler');
+  });
+
+  it('should copy a spoiler in a formatted emote as [Spoiler]', () => {
+    const emote = withContent('$m', {
+      type: 'Emote',
+      data: { body: 'hides [Spoiler]', html: 'hides <span data-mx-spoiler>it</span>' },
+    });
+
+    expect(messageText(emote)).toBe('* Grace hides [Spoiler]');
   });
 
   it('should have nothing to copy of a deleted message', () => {
