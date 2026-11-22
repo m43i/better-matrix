@@ -328,7 +328,7 @@ fn cached_plan(view_key: &str, cx: &Context<'_>, timeline: Option<&RoomTimeline>
 
 /// What a timeline's plan is made of: its revision, and whom the user ignores. 0 (never cached)
 /// while the timeline has no revision.
-fn plan_version(revision: u64, ignored: (&[String], &[String])) -> u64 {
+fn plan_version(revision: u64, ignored: u64) -> u64 {
     use std::hash::{Hash, Hasher};
     if revision == 0 {
         return 0;
@@ -506,8 +506,8 @@ pub fn timeline(
     // timeline changed; each mounted row is built from the state by its plan entry.
     let revision = timeline.map_or(0, |t| t.revision);
     // The plan leaves out people the user ignores: it is made again when that list changes too.
-    // Both the ignores shown and those saved: someone stays left out while either holds them.
-    let version = plan_version(revision, (&cx.data.safety.ignored, &cx.data.saved_safety.ignored));
+    // Everyone left out as ignored (shown, saved or being saved): the rows change with them.
+    let version = plan_version(revision, cx.data.ignores_fingerprint());
     let plan = cached_plan(view_key, cx, timeline, version);
     let (keys, shown) = (Rc::clone(&plan), Rc::clone(&plan));
     let (account, key, palette) = (cx.account.clone(), cx.key.clone(), *p);
@@ -1411,31 +1411,39 @@ fn link_card(
     // the words a readable width; in a narrower message, under them.
     const WORDS_MIN: f32 = 120.0;
     let room = max_width - 2.0 * 12.0 - 3.0 - 2.0 * 12.0 - THUMB;
-    let thumb = card.image.as_ref().filter(|(image, _)| !media.has_failed(image)).map(|(image, _)| {
-        let thumb = el().size(THUMB, THUMB).radius(8.0).clip_rounded(8.0);
-        match (held, media.image(image)) {
-            // Held back: a press on it shows it, rather than opening the link.
-            (Some((account, event_id)), _) => thumb
-                .key(format!("{key}-hidden"))
-                .fill(p.hover)
-                .center()
-                .role("button")
-                .label(t!("safety.show_media").to_owned())
-                .help(t!("safety.show_media").to_owned())
-                .focusable(true)
-                .cursor(rune::Cursor::Pointer)
-                .child(
-                    col()
-                        .gap(4.0)
-                        .items_center()
-                        .child(icon(&icons::EYE_OFF, 18.0).color(p.text_muted))
-                        .child(text(t!("safety.show_media")).font(font::META).color(p.accent)),
-                )
-                .on_press(move |s: &mut State| s.reveal_media(&account, &event_id)),
-            (None, Some(image)) => thumb.pixels_fit(image.pixels(), SurfaceFit::Fill),
-            (None, None) => thumb.fill(p.hover).center().child(icon(&icons::IMAGE, 20.0).color(p.text_muted)),
-        }
-    });
+    // Held back, it keeps its Show even when an earlier download failed: Show tries again.
+    let thumb =
+        card.image.as_ref().filter(|(image, _)| held.is_some() || !media.has_failed(image)).map(|(image, _)| {
+            let thumb = el().size(THUMB, THUMB).radius(8.0).clip_rounded(8.0);
+            match (held, media.image(image)) {
+                // Held back: a press on it shows it, rather than opening the link.
+                (Some((account, event_id)), _) => thumb
+                    .key(format!("{key}-hidden"))
+                    .fill(p.hover)
+                    .center()
+                    .role("button")
+                    .label(t!("safety.show_media").to_owned())
+                    .help(t!("safety.show_media").to_owned())
+                    .focusable(true)
+                    .cursor(rune::Cursor::Pointer)
+                    .child(
+                        col()
+                            .gap(4.0)
+                            .items_center()
+                            .child(icon(&icons::EYE_OFF, 18.0).color(p.text_muted))
+                            .child(text(t!("safety.show_media")).font(font::META).color(p.accent)),
+                    )
+                    .on_press({
+                        let image = image.clone();
+                        move |s: &mut State| {
+                            s.media.try_again(&image);
+                            s.reveal_media(&account, &event_id);
+                        }
+                    }),
+                (None, Some(image)) => thumb.pixels_fit(image.pixels(), SurfaceFit::Fill),
+                (None, None) => thumb.fill(p.hover).center().child(icon(&icons::IMAGE, 20.0).color(p.text_muted)),
+            }
+        });
     let (beside, under) = match thumb {
         Some(thumb) if room >= WORDS_MIN => (Some(thumb), None),
         thumb => (None, thumb),

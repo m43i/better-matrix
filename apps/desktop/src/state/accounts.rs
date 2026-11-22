@@ -917,10 +917,29 @@ impl AccountData {
         }
     }
 
-    /// Whether the user ignores someone, or is saving an ignore of them: what lists of their
-    /// things (the Files panel) leave out.
+    /// Whether the user ignores someone, or is saving an ignore of them (even with a Stop ignoring
+    /// queued after it): what lists of their things (the Files panel) leave out.
     pub fn ignores(&self, user_id: &str) -> bool {
-        self.safety.ignores(user_id) || self.saved_safety.ignores(user_id)
+        self.safety.ignores(user_id)
+            || self.saved_safety.ignores(user_id)
+            || self.pending_safety.iter().any(|(_, change)| {
+                matches!(change, matrix_core::SafetyChange::Ignore { user_id: pending, ignored: true } if pending == user_id)
+            })
+    }
+
+    /// A fingerprint of everyone [`AccountData::ignores`] counts: what views built from it (a
+    /// timeline's rows) are made again for when it changes.
+    pub fn ignores_fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.safety.ignored.hash(&mut hasher);
+        self.saved_safety.ignored.hash(&mut hasher);
+        for (_, change) in &self.pending_safety {
+            if let matrix_core::SafetyChange::Ignore { user_id, ignored: true } = change {
+                user_id.hash(&mut hasher);
+            }
+        }
+        hasher.finish()
     }
 
     /// The invitations the sidebar and Home list: all but strangers' when the user hides them.

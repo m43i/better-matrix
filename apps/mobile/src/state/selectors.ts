@@ -81,15 +81,23 @@ export function roomListOf(state: State, id: AccountId | null): RoomListData | u
 }
 
 /**
- * Everyone whose messages and hidden events the timeline leaves out: those shown as ignored
- * (confirmed or on the way) and those the engine still has as ignored, whose ignore is being
- * undone, until that is saved.
+ * Everyone whose messages and hidden events the timeline leaves out: those shown as ignored, those
+ * the engine still has as ignored (an ignore being undone, until that is saved), and anyone an
+ * Ignore on its way names, even when a later Stop ignoring is on its way too: content shows again
+ * only once no Ignore for them is pending and the engine no longer has them.
  */
 export function shownIgnored(data: AccountData | undefined): string[] | undefined {
   if (!data) return undefined;
-  const undoing = data.savedSafety.ignored.filter((id) => !data.safety.ignored.includes(id));
 
-  return undoing.length === 0 ? data.safety.ignored : [...data.safety.ignored, ...undoing];
+  const pending = data.pendingSafety.flatMap(({ change }) =>
+    change.type === 'Ignore' && change.data.ignored ? [change.data.user_id] : [],
+  );
+
+  const extra = [...data.savedSafety.ignored, ...pending].filter(
+    (id, i, all) => !data.safety.ignored.includes(id) && all.indexOf(id) === i,
+  );
+
+  return extra.length === 0 ? data.safety.ignored : [...data.safety.ignored, ...extra];
 }
 
 /**

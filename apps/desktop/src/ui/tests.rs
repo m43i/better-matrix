@@ -2821,3 +2821,18 @@ fn a_narrow_link_card_should_keep_its_held_back_picture_under_the_words() {
     press(&mut rt, "link-$link-hidden");
     assert!(rt.state.revealed_media.contains(&(AccountId::new(demo::ADA), "$link".to_owned())));
 }
+
+#[test]
+fn a_held_back_link_card_image_that_failed_should_still_offer_show_and_try_again() {
+    let page = matrix_core::MediaRef::opaque("page-image");
+    let failed = page.clone();
+    let mut rt = runtime(move |s| {
+        held_link_card(s);
+        s.media.failed(failed, std::time::Instant::now());
+    });
+    assert!(rt.state.media.has_failed(&page));
+    assert!(rt.find("link-$link-hidden").is_some(), "Show stays");
+    press(&mut rt, "link-$link-hidden");
+    assert!(rt.state.revealed_media.contains(&(AccountId::new(demo::ADA), "$link".to_owned())));
+    assert!(!rt.state.media.has_failed(&page), "tried again");
+}

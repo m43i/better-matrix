@@ -776,3 +776,24 @@ fn media_on_screen_should_load_once_its_room_turns_private() {
     general_public(&mut s, false);
     assert!(fetches_demo_image(&mut commands));
 }
+
+#[test]
+fn someone_ignored_and_unignored_with_both_still_saving_should_stay_left_out() {
+    let (mut s, mut commands) = state();
+    crate::demo::seed(&mut s);
+    drain(&mut commands);
+    let troll = "@troll:spam.example";
+    s.set_safety(&ada(), SafetyChange::Ignore { user_id: troll.into(), ignored: true });
+    s.stop_ignoring(&ada(), troll);
+    let requests: Vec<_> = drain(&mut commands)
+        .into_iter()
+        .filter_map(|(request, command)| matches!(command, Command::SetSafety { .. }).then_some(request))
+        .collect();
+    assert_eq!(requests.len(), 2);
+    assert!(s.accounts.get(&ada()).unwrap().ignores(troll), "left out while the ignore may still land");
+    // Both saved, the last one wins: no longer ignored.
+    s.apply(Event::Safety { account: ada(), safety: Safety::default() }, &mut Tx::default());
+    finish(&mut s, requests[0], Ok(()));
+    finish(&mut s, requests[1], Ok(()));
+    assert!(!s.accounts.get(&ada()).unwrap().ignores(troll));
+}

@@ -3,7 +3,7 @@ import type { Invitation } from '@better-matrix/matrix-native/types';
 
 import { ADA, GRACE, message, messageEntry, summary } from '../../../test/fixtures';
 import { lastMessage } from '../../sections';
-import { activeRoomList, roomListOf, shownTimeline } from '../../selectors';
+import { activeRoomList, hides, roomListOf, shownTimeline } from '../../selectors';
 import { roomKey } from '../../timeline';
 import { DEFAULT_SAFETY, revealKey } from '../../safety';
 import { Store } from '../../store';
@@ -302,5 +302,24 @@ describe('changes that fail in sequence', () => {
     finish(mediaRequest, { Err: 'offline' });
     await expect(media).rejects.toThrow();
     expect(safetyOf(store)).toEqual({ ...DEFAULT_SAFETY, invite_pictures: false });
+  });
+});
+
+describe('an Ignore and a Stop ignoring both on their way', () => {
+  it('should keep the person hidden until neither is pending and the engine no longer has them', async () => {
+    const { store, sent, finish } = setup();
+    const ignore = setIgnored(store, ADA, GRACE, true);
+    const ignoreRequest = sent.at(-1)!.request;
+    const stop = setIgnored(store, ADA, GRACE, false);
+    const stopRequest = sent.at(-1)!.request;
+    const hidden = () => hides(store.getState().accounts[0]!, GRACE);
+
+    const whileBoth = hidden();
+    finish(ignoreRequest, { Err: 'offline' });
+    await expect(ignore).rejects.toThrow();
+    finish(stopRequest);
+    await stop;
+
+    expect([whileBoth, hidden()]).toEqual([true, false]);
   });
 });
