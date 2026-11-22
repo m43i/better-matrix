@@ -28,6 +28,7 @@ import { useMedia } from '../media';
 import { useNow } from '../shell/useNow';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
+import { HiddenMedia, useHiddenMedia } from './HiddenMedia';
 import { useContentWidth } from './readersLayout';
 import { openLink } from './open';
 
@@ -162,13 +163,15 @@ const CARD_WORDS_MIN = 100;
  * A link's card once the homeserver described the page: site, title, description and image
  * (left out where it would leave the words too little room).
  */
-export function LinkCard({ url }: { url: string }) {
+export function LinkCard({ url, message }: { url: string; message: Message }) {
   const palette = usePalette();
   const store = useAppStore();
   const { account } = useTimelineContext();
   const preview = useStore((s) => s.linkPreviews[previewKey(account, url)]);
   useEffect(() => wantLinkPreview(store, account, url), [store, account, url]);
-  const image = useMedia(account, preview?.image?.[0] ?? null, CARD_IMAGE);
+  // The page's picture waits for Show where the account keeps media back (ADR 0011).
+  const { hidden, reveal } = useHiddenMedia(message);
+  const image = useMedia(account, hidden ? null : (preview?.image?.[0] ?? null), CARD_IMAGE);
   // The picture shows only where it leaves the words a readable width beside it.
   const words = useContentWidth() - 2 * 12 - 3 - 2 * 12 - CARD_IMAGE_SIDE;
   const showImage = preview?.image != null && words >= CARD_WORDS_MIN;
@@ -202,7 +205,14 @@ export function LinkCard({ url }: { url: string }) {
         ) : null}
       </View>
       {showImage ? (
-        image ? (
+        hidden ? (
+          <HiddenMedia
+            label={t('mobile.safety.hidden_picture')}
+            onShow={reveal}
+            style={styles.cardImage}
+            compact
+          />
+        ) : image ? (
           <Image source={{ uri: image }} style={styles.cardImage} contentFit="cover" />
         ) : (
           <View style={[styles.cardImage, styles.center, { backgroundColor: palette.hover }]}>
@@ -223,7 +233,7 @@ const GIF_ASPECT = 4 / 3;
 const gifAspects = new Lru<string, number>(200);
 
 /** A GIF behind a link, playing once fetched, as wide as fits; pressing it opens the link. */
-export function LinkedGif({ url }: { url: string }) {
+export function LinkedGif({ url, message }: { url: string; message: Message }) {
   const palette = usePalette();
   const store = useAppStore();
   const path = useStore((s) => s.gifs[url]);
@@ -231,7 +241,18 @@ export function LinkedGif({ url }: { url: string }) {
   const [measured, setMeasured] = useState<{ url: string; aspect: number } | null>(null);
   const aspect = measured?.url === url ? measured.aspect : (gifAspects.get(url) ?? GIF_ASPECT);
   const width = Math.min(GIF_WIDTH, useContentWidth());
-  useEffect(() => wantGif(store, url), [store, url]);
+  // A GIF the account keeps back is not fetched before Show (ADR 0011).
+  const { hidden, reveal } = useHiddenMedia(message);
+  useEffect(() => (hidden ? undefined : wantGif(store, url)), [store, url, hidden]);
+
+  if (hidden)
+    return (
+      <HiddenMedia
+        label={t('mobile.safety.hidden_gif')}
+        onShow={reveal}
+        style={[styles.gif, { width, aspectRatio: aspect }]}
+      />
+    );
 
   return (
     <Pressable

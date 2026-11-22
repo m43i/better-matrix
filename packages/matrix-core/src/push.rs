@@ -157,6 +157,12 @@ pub(crate) async fn fetch(
         found => found,
     };
     Ok(match status {
+        Ok(NotificationStatus::Event(item))
+            if matches!(item.event, NotificationEvent::Invite(_))
+                && crate::safety::hides_invite_from(client, item.event.sender()).await =>
+        {
+            PushContent::Nothing
+        }
         Ok(NotificationStatus::Event(item)) => content_of(account, room_id, event_id, *item),
         Ok(NotificationStatus::EventFilteredOut | NotificationStatus::EventRedacted) => PushContent::Nothing,
         Ok(NotificationStatus::EventNotFound) => hidden(),

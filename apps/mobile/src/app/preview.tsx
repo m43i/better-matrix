@@ -36,7 +36,7 @@ import { routes } from '../routes';
 import { galleryAround, showsStrip, stepGallery } from '../state/gallery';
 import { attachmentPreview } from '../state/messages';
 import { shallow, useAppStore, useStore } from '../state/react';
-import { timeline } from '../state/selectors';
+import { mediaHidden, timeline } from '../state/selectors';
 import { roomKey, threadKey } from '../state/timeline';
 import { sentAt } from '../state/timelineText';
 import { font } from '../theme/palette';
@@ -78,8 +78,13 @@ export default function PreviewScreen() {
   // The item on screen, which the strip and swipes move; the opened one at first.
   const [current, setCurrent] = useState(eventId);
 
+  // Media the account keeps back stays out of the gallery until shown in the timeline
+  // (ADR 0011); the opened one was shown to be opened.
   const gallery = useStore(
-    (s) => galleryAround(timeline(s, account, key).entries, current, eventId, thread ?? null),
+    (s) =>
+      galleryAround(timeline(s, account, key).entries, current, eventId, thread ?? null).filter(
+        (m) => m.event_id === eventId || !mediaHidden(s, account, roomId, m),
+      ),
     shallow,
   );
 

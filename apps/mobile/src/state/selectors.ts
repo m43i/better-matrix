@@ -9,6 +9,7 @@ import type {
 } from '@better-matrix/matrix-native/types';
 
 import { EMPTY_TIMELINE, mediaKey } from './reducer';
+import { revealKey, showsMedia, shownInvitations } from './safety';
 import { newestMessages, type NewestMessages } from './sections';
 import { timelineId } from './timeline';
 import type { AccountData, State, Timeline } from './types';
@@ -53,7 +54,8 @@ export function activeRoomList(state: State): RoomListData | undefined {
     summary: data.summary,
     rooms: data.rooms,
     spaces: data.spaces,
-    invitations: data.invitations,
+    // Strangers' invitations the user hides stay out of the list and its counter.
+    invitations: shownInvitations(data.invitations, data.safety),
     roomsLoaded: data.roomsLoaded,
     scope: data.scope,
     sidebar: data.sidebar,
@@ -100,4 +102,22 @@ export function savedSignature(state: State, id: AccountId): string {
     .flatMap((r) => r.saved.map((eventId) => `${r.room_id}|${eventId}`))
     .sort()
     .join(',');
+}
+
+/**
+ * Whether a message's pictures and videos wait for a tap on Show (ADR 0011): the account's media
+ * choice, the room's being public and whose message it is, unless the user showed it already.
+ */
+export function mediaHidden(
+  state: State,
+  id: AccountId,
+  roomId: string,
+  message: { sender_id: string; event_id: string },
+): boolean {
+  const data = account(state, id);
+
+  if (!data || state.revealedMedia[revealKey(id, message.event_id)]) return false;
+  const publicRoom = data.rooms.find((r) => r.room_id === roomId)?.public ?? false;
+
+  return !showsMedia(data.safety, publicRoom, message.sender_id === id);
 }

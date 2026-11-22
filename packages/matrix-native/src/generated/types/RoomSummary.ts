@@ -76,6 +76,11 @@ activity_ms: number | null,
  */
 encrypted: boolean, 
 /**
+ * Whether anyone may join (the public join rule): strangers may speak, so media may wait
+ * for a press ([`Safety::shows_media`](crate::Safety::shows_media)).
+ */
+public: boolean, 
+/**
  * Whether the user may rename the room.
  */
 can_rename: boolean, 

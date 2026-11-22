@@ -123,12 +123,12 @@ export const MessageRow = memo(function MessageRow({
         {gif ? (
           <>
             {gif.rest ? <RichText blocks={gif.rest} /> : null}
-            <LinkedGif key={gif.url} url={gif.url} />
+            <LinkedGif key={gif.url} url={gif.url} message={message} />
           </>
         ) : (
           <Body message={message} latestCall={latestCall} />
         )}
-        {link ? <LinkCard key={link} url={link} /> : null}
+        {link ? <LinkCard key={link} url={link} message={message} /> : null}
         {message.reactions.length > 0 ? (
           <Reactions message={message} reactions={message.reactions} />
         ) : null}

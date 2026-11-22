@@ -1,5 +1,5 @@
 import { previewGallery } from '../../state/gallery';
-import { activeAccount } from '../../state/selectors';
+import { activeAccount, activeRoomList } from '../../state/selectors';
 import { timelineId } from '../../state/timeline';
 import { bootDemo } from '../boot';
 import { answer, demoEngine } from '../engine';
@@ -10,7 +10,9 @@ import {
   DEMO_THREAD,
   DESIGN,
   GENERAL,
+  GRACE,
   SCREENSHOT,
+  STRANGER_INVITE,
   TEST_PLAN,
 } from '../fixtures';
 import { demoScene } from '../link';
@@ -212,4 +214,19 @@ it('should list a newly pinned message with its real preview', async () => {
       }),
     ]),
   );
+});
+
+it('should answer a safety change with the choices after it', async () => {
+  const store = bootDemo('settings-safety', noMedia);
+  await store.run({
+    type: 'SetSafety',
+    data: { account: ADA, change: { type: 'Ignore', data: { user_id: GRACE, ignored: true } } },
+  });
+  expect(store.getState().accounts[0]?.safety.ignored).toContain(GRACE);
+  expect(store.getState().accounts[0]?.safety.media).toBe('Private');
+});
+
+it('should hide the stranger’s invitation in the safety scenes', () => {
+  const state = bootDemo('settings-safety', noMedia).getState();
+  expect(activeRoomList(state)?.invitations.map((i) => i.room_id)).not.toContain(STRANGER_INVITE);
 });

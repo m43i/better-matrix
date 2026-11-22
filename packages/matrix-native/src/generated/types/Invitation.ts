@@ -34,4 +34,10 @@ space: boolean,
 /**
  * A group room or direct chat, for its navigation label.
  */
-kind: RoomKind, };
+kind: RoomKind, 
+/**
+ * Whether the inviter shares no joined room with the account, as far as this device knows:
+ * someone the user may not know, whose invitation the user can hide
+ * ([`Safety::hide_stranger_invites`](crate::Safety::hide_stranger_invites)).
+ */
+stranger: boolean, };

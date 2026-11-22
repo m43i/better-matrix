@@ -59,6 +59,12 @@ pub fn room_menu(account: &AccountData, room_id: &str, notifications_open: bool,
                 }),
         )
         .child(divider(p))
+        .child({
+            let reported = room.room_id.clone();
+            menu_action(&icons::FLAG, t!("report.room_action"), Tone::Normal, p)
+                .key("room-menu-report")
+                .on_press(move |s: &mut State| s.report_room(&reported))
+        })
         .child(
             menu_action(leave_icon, leave_label, Tone::Danger, p)
                 .key("room-menu-leave")

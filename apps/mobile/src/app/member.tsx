@@ -1,6 +1,7 @@
 // A member of a room (sheet, from the member list): who they are and their role, and what the
 // user can do with them: message them, invite them to another room, and with the rights change
-// their role, remove or ban them. Destructive acts ask first, in the desktop's words.
+// their role, remove or ban them; and, for anyone, ignore or report them (ADR 0011). Destructive
+// acts ask first, in the desktop's words.
 
 import type { MemberRole, Moderation } from '@better-matrix/matrix-native/types';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -10,8 +11,10 @@ import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from 'reac
 import { t } from '../i18n';
 import { routes } from '../routes';
 import { invite, listAllMembers, moderate, openDirectChat } from '../state/actions/people';
+import { setIgnored } from '../state/actions/safety';
 import { asksFirst, inviteTargets, may, memberOf, rolesOffered, ROLES } from '../state/people';
 import { shallow, useAppStore, useStore } from '../state/react';
+import { ignores } from '../state/safety';
 import { account as accountOf } from '../state/selectors';
 import { font } from '../theme/palette';
 import { Avatar } from '../ui/Avatar';
@@ -34,6 +37,13 @@ export default function MemberScreen() {
   const router = useRouter();
   const palette = usePalette();
   const members = useStore((s) => accountOf(s, account)?.members[roomId]);
+
+  const ignored = useStore((s) => {
+    const safety = accountOf(s, account)?.safety;
+
+    return safety !== undefined && ignores(safety, userId);
+  });
+
   const rooms = useStore((s) => inviteTargets(accountOf(s, account)?.rooms ?? [], roomId), shallow);
   const [open, setOpen] = useState<Open>('none');
   const [busy, setBusy] = useState<'chat' | MemberRole | null>(null);
@@ -107,6 +117,34 @@ export default function MemberScreen() {
       { text: t('common.cancel'), style: 'cancel' },
       { text: confirm, style: 'destructive', onPress: run },
     ]);
+  };
+
+  const ignore = () => {
+    if (ignored) {
+      void setIgnored(store, account, person.id, false).catch(() => {});
+
+      return;
+    }
+
+    Alert.alert(
+      t('mobile.safety.ignore_title', { name: person.name }),
+      t('mobile.safety.ignore_body'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('mobile.safety.ignore'),
+          style: 'destructive',
+          onPress: () => void setIgnored(store, account, person.id, true).catch(() => {}),
+        },
+      ],
+    );
+  };
+
+  const reportPerson = () => {
+    router.back();
+    router.push(
+      routes.report(account, { type: 'Person', data: { user_id: person.id } }, person.name),
+    );
   };
 
   const toggle = (which: Open) => setOpen((current) => (current === which ? 'none' : which));
@@ -255,6 +293,25 @@ export default function MemberScreen() {
               ) : null}
             </ListSection>
           ) : null}
+          <ListSection>
+            <ListRow
+              testID="member-ignore"
+              icon="block"
+              title={ignored ? t('mobile.safety.unignore') : t('mobile.safety.ignore')}
+              danger={!ignored}
+              onPress={ignore}
+              chevron={false}
+            />
+            <Divider inset={52} />
+            <ListRow
+              testID="member-report"
+              icon="flag"
+              title={t('mobile.safety.report')}
+              danger
+              onPress={reportPerson}
+              chevron={false}
+            />
+          </ListSection>
         </>
       )}
     </View>

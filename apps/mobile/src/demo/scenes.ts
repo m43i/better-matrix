@@ -17,6 +17,7 @@ import { roomKey, threadKey } from '../state/timeline';
 import {
   ADA,
   ADA_HOBBY,
+  ALAN,
   batchEvents,
   callGallery,
   callInfo,
@@ -32,6 +33,8 @@ import {
   KAI,
   READ_BY_SIX,
   ring,
+  safetyEvents,
+  STRANGER_INVITE,
   SCREENSHOT,
   seedEvents,
   TEST_PLAN,
@@ -232,6 +235,36 @@ export const scenes = {
   'settings-sessions': {
     about: 'Sessions',
     routes: [routes.settings(), routes.settingsSessions(ADA)],
+  },
+  'settings-safety': {
+    about:
+      'Safety: media in private rooms, a hidden invitation from a stranger, an ignored spammer',
+    events: safetyEvents(),
+    routes: [routes.settings(), routes.settingsSafety(ADA)],
+  },
+  'hidden-invitation': {
+    about: 'A stranger’s hidden invitation, opened from Settings → Safety, with Ignore and Report',
+    events: safetyEvents(),
+    routes: [routes.settingsSafety(ADA), routes.invitation(ADA, STRANGER_INVITE)],
+  },
+  'hidden-media': {
+    about: 'The public design room with media in private rooms only: the image waits for Show',
+    events: safetyEvents(),
+    setup: general,
+    routes: [routes.room(ADA, DESIGN)],
+  },
+  report: {
+    about: 'Reporting a message, with a reason and Also ignore',
+    setup: general,
+    routes: [
+      routes.room(ADA, GENERAL),
+      routes.report(
+        ADA,
+        { type: 'Message', data: { room_id: GENERAL, event_id: TEST_PLAN } },
+        'Alan Turing',
+        ALAN,
+      ),
+    ],
   },
   'settings-info': {
     about: 'Version and licences',

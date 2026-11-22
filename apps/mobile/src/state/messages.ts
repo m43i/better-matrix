@@ -143,6 +143,8 @@ export interface MessageActions {
   endPoll: boolean;
   /** The attachment, to save or share. */
   file: boolean;
+  /** Reporting someone else's message to the homeserver's admins. */
+  report: boolean;
 }
 
 export function messageActions(
@@ -176,6 +178,7 @@ export function messageActions(
     delete: sent && own && content.type !== 'Redacted',
     endPoll: sent && own && content.type === 'Poll' && !content.data.ended,
     file: content.type === 'Attachment' && content.data.media !== null,
+    report: sent && !own && content.type !== 'Redacted',
   };
 }
 

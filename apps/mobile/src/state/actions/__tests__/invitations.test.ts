@@ -13,6 +13,7 @@ const DESIGN: Invitation = {
   inviter: null,
   space: false,
   kind: 'Group',
+  stranger: false,
 };
 
 function setup() {

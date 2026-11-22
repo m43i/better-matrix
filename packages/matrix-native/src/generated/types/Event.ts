@@ -26,6 +26,7 @@ import type { PushContent } from "./PushContent";
 import type { RequestId } from "./RequestId";
 import type { RoomList } from "./RoomList";
 import type { RoomPreview } from "./RoomPreview";
+import type { Safety } from "./Safety";
 import type { SavedMessage } from "./SavedMessage";
 import type { SearchUsage } from "./SearchUsage";
 import type { Security } from "./Security";
@@ -297,7 +298,15 @@ account: AccountId,
 /**
  * The arrangement.
  */
-layout: SidebarLayout, } } | { "type": "Status", "data": { 
+layout: SidebarLayout, } } | { "type": "Safety", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The choices.
+ */
+safety: Safety, } } | { "type": "Status", "data": { 
 /**
  * Whose.
  */

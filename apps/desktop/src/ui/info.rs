@@ -112,8 +112,24 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
             link_row(&icons::FILE, t!("info.files"), None, "info-files", p)
                 .on_press(|s: &mut State| s.show_side(SidePanel::Files)),
         );
-    // Leaving sits apart from the rest, at the bottom, however long the topic.
-    let footer = col().w_full().child(divider(p)).child(leave.mb(8.0));
+    let reported = room.room_id.clone();
+    let report = row()
+        .key("info-report")
+        .w_full()
+        .h(44.0)
+        .px(16.0)
+        .gap(12.0)
+        .center_y()
+        .hover(p.hover.alpha(p.hover.a * 2.0))
+        .role("button")
+        .cursor(rune::Cursor::Pointer)
+        .focusable(true)
+        .label(t!("report.room_action").to_owned())
+        .child(icon(&icons::FLAG, 18.0).color(p.text_muted))
+        .child(text(t!("report.room_action")).font(font::BODY).color(p.text))
+        .on_press(move |s: &mut State| s.report_room(&reported));
+    // Reporting and leaving sit apart from the rest, at the bottom, however long the topic.
+    let footer = col().w_full().child(divider(p)).child(report).child(leave.mb(8.0));
     frame("info-panel", t!("info.title"), content, Some(footer), p)
 }
 

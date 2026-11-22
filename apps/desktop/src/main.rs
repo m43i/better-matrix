@@ -84,6 +84,9 @@ fn spec() -> AppSpec<State> {
             ("demo-unread", demo::unread),
             ("demo-invitation", demo::invitation),
             ("demo-discovery", demo::discovery),
+            ("demo-safety", demo::safety),
+            ("demo-report", demo::report),
+            ("demo-hidden-media", demo::hidden_media),
             ("demo-public-rooms", |s| {
                 demo::discovery(s);
                 s.browse_public_rooms();

@@ -669,6 +669,11 @@ pub struct AccountData {
     /// The latest status message chosen while it is saved: until that request finishes, it shows
     /// over what the engine reports.
     pub saving_status_message: Option<matrix_core::RequestId>,
+    /// What the user keeps away on this account, including a change still being saved; nothing
+    /// until the engine reports.
+    pub safety: matrix_core::Safety,
+    /// The choices as last reported: what a change that fails to save falls back to.
+    pub saved_safety: matrix_core::Safety,
 }
 
 impl AccountData {
@@ -718,6 +723,8 @@ impl AccountData {
             presence: HashMap::new(),
             saved_status_message: None,
             saving_status_message: None,
+            safety: matrix_core::Safety::default(),
+            saved_safety: matrix_core::Safety::default(),
         }
     }
 
@@ -822,9 +829,28 @@ impl AccountData {
         listed.iter().filter_map(|at| Some((*at, self.rooms.get(*at)?))).filter(move |(_, room)| room.kind == kind)
     }
 
+    /// The invitations the sidebar and Home list: all but strangers' when the user hides them.
+    pub fn shown_invitations(&self) -> impl Iterator<Item = &matrix_core::Invitation> {
+        self.invitations.iter().filter(|invite| self.safety.shows_invitation(invite))
+    }
+
+    /// Strangers' invitations the user hides, which only Settings → Safety lists.
+    pub fn hidden_invitations(&self) -> impl Iterator<Item = &matrix_core::Invitation> {
+        self.invitations.iter().filter(|invite| !self.safety.shows_invitation(invite))
+    }
+
+    /// Whether a message's pictures, video poster, linked GIF and link card image wait for a
+    /// press: the user's media choice keeps them back in its room, and `revealed` doesn't hold it.
+    pub fn hides_media(&self, room_id: &str, message: &Message, revealed: &HashSet<(AccountId, String)>) -> bool {
+        let public = self.room(room_id).is_some_and(|room| room.public);
+        let own = message.sender_id == self.summary.id.as_str();
+        !self.safety.shows_media(public, own)
+            && !revealed.contains(&(self.summary.id.clone(), message.event_id.clone()))
+    }
+
     /// Whether any room in the scope has unread messages, for the rail's dots.
     pub fn has_unread(&self, scope: &Scope) -> bool {
-        (*scope == Scope::Home && !self.invitations.is_empty())
+        (*scope == Scope::Home && self.shown_invitations().next().is_some())
             || [RoomKind::Group, RoomKind::Direct]
                 .into_iter()
                 .any(|kind| self.rooms_in(scope, kind).any(wants_attention))
@@ -1105,6 +1131,24 @@ impl Accounts {
     pub fn remove(&mut self, id: &AccountId) {
         self.list.retain(|account| &account.summary.id != id);
         self.revision += 1;
+    }
+
+    /// The safety choices the engine reported: shown, and kept as the ones to fall back to.
+    pub fn safety_saved(&mut self, id: &AccountId, safety: matrix_core::Safety) {
+        if let Some(account) = self.get_mut(id) {
+            account.safety = safety.clone();
+            account.saved_safety = safety;
+            // The lists (invitations, their pictures) may change with them.
+            self.revision += 1;
+        }
+    }
+
+    /// Shows safety choices at once, before the engine confirms them.
+    pub fn set_safety(&mut self, id: &AccountId, safety: matrix_core::Safety) {
+        if let Some(account) = self.get_mut(id) {
+            account.safety = safety;
+            self.revision += 1;
+        }
     }
 
     pub fn set_search_usage(&mut self, id: &AccountId, usage: matrix_core::SearchUsage) {
@@ -1573,6 +1617,7 @@ mod tests {
             call: matrix_core::RoomCall::default(),
             activity_ms: None,
             encrypted: false,
+            public: false,
             can_rename: false,
             pinned: Vec::new(),
             can_pin: true,

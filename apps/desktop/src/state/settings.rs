@@ -168,6 +168,8 @@ pub enum SettingsSection {
     /// The active account's name, picture and contact details.
     Profile,
     Notifications,
+    /// The active account's safety: ignored people, media and strangers' invitations.
+    Safety,
     /// The active account: its encryption and recovery.
     Account,
     /// The active account's signed-in sessions.
@@ -179,10 +181,11 @@ pub enum SettingsSection {
 }
 
 impl SettingsSection {
-    pub const ALL: [SettingsSection; 7] = [
+    pub const ALL: [SettingsSection; 8] = [
         SettingsSection::General,
         SettingsSection::Profile,
         SettingsSection::Notifications,
+        SettingsSection::Safety,
         SettingsSection::Account,
         SettingsSection::Sessions,
         SettingsSection::VoiceVideo,
@@ -194,6 +197,7 @@ impl SettingsSection {
             Self::General => t!("settings.general"),
             Self::Profile => t!("settings.profile"),
             Self::Notifications => t!("settings.notifications"),
+            Self::Safety => t!("settings.safety"),
             Self::Account => t!("settings.account"),
             Self::Sessions => t!("settings.sessions"),
             Self::VoiceVideo => t!("settings.voice_video"),
@@ -207,6 +211,7 @@ impl SettingsSection {
             Self::General => "general",
             Self::Profile => "profile",
             Self::Notifications => "notifications",
+            Self::Safety => "safety",
             Self::Account => "account",
             Self::Sessions => "sessions",
             Self::VoiceVideo => "voice-video",

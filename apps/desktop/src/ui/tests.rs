@@ -2081,3 +2081,86 @@ fn switching_to_a_room_should_show_its_first_page_whole_on_its_first_frame() {
         );
     }
 }
+
+#[test]
+fn held_back_media_should_show_a_placeholder_until_show_is_pressed() {
+    let mut rt = runtime(demo::hidden_media);
+    assert!(rt.find("hidden-media-$attachment").is_some());
+    assert!(rt.find("image-better-matrix.png").is_none());
+    press(&mut rt, "show-media-$attachment");
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("hidden-media-$attachment").is_none());
+    assert!(rt.find("image-better-matrix.png").is_some());
+}
+
+#[test]
+fn a_strangers_hidden_invitation_should_stay_out_of_the_sidebar_but_open_from_settings() {
+    let mut rt = runtime(demo::safety);
+    assert!(rt.find("invitation-!prizes:spam.example").is_none());
+    press(&mut rt, "safety-hidden-!prizes:spam.example");
+    assert!(
+        matches!(&rt.state.modal, Some(crate::state::Modal::Invitation { room_id, .. }) if room_id == "!prizes:spam.example")
+    );
+}
+
+#[test]
+fn stop_ignoring_in_settings_should_remove_the_person_from_the_list() {
+    // A window tall enough for the list at the bottom of the page.
+    let mut state = State::detached();
+    demo::safety(&mut state);
+    let mut rt = Runtime::new(state, super::view, (1200.0, 1500.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, "safety-unignore-@troll:spam.example");
+    assert!(rt.find("safety-ignored-@troll:spam.example").is_none());
+    assert!(rt.find("safety-ignored-none").is_some());
+}
+
+#[test]
+fn choosing_where_media_shows_should_select_it() {
+    let mut rt = runtime(demo::safety);
+    press(&mut rt, "safety-media-Never");
+    assert_eq!(rt.state.active_account().unwrap().safety.media, matrix_core::ShowMedia::Never);
+}
+
+#[test]
+fn someone_elses_message_should_offer_a_report_that_opens_the_dialog() {
+    let mut rt = runtime(|s| {
+        demo::attachment_message(s);
+        s.popover = Some(crate::state::Popover::MessageMenu {
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            event_id: "$attachment".into(),
+            at: Some((600, 200)),
+        });
+    });
+    press(&mut rt, "message-report");
+    assert!(rt.find("report-dialog").is_some());
+}
+
+#[test]
+fn the_report_dialog_should_tick_also_ignore_when_pressed() {
+    let mut rt = runtime(demo::report);
+    press(&mut rt, "report-ignore");
+    assert!(matches!(&rt.state.modal, Some(crate::state::Modal::Report(form)) if form.also_ignore));
+}
+
+#[test]
+fn the_member_menu_should_offer_to_ignore_and_report() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.show_side(SidePanel::Person(matrix_core::Person {
+            id: "@grace:example.org".into(),
+            name: "Grace Hopper".into(),
+            avatar: None,
+        }));
+        s.toggle_member_menu("@grace:example.org");
+    });
+    assert!(rt.find("member-menu-report").is_some());
+    press(&mut rt, "member-menu-ignore");
+    assert!(matches!(
+        &rt.state.modal,
+        Some(crate::state::Modal::Confirm(crate::state::Confirm::Ignore { user_id, .. })) if user_id == "@grace:example.org"
+    ));
+}

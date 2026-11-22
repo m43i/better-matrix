@@ -125,6 +125,15 @@ pub fn menu(
             ));
         }
     }
+    // Someone else's message can go to the homeserver's admins.
+    if message.sender_id != account.summary.id.as_str() {
+        let (key, id) = (key.clone(), event_id.to_owned());
+        panel = panel.child(divider(p)).child(
+            menu_action(&icons::FLAG, t!("report.message_action"), Tone::Danger, p)
+                .key("message-report")
+                .on_press(move |s: &mut State| s.report_message(&key, &id)),
+        );
+    }
     if message.sender_id == account.summary.id.as_str() {
         if let MessageContent::Poll(poll) = &message.content
             && !poll.ended

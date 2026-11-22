@@ -120,6 +120,8 @@ export const icons = {
   fullVideo: { ios: 'arrow.up.left.and.arrow.down.right', android: 'fit_screen' },
   cropVideo: { ios: 'crop', android: 'crop' },
   expand: { ios: 'arrow.up.left.and.arrow.down.right', android: 'open_in_full' },
+  block: { ios: 'nosign', android: 'block' },
+  safety: { ios: 'hand.raised', android: 'back_hand' },
 } as const satisfies Record<string, { ios: SFSymbol; android: AndroidSymbol }>;
 
 export type IconName = keyof typeof icons;

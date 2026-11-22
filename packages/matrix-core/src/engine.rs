@@ -454,6 +454,23 @@ pub enum Command {
         /// The room.
         room_id: String,
     },
+    /// Change what the user keeps away (ignored people, media, invitations) on every session;
+    /// an [`Event::Safety`] with the choices after it follows.
+    SetSafety {
+        /// Whose.
+        account: AccountId,
+        /// The change.
+        change: crate::SafetyChange,
+    },
+    /// Report a message, a room or a person to the homeserver's admins.
+    Report {
+        /// Who reports.
+        account: AccountId,
+        /// What is reported.
+        target: crate::ReportTarget,
+        /// Why, in the user's words; may be empty.
+        reason: String,
+    },
     /// Kick, ban or change the role of a room member; [`Event::Members`] follows.
     ModerateMember {
         /// Whose room.
@@ -920,6 +937,15 @@ pub enum Event {
         account: AccountId,
         /// The arrangement.
         layout: crate::SidebarLayout,
+    },
+    /// What the user keeps away on an account (ignored people, media, invitations): sent once
+    /// an account is ready, when a sync changes it (here or on another session), and after
+    /// [`Command::SetSafety`].
+    Safety {
+        /// Whose.
+        account: AccountId,
+        /// The choices.
+        safety: crate::Safety,
     },
     /// The status the user set for an account, as saved: sent once an account is ready and
     /// whenever it changes, here or on another session.
@@ -2311,6 +2337,21 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            Command::SetSafety { account: id, change } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let safety = account?.change_safety(&change).await?;
+                    sink.emit(Event::Safety { account: id, safety });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::Report { account, target, reason } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    account?.report(&target, &reason).await?;
+                    Ok(Outcome::Done)
+                })
+            }
             Command::SetSidebarLayout { account, layout } => {
                 let account = self.account(&account);
                 Box::pin(async move {
@@ -2633,6 +2674,12 @@ impl State {
                             };
                             sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
                         };
+                        let safety = async {
+                            match account.safety().await {
+                                Ok(safety) => sink.emit(Event::Safety { account: account.id().clone(), safety }),
+                                Err(error) => eprintln!("matrix-engine: could not read the safety choices: {error}"),
+                            }
+                        };
                         let status = account
                             .report_status(|status| sink.emit(Event::Status { account: account.id().clone(), status }));
                         // Once the homeserver names a call service, rooms offer MatrixRTC calls.
@@ -2664,6 +2711,7 @@ impl State {
                         tokio::join!(
                             profile,
                             layout,
+                            safety,
                             status,
                             own,
                             calls,
@@ -2965,6 +3013,11 @@ async fn sync_until_error(
                 && let Ok(layout) = account.sidebar_layout().await
             {
                 sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
+            }
+            if crate::safety::changed_in(&response.account_data)
+                && let Ok(safety) = account.safety().await
+            {
+                sink.emit(Event::Safety { account: account.id().clone(), safety });
             }
             // The user's own, as the server says now: the sync may predate a status message saved
             // meanwhile.

@@ -325,6 +325,7 @@ mod tests {
                 call: matrix_core::RoomCall::default(),
                 activity_ms: None,
                 encrypted: false,
+                public: false,
                 can_rename: false,
                 pinned: Vec::new(),
                 can_pin: true,

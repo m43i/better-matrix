@@ -65,6 +65,8 @@ pub struct Context<'a> {
     /// The widest a message's content can be, once the timeline has a size: pictures and GIFs
     /// fit it, so they never reach into the readers' column.
     pub content_width: f32,
+    /// Messages whose held-back media the user chose to show.
+    pub revealed: &'a std::collections::HashSet<(AccountId, String)>,
 }
 
 impl<'a> Context<'a> {
@@ -88,7 +90,13 @@ impl<'a> Context<'a> {
             reader_faces: crate::state::READER_FACES,
             readers_column: key.thread.is_none(),
             content_width: f32::INFINITY,
+            revealed: &s.revealed_media,
         }
+    }
+
+    /// Whether a message's media waits for a press here (ADR 0011).
+    fn hides(&self, message: &Message) -> bool {
+        self.data.hides_media(&self.key.room_id, message, self.revealed)
     }
 
     fn in_thread(&self) -> bool {
@@ -658,7 +666,11 @@ fn message_row(
             if let Some(rest) = &gif.rest {
                 body = body.child(text_body(&message.event_id, &rest.plain, rest.rich.as_ref(), p));
             }
-            body = body.child(linked_gif(&gif.url, cx.content_width, cx.gifs, p));
+            body = body.child(if cx.hides(message) {
+                hidden_media(cx, &message.event_id, (cx.content_width.clamp(0.0, 280.0), 160.0), p)
+            } else {
+                linked_gif(&gif.url, cx.content_width, cx.gifs, p)
+            });
         }
         None => body = body.child(message_body(item, cx, latest_call, p)),
     }
@@ -666,11 +678,12 @@ fn message_row(
     if let Some((url, card)) =
         item.card_link(cx.show_gifs).and_then(|url| Some((url, cx.link_previews?.get(cx.account, url)?)))
     {
+        let held = cx.hides(message).then(|| (cx.account.clone(), message.event_id.clone()));
         body = body.child(link_card(
             &cx.key(&format!("link-{}", message.event_id)),
             url,
             card,
-            cx.content_width,
+            (cx.content_width, held),
             cx.media,
             p,
         ));
@@ -1010,7 +1023,7 @@ fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Pa
         }
         (MessageContent::Attachment(attachment), _) => match attachment.preview() {
             Some((preview, _)) if !media.has_failed(&preview) => {
-                image_preview(&item.message.event_id, attachment, cx, p)
+                image_preview(&item.message.event_id, attachment, cx, cx.hides(&item.message), p)
             }
             _ => attachment_card(&item.message.event_id, attachment, cx, p),
         },
@@ -1122,7 +1135,17 @@ const PREVIEW_BOX: (f32, f32) = (360.0, 280.0);
 /// A link's preview card, up to `max_width` wide: the site, the page's title and description,
 /// and its image beside them when that leaves the words room.
 /// Pressing it opens the link.
-fn link_card(key: &str, url: &str, card: &LinkPreview, max_width: f32, media: &MediaCache, p: &Palette) -> El {
+/// `fit`: the widest it may be, and the account and message whose held-back image waits for a
+/// press, if it does.
+fn link_card(
+    key: &str,
+    url: &str,
+    card: &LinkPreview,
+    fit: (f32, Option<(AccountId, String)>),
+    media: &MediaCache,
+    p: &Palette,
+) -> El {
+    let (max_width, held) = fit;
     /// The image's side.
     const THUMB: f32 = 72.0;
     let mut words = col().grow(1.0).min_w(0.0).gap(2.0);
@@ -1160,9 +1183,20 @@ fn link_card(key: &str, url: &str, card: &LinkPreview, max_width: f32, media: &M
     let room = max_width - 2.0 * 12.0 - 3.0 - 2.0 * 12.0 - THUMB;
     if let Some((image, _)) = card.image.as_ref().filter(|(image, _)| !media.has_failed(image) && room >= WORDS_MIN) {
         let thumb = el().size(THUMB, THUMB).radius(8.0).clip_rounded(8.0);
-        entry = entry.child(match media.image(image) {
-            Some(image) => thumb.pixels_fit(image.pixels(), SurfaceFit::Fill),
-            None => thumb.fill(p.hover).center().child(icon(&icons::IMAGE, 20.0).color(p.text_muted)),
+        entry = entry.child(match (held, media.image(image)) {
+            // Held back: a press on it shows it, rather than opening the link.
+            (Some((account, event_id)), _) => thumb
+                .key(format!("{key}-hidden"))
+                .fill(p.hover)
+                .center()
+                .role("button")
+                .label(t!("safety.show_media").to_owned())
+                .help(t!("safety.show_media").to_owned())
+                .focusable(true)
+                .child(icon(&icons::EYE_OFF, 20.0).color(p.text_muted))
+                .on_press(move |s: &mut State| s.reveal_media(&account, &event_id)),
+            (None, Some(image)) => thumb.pixels_fit(image.pixels(), SurfaceFit::Fill),
+            (None, None) => thumb.fill(p.hover).center().child(icon(&icons::IMAGE, 20.0).color(p.text_muted)),
         });
     }
     entry.on_press_tx(move |s: &mut State, tx| s.open_link(&opened, tx))
@@ -1172,13 +1206,16 @@ fn link_card(key: &str, url: &str, card: &LinkPreview, max_width: f32, media: &M
 /// sender's dimensions so the timeline doesn't jump when it loads; a placeholder of the same size
 /// until then. Without the sender's dimensions, or with ones the picture doesn't match, the loaded
 /// picture's own decide. A video's poster carries a play button.
-fn image_preview(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &Palette) -> El {
+fn image_preview(event_id: &str, attachment: &Attachment, cx: &Context<'_>, held: bool, p: &Palette) -> El {
     let max_width = cx.content_width;
-    let image = attachment.preview().and_then(|(media_ref, _)| cx.media.image(&media_ref));
+    let image = attachment.preview().and_then(|(media_ref, _)| cx.media.image(&media_ref)).filter(|_| !held);
     let loaded = image.and_then(|image| image.size()).map(|[w, h]| (w, h));
     let (w, h) = preview_size(shown_dimensions(attachment.dimensions, loaded));
     let scale = (max_width / w).clamp(0.0, 1.0);
     let (w, h) = (w * scale, h * scale);
+    if held {
+        return hidden_media(cx, event_id, (w, h), p).mt(4.0);
+    }
     let (opened, key, id) = (attachment.clone(), cx.key.clone(), event_id.to_owned());
     let frame = el()
         .key(format!("image-{}", attachment.name))
@@ -1199,6 +1236,29 @@ fn image_preview(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &
         }
     };
     if video { frame.child(play_badge()) } else { frame }
+}
+
+/// Media the account's choice holds back (ADR 0011), in its place and at its size: nothing is
+/// fetched until Show.
+fn hidden_media(cx: &Context<'_>, event_id: &str, (w, h): (f32, f32), p: &Palette) -> El {
+    let (account, id) = (cx.account.clone(), event_id.to_owned());
+    let show = button(t!("safety.show_media"), ButtonKind::Secondary, true, p)
+        .key(cx.key(&format!("show-media-{event_id}")))
+        .on_press(move |s: &mut State| s.reveal_media(&account, &id));
+    let mut inside = col().gap(8.0).items_center();
+    // A short frame keeps only the button.
+    if h >= 110.0 {
+        inside = inside
+            .child(icon(&icons::EYE_OFF, 24.0).color(p.text_muted))
+            .child(text(t!("safety.hidden_media")).font(font::META).color(p.text_muted));
+    }
+    el().key(cx.key(&format!("hidden-media-{event_id}")))
+        .size(w, h)
+        .radius(8.0)
+        .fill(p.surface)
+        .border(1.0, p.divider)
+        .center()
+        .child(inside.child(show))
 }
 
 /// The play button over a video's poster.

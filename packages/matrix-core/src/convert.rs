@@ -83,6 +83,7 @@ pub(crate) async fn room_summary(room: &Room, settings: &NotificationSettings, r
         call: call_in(room, kind, rtc_service, power.as_ref()),
         activity_ms: room.latest_event_timestamp().map(|at| at.get().into()),
         encrypted: room.encryption_state().is_encrypted(),
+        public: room.is_public().unwrap_or(false),
         can_rename: may_send_state(StateEventType::RoomName),
         pinned: room.pinned_event_ids().unwrap_or_default().iter().map(ToString::to_string).collect(),
         saved: crate::saved::saved_ids(room).await,

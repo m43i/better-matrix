@@ -57,6 +57,8 @@ icons! {
     LEAVE = "leave": r#"<path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5M10 17l-5-5 5-5M5 12h11"/>"#;
     TRASH = "trash": r#"<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>"#;
     EYE_OFF = "eye-off": r#"<path d="M10.7 5.1A10 10 0 0 1 12 5c7 0 10 7 10 7a13 13 0 0 1-1.7 2.7M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6M2 2l20 20M9.9 9.9a3 3 0 0 0 4.2 4.2"/>"#;
+    FLAG = "flag": r#"<path d="M4 22V4M4 4h13l-2.5 4.5L17 13H4"/>"#;
+    USER_X = "user-x": r#"<circle cx="9" cy="8" r="4"/><path d="M2 21v-1a7 7 0 0 1 10.5-6M16 15l5 5M21 15l-5 5"/>"#;
     SMILE = "smile": r#"<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/>"#;
     REPLY = "reply": r#"<path d="m9 17-5-5 5-5M4 12h11a5 5 0 0 1 5 5v2"/>"#;
     THREAD = "thread": r#"<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5"/>"#;

@@ -604,7 +604,12 @@ impl Account {
             if changed.is_some_and(|changed| !changed.contains(&id)) && cache.invitations.contains_key(&id) {
                 continue;
             }
-            let inviter = room.invite_details().await.ok().map(|invite| crate::Person {
+            let details = room.invite_details().await.ok();
+            let stranger = match details.as_ref() {
+                Some(invite) => !crate::safety::shares_room(&self.client, &invite.inviter_id).await,
+                None => true,
+            };
+            let inviter = details.map(|invite| crate::Person {
                 id: invite.inviter_id.to_string(),
                 name: invite
                     .inviter
@@ -631,6 +636,7 @@ impl Account {
                 } else {
                     crate::RoomKind::Group
                 },
+                stranger,
             };
             moved |= self::changed(&mut cache.invitations, id, invitation);
         }

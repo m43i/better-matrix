@@ -19,6 +19,7 @@ import { ORIGINAL, PREVIEW_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
 import { AudioCard } from './AudioCard';
 import { useTimelineContext } from './context';
+import { HiddenMedia, useHiddenMedia } from './HiddenMedia';
 import { useContentWidth } from './readersLayout';
 import { shareAttachment } from './files';
 
@@ -74,9 +75,26 @@ function ImageAttachment({ message, attachment }: { message: Message; attachment
   const palette = usePalette();
   const { account, openActions } = useTimelineContext();
   const preview = attachmentPreview(attachment);
-  const uri = useMedia(account, preview?.media ?? null, preview?.size ?? PREVIEW_SIZE);
+  // Media the account's choice keeps back is not fetched, nor opened, before Show.
+  const { hidden, reveal } = useHiddenMedia(message);
+
+  const uri = useMedia(
+    account,
+    hidden ? null : (preview?.media ?? null),
+    preview?.size ?? PREVIEW_SIZE,
+  );
+
   const size = previewSize(attachment.dimensions, useMediaBox());
   const open = useOpenPreview(message);
+
+  if (hidden)
+    return (
+      <HiddenMedia
+        label={t('mobile.safety.hidden_picture')}
+        onShow={reveal}
+        style={[size, styles.media]}
+      />
+    );
 
   return (
     <Pressable
@@ -115,9 +133,19 @@ function ImageAttachment({ message, attachment }: { message: Message; attachment
 function VideoAttachment({ message, attachment }: { message: Message; attachment: Attachment }) {
   const palette = usePalette();
   const { account, openActions } = useTimelineContext();
-  const poster = useMedia(account, attachment.thumbnail, ORIGINAL);
+  const { hidden, reveal } = useHiddenMedia(message);
+  const poster = useMedia(account, hidden ? null : attachment.thumbnail, ORIGINAL);
   const size = previewSize(attachment.dimensions, useMediaBox());
   const open = useOpenPreview(message);
+
+  if (hidden)
+    return (
+      <HiddenMedia
+        label={t('mobile.safety.hidden_video')}
+        onShow={reveal}
+        style={[size, styles.media]}
+      />
+    );
 
   return (
     <Pressable

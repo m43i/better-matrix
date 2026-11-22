@@ -16,7 +16,9 @@ import type { Outgoing } from "./Outgoing";
 import type { Password } from "./Password";
 import type { PendingContact } from "./PendingContact";
 import type { Pusher } from "./Pusher";
+import type { ReportTarget } from "./ReportTarget";
 import type { RequestId } from "./RequestId";
+import type { SafetyChange } from "./SafetyChange";
 import type { SidebarLayout } from "./SidebarLayout";
 import type { Status } from "./Status";
 import type { TimelineKey } from "./TimelineKey";
@@ -495,7 +497,27 @@ account: AccountId,
 /**
  * The room.
  */
-room_id: string, } } | { "type": "ModerateMember", "data": { 
+room_id: string, } } | { "type": "SetSafety", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The change.
+ */
+change: SafetyChange, } } | { "type": "Report", "data": { 
+/**
+ * Who reports.
+ */
+account: AccountId, 
+/**
+ * What is reported.
+ */
+target: ReportTarget, 
+/**
+ * Why, in the user's words; may be empty.
+ */
+reason: string, } } | { "type": "ModerateMember", "data": { 
 /**
  * Whose room.
  */

@@ -107,6 +107,14 @@ describe('messageActions', () => {
     expect(messageActions(message('$m'), ADA, false).delete).toBe(false);
   });
 
+  it('should offer reporting someone else message', () => {
+    expect(messageActions(message('$m'), ADA, false).report).toBe(true);
+  });
+
+  it('should not offer reporting the user own message', () => {
+    expect(messageActions({ ...message('$m'), sender_id: ADA }, ADA, false).report).toBe(false);
+  });
+
   it('should not offer reactions on a call card', () => {
     const call = withContent('$m', {
       type: 'Call',

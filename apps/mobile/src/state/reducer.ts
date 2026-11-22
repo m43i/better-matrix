@@ -13,6 +13,7 @@ import type {
 } from '@better-matrix/matrix-native/types';
 
 import { initialCallView, reconcileView } from './callView';
+import { DEFAULT_SAFETY } from './safety';
 import { keepUnchanged } from './json';
 import { DEFAULT_SETTINGS, type Settings } from './settings';
 import { applyDiffs, timelineId } from './timeline';
@@ -39,6 +40,7 @@ export function initialState(settings: Settings = DEFAULT_SETTINGS): State {
     ended: [],
     media: {},
     gifs: {},
+    revealedMedia: {},
     linkPreviews: {},
     call: {
       current: null,
@@ -93,6 +95,7 @@ function newAccount(summary: AccountSummary): AccountData {
     sidebarLoaded: false,
     status: 'Online',
     savedStatus: 'Online',
+    safety: DEFAULT_SAFETY,
   };
 }
 
@@ -408,6 +411,8 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
         status: event.data.status,
         savedStatus: event.data.status,
       }));
+    case 'Safety':
+      return updateAccount(state, event.data.account, (a) => ({ ...a, safety: event.data.safety }));
     case 'RecoveryKey':
       return { ...state, recoveryKey: { account: event.data.account, key: event.data.key } };
     case 'Verification': {

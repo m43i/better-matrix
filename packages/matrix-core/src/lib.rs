@@ -22,6 +22,7 @@ pub mod permalinks;
 pub mod profile;
 pub mod push;
 pub mod rooms;
+pub mod safety;
 pub mod search;
 pub mod secrets;
 pub mod security;
@@ -71,6 +72,7 @@ pub use people::{MemberRole, Members, Moderation, PersonPresence, Presence, Room
 pub use permalinks::{LinkAction, LinkTarget, Permalink};
 pub use profile::{AccountPage, ContactDetail, ContactKind, Contacts, PendingContact};
 pub use rooms::{DirectoryKind, JoinRule, RoomPreview};
+pub use safety::{ReportTarget, Safety, SafetyChange, ShowMedia};
 pub use saved::SavedMessage;
 pub use search::{MessageHit, SearchUsage};
 pub use secrets::{FileSecrets, MemorySecrets, SecretError, SecretStore};

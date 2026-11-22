@@ -1,18 +1,21 @@
 // An invitation's sheet, the desktop's invitation dialog: the room or space with its picture and
-// topic, which account was invited and by whom, Decline and Accept. Answering waits for the
-// engine; accepting opens the room (a space becomes the scope), and a failure stays here with
-// its reason so it can be tried again.
+// topic, which account was invited and by whom, Decline and Accept; Ignore (decline and ignore
+// the inviter) and Report for unwanted ones (ADR 0011). Answering waits for the engine;
+// accepting opens the room (a space becomes the scope), and a failure stays here with its reason
+// so it can be tried again. With pictures in invitations off, it shows initials.
 
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../i18n';
-import { afterAnswer, answerInvitation } from '../state/actions/invitations';
+import { routes } from '../routes';
+import { afterAnswer, answerInvitation, type InvitationAnswer } from '../state/actions/invitations';
+import { ignoreInviter } from '../state/actions/safety';
 import { useAppStore, useStore } from '../state/react';
 import { font } from '../theme/palette';
 import { Avatar } from '../ui/Avatar';
-import { Button } from '../ui/components';
+import { Button, Divider, ListRow, ListSection } from '../ui/components';
 import { openJoined } from '../ui/links/open';
 import { usePalette } from '../ui/theme';
 import { useShown } from '../ui/useShown';
@@ -26,17 +29,26 @@ export default function InvitationScreen() {
     s.accounts.find((a) => a.summary.id === account)?.invitations.find((i) => i.room_id === roomId),
   );
 
-  const [busy, setBusy] = useState<'accept' | 'decline' | null>(null);
+  const pictures = useStore(
+    (s) => s.accounts.find((a) => a.summary.id === account)?.safety.invite_pictures ?? true,
+  );
+
+  const [busy, setBusy] = useState<'accept' | 'decline' | 'ignore' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const shown = useShown();
 
   if (!invite || !account) return null;
   const room = !invite.space && invite.kind === 'Group';
 
-  const answer = async (accept: boolean) => {
-    setBusy(accept ? 'accept' : 'decline');
+  const answer = async (how: 'accept' | 'decline' | 'ignore') => {
+    setBusy(how);
     setError(null);
-    const result = await answerInvitation(store, account, invite.room_id, accept);
+
+    const result: InvitationAnswer =
+      how === 'ignore'
+        ? await ignoreInviter(store, account, invite)
+        : await answerInvitation(store, account, invite.room_id, how === 'accept');
+
     setBusy(null);
 
     if (result.kind === 'failed') setError(result.error);
@@ -52,6 +64,29 @@ export default function InvitationScreen() {
       openJoined(store, { type: 'room', account, roomId: next.roomId, eventId: null });
   };
 
+  const askIgnore = () => {
+    const name = invite.inviter?.name ?? '';
+    Alert.alert(
+      t('mobile.safety.decline_ignore_title', { name }),
+      t('mobile.safety.decline_ignore_body'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('mobile.safety.ignore'),
+          style: 'destructive',
+          onPress: () => void answer('ignore'),
+        },
+      ],
+    );
+  };
+
+  const reportRoom = () => {
+    router.back();
+    router.push(
+      routes.report(account, { type: 'Room', data: { room_id: invite.room_id } }, invite.name),
+    );
+  };
+
   return (
     <ScrollView style={{ backgroundColor: palette.bg }} contentContainerStyle={styles.content}>
       <View style={styles.head}>
@@ -59,7 +94,7 @@ export default function InvitationScreen() {
           account={account}
           id={invite.room_id}
           name={invite.name}
-          media={invite.avatar}
+          media={pictures ? invite.avatar : null}
           size={64}
         />
         <Text
@@ -93,7 +128,7 @@ export default function InvitationScreen() {
             kind="secondary"
             busy={busy === 'decline'}
             disabled={busy !== null}
-            onPress={() => void answer(false)}
+            onPress={() => void answer('decline')}
           />
         </View>
         <View style={styles.button}>
@@ -102,10 +137,33 @@ export default function InvitationScreen() {
             title={t('invitations.accept')}
             busy={busy === 'accept'}
             disabled={busy !== null}
-            onPress={() => void answer(true)}
+            onPress={() => void answer('accept')}
           />
         </View>
       </View>
+      <ListSection>
+        {invite.inviter ? (
+          <>
+            <ListRow
+              testID="invitation-ignore"
+              icon="block"
+              title={t('mobile.safety.decline_ignore', { name: invite.inviter.name })}
+              danger
+              chevron={false}
+              onPress={busy === null ? askIgnore : undefined}
+            />
+            <Divider inset={52} />
+          </>
+        ) : null}
+        <ListRow
+          testID="invitation-report"
+          icon="flag"
+          title={t('mobile.safety.report_room')}
+          danger
+          chevron={false}
+          onPress={busy === null ? reportRoom : undefined}
+        />
+      </ListSection>
     </ScrollView>
   );
 }

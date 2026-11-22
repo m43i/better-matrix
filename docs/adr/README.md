@@ -16,6 +16,7 @@ record and a line here.
 | [0008](0008-people-and-rooms.md)         | People and rooms: profile, contact details, search, members, making rooms               |
 | [0009](0009-calls.md)                    | Calls: MatrixRTC and one-to-one calls, media engine, ringing, the call stage            |
 | [0010](0010-mobile.md)                   | Mobile: React Native and Expo, the bridge, JSON boundary, the store, OAuth on phones    |
+| [0011](0011-safety.md)                   | Safety: ignoring, reporting, strangers' invitations, media in public rooms              |
 
 ## Template
 

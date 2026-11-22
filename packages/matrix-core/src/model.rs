@@ -105,6 +105,9 @@ pub struct RoomSummary {
     pub activity_ms: Option<u64>,
     /// Whether messages here are end-to-end encrypted.
     pub encrypted: bool,
+    /// Whether anyone may join (the public join rule): strangers may speak, so media may wait
+    /// for a press ([`Safety::shows_media`](crate::Safety::shows_media)).
+    pub public: bool,
     /// Whether the user may rename the room.
     pub can_rename: bool,
     /// Event IDs pinned in this room, in server order.
@@ -380,6 +383,10 @@ pub struct Invitation {
     pub space: bool,
     /// A group room or direct chat, for its navigation label.
     pub kind: RoomKind,
+    /// Whether the inviter shares no joined room with the account, as far as this device knows:
+    /// someone the user may not know, whose invitation the user can hide
+    /// ([`Safety::hide_stranger_invites`](crate::Safety::hide_stranger_invites)).
+    pub stranger: bool,
 }
 
 /// A public room discovered in a space hierarchy.

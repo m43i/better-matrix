@@ -243,10 +243,63 @@ pub fn invitation(s: &mut State) {
             inviter: Some(Person { id: GRACE.into(), name: "Grace Hopper".into(), avatar: None }),
             space: false,
             kind: RoomKind::Group,
+            stranger: false,
         }],
     };
     apply(s, Event::RoomsUpdated { account, list });
     s.show_invitation("!design:example.org");
+}
+
+/// Settings → Safety: someone ignored, media shown in private rooms only, and a stranger's
+/// invitation hidden there rather than in the sidebar.
+pub fn safety(s: &mut State) {
+    invitation(s);
+    s.close_modal();
+    let account = AccountId::new(ADA);
+    let Some(data) = s.accounts.get(&account) else { return };
+    let mut list =
+        RoomList { rooms: data.rooms.clone(), spaces: data.spaces.clone(), invitations: data.invitations.clone() };
+    list.invitations.push(matrix_core::Invitation {
+        room_id: "!prizes:spam.example".into(),
+        name: "Claim your prize".into(),
+        topic: None,
+        avatar: None,
+        inviter: Some(Person { id: "@winner:spam.example".into(), name: "Prize desk".into(), avatar: None }),
+        space: false,
+        kind: RoomKind::Group,
+        stranger: true,
+    });
+    apply(s, Event::RoomsUpdated { account: account.clone(), list });
+    let safety = matrix_core::Safety {
+        ignored: vec!["@troll:spam.example".into()],
+        media: matrix_core::ShowMedia::Private,
+        invite_pictures: false,
+        hide_stranger_invites: true,
+    };
+    apply(s, Event::Safety { account, safety });
+    s.open_settings();
+    s.show_settings_section(crate::state::SettingsSection::Safety);
+}
+
+/// Reporting someone else's message.
+pub fn report(s: &mut State) {
+    attachment_message(s);
+    s.report_message(&TimelineKey::room(DEMO_THREAD.0), "$attachment");
+}
+
+/// A picture in a public room, held back by media shown in private rooms only.
+pub fn hidden_media(s: &mut State) {
+    attachment_message(s);
+    let account = AccountId::new(ADA);
+    let Some(data) = s.accounts.get(&account) else { return };
+    let mut list =
+        RoomList { rooms: data.rooms.clone(), spaces: data.spaces.clone(), invitations: data.invitations.clone() };
+    for room in list.rooms.iter_mut().filter(|room| room.room_id == DEMO_THREAD.0) {
+        room.public = true;
+    }
+    apply(s, Event::RoomsUpdated { account: account.clone(), list });
+    let safety = matrix_core::Safety { media: matrix_core::ShowMedia::Private, ..matrix_core::Safety::default() };
+    apply(s, Event::Safety { account, safety });
 }
 
 /// A space with public rooms to discover and join.
@@ -720,6 +773,7 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
         call: matrix_core::RoomCall { via: Some(matrix_core::CallVia::Rtc), ..matrix_core::RoomCall::default() },
         activity_ms: None,
         encrypted: true,
+        public: false,
         can_rename: true,
         pinned: Vec::new(),
         can_pin: true,

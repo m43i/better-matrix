@@ -3,18 +3,28 @@
 use matrix_core::{AccountId, PublicRoom};
 use rune::{El, col, icon, row, text};
 
-use super::components::{ButtonKind, NavEmphasis, button, dialog, media_avatar, nav_row};
+use super::components::{ButtonKind, NavEmphasis, avatar, button, dialog, media_avatar, nav_row};
 use super::icons;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf, tp};
 use crate::state::{AccountData, Directory, INVITATIONS, State};
 
+/// An invitation's picture, or its initials where the user hides invitations' pictures.
+pub fn invitation_picture(s: &State, account: &AccountData, invite: &matrix_core::Invitation, size: f32) -> El {
+    if account.safety.invite_pictures {
+        media_avatar(&invite.room_id, &invite.name, invite.avatar.as_ref(), &s.media, size)
+    } else {
+        avatar(&invite.room_id, &invite.name, size)
+    }
+}
+
 pub fn invitations(s: &State, account: &AccountData, p: &Palette) -> Option<El> {
-    if account.invitations.is_empty() {
+    let shown: Vec<_> = account.shown_invitations().collect();
+    if shown.is_empty() {
         return None;
     }
     let collapsed = s.section_collapsed(INVITATIONS);
-    let title = tf!("invitations.heading", count = account.invitations.len());
+    let title = tf!("invitations.heading", count = shown.len());
     let header = row()
         .key("section-header-invitations")
         .w_full()
@@ -39,12 +49,12 @@ pub fn invitations(s: &State, account: &AccountData, p: &Palette) -> Option<El> 
     if collapsed {
         return Some(list);
     }
-    for invite in &account.invitations {
+    for invite in shown {
         let room_id = invite.room_id.clone();
         let leading = if !invite.space && invite.kind == matrix_core::RoomKind::Group {
             rune::el().w(18.0).center().child(text("#").font(font::NAV).color(p.sidebar_text_muted))
         } else {
-            media_avatar(&room_id, &invite.name, invite.avatar.as_ref(), &s.media, 18.0)
+            invitation_picture(s, account, invite, 18.0)
         };
         list = list.child(
             nav_row(leading, &invite.name, NavEmphasis::Unread, None, p)
@@ -64,13 +74,16 @@ fn invitation_name(invite: &matrix_core::Invitation) -> String {
 }
 
 pub fn home_invitations(s: &State, account: &AccountData, p: &Palette) -> Option<El> {
-    if account.invitations.is_empty() {
+    let shown: Vec<_> = account.shown_invitations().collect();
+    if shown.is_empty() {
         return None;
     }
-    let mut list = col().key("overview-invitations").w_full().gap(6.0).child(
-        text(tf!("invitations.heading", count = account.invitations.len())).font(font::SECTION).color(p.text_muted),
-    );
-    for invite in &account.invitations {
+    let mut list = col()
+        .key("overview-invitations")
+        .w_full()
+        .gap(6.0)
+        .child(text(tf!("invitations.heading", count = shown.len())).font(font::SECTION).color(p.text_muted));
+    for invite in shown {
         let room_id = invite.room_id.clone();
         let mut titles = col()
             .grow(1.0)
@@ -100,7 +113,7 @@ pub fn home_invitations(s: &State, account: &AccountData, p: &Palette) -> Option
                 .cursor(rune::Cursor::Pointer)
                 .focusable(true)
                 .label(invitation_name(invite))
-                .child(media_avatar(&room_id, &invite.name, invite.avatar.as_ref(), &s.media, 36.0))
+                .child(invitation_picture(s, account, invite, 36.0))
                 .child(titles)
                 .child(icon(&icons::CHEVRON_RIGHT, 18.0).color(p.text_muted))
                 .on_press(move |s: &mut State| s.show_invitation(&room_id)),
@@ -110,14 +123,11 @@ pub fn home_invitations(s: &State, account: &AccountData, p: &Palette) -> Option
 }
 
 pub fn invitation(s: &State, account: &AccountId, room_id: &str, p: &Palette) -> Option<El> {
-    let invite = s.accounts.get(account)?.invitations.iter().find(|invite| invite.room_id == room_id)?;
-    let mut content = col()
-        .w_full()
-        .gap(12.0)
-        .child(media_avatar(room_id, &invite.name, invite.avatar.as_ref(), &s.media, 56.0))
-        .child(
-            text(tf!("invitations.account", account = account.as_str())).font(font::META).color(p.text_muted).wrap(),
-        );
+    let data = s.accounts.get(account)?;
+    let invite = data.invitations.iter().find(|invite| invite.room_id == room_id)?;
+    let mut content = col().w_full().gap(12.0).child(invitation_picture(s, data, invite, 56.0)).child(
+        text(tf!("invitations.account", account = account.as_str())).font(font::META).color(p.text_muted).wrap(),
+    );
     if let Some(inviter) = &invite.inviter {
         content = content.child(
             text(tf!("invitations.from", name = inviter.name, user = inviter.id)).font(font::BODY).color(p.text).wrap(),
@@ -127,6 +137,22 @@ pub fn invitation(s: &State, account: &AccountId, room_id: &str, p: &Palette) ->
         content = content.child(text(topic.clone()).font(font::BODY).color(p.text_muted).wrap());
     }
     let busy = s.membership_pending(account, room_id);
+    // Ways to deal with an unwanted invitation, aside from the answer.
+    let reported = room_id.to_owned();
+    let mut aside = row().gap(16.0).center_y().child(
+        button(t!("report.action"), ButtonKind::Link, true, p)
+            .key("invitation-report")
+            .on_press(move |s: &mut State| s.report_room(&reported)),
+    );
+    if let Some(inviter) = &invite.inviter {
+        let (owner, room) = (account.clone(), room_id.to_owned());
+        aside = aside.child(
+            button(&tf!("invitations.ignore", name = inviter.name), ButtonKind::Link, !busy, p)
+                .key("invitation-ignore")
+                .on_press(move |s: &mut State| s.ask_to_ignore_inviter(&owner, &room)),
+        );
+    }
+    content = content.child(aside);
     let (accept_account, accept_room) = (account.clone(), room_id.to_owned());
     let (decline_account, decline_room) = (account.clone(), room_id.to_owned());
     Some(dialog(

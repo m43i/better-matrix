@@ -19,6 +19,7 @@ import type {
   MessagePreview,
   SavedMessage,
   RoomSummary,
+  Safety,
   Security,
   Session,
   SharedFile,
@@ -99,6 +100,8 @@ export interface AccountData {
   status: Status;
   /** The status as last saved: what a choice that fails to save falls back to. */
   savedStatus: Status;
+  /** What the user keeps away (ignored people, media, invitations), as last reported. */
+  safety: Safety;
 }
 
 /** A verification running for one of the accounts. */
@@ -146,6 +149,8 @@ export interface State {
   media: Record<string, string>;
   /** Linked GIF files, by URL. */
   gifs: Record<string, string>;
+  /** Hidden media the user tapped Show on, by `revealKey`, until the app restarts. */
+  revealedMedia: Record<string, true>;
   /** Link cards, by `previewKey`; `null` when the page has none. */
   linkPreviews: Record<string, LinkPreview | null>;
   call: CallState;

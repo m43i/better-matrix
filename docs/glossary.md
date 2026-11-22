@@ -291,6 +291,27 @@ when it notifies for mentions only or is muted.
 **Modal**
 : A dialog over the whole window with the rest dimmed (settings, confirmations). One at a time.
 
+**Safety**
+: What the user keeps away on one account: people they ignore, where pictures and videos show,
+and invitations from strangers (`Safety`). Settings → Safety; kept in the account's data. See
+[ADR 0011](adr/0011-safety.md).
+
+**Ignored person**
+: Someone the user ignores (Matrix's ignore list): the server sends nothing from them, earlier
+messages disappear, and they aren't told. Ignore is in the member menu and person panel.
+
+**Report**
+: Telling the homeserver's admins about a message, a room or a person, with an optional reason
+(`Command::Report`, `ReportTarget`).
+
+**Stranger**
+: Someone the account shares no joined room with, as this device knows (`Invitation::stranger`).
+Their invitations can be hidden: out of the sidebar and pushes, listed in Settings → Safety.
+
+**Hidden media**
+: A picture, video, linked GIF or link card image the media choice (`ShowMedia`: always, in
+private rooms, never) keeps back: a placeholder with Show until pressed.
+
 **Room menu**
 : A room's right-click menu: the Notifications submenu, then Leave room, or Delete chat for a
 direct chat.

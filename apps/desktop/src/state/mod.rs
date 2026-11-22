@@ -30,6 +30,7 @@ mod readers;
 mod receipts;
 mod retry;
 mod room_discovery;
+mod safety;
 mod search;
 mod sections;
 mod settings;
@@ -442,6 +443,23 @@ pub enum Modal {
         device_id: String,
         edit: TextEdit,
     },
+    /// Reporting a message, a room or a person to the homeserver's admins.
+    Report(Box<ReportForm>),
+}
+
+/// The report dialog: what is reported, the user's reason, and whether to ignore them too.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReportForm {
+    pub account: AccountId,
+    pub target: matrix_core::ReportTarget,
+    /// What the dialog calls the reported room or person.
+    pub name: String,
+    /// Who sent the message or is reported, when the report can also ignore them.
+    pub person: Option<String>,
+    pub reason: TextEdit,
+    pub also_ignore: bool,
+    /// The report on its way; the dialog waits for it.
+    pub sending: Option<RequestId>,
 }
 
 /// An action that waits for the user's confirmation. New destructive actions are new variants.
@@ -478,6 +496,14 @@ pub enum Confirm {
         key: TimelineKey,
         poll_id: String,
         question: String,
+    },
+    /// Ignore someone: their messages disappear, on every session. `decline`: an invitation from
+    /// them to decline as well.
+    Ignore {
+        account: AccountId,
+        user_id: String,
+        name: String,
+        decline: Option<String>,
     },
 }
 
@@ -617,6 +643,10 @@ enum Purpose {
     DirectChat(AccountId),
     /// Kicking, banning or changing a member's role.
     Moderate,
+    /// Changing an account's safety choices; failing, the account shows the saved ones again.
+    Safety(AccountId),
+    /// Sending a report from the report dialog, which stays open on failure.
+    Report,
     /// Voting in or ending a poll.
     Poll,
     /// A direct chat being opened (or started) to call its person.
@@ -746,6 +776,9 @@ pub struct State {
     pub gifs: GifCache,
     /// Links' preview cards.
     pub link_previews: LinkPreviews,
+    /// Messages whose hidden media the user chose to show, by account and event ID: shown until
+    /// the app restarts.
+    pub revealed_media: HashSet<(AccountId, String)>,
     pub popover: Option<Popover>,
     pub modal: Option<Modal>,
     /// What the emoji picker searches for.
@@ -860,6 +893,7 @@ impl State {
             media: MediaCache::default(),
             gifs: GifCache::default(),
             link_previews: LinkPreviews::default(),
+            revealed_media: HashSet::new(),
             popover: None,
             modal: None,
             emoji_search: TextEdit::default(),
@@ -1290,6 +1324,7 @@ impl State {
             Event::Sessions { account, sessions } => self.accounts.set_sessions(&account, sessions),
             Event::ContactDetails { account, contacts } => self.accounts.set_contacts(&account, contacts),
             Event::Status { account, status } => self.accounts.status_saved(&account, status),
+            Event::Safety { account, safety } => self.safety_reported(&account, safety),
             Event::Presence { account, people } => self.accounts.set_presence(&account, people),
             Event::SidebarLayout { account, layout } => {
                 let newer = self
@@ -1681,6 +1716,7 @@ impl State {
                 Purpose::Forward if matches!(self.modal, Some(Modal::Forward { sending: Some(waiting), .. }) if waiting == request) => {
                     self.modal = None
                 }
+                Purpose::Report => self.report_sent(request),
                 Purpose::Membership { account, room_id, action, scope } => {
                     self.membership_finished(account, room_id, *action, scope)
                 }
@@ -1876,6 +1912,8 @@ impl State {
             }
             Purpose::Invite => self.notice = Some(tf!("notice.invite", error = error)),
             Purpose::Moderate => self.notice = Some(tf!("notice.moderate", error = error)),
+            Purpose::Safety(account) => self.safety_failed(&account, &error),
+            Purpose::Report => self.report_failed(request, &error),
             // The panel stops loading, and says why.
             Purpose::SidePanel(account, room_id, panel) => {
                 match panel {
@@ -2314,8 +2352,14 @@ impl State {
         if !self.settings.show_link_gifs {
             return;
         }
-        let shown: HashSet<String> =
-            self.entries_on_screen().filter_map(|(_, entry)| entry.gif_link()).map(str::to_owned).collect();
+        let shown: HashSet<String> = self
+            .entries_on_screen()
+            .filter(|((account, key), entry)| {
+                entry.message().is_none_or(|message| !self.hides_media(account, &key.room_id, message))
+            })
+            .filter_map(|(_, entry)| entry.gif_link())
+            .map(str::to_owned)
+            .collect();
         let mut wanted: Vec<String> = shown.iter().filter(|url| self.gifs.wants(url, now)).cloned().collect();
         self.gifs.show(shown, self.window_focused);
         wanted.sort_unstable();
@@ -2357,7 +2401,10 @@ impl State {
         let mut seen = HashSet::new();
         let mut wanted = Vec::new();
         for ((account, key), entry) in self.entries_on_screen() {
-            if let Some(attachment) = entry.image()
+            // Media the account's choice holds back is fetched only once shown.
+            let held = entry.message().is_some_and(|message| self.hides_media(account, &key.room_id, message));
+            if !held
+                && let Some(attachment) = entry.image()
                 && let Some((media, size)) = attachment.preview()
             {
                 let dimensions = media::preview_size(size, attachment.dimensions);
@@ -2382,6 +2429,7 @@ impl State {
             }
             // A link card's image.
             if self.settings.show_link_previews
+                && !held
                 && let Some((media, size)) = entry
                     .preview_link(self.settings.show_link_gifs)
                     .and_then(|url| self.link_previews.get(account, url))
@@ -2535,7 +2583,12 @@ impl State {
                 let id = &account.summary.id;
                 let rooms = account.rooms.iter().filter_map(|room| room.avatar.as_ref());
                 let spaces = account.spaces.iter().filter_map(|space| space.avatar.as_ref());
-                let invitations = account.invitations.iter().filter_map(|invite| invite.avatar.as_ref());
+                // Invitations' pictures only where the user shows them.
+                let invitations = account
+                    .invitations
+                    .iter()
+                    .filter(|_| account.safety.invite_pictures)
+                    .filter_map(|invite| invite.avatar.as_ref());
                 rooms.chain(spaces).chain(invitations).map(move |media| (id, media))
             });
             own.chain(active)
@@ -3151,12 +3204,33 @@ impl State {
     /// full size, with the rest of its batch to step through; any other file saves.
     pub fn open_attachment(&mut self, key: &TimelineKey, event_id: &str, attachment: &matrix_core::Attachment) {
         let (Some(account), Some(media)) = (self.nav.account.clone(), attachment.media.clone()) else { return };
+        // Held-back media shows in its place first; it opens from there.
+        let message =
+            self.accounts.get(&account).and_then(|data| data.timeline(key)).and_then(|timeline| {
+                timeline.entries.iter().filter_map(|e| e.message()).find(|m| m.event_id == event_id)
+            });
+        if attachment.preview().is_some() && message.is_some_and(|m| self.hides_media(&account, &key.room_id, m)) {
+            self.reveal_media(&account, event_id);
+            return;
+        }
         if !Opens::previews(attachment) {
             self.download(account, media, &attachment.name);
             return;
         }
         let entries = self.accounts.get(&account).and_then(|data| data.timeline(key)).map(|t| t.entries.as_slice());
         let mut batch = preview::batch(entries.unwrap_or_default(), event_id);
+        // The batch steps only through media that shows.
+        if let Some(data) = self.accounts.get(&account) {
+            let entries = entries.unwrap_or_default();
+            batch.retain(|item| {
+                item.event_id == event_id
+                    || entries
+                        .iter()
+                        .filter_map(|e| e.message())
+                        .find(|m| m.event_id == item.event_id)
+                        .is_none_or(|m| !data.hides_media(&key.room_id, m, &self.revealed_media))
+            });
+        }
         let index = match batch.iter().position(|item| item.event_id == event_id) {
             Some(index) => index,
             None => {
@@ -3752,6 +3826,13 @@ impl State {
             Confirm::DeleteMessage { account, key, event_id } => {
                 (Command::Redact { account, key, event_id }, Purpose::Delete)
             }
+            Confirm::Ignore { account, user_id, decline, .. } => {
+                if let Some(room_id) = decline {
+                    self.respond_to_invitation(&account, &room_id, false);
+                }
+                self.set_safety(&account, matrix_core::SafetyChange::Ignore { user_id, ignored: true });
+                return;
+            }
         };
         self.dispatch(command, purpose);
     }
@@ -3855,6 +3936,7 @@ impl State {
                 | Modal::RenameSession { edit, .. }
                 | Modal::SectionName { edit, .. },
             ) => edit,
+            Some(Modal::Report(form)) => &mut form.reason,
             _ => &mut self.scratch,
         }
     }

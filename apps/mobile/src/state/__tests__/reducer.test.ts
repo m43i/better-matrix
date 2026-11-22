@@ -239,6 +239,7 @@ describe('apply', () => {
       inviter: null,
       space: false,
       kind: 'Group' as const,
+      stranger: false,
     };
 
     const list = { rooms: [], spaces: [], invitations: [invitation] };

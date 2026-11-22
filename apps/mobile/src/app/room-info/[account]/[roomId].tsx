@@ -190,6 +190,16 @@ export default function RoomInfoScreen() {
           />
         ) : null}
         <QuickAction
+          testID="info-report"
+          icon="flag"
+          label={t('mobile.safety.report')}
+          onPress={() =>
+            router.push(
+              routes.report(account, { type: 'Room', data: { room_id: roomId } }, room.name),
+            )
+          }
+        />
+        <QuickAction
           testID="info-leave"
           icon={direct ? 'trash' : 'leave'}
           label={direct ? t('mobile.people.action.delete') : t('mobile.people.action.leave')}

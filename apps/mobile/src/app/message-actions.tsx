@@ -260,6 +260,29 @@ export default function MessageActionsScreen() {
             }}
           />
         ) : null}
+        {can.report ? (
+          <>
+            <Divider inset={52} />
+            <ListRow
+              icon="flag"
+              title={t('mobile.safety.report')}
+              danger
+              chevron={false}
+              testID="message-actions-report"
+              onPress={() => {
+                close();
+                router.push(
+                  routes.report(
+                    account,
+                    { type: 'Message', data: { room_id: roomId, event_id: message.event_id } },
+                    message.sender_name,
+                    message.sender_id,
+                  ),
+                );
+              }}
+            />
+          </>
+        ) : null}
         {can.delete ? (
           <>
             <Divider inset={52} />

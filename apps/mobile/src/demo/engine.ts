@@ -14,9 +14,11 @@ import type {
   RoomList,
   RequestId,
   RoomPreview,
+  Safety,
 } from '@better-matrix/matrix-native/types';
 
 import { messageText } from '../state/messages';
+import { DEFAULT_SAFETY, withChange } from '../state/safety';
 import { fuzzyMatch } from '../state/search';
 import {
   DEMO_DAY_MS,
@@ -373,8 +375,12 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
   const lists = new Map<string, RoomList>();
   /** Drafts kept as the engine's store keeps them, for the run of the demo. */
   const drafts = new Map<string, Draft>();
+  /** Each account's safety choices, as its account data holds them. */
+  const safeties = new Map<string, Safety>();
   engine.subscribe((event) => {
     if (event.type === 'RoomsUpdated') lists.set(event.data.account, event.data.list);
+
+    if (event.type === 'Safety') safeties.set(event.data.account, event.data.safety);
   });
 
   const finish = (request: RequestId, error?: string) =>
@@ -490,6 +496,16 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
             },
           },
         });
+      finish(request);
+
+      return;
+    }
+
+    if (command.type === 'SetSafety') {
+      const { account, change } = command.data;
+      const safety = withChange(safeties.get(account) ?? DEFAULT_SAFETY, change);
+
+      engine.emit({ type: 'Safety', data: { account, safety } });
       finish(request);
 
       return;

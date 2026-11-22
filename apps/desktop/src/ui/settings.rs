@@ -38,6 +38,7 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
                 SettingsSection::General => &icons::SETTINGS,
                 SettingsSection::Profile => &icons::USER,
                 SettingsSection::Notifications => &icons::BELL,
+                SettingsSection::Safety => &icons::EYE_OFF,
                 SettingsSection::Account => &icons::SHIELD,
                 SettingsSection::Sessions => &icons::LAPTOP,
                 SettingsSection::VoiceVideo => &icons::MIC,
@@ -71,6 +72,7 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
         SettingsSection::General => general(s, p),
         SettingsSection::Profile => profile(s, p),
         SettingsSection::Notifications => notifications(s, p),
+        SettingsSection::Safety => safety(s, p),
         SettingsSection::Account => account(s, p),
         SettingsSection::Sessions => sessions(s, p),
         SettingsSection::VoiceVideo => voice_video(s, p),
@@ -298,6 +300,129 @@ fn notifications(s: &State, p: &Palette) -> El {
             accounts,
             p,
         ))
+}
+
+/// What the active account keeps away (ADR 0011): where media shows, strangers' invitations
+/// (with those hidden, to open), pictures in invitations, and the people the user ignores.
+fn safety(s: &State, p: &Palette) -> El {
+    use matrix_core::{SafetyChange, ShowMedia};
+    let Some(account) = s.settings_account() else { return col() };
+    let id = &account.summary.id;
+    let safety = &account.safety;
+    let media = [
+        (ShowMedia::Always, t!("safety.media_always"), None),
+        (ShowMedia::Private, t!("safety.media_private"), Some(t!("safety.media_private_hint"))),
+        (ShowMedia::Never, t!("safety.media_never"), None),
+    ]
+    .into_iter()
+    .fold(col().w_full().gap(8.0), |list, (choice, title, hint)| {
+        let owner = id.clone();
+        list.child(
+            choice_row(title, hint, safety.media == choice, p)
+                .key(format!("safety-media-{choice:?}"))
+                .on_press(move |s: &mut State| s.set_safety(&owner, SafetyChange::Media(choice))),
+        )
+    });
+    let mut strangers = [
+        (false, t!("safety.strangers_show"), None),
+        (true, t!("safety.strangers_hide"), Some(t!("safety.strangers_hide_hint"))),
+    ]
+    .into_iter()
+    .fold(col().w_full().gap(8.0), |list, (hide, title, hint)| {
+        let owner = id.clone();
+        list.child(
+            choice_row(title, hint, safety.hide_stranger_invites == hide, p)
+                .key(format!("safety-strangers-{hide}"))
+                .on_press(move |s: &mut State| s.set_safety(&owner, SafetyChange::HideStrangerInvites(hide))),
+        )
+    });
+    let hidden: Vec<_> = account.hidden_invitations().collect();
+    if !hidden.is_empty() {
+        strangers = strangers.child(
+            text(tf!("safety.hidden_invitations", count = hidden.len()))
+                .key("safety-hidden-heading")
+                .font(font::SECTION)
+                .color(p.text_muted)
+                .mt(8.0),
+        );
+        for invite in hidden {
+            let room_id = invite.room_id.clone();
+            let from =
+                invite.inviter.as_ref().map(|inviter| tf!("invitations.from", name = inviter.name, user = inviter.id));
+            let mut titles = col()
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(2.0)
+                .child(text(invite.name.clone()).font(font::BODY_STRONG).color(p.text).truncate());
+            if let Some(from) = from {
+                titles = titles.child(text(from).font(font::META).color(p.text_muted).truncate());
+            }
+            strangers = strangers.child(
+                row()
+                    .key(format!("safety-hidden-{room_id}"))
+                    .w_full()
+                    .px(14.0)
+                    .py(10.0)
+                    .gap(12.0)
+                    .center_y()
+                    .radius(8.0)
+                    .border(1.0, p.divider)
+                    .hover(p.hover.alpha(p.hover.a * 2.0))
+                    .role("button")
+                    .cursor(rune::Cursor::Pointer)
+                    .focusable(true)
+                    .label(invite.name.clone())
+                    .child(super::room_discovery::invitation_picture(s, account, invite, 28.0))
+                    .child(titles)
+                    .child(icon(&icons::CHEVRON_RIGHT, 18.0).color(p.text_muted))
+                    .on_press(move |s: &mut State| s.show_invitation(&room_id)),
+            );
+        }
+    }
+    let pictures = [(true, t!("safety.pictures_show")), (false, t!("safety.pictures_hide"))].into_iter().fold(
+        col().w_full().gap(8.0),
+        |list, (shown, title)| {
+            let owner = id.clone();
+            list.child(
+                choice_row(title, None, safety.invite_pictures == shown, p)
+                    .key(format!("safety-pictures-{shown}"))
+                    .on_press(move |s: &mut State| s.set_safety(&owner, SafetyChange::InvitePictures(shown))),
+            )
+        },
+    );
+    let ignored = if safety.ignored.is_empty() {
+        col().child(text(t!("safety.ignored_none")).key("safety-ignored-none").font(font::BODY).color(p.text_muted))
+    } else {
+        safety.ignored.iter().fold(col().w_full().gap(8.0), |list, user_id| {
+            let (owner, user) = (id.clone(), user_id.clone());
+            list.child(
+                row()
+                    .key(format!("safety-ignored-{user_id}"))
+                    .w_full()
+                    .px(14.0)
+                    .py(8.0)
+                    .gap(12.0)
+                    .center_y()
+                    .radius(8.0)
+                    .border(1.0, p.divider)
+                    .child(super::components::avatar(user_id, user_id, 28.0))
+                    .child(text(user_id.clone()).font(font::BODY).color(p.text).grow(1.0).min_w(0.0).truncate())
+                    .child(
+                        button(t!("safety.stop_ignoring"), ButtonKind::Secondary, true, p)
+                            .key(format!("safety-unignore-{user_id}"))
+                            .on_press(move |s: &mut State| s.stop_ignoring(&owner, &user)),
+                    ),
+            )
+        })
+    };
+    col()
+        .w_full()
+        .gap(32.0)
+        .child(account_heading(account, &s.media, p))
+        .child(setting_group(&icons::IMAGE, t!("safety.media"), t!("safety.media_hint"), media, p))
+        .child(setting_group(&icons::USER_PLUS, t!("safety.strangers"), t!("safety.strangers_hint"), strangers, p))
+        .child(setting_group(&icons::EYE_OFF, t!("safety.pictures"), t!("safety.pictures_hint"), pictures, p))
+        .child(setting_group(&icons::USER_X, t!("safety.ignored"), t!("safety.ignored_hint"), ignored, p))
 }
 
 fn ring_choices() -> [(bool, &'static str, &'static str); 2] {

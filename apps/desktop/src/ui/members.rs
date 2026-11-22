@@ -450,6 +450,31 @@ pub fn menu(
             );
         }
     }
+    // Keeping them away: on every room, not this one alone.
+    panel = panel.child(divider(p));
+    {
+        let (id, name) = (id.clone(), person.name.clone());
+        panel = panel.child(
+            menu_action(&icons::FLAG, t!("report.action"), Tone::Normal, p)
+                .key("member-menu-report")
+                .on_press(move |s: &mut State| s.report_person(&id, &name)),
+        );
+    }
+    if account.safety.ignores(user_id) {
+        let owner = account.summary.id.clone();
+        panel = panel.child(
+            menu_action(&icons::USER_X, t!("safety.stop_ignoring"), Tone::Normal, p)
+                .key("member-menu-unignore")
+                .on_press(move |s: &mut State| s.stop_ignoring(&owner, &id)),
+        );
+    } else {
+        let name = person.name.clone();
+        panel = panel.child(
+            menu_action(&icons::USER_X, t!("safety.ignore"), Tone::Danger, p)
+                .key("member-menu-ignore")
+                .on_press(move |s: &mut State| s.ask_to_ignore(&id, &name)),
+        );
+    }
     let mut panels = vec![col().child(panel).anchored(anchor.to_owned(), Side::Left, Align::Start, 6.0)];
     match submenu {
         Some(MemberSubmenu::Invite) => panels.push(invite_menu(account, &room.room_id, user_id, p)),

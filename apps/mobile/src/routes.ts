@@ -1,7 +1,7 @@
 // Every screen's address, built in one place so params are always encoded the same way.
 // Account and room IDs contain `@`, `!`, `:` and `$`; expo-router encodes object params.
 
-import type { AccountId } from '@better-matrix/matrix-native/types';
+import type { AccountId, ReportTarget } from '@better-matrix/matrix-native/types';
 import type { Href } from 'expo-router';
 
 export const routes = {
@@ -105,6 +105,18 @@ export const routes = {
     pathname: '/invite',
     params: { account, roomId },
   }),
+  /**
+   * Reporting a message, a room or a person to the homeserver's admins. `name` is the person's or
+   * room's name, or a message's sender's; `sender` is a message's sender, whom the user may also
+   * ignore.
+   */
+  report: (account: AccountId, target: ReportTarget, name: string, sender?: string): Href => {
+    const params: ReportParams = { account, name, ...reportParams(target) };
+
+    if (sender) params.userId = sender;
+
+    return { pathname: '/report', params };
+  },
   newChat: (): Href => '/new-chat',
   newRoom: (space?: string): Href => ({ pathname: '/new-room', params: space ? { space } : {} }),
   newSpace: (): Href => '/new-space',
@@ -124,6 +136,11 @@ export const routes = {
   }),
   settingsSessions: (account: AccountId): Href => ({
     pathname: '/settings/sessions',
+    params: { account },
+  }),
+  /** What the account keeps away: media, strangers' invitations, ignored people (ADR 0011). */
+  settingsSafety: (account: AccountId): Href => ({
+    pathname: '/settings/safety',
     params: { account },
   }),
   settingsInfo: (): Href => '/settings/info',
@@ -175,4 +192,49 @@ function messageParams(
   if (localTarget) params.localTarget = '1';
 
   return params;
+}
+
+/** The report screen's params: who reports, the name its title shows, and the target. */
+type ReportParams = {
+  account: AccountId;
+  name: string;
+  about: 'message' | 'room' | 'person';
+  roomId?: string;
+  eventId?: string;
+  userId?: string;
+};
+
+/** A report's target as route params: what it is about, and its IDs. */
+function reportParams(target: ReportTarget) {
+  switch (target.type) {
+    case 'Message':
+      return {
+        about: 'message' as const,
+        roomId: target.data.room_id,
+        eventId: target.data.event_id,
+      };
+    case 'Room':
+      return { about: 'room' as const, roomId: target.data.room_id };
+    case 'Person':
+      return { about: 'person' as const, userId: target.data.user_id };
+  }
+}
+
+/** The report target `routes.report` put in its params, if they name one. */
+export function reportTarget(params: {
+  about?: string;
+  roomId?: string;
+  eventId?: string;
+  userId?: string;
+}): ReportTarget | null {
+  const { about, roomId, eventId, userId } = params;
+
+  if (about === 'message' && roomId && eventId)
+    return { type: 'Message', data: { room_id: roomId, event_id: eventId } };
+
+  if (about === 'room' && roomId) return { type: 'Room', data: { room_id: roomId } };
+
+  if (about === 'person' && userId) return { type: 'Person', data: { user_id: userId } };
+
+  return null;
 }
