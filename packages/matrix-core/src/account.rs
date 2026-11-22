@@ -101,6 +101,12 @@ pub struct Account {
     /// Changes to rooms' tags and unread marks and to the keywords, run one at a time in the
     /// order the engine was asked for them (queued as commands arrive, not as their tasks start).
     pub(crate) organising: crate::drafts::DraftQueue,
+    /// Whether this session runs the account's offline device (`crate::offline_device`).
+    pub(crate) offline_device: Arc<tokio::sync::watch::Sender<crate::OfflineDevice>>,
+    /// Held while the offline device is turned on or off, taken over or replaced: one at a time.
+    pub(crate) offline_changes: Arc<tokio::sync::Mutex<()>>,
+    /// Where the account's secrets are saved (none in tests): the offline device's key goes there.
+    pub(crate) sessions: Option<Sessions>,
 }
 
 /// Where the browser comes back to after an OAuth sign-in.
@@ -122,6 +128,65 @@ pub(crate) enum Redirect {
     Loopback(LocalServerRedirectHandle),
     /// The app, with the full URL its scheme received.
     App(tokio::sync::oneshot::Receiver<String>),
+}
+
+/// The store directory of a sign-in that hasn't saved its session yet: removed when the sign-in
+/// fails or is cancelled (its task dropped), kept once [`NewStore::signed_in`] saved an account in it.
+pub(crate) struct NewStore(Option<PathBuf>);
+
+impl NewStore {
+    /// A fresh, empty store directory.
+    pub(crate) fn new(layout: &StoreLayout) -> Result<Self, Error> {
+        Ok(Self(Some(layout.new_account_dir()?)))
+    }
+
+    /// Its directory.
+    pub(crate) fn path(&self) -> PathBuf {
+        self.0.clone().unwrap_or_default()
+    }
+
+    /// Saves the session `client` signed in, into this store, and keeps the store. The saving
+    /// runs on a task of its own: a sign-in cancelled meanwhile still finishes saving (the
+    /// account then comes back at the next start), and never loses the store a saved account
+    /// points at.
+    pub(crate) async fn signed_in(
+        mut self,
+        client: Client,
+        sessions: &Sessions,
+        holder: Holder,
+        passphrase: String,
+    ) -> Result<Account, Error> {
+        let sessions = sessions.clone();
+        let saving = tokio::spawn(async move {
+            let account = Account::signed_in(client, &sessions, holder, self.path(), passphrase).await?;
+            // Saved: the store stays.
+            self.0.take();
+            Ok(account)
+        });
+        saving.await.map_err(|e| Error::Storage(std::io::Error::other(e.to_string())))?
+    }
+}
+
+impl Drop for NewStore {
+    fn drop(&mut self) {
+        let Some(dir) = self.0.take() else { return };
+        let remove = move || {
+            let _ = std::fs::remove_dir_all(dir);
+        };
+        // File I/O stays off the engine's workers where there is a runtime to hand it to.
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => drop(runtime.spawn_blocking(remove)),
+            Err(_) => remove(),
+        }
+    }
+}
+
+/// Where a browser sign-in goes: the server, the suspended account it resumes, and whether it
+/// creates a new account first.
+pub(crate) struct OAuthTarget<'a> {
+    pub homeserver: &'a str,
+    pub resume: Option<&'a AccountId>,
+    pub create: bool,
 }
 
 /// A browser sign-in waiting for the user: the URL to open, and the redirect to wait for.
@@ -313,6 +378,9 @@ impl Account {
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
             organising: crate::drafts::DraftQueue::default(),
+            offline_device: Arc::new(tokio::sync::watch::Sender::new(crate::OfflineDevice::Unknown)),
+            offline_changes: Arc::default(),
+            sessions: None,
         }
     }
 
@@ -343,11 +411,11 @@ impl Account {
         layout: &StoreLayout,
         sessions: &Sessions,
         holder: Holder,
-        homeserver: &str,
         identity: &ClientIdentity,
-        resume: Option<&AccountId>,
+        target: OAuthTarget<'_>,
         app_redirect: Option<(Url, tokio::sync::oneshot::Receiver<String>)>,
     ) -> Result<PendingOAuth, Error> {
+        let OAuthTarget { homeserver, resume, create } = target;
         let (store_dir, passphrase, device) = store_for(layout, sessions, resume, homeserver, None).await?;
         let client = build_client(homeserver, &store_dir, &passphrase, sessions, holder).await?;
         let (redirect_uri, redirect) = match app_redirect {
@@ -364,7 +432,12 @@ impl Account {
         );
         metadata.client_name = Some(Localized::new(identity.name.clone(), []));
         let metadata = Raw::new(&metadata).map_err(|e| Error::Storage(e.into()))?;
-        let data = client.oauth().login(redirect_uri, device, Some(metadata.into()), None).build().await?;
+        let mut login = client.oauth().login(redirect_uri, device, Some(metadata.into()), None);
+        if create {
+            use matrix_sdk::ruma::api::client::discovery::get_authorization_server_metadata::v1::Prompt;
+            login = login.prompt(vec![Prompt::Create]);
+        }
+        let data = login.build().await?;
         Ok(PendingOAuth { url: data.url, client, holder, redirect, store_dir, passphrase })
     }
 
@@ -376,10 +449,10 @@ impl Account {
         let client = build_client(&stored.homeserver, &stored.store_dir, &secrets.passphrase, sessions, holder).await?;
         let changes = client.subscribe_to_session_changes();
         client.restore_session(secrets.auth.into_session()).await?;
-        Self::ready(AccountId::new(&stored.id), client, holder, changes).await
+        Self::ready(AccountId::new(&stored.id), client, holder, changes, sessions).await
     }
 
-    async fn signed_in(
+    pub(crate) async fn signed_in(
         client: Client,
         sessions: &Sessions,
         holder: Holder,
@@ -392,7 +465,7 @@ impl Account {
         let homeserver = client.homeserver().to_string();
         let stored = StoredAccount { id: id.to_string(), homeserver, store_dir, signed_out: false };
         blocking(sessions, move |s| s.save(stored, &StoredSecrets { auth, passphrase })).await?;
-        Self::ready(id, client, holder, changes).await
+        Self::ready(id, client, holder, changes, sessions).await
     }
 
     /// Turns on what every signed-in account runs: the event cache, which keeps room history on
@@ -403,6 +476,7 @@ impl Account {
         client: Client,
         holder: Holder,
         changes: broadcast::Receiver<SessionChange>,
+        sessions: &Sessions,
     ) -> Result<Self, Error> {
         // A push handled without the engine may write the crypto store (ADR 0010): with the
         // lock, each sync waits for a push to finish and reloads what it changed (`sync_once_locked`).
@@ -433,6 +507,9 @@ impl Account {
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
             organising: crate::drafts::DraftQueue::default(),
+            offline_device: Arc::new(tokio::sync::watch::Sender::new(crate::OfflineDevice::Unknown)),
+            offline_changes: Arc::default(),
+            sessions: Some(sessions.clone()),
         })
     }
 
@@ -1149,7 +1226,7 @@ pub(crate) async fn set_signed_out(sessions: &Sessions, id: &AccountId) -> Resul
 }
 
 /// Runs a session-store call on the blocking pool: secret stores may wait on a keychain or D-Bus.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     sessions: &Sessions,
     f: impl FnOnce(&Sessions) -> Result<T, Error> + Send + 'static,
 ) -> Result<T, Error> {
@@ -1228,6 +1305,9 @@ mod tests {
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
             organising: crate::drafts::DraftQueue::default(),
+            offline_device: Arc::new(tokio::sync::watch::Sender::new(crate::OfflineDevice::Unknown)),
+            offline_changes: Arc::default(),
+            sessions: Some(sessions),
         }
     }
 

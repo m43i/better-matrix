@@ -5,13 +5,14 @@ use std::path::PathBuf;
 
 use matrix_core::{
     AccountId, AccountSummary, Attachment, AttachmentKind, ContactDetail, ContactKind, Contacts, EntryKind, Event,
-    HistoryVisibility, Homeserver, LoginMethods, Message, MessageContent, NotificationMode, Person, Quote, Reaction,
-    RecoveryStatus, RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary, SasEmoji, Security, Session, SignInMethod,
-    SpaceSummary, ThreadSummary, TimelineDiff, TimelineEntry, TimelineKey,
+    HistoryVisibility, Homeserver, LoginMethods, Message, MessageContent, NotificationMode, OfflineDevice, Person,
+    Policy, QrImage, QrLoginStep, Quote, Reaction, RecoveryStatus, RegistrationStep, RequestId, RoomChange, RoomEvent,
+    RoomKind, RoomList, RoomSummary, SasEmoji, Security, Session, SignInMethod, SpaceSummary, ThreadSummary,
+    TimelineDiff, TimelineEntry, TimelineKey,
 };
 use rune::Tx;
 
-use crate::state::{Format, SignInStep, State};
+use crate::state::{Asked, Format, QrLogin, SignInStep, State};
 
 pub const WORK_SPACE: &str = "!engines:example.org";
 
@@ -409,9 +410,11 @@ pub fn seed(s: &mut State) {
         shown("@alan:example.org", Presence::Offline, None),
     ];
     apply(s, Event::Presence { account: AccountId::new(ADA), people });
-    let verified = Security { session_verified: true, recovery: RecoveryStatus::Enabled };
+    let verified =
+        Security { session_verified: true, recovery: RecoveryStatus::Enabled, offline_device: OfflineDevice::Off };
     apply(s, Event::SecurityChanged { account: AccountId::new(ADA), security: verified });
-    let fresh = Security { session_verified: false, recovery: RecoveryStatus::Enabled };
+    let fresh =
+        Security { session_verified: false, recovery: RecoveryStatus::Enabled, offline_device: OfflineDevice::Off };
     apply(s, Event::SecurityChanged { account: AccountId::new("@ada:hobby.chat"), security: fresh });
     apply(s, Event::Sessions { account: AccountId::new(ADA), sessions: sessions() });
     s.select_account(&AccountId::new(ADA));
@@ -454,8 +457,113 @@ fn homeserver(oauth: bool, password: bool) -> Homeserver {
     Homeserver {
         server_name: Some("example.org".into()),
         url: "https://matrix.example.org/".into(),
-        methods: LoginMethods { oauth, password },
+        methods: LoginMethods { oauth, password, create_account: true, qr: oauth },
     }
+}
+
+/// A QR code the size of a real one (MSC4108 and verification codes carry about 150 bytes).
+pub fn qr_code() -> QrImage {
+    let data: Vec<u8> = b"MATRIX\x02\x03".iter().copied().chain((0..140u8).map(|i| i.wrapping_mul(37))).collect();
+    QrImage::encode(&data).unwrap_or(QrImage { width: 0, dark: Vec::new() })
+}
+
+/// Verifying Grace from her profile, both sides ready: this side shows its code. After [`seed`].
+pub fn verify_person_qr(s: &mut State) {
+    s.select_room(DEMO_THREAD.0);
+    let grace = Person { id: "@grace:example.org".into(), name: "Grace Hopper".into(), avatar: None };
+    s.verify_person(&grace);
+    if let Some(crate::state::Modal::Verification {
+        flow: crate::state::VerificationFlow::Requested(request), ..
+    }) = &s.modal
+    {
+        let request = *request;
+        apply(s, Event::VerificationRequested { request, account: AccountId::new(ADA), flow_id: "flow".into() });
+    }
+    let step = matrix_core::VerificationStep::Ready { qr: Some(qr_code()), scan: false };
+    apply(s, Event::Verification { account: AccountId::new(ADA), flow_id: "flow".into(), step });
+}
+
+/// Grace's profile beside the room, with whether Ada verified her. After [`seed`].
+pub fn person(s: &mut State, identity: Option<matrix_core::Identity>) {
+    s.select_room(DEMO_THREAD.0);
+    s.show_side(crate::state::SidePanel::Person(Person {
+        id: "@grace:example.org".into(),
+        name: "Grace Hopper".into(),
+        avatar: None,
+    }));
+    apply(s, Event::Identity { account: AccountId::new(ADA), user_id: "@grace:example.org".into(), identity });
+}
+
+/// Ada's OAuth account, verified here, showing a code for a new device to scan. After [`seed`].
+pub fn link_device(s: &mut State) {
+    let hobby = AccountId::new("@ada:hobby.chat");
+    let verified =
+        Security { session_verified: true, recovery: RecoveryStatus::Enabled, offline_device: OfflineDevice::On };
+    apply(s, Event::SecurityChanged { account: hobby.clone(), security: verified });
+    s.select_account(&hobby);
+    s.open_settings();
+    s.show_settings_section(crate::state::SettingsSection::Sessions);
+    s.link_device();
+    if let Some(crate::state::Modal::LinkDevice { flow: QrLogin { request: Some(request), .. }, .. }) = &s.modal {
+        let request = *request;
+        apply(s, Event::QrLogin { request, step: QrLoginStep::Show(qr_code()) });
+    }
+}
+
+/// Signing in on a new device with a QR code, showing it for a signed-in device to scan.
+pub fn sign_in_qr(s: &mut State) {
+    let mut flow = QrLogin::started(RequestId(1));
+    flow.moved(RequestId(1), QrLoginStep::Show(qr_code()));
+    s.sign_in.step = SignInStep::Qr { server: homeserver(true, false), flow: Box::new(flow) };
+}
+
+/// Creating an account on a password server, which asks to agree to its policies.
+pub fn registration_terms(s: &mut State) {
+    let policies = vec![
+        Policy { name: "Terms of Service".into(), url: "https://example.org/terms".into() },
+        Policy { name: "Privacy Policy".into(), url: "https://example.org/privacy".into() },
+    ];
+    s.sign_in.step = SignInStep::Register {
+        server: homeserver(false, true),
+        request: Some(RequestId(1)),
+        asked: Some(Asked { step: RegistrationStep::Terms(policies), answered: false }),
+        error: None,
+    };
+}
+
+/// Creating an account on a password server, which sent a link to confirm the email address
+/// and hasn't seen it opened yet.
+pub fn registration_email_sent(s: &mut State) {
+    let step = RegistrationStep::EmailSent { address: "ada@hobby.chat".into(), unconfirmed: true };
+    s.sign_in.step = SignInStep::Register {
+        server: homeserver(false, true),
+        request: Some(RequestId(1)),
+        asked: Some(Asked { step, answered: false }),
+        error: None,
+    };
+}
+
+/// Creating an account on a password server, which asks for an email address to confirm.
+pub fn registration_email(s: &mut State) {
+    s.sign_in.step = SignInStep::Register {
+        server: homeserver(false, true),
+        request: Some(RequestId(1)),
+        asked: Some(Asked { step: RegistrationStep::Email, answered: false }),
+        error: None,
+    };
+    s.sign_in.email = rune::TextEdit::new("ada@hobby.chat");
+}
+
+/// Signing in again as a suspended account on an OAuth server: no QR code, no new account.
+pub fn sign_in_resume(s: &mut State) {
+    sign_in_browser(s);
+    s.sign_in.resume = Some(AccountId::new("@ada:hobby.chat"));
+}
+
+/// The registration form on a password server.
+pub fn registration_form(s: &mut State) {
+    s.sign_in.step = SignInStep::Register { server: homeserver(false, true), request: None, asked: None, error: None };
+    s.sign_in.username = rune::TextEdit::new("ada");
 }
 
 /// Sign-in step 2 on a password-only server.
@@ -469,6 +577,7 @@ pub fn sign_in_browser(s: &mut State) {
         server: homeserver(true, true),
         request: Some(matrix_core::RequestId(1)),
         url: Some("https://auth.example.org/authorize".into()),
+        create: false,
         error: None,
     };
 }

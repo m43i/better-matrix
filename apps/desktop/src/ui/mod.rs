@@ -1,6 +1,7 @@
 //! The view: one function from [`State`] to elements, composed from the screens below, which
 //! are composed from [`components`]. Popovers draw last, at the root, over everything.
 
+mod account_dialogs;
 mod account_menu;
 mod attachments;
 mod backdrop;
@@ -21,6 +22,7 @@ mod panes;
 mod people;
 mod poll;
 mod preview;
+mod qr;
 mod rail;
 mod readers;
 mod room;

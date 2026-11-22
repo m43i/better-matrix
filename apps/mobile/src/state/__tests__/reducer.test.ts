@@ -199,7 +199,74 @@ describe('apply', () => {
       type: 'Verification',
       data: { account: ADA, flow_id: 'f', step: { type: 'Done' } },
     });
-    expect(state.verifications).toEqual([{ account: ADA, flowId: 'f', step: { type: 'Done' } }]);
+    expect(state.verifications).toEqual([
+      { account: ADA, flowId: 'f', step: { type: 'Done' }, user: null },
+    ]);
+  });
+
+  it('should remember who asked to verify through the later steps', () => {
+    const grace = { id: GRACE, name: 'Grace', avatar: null };
+
+    let state = apply(signedIn(ADA), {
+      type: 'Verification',
+      data: {
+        account: ADA,
+        flow_id: 'f',
+        step: { type: 'Incoming', data: { other_device: 'GRACEPHONE', user: grace } },
+      },
+    });
+
+    state = apply(state, {
+      type: 'Verification',
+      data: { account: ADA, flow_id: 'f', step: { type: 'Ready', data: { qr: null, scan: true } } },
+    });
+    expect(state.verifications[0]?.user).toEqual(grace);
+  });
+
+  it('should keep the step after the other side scanned the code', () => {
+    const state = apply(signedIn(ADA), {
+      type: 'Verification',
+      data: { account: ADA, flow_id: 'f', step: { type: 'Scanned' } },
+    });
+
+    expect(state.verifications[0]?.step).toEqual({ type: 'Scanned' });
+  });
+
+  it('should keep the identity reported for a person', () => {
+    const state = apply(signedIn(ADA), {
+      type: 'Identity',
+      data: { account: ADA, user_id: GRACE, identity: { verified: true, changed: false } },
+    });
+
+    expect(state.accounts[0]?.identities[GRACE]).toEqual({ verified: true, changed: false });
+  });
+
+  it('should remember that a person has no identity to verify', () => {
+    const state = apply(signedIn(ADA), {
+      type: 'Identity',
+      data: { account: ADA, user_id: GRACE, identity: null },
+    });
+
+    expect(state.accounts[0]?.identities).toEqual({ [GRACE]: null });
+  });
+
+  it('should keep whether the offline device is on', () => {
+    const state = apply(signedIn(ADA), {
+      type: 'SecurityChanged',
+      data: {
+        account: ADA,
+        security: { session_verified: true, recovery: 'Enabled', offline_device: 'On' },
+      },
+    });
+
+    expect(state.accounts[0]?.security?.offline_device).toBe('On');
+  });
+
+  it('should leave the state alone for a QR sign-in step, which only its request hears', () => {
+    const state = signedIn(ADA);
+    expect(apply(state, { type: 'QrLogin', data: { request: 3, step: { type: 'Syncing' } } })).toBe(
+      state,
+    );
   });
 
   it('should keep a room read boundary that is outside loaded history as unresolved', () => {

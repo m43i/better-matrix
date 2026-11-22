@@ -1,7 +1,7 @@
-// A member of a room (sheet, from the member list): who they are and their role, and what the
-// user can do with them: message them, invite them to another room, and with the rights change
-// their role, remove or ban them; and, for anyone, ignore or report them (ADR 0011). Destructive
-// acts ask first, in the desktop's words.
+// A member of a room (sheet, from the member list): who they are, whether the user verified them,
+// their role, and what the user can do with them: message them, verify them, invite them to
+// another room, and with the rights change their role, remove or ban them; and, for anyone,
+// ignore or report them (ADR 0011). Destructive acts ask first, in the desktop's words.
 
 import type { MemberRole, Moderation } from '@better-matrix/matrix-native/types';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -12,10 +12,11 @@ import { t } from '../i18n';
 import { routes } from '../routes';
 import { invite, listAllMembers, moderate, openDirectChat } from '../state/actions/people';
 import { setIgnored } from '../state/actions/safety';
+import { loadIdentity } from '../state/actions/security';
 import { asksFirst, inviteTargets, may, memberOf, rolesOffered, ROLES } from '../state/people';
 import { shallow, useAppStore, useStore } from '../state/react';
 import { ignores } from '../state/safety';
-import { account as accountOf } from '../state/selectors';
+import { account as accountOf, identityOf } from '../state/selectors';
 import { font } from '../theme/palette';
 import { Avatar } from '../ui/Avatar';
 import { Divider, ListRow, ListSection } from '../ui/components';
@@ -49,6 +50,10 @@ export default function MemberScreen() {
   const [busy, setBusy] = useState<'chat' | MemberRole | null>(null);
   // A mention opens this sheet straight from the timeline, before anything listed the members.
   useEffect(() => listAllMembers(store, account, roomId), [store, account, roomId]);
+  const identity = useStore((s) => identityOf(s, account, userId));
+  useEffect(() => {
+    if (userId !== account) loadIdentity(store, account, userId);
+  }, [store, account, userId]);
   const member = memberOf(members, userId);
 
   if (!members || !member) return null;
@@ -57,6 +62,14 @@ export default function MemberScreen() {
   const roles = rolesOffered(members, member);
   const mayKick = may(members, { type: 'Kick' }, member);
   const mayBan = may(members, { type: 'Ban' }, member);
+  const verified = identity ? identity.verified && !identity.changed : member.verified;
+  // Someone with an identity the user hasn't verified (or that changed since) can be verified.
+  const verifiable = identity !== undefined && identity !== null && !verified;
+
+  const verify = () => {
+    router.dismiss();
+    router.push(routes.verifyUser(account, person.id));
+  };
 
   const message = () => {
     if (busy !== null) return;
@@ -161,8 +174,8 @@ export default function MemberScreen() {
           <Text style={[font.title, { color: palette.text }]} numberOfLines={2}>
             {person.name}
           </Text>
-          {member.verified ? (
-            <View accessible accessibilityLabel={t('members.verified')}>
+          {verified ? (
+            <View testID="member-verified" accessible accessibilityLabel={t('members.verified')}>
               <Icon name="verified" size={20} color={palette.success} />
             </View>
           ) : null}
@@ -174,6 +187,14 @@ export default function MemberScreen() {
           {me ? t('mobile.people.you') : roleLabel(member.role)}
         </Text>
       </View>
+      {identity?.changed ? (
+        <View style={styles.warning} testID="member-identity-changed">
+          <Icon name="alert" size={20} color={palette.warning} />
+          <Text style={[font.body, styles.warningText, { color: palette.text }]}>
+            {t('mobile.people.identity_changed', { name: person.name })}
+          </Text>
+        </View>
+      ) : null}
       {me ? null : (
         <>
           <ListSection>
@@ -187,6 +208,19 @@ export default function MemberScreen() {
                 busy === 'chat' ? <ActivityIndicator color={palette.textMuted} /> : undefined
               }
             />
+            {verifiable ? (
+              <>
+                <Divider inset={52} />
+                <ListRow
+                  testID="member-verify"
+                  icon="shield"
+                  title={t('mobile.people.verify')}
+                  subtitle={t('mobile.people.verify_hint', { name: person.name })}
+                  onPress={verify}
+                  chevron={false}
+                />
+              </>
+            ) : null}
             <Divider inset={52} />
             <ListRow
               testID="member-invite"
@@ -321,4 +355,12 @@ const styles = StyleSheet.create({
   nested: { maxHeight: 280 },
   note: { padding: 16 },
   indent: { width: 22 },
+  warning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginHorizontal: 24,
+    marginTop: 16,
+  },
+  warningText: { flex: 1 },
 });

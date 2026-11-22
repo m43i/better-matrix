@@ -2868,3 +2868,219 @@ fn a_held_back_gif_that_failed_should_still_offer_show_and_try_again() {
     assert!(rt.state.revealed_media.contains(&(AccountId::new(demo::ADA), "$gif".to_owned())));
     assert!(!rt.state.gifs.has_failed(url), "tried again");
 }
+
+// ----- verification, account actions, linking devices, signing up ------------------------
+
+fn grace_identity(verified: bool, changed: bool) -> Option<matrix_core::Identity> {
+    Some(matrix_core::Identity { verified, changed })
+}
+
+#[test]
+fn a_verification_ready_for_a_code_should_show_it_to_scan() {
+    let rt = runtime(demo::verify_person_qr);
+    assert!(rt.find("verify-qr").is_some() && rt.find("verify-emoji").is_some());
+}
+
+#[test]
+fn the_verification_code_should_be_square_and_fit_its_dialog() {
+    let rt = runtime(demo::verify_person_qr);
+    let code = rt.presented("verify-qr").unwrap().0;
+    let dialog = rt.presented("verify-dialog").unwrap().0;
+    assert!((code[2] - code[3]).abs() < 0.5, "{code:?}");
+    assert!(code[0] >= dialog[0] && code[0] + code[2] <= dialog[0] + dialog[2], "{code:?} in {dialog:?}");
+}
+
+#[test]
+fn a_verified_person_should_show_the_badge_and_no_verify_button() {
+    let rt = runtime(|s| demo::person(s, grace_identity(true, false)));
+    let shown = rt.elements().into_iter().filter_map(|e| e.text).any(|text| text == "Verified");
+    assert!(shown && rt.find("person-verify").is_none());
+}
+
+#[test]
+fn an_unverified_person_should_offer_to_verify_them() {
+    let mut rt = runtime(|s| demo::person(s, grace_identity(false, false)));
+    press(&mut rt, "person-verify");
+    assert!(matches!(
+        &rt.state.modal,
+        Some(crate::state::Modal::Verification { with: Some(person), .. }) if person.id == "@grace:example.org"
+    ));
+}
+
+#[test]
+fn a_person_whose_identity_changed_should_be_warned_about() {
+    let rt = runtime(|s| demo::person(s, grace_identity(true, true)));
+    assert!(rt.find("person-identity").is_some() && rt.find("person-verify").is_some());
+}
+
+#[test]
+fn a_person_without_encryption_should_say_there_is_nothing_to_verify() {
+    let rt = runtime(|s| demo::person(s, None));
+    assert!(rt.find("person-cannot-verify").is_some() && rt.find("person-verify").is_none());
+}
+
+#[test]
+fn the_account_page_should_offer_the_offline_device_keys_password_and_deactivation() {
+    let rt = runtime(|s| s.open_account_settings());
+    for key in ["offline-device-on", "keys-export", "keys-import", "password-change", "deactivate-account"] {
+        assert!(rt.find(key).is_some(), "no {key}");
+    }
+}
+
+#[test]
+fn an_offline_device_the_server_does_not_keep_should_not_show() {
+    let rt = runtime(|s| {
+        let security = matrix_core::Security {
+            session_verified: true,
+            recovery: matrix_core::RecoveryStatus::Enabled,
+            offline_device: matrix_core::OfflineDevice::Unsupported,
+        };
+        s.apply(Event::SecurityChanged { account: AccountId::new(demo::ADA), security }, &mut rune::Tx::default());
+        s.open_account_settings();
+    });
+    assert!(rt.find("offline-device-on").is_none() && rt.find("offline-device-off").is_none());
+}
+
+#[test]
+fn turning_the_offline_device_on_should_ask_for_the_recovery_key() {
+    let mut rt = runtime(|s| s.open_account_settings());
+    press(&mut rt, "offline-device-on");
+    assert!(rt.find("recovery-key").is_some() && rt.find("recovery-forgot").is_none());
+}
+
+#[test]
+fn deactivating_should_confirm_with_a_choice_to_erase_messages() {
+    let mut rt = runtime(|s| {
+        s.open_account_settings();
+        s.ask_to_deactivate();
+    });
+    press(&mut rt, "deactivate-erase");
+    assert!(matches!(
+        rt.state.modal,
+        Some(crate::state::Modal::Confirm(crate::state::Confirm::Deactivate { erase: true, .. }))
+    ));
+}
+
+#[test]
+fn an_empty_new_password_should_show_why_it_was_not_sent() {
+    let mut rt = runtime(|s| {
+        s.open_account_settings();
+        s.open_change_password();
+    });
+    press(&mut rt, "password-change-submit");
+    assert!(rt.find("dialog-error").is_some());
+}
+
+#[test]
+fn the_sessions_page_of_a_verified_oauth_account_should_link_a_new_device() {
+    let mut rt = runtime(|s| {
+        demo::link_device(s);
+        s.modal = Some(crate::state::Modal::Settings(SettingsSection::Sessions));
+    });
+    press(&mut rt, "link-device");
+    assert!(matches!(rt.state.modal, Some(crate::state::Modal::LinkDevice { .. })));
+}
+
+#[test]
+fn a_password_account_should_not_offer_to_link_a_device() {
+    let rt = runtime(|s| {
+        s.open_settings();
+        s.show_settings_section(SettingsSection::Sessions);
+    });
+    assert!(rt.find("link-device").is_none());
+}
+
+#[test]
+fn linking_a_device_should_show_the_code_to_scan() {
+    let rt = runtime(demo::link_device);
+    assert!(rt.find("qr-login-code").is_some());
+}
+
+#[test]
+fn the_approval_page_of_a_device_link_should_open_again_on_request() {
+    let mut rt = runtime(demo::link_device);
+    let url = "https://account.hobby.chat/device".to_owned();
+    rt.update(|s, _| {
+        if let Some(crate::state::Modal::LinkDevice { flow, .. }) = &mut s.modal
+            && let Some(request) = flow.request
+        {
+            flow.moved(request, matrix_core::QrLoginStep::Approve { url: url.clone() });
+        }
+    });
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, "qr-login-reopen");
+    assert_eq!(rt.take_url_requests(), [url]);
+}
+
+#[test]
+fn signing_in_with_a_qr_code_should_show_the_code_to_scan() {
+    let rt = runtime(|s| {
+        s.nav.account = None;
+        s.accounts = crate::state::Accounts::default();
+        demo::sign_in_qr(s);
+    });
+    assert!(rt.find("qr-login-code").is_some());
+}
+
+#[test]
+fn signing_in_again_as_a_suspended_account_should_not_offer_a_qr_code_or_a_new_account() {
+    let rt = runtime(|s| {
+        s.start_adding_account();
+        demo::sign_in_resume(s);
+    });
+    assert!(rt.find("use-qr").is_none() && rt.find("create-account").is_none());
+}
+
+#[test]
+fn signing_in_to_a_new_account_should_offer_a_qr_code_and_a_new_account() {
+    let rt = runtime(|s| {
+        s.start_adding_account();
+        demo::sign_in_browser(s);
+    });
+    assert!(rt.find("use-qr").is_some() && rt.find("create-account").is_some());
+}
+
+#[test]
+fn an_email_address_should_answer_the_registration() {
+    let mut rt = runtime(|s| {
+        s.start_adding_account();
+        demo::registration_email(s);
+    });
+    press(&mut rt, "registration-email-submit");
+    assert!(matches!(
+        rt.state.sign_in.step,
+        crate::state::SignInStep::Register { asked: Some(crate::state::Asked { answered: true, .. }), .. }
+    ));
+}
+
+#[test]
+fn a_link_not_yet_opened_should_say_so() {
+    let rt = runtime(|s| {
+        s.start_adding_account();
+        demo::registration_email_sent(s);
+    });
+    assert!(rt.find("registration-email-unconfirmed").is_some() && rt.find("registration-continue").is_some());
+}
+
+#[test]
+fn a_policy_to_agree_to_should_open_in_the_browser() {
+    let mut rt = runtime(|s| {
+        s.start_adding_account();
+        demo::registration_terms(s);
+    });
+    press(&mut rt, "policy-0");
+    assert_eq!(rt.take_url_requests(), ["https://example.org/terms"]);
+}
+
+#[test]
+fn agreeing_to_the_policies_should_answer_the_registration() {
+    let mut rt = runtime(|s| {
+        s.start_adding_account();
+        demo::registration_terms(s);
+    });
+    press(&mut rt, "registration-agree");
+    assert!(matches!(
+        rt.state.sign_in.step,
+        crate::state::SignInStep::Register { asked: Some(crate::state::Asked { answered: true, .. }), .. }
+    ));
+}

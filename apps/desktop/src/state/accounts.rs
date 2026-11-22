@@ -645,6 +645,9 @@ pub struct AccountData {
     pub security: Option<matrix_core::Security>,
     /// The signed-in sessions, once listed.
     pub sessions: Option<Vec<matrix_core::Session>>,
+    /// What the user knows of other people's identities, by user ID, once asked: `None` for
+    /// someone with no encryption identity (nothing to verify).
+    pub identities: HashMap<String, Option<matrix_core::Identity>>,
     /// The linked email addresses and phone numbers, and whether the app may change them, once
     /// listed.
     pub contacts: Option<matrix_core::Contacts>,
@@ -730,6 +733,7 @@ impl AccountData {
             heard_at: HashMap::new(),
             security: None,
             sessions: None,
+            identities: HashMap::new(),
             contacts: None,
             members: HashMap::new(),
             member_index: HashMap::new(),
@@ -1362,6 +1366,12 @@ impl Accounts {
     pub fn set_security(&mut self, id: &AccountId, security: matrix_core::Security) {
         if let Some(account) = self.get_mut(id) {
             account.security = Some(security);
+        }
+    }
+
+    pub fn set_identity(&mut self, id: &AccountId, user_id: String, identity: Option<matrix_core::Identity>) {
+        if let Some(account) = self.get_mut(id) {
+            account.identities.insert(user_id, identity);
         }
     }
 

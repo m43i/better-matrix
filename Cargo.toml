@@ -19,6 +19,7 @@ matrix-sdk = { version = "0.19.1", features = [
   "bundled-sqlite",
   "local-server",
   "experimental-send-custom-to-device",
+  "qrcode",
 ] }
 matrix-sdk-ui = "0.19.1"
 matrix-sdk-base = "0.19.1"

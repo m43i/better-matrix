@@ -10,6 +10,7 @@ import type {
   CallEnd,
   CallInfo,
   Contacts,
+  Identity,
   IncomingCall,
   Invitation,
   LinkPreview,
@@ -87,6 +88,11 @@ export interface AccountData {
   /** Who is typing, by room ID. */
   typing: Record<string, Person[]>;
   security: Security | null;
+  /**
+   * What the user knows of other people's identities, by user ID, once asked for (`LoadIdentity`)
+   * or after verifying them; `null` when they have none to verify.
+   */
+  identities: Record<string, Identity | null>;
   sessions: Session[] | null;
   contacts: Contacts | null;
   members: Record<string, Members>;
@@ -133,6 +139,8 @@ export interface Verification {
   account: AccountId;
   flowId: string;
   step: VerificationStep;
+  /** The person on the other side, when it isn't one of the user's own sessions (from `Incoming`). */
+  user: Person | null;
 }
 
 /** Something to tell the user once, such as a command that failed. */

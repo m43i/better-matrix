@@ -1,10 +1,12 @@
-// Encryption and sessions: verifying this session (emoji or recovery key), the recovery key,
-// resetting the identity, and the account's other sessions. Actions the server guards with the
-// password share one retry (`runGuarded`), as the desktop's `Guarded` does.
+// Encryption and sessions: verifying this session or another person (emoji or QR code), the
+// recovery key, the offline device, exporting and importing message keys, resetting the
+// identity, the account's other sessions, and the password and deactivation. Actions the server
+// guards with the password share one retry (`runGuarded`), as the desktop's `Guarded` does.
 
 import type {
   AccountId,
   Command,
+  KeyImport,
   PendingContact,
   RequestId,
   VerificationStep,
@@ -22,7 +24,9 @@ import type { State, Verification } from '../types';
 export type Guarded =
   | { type: 'EndSession'; deviceId: string }
   | { type: 'ResetIdentity' }
-  | { type: 'AddContact'; pending: PendingContact };
+  | { type: 'AddContact'; pending: PendingContact }
+  | { type: 'ChangePassword'; newPassword: string }
+  | { type: 'DeactivateAccount'; erase: boolean };
 
 /** The command for a guarded action, with the password once the server asked for it. */
 export function guardedCommand(
@@ -37,6 +41,13 @@ export function guardedCommand(
       return { type: 'ResetIdentity', data: { account, password } };
     case 'AddContact':
       return { type: 'AddContact', data: { account, pending: action.pending, password } };
+    case 'ChangePassword':
+      return {
+        type: 'ChangePassword',
+        data: { account, new_password: action.newPassword, password },
+      };
+    case 'DeactivateAccount':
+      return { type: 'DeactivateAccount', data: { account, erase: action.erase, password } };
   }
 }
 
@@ -105,16 +116,115 @@ export function unverifiedAccount(state: State): AccountId | null {
   return account?.security && !account.security.session_verified ? account.summary.id : null;
 }
 
-/** Asks the user's other sessions to verify this one; `Verification` events follow. */
-export function verifyThisSession(store: Store, account: AccountId): RequestId {
-  return store.send({ type: 'VerifyThisSession', data: account });
+/**
+ * One verification this device asks for (this session with the user's others, or with another
+ * person), bound to the flow its command started: `VerificationRequested` names it before any of
+ * its steps, so steps of other flows (a request coming in meanwhile) never drive or end it.
+ * Views read `flowId()` and redraw on `subscribe`.
+ */
+export class AskedVerification {
+  private request: RequestId | null = null;
+  private flow: string | null = null;
+  private closed = false;
+  private readonly listeners = new Set<() => void>();
+
+  constructor(
+    private readonly store: Store,
+    private readonly account: AccountId,
+    /** The person to verify; `null` verifies this session. */
+    private readonly userId: string | null,
+  ) {}
+
+  /** The flow the request started, once the engine named it. */
+  flowId = (): string | null => this.flow;
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  /** Asks, once. */
+  start(): void {
+    if (this.request !== null || this.closed) return;
+
+    const command: Command =
+      this.userId === null
+        ? { type: 'VerifyThisSession', data: this.account }
+        : { type: 'VerifyUser', data: { account: this.account, user_id: this.userId } };
+
+    const run = this.store.run(command, (event) => {
+      if (event.type === 'VerificationRequested') this.started(event.data.flow_id);
+    });
+
+    this.request = run.request;
+    run.catch((error: CommandFailed) => {
+      if (!error.cancelled) this.store.update((s) => addNotice(s, error.message));
+    });
+  }
+
+  private started(flowId: string): void {
+    this.flow = flowId;
+
+    // Closed while the request was on its way: the verification it started stops too.
+    if (this.closed) {
+      cancelVerification(this.store, this.account, flowId);
+
+      return;
+    }
+
+    for (const listener of this.listeners) listener();
+  }
+
+  /**
+   * Stops what is under way (leaving the sheet): the verification it started unless it is over,
+   * or the request while it has none yet.
+   */
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    const flowId = this.flow;
+
+    if (flowId !== null) {
+      const flow = this.store
+        .getState()
+        .verifications.find((v) => v.account === this.account && v.flowId === flowId);
+
+      if (!flow || !verificationOver(flow.step))
+        cancelVerification(this.store, this.account, flowId);
+    }
+    // Still on its way: the request isn't cancelled, as the server may have sent it already;
+    // the flow it names is cancelled once it arrives.
+  }
+}
+
+/** Asks what the user knows of someone's identity; `Identity` follows. */
+export function loadIdentity(store: Store, account: AccountId, userId: string): void {
+  store.send({ type: 'LoadIdentity', data: { account, user_id: userId } }, { quiet: true });
+}
+
+/** Switches a verification showing QR codes to comparing emoji. */
+export function compareEmoji(store: Store, account: AccountId, flowId: string): void {
+  store.send({ type: 'CompareEmoji', data: { account, flow_id: flowId } });
+}
+
+/** Hands a verification the other side's code, as the scanner read it. */
+export function scanVerificationCode(
+  store: Store,
+  account: AccountId,
+  flowId: string,
+  code: number[],
+): void {
+  store.send({ type: 'ScanVerificationCode', data: { account, flow_id: flowId, code } });
 }
 
 export function acceptVerification(store: Store, account: AccountId, flowId: string): void {
   store.send({ type: 'AcceptVerification', data: { account, flow_id: flowId } });
 }
 
-/** Says whether the emoji match the other session's. */
+/** Says whether the emoji match the other side's, or whether the other side scanned our code. */
 export function confirmVerification(
   store: Store,
   account: AccountId,
@@ -135,22 +245,20 @@ export function verificationOver(step: VerificationStep): boolean {
 }
 
 /**
- * The verification the sheet follows: `flowId` when it was opened for one, else the first of
- * the account's verifications that wasn't there when it opened (`known`), the one it started.
+ * The verification the sheet follows: exactly `flowId` (the one it was opened for, or the one
+ * its request started), nothing until that is known.
  */
 export function followedVerification(
   verifications: Verification[],
   account: AccountId,
   flowId: string | null,
-  known: readonly string[],
 ): Verification | undefined {
-  return verifications.find(
-    (v) =>
-      v.account === account && (flowId !== null ? v.flowId === flowId : !known.includes(v.flowId)),
-  );
+  return flowId === null
+    ? undefined
+    : verifications.find((v) => v.account === account && v.flowId === flowId);
 }
 
-/** Verification requests from the user's other sessions that `seen` doesn't hold yet. */
+/** Verification requests (from the user's other sessions or other people) that `seen` doesn't hold yet. */
 export function newIncoming(
   verifications: Verification[],
   seen: ReadonlySet<string>,
@@ -168,31 +276,55 @@ export type VerificationAction =
   | 'accept'
   | 'decline'
   | 'cancel'
+  | 'scan'
+  | 'emoji'
+  | 'scanned'
+  | 'notScanned'
   | 'match'
   | 'mismatch'
   | 'done'
   | 'close';
 
 export interface VerificationView {
-  title: 'verify.title' | 'verify.incoming_title' | 'verify.done_title';
+  title:
+    | 'verify.title'
+    | 'verify.incoming_title'
+    | 'verify.done_title'
+    | 'mobile.accounts.verify_person_title'
+    | 'mobile.accounts.verify_person_done_title';
   actions: VerificationAction[];
 }
 
-/** How the verification sheet shows a step: `null` is the request on its way to a first step. */
-export function verificationView(step: VerificationStep | null): VerificationView {
+/**
+ * How the verification sheet shows a step: `null` is the request on its way to a first step.
+ * `person` when the other side is another person, not one of the user's sessions.
+ */
+export function verificationView(step: VerificationStep | null, person = false): VerificationView {
+  const title = person ? 'mobile.accounts.verify_person_title' : 'verify.title';
+
   switch (step?.type) {
     case 'Incoming':
       return { title: 'verify.incoming_title', actions: ['decline', 'accept'] };
+    case 'Ready':
+      return {
+        title,
+        actions: [...(step.data.scan ? (['scan'] as const) : []), 'emoji', 'cancel'],
+      };
+    case 'Scanned':
+      return { title, actions: ['notScanned', 'scanned'] };
     case 'Compare':
-      return { title: 'verify.title', actions: ['mismatch', 'match'] };
+      return { title, actions: ['mismatch', 'match'] };
     case 'Done':
-      return { title: 'verify.done_title', actions: ['done'] };
+      return {
+        title: person ? 'mobile.accounts.verify_person_done_title' : 'verify.done_title',
+        actions: ['done'],
+      };
     case 'Cancelled':
-      return { title: 'verify.title', actions: ['close'] };
+      return { title, actions: ['close'] };
     case 'Waiting':
     case 'Confirmed':
     case undefined:
-      return { title: 'verify.title', actions: ['cancel'] };
+      return { title, actions: ['cancel'] };
   }
 }
 
@@ -283,6 +415,154 @@ export async function resetIdentity(
   }
 
   return step;
+}
+
+// ----- offline device, key export and import -----------------------------------------------
+
+/**
+ * Turns the offline device on (with the recovery key) or off; `SecurityChanged` follows. Rejects
+ * with why when the server or the key refuses.
+ */
+export function setOfflineDevice(
+  store: Store,
+  account: AccountId,
+  on: boolean,
+  recoveryKey: string | null = null,
+): Promise<void> {
+  return store.run({
+    type: 'SetOfflineDevice',
+    data: { account, on, recovery_key: on ? (recoveryKey?.trim() ?? null) : null },
+  });
+}
+
+/**
+ * Asks for a secret (a key, a passphrase) and tries `attempt` with it until it is accepted;
+ * `ask` hears why the last one was refused. Resolves with what `attempt` resolved with, or `null`
+ * when the user gave up. A cancelled attempt ends it.
+ */
+export async function untilAccepted<T>(
+  ask: (error: string | null) => Promise<string | null>,
+  attempt: (secret: string) => Promise<T>,
+): Promise<T | null> {
+  let error: string | null = null;
+
+  for (;;) {
+    const secret = await ask(error);
+
+    if (secret === null) return null;
+
+    try {
+      return await attempt(secret);
+    } catch (cause) {
+      if (!(cause instanceof CommandFailed) || cause.cancelled) throw cause;
+      error = cause.message;
+    }
+  }
+}
+
+/** Turns the offline device on with the recovery key `ask` gets, asking again while it's wrong. */
+export async function turnOnOfflineDevice(
+  store: Store,
+  account: AccountId,
+  ask: (error: string | null) => Promise<string | null>,
+): Promise<boolean> {
+  const done = await untilAccepted(ask, (key) => setOfflineDevice(store, account, true, key));
+
+  return done !== null;
+}
+
+/** Why a new passphrase or password and its confirmation can't be used, or `null` when they can. */
+export function confirmationProblem(
+  value: string,
+  confirmation: string,
+): 'empty' | 'mismatch' | null {
+  if (value === '') return 'empty';
+
+  return value === confirmation ? null : 'mismatch';
+}
+
+/** Writes this session's message keys to `path` (a plain path), encrypted with `passphrase`. */
+export function exportRoomKeys(
+  store: Store,
+  account: AccountId,
+  path: string,
+  passphrase: string,
+): Promise<void> {
+  return store.run({ type: 'ExportRoomKeys', data: { account, path, passphrase } });
+}
+
+/**
+ * Reads message keys from an exported file with the passphrase `ask` gets, asking again while
+ * it's wrong; resolves with how many were new, or `null` when the user gave up.
+ */
+export function importRoomKeysAsking(
+  store: Store,
+  account: AccountId,
+  path: string,
+  ask: (error: string | null) => Promise<string | null>,
+): Promise<KeyImport | null> {
+  return untilAccepted(ask, (passphrase) => importRoomKeys(store, account, path, passphrase));
+}
+
+/** Reads message keys from an exported file; resolves with how many were new. */
+export async function importRoomKeys(
+  store: Store,
+  account: AccountId,
+  path: string,
+  passphrase: string,
+): Promise<KeyImport> {
+  let found: KeyImport = { imported: 0, total: 0 };
+
+  await store.run({ type: 'ImportRoomKeys', data: { account, path, passphrase } }, (event) => {
+    if (event.type === 'KeysImported') found = event.data.import;
+  });
+
+  return found;
+}
+
+// ----- QR codes -----------------------------------------------------------------------------
+
+/**
+ * Reads the QR code in a camera picture (a plain path) in the engine, which keeps its bytes
+ * whole; resolves with them, or `null` when no code reads.
+ */
+export async function readQrCode(store: Store, picture: string): Promise<number[] | null> {
+  let code: number[] | null = null;
+
+  await store.run({ type: 'ReadQrCode', data: { picture } }, (event) => {
+    if (event.type === 'QrCodeRead') code = event.data.code;
+  });
+
+  return code;
+}
+
+// ----- password and deactivation ------------------------------------------------------------
+
+/**
+ * Changes a password account's password, sending the current one at once (the form asks for
+ * it); rejects with why the server refused, such as a wrong current password.
+ */
+export function changePassword(
+  store: Store,
+  account: AccountId,
+  current: string,
+  newPassword: string,
+): Promise<void> {
+  return store.run(guardedCommand(account, { type: 'ChangePassword', newPassword }, current));
+}
+
+/**
+ * Deactivates the account. A password account may be asked for the password; an OAuth account
+ * deactivates on its account page (`openUrl`). Resolves `true` once the server deactivated it
+ * here (the account is then removed) or the page opened, `false` when the user gave up.
+ */
+export function deactivateAccount(
+  store: Store,
+  account: AccountId,
+  erase: boolean,
+  hooks: GuardHooks,
+): Promise<boolean> {
+  return runGuarded(store, account, { type: 'DeactivateAccount', erase }, hooks);
 }
 
 // ----- sessions -----------------------------------------------------------------------------

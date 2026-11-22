@@ -440,8 +440,41 @@ so it survives a restart. The Sessions page in settings lists every session of t
 encrypted history. See [ADR 0004](adr/0004-encryption.md).
 
 **Verification**
-: Confirming a new session from one already verified by comparing the same emoji on both
-(`VerificationStep`). An incoming verification request comes from the user's other session.
+: Confirming a new session from one already verified, or another person's identity, by
+comparing the same emoji on both sides or scanning one side's QR code with the other
+(`VerificationStep`). An incoming request comes from the user's other session or, in a direct
+chat, from another person.
+
+**Verified person**
+: Someone whose identity the user verified (`Identity::verified`). When their identity changes
+afterwards (`Identity::changed`), whoever holds it now may not be them.
+
+**Offline device**
+: A device the server keeps for the account (a dehydrated device, MSC3814) so a session signed
+in later reads messages sent while no session was signed in. Turned on with the recovery key
+(`OfflineDevice`). See [ADR 0004](adr/0004-encryption.md).
+
+**Key export**
+: The account's message keys written to a file, encrypted with a passphrase, for importing on
+another session or client (`ExportRoomKeys`, `ImportRoomKeys`).
+
+**QR sign-in** (link a device)
+: Signing a new device in with a QR code exchanged with a device where the account is signed in
+already, which approves it and hands over the secrets, so it starts verified (MSC4108,
+`QrLoginStep`). See [ADR 0003](adr/0003-accounts-and-sign-in.md).
+
+**Check code**
+: The two digits a device shows after scanning a QR sign-in code, typed on the other device to
+prove the two are talking to each other.
+
+**Registration**
+: Creating an account: on the account page for OAuth servers, in the app for password servers,
+which may ask for a registration token, agreement to policies (`Policy`), or a step on the
+server's page (`RegistrationStep`).
+
+**Deactivation**
+: Closing an account for good on its server; nobody can sign in to it again
+(`DeactivateAccount`).
 
 **Identity reset**
 : Replacing the account's cryptographic identity when the recovery key and every verified session
@@ -450,7 +483,8 @@ unreadable. See [ADR 0004](adr/0004-encryption.md).
 
 **Guarded action**
 : An action the server may protect with the account password (`Guarded`): ending a session,
-resetting the identity, adding a contact detail. They share one password dialog and retry.
+resetting the identity, adding a contact detail, changing the password, deactivating the account.
+They share one password dialog and retry.
 
 **Profile**
 : The account's display name and picture, plus its contact details. An OAuth account manages

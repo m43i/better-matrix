@@ -11,6 +11,10 @@ export const routes = {
     pathname: '/sign-in',
     params: resume ? { resume } : {},
   }),
+  /** Signing in by scanning a signed-in device's QR code. */
+  signInWithQr: (): Href => ({ pathname: '/sign-in', params: { qr: '1' } }),
+  /** Creating an account on `server`, which the sign-in looks up first. */
+  register: (server: string): Href => ({ pathname: '/sign-in', params: { server, create: '1' } }),
   /** The account menu, from the avatar in the header: switch or add accounts, settings. */
   accountMenu: (): Href => '/account-menu',
   /** Home and the spaces of the account on screen, from Home's title. */
@@ -158,6 +162,21 @@ export const routes = {
     pathname: '/settings/safety',
     params: { account },
   }),
+  /** Linking a new device with a QR code: showing this session's code, or scanning the new one's. */
+  linkDevice: (account: AccountId, scan = false): Href => ({
+    pathname: '/link-device',
+    params: scan ? { account, scan: '1' } : { account },
+  }),
+  /** Exporting the account's message keys to a file, protected with a passphrase. */
+  settingsExportKeys: (account: AccountId): Href => ({
+    pathname: '/settings/export-keys',
+    params: { account },
+  }),
+  /** Changing a password account's password. */
+  settingsPassword: (account: AccountId): Href => ({
+    pathname: '/settings/password',
+    params: { account },
+  }),
   settingsInfo: (): Href => '/settings/info',
   /** This device's preferences: language, appearance, link previews and GIFs. */
   settingsPreferences: (): Href => '/settings/preferences',
@@ -171,9 +190,15 @@ export const routes = {
     pathname: '/settings/recovery-key',
     params: reset ? { account, reset: '1' } : { account },
   }),
+  /** The verification sheet: following `flowId`, else verifying this session. */
   verify: (account: AccountId, flowId?: string): Href => ({
     pathname: '/verify',
     params: flowId ? { account, flowId } : { account },
+  }),
+  /** Verifying another person, from their profile. */
+  verifyUser: (account: AccountId, userId: string): Href => ({
+    pathname: '/verify',
+    params: { account, userId },
   }),
   recovery: (account: AccountId): Href => ({ pathname: '/recovery', params: { account } }),
   call: (): Href => '/call',

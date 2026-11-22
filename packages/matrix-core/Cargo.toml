@@ -18,6 +18,10 @@ matrix-sdk-ui.workspace = true
 matrix-sdk-base.workspace = true
 mime_guess.workspace = true
 nokhwa.workspace = true
+# Draws QR codes for others to scan (src/qr.rs).
+qrcode = { version = "0.14", default-features = false }
+# Reads QR codes from camera pictures on the phones (src/qr.rs).
+rqrr = { version = "0.11", default-features = false }
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true

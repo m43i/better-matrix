@@ -366,6 +366,11 @@ pub struct LoginMethods {
     pub oauth: bool,
     /// Username and password in the app.
     pub password: bool,
+    /// New accounts can be created: on the account page (OAuth), else in the app.
+    pub create_account: bool,
+    /// Signing in with a QR code from a signed-in device (MSC4108): an OAuth server that grants
+    /// devices sign-ins.
+    pub qr: bool,
 }
 
 /// A space: a room that groups other rooms. Never listed among [`RoomList::rooms`].

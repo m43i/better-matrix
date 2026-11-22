@@ -102,5 +102,7 @@ icons! {
     LAPTOP = "laptop": r#"<rect x="4" y="4" width="16" height="11" rx="2"/><path d="M2 20h20"/>"#;
     MORE = "more": r#"<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>"#;
     PENCIL = "pencil": r#"<path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>"#;
+    QR = "qr": r#"<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>"#;
+    CLOUD = "cloud": r#"<path d="M17.5 19H7a5 5 0 1 1 1-9.9A6 6 0 0 1 19.4 11a4 4 0 0 1-1.9 8z"/>"#;
     GLOBE = "globe": r#"<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/>"#;
 }

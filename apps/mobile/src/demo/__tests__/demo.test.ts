@@ -2,7 +2,7 @@ import { previewGallery } from '../../state/gallery';
 import { activeAccount, activeRoomList } from '../../state/selectors';
 import { timelineId } from '../../state/timeline';
 import { bootDemo } from '../boot';
-import { answer, demoEngine } from '../engine';
+import { answer, demoEngine, nextAsked } from '../engine';
 import {
   ADA,
   ADA_HOBBY,
@@ -11,6 +11,7 @@ import {
   DESIGN,
   GENERAL,
   GRACE,
+  KAI,
   SCREENSHOT,
   STRANGER_INVITE,
   TEST_PLAN,
@@ -175,6 +176,43 @@ describe('the demo engine', () => {
       type: 'RoomJoined',
       data: { request: 5, room_id: '!rust-lang:matrix.org' },
     });
+  });
+
+  it('should name the flow a verification request started before its steps', () => {
+    const events = answer({ type: 'VerifyThisSession', data: ADA }, 6);
+    expect(events.map((e) => e.type)).toEqual(['VerificationRequested', 'Verification']);
+    expect(events[0]).toEqual({
+      type: 'VerificationRequested',
+      data: { request: 6, account: ADA, flow_id: 'demo-self' },
+    });
+  });
+
+  it('should start the verification of a person under the flow it named', () => {
+    const events = answer({ type: 'VerifyUser', data: { account: ADA, user_id: KAI } }, 7);
+
+    const flows = events.map((e) =>
+      e.type === 'VerificationRequested' || e.type === 'Verification' ? e.data.flow_id : null,
+    );
+
+    expect(flows).toEqual([`demo-${KAI}`, `demo-${KAI}`]);
+  });
+
+  it('should ask for an email address after the registration token', () => {
+    expect(nextAsked({ type: 'RegistrationToken', data: 't' }, 3)).toEqual([
+      { type: 'Registration', data: { request: 3, step: { type: 'Email' } } },
+    ]);
+  });
+
+  it('should say where it sent the link for the email address given', () => {
+    expect(nextAsked({ type: 'Email', data: 'ada@example.org' }, 3)).toEqual([
+      {
+        type: 'Registration',
+        data: {
+          request: 3,
+          step: { type: 'EmailSent', data: { address: 'ada@example.org', unconfirmed: false } },
+        },
+      },
+    ]);
   });
 
   it('should finish every command', async () => {

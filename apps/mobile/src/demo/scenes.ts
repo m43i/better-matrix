@@ -27,11 +27,14 @@ import {
   DESIGN,
   DESIGN_INVITE,
   DM_GRACE,
+  demoQr,
+  demoSessions,
   DM_KAI,
   GENERAL,
   GRACE,
   hiddenEvents,
   KAI,
+  PASSWORD_SERVER,
   READ_BY_SIX,
   ring,
   safetyEvents,
@@ -60,6 +63,20 @@ export interface Scene {
 }
 
 const general = (store: Store) => setScope(store, ADA, { space: WORK_SPACE });
+
+/** Ada's hobby account (an OAuth account) verified, with its sessions: it may link devices. */
+function hobbyVerified(): EngineEvent[] {
+  return [
+    {
+      type: 'SecurityChanged',
+      data: {
+        account: ADA_HOBBY,
+        security: { session_verified: true, recovery: 'Enabled', offline_device: 'On' },
+      },
+    },
+    { type: 'Sessions', data: { account: ADA_HOBBY, sessions: demoSessions() } },
+  ];
+}
 
 export const scenes = {
   home: { about: 'Home: sections, unread rooms, direct messages' },
@@ -235,8 +252,16 @@ export const scenes = {
     routes: [routes.room(ADA, GENERAL)],
   },
   member: {
-    about: 'Someone in the member list',
+    about: 'Someone in the member list, verified',
     routes: [routes.roomInfo(ADA, GENERAL), routes.member(ADA, GENERAL, GRACE)],
+  },
+  'member-unverified': {
+    about: 'A member nobody verified yet, with Verify',
+    routes: [routes.roomInfo(ADA, GENERAL), routes.member(ADA, GENERAL, KAI)],
+  },
+  'member-changed': {
+    about: 'A verified member whose identity changed since',
+    routes: [routes.roomInfo(ADA, GENERAL), routes.member(ADA, GENERAL, ALAN)],
   },
   invite: { about: 'Inviting people', routes: [routes.invite(ADA, GENERAL)] },
   'new-chat': { about: 'Starting a direct chat', routes: [routes.newChat()] },
@@ -293,6 +318,32 @@ export const scenes = {
       ),
     ],
   },
+  'settings-sessions-oauth': {
+    about: 'Sessions of a verified OAuth account, with Link a new device',
+    events: hobbyVerified(),
+    setup: (store) => setActive(store, ADA_HOBBY),
+    routes: [routes.settings(), routes.settingsSessions(ADA_HOBBY)],
+  },
+  'export-keys': {
+    about: 'Exporting message keys with a passphrase',
+    routes: [routes.settings(), routes.settingsAccount(ADA), routes.settingsExportKeys(ADA)],
+  },
+  'change-password': {
+    about: 'Changing a password account’s password',
+    routes: [routes.settings(), routes.settingsAccount(ADA), routes.settingsPassword(ADA)],
+  },
+  'link-device': {
+    about: 'Linking a new device: this session’s QR code',
+    events: hobbyVerified(),
+    setup: (store) => setActive(store, ADA_HOBBY),
+    routes: [routes.linkDevice(ADA_HOBBY)],
+  },
+  'link-device-scan': {
+    about: 'Linking a new device by scanning its code (tap the placeholder to scan)',
+    events: hobbyVerified(),
+    setup: (store) => setActive(store, ADA_HOBBY),
+    routes: [routes.linkDevice(ADA_HOBBY, true)],
+  },
   'settings-info': {
     about: 'Version and licences',
     routes: [routes.settings(), routes.settingsInfo()],
@@ -320,6 +371,53 @@ export const scenes = {
     ],
     routes: [routes.verify(ADA, 'demo')],
   },
+  'verify-qr': {
+    about: 'Verifying with a QR code: this side’s code, Scan their code, or emoji',
+    events: [
+      {
+        type: 'Verification',
+        data: {
+          account: ADA,
+          flow_id: 'demo-qr',
+          step: { type: 'Ready', data: { qr: demoQr(), scan: true } },
+        },
+      },
+    ],
+    routes: [routes.verify(ADA, 'demo-qr')],
+  },
+  'verify-scanned': {
+    about: 'The other side scanned this side’s code: did it say so?',
+    events: [
+      {
+        type: 'Verification',
+        data: { account: ADA, flow_id: 'demo-scanned', step: { type: 'Scanned' } },
+      },
+    ],
+    routes: [routes.verify(ADA, 'demo-scanned')],
+  },
+  'verify-person': {
+    about: 'Verifying another person from their profile',
+    routes: [routes.verifyUser(ADA, KAI)],
+  },
+  'verify-person-incoming': {
+    about: 'Another person asks to verify',
+    events: [
+      {
+        type: 'Verification',
+        data: {
+          account: ADA,
+          flow_id: 'demo-grace',
+          step: {
+            type: 'Incoming',
+            data: {
+              other_device: 'GRACEPHONE',
+              user: { id: GRACE, name: 'Grace Hopper', avatar: null },
+            },
+          },
+        },
+      },
+    ],
+  },
   'verify-incoming': {
     about: 'Another session asks to verify',
     events: [
@@ -328,7 +426,7 @@ export const scenes = {
         data: {
           account: ADA,
           flow_id: 'demo-in',
-          step: { type: 'Incoming', data: { other_device: 'BMDESKTOP' } },
+          step: { type: 'Incoming', data: { other_device: 'BMDESKTOP', user: null } },
         },
       },
     ],
@@ -340,6 +438,15 @@ export const scenes = {
   },
   'sign-in': { about: 'Signing in, signed out', seeded: false },
   'add-account': { about: 'Adding another account', routes: [routes.signIn()] },
+  'sign-in-qr': {
+    about: 'Signing in by scanning a signed-in device’s code (tap the placeholder to scan)',
+    routes: [routes.signInWithQr()],
+  },
+  register: {
+    about:
+      'Creating an account on a password server; Create an account asks for the terms, a token, then an email address',
+    routes: [routes.register(PASSWORD_SERVER)],
+  },
   'call-voice': {
     about: 'A voice call',
     events: [

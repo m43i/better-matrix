@@ -73,7 +73,7 @@ fn discover(s: &mut State, commands: &mut DetachedCommands, oauth: bool, passwor
     let homeserver = Homeserver {
         server_name: Some("example.org".into()),
         url: "https://matrix.example.org/".into(),
-        methods: LoginMethods { oauth, password },
+        methods: LoginMethods { oauth, password, create_account: false, qr: false },
     };
     apply(s, Event::HomeserverDiscovered { request, homeserver });
     drain(commands).into_iter().map(|(_, c)| c).collect()
@@ -341,7 +341,7 @@ fn an_oauth_server_should_go_straight_to_the_browser() {
     let (mut s, mut commands) = state();
     let sent = discover(&mut s, &mut commands, true, true);
     assert!(
-        matches!(&sent[..], [Command::LoginOAuth { homeserver, resume: None }] if homeserver == "https://matrix.example.org/")
+        matches!(&sent[..], [Command::LoginOAuth { homeserver, resume: None, create: false }] if homeserver == "https://matrix.example.org/")
     );
 }
 
@@ -390,7 +390,7 @@ fn a_browser_sign_in_should_remember_the_url_to_reopen() {
     let homeserver = Homeserver {
         server_name: None,
         url: "https://hs/".into(),
-        methods: LoginMethods { oauth: true, password: false },
+        methods: LoginMethods { oauth: true, password: false, create_account: false, qr: false },
     };
     apply(&mut s, Event::HomeserverDiscovered { request: discovery, homeserver });
     let (request, _) = commands.try_next().unwrap();
@@ -1080,7 +1080,11 @@ fn verifying_the_session_should_fetch_the_keys_of_open_rooms() {
     let (mut s, mut commands) = state();
     let id = AccountId::new("@a:example.org");
     with_rooms(&mut s, &id, &["!one:x"], Vec::new());
-    let unverified = matrix_core::Security { session_verified: false, recovery: matrix_core::RecoveryStatus::Enabled };
+    let unverified = matrix_core::Security {
+        session_verified: false,
+        recovery: matrix_core::RecoveryStatus::Enabled,
+        offline_device: matrix_core::OfflineDevice::Unsupported,
+    };
     apply(&mut s, Event::SecurityChanged { account: id.clone(), security: unverified });
     drain(&mut commands);
     let verified = matrix_core::Security { session_verified: true, ..unverified };
@@ -1094,7 +1098,11 @@ fn an_unverified_session_should_not_fetch_room_keys() {
     let id = AccountId::new("@a:example.org");
     with_rooms(&mut s, &id, &["!one:x"], Vec::new());
     drain(&mut commands);
-    let unverified = matrix_core::Security { session_verified: false, recovery: matrix_core::RecoveryStatus::Enabled };
+    let unverified = matrix_core::Security {
+        session_verified: false,
+        recovery: matrix_core::RecoveryStatus::Enabled,
+        offline_device: matrix_core::OfflineDevice::Unsupported,
+    };
     apply(&mut s, Event::SecurityChanged { account: id, security: unverified });
     assert!(commands.try_next().is_none());
 }
@@ -1178,9 +1186,27 @@ fn a_verification_request_from_another_session_should_open_a_dialog() {
     let (mut s, _) = state();
     let id = AccountId::new("@a:example.org");
     with_rooms(&mut s, &id, &["!one:x"], Vec::new());
-    let step = VerificationStep::Incoming { other_device: "Phone".into() };
+    let step = VerificationStep::Incoming { other_device: "Phone".into(), user: None };
     apply(&mut s, Event::Verification { account: id, flow_id: "f".into(), step });
-    assert!(matches!(&s.modal, Some(Modal::Verification { flow_id: Some(f), .. }) if f == "f"));
+    assert!(matches!(&s.modal, Some(Modal::Verification { flow: VerificationFlow::Following(f), .. }) if f == "f"));
+}
+
+#[test]
+fn verifying_this_session_should_follow_the_flow_its_request_names() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    drain(&mut commands);
+    s.verify_with_other_device();
+    let (request, _) = commands.try_next().unwrap();
+    apply(&mut s, Event::VerificationRequested { request, account: id.clone(), flow_id: "mine".into() });
+    let step = VerificationStep::Ready { qr: None, scan: true };
+    apply(&mut s, Event::Verification { account: id.clone(), flow_id: "other".into(), step });
+    apply(&mut s, Event::Verification { account: id, flow_id: "mine".into(), step: VerificationStep::Scanned });
+    assert!(matches!(
+        &s.modal,
+        Some(Modal::Verification { flow: VerificationFlow::Following(f), step: VerificationStep::Scanned, .. }) if f == "mine"
+    ));
 }
 
 #[test]
@@ -1188,7 +1214,7 @@ fn accepting_and_confirming_should_answer_the_open_verification() {
     let (mut s, mut commands) = state();
     let id = AccountId::new("@a:example.org");
     with_rooms(&mut s, &id, &["!one:x"], Vec::new());
-    let step = VerificationStep::Incoming { other_device: "Phone".into() };
+    let step = VerificationStep::Incoming { other_device: "Phone".into(), user: None };
     apply(&mut s, Event::Verification { account: id.clone(), flow_id: "f".into(), step });
     drain(&mut commands);
     s.accept_verification();
@@ -1531,7 +1557,7 @@ fn signing_in_again_should_look_up_the_server_of_the_account() {
 /// Answers the discovery just sent with an OAuth server, returning the commands after it.
 fn discovered(s: &mut State, commands: &mut DetachedCommands) -> Vec<Command> {
     let (request, _) = commands.try_next().unwrap();
-    let methods = LoginMethods { oauth: true, password: false };
+    let methods = LoginMethods { oauth: true, password: false, create_account: false, qr: false };
     let homeserver = Homeserver { server_name: None, url: "https://matrix.example.org/".into(), methods };
     apply(s, Event::HomeserverDiscovered { request, homeserver });
     drain(commands).into_iter().map(|(_, c)| c).collect()

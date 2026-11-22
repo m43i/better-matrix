@@ -54,6 +54,9 @@ pub enum Command {
         homeserver: String,
         /// A suspended account to sign in as again, taking back its store and device.
         resume: Option<AccountId>,
+        /// Create a new account on the server's page first (when
+        /// [`LoginMethods::create_account`](crate::LoginMethods::create_account)).
+        create: bool,
     },
     /// The browser came back to the app's own redirect URI ([`OAuthRedirect::App`]) for the
     /// sign-in `request` started: finishes it. Unknown or finished sign-ins answer cancelled.
@@ -64,6 +67,37 @@ pub enum Command {
         request: RequestId,
         /// The full URL the app received, query included.
         url: String,
+    },
+    /// Create an account on a password homeserver and sign it in. The server may ask first:
+    /// [`Event::Registration`] says what, [`Command::Answer`] replies. An OAuth homeserver
+    /// creates accounts in the browser instead ([`Command::LoginOAuth`] with `create`).
+    Register(crate::RegisterRequest),
+    /// Sign another account in with a QR code exchanged with a device where it is signed in
+    /// (MSC4108). [`Event::QrLogin`] reports each step; the check code goes back with
+    /// [`Command::Answer`]. The new session starts verified.
+    SignInWithQr(crate::QrSignIn),
+    /// Approve a new device's sign-in with a QR code from this verified session: show a code
+    /// for it to scan (`scanned` is `None`), or take the code it shows. [`Event::QrLogin`]
+    /// reports each step, [`Event::OpenUrl`] opens the account page to approve it on, and the
+    /// check code goes back with [`Command::Answer`].
+    LinkDevice {
+        /// The signed-in account.
+        account: AccountId,
+        /// The new device's code, as scanned.
+        scanned: Option<Vec<u8>>,
+    },
+    /// Answer a question a running command asked (a check code, a registration step).
+    /// Answers to finished or unknown commands are dropped.
+    Answer {
+        /// The command that asked.
+        request: RequestId,
+        /// The answer.
+        answer: Answer,
+    },
+    /// Read the QR code in a picture (a camera frame); answered by [`Event::QrCodeRead`].
+    ReadQrCode {
+        /// The picture, a PNG or JPEG file.
+        picture: PathBuf,
     },
     /// Sign an account out on the server and forget it locally, its data included. A
     /// suspended account is only forgotten.
@@ -680,6 +714,90 @@ pub enum Command {
     FetchRoomKeys(AccountId),
     /// Ask the user's other sessions to verify this one; [`Event::Verification`] follows.
     VerifyThisSession(AccountId),
+    /// Ask another person to verify each other, in the direct chat both have joined (else it
+    /// fails with [`Error::NoDirectChat`](crate::Error::NoDirectChat)); [`Event::Verification`]
+    /// follows, then [`Event::Identity`] once it ends.
+    VerifyUser {
+        /// Which account.
+        account: AccountId,
+        /// Whom.
+        user_id: String,
+    },
+    /// Compare emoji instead of scanning a code, in a verification both sides are ready for.
+    CompareEmoji {
+        /// Which account.
+        account: AccountId,
+        /// The verification.
+        flow_id: String,
+    },
+    /// The code the other side of a verification shows, as scanned.
+    ScanVerificationCode {
+        /// Which account.
+        account: AccountId,
+        /// The verification.
+        flow_id: String,
+        /// The code's raw bytes.
+        code: Vec<u8>,
+    },
+    /// Find out whether the user verified someone; answered by [`Event::Identity`].
+    LoadIdentity {
+        /// Which account.
+        account: AccountId,
+        /// Whom.
+        user_id: String,
+    },
+    /// Write every message key this session holds to a file, encrypted with a passphrase.
+    ExportRoomKeys {
+        /// Whose keys.
+        account: AccountId,
+        /// The file to write.
+        path: PathBuf,
+        /// What the file is encrypted with.
+        passphrase: Password,
+    },
+    /// Read message keys from a file another session or client exported; answered by
+    /// [`Event::KeysImported`]. Messages they unlock decrypt by themselves.
+    ImportRoomKeys {
+        /// Which account.
+        account: AccountId,
+        /// The file.
+        path: PathBuf,
+        /// What it was encrypted with.
+        passphrase: Password,
+    },
+    /// Turn the offline device on (with the recovery key) or off on this session; an
+    /// [`Event::SecurityChanged`] follows.
+    SetOfflineDevice {
+        /// Which account.
+        account: AccountId,
+        /// On or off.
+        on: bool,
+        /// The recovery key, to turn it on.
+        recovery_key: Option<Password>,
+    },
+    /// Change a password account's password, which signs its other sessions out. The server
+    /// asks for the current one: [`Event::PasswordNeeded`] (send again with it). An OAuth
+    /// account changes it on its account page ([`Command::OpenAccountPage`]).
+    ChangePassword {
+        /// Which account.
+        account: AccountId,
+        /// The new password.
+        new_password: Password,
+        /// The current password, when the server asked for it.
+        password: Option<Password>,
+    },
+    /// Deactivate an account for good, then forget it here ([`Event::AccountRemoved`]). A
+    /// password account may answer with [`Event::PasswordNeeded`] (send again with it); an OAuth
+    /// account answers with [`Event::OpenUrl`] for its account page, where it is deactivated
+    /// (its session then ends).
+    DeactivateAccount {
+        /// Which account.
+        account: AccountId,
+        /// Also ask the server to forget the messages it sent, as far as it can.
+        erase: bool,
+        /// The account password, when the server asked for it.
+        password: Option<Password>,
+    },
     /// Accept a verification request from another of the user's sessions.
     AcceptVerification {
         /// Which account.
@@ -784,6 +902,24 @@ pub enum Command {
     },
 }
 
+/// The app's answer to a question a running command asked ([`Command::Answer`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
+pub enum Answer {
+    /// The two digits the other device shows ([`QrLoginStep::EnterCheckCode`](crate::QrLoginStep::EnterCheckCode)).
+    CheckCode(u8),
+    /// The registration token ([`RegistrationStep::Token`](crate::RegistrationStep::Token)).
+    RegistrationToken(String),
+    /// The user agrees to the policies ([`RegistrationStep::Terms`](crate::RegistrationStep::Terms)).
+    Agree,
+    /// The email address to confirm ([`RegistrationStep::Email`](crate::RegistrationStep::Email)).
+    Email(String),
+    /// The user finished the step in the browser ([`RegistrationStep::Browser`](crate::RegistrationStep::Browser)),
+    /// or opened the emailed link ([`RegistrationStep::EmailSent`](crate::RegistrationStep::EmailSent)).
+    Continue,
+}
+
 /// What the engine reports. Delivered on the engine's threads; a sink forwards them to its UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, ts_rs::TS))]
@@ -812,6 +948,14 @@ pub enum Event {
     },
     /// An account signed in, or was restored at startup.
     AccountAdded(AccountSummary),
+    /// Which account a sign-in command (`Login`, `LoginOAuth`, `Register`, `SignInWithQr`)
+    /// signed in, right after its [`Event::AccountAdded`] and before its [`Event::Finished`].
+    SignedIn {
+        /// The command it answers.
+        request: RequestId,
+        /// The account.
+        account: AccountId,
+    },
     /// An account's summary changed (its default notification mode, say).
     AccountChanged(AccountSummary),
     /// The server no longer accepts this account's session: it was signed out elsewhere, or its
@@ -1077,7 +1221,58 @@ pub enum Event {
         /// The command that asked.
         request: RequestId,
     },
-    /// A verification between this session and another of the user's moved on.
+    /// Where signing in with a QR code stands, for [`Command::SignInWithQr`] or
+    /// [`Command::LinkDevice`].
+    QrLogin {
+        /// The command it reports on.
+        request: RequestId,
+        /// Where it stands.
+        step: crate::QrLoginStep,
+    },
+    /// What the server asks before creating an account, for [`Command::Register`]: answer with
+    /// [`Command::Answer`].
+    Registration {
+        /// The command it asks for.
+        request: RequestId,
+        /// What it asks.
+        step: crate::RegistrationStep,
+    },
+    /// The QR code in a picture, for [`Command::ReadQrCode`]; `None` when none reads.
+    QrCodeRead {
+        /// The command it answers.
+        request: RequestId,
+        /// The code's raw bytes.
+        code: Option<Vec<u8>>,
+    },
+    /// Whether the user verified someone: for [`Command::LoadIdentity`], and once a
+    /// verification with them ends. `None` when they have no identity (no encryption) yet.
+    Identity {
+        /// Which account.
+        account: AccountId,
+        /// Whom.
+        user_id: String,
+        /// What the user knows of their identity.
+        identity: Option<crate::Identity>,
+    },
+    /// Message keys read from a file, for [`Command::ImportRoomKeys`].
+    KeysImported {
+        /// The command it answers.
+        request: RequestId,
+        /// How many were new.
+        import: crate::KeyImport,
+    },
+    /// The verification [`Command::VerifyThisSession`] or [`Command::VerifyUser`] started: its
+    /// [`Event::Verification`]s carry this `flow_id`, and come after this.
+    VerificationRequested {
+        /// The command it answers.
+        request: RequestId,
+        /// Which account.
+        account: AccountId,
+        /// The new verification.
+        flow_id: String,
+    },
+    /// A verification moved on: between this session and another of the user's, or with
+    /// another person.
     Verification {
         /// Which account.
         account: AccountId,
@@ -1240,6 +1435,9 @@ pub struct EngineConfig {
     pub oauth_redirect: crate::account::OAuthRedirect,
     /// Whether anything besides the engine opens an account's store.
     pub stores: StoreSharing,
+    /// Whether the app can scan QR codes (it has a camera to, and sends what it scans): it then
+    /// offers to scan the other side's code in verifications.
+    pub scans_qr: bool,
 }
 
 /// Whether anything besides the engine opens an account's store (ADR 0010).
@@ -1261,6 +1459,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("identity", &self.identity)
             .field("oauth_redirect", &self.oauth_redirect)
             .field("stores", &self.stores)
+            .field("scans_qr", &self.scans_qr)
             .finish()
     }
 }
@@ -1419,6 +1618,8 @@ impl Engine {
             identity: config.identity,
             oauth_redirect: config.oauth_redirect,
             oauth_returns: HashMap::new(),
+            answers: HashMap::new(),
+            scans_qr: config.scans_qr,
             sink: Arc::new(sink),
             accounts: HashMap::new(),
             tasks: JoinSet::new(),
@@ -1459,7 +1660,7 @@ struct Running {
     /// The account's room list: every re-read of rooms goes through it.
     feed: RoomFeed,
     /// The handlers hearing the account's call signals.
-    call_handlers: Vec<matrix_sdk::event_handler::EventHandlerHandle>,
+    handlers: Vec<matrix_sdk::event_handler::EventHandlerHandle>,
 }
 
 /// How many closed timelines an account keeps warm: the rooms and threads switched between.
@@ -1537,9 +1738,10 @@ impl Drop for Running {
         for task in self.background.iter().chain(self.timelines.values().map(|(_, following)| &following.forward)) {
             task.abort();
         }
-        for handler in self.call_handlers.drain(..) {
+        for handler in self.handlers.drain(..) {
             self.account.client().remove_event_handler(handler);
         }
+        self.flows.stop();
     }
 }
 
@@ -1604,6 +1806,10 @@ struct State {
     oauth_redirect: crate::account::OAuthRedirect,
     /// Browser sign-ins waiting for the app to hand their redirect back, by request.
     oauth_returns: HashMap<RequestId, tokio::sync::oneshot::Sender<String>>,
+    /// Running commands that ask the app questions, by request: where its answers go.
+    answers: HashMap<RequestId, mpsc::UnboundedSender<Answer>>,
+    /// Whether the app scans QR codes ([`EngineConfig::scans_qr`]).
+    scans_qr: bool,
     sink: Arc<dyn EventSink>,
     accounts: HashMap<AccountId, Running>,
     tasks: JoinSet<Completion>,
@@ -1632,6 +1838,13 @@ struct State {
 }
 
 impl State {
+    /// Where the app's answers to `request`'s questions go ([`Command::Answer`]).
+    fn answers_for(&mut self, request: RequestId) -> mpsc::UnboundedReceiver<Answer> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        self.answers.insert(request, sender);
+        receiver
+    }
+
     fn flows(&self, account: &AccountId) -> Result<crate::security::Flows, Error> {
         self.accounts
             .get(account)
@@ -1943,7 +2156,15 @@ impl State {
                 self.sink.emit(Event::Finished { request, result });
                 return;
             }
+            Command::Answer { request: asking, answer } => {
+                if let Some(answers) = self.answers.get(&asking) {
+                    let _ = answers.send(answer);
+                }
+                self.sink.emit(Event::Finished { request, result: Ok(()) });
+                return;
+            }
             Command::Cancel(target) => {
+                self.answers.remove(&target);
                 if let Some(handle) = self.running.remove(&target) {
                     handle.abort();
                     self.forget_opening(target);
@@ -2582,17 +2803,104 @@ impl State {
                 })
             }
             Command::VerifyThisSession(id) => {
-                let (account, flows) = (self.account(&id), self.flows(&id));
+                let (account, flows, scans_qr) = (self.account(&id), self.flows(&id), self.scans_qr);
                 Box::pin(async move {
-                    account?.verify_with_other_device(&flows?, sink).await?;
+                    let started = |flow_id| sink.emit(Event::VerificationRequested { request, account: id, flow_id });
+                    account?.request_verification(None, &flows?, scans_qr, Arc::clone(&sink), started).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::VerifyUser { account: id, user_id } => {
+                let (account, flows, scans_qr) = (self.account(&id), self.flows(&id), self.scans_qr);
+                Box::pin(async move {
+                    let started = |flow_id| sink.emit(Event::VerificationRequested { request, account: id, flow_id });
+                    account?
+                        .request_verification(Some(&user_id), &flows?, scans_qr, Arc::clone(&sink), started)
+                        .await?;
                     Ok(Outcome::Done)
                 })
             }
             Command::AcceptVerification { account, flow_id } => {
+                let (flows, scans_qr) = (self.flows(&account), self.scans_qr);
+                Box::pin(async move {
+                    flows?.accept(&flow_id, scans_qr).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::CompareEmoji { account, flow_id } => {
                 let flows = self.flows(&account);
                 Box::pin(async move {
-                    flows?.accept(&flow_id).await?;
+                    flows?.compare_emoji(&flow_id).await?;
                     Ok(Outcome::Done)
+                })
+            }
+            Command::ScanVerificationCode { account, flow_id, code } => {
+                let flows = self.flows(&account);
+                Box::pin(async move {
+                    flows?.scan(&flow_id, &code).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::LoadIdentity { account: id, user_id } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let identity = account?.identity(&user_id).await?;
+                    sink.emit(Event::Identity { account: id, user_id, identity });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ExportRoomKeys { account, path, passphrase } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    account?.export_room_keys(&path, &passphrase.0).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ImportRoomKeys { account, path, passphrase } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    let import = account?.import_room_keys(&path, &passphrase.0).await?;
+                    sink.emit(Event::KeysImported { request, import });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::SetOfflineDevice { account, on, recovery_key } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    account?.set_offline_device(on, recovery_key.as_ref().map(|k| k.0.as_str())).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ChangePassword { account, new_password, password } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    let password = password.as_ref().map(|p| p.0.as_str());
+                    match account?.change_password(&new_password.0, password).await {
+                        Ok(()) => Ok(Outcome::Done),
+                        Err(error) => Err(asked_for_password(error, request, &*sink)),
+                    }
+                })
+            }
+            Command::DeactivateAccount { account: id, erase, password } => {
+                let (account, sessions) = (self.account(&id), self.sessions.clone());
+                Box::pin(async move {
+                    let account = account?;
+                    if account.client().oauth().client_id().is_some() {
+                        let url = account.account_page(crate::AccountPage::Deactivate).await?;
+                        sink.emit(Event::OpenUrl { request, url });
+                        return Ok(Outcome::Done);
+                    }
+                    match account.deactivate(erase, password.as_ref().map(|p| p.0.as_str())).await {
+                        Ok(()) => {
+                            // The account is gone on the server whatever happens here: it stops
+                            // either way, and data left behind only costs disk.
+                            if let Err(error) = crate::account::forget(&sessions, &id).await {
+                                eprintln!("matrix-engine: could not forget the deactivated account: {error}");
+                            }
+                            Ok(Outcome::LoggedOut(id))
+                        }
+                        Err(error) => Err(asked_for_password(error, request, &*sink)),
+                    }
                 })
             }
             Command::ConfirmVerification { account, flow_id, matches } => {
@@ -2637,7 +2945,54 @@ impl State {
                     Ok(signed_in(Account::login_password(&layout, &sessions, holder, &login).await?).await)
                 })
             }
-            Command::LoginOAuth { homeserver, resume } => {
+            Command::Register(registration) => {
+                let (layout, sessions, holder) = (self.layout.clone(), self.sessions.clone(), self.holder);
+                let answers = self.answers_for(request);
+                Box::pin(async move {
+                    let ask = |step: crate::RegistrationStep| {
+                        if let crate::RegistrationStep::Browser { url } = &step {
+                            sink.emit(Event::OpenUrl { request, url: url.clone() });
+                        }
+                        sink.emit(Event::Registration { request, step });
+                    };
+                    let account = Account::register(&layout, &sessions, holder, &registration, &ask, answers).await?;
+                    Ok(signed_in(account).await)
+                })
+            }
+            Command::SignInWithQr(start) => {
+                let (layout, sessions, holder) = (self.layout.clone(), self.sessions.clone(), self.holder);
+                let identity = self.identity.clone();
+                let answers = self.answers_for(request);
+                Box::pin(async move {
+                    let report = |step: crate::QrLoginStep| sink.emit(Event::QrLogin { request, step });
+                    let account =
+                        Account::sign_in_with_qr(&layout, &sessions, holder, &identity, start, &report, answers)
+                            .await?;
+                    Ok(signed_in(account).await)
+                })
+            }
+            Command::LinkDevice { account, scanned } => {
+                let account = self.account(&account);
+                let answers = self.answers_for(request);
+                Box::pin(async move {
+                    let report = |step: crate::QrLoginStep| {
+                        if let crate::QrLoginStep::Approve { url } = &step {
+                            sink.emit(Event::OpenUrl { request, url: url.clone() });
+                        }
+                        sink.emit(Event::QrLogin { request, step });
+                    };
+                    account?.link_device(scanned, &report, answers).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ReadQrCode { picture } => Box::pin(async move {
+                let code = tokio::task::spawn_blocking(move || crate::qr::read_picture(&picture))
+                    .await
+                    .map_err(|e| Error::QrCode(e.to_string()))??;
+                sink.emit(Event::QrCodeRead { request, code });
+                Ok(Outcome::Done)
+            }),
+            Command::LoginOAuth { homeserver, resume, create } => {
                 let (layout, sessions, identity) = (self.layout.clone(), self.sessions.clone(), self.identity.clone());
                 let holder = self.holder;
                 self.oauth_returns.retain(|_, waiting| !waiting.is_closed());
@@ -2654,9 +3009,8 @@ impl State {
                         &layout,
                         &sessions,
                         holder,
-                        &homeserver,
                         &identity,
-                        resume.as_ref(),
+                        crate::account::OAuthTarget { homeserver: &homeserver, resume: resume.as_ref(), create },
                         app_redirect,
                     )
                     .await?;
@@ -2893,6 +3247,7 @@ impl State {
     fn complete(&mut self, Completion { request, result }: Completion) {
         if let Some(request) = request {
             self.running.remove(&request);
+            self.answers.remove(&request);
         }
         let result = match result {
             Ok(Outcome::Done) => Ok(()),
@@ -2900,18 +3255,20 @@ impl State {
                 // Shown now, before the sign-in's `Finished`: the app selects an account it is
                 // adding when it arrives.
                 self.sink.emit(Event::AccountAdded((*cached).clone()));
+                if let Some(request) = request {
+                    self.sink.emit(Event::SignedIn { request, account: account.id().clone() });
+                }
                 // Saving refreshed tokens comes first: the summary's requests may refresh them.
                 let tokens = tokio::spawn(watch_session(account.clone(), Arc::clone(&self.sink)));
                 let flows = crate::security::Flows::default();
                 let feed = RoomFeed { account: account.clone(), sink: Arc::clone(&self.sink), cache: Arc::default() };
                 account.sticky.report_to(account.id().clone(), self.signals.clone());
-                let call_handlers =
-                    crate::calls::listen(account.client(), account.id(), &self.signals, &account.sticky);
+                let mut handlers = crate::calls::listen(account.client(), account.id(), &self.signals, &account.sticky);
+                handlers.extend(crate::security::listen(&account, &flows, self.scans_qr, &self.sink));
                 // The rest waits on the server, so it runs beside the engine rather than holding
                 // up every account's commands. The account shows before anything about it.
                 let started = {
-                    let (account, flows, sink, feed) =
-                        (account.clone(), flows.clone(), Arc::clone(&self.sink), feed.clone());
+                    let (account, sink, feed) = (account.clone(), Arc::clone(&self.sink), feed.clone());
                     tokio::spawn(async move {
                         // The safety choices as this device stored them, before any room or
                         // invitation shows (the room list follows from the sync loop below): an
@@ -2988,7 +3345,7 @@ impl State {
                             status,
                             own,
                             calls,
-                            crate::security::watch(account.clone(), flows, Arc::clone(&sink)),
+                            crate::security::watch(account.clone(), Arc::clone(&sink)),
                             sync_loop(account.clone(), Arc::clone(&sink), feed, Arc::clone(&own_refresh)),
                         );
                     })
@@ -3005,7 +3362,7 @@ impl State {
                     opening: HashMap::new(),
                     keys_fetched: HashSet::new(),
                     feed,
-                    call_handlers,
+                    handlers,
                 };
                 self.accounts.insert(running.account.id().clone(), running);
                 Ok(())
@@ -3361,6 +3718,7 @@ async fn sync_until_error(
             }
             let report = |status| sink.emit(Event::Status { account: account.id().clone(), status });
             account.follow_status(&response.account_data, &sent, report).await;
+            account.follow_offline_device(&response.account_data).await;
             feed.refresh((!all).then_some(&changed)).await;
             LoopCtrl::Continue
         }
@@ -4302,7 +4660,7 @@ mod tests {
             opening: HashMap::from([(TimelineKey::room("!room:example.org"), RequestId(3))]),
             keys_fetched: HashSet::new(),
             feed,
-            call_handlers: Vec::new(),
+            handlers: Vec::new(),
         };
         running.forget_opening(RequestId(3));
         assert!(running.opening.is_empty());
@@ -4715,17 +5073,23 @@ mod tests {
     }
 
     fn start() -> (EngineHandle, std_mpsc::Receiver<Event>) {
+        start_as("engine", false)
+    }
+
+    /// An engine with a data directory of its own (`name`), scanning QR codes or not.
+    fn start_as(name: &str, scans_qr: bool) -> (EngineHandle, std_mpsc::Receiver<Event>) {
         let (events, received) = std_mpsc::channel();
         let sink = move |event| {
             let _ = events.send(event);
         };
-        let data_dir = std::env::temp_dir().join(format!("matrix-core-engine-{}", std::process::id()));
+        let data_dir = std::env::temp_dir().join(format!("matrix-core-{name}-{}", std::process::id()));
         let config = EngineConfig {
             data_dir,
             secrets: Arc::new(MemorySecrets::default()),
             identity: ClientIdentity { name: "Test".into(), uri: "https://example.org".parse().unwrap() },
             oauth_redirect: crate::OAuthRedirect::Loopback,
             stores: StoreSharing::Alone,
+            scans_qr,
         };
         (Engine::start(config, sink).expect("engine starts"), received)
     }
@@ -4758,6 +5122,35 @@ mod tests {
         };
         let _ = asked_for_password(Error::WrongCode, RequestId(7), &sink);
         assert!(received.try_recv().is_err());
+    }
+
+    #[test]
+    fn an_answer_to_a_command_that_asked_nothing_should_be_dropped() {
+        let (engine, events) = start();
+        let request = engine.send(Command::Answer { request: RequestId(9_999), answer: Answer::Agree });
+        assert_eq!(finished(&events, request), Ok(()));
+    }
+
+    #[test]
+    fn a_picture_of_a_qr_code_should_read_back_its_bytes() {
+        let code = crate::QrImage::encode(&[0, 159, 255, 7]).expect("encodes");
+        let side = (code.width + 8) * 4;
+        let picture = image::GrayImage::from_fn(side, side, |x, y| {
+            let dark = code.is_dark((x / 4).wrapping_sub(4), (y / 4).wrapping_sub(4));
+            image::Luma([if dark { 0 } else { 255 }])
+        });
+        let path = std::env::temp_dir().join(format!("matrix-core-qr-{}.png", std::process::id()));
+        picture.save(&path).expect("saves");
+        let (engine, events) = start();
+        let request = engine.send(Command::ReadQrCode { picture: path.clone() });
+        let code = loop {
+            match events.recv_timeout(std::time::Duration::from_secs(10)).expect("an event") {
+                Event::QrCodeRead { request: read, code } if read == request => break code,
+                _ => {}
+            }
+        };
+        let _ = std::fs::remove_file(path);
+        assert_eq!(code, Some(vec![0, 159, 255, 7]));
     }
 
     #[test]
@@ -4832,6 +5225,254 @@ mod tests {
             }
         };
         assert!(homeserver.methods.oauth && homeserver.url.contains("matrix-client"), "{homeserver:?}");
+    }
+
+    /// Sends `command` and collects the events until it finishes.
+    fn run(
+        engine: &EngineHandle,
+        events: &std_mpsc::Receiver<Event>,
+        command: Command,
+    ) -> (Result<(), String>, Vec<Event>) {
+        let request = engine.send(command);
+        let mut seen = Vec::new();
+        loop {
+            match events.recv_timeout(Duration::from_secs(60)).expect("an event") {
+                Event::Finished { request: r, result } if r == request => return (result, seen),
+                event => seen.push(event),
+            }
+        }
+    }
+
+    /// An account's life on a real homeserver with open registration (a local Synapse with
+    /// `enable_registration_without_verification` and `experimental_features.msc3814_enabled`):
+    /// `BM_LIVE_HOMESERVER=http://127.0.0.1:8008 cargo test -p matrix-core -- --ignored live_account`.
+    #[test]
+    #[ignore = "needs a homeserver with open registration"]
+    fn live_account_should_register_move_keys_keep_an_offline_device_and_close() {
+        let Ok(server) = std::env::var("BM_LIVE_HOMESERVER") else { return };
+        let (engine, events) = start();
+        let (found, seen) = run(&engine, &events, Command::Discover { server });
+        found.expect("discovered");
+        let homeserver = seen
+            .into_iter()
+            .find_map(|e| match e {
+                Event::HomeserverDiscovered { homeserver, .. } => Some(homeserver),
+                _ => None,
+            })
+            .expect("a homeserver");
+        assert!(homeserver.methods.create_account, "{homeserver:?}");
+
+        let username = format!("live{}", now_ms());
+        let password = Password("first password".into());
+        let registration = crate::RegisterRequest { homeserver: homeserver.url, username: username.clone(), password };
+        let (registered, seen) = run(&engine, &events, Command::Register(registration));
+        registered.expect("registered");
+        let account = seen
+            .iter()
+            .find_map(|e| match e {
+                Event::SignedIn { account, .. } => Some(account.clone()),
+                _ => None,
+            })
+            .expect("signed in");
+        assert!(account.as_str().starts_with(&format!("@{username}:")));
+
+        let (set_up, seen) = run(&engine, &events, Command::SetUpRecovery(account.clone()));
+        set_up.expect("recovery set up");
+        let key = seen
+            .into_iter()
+            .find_map(|e| match e {
+                Event::RecoveryKey { key, .. } => Some(key),
+                _ => None,
+            })
+            .expect("a recovery key");
+
+        let file = std::env::temp_dir().join(format!("matrix-core-live-keys-{}.txt", std::process::id()));
+        let passphrase = Password("file passphrase".into());
+        let export =
+            Command::ExportRoomKeys { account: account.clone(), path: file.clone(), passphrase: passphrase.clone() };
+        run(&engine, &events, export).0.expect("exported");
+        assert!(std::fs::read_to_string(&file).expect("a key file").contains("BEGIN MEGOLM SESSION DATA"));
+        let wrong =
+            Command::ImportRoomKeys { account: account.clone(), path: file.clone(), passphrase: Password("no".into()) };
+        assert!(run(&engine, &events, wrong).0.is_err(), "a wrong passphrase is refused");
+        let import = Command::ImportRoomKeys { account: account.clone(), path: file.clone(), passphrase };
+        let (imported, seen) = run(&engine, &events, import);
+        imported.expect("imported");
+        assert!(seen.iter().any(|e| matches!(e, Event::KeysImported { .. })));
+        let _ = std::fs::remove_file(&file);
+
+        let on = Command::SetOfflineDevice { account: account.clone(), on: true, recovery_key: Some(key) };
+        run(&engine, &events, on).0.expect("offline device on");
+        let off = Command::SetOfflineDevice { account: account.clone(), on: false, recovery_key: None };
+        run(&engine, &events, off).0.expect("offline device off");
+
+        let change = Command::ChangePassword {
+            account: account.clone(),
+            new_password: Password("second password".into()),
+            password: Some(Password("first password".into())),
+        };
+        run(&engine, &events, change).0.expect("password changed");
+
+        let close = Command::DeactivateAccount {
+            account: account.clone(),
+            erase: false,
+            password: Some(Password("second password".into())),
+        };
+        let (closed, seen) = run(&engine, &events, close);
+        closed.expect("deactivated");
+        assert!(seen.iter().any(|e| matches!(e, Event::AccountRemoved(gone) if *gone == account)));
+    }
+
+    /// Registers a fresh account on `homeserver` (a resolved URL) and returns it.
+    fn register_live(
+        engine: &EngineHandle,
+        events: &std_mpsc::Receiver<Event>,
+        homeserver: &str,
+        name: &str,
+    ) -> AccountId {
+        let username = format!("{name}{}", now_ms());
+        let registration = crate::RegisterRequest {
+            homeserver: homeserver.to_owned(),
+            username,
+            password: Password("a password".into()),
+        };
+        let (registered, seen) = run(engine, events, Command::Register(registration));
+        registered.expect("registered");
+        seen.into_iter()
+            .find_map(|e| match e {
+                Event::SignedIn { account, .. } => Some(account),
+                _ => None,
+            })
+            .expect("signed in")
+    }
+
+    /// The bytes a phone's camera would read from a code drawn on a screen.
+    fn photographed(code: &crate::QrImage) -> Vec<u8> {
+        let side = (code.width + 8) * 4;
+        let picture = image::GrayImage::from_fn(side, side, |x, y| {
+            let dark = code.is_dark((x / 4).wrapping_sub(4), (y / 4).wrapping_sub(4));
+            image::Luma([if dark { 0 } else { 255 }])
+        });
+        crate::qr::read_luma(&picture).expect("the code reads")
+    }
+
+    /// Two people verify each other on a real homeserver: a desktop shows its code, a phone
+    /// scans it, the desktop confirms, and the desktop then sees the phone's user as verified.
+    /// `BM_LIVE_HOMESERVER=http://127.0.0.1:8008 cargo test -p matrix-core -- --ignored live_people`.
+    #[test]
+    #[ignore = "needs a homeserver with open registration"]
+    fn live_people_should_verify_each_other_by_qr_code() {
+        let Ok(server) = std::env::var("BM_LIVE_HOMESERVER") else { return };
+        let (desktop, desktop_events) = start_as("live-desktop", false);
+        let (phone, phone_events) = start_as("live-phone", true);
+        let ada = register_live(&desktop, &desktop_events, &server, "ada");
+        let grace = register_live(&phone, &phone_events, &server, "grace");
+        // Each sets up encryption's identity: cross-signing comes with recovery.
+        run(&desktop, &desktop_events, Command::SetUpRecovery(ada.clone())).0.expect("ada's recovery");
+        run(&phone, &phone_events, Command::SetUpRecovery(grace.clone())).0.expect("grace's recovery");
+
+        // Not before they share a chat: Grace's client would drop a request from Ada's devices,
+        // which it doesn't know yet.
+        let early = Command::VerifyUser { account: ada.clone(), user_id: grace.to_string() };
+        let refused = run(&desktop, &desktop_events, early).0.expect_err("refused without a chat");
+        assert!(refused.contains("direct chat"), "{refused}");
+        // They already chat: verification starts in their direct chat, where each side knows the
+        // other's devices.
+        run(&desktop, &desktop_events, Command::OpenDirectChat { account: ada.clone(), user_id: grace.to_string() })
+            .0
+            .expect("a direct chat");
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        let mut joined = false;
+        while !joined {
+            assert!(std::time::Instant::now() < deadline, "the invitation never came");
+            if let Ok(Event::RoomsUpdated { list, .. }) = phone_events.recv_timeout(Duration::from_secs(1))
+                && let Some(invite) = list.invitations.first()
+            {
+                let join =
+                    Command::JoinRoom { account: grace.clone(), room_id: invite.room_id.clone(), via: Vec::new() };
+                run(&phone, &phone_events, join).0.expect("joined");
+                joined = true;
+            }
+        }
+        // Each side's sync learns the other's devices.
+        std::thread::sleep(Duration::from_secs(3));
+        while desktop_events.try_recv().is_ok() {}
+        desktop.send(Command::VerifyUser { account: ada.clone(), user_id: grace.to_string() });
+        let (mut scanned, mut verified) = (false, false);
+        let mut ada_code = None;
+        while !verified {
+            assert!(std::time::Instant::now() < deadline, "the verification didn't finish in time");
+            while let Ok(event) = phone_events.try_recv() {
+                if std::env::var("BM_LIVE_TRACE").is_ok()
+                    && matches!(
+                        event,
+                        Event::Verification { .. }
+                            | Event::Finished { .. }
+                            | Event::RoomsUpdated { .. }
+                            | Event::RoomJoined { .. }
+                    )
+                {
+                    eprintln!("phone: {event:?}");
+                }
+                match event {
+                    Event::Verification { flow_id, step: crate::VerificationStep::Incoming { user, .. }, .. } => {
+                        assert_eq!(user.map(|p| p.id), Some(ada.to_string()), "the request names Ada");
+                        phone.send(Command::AcceptVerification { account: grace.clone(), flow_id });
+                    }
+                    Event::Verification {
+                        flow_id, step: crate::VerificationStep::Ready { scan: true, .. }, ..
+                    } => {
+                        while ada_code.is_none() {
+                            assert!(std::time::Instant::now() < deadline, "Ada never showed her code");
+                            if let Ok(Event::Verification {
+                                step: crate::VerificationStep::Ready { qr: Some(qr), .. },
+                                ..
+                            }) = desktop_events.recv_timeout(Duration::from_secs(1))
+                            {
+                                ada_code = Some(photographed(&qr));
+                            }
+                        }
+                        let code = ada_code.clone().unwrap_or_default();
+                        phone.send(Command::ScanVerificationCode { account: grace.clone(), flow_id, code });
+                        scanned = true;
+                    }
+                    Event::Verification { step: crate::VerificationStep::Cancelled(why), .. } => {
+                        panic!("cancelled: {why}")
+                    }
+                    _ => {}
+                }
+            }
+            while let Ok(event) = desktop_events.try_recv() {
+                if std::env::var("BM_LIVE_TRACE").is_ok()
+                    && matches!(
+                        event,
+                        Event::Verification { .. }
+                            | Event::VerificationRequested { .. }
+                            | Event::Finished { result: Err(_), .. }
+                    )
+                {
+                    eprintln!("desktop: {event:?}");
+                }
+                match event {
+                    Event::Verification { step: crate::VerificationStep::Ready { qr: Some(qr), .. }, .. } => {
+                        ada_code = Some(photographed(&qr));
+                    }
+                    Event::Verification { flow_id, step: crate::VerificationStep::Scanned, .. } => {
+                        desktop.send(Command::ConfirmVerification { account: ada.clone(), flow_id, matches: true });
+                    }
+                    Event::Verification { step: crate::VerificationStep::Cancelled(why), .. } => {
+                        panic!("cancelled: {why}")
+                    }
+                    Event::Identity { user_id, identity, .. } if user_id == grace.as_str() => {
+                        assert_eq!(identity, Some(crate::Identity { verified: true, changed: false }));
+                        verified = true;
+                    }
+                    _ => {}
+                }
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(scanned, "the phone scanned the desktop's code");
     }
 
     #[test]

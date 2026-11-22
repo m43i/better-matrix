@@ -50,6 +50,53 @@ end a session at any time, hard or softly.
     fields (`Command::Login`); both open the browser, with "Use a password instead".
   - The second step shows its server above the form. There is no step indicator.
   - Everything after discovery uses the resolved URL; restored sessions use the saved one.
+- **Creating an account** (`registration`): discovery reports `LoginMethods::create_account`,
+  from the OAuth metadata's `prompt_values_supported` (`create`) or, on a password server, from
+  whether `POST /register` answers with interactive-auth flows.
+  - An OAuth server creates accounts on its own page: `LoginOAuth { create: true }` asks for
+    `prompt=create`, then signs in as usual.
+  - A password server goes through `Command::Register`: the engine picks the flow with the
+    fewest browser stages, completes `m.login.dummy` itself, asks the app for a registration
+    token, agreement to the server's policies or an email address (`Event::Registration` with a
+    `RegistrationStep`; the engine then asks the server to send a link and waits for the app to
+    say it was opened, asking again while the server hasn't seen it), and sends every other
+    stage (captchas) to the server's fallback page in the browser, continuing when the app
+    answers. Synapse has no fallback page for email, hence the app's own step. Flows with a
+    phone number stage aren't taken. Answers travel as
+    `Command::Answer { request, answer }`, the general path for a running command's
+    questions. The new account signs in like a password sign-in.
+- **Signing in with a QR code** (MSC4108, `qr_login`): `LoginMethods::qr` is an OAuth server
+  with a device authorization endpoint.
+  - One flow covers the four directions: a new device shows a code or scans a signed-in
+    device's (`Command::SignInWithQr`), and a signed-in, verified session shows one or scans the
+    new device's (`Command::LinkDevice`). Both report `QrLoginStep`s in `Event::QrLogin`:
+    `Show(QrImage)`, `EnterCheckCode` (answered with `Answer::CheckCode`), `CheckCode(n)`,
+    `Approve { url }` (also `Event::OpenUrl`), `Waiting { code }`, `Syncing`, `Done`.
+  - The signed-in side confirms at once once the account page is open: the new device then
+    waits for the approval, and the signed-in one for the new device (up to a minute after
+    the new device signs in).
+  - The new device reports `Done { account }` only once its session is saved, and the apps
+    leave the flow when the command finishes; once saving started it finishes even when the
+    sign-in is cancelled (the account then comes back at the next start).
+  - A QR sign-in as an account this device already has, signed in or suspended, signs the new
+    device out again (`Error::AlreadySignedIn`): saving it would replace that account's store
+    (a running one's, or a suspended one's history and keys). A suspended account signs in
+    again from its entry, which keeps its store.
+- **Which account a sign-in added:** every sign-in command (`Login`, `LoginOAuth`, `Register`,
+  `SignInWithQr`) answers with `Event::SignedIn { request, account }` after `AccountAdded`, so
+  the apps select exactly that account even while saved accounts are still being restored.
+  - A sign-in or registration that fails or is cancelled removes its new store directory
+    (`NewStore`).
+  - The new device registers as a native client with the device-code grant and starts
+    verified, with the account's secrets. A code from the wrong side is refused
+    (`Error::WrongSignInCode`).
+  - The desktop shows codes; the phones also scan them (ADR 0004).
+- **Where the new ways in sit:** the sign-in step offers "Sign in with a QR code" (where
+  `LoginMethods::qr`) and "Create an account" (where `create_account`) as links under the
+  form. On an OAuth server, where the browser has already opened, picking one cancels that
+  browser sign-in. Signing in again as a suspended account offers neither: both make a new
+  store, which would replace the suspended account's. Phones also offer scanning a code before any server is chosen, as the code
+  names the server. Linking a new device is on the Sessions page of a verified OAuth session.
 - **OAuth** (`Command::LoginOAuth`): the app registers dynamically as a native client, listens
   on a loopback redirect and asks the UI to open the URL (`Event::OpenUrl`). It waits up to ten
   minutes (`BROWSER_LOGIN_TIMEOUT`) and can be cancelled. It introduces itself with
@@ -119,6 +166,10 @@ end a session at any time, hard or softly.
 ## Consequences
 
 - Passwords for OAuth servers never pass through the app.
+- Registration stages the app can't take run on the server's fallback pages, so a server
+  without them (rare) can't register in the app. Email and phone stages there work too.
+- Signing in with a QR code needs both a rendezvous service and the device authorization grant
+  on the server (MAS); elsewhere the option doesn't show.
 - The file fallback is weaker than a keychain: anything running as the user can read it.
 - `CLIENT_URI` is a placeholder; set the real site before release, since servers show it.
 - Each browser sign-in registers a new client, as the loopback port changes.

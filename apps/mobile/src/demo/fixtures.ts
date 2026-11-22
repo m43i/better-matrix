@@ -14,8 +14,10 @@ import type {
   Members,
   Message,
   MessageContent,
+  Identity,
   Person,
   Presence,
+  QrImage,
   RoomMember,
   RoomPreview,
   RoomSummary,
@@ -844,6 +846,46 @@ export function verificationEmojis(): SasEmoji[] {
   ].map(([symbol, description]) => ({ symbol: symbol!, description: description! }));
 }
 
+/**
+ * A QR code's look for the demo: finder patterns in three corners, timing lines, and modules
+ * from a fixed sequence. It reads as nothing; the demo engine answers scans itself.
+ */
+export function demoQr(width = 29): QrImage {
+  let seed = 20_769;
+  const dark: boolean[] = [];
+
+  const finder = (x: number, y: number) => {
+    const ring = Math.max(Math.abs(x - 3), Math.abs(y - 3));
+
+    return ring !== 2 && ring !== 4;
+  };
+
+  for (let y = 0; y < width; y++) {
+    for (let x = 0; x < width; x++) {
+      seed = (seed * 48_271) % 2_147_483_647;
+
+      if (x < 8 && y < 8) dark.push(finder(x, y));
+      else if (x >= width - 8 && y < 8) dark.push(finder(x - (width - 7), y));
+      else if (x < 8 && y >= width - 8) dark.push(finder(x, y - (width - 7)));
+      else if (x === 6 || y === 6) dark.push((x + y) % 2 === 0);
+      else dark.push(seed % 7 < 3);
+    }
+  }
+
+  return { width, dark };
+}
+
+/** A homeserver that only signs in with passwords, so accounts are created in the app. */
+export const PASSWORD_SERVER = 'password.example.org';
+
+/** What the demo's engine reads from any picture: some code's bytes. */
+export const DEMO_QR_BYTES = [77, 65, 84, 82, 73, 88, 3, 0];
+
+/** What Ada knows of her co-workers' identities: Grace verified, Alan's changed since. */
+export function demoIdentity(userId: string): Identity {
+  return { verified: userId === GRACE || userId === ALAN, changed: userId === ALAN };
+}
+
 /** Everything the demo starts with: Ada's work and hobby accounts, as the engine reports them. */
 export function seedEvents(): EngineEvent[] {
   return [
@@ -891,11 +933,17 @@ export function seedEvents(): EngineEvent[] {
     },
     {
       type: 'SecurityChanged',
-      data: { account: ADA, security: { session_verified: true, recovery: 'Enabled' } },
+      data: {
+        account: ADA,
+        security: { session_verified: true, recovery: 'Enabled', offline_device: 'Off' },
+      },
     },
     {
       type: 'SecurityChanged',
-      data: { account: ADA_HOBBY, security: { session_verified: false, recovery: 'Enabled' } },
+      data: {
+        account: ADA_HOBBY,
+        security: { session_verified: false, recovery: 'Enabled', offline_device: 'Off' },
+      },
     },
     { type: 'Sessions', data: { account: ADA, sessions: demoSessions() } },
     { type: 'Threads', data: { account: ADA, room_id: GENERAL, threads: demoThreads() } },

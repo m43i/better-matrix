@@ -342,10 +342,109 @@ fn spec() -> AppSpec<State> {
                 demo::seed(s);
                 s.modal = Some(state::Modal::Verification {
                     account: matrix_core::AccountId::new("@ada:hobby.chat"),
-                    flow_id: Some("flow".into()),
+                    flow: state::VerificationFlow::Following("flow".into()),
                     step: matrix_core::VerificationStep::Compare(demo::verification_emojis()),
+                    with: None,
                 });
             }),
+            ("demo-verify-qr", |s| {
+                demo::seed(s);
+                demo::verify_person_qr(s);
+            }),
+            ("demo-verify-scanned", |s| {
+                demo::seed(s);
+                demo::verify_person_qr(s);
+                let step = matrix_core::VerificationStep::Scanned;
+                let event = matrix_core::Event::Verification {
+                    account: matrix_core::AccountId::new(demo::ADA),
+                    flow_id: "flow".into(),
+                    step,
+                };
+                s.apply(event, &mut rune::Tx::default());
+            }),
+            ("demo-verify-incoming-person", |s| {
+                demo::seed(s);
+                let user =
+                    matrix_core::Person { id: "@grace:example.org".into(), name: "Grace Hopper".into(), avatar: None };
+                let step =
+                    matrix_core::VerificationStep::Incoming { other_device: "GRACEPHONE".into(), user: Some(user) };
+                let event = matrix_core::Event::Verification {
+                    account: matrix_core::AccountId::new(demo::ADA),
+                    flow_id: "flow".into(),
+                    step,
+                };
+                s.apply(event, &mut rune::Tx::default());
+            }),
+            ("demo-person-verified", |s| {
+                demo::seed(s);
+                demo::person(s, Some(matrix_core::Identity { verified: true, changed: false }));
+            }),
+            ("demo-person-unverified", |s| {
+                demo::seed(s);
+                demo::person(s, Some(matrix_core::Identity { verified: false, changed: false }));
+            }),
+            ("demo-person-changed", |s| {
+                demo::seed(s);
+                demo::person(s, Some(matrix_core::Identity { verified: true, changed: true }));
+            }),
+            ("demo-person-no-identity", |s| {
+                demo::seed(s);
+                demo::person(s, None);
+            }),
+            ("demo-link-device", |s| {
+                demo::seed(s);
+                demo::link_device(s);
+            }),
+            ("demo-sessions-oauth", |s| {
+                demo::seed(s);
+                demo::link_device(s);
+                s.modal = Some(state::Modal::Settings(SettingsSection::Sessions));
+            }),
+            ("demo-link-device-code", |s| {
+                demo::seed(s);
+                demo::link_device(s);
+                if let Some(state::Modal::LinkDevice { flow, .. }) = &mut s.modal
+                    && let Some(request) = flow.request
+                {
+                    flow.moved(request, matrix_core::QrLoginStep::EnterCheckCode);
+                    flow.code.insert("4");
+                }
+            }),
+            ("demo-key-export", |s| {
+                demo::seed(s);
+                s.open_account_settings();
+                s.key_file_chosen(state::KeyTransfer::Export, "/home/ada/message-keys.txt".into());
+            }),
+            ("demo-key-import-done", |s| {
+                demo::seed(s);
+                s.open_account_settings();
+                s.key_file_chosen(state::KeyTransfer::Import, "/home/ada/message-keys.txt".into());
+                if let Some(state::Modal::KeyFile(file)) = &mut s.modal {
+                    file.step = state::KeyFileStep::Done(i18n::tf!("keys.imported", imported = 412, total = 530));
+                }
+            }),
+            ("demo-change-password", |s| {
+                demo::seed(s);
+                s.open_account_settings();
+                s.open_change_password();
+            }),
+            ("demo-deactivate", |s| {
+                demo::seed(s);
+                s.open_account_settings();
+                s.ask_to_deactivate();
+                s.toggle_deactivate_erase();
+            }),
+            ("demo-offline-device-key", |s| {
+                demo::seed(s);
+                s.open_account_settings();
+                s.set_offline_device(true);
+            }),
+            ("demo-sign-in-qr", demo::sign_in_qr),
+            ("demo-register", demo::registration_form),
+            ("demo-register-terms", demo::registration_terms),
+            ("demo-register-email", demo::registration_email),
+            ("demo-register-email-sent", demo::registration_email_sent),
+            ("demo-sign-in-resume", demo::sign_in_resume),
             ("demo-recovery-key", |s| {
                 demo::seed(s);
                 s.modal = Some(state::Modal::NewRecoveryKey {
@@ -720,6 +819,8 @@ fn main() {
             oauth_redirect: matrix_core::OAuthRedirect::Loopback,
             // One instance at a time, and no push opens a store without it.
             stores: matrix_core::StoreSharing::Alone,
+            // No camera to scan with: the desktop shows its code, or compares emoji.
+            scans_qr: false,
         },
         Err(error) => {
             eprintln!("better-matrix: invalid client URI {CLIENT_URI}: {error}");

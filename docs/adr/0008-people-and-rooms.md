@@ -336,8 +336,13 @@ Date: 2026-11-14
 
 - A server that checks phone codes itself (no `submit_url`) can't finish adding a number; it
   fails with `Error::NoCodeSubmission`.
-- Password change and deactivation aren't in the app: the account page on OAuth, future guarded
-  actions on password accounts.
+- **Password and deactivation** (Settings → Account): on OAuth accounts both open the account
+  page (`AccountPage::Profile`, `AccountPage::Deactivate`). On password accounts they are
+  guarded actions: `ChangePassword` (signs the other sessions out, the spec's default) and
+  `DeactivateAccount { erase }`, which forgets the account here once the server confirms
+  (`Event::AccountRemoved`). On password accounts deactivating asks for confirmation first and
+  offers to erase sent messages; OAuth accounts go straight to the account page, which asks
+  itself.
 - Opening a room makes no member request. A large room's full list is fetched once, on demand.
 - New pictures should go through `media_avatar` and `request_avatars` and stay on-screen only.
 - A room only an alias names can't be checked against the room lists (summaries carry no

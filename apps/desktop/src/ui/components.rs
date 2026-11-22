@@ -230,6 +230,32 @@ pub fn choice_row(title: &str, hint: Option<&str>, selected: bool, p: &Palette) 
         .child(titles)
 }
 
+/// A checkbox with a title and an optional hint. The caller adds `key` and `on_press`.
+pub fn check_row(title: &str, hint: Option<&str>, checked: bool, p: &Palette) -> El {
+    let mut tick = el().size(18.0, 18.0).radius(4.0).center();
+    tick = if checked {
+        tick.fill(p.accent).child(icon(&super::icons::CHECK, 14.0).color(p.on_accent))
+    } else {
+        tick.border(2.0, p.text_muted)
+    };
+    let mut titles =
+        col().grow(1.0).min_w(0.0).gap(2.0).child(text(title.to_owned()).font(font::BODY_STRONG).color(p.text).wrap());
+    if let Some(hint) = hint {
+        titles = titles.child(text(hint.to_owned()).font(font::META).color(p.text_muted).wrap());
+    }
+    row()
+        .w_full()
+        .py(6.0)
+        .gap(12.0)
+        .role("checkbox")
+        .cursor(rune::Cursor::Pointer)
+        .label(title.to_owned())
+        .checked(checked)
+        .focusable(true)
+        .child(tick.mt(1.0))
+        .child(titles)
+}
+
 /// How wide a select and its list are.
 pub const SELECT_WIDTH: f32 = 380.0;
 

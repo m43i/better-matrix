@@ -7,6 +7,7 @@
 //!
 //! Side effects on the OS (dialogs, notifications) go through [`Shell`].
 
+mod account_actions;
 mod accounts;
 mod attachments;
 pub mod backdrop;
@@ -28,6 +29,7 @@ mod panes;
 mod poll;
 mod preview;
 mod profile;
+mod qr_login;
 mod readers;
 mod receipts;
 mod retry;
@@ -53,6 +55,7 @@ use matrix_core::{
 };
 use rune::{TextEdit, Tx};
 
+pub use account_actions::{KeyFile, KeyFileStep, KeyTransfer, PasswordForm, RecoveryKeyFor};
 pub use accounts::READ_MARKER_FADE;
 pub use accounts::{
     AccountData, Accounts, EntryView, Landing, RoomTimeline, Scope, TimelineItem, continues_group, now_ms, visual,
@@ -73,6 +76,7 @@ pub use preview::{
     DocumentStatus, ImageStatus, Opens, Preview, PreviewContent, PreviewItem, VideoStatus, render_document,
 };
 pub use profile::{ContactStep, ProfileForm};
+pub use qr_login::QrLogin;
 pub use readers::{READER_FACES, ReaderMenu};
 pub use room_discovery::Directory;
 pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches};
@@ -80,7 +84,7 @@ pub use sections::{
     DIRECT, FAVOURITES, INVITATIONS, LOW_PRIORITY, ROOMS, SectionView, is_builtin, ordered_spaces, sections,
 };
 pub use settings::{Appearance, MessageLayout, PlaybackSpeed, Settings, SettingsSection, Zoom};
-pub use sign_in::{SignInForm, SignInStep};
+pub use sign_in::{Asked, SignInForm, SignInStep};
 pub use status_message::{leading_emoji, suggestions as status_suggestions};
 pub use updates::Update;
 
@@ -236,6 +240,8 @@ pub enum PickFor {
     Attachments(ComposerTarget),
     /// A new profile picture.
     Avatar,
+    /// A file of exported message keys to import.
+    KeyFile,
 }
 
 /// Something dragged in the sidebar or on the rail: a room, a whole section, or a space.
@@ -361,6 +367,23 @@ pub enum EmojiFor {
     StatusMessage,
 }
 
+/// Which verification the Verification dialog follows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VerificationFlow {
+    /// The one this request asks for, until [`Event::VerificationRequested`] names it: steps of
+    /// other verifications leave the dialog alone meanwhile.
+    ///
+    /// [`Event::VerificationRequested`]: matrix_core::Event::VerificationRequested
+    Requested(RequestId),
+    /// This flow.
+    Following(String),
+}
+
+/// Whether a verification is over, done or not: another may take its dialog.
+fn verification_ended(step: &VerificationStep) -> bool {
+    matches!(step, VerificationStep::Done | VerificationStep::Cancelled(_))
+}
+
 /// A dialog over the whole window, with the rest dimmed. At most one is open; new kinds are new
 /// variants.
 #[derive(Clone, Debug, PartialEq)]
@@ -392,19 +415,29 @@ pub enum Modal {
     Poll,
     /// "Are you sure?" before something that can't be undone.
     Confirm(Confirm),
-    /// Verifying this session with another of the user's sessions. `flow_id` is `None` while
-    /// the request is on its way.
+    /// Verifying this session with another of the user's sessions, or another person (`with`).
     Verification {
         account: AccountId,
-        flow_id: Option<String>,
+        flow: VerificationFlow,
         step: VerificationStep,
+        with: Option<matrix_core::Person>,
     },
-    /// Entering the recovery key to verify this session.
+    /// Entering the recovery key, for what `purpose` says.
     RecoveryKeyEntry {
         account: AccountId,
         edit: TextEdit,
         error: Option<String>,
         submitting: bool,
+        purpose: RecoveryKeyFor,
+    },
+    /// The passphrase of a key export or import, then how it went.
+    KeyFile(Box<KeyFile>),
+    /// A new password for a password account.
+    ChangePassword(Box<PasswordForm>),
+    /// Approving a new device's sign-in with a QR code from this session.
+    LinkDevice {
+        account: AccountId,
+        flow: QrLogin,
     },
     /// A new recovery key, shown once.
     NewRecoveryKey {
@@ -527,6 +560,11 @@ pub enum Confirm {
         name: String,
         decline: Option<String>,
     },
+    /// Close the account for good on its server, also erasing its messages when `erase`.
+    Deactivate {
+        account: AccountId,
+        erase: bool,
+    },
 }
 
 /// An action the server may guard with the account password ([`Event::PasswordNeeded`]). New
@@ -536,11 +574,17 @@ pub enum Guarded {
     EndSession { device_id: String },
     ResetIdentity,
     AddContact { pending: PendingContact },
+    ChangePassword { new_password: Password },
+    Deactivate { erase: bool },
 }
 
 impl Guarded {
     fn command(&self, account: AccountId, password: Option<Password>) -> Command {
         match self {
+            Self::ChangePassword { new_password } => {
+                Command::ChangePassword { account, new_password: new_password.clone(), password }
+            }
+            Self::Deactivate { erase } => Command::DeactivateAccount { account, erase: *erase, password },
             Self::EndSession { device_id } => Command::EndSession { account, device_id: device_id.clone(), password },
             Self::ResetIdentity => Command::ResetIdentity { account, password },
             Self::AddContact { pending } => Command::AddContact { account, pending: pending.clone(), password },
@@ -629,6 +673,14 @@ enum Purpose {
         action: Guarded,
     },
     Security,
+    /// Asking for a verification; a failure ends its dialog with the error.
+    Verification,
+    /// Asking whether the user verified someone; a failure leaves it unknown.
+    Identity,
+    /// Exporting or importing message keys; the key file dialog shows how it went.
+    KeyFile,
+    /// Linking a new device with a QR code; its dialog shows each step.
+    LinkDevice,
     /// Profile changes whose failure is a notice: removing a contact detail.
     Profile,
     ProfileName,
@@ -1078,12 +1130,16 @@ impl State {
         let location = navigation::Location::of(self);
         match event {
             Event::Finished { request, result } => self.finish(request, result),
+            // The sign-in in progress takes its account from `AccountAdded`.
+            Event::SignedIn { .. } => {}
             Event::HomeserverDiscovered { request, homeserver } => {
                 if self.sign_in.step == SignInStep::Discovering(request) {
                     self.continue_sign_in(homeserver);
                 }
             }
-            Event::OpenUrl { request, url } if self.pending.get(&request) == Some(&Purpose::AccountPage) => {
+            Event::OpenUrl { request, url }
+                if matches!(self.pending.get(&request), Some(Purpose::AccountPage | Purpose::LinkDevice)) =>
+            {
                 if let Err(error) = tx.open_url(&url) {
                     self.notice = Some(tf!("notice.browser", error = error));
                 }
@@ -1100,16 +1156,27 @@ impl State {
                     self.notice = Some(tf!("notice.browser", error = error));
                 }
             }
-            Event::OpenUrl { request, url } => {
-                if let SignInStep::Browser { request: Some(waiting), url: shown, .. } = &mut self.sign_in.step
-                    && *waiting == request
-                {
+            Event::OpenUrl { request, url } => match &mut self.sign_in.step {
+                SignInStep::Browser { request: Some(waiting), url: shown, .. } if *waiting == request => {
                     if let Err(error) = tx.open_url(&url) {
                         self.notice = Some(tf!("notice.browser", error = error));
                     }
                     *shown = Some(url);
                 }
-            }
+                // A registration stage on the server's page; its step keeps the URL to open again.
+                SignInStep::Register { request: Some(waiting), .. } if *waiting == request => {
+                    if let Err(error) = tx.open_url(&url) {
+                        self.notice = Some(tf!("notice.browser", error = error));
+                    }
+                }
+                _ => {}
+            },
+            Event::QrLogin { request, step } => self.qr_login_moved(request, step),
+            Event::Registration { request, step } => self.sign_in.registration_asked(request, step),
+            // The desktop has no camera: it never reads codes from pictures.
+            Event::QrCodeRead { .. } => {}
+            Event::Identity { account, user_id, identity } => self.accounts.set_identity(&account, user_id, identity),
+            Event::KeysImported { request, import } => self.keys_imported(request, import),
             Event::Restoring(accounts) => {
                 if self.nav.account.as_ref().is_some_and(|id| !accounts.contains(id)) {
                     self.nav.account = None;
@@ -1446,6 +1513,9 @@ impl State {
                     self.modal = Some(Modal::Password { account, action, edit, error: None, submitting: false });
                 }
             }
+            Event::VerificationRequested { request, account, flow_id } => {
+                self.verification_requested(request, account, flow_id)
+            }
             Event::Verification { account, flow_id, step } => self.verification_moved(account, flow_id, step),
             Event::HistoryLoaded { account, key, reached_start } => {
                 if let Some(timeline) = self.accounts.kept_timeline_mut(&account, &key) {
@@ -1781,6 +1851,8 @@ impl State {
                     self.membership_finished(account, room_id, *action, scope)
                 }
                 Purpose::Recover if matches!(self.modal, Some(Modal::RecoveryKeyEntry { .. })) => self.modal = None,
+                Purpose::KeyFile => self.key_file_done(request),
+                Purpose::Guarded { action: Guarded::ChangePassword { .. }, .. } => self.password_changed(),
                 Purpose::Guarded { account, action: Guarded::ResetIdentity } if self.resetting_identity() => {
                     self.modal = Some(Modal::ResetIdentity { account: account.clone(), step: ResetStep::Done });
                 }
@@ -1907,6 +1979,10 @@ impl State {
                     *shown = Some(error);
                     *submitting = false;
                 }
+                Some(Modal::ChangePassword(form)) => {
+                    form.error = Some(error);
+                    form.submitting = false;
+                }
                 Some(Modal::ResetIdentity { step, .. }) if matches!(step, ResetStep::Resetting { .. }) => {
                     *step = ResetStep::Warning { error: Some(error) };
                 }
@@ -1947,6 +2023,14 @@ impl State {
             Purpose::CopyImage => self.notice = Some(tf!("notice.copy_image", error = error)),
             Purpose::OpenFile(_) => self.notice = Some(tf!("notice.open_attachment", error = error)),
             Purpose::RecoveryKey | Purpose::Security => self.notice = Some(error),
+            Purpose::Verification => self.verification_failed(request, error),
+            Purpose::Identity => {}
+            Purpose::KeyFile => self.key_file_failed(request, error),
+            Purpose::LinkDevice => {
+                if let Some(Modal::LinkDevice { flow, .. }) = &mut self.modal {
+                    flow.fail(request, error);
+                }
+            }
             Purpose::Gif(url) => {
                 self.gifs.failed(&url, std::time::Instant::now());
                 self.schedule_retry();
@@ -3893,9 +3977,11 @@ impl State {
             }
             // Their role and whether they are verified come from the member list, as complete
             // as the readers' list asks for; their picture may be one no row has fetched.
-            Some(SidePanel::Person(_)) => {
+            Some(SidePanel::Person(person)) => {
+                let user_id = person.id.clone();
                 self.list_all_members();
                 self.request_avatars();
+                self.load_identity(&user_id);
             }
             Some(SidePanel::Info) | None => {}
         }
@@ -4034,6 +4120,14 @@ impl State {
     /// Carries out the action the open confirmation asks about.
     pub fn confirm(&mut self) {
         let Some(Modal::Confirm(confirm)) = self.modal.take() else { return };
+        // A guarded action: the server may ask for the password first.
+        let confirm = match confirm {
+            Confirm::Deactivate { account, erase } => {
+                self.guarded(account, Guarded::Deactivate { erase });
+                return;
+            }
+            other => other,
+        };
         let (command, purpose) = match confirm {
             Confirm::LeaveRoom { account, room_id, .. } => {
                 (Command::LeaveRoom { account, room_id, forget: false }, Purpose::Leave)
@@ -4058,6 +4152,7 @@ impl State {
                 self.change_safety(&account, matrix_core::SafetyChange::Ignore { user_id, ignored: true }, decline);
                 return;
             }
+            Confirm::Deactivate { .. } => return,
         };
         self.dispatch(command, purpose);
     }
@@ -4190,22 +4285,56 @@ impl State {
     /// Asks the user's other sessions to verify this one.
     pub fn verify_with_other_device(&mut self) {
         let Some(account) = self.nav.account.clone() else { return };
-        self.modal =
-            Some(Modal::Verification { account: account.clone(), flow_id: None, step: VerificationStep::Waiting });
-        self.dispatch(Command::VerifyThisSession(account), Purpose::Security);
+        self.request_verification(account, None);
     }
 
-    /// Follows a verification: opens the dialog for a new incoming request, updates an open one.
+    /// Opens the Verification dialog for a verification asked for now: of this session (`with`
+    /// is `None`) or with a person; it follows the flow the request starts.
+    pub(super) fn request_verification(&mut self, account: AccountId, with: Option<matrix_core::Person>) {
+        let command = match &with {
+            Some(person) => Command::VerifyUser { account: account.clone(), user_id: person.id.clone() },
+            None => Command::VerifyThisSession(account.clone()),
+        };
+        let request = self.dispatch(command, Purpose::Verification);
+        let flow = VerificationFlow::Requested(request);
+        self.modal = Some(Modal::Verification { account, flow, step: VerificationStep::Waiting, with });
+    }
+
+    /// A verification this app asked for started: its dialog follows it from now on. One whose
+    /// dialog was closed meanwhile is stopped.
+    fn verification_requested(&mut self, request: RequestId, account: AccountId, flow_id: String) {
+        match &mut self.modal {
+            Some(Modal::Verification { account: shown, flow, .. })
+                if *shown == account && *flow == VerificationFlow::Requested(request) =>
+            {
+                *flow = VerificationFlow::Following(flow_id);
+            }
+            _ => {
+                self.dispatch(Command::CancelVerification { account, flow_id }, Purpose::Cancel);
+            }
+        }
+    }
+
+    /// Follows a verification: updates the open dialog with its own flow's steps, opens the
+    /// dialog for a new incoming request unless another verification is in progress.
     fn verification_moved(&mut self, account: AccountId, flow_id: String, step: VerificationStep) {
         match &mut self.modal {
-            Some(Modal::Verification { account: shown, flow_id: open, step: current })
-                if *shown == account && open.as_ref().is_none_or(|open| *open == flow_id) =>
-            {
-                *open = Some(flow_id);
+            Some(Modal::Verification {
+                account: shown,
+                flow: VerificationFlow::Following(open),
+                step: current,
+                ..
+            }) if *shown == account && *open == flow_id => {
                 *current = step;
             }
+            Some(Modal::Verification { step: current, .. }) if !verification_ended(current) => {}
             _ if matches!(step, VerificationStep::Incoming { .. }) => {
-                self.modal = Some(Modal::Verification { account, flow_id: Some(flow_id), step });
+                let with = match &step {
+                    VerificationStep::Incoming { user, .. } => user.clone(),
+                    _ => None,
+                };
+                let flow = VerificationFlow::Following(flow_id);
+                self.modal = Some(Modal::Verification { account, flow, step, with });
             }
             _ => {}
         }
@@ -4213,7 +4342,7 @@ impl State {
 
     fn open_verification(&self) -> Option<(AccountId, String)> {
         match &self.modal {
-            Some(Modal::Verification { account, flow_id: Some(flow_id), .. }) => {
+            Some(Modal::Verification { account, flow: VerificationFlow::Following(flow_id), .. }) => {
                 Some((account.clone(), flow_id.clone()))
             }
             _ => None,
@@ -4230,19 +4359,30 @@ impl State {
         self.dispatch(Command::ConfirmVerification { account, flow_id, matches }, Purpose::Security);
     }
 
-    /// Stops the open verification and closes its dialog.
+    /// Stops the open verification and closes its dialog. One still being asked for is stopped
+    /// once it starts ([`Self::verification_requested`]), and its request's end goes unheard.
     pub fn cancel_verification(&mut self) {
-        if let Some((account, flow_id)) = self.open_verification()
-            && let Some(Modal::Verification { step, .. }) = &self.modal
-            && !matches!(step, VerificationStep::Done | VerificationStep::Cancelled(_))
+        if let Some(Modal::Verification { account, flow, step, .. }) = &self.modal
+            && !verification_ended(step)
         {
-            self.dispatch(Command::CancelVerification { account, flow_id }, Purpose::Cancel);
+            match flow.clone() {
+                VerificationFlow::Following(flow_id) => {
+                    let account = account.clone();
+                    self.dispatch(Command::CancelVerification { account, flow_id }, Purpose::Cancel);
+                }
+                VerificationFlow::Requested(request) => {
+                    self.pending.remove(&request);
+                }
+            }
         }
         self.modal = None;
     }
 
     /// The text field of the open dialog, for its input's `on_edit`.
     pub fn modal_field(&mut self) -> &mut TextEdit {
+        if matches!(self.modal, Some(Modal::KeyFile(_) | Modal::ChangePassword(_))) {
+            return self.modal_field_at(0);
+        }
         match &mut self.modal {
             Some(
                 Modal::Forward { search: edit, .. }
@@ -4252,26 +4392,58 @@ impl State {
                 | Modal::SectionName { edit, .. },
             ) => edit,
             Some(Modal::Report(form)) => &mut form.reason,
+            Some(Modal::LinkDevice { flow, .. }) => &mut flow.code,
             _ => &mut self.scratch,
         }
     }
 
+    /// The `index`th text field of a dialog with several, for its inputs' `on_edit`: a key
+    /// file's passphrase and its confirmation; the current, new and confirmed password.
+    pub fn modal_field_at(&mut self, index: usize) -> &mut TextEdit {
+        let field = match &mut self.modal {
+            Some(Modal::KeyFile(file)) => {
+                [Some(&mut file.passphrase), Some(&mut file.confirm), None].into_iter().nth(index).flatten()
+            }
+            Some(Modal::ChangePassword(form)) => {
+                [&mut form.current, &mut form.new, &mut form.confirm].into_iter().nth(index)
+            }
+            _ => None,
+        };
+        match field {
+            Some(field) => field,
+            None => &mut self.scratch,
+        }
+    }
+
+    /// Asks for the recovery key to verify this session.
     pub fn open_recovery_key_entry(&mut self) {
+        self.ask_recovery_key(RecoveryKeyFor::Verify);
+    }
+
+    /// Asks for the recovery key, for `purpose`.
+    fn ask_recovery_key(&mut self, purpose: RecoveryKeyFor) {
         let Some(account) = self.nav.account.clone() else { return };
         self.modal = Some(Modal::RecoveryKeyEntry {
             account,
             edit: focused(TextEdit::new("").secure()),
             error: None,
             submitting: false,
+            purpose,
         });
     }
 
     pub fn submit_recovery_key(&mut self) {
-        let Some(Modal::RecoveryKeyEntry { account, edit, error, submitting }) = &mut self.modal else { return };
+        let Some(Modal::RecoveryKeyEntry { account, edit, error, submitting, purpose }) = &mut self.modal else {
+            return;
+        };
         if *submitting || edit.text.trim().is_empty() {
             return;
         }
-        let command = Command::Recover { account: account.clone(), key: Password(edit.text.clone()) };
+        let (account, key) = (account.clone(), Password(edit.text.clone()));
+        let command = match purpose {
+            RecoveryKeyFor::Verify => Command::Recover { account, key },
+            RecoveryKeyFor::OfflineDevice => Command::SetOfflineDevice { account, on: true, recovery_key: Some(key) },
+        };
         *error = None;
         *submitting = true;
         self.dispatch(command, Purpose::Recover);
@@ -4529,6 +4701,12 @@ impl State {
             Some(Modal::ResetIdentity { step: ResetStep::Resetting { request, .. }, .. }) => {
                 self.dispatch(Command::Cancel(request), Purpose::Cancel);
             }
+            // Closing a QR sign-in still under way stops it.
+            Some(Modal::LinkDevice { flow, .. }) if !flow.ended() => {
+                if let Some(request) = flow.request {
+                    self.dispatch(Command::Cancel(request), Purpose::Cancel);
+                }
+            }
             // Giving up on the password leaves the contact detail waiting to be confirmed.
             Some(Modal::Password { action: Guarded::AddContact { pending }, .. }) => {
                 if let ContactStep::Sent { busy, .. } = &mut self.profile.contact_mut(pending.kind).step {
@@ -4620,7 +4798,7 @@ impl State {
     /// Step 2, chosen by what the server offers: the browser for OAuth, else the password form.
     fn continue_sign_in(&mut self, server: Homeserver) {
         if server.methods.oauth {
-            self.start_browser(server);
+            self.start_browser(server, false);
         } else if server.methods.password {
             self.sign_in.step = SignInStep::Password { server, submitting: None, error: None };
         } else {
@@ -4629,17 +4807,21 @@ impl State {
         }
     }
 
-    fn start_browser(&mut self, server: Homeserver) {
-        let command = Command::LoginOAuth { homeserver: server.url.clone(), resume: self.sign_in.resume.clone() };
+    /// The browser sign-in; with `create`, the page creates the account first.
+    fn start_browser(&mut self, server: Homeserver, create: bool) {
+        let command =
+            Command::LoginOAuth { homeserver: server.url.clone(), resume: self.sign_in.resume.clone(), create };
         let request = self.dispatch(command, Purpose::SignIn);
-        self.sign_in.step = SignInStep::Browser { server, request: Some(request), url: None, error: None };
+        self.sign_in.step = SignInStep::Browser { server, request: Some(request), url: None, create, error: None };
     }
 
-    /// Starts the browser sign-in again, after a failure or from the password form.
+    /// Starts the browser sign-in again, after a failure or from another way of signing in. A
+    /// failed account creation tries again as one.
     pub fn retry_browser(&mut self) {
         let Some(server) = self.sign_in.server().filter(|s| s.methods.oauth).cloned() else { return };
+        let create = matches!(self.sign_in.step, SignInStep::Browser { create: true, request: None, .. });
         self.cancel_pending();
-        self.start_browser(server);
+        self.start_browser(server, create);
     }
 
     /// Switches step 2 to the password form, on a server that offers both.
@@ -5040,6 +5222,11 @@ impl State {
             PickFor::Avatar => {
                 if let Some(path) = paths.first() {
                     self.set_avatar(Some(path.clone()));
+                }
+            }
+            PickFor::KeyFile => {
+                if let Some(path) = paths.first() {
+                    self.key_file_chosen(KeyTransfer::Import, path.clone());
                 }
             }
         }

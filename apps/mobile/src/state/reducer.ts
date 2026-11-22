@@ -20,7 +20,7 @@ import { DEFAULT_SAFETY, hiddenEntry, withChange } from './safety';
 import { keepUnchanged } from './json';
 import { DEFAULT_SETTINGS, type Settings } from './settings';
 import { applyDiffs, timelineId } from './timeline';
-import type { AccountData, PendingSafety, State, Timeline } from './types';
+import type { AccountData, PendingSafety, State, Timeline, Verification } from './types';
 
 /** A fetched rendition's key in `State.media`. */
 export function mediaKey(media: MediaRef, size: MediaSize): string {
@@ -86,6 +86,7 @@ function newAccount(summary: AccountSummary): AccountData {
     heardAt: {},
     typing: {},
     security: null,
+    identities: {},
     sessions: null,
     contacts: null,
     members: {},
@@ -637,12 +638,21 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'Verification': {
       const { account, flow_id: flowId, step } = event.data;
 
-      const others = state.verifications.filter(
-        (v) => !(v.account === account && v.flowId === flowId),
-      );
+      const same = (v: Verification) => v.account === account && v.flowId === flowId;
+      const others = state.verifications.filter((v) => !same(v));
 
-      return { ...state, verifications: [...others, { account, flowId, step }] };
+      // Only a request names the person; the later steps keep who it was.
+      const user =
+        step.type === 'Incoming' ? step.data.user : (state.verifications.find(same)?.user ?? null);
+
+      return { ...state, verifications: [...others, { account, flowId, step, user }] };
     }
+
+    case 'Identity':
+      return updateAccount(state, event.data.account, (a) => ({
+        ...a,
+        identities: { ...a.identities, [event.data.user_id]: event.data.identity },
+      }));
 
     case 'LinkPreview':
       return {
@@ -745,6 +755,14 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'RoomPreview':
     case 'RoomJoined':
     case 'PasswordNeeded':
+    case 'QrLogin':
+    case 'Registration':
+    case 'QrCodeRead':
+    case 'KeysImported':
+    // Answers the verification sheet's own request (`AskedVerification`).
+    case 'VerificationRequested':
+    // Names the account a sign-in command added (`SignInFlow`); `AccountAdded` added it.
+    case 'SignedIn':
     case 'MediaFailed':
     case 'CallMediaStopped':
     case 'PushContent':

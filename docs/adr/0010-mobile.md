@@ -304,6 +304,14 @@ Date: 2026-11-16
 - **Message HTML** is parsed by a small tokenizer of our own (`state/html.ts`) into a safe node
   tree: only the desktop's allowed tags become formatting, links keep `http(s)`, `mailto` and
   `ftp`, reply fallbacks and scripts are dropped, nesting is capped. Nothing renders raw HTML.
+- **QR codes** (ADR 0004): one scanner (`ui/qr/QrScanner.tsx`, `expo-camera`) serves
+  verification, signing in with a QR code and linking a device. Matrix's codes are binary and
+  the camera's barcode result is lossy text, so a sighted QR code (or a 2.5 s timer) only
+  triggers a small picture, which `Command::ReadQrCode` reads in Rust. `QrCode` draws a
+  `QrImage` from Views, black on white with a quiet zone. Sign-in and linking share one panel
+  (`QrLoginPanel`) driven by `QrLoginStep`s through `Store.run`. Demo scenes show a placeholder
+  instead of the camera that reads a demo code when tapped, and the demo engine holds QR sign-in,
+  linking and registration until they are answered or cancelled.
 - **Demo scenes** (`src/demo`) are the mobile `--scene`: the desktop's fixtures as engine
   events through `apply`, on a demo engine that finishes every command and answers lists,
   searches, sends and calls from the fixtures (media from the app's own assets). Dev builds

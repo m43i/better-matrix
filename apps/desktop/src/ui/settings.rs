@@ -16,7 +16,7 @@ use crate::state::{
     AccountData, Appearance, ContactStep, MediaCache, MessageLayout, Popover, SelectFor, SettingsSection, State, Zoom,
 };
 use crate::third_party;
-use matrix_core::{ContactDetail, ContactKind, RecoveryStatus, Session, SignInMethod};
+use matrix_core::{ContactDetail, ContactKind, OfflineDevice, RecoveryStatus, Session, SignInMethod};
 
 /// How much of the whole window (rail and sidebar included) the modal takes, each way.
 const SHARE: f32 = 0.9;
@@ -941,12 +941,86 @@ fn account(s: &State, p: &Palette) -> El {
         RecoveryStatus::Incomplete => status_line(&icons::KEY, t!("recovery.incomplete"), p.warning, p),
         RecoveryStatus::Unknown => status_line(&icons::KEY, t!("recovery.unknown"), p.text_muted, p),
     };
-    col()
+    let oauth = account.summary.sign_in == SignInMethod::OAuth;
+    let mut page = col()
         .w_full()
         .gap(32.0)
         .child(account_heading(account, &s.media, p))
         .child(setting_group(&icons::SHIELD, t!("account.session"), t!("account.session_hint"), verification, p))
-        .child(setting_group(&icons::KEY, t!("recovery.title"), t!("recovery.hint"), recovery, p))
+        .child(setting_group(&icons::KEY, t!("recovery.title"), t!("recovery.hint"), recovery, p));
+    if let Some(offline) = offline_device(security, p) {
+        page =
+            page.child(setting_group(&icons::CLOUD, t!("offline_device.title"), t!("offline_device.hint"), offline, p));
+    }
+    let keys = row()
+        .gap(8.0)
+        .child(
+            button(t!("keys.export_button"), ButtonKind::Secondary, true, p)
+                .key("keys-export")
+                .on_press(State::export_room_keys),
+        )
+        .child(
+            button(t!("keys.import_button"), ButtonKind::Secondary, true, p)
+                .key("keys-import")
+                .on_press(State::import_room_keys),
+        );
+    let (password_hint, password_label) = if oauth {
+        (t!("password.hint_oauth"), t!("password.change_on_page"))
+    } else {
+        (t!("password.hint"), t!("password.change_title"))
+    };
+    let password = row().child(
+        button(password_label, ButtonKind::Secondary, true, p)
+            .key("password-change")
+            .on_press(State::open_change_password),
+    );
+    let deactivate = row().child(
+        button(t!("deactivate.button"), ButtonKind::Danger, true, p)
+            .key("deactivate-account")
+            .on_press(State::ask_to_deactivate),
+    );
+    page.child(setting_group(&icons::FILE, t!("keys.title"), t!("keys.hint"), keys, p))
+        .child(setting_group(&icons::LOCK, t!("password.title"), password_hint, password, p))
+        .child(setting_group(
+            &icons::ALERT,
+            t!("deactivate.heading"),
+            if oauth { t!("deactivate.hint_oauth") } else { t!("deactivate.hint") },
+            deactivate,
+            p,
+        ))
+}
+
+/// The offline device's state and the switch for it, where the server keeps one.
+fn offline_device(security: matrix_core::Security, p: &Palette) -> Option<El> {
+    let column = col().w_full().gap(12.0).items_start();
+    match security.offline_device {
+        OfflineDevice::On => Some(
+            column.child(status_line(&icons::CLOUD, t!("offline_device.on"), p.success, p)).child(
+                button(t!("offline_device.turn_off"), ButtonKind::Secondary, true, p)
+                    .key("offline-device-off")
+                    .on_press(|s: &mut State| s.set_offline_device(false)),
+            ),
+        ),
+        OfflineDevice::Off => {
+            // It keeps its key with the recovery key, from a verified session.
+            let ready = security.session_verified && security.recovery == RecoveryStatus::Enabled;
+            let mut column = column.child(status_line(&icons::CLOUD, t!("offline_device.off"), p.text_muted, p));
+            if !ready {
+                column =
+                    column.child(text(t!("offline_device.needs_recovery")).font(font::BODY).color(p.text_muted).wrap());
+            }
+            Some(column.child(
+                button(t!("offline_device.turn_on"), ButtonKind::Primary, ready, p).key("offline-device-on").on_press(
+                    move |s: &mut State| {
+                        if ready {
+                            s.set_offline_device(true);
+                        }
+                    },
+                ),
+            ))
+        }
+        OfflineDevice::Unknown | OfflineDevice::Unsupported => None,
+    }
 }
 
 /// Every signed-in session: this one first, each with its last activity, verification, and
@@ -959,13 +1033,22 @@ fn sessions(s: &State, p: &Palette) -> El {
             sessions.iter().fold(col().w_full().gap(10.0), |list, session| list.child(session_card(session, p)))
         }
     };
-    col().w_full().gap(32.0).child(account_heading(account, &s.media, p)).child(setting_group(
-        &icons::LAPTOP,
-        t!("settings.sessions"),
-        t!("sessions.hint"),
-        list,
-        p,
-    ))
+    let mut page = col().w_full().gap(32.0).child(account_heading(account, &s.media, p));
+    // A QR sign-in hands this session's secrets over: OAuth accounts, from a verified session.
+    if account.summary.sign_in == SignInMethod::OAuth {
+        let verified = account.security.is_some_and(|security| security.session_verified);
+        let mut link = col().w_full().gap(10.0).items_start();
+        if !verified {
+            link = link.child(text(t!("link_device.verify_first")).font(font::BODY).color(p.text_muted).wrap());
+        }
+        link = link.child(
+            button(t!("link_device.button"), ButtonKind::Primary, verified, p)
+                .key("link-device")
+                .on_press(State::link_device),
+        );
+        page = page.child(setting_group(&icons::QR, t!("link_device.title"), t!("link_device.hint"), link, p));
+    }
+    page.child(setting_group(&icons::LAPTOP, t!("settings.sessions"), t!("sessions.hint"), list, p))
 }
 
 fn session_card(session: &Session, p: &Palette) -> El {

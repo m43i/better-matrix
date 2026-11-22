@@ -5,6 +5,7 @@
 
 import { Engine, type EngineEvent } from '@better-matrix/matrix-native/client';
 import type {
+  Answer,
   Command,
   Draft,
   Message,
@@ -23,6 +24,10 @@ import { fuzzyMatch } from '../state/search';
 import {
   DEMO_DAY_MS,
   DEMO_LINKED_ROOM,
+  DEMO_QR_BYTES,
+  demoIdentity,
+  PASSWORD_SERVER,
+  demoQr,
   demoFiles,
   demoMembers,
   demoSessions,
@@ -34,6 +39,7 @@ import {
   DEMO_THREAD,
   GRACE,
   KAI,
+  verificationEmojis,
 } from './fixtures';
 
 /** Resolves a demo media ref to a plain file path, or `null` when the demo has no such media. */
@@ -46,7 +52,11 @@ export function answer(
   now: number = DEMO_DAY_MS + 12 * 3_600_000,
 ): EngineEvent[] {
   switch (command.type) {
-    case 'Discover':
+    case 'Discover': {
+      // Servers sign in with OAuth (and a QR code) and passwords, except the one that only takes
+      // passwords, which creates accounts in the app.
+      const passwordOnly = command.data.server === PASSWORD_SERVER;
+
       return [
         {
           type: 'HomeserverDiscovered',
@@ -55,11 +65,18 @@ export function answer(
             homeserver: {
               server_name: command.data.server,
               url: `https://matrix.${command.data.server}/`,
-              methods: { oauth: true, password: true },
+              methods: {
+                oauth: !passwordOnly,
+                password: true,
+                create_account: true,
+                qr: !passwordOnly,
+              },
             },
           },
         },
       ];
+    }
+
     case 'ListMembers':
       return [
         {
@@ -287,10 +304,167 @@ export function answer(
       return [];
     case 'SetStatus':
       return [{ type: 'Status', data: command.data }];
+    // As the engine: the flow's ID answers the request, before any of its steps.
+    case 'VerifyThisSession':
+    case 'VerifyUser': {
+      const account = command.type === 'VerifyUser' ? command.data.account : command.data;
+      const flowId = command.type === 'VerifyUser' ? `demo-${command.data.user_id}` : 'demo-self';
+
+      return [
+        { type: 'VerificationRequested', data: { request, account, flow_id: flowId } },
+        {
+          type: 'Verification',
+          data: {
+            account,
+            flow_id: flowId,
+            step: { type: 'Ready', data: { qr: demoQr(), scan: true } },
+          },
+        },
+      ];
+    }
+
+    case 'AcceptVerification':
+      return [
+        {
+          type: 'Verification',
+          data: { ...command.data, step: { type: 'Ready', data: { qr: demoQr(), scan: true } } },
+        },
+      ];
+    case 'CompareEmoji':
+      return [
+        {
+          type: 'Verification',
+          data: { ...command.data, step: { type: 'Compare', data: verificationEmojis() } },
+        },
+      ];
+    case 'ScanVerificationCode':
+      return [
+        {
+          type: 'Verification',
+          data: {
+            account: command.data.account,
+            flow_id: command.data.flow_id,
+            step: { type: 'Done' },
+          },
+        },
+      ];
+    case 'ConfirmVerification':
+      return [
+        {
+          type: 'Verification',
+          data: {
+            account: command.data.account,
+            flow_id: command.data.flow_id,
+            step: command.data.matches
+              ? { type: 'Done' }
+              : { type: 'Cancelled', data: 'they don’t match' },
+          },
+        },
+      ];
+    case 'LoadIdentity':
+      return [
+        {
+          type: 'Identity',
+          data: { ...command.data, identity: demoIdentity(command.data.user_id) },
+        },
+      ];
+    case 'ReadQrCode':
+      return [{ type: 'QrCodeRead', data: { request, code: DEMO_QR_BYTES } }];
+    case 'ImportRoomKeys':
+      return [{ type: 'KeysImported', data: { request, import: { imported: 112, total: 134 } } }];
+    case 'SetOfflineDevice':
+      return [
+        {
+          type: 'SecurityChanged',
+          data: {
+            account: command.data.account,
+            security: {
+              session_verified: true,
+              recovery: 'Enabled',
+              offline_device: command.data.on ? 'On' : 'Off',
+            },
+          },
+        },
+      ];
     default:
       return [];
   }
 }
+
+/**
+ * The steps a long-running sign-in command reports first, in the demo, before it waits for an
+ * answer (or a cancel): what its screen shows at the start.
+ */
+export function asking(command: Command, request: RequestId): EngineEvent[] {
+  switch (command.type) {
+    case 'LinkDevice':
+      return [
+        {
+          type: 'QrLogin',
+          data: {
+            request,
+            step:
+              command.data.scanned === null
+                ? { type: 'Show', data: demoQr() }
+                : { type: 'CheckCode', data: 7 },
+          },
+        },
+      ];
+    case 'SignInWithQr':
+      return [
+        {
+          type: 'QrLogin',
+          data: {
+            request,
+            step:
+              command.data.type === 'Show'
+                ? { type: 'Show', data: demoQr() }
+                : { type: 'CheckCode', data: 7 },
+          },
+        },
+      ];
+    case 'Register':
+      return [{ type: 'Registration', data: { request, step: { type: 'Terms', data: POLICIES } } }];
+    default:
+      return [];
+  }
+}
+
+/** What a demo registration asks next, after `answer`. */
+export function nextAsked(answer: Answer, request: RequestId): EngineEvent[] {
+  switch (answer.type) {
+    case 'Agree':
+      return [{ type: 'Registration', data: { request, step: { type: 'Token' } } }];
+    case 'CheckCode':
+      return [
+        {
+          type: 'QrLogin',
+          data: { request, step: { type: 'Approve', data: { url: ACCOUNT_PAGE } } },
+        },
+      ];
+    case 'RegistrationToken':
+      return [{ type: 'Registration', data: { request, step: { type: 'Email' } } }];
+    case 'Email':
+      return [
+        {
+          type: 'Registration',
+          data: {
+            request,
+            step: { type: 'EmailSent', data: { address: answer.data, unconfirmed: false } },
+          },
+        },
+      ];
+    case 'Continue':
+      return [];
+  }
+}
+
+const POLICIES = [
+  { name: 'Terms of service', url: 'https://example.org/terms' },
+  { name: 'Privacy policy', url: 'https://example.org/privacy' },
+];
+
+const ACCOUNT_PAGE = 'https://account.hobby.chat/link';
 
 /** A room as a link shows it: #general (joined) by its alias or ID, else a public room nobody joined. */
 function demoPreview(room: string): RoomPreview {
@@ -394,6 +568,8 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
   });
 
   const lists = new Map<string, RoomList>();
+  /** Sign-ins waiting for an answer or a cancel. */
+  const waiting = new Set<RequestId>();
   /** Drafts kept as the engine's store keeps them, for the run of the demo. */
   const drafts = new Map<string, Draft>();
   /** Each account's safety choices, as its account data holds them. */
@@ -610,6 +786,30 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
       finish(request, 'not in the demo');
 
       return;
+    }
+
+    // Sign-ins that ask on the way wait, as on a server, until answered to the end or cancelled.
+    const first = asking(command, request);
+
+    if (first.length > 0) {
+      for (const event of first) engine.emit(event);
+      waiting.add(request);
+
+      return;
+    }
+
+    if (command.type === 'Answer' && waiting.has(command.data.request)) {
+      const next = nextAsked(command.data.answer, command.data.request);
+
+      for (const event of next) engine.emit(event);
+
+      // Nothing more to ask: the demo has no account to sign in.
+      if (next.length === 0) {
+        waiting.delete(command.data.request);
+        finish(command.data.request, 'not in the demo');
+      }
+    } else if (command.type === 'Cancel' && waiting.delete(command.data)) {
+      finish(command.data, 'cancelled');
     }
 
     for (const event of answer(command, request, Date.now())) engine.emit(event);

@@ -1,13 +1,15 @@
 // Sessions: everywhere the account is signed in, this session first, each with its last
 // activity and verification. A session's row offers renaming it and signing it out; the server
-// may ask for the password first, and an OAuth account ends it on the server's page.
+// may ask for the password first, and an OAuth account ends it on the server's page. A verified
+// OAuth session also links a new device with a QR code, shown here or scanned from it.
 
 import type { Session } from '@better-matrix/matrix-native/types';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Fragment, useCallback } from 'react';
 import { ActionSheetIOS, Alert, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { locale, t } from '../../i18n';
+import { routes } from '../../routes';
 import { endSession, listSessions, renameSession } from '../../state/actions/security';
 import { useAppStore } from '../../state/react';
 import { font } from '../../theme/palette';
@@ -105,9 +107,52 @@ export default function SessionsScreen() {
 
   const sessions = account.sessions === null ? null : sortSessions(account.sessions);
 
+  // Linking hands the new device the account's secrets: an OAuth session that holds them.
+  const mayLink =
+    account.summary.sign_in === 'OAuth' && account.security?.session_verified === true;
+
+  const link = () => {
+    const show = () => router.push(routes.linkDevice(id));
+    const scan = () => router.push(routes.linkDevice(id, true));
+
+    if (Platform.OS === 'ios') {
+      const options = [
+        t('mobile.accounts.link_show'),
+        t('mobile.accounts.link_scan'),
+        t('common.cancel'),
+      ];
+
+      ActionSheetIOS.showActionSheetWithOptions(
+        { title: t('mobile.accounts.link_device'), options, cancelButtonIndex: 2 },
+        (index) => {
+          if (index === 0) show();
+          else if (index === 1) scan();
+        },
+      );
+
+      return;
+    }
+
+    Alert.alert(t('mobile.accounts.link_device'), t('mobile.accounts.link_device_hint'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('mobile.accounts.link_scan'), onPress: scan },
+      { text: t('mobile.accounts.link_show'), onPress: show },
+    ]);
+  };
+
   return (
     <SettingsPage title={t('settings.sessions')} testID="sessions">
       <AccountHeading account={account} />
+      {mayLink ? (
+        <ListSection footer={t('mobile.accounts.link_device_hint')}>
+          <ListRow
+            testID="link-device"
+            icon="qrCode"
+            title={t('mobile.accounts.link_device')}
+            onPress={link}
+          />
+        </ListSection>
+      ) : null}
       <ListSection title={t('settings.sessions')} footer={t('sessions.hint')}>
         {sessions === null ? (
           <ListRow title={t('sessions.loading')} />

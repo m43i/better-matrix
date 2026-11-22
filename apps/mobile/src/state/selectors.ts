@@ -2,10 +2,12 @@
 
 import type {
   AccountId,
+  Identity,
   MediaRef,
   Message,
   MediaSize,
   MessagePreview,
+  Person,
   RoomPreview,
   RoomSummary,
   SavedMessage,
@@ -485,4 +487,27 @@ export function galleryThumbnail(
   if (!attachment || previewHidden(state, id, roomId, message)) return null;
 
   return thumbnailOf(attachment)?.media ?? null;
+}
+
+/** Someone the account shares a room with, as a member list it fetched knows them. */
+export function knownPerson(state: State, id: AccountId, userId: string): Person | undefined {
+  for (const members of Object.values(account(state, id)?.members ?? {})) {
+    const found = members.people.find((m) => m.person.id === userId);
+
+    if (found) return found.person;
+  }
+
+  return undefined;
+}
+
+/**
+ * What the user knows of someone's identity: `undefined` until reported, `null` when they have
+ * none to verify.
+ */
+export function identityOf(
+  state: State,
+  id: AccountId,
+  userId: string,
+): Identity | null | undefined {
+  return account(state, id)?.identities[userId];
 }

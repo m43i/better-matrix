@@ -94,7 +94,17 @@ pub(crate) struct Sessions {
     lock: std::sync::Arc<std::sync::Mutex<()>>,
 }
 
+// Hand-written: the secret store has no `Debug`, and its contents mustn't reach a log.
+impl std::fmt::Debug for Sessions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Sessions").field("index", &self.index).finish_non_exhaustive()
+    }
+}
+
 const SECRET_PREFIX: &str = "session:";
+
+/// Where an account's offline device key is kept (`crate::offline_device`), beside its session.
+const OFFLINE_KEY_PREFIX: &str = "offline-device:";
 
 impl Sessions {
     pub fn new(root: &Path, secrets: std::sync::Arc<dyn SecretStore>) -> Self {
@@ -207,10 +217,32 @@ impl Sessions {
         Ok(self.secrets(id.as_str())?.map(|secrets| (stored, secrets)))
     }
 
+    /// The key of the offline device this session runs for an account, if any.
+    pub fn offline_key(&self, id: &AccountId) -> Result<Option<String>, Error> {
+        Ok(self.secrets.get(&format!("{OFFLINE_KEY_PREFIX}{id}"))?)
+    }
+
+    /// Keeps (or with `None` forgets) the key of the offline device this session runs. Under the
+    /// same lock as [`Sessions::remove`], and only for an account still listed: a replacement
+    /// finishing after a sign-out leaves no key behind.
+    pub fn set_offline_key(&self, id: &AccountId, key: Option<&str>) -> Result<(), Error> {
+        let _locked = self.locked();
+        let name = format!("{OFFLINE_KEY_PREFIX}{id}");
+        if key.is_some() && !self.list().iter().any(|known| known.id == id.as_str()) {
+            return Err(Error::UnknownAccount(id.clone()));
+        }
+        match key {
+            Some(key) => self.secrets.set(&name, key)?,
+            None => self.secrets.delete(&name)?,
+        }
+        Ok(())
+    }
+
     /// Forgets an account: its secrets, its entry, and its local store.
     pub fn remove(&self, id: &AccountId) -> Result<(), Error> {
         let _locked = self.locked();
         self.secrets.delete(&format!("{SECRET_PREFIX}{id}"))?;
+        self.secrets.delete(&format!("{OFFLINE_KEY_PREFIX}{id}"))?;
         let mut list = self.list();
         if let Some(known) = list.iter().find(|known| known.id == id.as_str()) {
             let _ = std::fs::remove_dir_all(&known.store_dir);
@@ -285,6 +317,30 @@ mod tests {
         let gone = s.secrets("@a:example.org").unwrap().is_none();
         let _ = std::fs::remove_dir_all(root);
         assert!(gone);
+    }
+
+    #[test]
+    fn a_removed_account_should_lose_its_offline_device_key() {
+        let (s, root) = sessions();
+        let id = AccountId::new("@a:example.org");
+        s.save(account("@a:example.org"), &secrets()).unwrap();
+        s.set_offline_key(&id, Some("key")).unwrap();
+        s.remove(&id).unwrap();
+        let gone = s.offline_key(&id).unwrap().is_none();
+        let _ = std::fs::remove_dir_all(root);
+        assert!(gone);
+    }
+
+    #[test]
+    fn an_offline_device_key_for_a_removed_account_should_not_be_kept() {
+        let (s, root) = sessions();
+        let id = AccountId::new("@a:example.org");
+        s.save(account("@a:example.org"), &secrets()).unwrap();
+        s.remove(&id).unwrap();
+        let refused = s.set_offline_key(&id, Some("key")).is_err();
+        let gone = s.offline_key(&id).unwrap().is_none();
+        let _ = std::fs::remove_dir_all(root);
+        assert!(refused && gone);
     }
 
     #[test]
