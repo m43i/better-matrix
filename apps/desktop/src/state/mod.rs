@@ -1830,7 +1830,12 @@ impl State {
             Purpose::Command => self.notice = Some(tf!("notice.command", error = error)),
             Purpose::Packs | Purpose::ListScheduled => {}
             Purpose::Places => self.places_failed(request, error),
-            Purpose::Locate => self.notice = Some(t!("search.message_unavailable").to_owned()),
+            // Only the latest jump says it found nothing.
+            Purpose::Locate if self.locating == Some(request) => {
+                self.locating = None;
+                self.notice = Some(t!("search.message_unavailable").to_owned());
+            }
+            Purpose::Locate => {}
             Purpose::Schedule => self.notice = Some(tf!("notice.schedule", error = error)),
             Purpose::Scheduling { owner, draft } => {
                 self.notice = Some(tf!("notice.schedule", error = error));

@@ -184,11 +184,14 @@ impl State {
                 let composer = self.composer_mut(target);
                 composer.cut_front(len);
                 let words = composer.edit.text.trim().to_owned();
-                let (reply, _) = composer.take_outgoing();
+                let (reply, messages) = composer.take_outgoing();
                 composer.reply_to = reply;
                 let html = matrix_core::html::spoiler(&words);
                 let body = super::composer::SPOILER_FALLBACK.to_owned();
-                Some(vec![Outgoing::Text { body, html: Some(html), mentions: Default::default() }])
+                let spoiler = Outgoing::Text { body, html: Some(html), mentions: Default::default() };
+                // The words go hidden in the text's place; the files go as they would.
+                let files = messages.into_iter().filter(|message| !matches!(message, Outgoing::Text { .. }));
+                Some(std::iter::once(spoiler).chain(files).collect())
             }
             SlashCommand::Me | SlashCommand::Plain => {
                 let composer = self.composer_mut(target);

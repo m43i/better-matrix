@@ -183,8 +183,9 @@ struct Kept {
     last_modified: Option<String>,
 }
 
-/// The least time a tile is kept fresh when the server says nothing: a day.
-const FRESH_AT_LEAST: u64 = 24 * 60 * 60 * 1000;
+/// How long a tile is kept fresh when the server says nothing readable: seven days, as
+/// OpenStreetMap's tile policy asks.
+const FRESH_AT_LEAST: u64 = 7 * 24 * 60 * 60 * 1000;
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -192,15 +193,16 @@ fn now_ms() -> u64 {
         .map_or(0, |at| u64::try_from(at.as_millis()).unwrap_or(u64::MAX))
 }
 
-/// When a response stops being fresh, by its `Cache-Control: max-age`, else its `Expires`, else
-/// [`FRESH_AT_LEAST`] from now.
+/// When a response stops being fresh, by its `Cache-Control: max-age` less its `Age` (what a
+/// cache on the way already held it for), else its `Expires`, else [`FRESH_AT_LEAST`] from now.
 fn fresh_until(headers: &reqwest::header::HeaderMap, now: u64) -> u64 {
     let header = |name| headers.get(name).and_then(|value| value.to_str().ok());
     let max_age = header(reqwest::header::CACHE_CONTROL).and_then(|value| {
         value.split(',').find_map(|part| part.trim().strip_prefix("max-age=")?.trim().parse::<u64>().ok())
     });
     if let Some(seconds) = max_age {
-        return now.saturating_add(seconds.saturating_mul(1000));
+        let age = header(reqwest::header::AGE).and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(0);
+        return now.saturating_add(seconds.saturating_sub(age).saturating_mul(1000));
     }
     let expires = header(reqwest::header::EXPIRES)
         .and_then(|value| httpdate::parse_http_date(value).ok())
@@ -505,7 +507,15 @@ mod tests {
     }
 
     #[test]
-    fn a_tile_the_server_says_nothing_of_should_stay_fresh_a_day() {
+    fn a_tile_a_cache_already_held_should_be_fresh_for_what_is_left() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::CACHE_CONTROL, "max-age=600".parse().expect("header"));
+        headers.insert(reqwest::header::AGE, "590".parse().expect("header"));
+        assert_eq!(fresh_until(&headers, 1_000), 11_000);
+    }
+
+    #[test]
+    fn a_tile_the_server_says_nothing_of_should_stay_fresh_a_week() {
         assert_eq!(fresh_until(&reqwest::header::HeaderMap::new(), 0), FRESH_AT_LEAST);
     }
 

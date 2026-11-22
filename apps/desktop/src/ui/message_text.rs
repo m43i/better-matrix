@@ -106,7 +106,7 @@ fn inline(key: &str, edit: &TextEdit, range: std::ops::Range<usize>, block: Bloc
                 }
                 Mark::Pill(id) => {
                     let absolute = mark.start;
-                    match pill(id, start..end, absolute, look, p) {
+                    match pill(id, start..end, absolute, &words[start..end], look, p) {
                         Inline::Chip { style, link, span: chip_span } => {
                             pills.push((start..end, style));
                             links.extend(link.map(|link| *link));
@@ -153,6 +153,14 @@ fn inline(key: &str, edit: &TextEdit, range: std::ops::Range<usize>, block: Bloc
     content
 }
 
+/// A short fingerprint of a spoiler's words, for its link id.
+fn fingerprint(words: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    words.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// The side of a custom emoji in text.
 const EMOJI: f32 = 22.0;
 
@@ -169,7 +177,7 @@ enum Inline {
 /// A message's pill (`matrix_core::html`): a mention opens its person or room and the reader's
 /// own stands out; a spoiler hides its words until pressed; maths reads in italics on a
 /// chip; a custom emoji shows its picture.
-fn pill(id: &str, range: std::ops::Range<usize>, absolute: usize, look: Look<'_>, p: &Palette) -> Inline {
+fn pill(id: &str, range: std::ops::Range<usize>, absolute: usize, words: &str, look: Look<'_>, p: &Palette) -> Inline {
     if let Some(link) = matrix_core::html::mention_link(id) {
         let mine = id.strip_prefix("user:") == Some(look.me);
         let style = if mine {
@@ -180,7 +188,9 @@ fn pill(id: &str, range: std::ops::Range<usize>, absolute: usize, look: Look<'_>
         return Inline::Chip { style, link: Some(Box::new(Link::new(range, link))), span: None };
     }
     if id == "spoiler" {
-        let link_id = format!("{SPOILER_LINK}{}/{absolute}", look.event_id);
+        // Revealed words stay revealed for these words only: an edit that hides others in their
+        // place hides them again.
+        let link_id = format!("{SPOILER_LINK}{}/{absolute}/{:x}", look.event_id, fingerprint(words));
         if look.revealed.contains(&link_id) {
             return Inline::Chip {
                 style: PillStyle::new().bg(p.text_muted.alpha(0.15)).fg(p.text),

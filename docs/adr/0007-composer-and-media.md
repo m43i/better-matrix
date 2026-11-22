@@ -59,7 +59,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   global display name. A name the app doesn't know stops the send with a notice and keeps the
   text: a typo never goes out. `//` sends a leading slash; `/usr/bin` is a message.
 - **Spoilers and formulas:** received spoilers draw as a block of their own colour, carrying an
-  app link (`SPOILER_LINK`) a press reveals for the run (`State::revealed`). A spoiler is its
+  app link (`SPOILER_LINK`, naming the message, the place and a fingerprint of the words) a press
+  reveals for the run (`State::revealed`): an edit hiding other words there hides them again. A spoiler is its
   plain words (a custom emoji by its description): nothing inside it becomes a pill or link that
   could show or act through it, and a link around a spoiler is no link, its words being hidden.
   A spoiler wins over everything else an element says (maths too), and a code block holding one
@@ -92,7 +93,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   `Command::FetchMedia` draws from the standard tiles at the size asked for, with a pin, so maps
   load, cache and retry as pictures do on both apps. As OpenStreetMap's tile policy asks, tiles
   are kept on disk (`StoreLayout::map_tiles`) for as long as the server's `Cache-Control` or
-  `Expires` say (a day when it says nothing), then asked for again with `If-None-Match` /
+  `Expires` say (less what a cache on the way already held it for; seven days when it says
+  nothing readable), then asked for again with `If-None-Match` /
   `If-Modified-Since`, a copy past its time still showing when the server can't be reached; the
   last 64 are also kept decoded in memory, and they are fetched two at a time with a User-Agent
   naming the app and its home;

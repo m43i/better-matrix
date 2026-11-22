@@ -6014,3 +6014,38 @@ fn spoiler_should_hide_its_words_even_in_a_code_block() {
     assert_eq!(body, "[Spoiler]");
     assert_eq!(html, "<span data-mx-spoiler>secret</span>");
 }
+
+#[test]
+fn spoiler_should_send_the_drafts_files_and_reply_too() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    let answered = Message { event_id: "$q".into(), sender_name: "Grace".into(), ..Message::default() };
+    s.start_reply(ComposerTarget::Room, &answered, &mut Tx::default());
+    s.composer.attach([PathBuf::from("/a.png")]);
+    s.composer.edit.insert("/spoiler the ending");
+    s.send_message(ComposerTarget::Room, &mut Tx::default());
+    let sent: Vec<_> = all_commands(&mut commands)
+        .into_iter()
+        .filter_map(|command| match command {
+            Command::Send { message, reply_to, .. } => Some((message, reply_to)),
+            _ => None,
+        })
+        .collect();
+    assert!(matches!(&sent[0], (Outgoing::Text { body, .. }, Some(reply)) if body == "[Spoiler]" && reply == "$q"));
+    assert!(matches!(&sent[1], (Outgoing::File(_), None)));
+}
+
+#[test]
+fn a_search_hit_opened_while_a_lookup_waits_should_not_be_undone_by_it() {
+    let (mut s, mut commands) = state();
+    let id = writing(&mut s, &mut commands);
+    s.jump_to_message(&id, "!one:x", "$far");
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::LocateMessage { .. }))
+        .expect("a lookup");
+    s.open_message(&TimelineKey::room("!one:x"), "$hit");
+    let key = TimelineKey::thread("!one:x", "$root");
+    apply(&mut s, Event::MessageLocated { request, account: id, key, event_id: "$far".into() });
+    assert_eq!(s.message_jump.as_ref().map(|jump| jump.event_id.as_str()), Some("$hit"));
+}

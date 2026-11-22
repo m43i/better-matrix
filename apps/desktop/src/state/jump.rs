@@ -31,7 +31,6 @@ impl State {
                 .is_some_and(|timeline| timeline.messages().any(|message| message.event_id == event_id))
         });
         if let (true, Some((_, key))) = (held, shown) {
-            self.locating = None;
             self.open_message(&key, event_id);
             return;
         }

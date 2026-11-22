@@ -322,6 +322,8 @@ impl super::State {
     /// Open a message from search or pinned messages, loading history until it is on screen.
     pub fn open_message(&mut self, key: &matrix_core::TimelineKey, event_id: &str) {
         let Some(account) = self.nav.account.clone() else { return };
+        // This jump is the latest: a lookup still on its way for an earlier one is let go.
+        self.locating = None;
         self.message_jump = Some(MessageJump { account, key: key.clone(), event_id: event_id.to_owned() });
         self.open_found_room(&key.room_id);
         if let Some(root) = &key.thread {
