@@ -389,7 +389,10 @@ Date: 2026-11-16
   around a spoiler is neither, its content drawn as it is, so its label or look can't give the
   spoiler away; the engine reads them the same; a span marked both spoiler and formula is a
   spoiler; a code block holding a spoiler is drawn as its lines of text without its code, the
-  spoiler hidden in it, as the engine reads it), formulas as Unicode (`state/math.ts`, a
+  spoiler hidden in it, as the engine reads it; a tapped spoiler stays shown while its screen
+  is mounted, kept by the screen, not the view, by its message, its place in the message and
+  its words (`state/spoilers.ts`), so a row the list recycles for another message, or an edit
+  putting other words where it stood, shows it hidden), formulas as Unicode (`state/math.ts`, a
   line-for-line port of `math.rs` run against its `math.json` vectors, bounded as it is: past
   2000 bytes, 32 nested groups or commands, or 8000 bytes of output, a formula shows as its
   LaTeX; a `<div>` formula gets its own line) and custom emoji as pictures in the line.
@@ -407,7 +410,13 @@ Date: 2026-11-16
   it (`openJoined`, the room when the engine can't tell). Either answer navigates only while
   its jump is the latest one begun and the screen that asked is still on show (`ui/links/jumps.ts`;
   the link sheet stays up while it waits and goes as the message opens): an answer that comes
-  after the user went elsewhere or began another jump opens nothing, and says nothing.
+  after the user went elsewhere or began another jump opens nothing, and says nothing. A jump
+  begins at the tap: a quote's (`beginJump`) before it pages back, so a link tapped meanwhile
+  is the newer one, and its paging stops quietly once a later jump began or its screen left; a
+  link or room pill tapped in a message carries its timeline's screen guard
+  (`TimelineContext.shown`). Read marking waits for the opening only (`state/seek.ts`): a
+  timeline opened at a link's message is positioned once it got there, gave up looking, or the
+  reader tapped a quote; a quote's own search never holds it back.
 - **Demo scenes** (`src/demo`) are the mobile `--scene`: the desktop's fixtures as engine
   events through `apply`, on a demo engine that finishes every command and answers lists,
   searches, sends and calls from the fixtures (media from the app's own assets). Dev builds

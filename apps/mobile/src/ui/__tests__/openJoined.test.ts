@@ -2,8 +2,8 @@ import { detachedEngine } from '@better-matrix/matrix-native/client';
 
 import { routes } from '../../routes';
 import { Store } from '../../state/store';
-import { ADA, summary } from '../../test/fixtures';
-import { openElsewhere, openJoined } from '../links/open';
+import { ADA, roomSummary, summary } from '../../test/fixtures';
+import { beginJump, openElsewhere, openJoined, openPermalink } from '../links/open';
 
 const navigation = { navigate: jest.fn(), push: jest.fn() };
 
@@ -109,21 +109,23 @@ describe('openElsewhere', () => {
   const located = async (
     where: { thread: string | null } | 'unknown',
     current: string | null,
-    shown = () => true,
+    leave = false,
   ) => {
     const { engine, sent } = detachedEngine();
     const store = new Store(engine);
     engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    let shown = true;
 
     const opened = openElsewhere(
       store,
       ADA,
       { room_id: '!r:x', thread: current },
       '$q',
+      beginJump(() => shown),
       navigation,
-      shown,
     );
 
+    if (leave) shown = false;
     const request = sent[0]!.request;
 
     if (where !== 'unknown')
@@ -162,6 +164,74 @@ describe('openElsewhere', () => {
   });
 
   it('a quoted message found once its timeline left the screen should open nothing', async () => {
-    expect(await located({ thread: '$root' }, null, () => false)).toEqual(['stale', []]);
+    expect(await located({ thread: '$root' }, null, true)).toEqual(['stale', []]);
+  });
+});
+
+describe('jumps begun at the tap', () => {
+  it('a quote paged back for after a later jump began should open nothing, nor ask', async () => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    const quote = beginJump();
+    openJoined(store, { type: 'room', account: ADA, roomId: '!r:x', eventId: null }, navigation);
+
+    const outcome = await openElsewhere(
+      store,
+      ADA,
+      { room_id: '!r:x', thread: null },
+      '$q',
+      quote,
+      navigation,
+    );
+
+    expect([outcome, sent.length, navigation.push.mock.calls]).toEqual([
+      'stale',
+      0,
+      [[routes.room(ADA, '!r:x', undefined)]],
+    ]);
+  });
+
+  it('a link looked up when a quote was tapped since should open nothing', async () => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    openJoined(store, { type: 'room', account: ADA, roomId: '!r:x', eventId: '$m' }, navigation);
+    beginJump();
+    engine.emit({ type: 'Finished', data: { request: sent[0]!.request, result: { Err: 'no' } } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(navigation.push.mock.calls).toEqual([]);
+  });
+});
+
+describe('openPermalink', () => {
+  it('a permalink tapped in a message should open nothing once its screen left', async () => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    engine.emit({
+      type: 'RoomsUpdated',
+      data: { account: ADA, list: { rooms: [roomSummary('!r:x')], spaces: [], invitations: [] } },
+    });
+    let shown = true;
+    openPermalink(store, 'https://matrix.to/#/!r:x/$m', ADA, () => shown, navigation);
+    shown = false;
+    engine.emit({ type: 'Finished', data: { request: sent[0]!.request, result: { Err: 'no' } } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(navigation.push.mock.calls).toEqual([]);
+  });
+
+  it('a permalink tapped in a message should open the room at it while its screen is on show', async () => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    engine.emit({
+      type: 'RoomsUpdated',
+      data: { account: ADA, list: { rooms: [roomSummary('!r:x')], spaces: [], invitations: [] } },
+    });
+    openPermalink(store, 'https://matrix.to/#/!r:x/$m', ADA, () => true, navigation);
+    engine.emit({ type: 'Finished', data: { request: sent[0]!.request, result: { Err: 'no' } } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(navigation.push.mock.calls).toEqual([[routes.room(ADA, '!r:x', '$m')]]);
   });
 });

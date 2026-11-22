@@ -2,7 +2,8 @@
 // list that starts at the newest message and holds the reading position as older pages arrive
 // above it. Scrolling near the top loads the page before; reaching the newest marks it read;
 // scrolled up, a button jumps back down. A quoted message, or the `target` a link names,
-// scrolls into view and is highlighted; one not loaded yet is looked for a few pages back.
+// scrolls into view and is highlighted; one not loaded yet is looked for a few pages back
+// (state/seek.ts).
 
 import type { AccountId, Message, TimelineKey } from '@better-matrix/matrix-native/types';
 import {
@@ -50,14 +51,22 @@ import {
   shouldMarkRead,
 } from '../../state/plan';
 import { shallow, useAppStore, useStore } from '../../state/react';
+import { openSeek, quoteTapped, seekEnded, sought } from '../../state/seek';
 import { room as roomOf, timeline as timelineOf } from '../../state/selectors';
 import { routes } from '../../routes';
 import { font } from '../../theme/palette';
 import { Icon } from '../icons';
-import { openElsewhere } from '../links/open';
+import type { Jump } from '../links/jumps';
+import { beginJump, openElsewhere } from '../links/open';
 import { usePalette } from '../theme';
 import { useShown } from '../useShown';
-import { PinnedContext, TimelineContext, type TimelineContextValue } from './context';
+import {
+  PinnedContext,
+  SpoilerContext,
+  TimelineContext,
+  type TimelineContextValue,
+  useSpoilers,
+} from './context';
 import { MessageRow } from './MessageRow';
 import {
   DateDivider,
@@ -131,6 +140,8 @@ export function Timeline({
   const store = useAppStore();
   // Whether this screen is still on show when a jump elsewhere is answered.
   const shown = useShown();
+  // The spoilers tapped open, by message, place and words, while the timeline is on screen.
+  const spoilers = useSpoilers();
   const thread = timelineKey.thread;
   const timeline = useStore((s) => timelineOf(s, account, timelineKey));
 
@@ -169,10 +180,13 @@ export function Timeline({
 
   const list = useRef<FlashListRef<Row>>(null);
   // The list starts drawing at the newest; opened at a linked message, it is positioned once it
-  // jumped there (or gave up looking), so the newest isn't marked read on the way.
+  // jumped there, gave up looking, or the reader moved on with a quote (state/seek.ts), so the
+  // newest isn't marked read on the way. A quote's own search never holds read marking back.
   const [atLatest, setAtLatest] = useState(true);
-  const [positionedAt, setPositionedAt] = useState<string | null>(null);
-  const positioned = target === null || positionedAt === target;
+  const [seek, setSeek] = useState(() => openSeek(target));
+
+  if (seek.target !== target) setSeek(openSeek(target));
+  const positioned = seek.positioned;
   const [farFromLatest, setFarFromLatest] = useState(false);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const onScreen = useOnScreen(account, timelineKey);
@@ -274,29 +288,40 @@ export function Timeline({
     [],
   );
 
-  // A message a quote points at that isn't loaded yet: looked for as a link's target is.
-  const [jump, setJump] = useState<string | null>(null);
-  const wanted = jump ?? target;
+  // The message looked for: the link's target, or one a quote points at that isn't loaded yet,
+  // looked for as a link's target is.
+  const wanted = sought(seek);
+  const quote = seek.quote;
+  // The jump the quote's tap began (`beginJump`): through paging and the engine's answer, it
+  // goes on only while no later jump began and this screen is on show.
+  const quoteJump = useRef<Jump | null>(null);
 
   // A linked message: scroll to it once loaded, paging back a little to find it.
   const targetDone = useRef<string | null>(null);
   const targetPages = useRef(0);
   useEffect(() => {
     if (!wanted || targetDone.current === wanted) return;
+    const ended = () => setSeek((now) => seekEnded(now, wanted));
 
-    if (rowOf(rows, wanted) >= 0) {
+    if (quote !== null && quoteJump.current?.() === false) {
+      // A later jump began, or the user left: the quote's search stops, quietly.
       targetDone.current = wanted;
-      // Once the list laid the rows out; it is positioned once the jump's scroll was reported.
+      ended();
+    } else if (rowOf(rows, wanted) >= 0) {
+      targetDone.current = wanted;
+      // Once the list laid the rows out; the search ends once the jump's scroll was reported.
       requestAnimationFrame(() => {
-        scrollTo(wanted, wanted !== jump);
-        settleTimer.current = setTimeout(() => setPositionedAt(wanted), SETTLE_MS);
+        scrollTo(wanted, quote !== null);
+
+        if (settleTimer.current) clearTimeout(settleTimer.current);
+        settleTimer.current = setTimeout(ended, SETTLE_MS);
       });
     } else if (timeline.opening || timeline.loadingOlder || timeline.historyError !== null) {
       // Wait: for the timeline to open, for the page coming, or for Try again after a failure
       // (until then nothing is marked read under the reader).
     } else if (
       !reachedStart &&
-      ((localTarget && wanted === target) || targetPages.current < TARGET_PAGES)
+      ((localTarget && quote === null) || targetPages.current < TARGET_PAGES)
     ) {
       targetPages.current += 1;
       loadMore();
@@ -304,23 +329,21 @@ export function Timeline({
       // Not found: the list stays where it is. A quoted message may live in another timeline
       // (a reply in a thread, a room message quoted in one): it opens there, as a link's does.
       targetDone.current = wanted;
-      setPositionedAt(wanted);
+      ended();
+      const jump = quoteJump.current;
 
-      if (wanted === jump)
-        void openElsewhere(store, account, timelineKey, wanted, router, () => shown.current).then(
-          (outcome) => {
-            if (outcome === 'missing')
-              store.update((s) => addNotice(s, t('mobile.conversation.message_missing'), account));
-          },
-        );
+      if (quote !== null && jump !== null)
+        void openElsewhere(store, account, timelineKey, wanted, jump, router).then((outcome) => {
+          if (outcome === 'missing')
+            store.update((s) => addNotice(s, t('mobile.conversation.message_missing'), account));
+        });
     }
   }, [
     store,
     account,
     timelineKey,
-    jump,
+    quote,
     wanted,
-    target,
     localTarget,
     rows,
     reachedStart,
@@ -329,7 +352,6 @@ export function Timeline({
     timeline.historyError,
     scrollTo,
     loadMore,
-    shown,
   ]);
 
   const context = useMemo<TimelineContextValue>(
@@ -338,11 +360,21 @@ export function Timeline({
       timelineKey,
       thread,
       scrollTo: (eventId) => {
-        if (scrollTo(eventId)) return;
+        // The tap is the jump: from now on an earlier one's late answer (a link being looked up,
+        // another quote's) opens nothing, and this one's goes on only while this screen is on show.
+        const jump = beginJump(() => shown.current);
+
+        if (scrollTo(eventId)) {
+          setSeek((now) => quoteTapped(now, null));
+
+          return;
+        }
+
         // Not loaded: look for it a few pages back.
+        quoteJump.current = jump;
         targetPages.current = 0;
         targetDone.current = null;
-        setJump(eventId);
+        setSeek((now) => quoteTapped(now, eventId));
       },
       openActions: (message) => {
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -355,8 +387,9 @@ export function Timeline({
           ),
         );
       },
+      shown: () => shown.current,
     }),
-    [account, timelineKey, thread, scrollTo],
+    [account, timelineKey, thread, scrollTo, shown],
   );
 
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -399,48 +432,52 @@ export function Timeline({
   return (
     <TimelineContext.Provider value={context}>
       <PinnedContext.Provider value={pinned}>
-        <View style={styles.frame}>
-          <FlashList
-            ref={list}
-            data={rows}
-            renderItem={renderItem}
-            keyExtractor={keyOf}
-            getItemType={typeOf}
-            extraData={highlighted}
-            onScroll={onScroll}
-            onViewableItemsChanged={onViewableItemsChanged}
-            scrollEventThrottle={32}
-            onStartReached={loadMore}
-            onStartReachedThreshold={1}
-            maintainVisibleContentPosition={{
-              autoscrollToBottomThreshold: 0.2,
-              animateAutoScrollToBottom: true,
-              startRenderingFromBottom: true,
-            }}
-            keyboardDismissMode="interactive"
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.content}
-            ListEmptyComponent={
-              empty ? <ActivityIndicator style={styles.spinner} color={palette.textMuted} /> : null
-            }
-          />
-          {farFromLatest ? (
-            <Pressable
-              onPress={() => list.current?.scrollToEnd({ animated: true })}
-              accessibilityRole="button"
-              accessibilityLabel={t('mobile.conversation.jump_latest')}
-              style={[
-                styles.jump,
-                { backgroundColor: palette.surface, borderColor: palette.divider },
-              ]}
-            >
-              <Icon name="arrowDown" size={16} color={palette.accent} />
-              <Text style={[font.section, { color: palette.accent }]}>
-                {t('mobile.conversation.jump_latest')}
-              </Text>
-            </Pressable>
-          ) : null}
-        </View>
+        <SpoilerContext.Provider value={spoilers}>
+          <View style={styles.frame}>
+            <FlashList
+              ref={list}
+              data={rows}
+              renderItem={renderItem}
+              keyExtractor={keyOf}
+              getItemType={typeOf}
+              extraData={highlighted}
+              onScroll={onScroll}
+              onViewableItemsChanged={onViewableItemsChanged}
+              scrollEventThrottle={32}
+              onStartReached={loadMore}
+              onStartReachedThreshold={1}
+              maintainVisibleContentPosition={{
+                autoscrollToBottomThreshold: 0.2,
+                animateAutoScrollToBottom: true,
+                startRenderingFromBottom: true,
+              }}
+              keyboardDismissMode="interactive"
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.content}
+              ListEmptyComponent={
+                empty ? (
+                  <ActivityIndicator style={styles.spinner} color={palette.textMuted} />
+                ) : null
+              }
+            />
+            {farFromLatest ? (
+              <Pressable
+                onPress={() => list.current?.scrollToEnd({ animated: true })}
+                accessibilityRole="button"
+                accessibilityLabel={t('mobile.conversation.jump_latest')}
+                style={[
+                  styles.jump,
+                  { backgroundColor: palette.surface, borderColor: palette.divider },
+                ]}
+              >
+                <Icon name="arrowDown" size={16} color={palette.accent} />
+                <Text style={[font.section, { color: palette.accent }]}>
+                  {t('mobile.conversation.jump_latest')}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </SpoilerContext.Provider>
       </PinnedContext.Provider>
     </TimelineContext.Provider>
   );

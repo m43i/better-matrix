@@ -12,10 +12,18 @@ import { type LinkRoute, routeLink } from '../../state/linkRoute';
 import { parsePermalink } from '../../state/permalinks';
 import { addNotice } from '../../state/reducer';
 import type { Store } from '../../state/store';
-import { jumps } from './jumps';
+import { type Jump, jumps } from './jumps';
 
 /** The app's jumps: a new one supersedes any whose answer hasn't come yet. */
 const JUMPS = jumps();
+
+/**
+ * Begins a jump at the tap that asks for it, from a screen on show while `shown` says so: any
+ * earlier jump's answer no longer navigates, and this one's only while it is the latest.
+ */
+export function beginJump(shown?: () => boolean): Jump {
+  return JUMPS.begin(shown);
+}
 
 function appRouter(): typeof ExpoRouter {
   // SAFETY: the literal require resolves Expo Router's typed module; tests inject navigation before this boundary.
@@ -33,6 +41,7 @@ export function openPermalink(
   link: string,
   preferred: AccountId | null = null,
   shown?: () => boolean,
+  navigation: Pick<typeof ExpoRouter, 'navigate' | 'push'> = appRouter(),
 ): void {
   const route = routeLink(store.getState(), parsePermalink(link), preferred);
 
@@ -43,13 +52,13 @@ export function openPermalink(
       return;
     case 'room':
     case 'space':
-      openJoined(store, route, appRouter(), shown);
+      openJoined(store, route, navigation, shown);
 
       return;
     case 'screen':
       // Where the user goes now, no earlier jump's answer takes them away.
       JUMPS.begin();
-      appRouter().push(routes.link(link, route.account ?? undefined));
+      navigation.push(routes.link(link, route.account ?? undefined));
   }
 }
 
@@ -104,18 +113,19 @@ export type Elsewhere = 'opened' | 'missing' | 'stale';
 /**
  * Opens a message the timeline `current` didn't find by paging back (a quote of a reply in a
  * thread, or of a room message from inside a thread): the engine says which timeline shows it,
- * and that one opens at it, as a permalink's message does, while this is the latest jump and the
- * timeline's screen is on show (`shown`).
+ * and that one opens at it, as a permalink's message does, while `wanted` says so: the jump
+ * begun at the quote's tap (`beginJump`, with its screen's guard), so paging back first doesn't
+ * make it newer than a jump tapped since.
  */
 export async function openElsewhere(
   store: Store,
   account: AccountId,
   current: TimelineKey,
   eventId: string,
+  wanted: Jump,
   navigation: Pick<typeof ExpoRouter, 'push'> = appRouter(),
-  shown?: () => boolean,
 ): Promise<Elsewhere> {
-  const wanted = JUMPS.begin(shown);
+  if (!wanted()) return 'stale';
   let located: TimelineKey;
 
   try {

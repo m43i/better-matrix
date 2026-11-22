@@ -2,38 +2,59 @@
 // links that open in the browser, mention pills, spoilers hidden until tapped, formulas as
 // Unicode, custom emoji as inline pictures, code, quotes and lists. Never raw HTML.
 
-import { memo, useState } from 'react';
+import { memo } from 'react';
 import { Image, Platform, ScrollView, StyleSheet, Text, type TextStyle, View } from 'react-native';
 
 import { t } from '../../i18n';
 import { type Block, type Inline, type Marks } from '../../state/html';
 import { mxcMedia } from '../../state/messages';
 import { useAppStore } from '../../state/react';
+import { spoilerId } from '../../state/spoilers';
 import { font } from '../../theme/palette';
 import { AVATAR_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
-import { useTimelineContext } from './context';
+import { useSpoiler, useTimelineContext } from './context';
 import { openLink, openMention } from './open';
 
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
+/**
+ * `blocks` of the message `owner` (its event ID: a spoiler shown in it stays shown for it only).
+ * `place` is where these blocks stand in the message, for blocks inside a quote or a list.
+ */
 export const RichText = memo(function RichText({
   blocks,
+  owner,
   muted = false,
+  place = '',
 }: {
   blocks: Block[];
+  owner: string;
   muted?: boolean;
+  place?: string;
 }) {
   return (
     <View style={styles.blocks}>
       {blocks.map((block, index) => (
-        <BlockView key={index} block={block} muted={muted} />
+        <BlockView
+          key={index}
+          block={block}
+          owner={owner}
+          muted={muted}
+          place={`${place}${index}`}
+        />
       ))}
     </View>
   );
 });
 
-function BlockView({ block, muted }: { block: Block; muted: boolean }) {
+interface Placed {
+  owner: string;
+  /** The path to this block or inline through the message's blocks. */
+  place: string;
+}
+
+function BlockView({ block, muted, owner, place }: { block: Block; muted: boolean } & Placed) {
   const palette = usePalette();
   const color = muted ? palette.textMuted : palette.text;
 
@@ -41,7 +62,7 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
     case 'paragraph':
       return (
         <Text style={[font.body, { color }]}>
-          <Inlines inlines={block.inlines} />
+          <Inlines inlines={block.inlines} owner={owner} place={place} />
         </Text>
       );
     case 'heading':
@@ -53,7 +74,7 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
             { color, fontSize: block.level === 1 ? 20 : block.level === 2 ? 18 : 16 },
           ]}
         >
-          <Inlines inlines={block.inlines} />
+          <Inlines inlines={block.inlines} owner={owner} place={place} />
         </Text>
       );
     case 'code':
@@ -72,7 +93,7 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
     case 'quote':
       return (
         <View style={[styles.quote, { borderLeftColor: palette.divider }]}>
-          <RichText blocks={block.blocks} muted />
+          <RichText blocks={block.blocks} owner={owner} muted place={`${place}.`} />
         </View>
       );
     case 'list':
@@ -84,7 +105,7 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
                 {block.ordered ? `${block.start + index}.` : '•'}
               </Text>
               <View style={styles.itemBody}>
-                <RichText blocks={item} muted={muted} />
+                <RichText blocks={item} owner={owner} muted={muted} place={`${place}.${index}.`} />
               </View>
             </View>
           ))}
@@ -95,7 +116,7 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
   }
 }
 
-function Inlines({ inlines }: { inlines: Inline[] }) {
+function Inlines({ inlines, owner, place }: { inlines: Inline[] } & Placed) {
   return (
     <>
       {inlines.map((inline, index) => {
@@ -105,7 +126,11 @@ function Inlines({ inlines }: { inlines: Inline[] }) {
           case 'mention':
             return <Pill key={index} inline={inline} />;
           case 'spoiler':
-            return <Spoiler key={index} text={inline.text} />;
+            return (
+              <Spoiler key={index} id={spoilerId(owner, `${place}/${index}`, inline.text)}>
+                {inline.text}
+              </Spoiler>
+            );
           case 'math':
             return <MathText key={index} text={inline.text} latex={inline.latex} />;
           case 'emote':
@@ -119,23 +144,24 @@ function Inlines({ inlines }: { inlines: Inline[] }) {
 /**
  * Hidden text: a block of the muted colour until tapped, then its words. A spoiler is only ever
  * its plain words (`state/html.ts`): no link, mention or custom emoji inside it shows anything,
- * hidden or not.
+ * hidden or not. Whether it is shown is the screen's, by the spoiler's `id` (its message, place
+ * and words, `state/spoilers.ts`), not this view's: a recycled row or an edit shows it hidden.
  */
-function Spoiler({ text }: { text: string }) {
+function Spoiler({ id, children }: { id: string; children: string }) {
   const palette = usePalette();
-  const [shown, setShown] = useState(false);
+  const { shown, reveal } = useSpoiler(id);
 
-  if (shown) return <Text>{text}</Text>;
+  if (shown) return <Text>{children}</Text>;
 
   return (
     <Text
       accessibilityRole="button"
       accessibilityLabel={t('mobile.conversation.spoiler')}
-      onPress={() => setShown(true)}
+      onPress={reveal}
       suppressHighlighting
       style={{ color: palette.textMuted, backgroundColor: palette.textMuted }}
     >
-      {text}
+      {children}
     </Text>
   );
 }
@@ -172,7 +198,7 @@ function Emote({ url, label }: { url: string; label: string }) {
 function Run({ text, marks }: { text: string; marks: Marks }) {
   const palette = usePalette();
   const store = useAppStore();
-  const { account } = useTimelineContext();
+  const { account, shown } = useTimelineContext();
 
   const underline = marks.underline || marks.link;
 
@@ -196,7 +222,11 @@ function Run({ text, marks }: { text: string; marks: Marks }) {
 
   if (link) {
     return (
-      <Text style={style} onPress={() => openLink(store, link, account)} accessibilityRole="link">
+      <Text
+        style={style}
+        onPress={() => openLink(store, link, account, shown)}
+        accessibilityRole="link"
+      >
         {text}
       </Text>
     );
@@ -209,7 +239,7 @@ function Run({ text, marks }: { text: string; marks: Marks }) {
 function Pill({ inline }: { inline: Extract<Inline, { type: 'mention' }> }) {
   const palette = usePalette();
   const store = useAppStore();
-  const { account, timelineKey } = useTimelineContext();
+  const { account, timelineKey, shown } = useTimelineContext();
   const me = inline.kind === 'user' && inline.id === account;
 
   const label =
@@ -218,7 +248,7 @@ function Pill({ inline }: { inline: Extract<Inline, { type: 'mention' }> }) {
   return (
     <Text
       accessibilityRole="link"
-      onPress={() => openMention(store, account, timelineKey.room_id, inline)}
+      onPress={() => openMention(store, account, timelineKey.room_id, inline, shown)}
       style={{
         fontWeight: '600',
         color: me ? palette.mention : palette.accent,
