@@ -790,6 +790,8 @@ enum Purpose {
     ReadRoomSettings,
     /// Changing one of a room's or space's settings.
     RoomSettings,
+    /// Saving a room's name or topic as typed in its settings (`State::room_text_saved`).
+    RoomText,
     /// Upgrading the room `from`, whose new room opens once made if the user is still on it:
     /// its settings, or the room itself.
     Upgrade {
@@ -1923,6 +1925,7 @@ impl State {
                     self.membership_finished(account, room_id, *action, scope)
                 }
                 Purpose::Successor { account, from, to } => self.successor_joined(account, from, to),
+                Purpose::RoomText => self.room_text_saved(request, true),
                 Purpose::Recover if matches!(self.modal, Some(Modal::RecoveryKeyEntry { .. })) => self.modal = None,
                 Purpose::KeyFile => self.key_file_done(request),
                 Purpose::Guarded { action: Guarded::ChangePassword { .. }, .. } => self.password_changed(),
@@ -2129,6 +2132,10 @@ impl State {
             Purpose::Source => self.source_failed(request, &error),
             Purpose::ReadRoomSettings => self.notice = Some(tf!("notice.room_settings_read", error = error)),
             Purpose::RoomSettings => self.notice = Some(tf!("notice.room_settings", error = error)),
+            Purpose::RoomText => {
+                self.room_text_saved(request, false);
+                self.notice = Some(tf!("notice.room_settings", error = error));
+            }
             Purpose::Upgrade { .. } => self.notice = Some(tf!("notice.upgrade", error = error)),
             Purpose::SpaceRooms { order } => {
                 if let Some(order) = order {

@@ -141,7 +141,10 @@ impl Members {
         let allowed = match action {
             Moderation::Kick => self.can_kick,
             Moderation::Ban => self.can_ban,
-            Moderation::Role(role) => self.can_set_roles && role.level() <= self.own_level && role != member.role,
+            // By the exact level: someone at a custom 25 may be set back to Member (0).
+            Moderation::Role(role) => {
+                self.can_set_roles && role.level() <= self.own_level && role.level() != member.level
+            }
             Moderation::Level(level) => self.can_set_roles && level <= self.own_level && level != member.level,
             // Lifting a ban is a kick from it: both rights (Matrix's authorization rules).
             Moderation::Unban => self.can_ban && self.can_kick,
@@ -764,6 +767,13 @@ mod tests {
         assert!(!kicked.load(Ordering::Relaxed));
         // The member list after it reads them afresh, not the store that missed the join.
         assert!(!account.room("!room:example.org").unwrap().are_members_synced());
+    }
+
+    #[test]
+    fn someone_at_a_custom_level_should_be_settable_back_to_member() {
+        let members = Members { own_level: 100, can_set_roles: true, ..Members::default() };
+        let custom = RoomMember { level: 25, ..member("c", Presence::Online, MemberRole::Member) };
+        assert!(members.may(Moderation::Role(MemberRole::Member), &custom));
     }
 
     #[test]

@@ -6165,6 +6165,34 @@ fn text_typed_back_while_a_save_is_on_its_way_should_stay() {
 }
 
 #[test]
+fn saving_the_name_should_leave_an_unsaved_topic_alone() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("Draft topic");
+    *s.room_settings_field(SettingsField::Name) = TextEdit::new("Renamed");
+    s.save_room_name();
+    let (request, _) = drain(&mut commands).pop().unwrap();
+    let renamed = matrix_core::RoomSettings { name: Some("Renamed".into()), ..admin_settings("!one:x") };
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(renamed) });
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    assert_eq!(
+        (settings_dialog(&s).name.text.as_str(), settings_dialog(&s).topic.text.as_str()),
+        ("Renamed", "Draft topic")
+    );
+}
+
+#[test]
+fn a_failed_save_should_keep_the_draft() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Name) = TextEdit::new("Renamed");
+    s.save_room_name();
+    let (request, _) = drain(&mut commands).pop().unwrap();
+    // The engine reports the settings as they stayed, then the failure.
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(admin_settings("!one:x")) });
+    apply(&mut s, Event::Finished { request, result: Err("forbidden".into()) });
+    assert_eq!(settings_dialog(&s).name.text, "Renamed");
+}
+
+#[test]
 fn a_name_changed_elsewhere_should_replace_an_untouched_field_but_not_an_edited_one() {
     let (mut s, _, id) = settings_open(admin_settings("!one:x"));
     let renamed = |name: &str| matrix_core::RoomSettings { name: Some(name.into()), ..admin_settings("!one:x") };

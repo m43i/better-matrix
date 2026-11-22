@@ -174,6 +174,9 @@ pub struct RoomSettingsDialog {
     /// The name and topic the fields were last filled with, once read: a field still holding
     /// them takes the fresh ones a later read brings, one the user edited keeps their text.
     filled: Option<(String, String)>,
+    /// Name and topic saves on their way: the request, the field and the text it sent. A field
+    /// being saved isn't refreshed until its save answers.
+    saving: Vec<(RequestId, SettingsField, String)>,
 }
 
 impl RoomSettingsDialog {
@@ -188,6 +191,7 @@ impl RoomSettingsDialog {
             custom: None,
             confirm: None,
             filled: None,
+            saving: Vec::new(),
         }
     }
 }
@@ -334,12 +338,25 @@ impl State {
         let Some(dialog) = self.settings_dialog() else { return };
         let (name, topic) = (settings.name.clone().unwrap_or_default(), settings.topic.clone().unwrap_or_default());
         let (was_name, was_topic) = dialog.filled.clone().unzip();
-        if was_name.is_none_or(|was| dialog.name.text == was) && dialog.name.text != name {
-            dialog.name = TextEdit::new(name.clone());
-        }
-        if was_topic.is_none_or(|was| dialog.topic.text == was) && dialog.topic.text != topic {
-            dialog.topic = TextEdit::new(topic.clone());
-        }
+        let saving = |field| dialog.saving.iter().any(|(_, saved, _)| *saved == field);
+        let (saving_name, saving_topic) = (saving(SettingsField::Name), saving(SettingsField::Topic));
+        // A field being saved waits for its save; the others take a fresh value unless edited.
+        let name = if saving_name {
+            was_name.unwrap_or_default()
+        } else {
+            if was_name.is_none_or(|was| dialog.name.text == was) && dialog.name.text != name {
+                dialog.name = TextEdit::new(name.clone());
+            }
+            name
+        };
+        let topic = if saving_topic {
+            was_topic.unwrap_or_default()
+        } else {
+            if was_topic.is_none_or(|was| dialog.topic.text == was) && dialog.topic.text != topic {
+                dialog.topic = TextEdit::new(topic.clone());
+            }
+            topic
+        };
         dialog.filled = Some((name, topic));
         // An upgrade asked about can't happen any more (another admin replaced the room).
         if dialog.confirm == Some(SettingsConfirm::Upgrade) && settings.upgrade_to.is_none() {
@@ -413,31 +430,56 @@ impl State {
     }
 
     pub fn save_room_name(&mut self) {
-        let Some(Modal::RoomSettings(dialog)) = &self.modal else { return };
         if self.room_name_changed() {
-            let name = dialog.name.text.trim().to_owned();
-            self.change_room(RoomSetting::Name(name));
-            self.saved_fields();
+            self.save_room_text(SettingsField::Name);
         }
     }
 
     pub fn save_room_topic(&mut self) {
-        let Some(Modal::RoomSettings(dialog)) = &self.modal else { return };
         if self.room_topic_changed() {
-            let topic = dialog.topic.text.trim().to_owned();
-            self.change_room(RoomSetting::Topic(topic));
-            self.saved_fields();
+            self.save_room_text(SettingsField::Topic);
         }
     }
 
-    /// What was just saved becomes the fields' baseline: the room's answer replaces a field still
-    /// holding it, and text typed after the save (even back to the old value) stays.
-    fn saved_fields(&mut self) {
-        if let Some(dialog) = self.settings_dialog()
-            && let Some(filled) = dialog.filled.as_mut()
-        {
-            *filled = (dialog.name.text.clone(), dialog.topic.text.clone());
+    /// Saves the name or the topic as typed, remembering what was sent: until the room answers,
+    /// that field isn't refreshed; then it takes the room's value unless typed in again since,
+    /// and a failure leaves the draft to try again.
+    fn save_room_text(&mut self, field: SettingsField) {
+        let Some(Modal::RoomSettings(dialog)) = &self.modal else { return };
+        let (account, room_id) = (dialog.account.clone(), dialog.room_id.clone());
+        let typed = match field {
+            SettingsField::Name => dialog.name.text.clone(),
+            _ => dialog.topic.text.clone(),
+        };
+        let setting = match field {
+            SettingsField::Name => RoomSetting::Name(typed.trim().to_owned()),
+            _ => RoomSetting::Topic(typed.trim().to_owned()),
+        };
+        self.popover = None;
+        let request = self.dispatch(Command::ChangeRoom { account, room_id, setting }, Purpose::RoomText);
+        if let Some(dialog) = self.settings_dialog() {
+            dialog.saving.push((request, field, typed));
         }
+    }
+
+    /// A name or topic save answered: on success the field takes the room's value unless the
+    /// user typed since; on failure the draft stays.
+    pub(super) fn room_text_saved(&mut self, request: RequestId, saved: bool) {
+        let Some(Modal::RoomSettings(dialog)) = &self.modal else { return };
+        let settings = self.shown_room_settings(dialog).cloned();
+        let Some(dialog) = self.settings_dialog() else { return };
+        let Some(at) = dialog.saving.iter().position(|(sent, _, _)| *sent == request) else { return };
+        let (_, field, typed) = dialog.saving.remove(at);
+        let (Some(settings), true) = (settings, saved) else { return };
+        let Some((name, topic)) = dialog.filled.as_mut() else { return };
+        let (edit, baseline, fresh) = match field {
+            SettingsField::Name => (&mut dialog.name, name, settings.name.unwrap_or_default()),
+            _ => (&mut dialog.topic, topic, settings.topic.unwrap_or_default()),
+        };
+        if edit.text == typed && edit.text != fresh {
+            *edit = TextEdit::new(fresh.clone());
+        }
+        *baseline = fresh;
     }
 
     /// Adds the typed address (on the account's server) to the room.

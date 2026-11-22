@@ -88,7 +88,7 @@ export function may(members: Members, action: Moderation, member: RoomMember): b
       allowed =
         members.can_set_roles &&
         roleLevel(action.data) <= members.own_level &&
-        action.data !== member.role;
+        roleLevel(action.data) !== member.level;
       break;
     case 'Level':
       allowed =

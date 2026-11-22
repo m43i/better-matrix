@@ -654,8 +654,10 @@ fn role_menu(member: &RoomMember, roles: &[MemberRole], custom: bool, p: &Palett
     for role in all.into_iter().filter(|role| *role == member.role || roles.contains(role)) {
         let label = role_label(role).unwrap_or(t!("members.member"));
         let id = member.person.id.clone();
-        let mut entry = menu_row(check(role == member.role), label, None, None, p).key(format!("member-role-{role:?}"));
-        if role != member.role {
+        // Checked by the exact level: a custom level matches no role.
+        let held = role.level() == member.level;
+        let mut entry = menu_row(check(held), label, None, None, p).key(format!("member-role-{role:?}"));
+        if !held {
             entry = entry.on_press(move |s: &mut State| s.moderate(&id, Moderation::Role(role)));
         }
         panel = panel.child(entry);

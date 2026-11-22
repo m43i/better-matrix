@@ -20,6 +20,7 @@ import {
   may,
   mayChooseLevel,
   memberOf,
+  roleLevel,
   rolesOffered,
   ROLES,
 } from '../state/people';
@@ -318,7 +319,7 @@ export default function MemberScreen() {
                         key={role}
                         testID={`member-role-${role}`}
                         title={roleLabel(role)}
-                        selected={role === member.role}
+                        selected={roleLevel(role) === member.level}
                         leading={
                           busy === role ? (
                             <ActivityIndicator color={palette.textMuted} />
@@ -327,7 +328,9 @@ export default function MemberScreen() {
                           )
                         }
                         onPress={
-                          role === member.role ? undefined : () => act({ type: 'Role', data: role })
+                          roleLevel(role) === member.level
+                            ? undefined
+                            : () => act({ type: 'Role', data: role })
                         }
                         chevron={false}
                       />
