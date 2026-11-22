@@ -163,8 +163,12 @@ Date: 2026-11-16
   people with one name keep their own IDs. Each change of the draft moves the pills after it
   (`trackPills`: the edit is what lies between the old and new text's common start and end,
   the caret settling where that is ambiguous in repeated text; a suggestion, an emoji or an
-  edit's own text place theirs directly), and a pill whose label was edited, or that now sits
-  inside a longer word, is dropped (Slack's behaviour: a broken mention is text). A refused
+  edit's own text place theirs directly). A change the app makes at known places (the
+  toolbar's markers and prefixes, a list continued, a link) carries its exact `Splice`s and
+  moves the pills by them (`spliceDraft`), since a diff would see `**` put either side of a
+  pill as one change across it. A pill whose label was edited, or that now sits inside a
+  longer word (letters and digits; `_`, italic's marker, doesn't join), is dropped (Slack's
+  behaviour: a broken mention is text). A refused
   edit comes back with its pills and the message's own.
   On send each placed label becomes one private-use character while the markers are parsed, so
   markers around it format it and nothing in a name reads as a marker; it then goes as the

@@ -54,7 +54,8 @@ export interface Placed {
   end: number;
 }
 
-const WORD = /[\p{L}\p{N}_]/u;
+/** What makes a longer word of a pill's label: not `_`, italic's marker, which may wrap one. */
+const WORD = /[\p{L}\p{N}]/u;
 
 /**
  * The pills standing in `draft`, in order: each whose label is still whole at its place, not
@@ -108,6 +109,37 @@ export function editPills(
 
     return [];
   });
+}
+
+/**
+ * A change of a draft whose place is known (the toolbar's markers, a list continued): `remove`
+ * characters from `at` replaced by `insert`. A list of them applies in order, each to the text
+ * the one before it left.
+ */
+export interface Splice {
+  at: number;
+  remove: number;
+  insert: string;
+}
+
+/** `text` with `splices` applied in order. */
+export function applySplices(text: string, splices: readonly Splice[]): string {
+  return splices.reduce(
+    (out, { at, remove, insert }) => out.slice(0, at) + insert + out.slice(at + remove),
+    text,
+  );
+}
+
+/**
+ * `pills` moved by `splices`, each exactly where it was made: a marker put right before or after
+ * a pill moves it or leaves it, never takes it with it (as a diff of the two texts would, seeing
+ * one change across the pill). A splice inside a pill's label still breaks it.
+ */
+export function splicePills(pills: readonly DraftPill[], splices: readonly Splice[]): DraftPill[] {
+  return splices.reduce<DraftPill[]>(
+    (moved, { at, remove, insert }) => editPills(moved, at, at + remove, insert.length),
+    [...pills],
+  );
 }
 
 /**

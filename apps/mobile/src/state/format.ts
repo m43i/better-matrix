@@ -11,6 +11,7 @@ import type { Mentions } from '@better-matrix/matrix-native/types';
 
 import { mentionOf } from './html';
 import {
+  applySplices,
   type DraftPill,
   emotePill,
   livePills,
@@ -22,6 +23,7 @@ import {
   pillText,
   placePills,
   roomPill,
+  type Splice,
   userPill,
 } from './pills';
 
@@ -46,11 +48,24 @@ export interface Selection {
   end: number;
 }
 
-/** The draft after a change, and where the caret or selection goes. */
+/**
+ * The draft after a change, where the caret or selection goes, and the exact changes made to the
+ * draft before it (in order), so its pills move by them (`splicePills`) rather than by a diff.
+ */
 export interface Edited {
   text: string;
   selection: Selection;
+  splices: Splice[];
 }
+
+/** `text` changed by `splices`, the caret or selection put at `selection`. */
+function edited(text: string, splices: Splice[], selection: Selection): Edited {
+  return { text: applySplices(text, splices), selection, splices };
+}
+
+const insertion = (at: number, insert: string): Splice => ({ at, remove: 0, insert });
+
+const removal = (at: number, remove: number): Splice => ({ at, remove, insert: '' });
 
 /** The markers of the inline formats. */
 const INLINE: Partial<Record<Format, string>> = {
@@ -89,7 +104,7 @@ export function applyFormat(text: string, selection: Selection, format: Format):
     case 'codeBlock':
       return toggleFence(text, ordered(selection));
     default:
-      return { text, selection };
+      return { text, selection, splices: [] };
   }
 }
 
@@ -98,15 +113,22 @@ export function applyLink(text: string, selection: Selection, url: string): Edit
   const address = url.trim();
   const { start, end } = ordered(selection);
 
-  if (!address || address === 'https://') return { text, selection };
-  const label = text.slice(start, end) || address;
-  const link = `[${label}](${address})`;
-  const caret = start + link.length;
+  if (!address || address === 'https://') return { text, selection, splices: [] };
 
-  return {
-    text: text.slice(0, start) + link + text.slice(end),
-    selection: { start: caret, end: caret },
-  };
+  if (start === end) {
+    const link = `[${address}](${address})`;
+    const caret = start + link.length;
+
+    return edited(text, [insertion(start, link)], { start: caret, end: caret });
+  }
+
+  // The selection stays where it is, between the link's brackets.
+  const caret = end + 1 + `](${address})`.length;
+
+  return edited(text, [insertion(end, `](${address})`), insertion(start, '[')], {
+    start: caret,
+    end: caret,
+  });
 }
 
 /** The block formats on the caret's line, for the toolbar to show as on. */
@@ -148,19 +170,15 @@ export function continueBlock(previous: string, next: string): Edited | null {
 
   if (line.slice(prefix.length).trim() === '') {
     // An empty item: the list ends here, and the line is left empty.
-    const text = previous.slice(0, start) + previous.slice(start + prefix.length);
-
-    return { text, selection: { start, end: start } };
+    return edited(previous, [removal(start, prefix.length)], { start, end: start });
   }
 
   const numbered = NUMBERED.exec(line);
   const following = numbered ? `${numbered[1]}${Number(numbered[2]) + 1}. ` : prefix;
   const caret = at + 1 + following.length;
 
-  return {
-    text: next.slice(0, at + 1) + following + next.slice(at + 1),
-    selection: { start: caret, end: caret },
-  };
+  // The splices are from `previous`: the line break typed, and the prefix after it.
+  return edited(previous, [insertion(at, `\n${following}`)], { start: caret, end: caret });
 }
 
 function blockPrefix(line: string): string | null {
@@ -203,15 +221,12 @@ function toggleInline(text: string, { start, end }: Selection, marker: string): 
     if (text.slice(start - m, start) === marker && text.slice(start, start + m) === marker) {
       const at = start - m;
 
-      return { text: text.slice(0, at) + text.slice(start + m), selection: { start: at, end: at } };
+      return edited(text, [removal(at, 2 * m)], { start: at, end: at });
     }
 
     const caret = start + m;
 
-    return {
-      text: text.slice(0, start) + marker + marker + text.slice(start),
-      selection: { start: caret, end: caret },
-    };
+    return edited(text, [insertion(start, marker + marker)], { start: caret, end: caret });
   }
 
   // Selecting a word often takes the space after it: the markers go around the word.
@@ -222,25 +237,18 @@ function toggleInline(text: string, { start, end }: Selection, marker: string): 
 
   while (e > s && /\s/.test(text[e - 1] ?? '')) e--;
 
-  if (s === e) return { text, selection: { start, end } };
+  if (s === e) return { text, selection: { start, end }, splices: [] };
 
-  if (text.slice(s - m, s) === marker && text.slice(e, e + m) === marker) {
-    const unwrapped = text.slice(0, s - m) + text.slice(s, e) + text.slice(e + m);
-
-    return { text: unwrapped, selection: { start: s - m, end: e - m } };
-  }
+  // Each pair of splices goes from the end, so the first's place still holds for the second.
+  if (text.slice(s - m, s) === marker && text.slice(e, e + m) === marker)
+    return edited(text, [removal(e, m), removal(s - m, m)], { start: s - m, end: e - m });
 
   const inner = text.slice(s, e);
 
-  if (inner.length > 2 * m && inner.startsWith(marker) && inner.endsWith(marker)) {
-    const unwrapped = text.slice(0, s) + inner.slice(m, -m) + text.slice(e);
+  if (inner.length > 2 * m && inner.startsWith(marker) && inner.endsWith(marker))
+    return edited(text, [removal(e - m, m), removal(s, m)], { start: s, end: e - 2 * m });
 
-    return { text: unwrapped, selection: { start: s, end: e - 2 * m } };
-  }
-
-  const wrapped = text.slice(0, s) + marker + inner + marker + text.slice(e);
-
-  return { text: wrapped, selection: { start: s + m, end: e + m } };
+  return edited(text, [insertion(e, marker), insertion(s, marker)], { start: s + m, end: e + m });
 }
 
 function toggleLines(
@@ -261,32 +269,44 @@ function toggleLines(
 
   const off = lines.every(has);
 
-  const changed = lines.map((line, index) => {
+  // Each line's prefix is replaced: what follows it (its text) is kept as it was.
+  const prefixes = lines.map((line, index) => {
     const bare = stripBlock(line);
+    const kept = off || format === 'quote' ? bare.text : bare.text.trimStart();
 
-    if (off) return bare.text;
+    const prefix = off
+      ? ''
+      : format === 'bullets'
+        ? `${bare.indent}- `
+        : format === 'numbers'
+          ? `${bare.indent}${index + 1}. `
+          : '> ';
 
-    switch (format) {
-      case 'bullets':
-        return `${bare.indent}- ${bare.text.trimStart()}`;
-      case 'numbers':
-        return `${bare.indent}${index + 1}. ${bare.text.trimStart()}`;
-      case 'quote':
-        return `> ${bare.text}`;
-    }
+    return { old: line.length - kept.length, prefix };
   });
 
-  const first = changed[0] ?? '';
-  const firstDelta = first.length - (lines[0] ?? '').length;
-  const replaced = changed.join('\n');
-  const totalDelta = replaced.length - (to - from);
+  const splices: Splice[] = [];
+  let lineAt = from;
+
+  lines.forEach((line, index) => {
+    const change = prefixes[index];
+
+    if (change) splices.push({ at: lineAt, remove: change.old, insert: change.prefix });
+    lineAt += line.length + 1;
+  });
+
+  // From the last line up, so each splice's place is still where the text had it.
+  splices.reverse();
+  const delta = (change: { old: number; prefix: string }) => change.prefix.length - change.old;
+  const firstDelta = prefixes[0] ? delta(prefixes[0]) : 0;
+  const totalDelta = prefixes.reduce((sum, change) => sum + delta(change), 0);
 
   const selection = {
     start: Math.max(from, start + firstDelta),
     end: Math.max(from, end + totalDelta),
   };
 
-  return { text: text.slice(0, from) + replaced + text.slice(to), selection: ordered(selection) };
+  return edited(text, splices, ordered(selection));
 }
 
 /** A line without its list or quote prefix, and the indentation a list item had. */
@@ -313,18 +333,21 @@ function toggleFence(text: string, { start, end }: Selection): Edited {
 
   if (above !== null && below !== null && FENCE.test(above) && FENCE.test(below)) {
     const aboveStart = lineStart(text, from - 1);
-    const inner = text.slice(from, to);
     const after = lineEnd(text, to + 1);
-    const removed = text.slice(0, aboveStart) + inner + text.slice(after);
     const shift = from - aboveStart;
 
-    return { text: removed, selection: { start: start - shift, end: end - shift } };
+    return edited(text, [removal(to, after - to), removal(aboveStart, shift)], {
+      start: start - shift,
+      end: end - shift,
+    });
   }
 
   const opening = from > 0 && text[from - 1] !== '\n' ? '\n```\n' : '```\n';
-  const fenced = text.slice(0, from) + opening + text.slice(from, to) + '\n```' + text.slice(to);
 
-  return { text: fenced, selection: { start: start + opening.length, end: end + opening.length } };
+  return edited(text, [insertion(to, '\n```'), insertion(from, opening)], {
+    start: start + opening.length,
+    end: end + opening.length,
+  });
 }
 
 // ----- sending ---------------------------------------------------------------------------------

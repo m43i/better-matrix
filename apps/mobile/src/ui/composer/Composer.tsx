@@ -38,6 +38,7 @@ import {
   sendVoiceMemo,
   setDraft,
   setSelection,
+  spliceDraft,
 } from '../../state/actions/composer';
 import { flushDraft, followDraft } from '../../state/actions/drafts';
 import { listImagePacks, listScheduled } from '../../state/actions/messages';
@@ -48,6 +49,7 @@ import {
   applyFormat,
   applyLink,
   continueBlock,
+  type Edited,
   type Format,
   hasText,
   type Selection,
@@ -176,8 +178,16 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
     ),
   );
 
-  /** Takes a new draft from the user, the toolbar or a suggestion (`pill`, when it is one). */
-  const write = (draft: string, caretAt?: Selection, pill?: DraftPill | null) => {
+  /**
+   * Takes a new draft from the user, a suggestion (`pill`, when it is one) or the toolbar (the
+   * `splices` it made, which move the pills exactly).
+   */
+  const write = (
+    draft: string,
+    caretAt?: Selection,
+    pill?: DraftPill | null,
+    splices?: Edited['splices'],
+  ) => {
     written.current = draft;
     setText(draft);
 
@@ -186,7 +196,9 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
       setCaret(caretAt.start);
     }
 
-    if (pill !== undefined)
+    if (splices && caretAt)
+      spliceDraft(store, account, timelineKey, { text: draft, selection: caretAt, splices });
+    else if (pill !== undefined)
       completeDraft(store, account, timelineKey, draft, caretAt ?? selection.current, pill);
     // Where the caret was tells apart an edit in repeated text, for the pills after it.
     else setDraft(store, account, timelineKey, draft, undefined, selection.current.start);
@@ -195,10 +207,14 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
     notify(step.notice);
   };
 
+  /** Takes a change the app made at known places. */
+  const writeEdited = (edited: Edited) =>
+    write(edited.text, edited.selection, undefined, edited.splices);
+
   const onChangeText = (next: string) => {
     const continued = continueBlock(written.current, next);
 
-    if (continued) write(continued.text, continued.selection);
+    if (continued) writeEdited(continued);
     else write(next);
   };
 
@@ -218,14 +234,12 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
       return;
     }
 
-    const edited = applyFormat(written.current, selection.current, which);
-    write(edited.text, edited.selection);
+    writeEdited(applyFormat(written.current, selection.current, which));
   };
 
   const confirmLink = () => {
     if (tool.type !== 'link') return;
-    const edited = applyLink(written.current, tool.selection, tool.url);
-    write(edited.text, edited.selection);
+    writeEdited(applyLink(written.current, tool.selection, tool.url));
     setTool({ type: 'format' });
     field.current?.focus();
   };

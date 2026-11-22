@@ -24,7 +24,17 @@ import {
   voiceMessage,
   withAttachments,
 } from '../outgoing';
-import { type DraftPill, editPills, livePills, type Pill, pillAt, trackPills } from '../pills';
+import {
+  applySplices,
+  type DraftPill,
+  editPills,
+  livePills,
+  type Pill,
+  pillAt,
+  type Splice,
+  splicePills,
+  trackPills,
+} from '../pills';
 import { type PollForm, pollOutgoing } from '../pollForm';
 import { addNotice } from '../reducer';
 import { CommandFailed } from '../requests';
@@ -82,6 +92,36 @@ export function setDraft(
     // Typing in an edit changes the sent message, not the draft set aside under it.
     touched: c.touched || !c.editing,
   }));
+}
+
+/**
+ * The draft changed by the app at known places (the formatting toolbar, a list continued):
+ * `splices` are the changes made to the draft as the store has it, and its pills move by them
+ * exactly, so a marker put around a pill keeps it. Were the draft no longer what the splices
+ * were made from, the change is measured as the user's would be.
+ */
+export function spliceDraft(
+  store: Store,
+  account: AccountId,
+  key: TimelineKey,
+  edited: { text: string; selection: { start: number; end: number }; splices: Splice[] },
+): void {
+  updateComposer(store, account, key, (c) => {
+    const pills = c.pills ?? [];
+
+    const moved =
+      applySplices(c.draft, edited.splices) === edited.text
+        ? livePills(edited.text, splicePills(pills, edited.splices))
+        : trackPills(c.draft, edited.text, pills, edited.selection.start);
+
+    return {
+      ...c,
+      draft: edited.text,
+      pills: pills.length > 0 ? moved : c.pills,
+      selection: edited.selection,
+      touched: c.touched || !c.editing,
+    };
+  });
 }
 
 /**
