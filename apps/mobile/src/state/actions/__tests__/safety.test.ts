@@ -2,7 +2,8 @@ import { detachedEngine } from '@better-matrix/matrix-native/client';
 import type { Invitation } from '@better-matrix/matrix-native/types';
 
 import { ADA, GRACE, message, messageEntry, summary } from '../../../test/fixtures';
-import { activeRoomList, shownTimeline } from '../../selectors';
+import { lastMessage } from '../../sections';
+import { activeRoomList, roomListOf, shownTimeline } from '../../selectors';
 import { roomKey } from '../../timeline';
 import { DEFAULT_SAFETY, revealKey } from '../../safety';
 import { Store } from '../../store';
@@ -220,6 +221,16 @@ describe('ignoring someone, whichever answer comes first', () => {
       undefined,
       '$hi',
     ]);
+  });
+
+  it('search’s rooms should preview as the room lists do, without a pending ignore’s person', () => {
+    const { store } = withGracesMessage();
+    void setIgnored(store, ADA, GRACE, true);
+    const state = store.getState();
+    expect([
+      lastMessage(roomListOf(state, ADA)!, '!room:x'),
+      lastMessage(state.accounts[0]!, '!room:x')?.event_id,
+    ]).toEqual([undefined, '$hi']);
   });
 
   it('an ignore that fails should give their preview and messages back', async () => {

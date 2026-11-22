@@ -25,6 +25,9 @@ import { RichText } from './RichText';
 
 export const AVATAR = 36;
 
+/** The least height of a message's sender column, its screen readers' control on every row. */
+export const GUTTER_MIN = 20;
+
 /** What a screen reader can do with a message: open its actions, by activating or long-pressing. */
 const ROW_ACTIONS = [{ name: 'activate' }, { name: 'longpress' }];
 
@@ -70,7 +73,11 @@ export const MessageRow = memo(function MessageRow({
       onLongPress={() => openActions(message)}
       delayLongPress={350}
       android_ripple={{ color: palette.hover }}
+      // Not a control on either platform: Android's TalkBack and focus skip it, its children
+      // stay exposed ("no", not "no-hide-descendants").
       accessible={false}
+      focusable={false}
+      importantForAccessibility="no"
       style={[
         styles.row,
         { paddingTop: continues ? 2 : 10, opacity: message.pending ? 0.6 : 1 },
@@ -206,7 +213,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 2,
   },
-  gutter: { width: AVATAR },
+  // Stretched to the row, so a following message's empty column still has bounds to focus.
+  gutter: { width: AVATAR, alignSelf: 'stretch', minHeight: GUTTER_MIN },
   content: { flex: 1, minWidth: 0, gap: 2 },
   // Kept in every room message, filled or not, so a receipt never rewraps or grows it; on a
   // screen too narrow for it, the indicator takes a line under the message instead.

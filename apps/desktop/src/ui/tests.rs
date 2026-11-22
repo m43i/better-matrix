@@ -2393,3 +2393,51 @@ fn the_source_dialog_should_show_both_the_decrypted_and_the_sent_event() {
     assert!(rt.find("source-dialog").is_some());
     assert!(rt.find("source-copy").is_some());
 }
+
+#[test]
+fn stop_ignoring_should_show_their_messages_only_once_saved() {
+    let mut rt = runtime(|s| {
+        demo::attachment_message(s);
+        // Grace's message is the room's newest: its preview, once shown.
+        let message = Message {
+            event_id: "$late".into(),
+            sender_id: "@grace:example.org".into(),
+            sender_name: "Grace Hopper".into(),
+            timestamp_ms: u64::MAX / 2,
+            content: MessageContent::Text { body: "Still here".into(), html: None },
+            ..Message::default()
+        };
+        let entry = TimelineEntry { id: "late".into(), kind: EntryKind::Message(Box::new(message)) };
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::Reset(vec![entry])],
+            },
+            &mut rune::Tx::default(),
+        );
+        let safety =
+            matrix_core::Safety { ignored: vec!["@grace:example.org".into()], ..matrix_core::Safety::default() };
+        s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, &mut rune::Tx::default());
+    });
+    let preview = |rt: &Runtime<State>| {
+        rt.state.active_account().unwrap().last_message(demo::DEMO_THREAD.0).map(|m| m.event_id.clone())
+    };
+    let settle = |rt: &mut Runtime<State>| {
+        for _ in 0..10 {
+            rt.frame(1.0 / 60.0);
+        }
+    };
+    assert!(rt.find("msg-late").is_none());
+    let ada = AccountId::new(demo::ADA);
+    let owner = ada.clone();
+    rt.update(move |s, _| s.stop_ignoring(&owner, "@grace:example.org"));
+    settle(&mut rt);
+    assert!(rt.find("msg-late").is_none(), "still hidden while Stop ignoring saves");
+    assert_ne!(preview(&rt).as_deref(), Some("$late"));
+    // Saved: the engine reports the list without them.
+    rt.update(move |s, tx| s.apply(Event::Safety { account: ada, safety: matrix_core::Safety::default() }, tx));
+    settle(&mut rt);
+    assert!(rt.find("msg-late").is_some());
+    assert_eq!(preview(&rt).as_deref(), Some("$late"));
+}

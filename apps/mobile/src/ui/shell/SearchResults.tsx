@@ -15,8 +15,9 @@ import { openDirectChat } from '../../state/actions/people';
 import { foundAny, listTime, searchResults } from '../../state/lists';
 import { busy } from '../../state/people';
 import { type Permalink, permalinkUri } from '../../state/permalinks';
-import { useAppStore } from '../../state/react';
+import { shallow, useAppStore, useStore } from '../../state/react';
 import { lastMessage } from '../../state/sections';
+import { roomListOf } from '../../state/selectors';
 import type { AccountData } from '../../state/types';
 import { font } from '../../theme/palette';
 import { Avatar } from '../Avatar';
@@ -56,6 +57,8 @@ export function SearchResults({
   const palette = usePalette();
   const now = useNow();
   const id = account.summary.id;
+  // Rooms preview their newest message as the room lists do: without a pending ignore's person.
+  const list = useStore((s) => roomListOf(s, id), shallow);
   // Only what is typed is searched: the tab's list shows while nothing is.
   const [people, type] = usePeopleSearch(id, false);
   const messages = useMessageSearch(id, term);
@@ -135,7 +138,7 @@ export function SearchResults({
             account={id}
             room={item.room}
             query={term}
-            last={lastMessage(account, item.room.room_id)}
+            last={list && lastMessage(list, item.room.room_id)}
             now={now}
             onPress={() => {
               onPicked();

@@ -822,7 +822,7 @@ impl AccountData {
     /// leaves at once, and those of people the user ignores don't show (they stay saved).
     pub fn saved_messages(&self) -> impl Iterator<Item = &matrix_core::SavedMessage> {
         self.saved.iter().flatten().filter(|saved| {
-            self.is_saved(&saved.room_id, &saved.preview.event_id) && !self.safety.ignores(&saved.preview.sender_id)
+            self.is_saved(&saved.room_id, &saved.preview.event_id) && !self.ignores(&saved.preview.sender_id)
         })
     }
 
@@ -830,7 +830,7 @@ impl AccountData {
     /// ignores (they stay pinned).
     pub fn pinned_messages(&self, room: &RoomSummary) -> Option<impl Iterator<Item = &matrix_core::MessagePreview>> {
         let pins = self.pins.get(&room.room_id)?;
-        Some(pins.iter().filter(|pin| room.pinned.contains(&pin.event_id) && !self.safety.ignores(&pin.sender_id)))
+        Some(pins.iter().filter(|pin| room.pinned.contains(&pin.event_id) && !self.ignores(&pin.sender_id)))
     }
 
     /// Whether a message saved in some room isn't in the list yet: saved here or on another
@@ -990,7 +990,7 @@ impl AccountData {
     pub fn last_message(&self, room_id: &str) -> Option<&Message> {
         // Asked for every room the sidebar sorts on every commit: the few timelines kept are
         // looked through rather than a key made for each room.
-        let heard = |message: &&Message| !self.safety.ignores(&message.sender_id);
+        let heard = |message: &&Message| !self.ignores(&message.sender_id);
         let from_timeline = self
             .timelines
             .iter()

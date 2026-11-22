@@ -2392,7 +2392,7 @@ impl State {
                 data.timeline(key)
                     .into_iter()
                     .flat_map(move |timeline| timeline.on_screen(shown))
-                    .filter(move |entry| entry.message().is_none_or(|m| !data.safety.ignores(&m.sender_id)))
+                    .filter(move |entry| entry.message().is_none_or(|m| !data.ignores(&m.sender_id)))
                     .map(move |entry| ((account, key), entry))
             })
         })

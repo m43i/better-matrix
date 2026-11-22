@@ -53,7 +53,12 @@ export type RoomListData = Pick<
  * does a timeline changing anything but a room's newest message as the list shows it.
  */
 export function activeRoomList(state: State): RoomListData | undefined {
-  const data = activeAccount(state);
+  return roomListOf(state, state.active);
+}
+
+/** An account as the room lists draw it (`activeRoomList`), search's rooms included. */
+export function roomListOf(state: State, id: AccountId | null): RoomListData | undefined {
+  const data = account(state, id);
 
   if (!data) return undefined;
 

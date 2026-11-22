@@ -320,7 +320,7 @@ fn cached_plan(view_key: &str, cx: &Context<'_>, timeline: Option<&RoomTimeline>
 
 /// What a timeline's plan is made of: its revision, and whom the user ignores. 0 (never cached)
 /// while the timeline has no revision.
-fn plan_version(revision: u64, ignored: &[String]) -> u64 {
+fn plan_version(revision: u64, ignored: (&[String], &[String])) -> u64 {
     use std::hash::{Hash, Hasher};
     if revision == 0 {
         return 0;
@@ -374,7 +374,7 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
                 rows.push((cx.key(&entry.id), Row::Events { start: at, end: index }));
                 previous = None;
             }
-            EntryView::Message(item) if cx.data.safety.ignores(&item.message.sender_id) => {}
+            EntryView::Message(item) if cx.data.ignores(&item.message.sender_id) => {}
             EntryView::Message(item) => {
                 let message = &item.message;
                 let continues = previous.is_some_and(|prev| crate::state::continues_group(prev, message));
@@ -392,7 +392,7 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
                 previous = None;
             }
             // Not even developer tools show what people the user ignores sent.
-            EntryView::Hidden(event) if cx.show_hidden && !cx.data.safety.ignores(&event.sender.id) => {
+            EntryView::Hidden(event) if cx.show_hidden && !cx.data.ignores(&event.sender.id) => {
                 rows.push((cx.key(&entry.id), Row::Hidden(at)));
                 previous = None;
             }
@@ -498,7 +498,8 @@ pub fn timeline(
     // timeline changed; each mounted row is built from the state by its plan entry.
     let revision = timeline.map_or(0, |t| t.revision);
     // The plan leaves out people the user ignores: it is made again when that list changes too.
-    let version = plan_version(revision, &cx.data.safety.ignored);
+    // Both the ignores shown and those saved: someone stays left out while either holds them.
+    let version = plan_version(revision, (&cx.data.safety.ignored, &cx.data.saved_safety.ignored));
     let plan = cached_plan(view_key, cx, timeline, version);
     let (keys, shown) = (Rc::clone(&plan), Rc::clone(&plan));
     let (account, key, palette) = (cx.account.clone(), cx.key.clone(), *p);
