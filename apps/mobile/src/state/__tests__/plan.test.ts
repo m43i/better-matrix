@@ -196,6 +196,16 @@ describe('planTimeline', () => {
     expect(rows).toEqual([]);
   });
 
+  it('should not draw a thread’s root from the room’s timeline when its sender is ignored', () => {
+    const rows = planTimeline(timelineOf([]), {
+      thread: '$root',
+      root: message('$root'),
+      ignored: [GRACE],
+    });
+
+    expect(rows.map((r) => r.kind)).toEqual([]);
+  });
+
   it('should not merge joins across a hidden event that shows', () => {
     const rows = planTimeline(
       timelineOf([

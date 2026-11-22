@@ -54,7 +54,8 @@ export interface PlanOptions {
   showHidden?: boolean;
   /**
    * People the user ignores, confirmed or on the way, and those whose ignore is being undone
-   * until that is saved: their hidden entries take no row, even with `showHidden`.
+   * until that is saved: nothing they sent takes a row (their hidden entries even with
+   * `showHidden`).
    */
   ignored?: readonly string[];
 }
@@ -119,6 +120,8 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
   let previous: Message | null = null;
 
   const pushMessage = (key: string, message: Message) => {
+    // Nothing an ignored person sent draws, a thread's root from the room's timeline included.
+    if (ignored.includes(message.sender_id)) return;
     const prev: Message | null = previous;
 
     const continues =

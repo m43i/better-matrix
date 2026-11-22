@@ -27,6 +27,7 @@ import { Icon } from '../icons';
 import { useMedia } from '../media';
 import { useNow } from '../shell/useNow';
 import { usePalette } from '../theme';
+import { CARD_IMAGE_SIDE, cardLayout } from './cardLayout';
 import { useMessageSide, useTimelineContext } from './context';
 import { HiddenMedia, useHiddenMedia } from './HiddenMedia';
 import { useContentWidth } from './readersLayout';
@@ -157,14 +158,9 @@ export function ThreadLink({ root, thread }: { root: string; thread: ThreadSumma
 /** The size link cards fetch their image at. */
 const CARD_IMAGE: MediaSize = { type: 'Thumbnail', data: { width: 192, height: 192 } };
 
-const CARD_IMAGE_SIDE = 64;
-
-/** The least width a link card keeps for its words beside its picture. */
-const CARD_WORDS_MIN = 100;
-
 /**
  * A link's card once the homeserver described the page: site, title, description and image
- * (left out where it would leave the words too little room).
+ * (under the words where beside them it would leave them too little room).
  */
 export function LinkCard({ url, message }: { url: string; message: Message }) {
   const palette = usePalette();
@@ -175,15 +171,21 @@ export function LinkCard({ url, message }: { url: string; message: Message }) {
   // The page's picture waits for Show where the account keeps media back (ADR 0011).
   const { hidden, reveal } = useHiddenMedia(message);
   const image = useMedia(account, hidden ? null : (preview?.image?.[0] ?? null), CARD_IMAGE);
-  // The picture shows only where it leaves the words a readable width beside it.
-  const words = useContentWidth() - 2 * 12 - 3 - 2 * 12 - CARD_IMAGE_SIDE;
-  const showImage = preview?.image != null && words >= CARD_WORDS_MIN;
+  // The picture sits beside the words where they keep a readable width, else under them.
+  const below = cardLayout(useContentWidth()) === 'below';
+  const showImage = preview?.image != null;
 
   if (!preview) return null;
 
   // The link and Show are siblings, so each is its own control; the card itself isn't one.
   return (
-    <View style={[styles.card, { backgroundColor: palette.surface, borderColor: palette.divider }]}>
+    <View
+      style={[
+        styles.card,
+        below ? styles.cardStacked : null,
+        { backgroundColor: palette.surface, borderColor: palette.divider },
+      ]}
+    >
       <Pressable
         onPress={() => openLink(store, url, account)}
         onLongPress={() => openActions(message)}
@@ -191,25 +193,27 @@ export function LinkCard({ url, message }: { url: string; message: Message }) {
         accessibilityRole="link"
         accessibilityLabel={preview.title ?? url}
         android_ripple={{ color: palette.hover }}
-        style={styles.cardLink}
+        style={[styles.cardLink, below ? styles.cardStacked : null]}
       >
-        <View style={[styles.cardBar, { backgroundColor: palette.accent }]} />
-        <View style={styles.cardWords}>
-          {preview.site ? (
-            <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
-              {preview.site}
-            </Text>
-          ) : null}
-          {preview.title ? (
-            <Text style={[font.bodyStrong, { color: palette.accent }]} numberOfLines={2}>
-              {preview.title}
-            </Text>
-          ) : null}
-          {preview.description ? (
-            <Text style={[font.meta, { color: palette.text }]} numberOfLines={3}>
-              {preview.description}
-            </Text>
-          ) : null}
+        <View style={below ? styles.cardLink : styles.cardRow}>
+          <View style={[styles.cardBar, { backgroundColor: palette.accent }]} />
+          <View style={styles.cardWords}>
+            {preview.site ? (
+              <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
+                {preview.site}
+              </Text>
+            ) : null}
+            {preview.title ? (
+              <Text style={[font.bodyStrong, { color: palette.accent }]} numberOfLines={2}>
+                {preview.title}
+              </Text>
+            ) : null}
+            {preview.description ? (
+              <Text style={[font.meta, { color: palette.text }]} numberOfLines={3}>
+                {preview.description}
+              </Text>
+            ) : null}
+          </View>
         </View>
         {showImage && !hidden ? (
           image ? (
@@ -355,6 +359,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   cardLink: { flex: 1, flexDirection: 'row', gap: 12 },
+  cardRow: { flex: 1, flexDirection: 'row', gap: 12 },
+  // A card too narrow for its picture beside the words: the picture goes under them.
+  cardStacked: { flexDirection: 'column' },
   cardBar: { width: 3, borderRadius: 1.5 },
   cardWords: { flex: 1, gap: 2 },
   cardImage: { width: CARD_IMAGE_SIDE, height: CARD_IMAGE_SIDE, borderRadius: 8 },

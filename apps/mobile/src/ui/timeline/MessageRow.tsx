@@ -357,18 +357,15 @@ function BubbleRow({ message, continues, latestCall, highlighted }: MessageRowPr
             ) : (
               said
             )}
-            <Text
-              style={[
-                font.meta,
-                bubbled
-                  ? [styles.time, { color: palette.bubbleMeta }]
-                  : { color: palette.textMuted },
-              ]}
-              numberOfLines={1}
-              {...actionsControl(message, openActions)}
-            >
-              {time}
-            </Text>
+            {/* A view, not the text, carries the control: iOS doesn't activate a text's. */}
+            <View style={bubbled ? styles.time : null} {...actionsControl(message, openActions)}>
+              <Text
+                style={[font.meta, { color: bubbled ? palette.bubbleMeta : palette.textMuted }]}
+                numberOfLines={1}
+              >
+                {time}
+              </Text>
+            </View>
           </View>
           <Hanging message={message} />
           <ReadLine message={message} />
