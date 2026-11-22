@@ -396,7 +396,7 @@ fn symbol(name: &str) -> Option<&'static str> {
     })
 }
 
-/// Named functions, written out as they are (`\\sin` → `sin`).
+/// Named functions, written out as they are (`\sin` → `sin`).
 const FUNCTIONS: [&str; 28] = [
     "sin", "cos", "tan", "log", "ln", "exp", "lim", "max", "min", "det", "sup", "inf", "arg", "deg", "dim", "gcd",
     "mod", "sinh", "cosh", "tanh", "arcsin", "arccos", "arctan", "sec", "csc", "cot", "ker", "Pr",
