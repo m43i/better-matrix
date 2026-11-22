@@ -23,7 +23,7 @@ impl Homeserver {
                 let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
                 let body: Value = serde_json::from_str(body).unwrap_or(Value::Null);
                 if path.contains("/account_data/") {
-                    stored.lock().unwrap().insert(path.clone(), body.clone());
+                    stored.lock().unwrap().insert(path, body.clone());
                 }
                 captured.lock().unwrap().push((line, body));
                 return json!({});
