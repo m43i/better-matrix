@@ -75,5 +75,7 @@
   "mobile.composer.scheduled_unreadable": "Chiffré sur un autre appareil",
   "mobile.composer.scheduled_none": "Rien n’est programmé dans cette conversation.",
   "mobile.composer.scheduled_failed": "Le message programmé n’a pas changé : {{error}}",
-  "mobile.composer.date_tomorrow": "Demain"
+  "mobile.composer.date_tomorrow": "Demain",
+  "mobile.composer.location_use_mine": "Utiliser ma position",
+  "mobile.composer.location_pick": "Utilisez votre position ou cherchez un lieu."
 }

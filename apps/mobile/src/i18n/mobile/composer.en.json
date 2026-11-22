@@ -75,5 +75,7 @@
   "mobile.composer.scheduled_unreadable": "Encrypted on another device",
   "mobile.composer.scheduled_none": "Nothing is scheduled in this conversation.",
   "mobile.composer.scheduled_failed": "The scheduled message didn’t change: {{error}}",
-  "mobile.composer.date_tomorrow": "Tomorrow"
+  "mobile.composer.date_tomorrow": "Tomorrow",
+  "mobile.composer.location_use_mine": "Use my location",
+  "mobile.composer.location_pick": "Use your location, or search for a place."
 }

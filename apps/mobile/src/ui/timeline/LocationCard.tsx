@@ -1,6 +1,7 @@
 // A shared place: its map (drawn by the engine from OpenStreetMap, with a pin), what the sender
-// called it and its coordinates, with OpenStreetMap's credit on the map. Tapping it opens the
-// place on openstreetmap.org; a long press opens the message's actions.
+// called it and its coordinates, with OpenStreetMap's credit on the map. With maps off
+// (Preferences, "Maps from OpenStreetMap") a pin stands in for the map and nothing is fetched.
+// Tapping it opens the place on openstreetmap.org; a long press opens the message's actions.
 
 import type { Location, MediaSize, Message } from '@better-matrix/matrix-native/types';
 import { Image } from 'expo-image';
@@ -8,7 +9,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
 import { coordinatesText, OSM_CREDIT, webLink } from '../../state/geo';
-import { useAppStore } from '../../state/react';
+import { useAppStore, useStore } from '../../state/react';
 import { font } from '../../theme/palette';
 import { Icon } from '../icons';
 import { useMedia } from '../media';
@@ -60,10 +61,14 @@ export function LocationCard({ message, location }: { message: Message; location
   );
 }
 
-/** A map at 5:3 with OpenStreetMap's credit; a placeholder until it is drawn. */
+/**
+ * A map at 5:3 with OpenStreetMap's credit; a pin until it is drawn, and in its place while maps
+ * are off (then it is never fetched).
+ */
 export function MapView({ account, map }: { account: string; map: Location['map'] }) {
   const palette = usePalette();
-  const uri = useMedia(account, map, MAP_SIZE);
+  const shown = useStore((s) => s.settings.showMaps);
+  const uri = useMedia(account, shown ? map : null, MAP_SIZE);
 
   return (
     <View style={[styles.map, { backgroundColor: palette.hover }]}>
@@ -74,9 +79,11 @@ export function MapView({ account, map }: { account: string; map: Location['map'
           <Icon name="location" size={28} color={palette.textMuted} />
         </View>
       )}
-      <Text style={[styles.credit, { color: '#1f2328', backgroundColor: '#ffffffcc' }]}>
-        {OSM_CREDIT}
-      </Text>
+      {shown ? (
+        <Text style={[styles.credit, { color: '#1f2328', backgroundColor: '#ffffffcc' }]}>
+          {OSM_CREDIT}
+        </Text>
+      ) : null}
     </View>
   );
 }

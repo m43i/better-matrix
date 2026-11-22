@@ -1,12 +1,15 @@
-// Sharing a place (sheet, from the composer's +): the phone's position first, once allowed and
-// found, or a place found by name. Searching goes to OpenStreetMap only when the user submits
-// (its policy forbids searching as they type). The chosen place shows on its map with
-// OpenStreetMap's credit, and Send shares it to the room or thread the composer writes to.
+// Sharing a place (sheet, from the composer's +): the phone's position, once the user asks for it
+// ("Use my location") and it is allowed and found, or a place found by name. Nothing is sent to
+// OpenStreetMap until the user asks: searching goes there only when they submit (its policy
+// forbids searching as they type), and the phone's position is neither looked up nor drawn on
+// its map before "Use my location". The chosen place shows on its map with OpenStreetMap's
+// credit (when maps are on, `MapView`), and Send shares it to the room or thread the composer
+// writes to.
 
 import type { MediaRef } from '@better-matrix/matrix-native/types';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { locale, t } from '../i18n';
@@ -29,8 +32,9 @@ interface Chosen {
   accuracy: number | null;
 }
 
-/** Where the phone's position stands. */
+/** Where the phone's position stands: not asked for until the user wants it. */
 type Here =
+  | { type: 'idle' }
   | { type: 'locating' }
   | { type: 'found'; place: Chosen }
   | { type: 'denied' }
@@ -70,30 +74,39 @@ export default function LocationScreen() {
   const store = useAppStore();
   const router = useRouter();
   const palette = usePalette();
-  const [here, setHere] = useState<Here>({ type: 'locating' });
+  const [here, setHere] = useState<Here>({ type: 'idle' });
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState<Search>({ type: 'idle' });
   const [picked, setPicked] = useState<Chosen | null>(null);
 
-  useEffect(() => {
-    let live = true;
+  // The sheet may close while the phone looks: what it finds then goes nowhere.
+  const live = useRef(true);
+  useEffect(
+    () => () => {
+      live.current = false;
+    },
+    [],
+  );
+
+  /** "Use my location": the phone's position, looked up once asked, then chosen. */
+  const locateHere = () => {
+    setPicked(null);
+
+    if (here.type === 'found' || here.type === 'locating') return;
+    setHere({ type: 'locating' });
     findHere().then(
       (found) => {
-        if (live) setHere(found);
+        if (live.current) setHere(found);
       },
       (cause: unknown) => {
-        if (live)
+        if (live.current)
           setHere({
             type: 'failed',
             error: cause instanceof Error ? cause.message : String(cause),
           });
       },
     );
-
-    return () => {
-      live = false;
-    };
-  }, []);
+  };
 
   const chosen = picked ?? (here.type === 'found' ? here.place : null);
 
@@ -128,13 +141,15 @@ export default function LocationScreen() {
   };
 
   const status =
-    here.type === 'locating'
-      ? t('mobile.composer.location_locating')
-      : here.type === 'denied'
-        ? t('mobile.composer.location_denied')
-        : here.type === 'failed'
-          ? t('mobile.composer.location_failed', { error: here.error })
-          : null;
+    here.type === 'idle'
+      ? t('mobile.composer.location_pick')
+      : here.type === 'locating'
+        ? t('mobile.composer.location_locating')
+        : here.type === 'denied'
+          ? t('mobile.composer.location_denied')
+          : here.type === 'failed'
+            ? t('mobile.composer.location_failed', { error: here.error })
+            : null;
 
   const header = (
     <View style={styles.header}>
@@ -170,12 +185,16 @@ export default function LocationScreen() {
         disabled={!chosen}
         testID="location-send"
       />
-      {picked && here.type === 'found' ? (
+      {here.type !== 'found' || picked ? (
         <ListRow
           icon="myLocation"
-          title={t('mobile.composer.location_current')}
+          title={t(
+            here.type === 'found'
+              ? 'mobile.composer.location_current'
+              : 'mobile.composer.location_use_mine',
+          )}
           chevron={false}
-          onPress={() => setPicked(null)}
+          onPress={locateHere}
           testID="location-here"
         />
       ) : null}
