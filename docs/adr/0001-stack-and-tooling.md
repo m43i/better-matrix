@@ -71,7 +71,10 @@ Date: 2026-11-14
     `main`, the mobile app's TypeScript (typecheck and Jest, [0010](0010-mobile.md)) included;
     releases build the desktop app only, until the phones ship. A newer push cancels a pull request's older run. Only `main` writes the Rust cache;
     pull requests read it. Linux builds use clang 21 from LLVM's packages (libwebrtc's libc++
-    needs it), passed to Cargo through Turbo (`CC`, `CXX`, `CARGO_*` in `turbo.json`).
+    needs it), passed to Cargo through Turbo (`CC`, `CXX`, `CARGO_*` in `turbo.json`). The shared
+    Linux dependency action explicitly requests GStreamer's `libunwind-dev`, letting apt replace
+    the conflicting `libunwind-14-dev` and unused libc++ headers on Ubuntu 22.04 runners;
+    libwebrtc uses its bundled libc++. Apt keeps dependency diagnostics in the log.
   - A release (`release.yml`) starts by hand with a version (checked as Cargo reads versions,
     set in `Cargo.toml` and `Cargo.lock` on `main`) or from a pushed `v*` tag. Preparation reads
     every explicitly listed workspace member's manifest and updates each inherited version in

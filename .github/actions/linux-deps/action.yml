@@ -13,11 +13,13 @@ runs:
         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
         echo "deb http://apt.llvm.org/$codename/ llvm-toolchain-$codename-21 main" | sudo tee /etc/apt/sources.list.d/llvm-21.list >/dev/null
         sudo apt-get update -qq
-        sudo apt-get install -y -qq --no-install-recommends \
+        # Request GStreamer's libunwind-dev explicitly so apt replaces the conflicting
+        # libunwind-14-dev (and unused libc++ headers) preinstalled on Ubuntu 22.04 runners.
+        sudo apt-get install -y -q --no-install-recommends \
           clang-21 lld-21 pkg-config libclang-dev \
           libglib2.0-dev libasound2-dev \
           libxkbcommon-dev libwayland-dev libpipewire-0.3-dev \
-          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libunwind-dev
         {
           echo "CC=clang-21"
           echo "CXX=clang++-21"
