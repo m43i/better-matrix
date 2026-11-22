@@ -11,6 +11,7 @@ import {
   changeSafety,
   ignoreInviter,
   report,
+  reportFailure,
   revealMedia,
   setIgnored,
 } from '../safety';
@@ -104,6 +105,14 @@ describe('report', () => {
     const done = report(store, ADA, { type: 'Person', data: { user_id: GRACE } }, '');
     finish(sent.at(-1)!.request, { Err: 'unsupported' });
     await expect(done).rejects.toThrow();
+  });
+
+  it('a report that fails should leave saying why to the sheet, not a notice beneath it', async () => {
+    const { store, sent, finish } = setup();
+    const done = report(store, ADA, { type: 'Person', data: { user_id: GRACE } }, '');
+    finish(sent.at(-1)!.request, { Err: 'unsupported' });
+    const why = await done.then(() => null, reportFailure);
+    expect([why, store.getState().notices]).toEqual(["Couldn't send the report: unsupported", []]);
   });
 });
 

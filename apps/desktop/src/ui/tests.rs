@@ -2232,3 +2232,32 @@ fn a_kept_timeline_should_draw_no_messages_from_someone_ignored_since() {
     let key = TimelineKey::room(demo::DEMO_THREAD.0);
     assert_eq!(rt.state.active_account().unwrap().timeline(&key).map(|t| t.entries.len()), Some(1));
 }
+
+#[test]
+fn a_held_back_video_without_a_poster_should_offer_show_on_its_file_card() {
+    let video = matrix_core::Attachment {
+        kind: matrix_core::AttachmentKind::Video,
+        name: "clip.mp4".into(),
+        size: None,
+        media: Some(matrix_core::MediaRef::opaque("clip")),
+        thumbnail: None,
+        dimensions: None,
+        audio: None,
+    };
+    let mut rt = runtime(move |s| {
+        demo::image_message(s, video);
+        let safety = matrix_core::Safety { media: matrix_core::ShowMedia::Never, ..matrix_core::Safety::default() };
+        s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, &mut rune::Tx::default());
+    });
+    assert!(rt.find("show-media-$attachment").is_some());
+    // The card itself does nothing while held: neither shows nor opens it.
+    let (x, y) = rt.find("file-clip.mp4").expect("the file card");
+    rt.pointer_down(x - 100.0, y);
+    rt.pointer_up(x - 100.0, y);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.preview.is_none() && rt.state.revealed_media.is_empty());
+    press(&mut rt, "show-media-$attachment");
+    assert!(rt.find("show-media-$attachment").is_none());
+    press(&mut rt, "file-clip.mp4");
+    assert!(rt.state.preview.is_some());
+}

@@ -53,7 +53,7 @@ use rune::{TextEdit, Tx};
 
 pub use accounts::READ_MARKER_FADE;
 pub use accounts::{
-    AccountData, Accounts, EntryView, Landing, RoomTimeline, Scope, TimelineItem, continues_group, now_ms,
+    AccountData, Accounts, EntryView, Landing, RoomTimeline, Scope, TimelineItem, continues_group, now_ms, visual,
     wants_attention,
 };
 pub use attachments::{AttachmentAction, can_open_attachment};
@@ -1168,8 +1168,9 @@ impl State {
                         old.map(|r| &r.pinned) != new.map(|r| &r.pinned)
                     });
                 self.accounts.set_room_list(&account, list);
-                // A room turning public (or private) may hold back (or show) what the preview shows.
-                self.reconcile_preview();
+                // A room turning public (or private) may hold back (or show) its media: the
+                // preview's, and what its rows on screen load.
+                self.safety_changed();
                 self.saved_changed(&account);
                 if pins_changed && self.side == Some(SidePanel::Pins) {
                     self.side_loaded = None;

@@ -265,21 +265,28 @@ impl Account {
     }
 
     /// The choices after a sync that carried some of their events, or `None` while a change is
-    /// being saved (its answer, read from the server, reports them). Only the parts the sync
-    /// carried change: a sync answered before a save finished can't bring back an older choice
-    /// for a part it didn't carry.
+    /// being saved (its answer, read from the server, reports them). They are read from the
+    /// server, under the same lock as changes: a sync answered before a save finished carries the
+    /// older event, which mustn't undo the save. Should the server not answer, the parts the sync
+    /// carried are taken from this device's copy onto the confirmed choices.
     pub(crate) async fn synced_safety(
         &self,
         account_data: &[Raw<AnyGlobalAccountDataEvent>],
     ) -> Result<Option<Safety>, Error> {
         let Ok(mut confirmed) = self.safety_changes.try_lock() else { return Ok(None) };
-        let synced = self.safety().await?;
-        let merged = match confirmed.take() {
-            Some(base) => merge_synced(base, synced, account_data),
-            None => synced,
+        let safety = match self.server_safety().await {
+            Ok(safety) => safety,
+            Err(error) => {
+                eprintln!("matrix-engine: could not read the safety choices a sync changed: {error}");
+                let synced = self.safety().await?;
+                match confirmed.take() {
+                    Some(base) => merge_synced(base, synced, account_data),
+                    None => synced,
+                }
+            }
         };
-        *confirmed = Some(merged.clone());
-        Ok(Some(merged))
+        *confirmed = Some(safety.clone());
+        Ok(Some(safety))
     }
 
     /// Makes one change and returns the choices that hold after it, as the server has them.

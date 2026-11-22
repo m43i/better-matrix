@@ -746,3 +746,33 @@ fn a_kept_timeline_should_load_nothing_for_someone_ignored_since() {
     assert!(!drain(&mut commands).iter().any(|(_, command)| matches!(command,
         Command::FetchMedia { media, .. } if *media == matrix_core::MediaRef::opaque("demo-image"))));
 }
+
+fn fetches_demo_image(commands: &mut DetachedCommands) -> bool {
+    drain(commands).iter().any(|(_, command)| {
+        matches!(command,
+        Command::FetchMedia { media, .. } if *media == matrix_core::MediaRef::opaque("demo-image"))
+    })
+}
+
+#[test]
+fn media_on_screen_should_load_once_the_choice_allows_it() {
+    let (mut s, mut commands) = state();
+    crate::demo::attachment_message(&mut s);
+    media_never(&mut s);
+    s.media = crate::state::MediaCache::default();
+    s.media.attach(std::sync::Arc::new(|| {}));
+    drain(&mut commands);
+    s.apply(Event::Safety { account: ada(), safety: Safety::default() }, &mut Tx::default());
+    assert!(fetches_demo_image(&mut commands));
+}
+
+#[test]
+fn media_on_screen_should_load_once_its_room_turns_private() {
+    let (mut s, mut commands) = state();
+    crate::demo::hidden_media(&mut s);
+    s.media = crate::state::MediaCache::default();
+    s.media.attach(std::sync::Arc::new(|| {}));
+    drain(&mut commands);
+    general_public(&mut s, false);
+    assert!(fetches_demo_image(&mut commands));
+}

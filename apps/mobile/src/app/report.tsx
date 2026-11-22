@@ -8,7 +8,9 @@ import { StyleSheet, Text } from 'react-native';
 
 import { t } from '../i18n';
 import { reportTarget } from '../routes';
-import { afterReport, report, reportedPerson } from '../state/actions/safety';
+import { afterReport, report, reportedPerson, reportFailure } from '../state/actions/safety';
+import { addNotice } from '../state/reducer';
+import type { CommandFailed } from '../state/requests';
 import { useAppStore } from '../state/react';
 import { font } from '../theme/palette';
 import { ListRow, ListSection, TextField } from '../ui/components';
@@ -32,6 +34,8 @@ export default function ReportScreen() {
   const [reason, setReason] = useState('');
   const [ignore, setIgnore] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Why the last try failed, shown in the sheet (a notice would draw beneath it on iOS).
+  const [error, setError] = useState<string | null>(null);
   // Cancel stays available while it sends: an answer that comes after the user left moves nothing.
   const shown = useShown();
   const target = reportTarget(params);
@@ -50,11 +54,21 @@ export default function ReportScreen() {
   const submit = () => {
     if (busy) return;
     setBusy(true);
+    setError(null);
     report(store, account, target, reason, ignore ? person : null).then(
       () => {
         if (afterReport(true, shown.current) === 'close') router.back();
       },
-      () => setBusy(false),
+      (failed: CommandFailed) => {
+        setBusy(false);
+        const why = reportFailure(failed);
+
+        if (why === null) return;
+
+        // The reason stays for another try; once the sheet is gone, a notice says it instead.
+        if (shown.current) setError(why);
+        else store.update((s) => addNotice(s, why, account));
+      },
     );
   };
 
@@ -91,6 +105,11 @@ export default function ReportScreen() {
             toggle={{ value: ignore, onChange: setIgnore }}
           />
         </ListSection>
+      ) : null}
+      {error ? (
+        <Text testID="report-error" style={[font.meta, styles.note, { color: palette.danger }]}>
+          {error}
+        </Text>
       ) : null}
     </RoomForm>
   );

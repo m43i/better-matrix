@@ -45,7 +45,7 @@ impl State {
     /// saved choices with the changes still being saved.
     pub(super) fn safety_finished(&mut self, account: &AccountId, request: RequestId) {
         self.accounts.safety_settled(account, request);
-        self.reconcile_preview();
+        self.safety_changed();
     }
 
     /// A change failed: the account shows the saved choices again, with the changes still
@@ -53,11 +53,12 @@ impl State {
     pub(super) fn safety_failed(&mut self, account: &AccountId, request: RequestId, error: &str) {
         self.notice = Some(tf!("notice.safety", error = error));
         self.accounts.safety_settled(account, request);
-        self.reconcile_preview();
+        self.safety_changed();
     }
 
-    /// What shows may have changed: media no longer held back loads, and invitations' pictures.
-    fn safety_changed(&mut self) {
+    /// What shows may have changed: media no longer held back loads (rows on screen, linked
+    /// GIFs, link cards, the preview and its strip), and invitations' pictures.
+    pub(super) fn safety_changed(&mut self) {
         self.reconcile_preview();
         self.request_timeline_media();
         self.fetch_linked(std::time::Instant::now());

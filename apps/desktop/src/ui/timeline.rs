@@ -1038,12 +1038,17 @@ fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Pa
         {
             audio_card(&item.message.event_id, attachment, cx, p)
         }
-        (MessageContent::Attachment(attachment), _) => match attachment.preview() {
-            Some((preview, _)) if !media.has_failed(&preview) => {
-                image_preview(&item.message.event_id, attachment, cx, cx.hides(&item.message), p)
+        (MessageContent::Attachment(attachment), _) => {
+            // Held back or not is decided first: a picture or video with no preview to draw
+            // falls back to its file card, which then offers Show too.
+            let held = crate::state::visual(attachment) && cx.hides(&item.message);
+            match attachment.preview() {
+                Some((preview, _)) if !media.has_failed(&preview) => {
+                    image_preview(&item.message.event_id, attachment, cx, held, p)
+                }
+                _ => attachment_card(&item.message.event_id, attachment, cx, held, p),
             }
-            _ => attachment_card(&item.message.event_id, attachment, cx, p),
-        },
+        }
         (MessageContent::Redacted, _) => notice_text(t!("message.deleted"), p),
         (MessageContent::Undecryptable, _) => notice_text(t!("message.undecryptable"), p),
         (MessageContent::Poll(poll), _) => {
@@ -1308,9 +1313,12 @@ pub fn preview_size(dimensions: Option<(u32, u32)>) -> (f32, f32) {
 }
 
 /// A file's card, up to the message's width: a long name is cut short.
-fn attachment_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &Palette) -> El {
+/// `held`: a picture or video the media choice holds back, which opens only once its Show is
+/// pressed (ADR 0011).
+fn attachment_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, held: bool, p: &Palette) -> El {
     let max_width = cx.content_width;
     let glyph = match attachment.kind {
+        _ if held => &icons::EYE_OFF,
         AttachmentKind::Image => &icons::IMAGE,
         AttachmentKind::Video => &icons::VIDEO,
         AttachmentKind::Audio => &icons::AUDIO,
@@ -1322,7 +1330,7 @@ fn attachment_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p:
         titles = titles.child(text(human_size(size)).font(font::META).color(p.text_muted));
     }
     let (opened, key, id) = (attachment.clone(), cx.key.clone(), event_id.to_owned());
-    row()
+    let card = row()
         .key(format!("file-{}", attachment.name))
         .max_w(max_width.clamp(0.0, 420.0))
         .mt(4.0)
@@ -1336,8 +1344,6 @@ fn attachment_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p:
         .hover(p.hover.alpha(p.hover.a * 2.0))
         .role("button")
         .label(attachment.name.clone())
-        .cursor(rune::Cursor::Pointer)
-        .on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened))
         .child(
             el().size(36.0, 36.0)
                 .radius(6.0)
@@ -1345,7 +1351,16 @@ fn attachment_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p:
                 .center()
                 .child(icon(glyph, 20.0).color(p.accent)),
         )
-        .child(titles)
+        .child(titles);
+    if !held {
+        return card.cursor(rune::Cursor::Pointer).on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened));
+    }
+    let account = cx.account.clone();
+    card.child(el().grow(1.0)).child(
+        button(t!("safety.show_media"), ButtonKind::Secondary, true, p)
+            .key(cx.key(&format!("show-media-{event_id}")))
+            .on_press(move |s: &mut State| s.reveal_media(&account, &id)),
+    )
 }
 
 /// Bars in an audio clip's waveform: as many as fit the message's width, within these.

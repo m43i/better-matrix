@@ -27,8 +27,9 @@ Date: 2026-11-22
   Changes run one at a time per account (`Account::safety_changes`), each read-modify-writing the
   server's latest copy, so two made before a sync both hold. Should reading the answer back fail
   after a save, the choices the server last confirmed stand in, with the change applied. A sync
-  changes only the parts whose events it carried, and reports nothing while a change is being
-  saved (that change's answer does), so a sync answered before a save can't undo it. Reports go
+  that carries any of the events reads the choices from the server under the same lock (only
+  the parts it carried change should the server not answer), and reports nothing while a change
+  is being saved (that change's answer does), so a sync answered before a save can't undo it. Reports go
   through `Command::Report { target: ReportTarget::{Message, Room, Person}, reason }`; the reason
   may be empty and is trimmed. The apps decide with `Safety::shows_media`,
   `Safety::shows_invitation` and `Safety::ignores` (mirrored in the phones' selectors).

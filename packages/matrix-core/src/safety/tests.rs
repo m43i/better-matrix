@@ -315,3 +315,17 @@ async fn a_sync_during_a_save_should_leave_reporting_to_the_save() {
         Raw::new(&json!({ "type": INVITES, "content": {} })).unwrap().cast_unchecked();
     assert_eq!(account.synced_safety(&[event]).await.unwrap(), None);
 }
+
+#[tokio::test]
+async fn a_sync_answered_before_a_save_should_not_undo_it() {
+    let server = Homeserver::new(json!([]));
+    let account = server.synced_account().await;
+    account.change_safety(&SafetyChange::InvitePictures(false)).await.unwrap();
+    account.change_safety(&SafetyChange::Media(ShowMedia::Never)).await.unwrap();
+    // The first save's sync, arriving late, carries the event without the second change.
+    let stale: Raw<AnyGlobalAccountDataEvent> =
+        Raw::new(&json!({ "type": MEDIA_UNSTABLE, "content": { "invite_avatars": "off" } })).unwrap().cast_unchecked();
+    let safety = account.synced_safety(&[stale]).await.unwrap().unwrap();
+    assert_eq!(safety.media, ShowMedia::Never);
+    assert!(!safety.invite_pictures);
+}

@@ -73,7 +73,8 @@ export function reportedPerson(target: ReportTarget, sender: string | null): str
 
 /**
  * Reports to the homeserver's admins; `ignore` also ignores that person once the report went.
- * Success says so; a failure says why and rejects, so the sheet stays to try again.
+ * Success says so; a failure rejects, for the sheet to say why in itself (`reportFailure`), as a
+ * notice would draw beneath it on iOS.
  */
 export async function report(
   store: Store,
@@ -82,20 +83,15 @@ export async function report(
   reason: string,
   ignore: string | null = null,
 ): Promise<void> {
-  try {
-    await store.run({ type: 'Report', data: { account, target, reason: reason.trim() } });
-  } catch (error) {
-    if (error instanceof CommandFailed && !error.cancelled) {
-      const failed = error;
-      store.update((s) => addNotice(s, t('notice.report', { error: failed.message }), account));
-    }
-
-    throw error;
-  }
-
+  await store.run({ type: 'Report', data: { account, target, reason: reason.trim() } });
   store.update((s) => addNotice(s, t('mobile.safety.reported'), account));
 
   if (ignore !== null) await setIgnored(store, account, ignore, true).catch(() => {});
+}
+
+/** Why a report failed, in the desktop's words; `null` when the user cancelled it. */
+export function reportFailure(error: CommandFailed): string | null {
+  return error.cancelled ? null : t('notice.report', { error: error.message });
 }
 
 /**
