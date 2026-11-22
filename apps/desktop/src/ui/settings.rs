@@ -221,6 +221,18 @@ fn general(s: &State, p: &Palette) -> El {
                 .on_press(move |s: &mut State| s.set_show_link_previews(on)),
         )
     });
+    let hidden = [
+        (true, t!("settings.hidden_events_on"), Some(t!("settings.hidden_events_on_hint"))),
+        (false, t!("settings.hidden_events_off"), None),
+    ]
+    .into_iter()
+    .fold(col().w_full().gap(8.0), |list, (on, title, hint)| {
+        list.child(
+            choice_row(title, hint, s.settings.show_hidden_events == on, p)
+                .key(format!("hidden-events-{on}"))
+                .on_press(move |s: &mut State| s.set_show_hidden_events(on)),
+        )
+    });
     col()
         .w_full()
         .gap(32.0)
@@ -235,6 +247,7 @@ fn general(s: &State, p: &Palette) -> El {
         .child(setting_group(&icons::ZOOM, t!("settings.zoom"), t!("settings.zoom_hint"), zoom(s, p), p))
         .child(setting_group(&icons::LINK, t!("settings.previews"), t!("settings.previews_hint"), previews, p))
         .child(setting_group(&icons::IMAGE, t!("settings.gifs"), t!("settings.gifs_hint"), gifs, p))
+        .child(setting_group(&icons::CODE, t!("settings.developer"), t!("settings.developer_hint"), hidden, p))
 }
 
 /// Smaller, the current size, larger, and back to the default.

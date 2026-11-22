@@ -49,7 +49,12 @@ import {
   shouldMarkRead,
 } from '../../state/plan';
 import { shallow, useAppStore, useStore } from '../../state/react';
-import { room as roomOf, shownTimeline, timeline as timelineOf } from '../../state/selectors';
+import {
+  account as accountOf,
+  room as roomOf,
+  shownTimeline,
+  timeline as timelineOf,
+} from '../../state/selectors';
 import { routes } from '../../routes';
 import { font } from '../../theme/palette';
 import { Icon } from '../icons';
@@ -62,11 +67,15 @@ import {
   LoadingRow,
   NewMarker,
   RepliesDivider,
+  HiddenEventLine,
   RoomEventLine,
   StartBlock,
 } from './Rows';
 
 const NO_PINS: string[] = [];
+
+/** No one ignored, as one array, so the plan isn't made again for a new empty one. */
+const NO_ONE: string[] = [];
 
 /** Within this far of the newest message counts as at it. */
 const AT_LATEST = 48;
@@ -158,9 +167,13 @@ export function Timeline({
   }, [fading, reducedMotion]);
   const shownMarker = marker.shown;
 
+  const showHidden = useStore((s) => s.settings.showHiddenEvents);
+  // What people the user ignores sent never draws, hidden events included (ADR 0011).
+  const ignored = useStore((s) => accountOf(s, account)?.safety.ignored ?? NO_ONE);
+
   const rows = useMemo(
-    () => planTimeline(timeline, { thread, root, marker: shownMarker }),
-    [timeline, thread, root, shownMarker],
+    () => planTimeline(timeline, { thread, root, marker: shownMarker, showHidden, ignored }),
+    [timeline, thread, root, shownMarker, showHidden, ignored],
   );
 
   const list = useRef<FlashListRef<Row>>(null);
@@ -359,6 +372,8 @@ export function Timeline({
         return <HistoryFailedRow error={item.error} />;
       case 'replies':
         return <RepliesDivider count={item.count} />;
+      case 'hidden':
+        return <HiddenEventLine event={item.event} />;
     }
   }, []);
 

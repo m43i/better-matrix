@@ -16,7 +16,7 @@ import type {
 } from '@better-matrix/matrix-native/types';
 
 import { initialCallView, reconcileView } from './callView';
-import { DEFAULT_SAFETY, withChange } from './safety';
+import { DEFAULT_SAFETY, hiddenEntry, withChange } from './safety';
 import { keepUnchanged } from './json';
 import { DEFAULT_SETTINGS, type Settings } from './settings';
 import { applyDiffs, timelineId } from './timeline';
@@ -91,6 +91,7 @@ function newAccount(summary: AccountSummary): AccountData {
     members: {},
     threads: {},
     files: {},
+    widgets: {},
     pins: {},
     saved: null,
     sidebar: EMPTY_LAYOUT,
@@ -298,7 +299,7 @@ function hiddenIfIgnored(
   if (entry.kind.type !== 'Message' || !ignored.has(entry.kind.data.sender_id)) return entry;
   hidden.push([entry.kind.data.event_id, entry.kind.data.sender_id]);
 
-  return { id: entry.id, kind: { type: 'Other' } };
+  return hiddenEntry(entry.id, entry.kind.data);
 }
 
 /** `hiddenEvents` with `events` (event ID, sender) added; the same object when there are none. */
@@ -396,7 +397,7 @@ function diffsWithoutIgnored(
  * `account` without what the people in `ignored` said: their messages leave the room list's
  * previews (`latest`) and every kept timeline, cold ones included, which no engine reset reaches
  * (ADR 0011). A timeline keeps its length, as the engine's diffs count by position: their
- * entries become `Other`, which draws nothing, until the engine sends the timeline again.
+ * entries become hidden events (`hiddenEntry`), which draw nothing, until the engine sends the timeline again.
  */
 function withoutIgnored(account: AccountData, ignored: ReadonlySet<string>): AccountData {
   const latest = Object.fromEntries(
@@ -603,6 +604,11 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
         ...a,
         files: { ...a.files, [event.data.room_id]: event.data.files },
       }));
+    case 'Widgets':
+      return updateAccount(state, event.data.account, (a) => ({
+        ...a,
+        widgets: { ...a.widgets, [event.data.room_id]: event.data.widgets },
+      }));
     case 'SidebarLayout':
       return updateAccount(state, event.data.account, (a) =>
         // Of two layouts the later wins, so a sync with an older save never undoes a newer one.
@@ -723,6 +729,7 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'ContactCodeSent':
     case 'MessagesFound':
     case 'PeopleFound':
+    case 'EventSource':
     // Answers the composer's own read (`state/actions/drafts.ts`).
     case 'DraftLoaded':
     case 'DirectoryFound':

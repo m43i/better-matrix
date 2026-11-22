@@ -30,6 +30,7 @@ import {
   DM_KAI,
   GENERAL,
   GRACE,
+  hiddenEvents,
   KAI,
   READ_BY_SIX,
   ring,
@@ -206,6 +207,21 @@ export const scenes = {
   'room-info': {
     about: 'Room details and members',
     routes: [routes.room(ADA, GENERAL), routes.roomInfo(ADA, GENERAL)],
+  },
+  widgets: {
+    about: 'A room’s widgets, opened in the browser',
+    routes: [routes.roomInfo(ADA, GENERAL), routes.widgets(ADA, GENERAL)],
+  },
+  'event-source': {
+    about: 'A message’s source, decrypted and as sent',
+    routes: [routes.room(ADA, GENERAL), routes.eventSource(ADA, GENERAL, TEST_PLAN)],
+  },
+  'hidden-events': {
+    about: 'Hidden events drawn in #general (developer tools)',
+    settings: { showHiddenEvents: true },
+    setup: general,
+    events: hiddenEvents(),
+    routes: [routes.room(ADA, GENERAL)],
   },
   member: {
     about: 'Someone in the member list',

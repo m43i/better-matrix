@@ -11,6 +11,7 @@ mod platform;
 mod rtc;
 mod session;
 mod signals;
+mod sticky;
 mod support;
 mod task;
 
@@ -22,7 +23,9 @@ use crate::model::{AccountId, Person};
 pub(crate) use direct::{has_video, reject};
 pub(crate) use media::list_devices;
 pub use platform::{CameraFrame, CameraPlanes, PlatformCamera, camera_lost, push_camera_frame, use_platform_camera};
+pub(crate) use rtc::{Member, joined_sticky};
 pub(crate) use signals::{DirectEvent, Signal, listen};
+pub(crate) use sticky::StickyMembers;
 pub use support::via;
 pub(crate) use task::{CallHandle, Control, Invite, Leaving, RingHeard, Start, hear_ringing, person, start};
 

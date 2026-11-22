@@ -175,7 +175,7 @@ fn attachment(entry: &Entry) -> Option<Result<&Message, ()>> {
             MessageContent::Attachment(_) => Some(Ok(&item.message)),
             _ => Some(Err(())),
         },
-        EntryView::ReadMarker | EntryView::Other => None,
+        EntryView::ReadMarker | EntryView::Hidden(_) => None,
         _ => Some(Err(())),
     }
 }

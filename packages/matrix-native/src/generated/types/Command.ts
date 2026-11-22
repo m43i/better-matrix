@@ -481,7 +481,55 @@ room_id: string,
  * Everyone, fetching the full list from the server when this device lacks it. Without
  * it, only the members this device knows (enough for a few faces), with no request.
  */
-all: boolean, } } | { "type": "ListThreads", "data": { 
+all: boolean, } } | { "type": "ViewSource", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, 
+/**
+ * The event.
+ */
+event_id: string, } } | { "type": "ListWidgets", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, } } | { "type": "AddWidget", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, 
+/**
+ * What to call it; the page's host when blank.
+ */
+name: string, 
+/**
+ * The page, `http` or `https`. It may hold template variables (`$matrix_user_id`, …).
+ */
+url: string, } } | { "type": "RemoveWidget", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, 
+/**
+ * The widget (`Widget::id`).
+ */
+widget_id: string, } } | { "type": "ListThreads", "data": { 
 /**
  * Whose room.
  */

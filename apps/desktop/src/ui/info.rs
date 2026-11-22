@@ -111,6 +111,10 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .child(
             link_row(&icons::FILE, t!("info.files"), None, "info-files", p)
                 .on_press(|s: &mut State| s.show_side(SidePanel::Files)),
+        )
+        .child(
+            link_row(&icons::LAYOUT, t!("widgets.title"), None, "info-widgets", p)
+                .on_press(|s: &mut State| s.show_side(SidePanel::Widgets)),
         );
     let reported = room.room_id.clone();
     let report = row()

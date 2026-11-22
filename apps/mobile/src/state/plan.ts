@@ -4,7 +4,12 @@
 // visible history starts, a failed or loading page, date dividers and the "New" marker. The
 // list draws only the rows near the screen, each by its plan entry.
 
-import type { Message, RoomEvent, TimelineEntry } from '@better-matrix/matrix-native/types';
+import type {
+  HiddenEvent,
+  Message,
+  RoomEvent,
+  TimelineEntry,
+} from '@better-matrix/matrix-native/types';
 
 import type { ShownMarker } from './newMarker';
 import type { Timeline } from './types';
@@ -28,7 +33,9 @@ export type Row =
   /** The "New" marker: where the unread messages begin; `fading` once read past. */
   | { kind: 'new'; key: string; fading: boolean }
   /** Under a thread's root: how many replies follow. */
-  | { kind: 'replies'; key: string; count: number };
+  | { kind: 'replies'; key: string; count: number }
+  /** An event timelines otherwise leave out, while hidden events show. */
+  | { kind: 'hidden'; key: string; event: HiddenEvent };
 
 export type RowKind = Row['kind'];
 
@@ -42,6 +49,10 @@ export interface PlanOptions {
    * moves as receipts advance. Left out, the SDK's marker is drawn where it is.
    */
   marker?: ShownMarker | null;
+  /** Draw hidden events (developer tools); left out, they take no row. */
+  showHidden?: boolean;
+  /** People the user ignores: their hidden entries take no row, even with `showHidden`. */
+  ignored?: readonly string[];
 }
 
 function isStart(entry: TimelineEntry): boolean {
@@ -67,6 +78,13 @@ function groups(event: RoomEvent): boolean {
 /** The rows of a timeline, oldest first. */
 export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
   const { thread } = options;
+  const ignored = options.ignored ?? [];
+
+  // A hidden event takes a row only under the developer setting, and never one an ignored
+  // person sent (ADR 0011).
+  const draws = (event: HiddenEvent) =>
+    (options.showHidden ?? false) && !ignored.includes(event.sender.id);
+
   const inThread = thread !== null;
   const entries = timeline.entries;
   const rows: Row[] = [];
@@ -145,7 +163,7 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
         ) {
           if (next.type === 'RoomEvent' && next.data.change.type === kind.data.change.type)
             events.push(next.data);
-          else if (next.type !== 'Other') break;
+          else if (next.type !== 'Hidden' || draws(next.data)) break;
           index += 1;
         }
 
@@ -172,7 +190,12 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
         }
 
         break;
-      case 'Other':
+      case 'Hidden':
+        if (draws(kind.data)) {
+          rows.push({ kind: 'hidden', key: `${prefix}${entry.id}`, event: kind.data });
+          previous = null;
+        }
+
         break;
     }
   }

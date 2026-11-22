@@ -39,6 +39,11 @@ fn wording(confirm: &Confirm) -> (String, String, &'static str) {
             t!("confirm.ignore_inviter_body").to_owned(),
             t!("confirm.ignore_inviter"),
         ),
+        Confirm::RemoveWidget { name, .. } => (
+            tf!("confirm.remove_widget_title", name = name),
+            t!("confirm.remove_widget_body").to_owned(),
+            t!("widgets.remove"),
+        ),
         // The question can be long: it goes in the body, which scrolls.
         Confirm::EndPoll { question, .. } => {
             (t!("confirm.end_poll_title").to_owned(), tf!("confirm.end_poll_body", question = question), t!("poll.end"))

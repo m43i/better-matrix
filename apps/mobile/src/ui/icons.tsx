@@ -15,6 +15,7 @@ export const icons = {
   italic: { ios: 'italic', android: 'format_italic' },
   strike: { ios: 'strikethrough', android: 'strikethrough_s' },
   code: { ios: 'chevron.left.forwardslash.chevron.right', android: 'code' },
+  widgets: { ios: 'square.grid.2x2', android: 'widgets' },
   link: { ios: 'link', android: 'link' },
   bullets: { ios: 'list.bullet', android: 'format_list_bulleted' },
   numbers: { ios: 'list.number', android: 'format_list_numbered' },

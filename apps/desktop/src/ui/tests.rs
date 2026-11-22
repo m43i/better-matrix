@@ -2345,3 +2345,51 @@ fn search_should_leave_out_messages_of_people_the_user_ignores_found_before_too(
     assert!(!rt.state.search.messages.is_empty(), "the results held are kept");
     assert!(!found(&rt, &sender));
 }
+
+#[test]
+fn hidden_events_should_show_only_while_turned_on() {
+    let shown = runtime(demo::hidden_events);
+    assert!(shown.find("hidden-acl").is_some(), "a line for the server ACL change");
+    let left_out = runtime(|s| {
+        demo::hidden_events(s);
+        s.set_show_hidden_events(false);
+    });
+    assert!(left_out.find("hidden-acl").is_none());
+}
+
+#[test]
+fn a_hidden_events_source_button_should_ask_for_its_source() {
+    let mut rt = runtime(demo::hidden_events);
+    press(&mut rt, "hidden-acl-source");
+    assert!(matches!(rt.state.modal, Some(crate::state::Modal::Source(crate::state::SourceView::Loading(_)))));
+}
+
+#[test]
+fn the_message_menu_should_offer_the_messages_source() {
+    let mut rt = runtime(|s| {
+        demo::pinned_messages(s);
+        s.popover = Some(crate::state::Popover::MessageMenu {
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            event_id: demo::DEMO_THREAD.1.into(),
+            at: Some((600, 280)),
+        });
+    });
+    press(&mut rt, "message-source");
+    assert!(matches!(rt.state.modal, Some(crate::state::Modal::Source(_))));
+}
+
+#[test]
+fn the_widgets_panel_should_list_widgets_and_ask_before_removing_one() {
+    let mut rt = runtime(demo::widgets);
+    assert!(rt.find("widget-open-board").is_some());
+    assert!(rt.find("widget-open-standup").is_some());
+    press(&mut rt, "widget-remove-board");
+    assert!(matches!(rt.state.modal, Some(crate::state::Modal::Confirm(crate::state::Confirm::RemoveWidget { .. }))));
+}
+
+#[test]
+fn the_source_dialog_should_show_both_the_decrypted_and_the_sent_event() {
+    let rt = runtime(demo::event_source);
+    assert!(rt.find("source-dialog").is_some());
+    assert!(rt.find("source-copy").is_some());
+}

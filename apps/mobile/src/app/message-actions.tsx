@@ -1,5 +1,6 @@
 // A message's actions, from a long press (Slack's sheet): quick reactions and the picker, reply,
-// reply in thread, copy, edit and delete the user's own, end their poll, save or share a file.
+// reply in thread, copy, edit and delete the user's own, end their poll, save or share a file,
+// and view its source.
 
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -260,6 +261,15 @@ export default function MessageActionsScreen() {
             chevron={false}
             testID="message-actions-translate"
             onPress={translate}
+          />
+        ) : null}
+        {can.link ? (
+          <ListRow
+            icon="code"
+            title={t('actions.view_source')}
+            chevron={false}
+            testID="message-actions-source"
+            onPress={() => router.replace(routes.eventSource(account, roomId, eventId))}
           />
         ) : null}
         {can.endPoll && message.content.type === 'Poll' ? (

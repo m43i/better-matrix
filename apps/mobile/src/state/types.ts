@@ -30,6 +30,7 @@ import type {
   ThreadInfo,
   TimelineEntry,
   VerificationStep,
+  Widgets,
 } from '@better-matrix/matrix-native/types';
 
 import type { CallView } from './callView';
@@ -91,6 +92,8 @@ export interface AccountData {
   members: Record<string, Members>;
   threads: Record<string, ThreadInfo[]>;
   files: Record<string, SharedFile[]>;
+  /** Rooms' widgets, by room ID, once listed. */
+  widgets: Record<string, Widgets>;
   pins: Record<string, MessagePreview[]>;
   /** The messages the user saved, most recently saved first, once listed. */
   saved: SavedMessage[] | null;

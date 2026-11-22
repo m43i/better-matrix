@@ -1,12 +1,14 @@
 // The rows around messages: room events (with merged runs), date dividers, the "New" marker,
 // where visible history starts, a page loading or failed, and a thread's reply count.
 
-import type { RoomEvent } from '@better-matrix/matrix-native/types';
+import type { HiddenEvent, RoomEvent } from '@better-matrix/matrix-native/types';
+import { router } from 'expo-router';
 import { memo } from 'react';
 import Animated, { useAnimatedStyle, useReducedMotion, withTiming } from 'react-native-reanimated';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
+import { routes } from '../../routes';
 import { retryHistory } from '../../state/actions/timeline';
 import { MARKER_FADE_MS, MARKER_FADE_REDUCED_MS } from '../../state/newMarker';
 import { shallow, useAppStore, useStore } from '../../state/react';
@@ -69,6 +71,39 @@ function RoomEventLineView({ events }: { events: RoomEvent[] }) {
         {eventRunText(events)}
       </Text>
     </View>
+  );
+}
+
+/**
+ * An event timelines otherwise leave out, while hidden events show: who sent what type. Pressing
+ * it shows its source.
+ */
+export const HiddenEventLine = memo(HiddenEventLineView);
+
+function HiddenEventLineView({ event }: { event: HiddenEvent }) {
+  const palette = usePalette();
+  const { account, timelineKey } = useTimelineContext();
+  const eventId = event.event_id;
+  const label = t('event.hidden', { name: event.sender.name, kind: event.event_type });
+
+  return (
+    <Pressable
+      testID={`hidden-${eventId ?? event.event_type}`}
+      disabled={eventId === null}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={t('actions.view_source')}
+      onPress={() => {
+        if (eventId !== null)
+          router.push(routes.eventSource(account, timelineKey.room_id, eventId));
+      }}
+      style={styles.event}
+    >
+      <Icon name="code" size={14} color={palette.textMuted} />
+      <Text numberOfLines={1} style={[font.meta, styles.grow, { color: palette.textMuted }]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 

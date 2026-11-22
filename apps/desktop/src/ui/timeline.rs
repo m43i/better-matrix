@@ -67,6 +67,8 @@ pub struct Context<'a> {
     pub content_width: f32,
     /// Messages whose held-back media the user chose to show.
     pub revealed: &'a std::collections::HashSet<(AccountId, String)>,
+    /// Hidden events get a line (developer tools).
+    pub show_hidden: bool,
 }
 
 impl<'a> Context<'a> {
@@ -91,6 +93,7 @@ impl<'a> Context<'a> {
             readers_column: key.thread.is_none(),
             content_width: f32::INFINITY,
             revealed: &s.revealed_media,
+            show_hidden: s.settings.show_hidden_events,
         }
     }
 
@@ -170,6 +173,34 @@ fn room_event_line(key: &str, run: &[&RoomEvent], media: &MediaCache, p: &Palett
     }
 }
 
+/// A hidden event as developer tools show it: who sent what type, and its source.
+fn hidden_line(key: &str, cx: &Context<'_>, event: &matrix_core::HiddenEvent, p: &Palette) -> El {
+    let line = row()
+        .key(key.to_owned())
+        .w_full()
+        .px(20.0)
+        .py(2.0)
+        .gap(8.0)
+        .center_y()
+        .child(icon(&icons::CODE, 14.0).color(p.text_muted))
+        .child(
+            text(tf!("event.hidden", name = event.sender.name, kind = event.event_type))
+                .font(font::META)
+                .color(p.text_muted)
+                .grow(1.0)
+                .min_w(0.0)
+                .truncate()
+                .selectable(true),
+        );
+    let Some(event_id) = event.event_id.clone() else { return line };
+    let (account, room_id) = (cx.account.clone(), cx.key.room_id.clone());
+    line.child(
+        button(t!("actions.view_source"), ButtonKind::Link, true, p)
+            .key(format!("{key}-source"))
+            .on_press(move |s: &mut State| s.view_source(account.clone(), room_id.clone(), event_id.clone())),
+    )
+}
+
 /// Marks where the names go in a "many" template.
 const NAMES: &str = "\u{1}";
 /// The size of the pictures on a room event line.
@@ -243,6 +274,8 @@ enum Row {
     },
     Divider(usize),
     ReadMarker(String),
+    /// A hidden event (an entry), while hidden events show.
+    Hidden(usize),
 }
 
 /// Rows either side of the viewport whose media loads before they scroll into view.
@@ -252,7 +285,7 @@ impl Row {
     /// The timeline entries the row shows.
     fn entries(&self) -> Option<std::ops::Range<usize>> {
         match *self {
-            Row::Message { entry, .. } | Row::Divider(entry) => Some(entry..entry + 1),
+            Row::Message { entry, .. } | Row::Divider(entry) | Row::Hidden(entry) => Some(entry..entry + 1),
             Row::Events { start, end } => Some(start..end),
             Row::Start | Row::HistoryFailed(_) | Row::Loading | Row::ReadMarker(_) => None,
         }
@@ -333,7 +366,7 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
                 {
                     match &next.kind {
                         EntryView::RoomEvent(other) if other.change == event.change => {}
-                        EntryView::Other => {}
+                        EntryView::Hidden(_) if !cx.show_hidden => {}
                         _ => break,
                     }
                     index += 1;
@@ -358,7 +391,12 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
                 rows.push((entry.id.clone(), Row::Start));
                 previous = None;
             }
-            EntryView::Start | EntryView::Other => {}
+            // Not even developer tools show what people the user ignores sent.
+            EntryView::Hidden(event) if cx.show_hidden && !cx.data.safety.ignores(&event.sender.id) => {
+                rows.push((cx.key(&entry.id), Row::Hidden(at)));
+                previous = None;
+            }
+            EntryView::Start | EntryView::Hidden(_) => {}
         }
     }
     if let Some((id, boundary)) = fading
@@ -423,6 +461,10 @@ fn build_row(cx: &Context<'_>, timeline: &RoomTimeline, key: &str, row: &Row, p:
                 .collect();
             if run.is_empty() { el().key(key.to_owned()) } else { room_event_line(key, &run, cx.media, p) }
         }
+        Row::Hidden(entry) => match entries.get(*entry).map(|e| &e.kind) {
+            Some(EntryView::Hidden(event)) => hidden_line(key, cx, event, p),
+            _ => el().key(key.to_owned()),
+        },
         Row::Divider(entry) => match entries.get(*entry).map(|e| &e.kind) {
             Some(EntryView::DateDivider(at)) => {
                 rule_with_label(key, &date_label(local_ms(*at), local_ms(now_ms())), p.text_muted, p)

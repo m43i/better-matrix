@@ -98,6 +98,22 @@ export function person(id: string, name = id): Person {
 }
 
 /** A room event entry: `sender` did `change`. */
+/** An event timelines leave out unless hidden events show. */
+export function hiddenEntry(id: string, eventType = 'm.room.server_acl'): TimelineEntry {
+  return {
+    id,
+    kind: {
+      type: 'Hidden',
+      data: {
+        event_id: `$${id}`,
+        sender: person('@grace:example.org'),
+        event_type: eventType,
+        timestamp_ms: 1,
+      },
+    },
+  };
+}
+
 export function roomEventEntry(id: string, sender: Person, change: RoomChange): TimelineEntry {
   return { id, kind: { type: 'RoomEvent', data: { sender, change } } };
 }

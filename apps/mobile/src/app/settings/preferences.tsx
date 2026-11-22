@@ -1,5 +1,5 @@
-// Preferences on this device: language, appearance, link previews and GIFs from links, as the
-// desktop's General settings.
+// Preferences on this device: language, appearance, link previews and GIFs from links, and hidden
+// events (developer tools), as the desktop's General settings.
 
 import { Fragment } from 'react';
 
@@ -71,6 +71,24 @@ export default function PreferencesScreen() {
           toggle={{
             value: settings.showLinkGifs,
             onChange: (on) => updateSettings(store, { showLinkGifs: on }),
+          }}
+        />
+      </ListSection>
+      <ListSection
+        title={t('settings.developer')}
+        footer={
+          settings.showHiddenEvents
+            ? t('settings.hidden_events_on_hint')
+            : t('settings.developer_hint')
+        }
+      >
+        <ListRow
+          testID="hidden-events"
+          icon="code"
+          title={t('settings.hidden_events_on')}
+          toggle={{
+            value: settings.showHiddenEvents,
+            onChange: (on) => updateSettings(store, { showHiddenEvents: on }),
           }}
         />
       </ListSection>

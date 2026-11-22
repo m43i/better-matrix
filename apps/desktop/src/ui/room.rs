@@ -87,6 +87,7 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
         Some(SidePanel::Threads) => Some(super::info::threads(account, room, p)),
         Some(SidePanel::Pins) => Some(super::info::pins(s, account, room, p)),
         Some(SidePanel::Files) => Some(super::info::files(s, account, room, p)),
+        Some(SidePanel::Widgets) => Some(super::developer::widgets(account, room, p)),
         None => s.active_thread().map(|root| thread_panel(s, account, room, root, p, ui)),
     };
     pane.children(panel.zip(layout.right).map(|(panel, (which, size))| super::panes::resizable(panel, which, size, p)))

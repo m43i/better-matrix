@@ -56,7 +56,7 @@ function neighbour(entries: readonly TimelineEntry[], index: number, step: 1 | -
   for (let i = index + step; i >= 0 && i < entries.length; i += step) {
     const kind = entries[i]?.kind;
 
-    if (kind?.type === 'ReadMarker' || kind?.type === 'Other') continue;
+    if (kind?.type === 'ReadMarker' || kind?.type === 'Hidden') continue;
 
     return kind?.type === 'Message' ? { message: kind.data, index: i } : null;
   }

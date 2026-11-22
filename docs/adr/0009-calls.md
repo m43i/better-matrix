@@ -102,8 +102,49 @@ Date: 2026-11-16
   5. LiveKit identities, for matching keys: `user:device`, SHA-256 of `[user, member]` (newer
      memberships) and of `[user, device, member]` (the newer endpoint), unpadded base64;
      a member without an ID has `user:device`.
-  6. Not yet: Element's "matrix_2_0" mode (sticky `m.rtc.member` events and transports
-     authenticated over federation).
+  6. Element's "matrix_2_0" mode (`calls::sticky`): its members write a sticky
+     `org.matrix.msc4143.rtc.member` (or `m.rtc.member`) event (MSC4354, at most an hour, sent
+     again before it lapses) under a random member ID, rather than state. Every Element Call
+     reads both kinds, so the app keeps writing its state membership and reads sticky ones too:
+     - The SDK keeps no sticky events, so each account does (`StickyMembers`, living as long as
+       the account), per room, keyed by type, sender and sticky key, the current one the one
+       sticky longest by its sender's clock (sent plus duration, then the highest event ID; so
+       a snapshot that arrives late can't undo a leave live sync brought), lapsing by the
+       server's remaining time. Only events sent sticky count, only for the
+       room-wide call's slot (`m.call#ROOM`), and in an encrypted room only ones that came
+       encrypted (anyone who may send could fake one in the clear). They come from the
+       timeline as they are sent (the call handlers see them decrypted), and, once per room
+       where the server lists `org.matrix.msc4354`, from before: a sync without a token for that
+       room alone that marks no one present (`StickyMembers::fetch`; its token is never used,
+       so its to-device messages stay undelivered). It runs when a room's timeline first opens
+       and when a call starts; a call waits for one under way; one that failed, or met events
+       this device can't decrypt yet, runs again next time, and after the sync reconnects every
+       room's runs again: the rooms on screen (a call's among them) at once, tried again until the
+       connection answers, others when opened
+       (memberships sent meanwhile may have come only in the failed sync). A leave (or a content without a
+       member) replaces the join, a redaction removes it, and members of rooms they left don't
+       count, and a snapshot skips their events (a call asks for one lazy loading left out; a room's summary counts only those
+       the store knows as joined), and such a member leaving the room (or being removed) takes
+       their memberships with them, which the call, rings and summaries hear at once. The store itself reports every change,
+       and each membership's lapse, as `Signal::Members` (`StickyMembers::report_to`).
+     - Known gaps: a sticky event that arrives only outside the timeline window between two
+       snapshots (MSC4354's sync section, which the SDK drops) is seen at the member's next
+       renewal or the next snapshot; a call signal the SDK decrypts only later (its key came
+       after it) isn't replayed, as before; MSC4195 grants use the unstable route, the only one
+       ruma 0.17 and today's deployments have.
+     - A sticky member counts wherever a state member does: the call's members
+       (`rtc::members`), the room's call participants in its summary, whether a ring's session
+       still has someone, and whether the user joined from another device. A change reports
+       `Signal::Members` and reads the room's summary again.
+     - Its member ID is the UUID: keys name it (`member_id`), and the identities already
+       include SHA-256 of `[user, member]`, the one a homeserver-vouched SFU gives.
+     - Transports (`rtc::Transport`): a `livekit_service_url` is a JWT service, asked as before;
+       a LiveKit transport with only `url` is an SFU its homeserver (`server_name`, else the
+       publisher's) vouches for (MSC4195): the user's own homeserver asks it over federation
+       (`rtc/livekit/get_token`, our member ID, slot `m.call#ROOM`), and the SFU is the URL. The
+       user still publishes on their own homeserver's JWT service.
+     - Not done: writing sticky memberships (matrix-sdk 0.19 can't send an encrypted sticky
+       event) and publishing on a homeserver that names only MSC4195 transports.
 - **One-to-one standard** (`calls::direct`): MSC2746 version 1 (invite, answer, candidates,
   select answer, hangup, reject) over a libwebrtc peer connection from LiveKit's runtime, with
   the homeserver's TURN servers. Media is WebRTC's own DTLS-SRTP; the signalling is encrypted

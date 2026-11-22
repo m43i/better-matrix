@@ -16,7 +16,7 @@ import type {
 
 import { galleryAround, thumbnailOf } from './gallery';
 import { EMPTY_TIMELINE, mediaKey } from './reducer';
-import { ignores, revealKey, showsMedia, shownInvitations } from './safety';
+import { hiddenEntry, ignores, revealKey, showsMedia, shownInvitations } from './safety';
 import { newestMessages, type NewestMessages } from './sections';
 import { timelineId } from './timeline';
 import type { AccountData, State, Timeline } from './types';
@@ -111,7 +111,7 @@ export function shownTimeline(state: State, id: AccountId, key: TimelineKey): Ti
 
   const entries = kept.entries.map((entry): TimelineEntry =>
     entry.kind.type === 'Message' && pending.includes(entry.kind.data.sender_id)
-      ? { id: entry.id, kind: { type: 'Other' } }
+      ? hiddenEntry(entry.id, entry.kind.data)
       : entry,
   );
 

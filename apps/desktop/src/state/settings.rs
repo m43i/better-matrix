@@ -94,6 +94,8 @@ pub struct Settings {
     pub ring_sound: bool,
     /// How fast voice memos and audio clips play.
     pub playback_speed: PlaybackSpeed,
+    /// Timelines draw the events they otherwise leave out (developer tools).
+    pub show_hidden_events: bool,
 }
 
 /// How fast voice memos and audio clips play, at their own pitch. The speed button on a clip
@@ -149,6 +151,7 @@ impl Default for Settings {
             devices: matrix_core::DeviceChoice::default(),
             ring_sound: true,
             playback_speed: PlaybackSpeed::default(),
+            show_hidden_events: false,
         }
     }
 }

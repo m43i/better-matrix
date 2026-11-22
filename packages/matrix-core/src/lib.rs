@@ -36,12 +36,14 @@ mod history;
 mod polls;
 mod saved;
 mod session;
+mod source;
 #[cfg(test)]
 mod test_server;
 mod thumbnail;
 mod timeline;
 mod timeline_bootstrap;
 mod tls;
+pub mod widgets;
 
 pub mod links;
 
@@ -56,11 +58,11 @@ pub use engine::{
     StoreSharing,
 };
 pub use model::{
-    AccountId, AccountSummary, Attachment, AttachmentKind, AudioDetails, CallCard, EntryKind, HistoryVisibility,
-    Invitation, LoginMethods, MediaRef, MediaSize, Message, MessageContent, Notification, NotificationMode, Outgoing,
-    Password, Person, Poll, PollAnswer, PublicRoom, PushContent, PushTarget, Pusher, Quote, Reaction, ReadReceipt,
-    RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary, ThreadSummary, TimelineDiff,
-    TimelineEntry, TimelineKey, Upload,
+    AccountId, AccountSummary, Attachment, AttachmentKind, AudioDetails, CallCard, EntryKind, HiddenEvent,
+    HistoryVisibility, Invitation, LoginMethods, MediaRef, MediaSize, Message, MessageContent, Notification,
+    NotificationMode, Outgoing, Password, Person, Poll, PollAnswer, PublicRoom, PushContent, PushTarget, Pusher, Quote,
+    Reaction, ReadReceipt, RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary,
+    ThreadSummary, TimelineDiff, TimelineEntry, TimelineKey, Upload,
 };
 
 /// How many messages a timeline page holds: what a room shows when it opens, and what each
@@ -78,8 +80,10 @@ pub use search::{MessageHit, SearchUsage};
 pub use secrets::{FileSecrets, MemorySecrets, SecretError, SecretStore};
 pub use security::{RecoveryStatus, SasEmoji, Security, Session, VerificationStep};
 pub use sidebar::{ScopeLayout, Section, SidebarLayout};
+pub use source::EventSource;
 pub use status::Status;
 pub use store::StoreLayout;
+pub use widgets::{Widget, Widgets};
 
 /// Shown to other devices and in the server's session list.
 pub const DEVICE_DISPLAY_NAME: &str = "Better Matrix";
@@ -99,6 +103,9 @@ pub enum Error {
     /// A Matrix identifier did not parse.
     #[error("invalid Matrix identifier: {0}")]
     Id(#[from] matrix_sdk::IdParseError),
+    /// A widget's address isn't a web page (`http` or `https`).
+    #[error("a widget needs a web address")]
+    InvalidWidgetUrl,
     /// A poll needs a question and two to twenty answers.
     #[error("a poll needs two to twenty answers")]
     InvalidPoll,

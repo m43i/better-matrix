@@ -16,15 +16,18 @@ use matrix_sdk_ui::timeline::{
 
 use crate::convert;
 use crate::model::{
-    CallCard, EntryKind, Message, MessageContent, Person, Quote, Reaction, RoomChange, RoomEvent, ThreadSummary,
-    TimelineDiff, TimelineEntry,
+    CallCard, EntryKind, HiddenEvent, Message, MessageContent, Person, Quote, Reaction, RoomChange, RoomEvent,
+    ThreadSummary, TimelineDiff, TimelineEntry,
 };
 
 pub(crate) fn entry(item: &Arc<TimelineItem>, me: &UserId) -> TimelineEntry {
     let kind = match item.kind() {
         TimelineItemKind::Event(event) => match message(event, me) {
             Some(message) => EntryKind::Message(Box::new(message)),
-            None => room_event(event).map_or(EntryKind::Other, |e| EntryKind::RoomEvent(Box::new(e))),
+            None => match room_event(event) {
+                Some(change) => EntryKind::RoomEvent(Box::new(change)),
+                None => EntryKind::Hidden(Box::new(hidden(event))),
+            },
         },
         TimelineItemKind::Virtual(VirtualTimelineItem::DateDivider(at)) => EntryKind::DateDivider(u64::from(at.0)),
         TimelineItemKind::Virtual(VirtualTimelineItem::ReadMarker) => EntryKind::ReadMarker,
@@ -234,6 +237,27 @@ fn sender(event: &EventTimelineItem) -> Person {
         _ => None,
     };
     Person { id: event.sender().to_string(), name: name(event.sender(), event.sender_profile()), avatar }
+}
+
+/// An event drawn only with "Show hidden events": its type, from its JSON when it has some
+/// (a local echo doesn't), else from what the timeline made of it.
+fn hidden(event: &EventTimelineItem) -> HiddenEvent {
+    let from_json = event.original_json().and_then(|raw| raw.get_field::<String>("type").ok().flatten());
+    let event_type = from_json.unwrap_or_else(|| match event.content() {
+        TimelineItemContent::MembershipChange(_) | TimelineItemContent::ProfileChange(_) => "m.room.member".to_owned(),
+        TimelineItemContent::OtherState(state) => state.content().event_type().to_string(),
+        TimelineItemContent::FailedToParseMessageLike { event_type, .. } => event_type.to_string(),
+        TimelineItemContent::FailedToParseState { event_type, .. } => event_type.to_string(),
+        TimelineItemContent::CallInvite => "m.call.invite".to_owned(),
+        TimelineItemContent::RtcNotification { .. } => "m.rtc.notification".to_owned(),
+        TimelineItemContent::MsgLike(_) => "m.room.message".to_owned(),
+    });
+    HiddenEvent {
+        event_id: event.event_id().map(ToString::to_string),
+        sender: sender(event),
+        event_type,
+        timestamp_ms: u64::from(event.timestamp().0),
+    }
 }
 
 /// A room event: a membership, profile or room-setting change. `None` for anything else, and

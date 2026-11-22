@@ -25,6 +25,8 @@ export interface Settings {
   pushOff: string[];
   /** How fast voice memos and audio clips play, at their own pitch. */
   playbackSpeed: PlaybackSpeed;
+  /** Timelines draw the events they otherwise leave out (developer tools). */
+  showHiddenEvents: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -37,6 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
   pushEnabled: true,
   pushOff: [],
   playbackSpeed: 1,
+  showHiddenEvents: false,
 };
 
 const savedSettings = z.object({
@@ -51,6 +54,7 @@ const savedSettings = z.object({
   playbackSpeed: z
     .union([z.literal(1), z.literal(1.5), z.literal(2)])
     .catch(DEFAULT_SETTINGS.playbackSpeed),
+  showHiddenEvents: z.boolean().catch(DEFAULT_SETTINGS.showHiddenEvents),
 });
 
 /** Settings from saved JSON: unknown or broken fields fall back to their defaults. */

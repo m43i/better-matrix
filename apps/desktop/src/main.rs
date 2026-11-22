@@ -64,6 +64,9 @@ fn spec() -> AppSpec<State> {
                 });
             }),
             ("demo-saved", demo::saved_messages),
+            ("demo-hidden-events", demo::hidden_events),
+            ("demo-widgets", demo::widgets),
+            ("demo-source", demo::event_source),
             ("demo-saved-menu", |s| {
                 demo::saved_messages(s);
                 s.close_modal();

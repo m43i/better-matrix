@@ -37,7 +37,7 @@ use tokio::time::Instant;
 
 use super::keys::{self, OwnKey};
 use super::media::{self, Capture, Sinks};
-use super::rtc::{self, Member};
+use super::rtc::{self, Member, Transport};
 use super::signals::Signal;
 use super::task::{Call, Control, Controls, Shared, media_error, panicked, person, switch_camera};
 use super::{
@@ -75,7 +75,7 @@ pub(super) async fn run(
     call: Call<'_>,
     http: Option<matrix_sdk::reqwest::Client>,
 ) -> Result<CallEnd, CallError> {
-    let own = account.rtc_service().ok_or(CallError::Unavailable)?;
+    let own = Transport::Service(account.rtc_service().ok_or(CallError::Unavailable)?);
     let mut info = CallInfo {
         call: call.generation,
         account: account.id().clone(),
@@ -95,6 +95,7 @@ pub(super) async fn run(
         user_id: account.user_id().map_err(|_| CallError::NoCall)?,
         device_id: account.client().device_id().ok_or(CallError::NoCall)?.to_string(),
         own,
+        sticky: account.sticky.clone(),
         http: http.ok_or_else(|| CallError::Service("no HTTP client".into()))?,
         key_provider: KeyProvider::new(KeyProviderOptions {
             ratchet_window_size: 10,
@@ -140,7 +141,7 @@ pub(super) async fn run(
 #[derive(Default)]
 struct Session {
     primary: Option<Link>,
-    links: HashMap<String, Link>,
+    links: HashMap<Transport, Link>,
     audio: Option<PlatformAudio>,
     microphone: Option<LocalAudioTrack>,
     camera: Option<Shared>,
@@ -209,17 +210,19 @@ struct Context {
     user_id: OwnedUserId,
     device_id: String,
     /// The user's own call service, where they publish.
-    own: String,
+    own: Transport,
+    /// The account's matrix_2_0 memberships.
+    sticky: super::StickyMembers,
     http: matrix_sdk::reqwest::Client,
     key_provider: KeyProvider,
     encrypted: bool,
     video: bool,
-    events: UnboundedSender<(String, RoomEvent)>,
+    events: UnboundedSender<(Transport, RoomEvent)>,
 }
 
 impl Context {
     /// Connects to `service`, forwarding its events tagged with it.
-    async fn connect(self, service: String) -> Result<Link, CallError> {
+    async fn connect(self, service: Transport) -> Result<Link, CallError> {
         let grant = rtc::grant(&self.http, &self.room, &service, self.user_id.clone(), &self.device_id);
         let grant = step("asking the call service for a token", STEP_LIMIT, grant).await?;
         let mut options = RoomOptions::default();
@@ -249,7 +252,7 @@ impl Context {
     /// call's oldest member stays the same.
     fn membership(&self, since: Option<u64>) -> Value {
         let room_id = self.room.room_id().as_str();
-        rtc::membership(self.user_id.as_str(), &self.device_id, room_id, &self.own, self.video, since)
+        rtc::membership(self.user_id.as_str(), &self.device_id, room_id, self.own.address(), self.video, since)
     }
 
     fn is_me(&self, member: &Member) -> bool {
@@ -258,8 +261,10 @@ impl Context {
 
     /// The call's members besides this device, and this device's own membership.
     async fn members(&self) -> (Vec<Member>, Option<Member>) {
+        // matrix_2_0 members who joined before this session heard them, once per room.
+        self.sticky.fetch(&self.room, &self.http).await;
         let (mut me, others): (Vec<Member>, Vec<Member>) =
-            rtc::members(&self.room).await.into_iter().partition(|member| self.is_me(member));
+            rtc::members(&self.room, &self.sticky).await.into_iter().partition(|member| self.is_me(member));
         (others, me.pop())
     }
 }
@@ -340,7 +345,7 @@ async fn step<T>(
 
 /// What the work beside the loop reports.
 enum Work {
-    Connected(String, Result<Link, CallError>),
+    Connected(Transport, Result<Link, CallError>),
     /// Keys went out; these devices didn't get them.
     KeysSent(HashSet<Device>),
     Person(String, Person),
@@ -362,7 +367,7 @@ enum Flow {
 struct RemoteVideo {
     owner: String,
     /// The service it comes over.
-    service: String,
+    service: Transport,
     sid: TrackSid,
     task: AbortHandle,
 }
@@ -380,7 +385,7 @@ struct Media {
 #[derive(Default)]
 struct Others {
     /// The services each identity is on, in the order identities arrived.
-    present: Vec<(String, HashSet<String>)>,
+    present: Vec<(String, HashSet<Transport>)>,
     /// The user each member identity stands for.
     members: HashMap<String, String>,
     people: HashMap<String, Person>,
@@ -392,24 +397,24 @@ struct Others {
 
 impl Others {
     /// Someone on `service`.
-    fn arrived(&mut self, identity: &str, service: &str) {
+    fn arrived(&mut self, identity: &str, service: &Transport) {
         match self.present.iter_mut().find(|(known, _)| known == identity) {
             Some((_, services)) => {
-                services.insert(service.to_owned());
+                services.insert(service.clone());
             }
-            None => self.present.push((identity.to_owned(), HashSet::from([service.to_owned()]))),
+            None => self.present.push((identity.to_owned(), HashSet::from([service.clone()]))),
         }
     }
 
     /// Someone left `service`, and their videos over it went: gone from the call once on no
     /// service at all.
-    fn left(&mut self, identity: &str, service: &str) {
+    fn left(&mut self, identity: &str, service: &Transport) {
         let Some(index) = self.present.iter().position(|(known, _)| known == identity) else { return };
         self.present[index].1.remove(service);
         let gone: Vec<VideoId> = self
             .videos
             .iter()
-            .filter(|(_, video)| video.owner == identity && video.service == service)
+            .filter(|(_, video)| video.owner == identity && video.service == *service)
             .map(|(id, _)| *id)
             .collect();
         for id in gone {
@@ -422,7 +427,7 @@ impl Others {
     }
 
     /// Everyone on a service that went.
-    fn left_service(&mut self, service: &str) {
+    fn left_service(&mut self, service: &Transport) {
         let identities: Vec<String> = self.present.iter().map(|(identity, _)| identity.clone()).collect();
         for identity in identities {
             self.left(&identity, service);
@@ -506,7 +511,7 @@ struct Live<'a, 'c> {
     rotate_at: Option<Instant>,
     last_rotation: Instant,
     /// Services being connected to.
-    connecting: HashSet<String>,
+    connecting: HashSet<Transport>,
     /// The membership is being sent again; `lost`: it should be, once this one is through.
     rejoining: bool,
     lost: bool,
@@ -550,7 +555,7 @@ impl<'a, 'c> Live<'a, 'c> {
         session: &mut Session,
         controls: &mut Controls,
         info: &mut CallInfo,
-        mut live_events: UnboundedReceiver<(String, RoomEvent)>,
+        mut live_events: UnboundedReceiver<(Transport, RoomEvent)>,
         mut ended: UnboundedReceiver<media::Ended>,
     ) -> CallEnd {
         if let Some(primary) = session.primary() {
@@ -695,16 +700,22 @@ impl<'a, 'c> Live<'a, 'c> {
     }
 
     /// Someone on `service`, whose name is then looked up.
-    fn arrived(&mut self, identity: &str, service: &str) {
+    fn arrived(&mut self, identity: &str, service: &Transport) {
         self.others.arrived(identity, service);
         if let Some(user) = self.others.user(identity) {
             self.others.look_up(user, &self.cx.room, &mut self.work);
         }
     }
 
-    fn live_event(&mut self, session: &mut Session, info: &mut CallInfo, service: &str, event: RoomEvent) -> Flow {
+    fn live_event(
+        &mut self,
+        session: &mut Session,
+        info: &mut CallInfo,
+        service: &Transport,
+        event: RoomEvent,
+    ) -> Flow {
         tracing::trace!(%service, ?event, "call: livekit");
-        let own = service == self.cx.own;
+        let own = *service == self.cx.own;
         match event {
             RoomEvent::ParticipantConnected(participant) => self.arrived(participant.identity().as_str(), service),
             RoomEvent::ParticipantDisconnected(participant) => {
@@ -716,7 +727,7 @@ impl<'a, 'c> Live<'a, 'c> {
                 let screen = publication.source() == TrackSource::Screenshare;
                 let task = tokio::spawn(media::watch_remote(track.rtc_track(), id, self.sinks.clone())).abort_handle();
                 let video =
-                    RemoteVideo { owner: owner.clone(), service: service.to_owned(), sid: publication.sid(), task };
+                    RemoteVideo { owner: owner.clone(), service: service.clone(), sid: publication.sid(), task };
                 self.others.videos.insert(id, video);
                 if !publication.is_muted() {
                     let media = self.others.media.entry(owner).or_default();
@@ -846,7 +857,8 @@ impl<'a, 'c> Live<'a, 'c> {
         self.members = members;
         // Services nobody publishes on any more.
         let wanted = rtc::subscriptions(&self.members, &self.cx.own);
-        let unused: Vec<String> = session.links.keys().filter(|service| !wanted.contains(service)).cloned().collect();
+        let unused: Vec<Transport> =
+            session.links.keys().filter(|service| !wanted.contains(service)).cloned().collect();
         for service in unused {
             if let Some(link) = session.links.remove(&service) {
                 tokio::spawn(link.close());
@@ -1075,6 +1087,10 @@ mod tests {
         assert!(matches!(done.await, Ok(7)));
     }
 
+    fn on(service: &str) -> Transport {
+        Transport::Service(service.into())
+    }
+
     fn video(owner: &str, service: &str, sid: &str) -> RemoteVideo {
         let task = tokio::runtime::Builder::new_current_thread()
             .build()
@@ -1082,7 +1098,7 @@ mod tests {
             .block_on(async { tokio::spawn(async {}).abort_handle() });
         RemoteVideo {
             owner: owner.into(),
-            service: service.into(),
+            service: on(service),
             sid: sid.to_owned().try_into().unwrap_or_else(|_| panic!("sid")),
             task,
         }
@@ -1091,18 +1107,18 @@ mod tests {
     #[test]
     fn someone_on_two_services_should_stay_until_gone_from_both() {
         let mut others = Others::default();
-        others.arrived("@a:x:D", "https://one");
-        others.arrived("@a:x:D", "https://two");
-        others.left("@a:x:D", "https://one");
+        others.arrived("@a:x:D", &on("https://one"));
+        others.arrived("@a:x:D", &on("https://two"));
+        others.left("@a:x:D", &on("https://one"));
         assert_eq!(others.participants().len(), 1);
-        others.left("@a:x:D", "https://two");
+        others.left("@a:x:D", &on("https://two"));
         assert!(others.participants().is_empty());
     }
 
     #[test]
     fn a_connection_that_belongs_to_no_member_should_not_show() {
         let mut others = Others::default();
-        others.arrived("c29tZWhhc2g", "https://one");
+        others.arrived("c29tZWhhc2g", &on("https://one"));
         assert!(others.participants().is_empty());
         others.members.insert("c29tZWhhc2g".into(), "@a:x".into());
         assert_eq!(others.participants()[0].person.id, "@a:x");
@@ -1111,11 +1127,11 @@ mod tests {
     #[test]
     fn a_service_going_should_take_the_videos_that_came_over_it() {
         let mut others = Others::default();
-        others.arrived("@a:x:D", "https://one");
-        others.arrived("@a:x:D", "https://two");
+        others.arrived("@a:x:D", &on("https://one"));
+        others.arrived("@a:x:D", &on("https://two"));
         others.videos.insert(VideoId(1), video("@a:x:D", "https://two", "TR_1"));
         others.media.entry("@a:x:D".into()).or_default().camera = Some(VideoId(1));
-        others.left_service("https://two");
+        others.left_service(&on("https://two"));
         assert_eq!(others.participants()[0].camera, None);
         assert!(others.videos.is_empty());
     }

@@ -227,6 +227,23 @@ see who is typing there.
   - Runs of a kind that `groups()` (joined, left) merge into one line, "Grace, Alan, Kai, Mira
     and 2 more joined", with up to four stacked pictures; hovering "and 2 more" shows everyone.
     Merging is in the view, so entries stay one per event and diff indices stay true.
+- **Hidden events** (developer tools): every timeline item the app draws nothing for (state it
+  has no `RoomChange` for, events that didn't parse, membership events that changed nothing)
+  is `EntryKind::Hidden` with its sender, type and event ID, so diff indices stay true. Whether
+  they show is a setting on this device ("Show hidden events", off by default; the desktop's
+  General settings, the phone's Preferences), not an engine mode: turning it on plans the rows
+  again (`Accounts::replan_timelines` on the desktop) and each shows as a small line, "Grace
+  sent m.room.server_acl", whose source button (a press on phones) opens its source. Hidden
+  entries that don't show don't break a run of joins; ones that show do. Events the SDK's
+  timeline can't represent at all (unknown message types, edits and reactions it folds into
+  their message) have no entry, so they don't show either.
+- **Event source** (developer tools): "View source" in a message's menu (any sent message) and
+  on a hidden event's line asks `Command::ViewSource`, answered by `Event::EventSource`: the
+  event as this device reads it (from the event cache, else the server; decrypted when it came
+  encrypted) and, for an encrypted event, as the server holds it (`get_room_event`, unprocessed),
+  each pretty-printed. The desktop shows it in a dialog (`Modal::Source`, selectable, Copy JSON);
+  a source that arrives after its dialog closed opens nothing, one that fails closes it with a
+  notice. Phones show it in a sheet (`app/event-source.tsx`).
 - **Pictures:** messages carry the sender's picture (`sender_avatar`), loaded as 128 px
   thumbnails and drawn by `media_avatar`.
   - Fallback initials: first letters of the display name's first two words, one for a single

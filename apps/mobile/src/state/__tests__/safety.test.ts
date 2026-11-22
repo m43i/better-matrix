@@ -182,7 +182,7 @@ describe('ignoring someone', () => {
     const entries =
       ignoreGrace(state).accounts[0]!.timelines[timelineId(roomKey(PRIVATE))]!.entries;
 
-    expect(entries).toEqual([{ id: '$spam', kind: { type: 'Other' } }]);
+    expect(entries.map((e) => e.kind.type)).toEqual(['Hidden']);
   });
 
   it('choices that ignore no one new should leave previews alone', () => {

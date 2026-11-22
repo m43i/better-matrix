@@ -6,6 +6,7 @@ import type { CallEnd } from "./CallEnd";
 import type { CallInfo } from "./CallInfo";
 import type { Contacts } from "./Contacts";
 import type { Draft } from "./Draft";
+import type { EventSource } from "./EventSource";
 import type { Homeserver } from "./Homeserver";
 import type { IncomingCall } from "./IncomingCall";
 import type { LinkPreview } from "./LinkPreview";
@@ -38,6 +39,7 @@ import type { ThreadInfo } from "./ThreadInfo";
 import type { TimelineDiff } from "./TimelineDiff";
 import type { TimelineKey } from "./TimelineKey";
 import type { VerificationStep } from "./VerificationStep";
+import type { Widgets } from "./Widgets";
 
 /**
  * What the engine reports. Delivered on the engine's threads; a sink forwards them to its UI.
@@ -234,7 +236,27 @@ request: RequestId,
 /**
  * Ranked excerpts and their match highlights.
  */
-messages: Array<MessageHit>, } } | { "type": "PeopleFound", "data": { 
+messages: Array<MessageHit>, } } | { "type": "EventSource", "data": { 
+/**
+ * The request it answers.
+ */
+request: RequestId, 
+/**
+ * The event's JSON.
+ */
+source: EventSource, } } | { "type": "Widgets", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, 
+/**
+ * Its widgets.
+ */
+widgets: Widgets, } } | { "type": "PeopleFound", "data": { 
 /**
  * The search it answers.
  */

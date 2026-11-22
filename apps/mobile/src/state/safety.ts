@@ -5,8 +5,10 @@
 import type {
   AccountId,
   Invitation,
+  Message,
   Safety,
   SafetyChange,
+  TimelineEntry,
 } from '@better-matrix/matrix-native/types';
 
 /** Before the engine reports an account's choices: everything shows, as with none saved. */
@@ -89,4 +91,24 @@ export function hiddenInvitations(
 /** A message's key in `State.revealedMedia`: media the user tapped Show on, until restart. */
 export function revealKey(account: AccountId, eventId: string): string {
   return `${account}|${eventId}`;
+}
+
+/**
+ * A message from someone the user ignores, in its timeline's place (`id`): a hidden event, so
+ * the engine's diffs still count positions right, which the timeline never draws, the developer
+ * setting for hidden events included (`PlanOptions.ignored`).
+ */
+export function hiddenEntry(id: string, message: Message): TimelineEntry {
+  return {
+    id,
+    kind: {
+      type: 'Hidden',
+      data: {
+        event_id: message.event_id,
+        sender: { id: message.sender_id, name: message.sender_name, avatar: message.sender_avatar },
+        event_type: message.content.type === 'Poll' ? 'm.poll.start' : 'm.room.message',
+        timestamp_ms: message.timestamp_ms,
+      },
+    },
+  };
 }

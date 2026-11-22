@@ -22,7 +22,7 @@ impl Server {
         let stopped = Arc::new(AtomicBool::new(false));
         let stop = Arc::clone(&stopped);
         let thread = std::thread::spawn(move || {
-            for stream in listener.incoming() {
+            'connections: for stream in listener.incoming() {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
@@ -31,7 +31,8 @@ impl Server {
                 let mut request = Vec::new();
                 let mut bytes = [0; 4096];
                 loop {
-                    let n = stream.read(&mut bytes).expect("read request");
+                    // A client that gave up on its request (a cancelled long poll) sends nothing.
+                    let Ok(n) = stream.read(&mut bytes) else { continue 'connections };
                     if n == 0 {
                         break;
                     }

@@ -254,7 +254,7 @@ describe('ignoring someone, whichever answer comes first', () => {
     });
     void setIgnored(store, ADA, GRACE, true);
     expect(shownTimeline(store.getState(), ADA, roomKey('!room:x')).entries[0]?.kind.type).toBe(
-      'Other',
+      'Hidden',
     );
   });
 });
