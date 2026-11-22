@@ -81,6 +81,7 @@ fn inline(key: &str, edit: &TextEdit, range: std::ops::Range<usize>, block: Bloc
     let mut strikes = Vec::new();
     let mut pills = Vec::new();
     let mut emoji = Vec::new();
+    let mut hidden: Vec<std::ops::Range<usize>> = Vec::new();
     if block == Block::Code {
         spans.push(Span::new(0, words.len()).mono());
     } else {
@@ -107,7 +108,10 @@ fn inline(key: &str, edit: &TextEdit, range: std::ops::Range<usize>, block: Bloc
                 Mark::Pill(id) => {
                     let absolute = mark.start;
                     match pill(id, start..end, absolute, &words[start..end], look, p) {
-                        Inline::Chip { style, link, span: chip_span } => {
+                        Inline::Chip { style, link, span: chip_span, hides } => {
+                            if hides {
+                                hidden.push(start..end);
+                            }
                             pills.push((start..end, style));
                             links.extend(link.map(|link| *link));
                             match chip_span {
@@ -128,7 +132,13 @@ fn inline(key: &str, edit: &TextEdit, range: std::ops::Range<usize>, block: Bloc
             spans.push(span);
         }
     }
-    let mut content = rune::rich(words.to_owned(), spans)
+    // Hidden words never reach the text: not the screen reader, not a copied selection. Blanks
+    // of the same length keep every other range where it is.
+    let mut shown = words.to_owned();
+    for range in hidden {
+        shown.replace_range(range.clone(), &" ".repeat(range.len()));
+    }
+    let mut content = rune::rich(shown, spans)
         .key(key.to_owned())
         .font(font::BODY)
         .color(p.text)
@@ -166,8 +176,9 @@ const EMOJI: f32 = 22.0;
 
 /// How a pill in a message draws.
 enum Inline {
-    /// A chip, maybe pressable, maybe with its words styled.
-    Chip { style: PillStyle, link: Option<Box<Link>>, span: Option<Span> },
+    /// A chip, maybe pressable, maybe with its words styled; `hides` its words (a spoiler not
+    /// revealed yet).
+    Chip { style: PillStyle, link: Option<Box<Link>>, span: Option<Span>, hides: bool },
     /// A custom emoji's picture.
     Emoji(rune::Pixels),
     /// Its words as they are (a custom emoji whose picture isn't here yet).
@@ -185,7 +196,7 @@ fn pill(id: &str, range: std::ops::Range<usize>, absolute: usize, words: &str, l
         } else {
             PillStyle::new().bg(p.accent.alpha(0.14)).fg(p.accent)
         };
-        return Inline::Chip { style, link: Some(Box::new(Link::new(range, link))), span: None };
+        return Inline::Chip { style, link: Some(Box::new(Link::new(range, link))), span: None, hides: false };
     }
     if id == "spoiler" {
         // Revealed words stay revealed for these words only: an edit that hides others in their
@@ -196,6 +207,7 @@ fn pill(id: &str, range: std::ops::Range<usize>, absolute: usize, words: &str, l
                 style: PillStyle::new().bg(p.text_muted.alpha(0.15)).fg(p.text),
                 link: None,
                 span: None,
+                hides: false,
             };
         }
         // The words take the chip's colour: there, but unread until pressed.
@@ -204,11 +216,17 @@ fn pill(id: &str, range: std::ops::Range<usize>, absolute: usize, words: &str, l
             style: PillStyle::new().bg(p.text_muted).fg(p.text_muted),
             link: Some(Box::new(link)),
             span: None,
+            hides: true,
         };
     }
     if id.starts_with("math") {
         let span = Span::new(range.start, range.end).italic();
-        return Inline::Chip { style: PillStyle::new().bg(p.surface).fg(p.text), link: None, span: Some(span) };
+        return Inline::Chip {
+            style: PillStyle::new().bg(p.surface).fg(p.text),
+            link: None,
+            span: Some(span),
+            hides: false,
+        };
     }
     if let Some(url) = id.strip_prefix("emote:") {
         let pixels = matrix_core::MediaRef::from_mxc(url)
@@ -249,6 +267,20 @@ mod tests {
         rt.pointer_move(5.0, 10.0);
         rt.frame(1.0 / 60.0);
         assert_eq!(rt.cursor(), Cursor::Text);
+    }
+
+    fn hidden_spoiler(s: &State, _: &mut rune::Cx<State>) -> El {
+        let edit = TextEdit::from_html("<p>the end: <span data-pill=\"spoiler\">the butler did it</span></p>");
+        formatted("message", &edit, test_look(s), &super::super::theme::palette(true))
+    }
+
+    #[test]
+    fn a_hidden_spoiler_should_give_its_words_to_nothing() {
+        let mut rt = Runtime::new(State::detached(), hidden_spoiler, (500.0, 100.0), Env::new(true, 1.0));
+        rt.frame(0.0);
+        let texts: Vec<String> = rt.elements().into_iter().filter_map(|element| element.text).collect();
+        assert!(texts.iter().any(|text| text.starts_with("the end:")), "{texts:?}");
+        assert!(texts.iter().all(|text| !text.contains("butler")), "{texts:?}");
     }
 
     fn multiline_lists(s: &State, _: &mut rune::Cx<State>) -> El {

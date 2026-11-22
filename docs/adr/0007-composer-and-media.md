@@ -60,7 +60,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   text: a typo never goes out. `//` sends a leading slash; `/usr/bin` is a message.
 - **Spoilers and formulas:** received spoilers draw as a block of their own colour, carrying an
   app link (`SPOILER_LINK`, naming the message, the place and a fingerprint of the words) a press
-  reveals for the run (`State::revealed`): an edit hiding other words there hides them again. A spoiler is its
+  reveals for the run (`State::revealed`): an edit hiding other words there hides them again.
+  Until revealed, the words never reach the text Rune holds (blanks of the same length stand in),
+  so neither a screen reader nor a copied selection has them. A spoiler is its
   plain words (a custom emoji by its description): nothing inside it becomes a pill or link that
   could show or act through it, and a link around a spoiler is no link, its words being hidden.
   A spoiler wins over everything else an element says (maths too), and a code block holding one
@@ -134,7 +136,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   as the list opens and when one of its messages comes due, then every 30 s while the server
   still lists it (sent ones aren't listed), and comes back after every change. Each account's
   lists are read and reported one at a time (`Account::listing_scheduled`), so an older answer
-  never covers a newer. One this device can't decrypt shows as "Encrypted message".
+  never covers a newer. A server that holds delayed events but can't list them (the bulk list is
+  optional) shows the messages this session scheduled there, still to come, so they can still be
+  sent now or cancelled. One this device can't decrypt shows as "Encrypted message".
 - **Composer layout:**
   - Room and thread editors grow up to eight lines, then scroll inside their own viewport,
     keeping the caret visible while typing or pasting. Vertical padding and the bottom bar stay outside

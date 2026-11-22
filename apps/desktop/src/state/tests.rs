@@ -6049,3 +6049,20 @@ fn a_search_hit_opened_while_a_lookup_waits_should_not_be_undone_by_it() {
     apply(&mut s, Event::MessageLocated { request, account: id, key, event_id: "$far".into() });
     assert_eq!(s.message_jump.as_ref().map(|jump| jump.event_id.as_str()), Some("$hit"));
 }
+
+#[test]
+fn a_lookup_failing_after_leaving_its_room_should_say_nothing() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x", "!two:x"], Vec::new());
+    s.select_room("!one:x");
+    drain(&mut commands);
+    s.jump_to_message(&id, "!one:x", "$m");
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::LocateMessage { .. }))
+        .expect("a lookup");
+    s.select_room("!two:x");
+    apply(&mut s, Event::Finished { request, result: Err("not found".into()) });
+    assert!(s.notice.is_none());
+}

@@ -735,8 +735,9 @@ pub struct State {
     pub message_jump: Option<search::MessageJump>,
     /// The message just jumped to, lit a moment.
     pub flash: Option<jump::Flash>,
-    /// The latest jump waiting for the engine to find its message: only its answer goes.
-    locating: Option<RequestId>,
+    /// The latest jump waiting for the engine to find its message, and its room: only its
+    /// answer goes.
+    locating: Option<(RequestId, String)>,
     /// Rooms' custom emoji and sticker packs.
     pub packs: packs::Packs,
     /// The location dialog, while [`Modal::Location`] shows.
@@ -1830,10 +1831,12 @@ impl State {
             Purpose::Command => self.notice = Some(tf!("notice.command", error = error)),
             Purpose::Packs | Purpose::ListScheduled => {}
             Purpose::Places => self.places_failed(request, error),
-            // Only the latest jump says it found nothing.
-            Purpose::Locate if self.locating == Some(request) => {
-                self.locating = None;
-                self.notice = Some(t!("search.message_unavailable").to_owned());
+            // Only the latest jump says it found nothing, and only while its room shows.
+            Purpose::Locate if self.locating.as_ref().is_some_and(|(asked, _)| *asked == request) => {
+                let room = self.locating.take().map(|(_, room)| room);
+                if self.active_room_id() == room.as_deref() {
+                    self.notice = Some(t!("search.message_unavailable").to_owned());
+                }
             }
             Purpose::Locate => {}
             Purpose::Schedule => self.notice = Some(tf!("notice.schedule", error = error)),

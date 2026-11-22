@@ -86,6 +86,8 @@ pub struct Account {
     /// Held while the scheduled messages are listed and reported: lists go out in the order
     /// asked, so an older one never covers a newer.
     pub(crate) listing_scheduled: Arc<tokio::sync::Mutex<()>>,
+    /// The messages this session scheduled, for a server that can't list them (`crate::scheduled`).
+    pub(crate) scheduled_here: Arc<Mutex<Vec<crate::ScheduledMessage>>>,
     /// Draft reads and writes, in the order they were asked for (`crate::drafts`).
     pub(crate) drafts: crate::drafts::DraftQueue,
     /// The client's own crypto, for sends the SDK doesn't encrypt itself (`crate::scheduled`);
@@ -341,6 +343,7 @@ impl Account {
             saved_changes: Arc::default(),
             scheduling: Arc::default(),
             listing_scheduled: Arc::default(),
+            scheduled_here: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
             crypto: Some(Box::new(crypto)),
         }
@@ -370,6 +373,7 @@ impl Account {
             saved_changes: Arc::default(),
             scheduling: Arc::default(),
             listing_scheduled: Arc::default(),
+            scheduled_here: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
             crypto: None,
         }
@@ -489,6 +493,7 @@ impl Account {
             saved_changes: Arc::default(),
             scheduling: Arc::default(),
             listing_scheduled: Arc::default(),
+            scheduled_here: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
             crypto: Some(Box::new(crypto)),
         })
@@ -1078,6 +1083,7 @@ mod tests {
             saved_changes: Arc::default(),
             scheduling: Arc::default(),
             listing_scheduled: Arc::default(),
+            scheduled_here: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
             crypto: None,
         }

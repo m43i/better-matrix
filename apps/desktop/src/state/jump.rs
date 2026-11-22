@@ -39,7 +39,7 @@ impl State {
             room_id: room_id.to_owned(),
             event_id: event_id.to_owned(),
         };
-        self.locating = Some(self.dispatch(command, Purpose::Locate));
+        self.locating = Some((self.dispatch(command, Purpose::Locate), room_id.to_owned()));
     }
 
     /// The engine found where a message shows: open it there, if its account and room are
@@ -52,7 +52,7 @@ impl State {
         event_id: &str,
     ) {
         // Only the latest jump goes: an earlier one answering late would undo it.
-        if self.locating != Some(request) {
+        if self.locating.as_ref().is_none_or(|(asked, _)| *asked != request) {
             return;
         }
         self.locating = None;

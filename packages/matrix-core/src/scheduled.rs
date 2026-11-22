@@ -82,8 +82,8 @@ impl Account {
             delay_ms,
             raw.clone().cast_unchecked(),
         );
-        match self.client().send(request).await {
-            Ok(response) => Ok(response.delay_id),
+        let delay_id = match self.client().send(request).await {
+            Ok(response) => response.delay_id,
             // `/send` with a delay only where the server says, asked again now, that it holds
             // delayed events: a cached answer may be from before it stopped.
             Err(error) if unrecognized(&error) => {
@@ -98,10 +98,24 @@ impl Account {
                     DelayParameters::Timeout { timeout: Duration::from_millis(delay_ms) },
                     raw,
                 );
-                Ok(self.client().send(request).await?.delay_id)
+                self.client().send(request).await?.delay_id
             }
-            Err(error) => Err(error.into()),
+            Err(error) => return Err(error.into()),
+        };
+        // Kept, so it can be sent now or cancelled even where the server can't list it.
+        let now = u64::try_from(
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),
+        )
+        .unwrap_or(u64::MAX);
+        if let Ok(mut known) = self.scheduled_here.lock() {
+            known.push(ScheduledMessage {
+                delay_id: delay_id.clone(),
+                room_id: key.room_id.clone(),
+                send_at_ms: now.saturating_add(delay_ms),
+                body: body_of(&json),
+            });
         }
+        Ok(delay_id)
     }
 
     /// Whether the account's server holds delayed events (`/versions` says so).
@@ -116,7 +130,22 @@ impl Account {
         if !self.can_schedule().await? {
             return Ok(Vec::new());
         }
-        let response = self.client().send(api::list::Request::default()).await?;
+        let response = match self.client().send(api::list::Request::default()).await {
+            Ok(response) => response,
+            // A server that holds delayed events but can't list them: those this session
+            // scheduled, still to come.
+            Err(error) if unrecognized(&error) => {
+                let now = u64::try_from(
+                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),
+                )
+                .unwrap_or(u64::MAX);
+                let mut known = self.scheduled_here.lock().map(|known| known.clone()).unwrap_or_default();
+                known.retain(|message| message.send_at_ms > now);
+                known.sort_by_key(|message| message.send_at_ms);
+                return Ok(known);
+            }
+            Err(error) => return Err(error.into()),
+        };
         let mut messages = Vec::new();
         for event in response.delayed_events.iter().filter_map(api::Listed::read) {
             // Delayed state (a call membership's own expiry) isn't a message, and one already
@@ -151,14 +180,17 @@ impl Account {
         // The action in the path (MSC4140 as it stands), then in the body (Synapse's first).
         let request = update_delayed_event::unstable_v2::Request::new(delay_id.to_owned(), action.clone());
         match self.client().send(request).await {
-            Ok(_) => Ok(()),
+            Ok(_) => {}
             Err(error) if unrecognized(&error) => {
                 let request = update_delayed_event::unstable_v1::Request::new(delay_id.to_owned(), action);
                 self.client().send(request).await?;
-                Ok(())
             }
-            Err(error) => Err(error.into()),
+            Err(error) => return Err(error.into()),
         }
+        if let Ok(mut known) = self.scheduled_here.lock() {
+            known.retain(|message| message.delay_id != delay_id);
+        }
+        Ok(())
     }
 
     /// The body of an encrypted scheduled message, when this device holds its key.
@@ -362,6 +394,8 @@ mod tests {
         None,
         /// None any more: `/versions` named MSC4140 the first time it was asked, not since.
         Stopped,
+        /// The proposal's own, but no list of them all.
+        NoList,
     }
 
     type Sent = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
@@ -381,25 +415,32 @@ mod tests {
                     serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap_or_default()).unwrap_or_default();
                 return match endpoints {
                     // As the proposal and Synapse have it: `delay_ms`, the content apart.
-                    Endpoints::Current if body["delay_ms"].is_u64() && body["content"].is_object() => {
+                    Endpoints::Current | Endpoints::NoList
+                        if body["delay_ms"].is_u64() && body["content"].is_object() =>
+                    {
                         json!({ "delay_id": "d1" })
                     }
-                    Endpoints::Current => json!({ "errcode": "M_BAD_JSON", "error": "no delay_ms" }),
+                    Endpoints::Current | Endpoints::NoList => {
+                        json!({ "errcode": "M_BAD_JSON", "error": "no delay_ms" })
+                    }
                     Endpoints::Older | Endpoints::None | Endpoints::Stopped => unknown(),
                 };
             }
             if first.contains("org.matrix.msc4140.delay=") {
                 return match endpoints {
                     Endpoints::None | Endpoints::Stopped => json!({ "event_id": "$posted-at-once" }),
-                    Endpoints::Current | Endpoints::Older => json!({ "delay_id": "d1" }),
+                    Endpoints::Current | Endpoints::Older | Endpoints::NoList => json!({ "delay_id": "d1" }),
                 };
             }
             if first.starts_with("POST") && first.contains("/delayed_events/") {
                 let in_path = first.contains("/d1/cancel") || first.contains("/d1/send");
                 return match (endpoints, in_path) {
-                    (Endpoints::Current, true) | (Endpoints::Older, false) => json!({}),
+                    (Endpoints::Current | Endpoints::NoList, true) | (Endpoints::Older, false) => json!({}),
                     _ => unknown(),
                 };
+            }
+            if first.starts_with("GET") && first.contains("/delayed_events") && endpoints == Endpoints::NoList {
+                return unknown();
             }
             if first.starts_with("GET") && first.contains("/delayed_events") {
                 let delayed = |id: &str, done: bool| {
@@ -417,7 +458,7 @@ mod tests {
             if first.contains("/versions") {
                 let first_time = versions_asked.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0;
                 let held = match endpoints {
-                    Endpoints::Current | Endpoints::Older => true,
+                    Endpoints::Current | Endpoints::Older | Endpoints::NoList => true,
                     Endpoints::None => false,
                     Endpoints::Stopped => first_time,
                 };
@@ -517,6 +558,21 @@ mod tests {
         assert!(matches!(id, Err(Error::Unsupported(_))), "{id:?}");
         let sent = sent.lock().expect("requests");
         assert!(sent.iter().all(|request| !request.starts_with("PUT /_matrix/client/v3/")), "nothing may be posted");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_scheduled_on_a_server_that_cant_list_should_still_be_listed_and_cancelled() {
+        let (server, _) = server(false, Endpoints::NoList);
+        let account = account(&server, "no-list").await;
+        let key = TimelineKey::room("!room:example.org");
+        account.schedule(&key, None, &text("later"), Duration::from_secs(600)).await.expect("scheduled");
+        let listed = account.scheduled_messages().await.expect("listed");
+        assert_eq!(
+            listed.iter().map(|message| (message.delay_id.as_str(), message.body.as_deref())).collect::<Vec<_>>(),
+            [("d1", Some("later"))]
+        );
+        account.update_scheduled("d1", ScheduledAction::Cancel).await.expect("cancelled");
+        assert!(account.scheduled_messages().await.expect("listed").is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]
