@@ -149,6 +149,10 @@ impl State {
     /// place: `None` to send the composer as usual, `Some(empty)` when the command did all
     /// there was to do (or stopped with a notice).
     pub(super) fn run_command(&mut self, target: ComposerTarget) -> Option<Vec<Outgoing>> {
+        // A slash in a pill is a spoiler's or a formula's words, sent as written.
+        if self.composer(target).starts_in_pill() {
+            return None;
+        }
         let text = self.composer(target).edit.text.clone();
         let (command, len) = match parse(&text) {
             Parsed::Message => return None,
@@ -173,6 +177,12 @@ impl State {
                 command,
                 SlashCommand::Shrug | SlashCommand::TableFlip | SlashCommand::Unflip | SlashCommand::Lenny
             );
+        // A command that acts rather than sends reads its arguments as plain words: a spoiler
+        // there would show (a topic, a name) to everyone.
+        if !command.sends_message() && self.composer(target).spoiler_after(len) {
+            self.notice = Some(tf!("slash.no_spoiler", command = command.name()));
+            return Some(Vec::new());
+        }
         if needs_arguments && arguments.is_empty() {
             self.notice = Some(tf!("slash.usage", command = command.name(), arguments = command.arguments()));
             return Some(Vec::new());

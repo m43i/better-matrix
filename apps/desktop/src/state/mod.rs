@@ -4785,6 +4785,12 @@ impl State {
         if composer.replacing_selection_strips_pills() {
             return true;
         }
+        // A code block pastes plain text: a copied spoiler would go there as its words.
+        if composer.pastes_into_code() && content.html().is_some_and(holds_spoiler) {
+            self.notice = Some(t!("composer.spoiler_in_code").to_owned());
+            return true;
+        }
+        let composer = self.composer_mut(target);
         // An edit changes the text only: nothing attaches to it.
         if composer.editing.is_none() {
             if let Some(image) = content.image() {
@@ -4895,6 +4901,11 @@ pub fn call_title(card: &matrix_core::CallCard) -> &'static str {
 mod tests;
 
 /// The element key of a composer's text field.
+/// Whether copied HTML holds a spoiler: the field's own pill, or a message's.
+fn holds_spoiler(html: &str) -> bool {
+    html.contains("data-pill=\"spoiler\"") || html.contains("data-mx-spoiler")
+}
+
 pub fn composer_field(target: ComposerTarget) -> &'static str {
     match target {
         ComposerTarget::Room => "composer",

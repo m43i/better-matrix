@@ -102,6 +102,7 @@
   "composer.attach": "Attach files",
   "composer.edit_cancel": "Stop editing",
   "composer.editing": "Editing your message",
+  "composer.spoiler_in_code": "A spoiler can't be pasted into a code block: its words would show.",
   "composer.emoji": "Emoji",
   "composer.formatting": "Formatting",
   "composer.link_apply": "Apply link",
@@ -704,5 +705,6 @@
   "settings.maps_on": "Show maps",
   "settings.maps_on_hint": "Loads them from OpenStreetMap, which can see your IP address and the area shown.",
   "settings.maps_off": "Show only the place's name and coordinates",
-  "slash.not_scheduled": "/{{command}} does something rather than send a message, so it can't be scheduled."
+  "slash.not_scheduled": "/{{command}} does something rather than send a message, so it can't be scheduled.",
+  "slash.no_spoiler": "/{{command}} can't take a spoiler: what it sets is shown to everyone."
 }

@@ -102,6 +102,7 @@
   "composer.attach": "Joindre des fichiers",
   "composer.edit_cancel": "Arrêter la modification",
   "composer.editing": "Modification de votre message",
+  "composer.spoiler_in_code": "Un spoiler ne peut pas être collé dans un bloc de code : ses mots seraient visibles.",
   "composer.emoji": "Emoji",
   "composer.formatting": "Mise en forme",
   "composer.link_apply": "Appliquer le lien",
@@ -704,5 +705,6 @@
   "settings.maps_on": "Afficher les cartes",
   "settings.maps_on_hint": "Les charge depuis OpenStreetMap, qui peut voir votre adresse IP et la zone affichée.",
   "settings.maps_off": "Afficher seulement le nom et les coordonnées du lieu",
-  "slash.not_scheduled": "/{{command}} effectue une action au lieu d'envoyer un message : elle ne peut pas être programmée."
+  "slash.not_scheduled": "/{{command}} effectue une action au lieu d'envoyer un message : elle ne peut pas être programmée.",
+  "slash.no_spoiler": "/{{command}} ne peut pas contenir de spoiler : ce qu'elle définit est visible par tous."
 }

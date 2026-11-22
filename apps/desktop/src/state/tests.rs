@@ -1935,6 +1935,26 @@ fn pasting_an_image_should_attach_it_to_the_draft() {
 }
 
 #[test]
+fn pasting_a_spoiler_into_a_code_block_should_do_nothing() {
+    let (mut s, _) = state();
+    s.composer.edit.insert("let x");
+    s.composer.format(Format::CodeBlock);
+    let content =
+        rune::clipboard::ClipboardContent::new("secret").with_html("<span data-pill=\"spoiler\">secret</span>");
+    assert!(s.paste_into_composer(ComposerTarget::Room, &content));
+    assert_eq!(s.composer.edit.text, "let x");
+    assert!(s.notice.is_some());
+}
+
+#[test]
+fn pasting_a_spoiler_outside_code_should_be_left_to_the_editor() {
+    let (mut s, _) = state();
+    let content =
+        rune::clipboard::ClipboardContent::new("secret").with_html("<span data-pill=\"spoiler\">secret</span>");
+    assert!(!s.paste_into_composer(ComposerTarget::Room, &content));
+}
+
+#[test]
 fn pasting_text_should_be_left_to_the_editor() {
     let (mut s, _) = state();
     let content = rune::clipboard::ClipboardContent::new("hello");
@@ -5719,6 +5739,29 @@ fn topic_should_set_the_rooms_topic() {
         |command| matches!(command, Command::SetTopic { room_id, topic, .. } if room_id == "!one:x" && topic == "Release week")
     ));
     assert!(s.composer.is_empty());
+}
+
+#[test]
+fn a_command_hidden_in_a_spoiler_should_be_sent_as_a_spoiler() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.composer.edit.insert_pill("spoiler", "/topic confidential");
+    s.send_message(ComposerTarget::Room, &mut Tx::default());
+    let all = all_commands(&mut commands);
+    assert!(!all.iter().any(|command| matches!(command, Command::SetTopic { .. })));
+    assert!(all.iter().any(|command| matches!(command, Command::Send { message: Outgoing::Text { body, .. }, .. } if !body.contains("confidential"))));
+}
+
+#[test]
+fn a_topic_holding_a_spoiler_should_not_be_set() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.composer.edit.insert("/topic ");
+    s.composer.edit.insert_pill("spoiler", "confidential");
+    s.send_message(ComposerTarget::Room, &mut Tx::default());
+    assert!(!all_commands(&mut commands).iter().any(|command| matches!(command, Command::SetTopic { .. })));
+    assert!(s.notice.is_some());
+    assert!(!s.composer.is_empty());
 }
 
 #[test]

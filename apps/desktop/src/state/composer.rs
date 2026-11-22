@@ -141,6 +141,8 @@ pub struct Composer {
     pub suggest: super::suggest::Suggest,
     /// The field's pills as `keep_pills` last saw them, by id and words.
     pills_seen: Vec<(String, String)>,
+    /// The field's code-block lines as [`Composer::keep_pills`] last saw them.
+    code_seen: String,
     /// [`Composer::stored_draft`], and a fingerprint of the field it was read from: drafts are
     /// checked every frame, and read again only once the field changed.
     stored: Option<(u64, Option<matrix_core::Draft>)>,
@@ -161,6 +163,7 @@ impl Default for Composer {
             owner: None,
             suggest: super::suggest::Suggest::default(),
             pills_seen: Vec::new(),
+            code_seen: String::new(),
             stored: None,
         }
     }
@@ -355,21 +358,48 @@ impl Composer {
         let seen = |edit: &TextEdit| -> Vec<(String, String)> {
             edit.pills().map(|(range, id)| (id.to_owned(), edit.text[range].to_owned())).collect()
         };
-        let now = seen(&self.edit);
-        let code: String = self
-            .edit
-            .paragraphs()
-            .into_iter()
-            .filter(|paragraph| paragraph.block == Block::Code)
-            .map(|paragraph| &self.edit.text[paragraph.range])
-            .collect::<Vec<_>>()
-            .join("\n");
-        let stripped = self.pills_seen.iter().any(|pill| !now.contains(pill) && code.contains(pill.1.as_str()));
+        let code = |edit: &TextEdit| -> String {
+            edit.paragraphs()
+                .into_iter()
+                .filter(|paragraph| paragraph.block == Block::Code)
+                .map(|paragraph| &edit.text[paragraph.range])
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let (now, code_now) = (seen(&self.edit), code(&self.edit));
+        // Counted, not just looked for: of two alike pills, one may go while the other stays.
+        let stripped = self.pills_seen.iter().any(|pill| {
+            let pills = |pills: &[(String, String)]| pills.iter().filter(|other| *other == pill).count();
+            let words = |code: &str| code.matches(pill.1.as_str()).count();
+            pills(&now) < pills(&self.pills_seen) && words(&code_now) > words(&self.code_seen)
+        });
         if stripped {
             self.edit.undo();
         }
         self.pills_seen = seen(&self.edit);
+        self.code_seen = code(&self.edit);
         stripped
+    }
+
+    /// Whether a paste would land in a code block, where the field pastes plain text: a
+    /// spoiler copied there would lose its pill and go as plain words.
+    pub fn pastes_into_code(&self) -> bool {
+        let (start, end) = (self.edit.anchor.min(self.edit.focus), self.edit.anchor.max(self.edit.focus));
+        self.edit.paragraphs().iter().any(|paragraph| {
+            paragraph.block == Block::Code && paragraph.range.start <= end && start <= paragraph.range.end
+        })
+    }
+
+    /// Whether the field's text starts inside a pill: a slash there is a spoiler's or a
+    /// formula's words, not a command.
+    pub fn starts_in_pill(&self) -> bool {
+        let start = self.edit.text.len() - self.edit.text.trim_start().len();
+        self.edit.pills().any(|(range, _)| range.contains(&start))
+    }
+
+    /// Whether a spoiler pill lies at or after byte `from`.
+    pub fn spoiler_after(&self, from: usize) -> bool {
+        self.edit.pills().any(|(range, id)| range.end > from && id == "spoiler")
     }
 
     /// Whether `key` would join a paragraph holding a pill onto a code block, whose lines keep no
@@ -987,6 +1017,24 @@ mod tests {
     }
 
     #[test]
+    fn a_spoiler_joined_onto_a_code_block_should_be_taken_back_while_its_twin_stays() {
+        let mut c = composer("let x");
+        c.format(Format::CodeBlock);
+        c.edit.set_selection(5, 5);
+        c.edit.insert("\n");
+        c.edit.toggle_block(Block::Code);
+        c.edit.insert_pill("spoiler", "secret");
+        c.edit.insert("\n");
+        c.edit.insert_pill("spoiler", "secret");
+        assert_eq!(c.edit.pills().count(), 2);
+        c.keep_pills();
+        c.edit.set_selection(5, 6);
+        c.edit.insert("");
+        assert!(c.keep_pills());
+        assert_eq!(c.edit.pills().count(), 2);
+    }
+
+    #[test]
     fn deleting_a_pill_should_not_be_taken_back() {
         let mut c = composer("hi ");
         c.edit.insert_pill("spoiler", "secret");
@@ -996,6 +1044,23 @@ mod tests {
         c.edit.insert("");
         assert!(!c.keep_pills());
         assert_eq!(c.edit.text, "hi ");
+    }
+
+    #[test]
+    fn deleting_one_of_two_alike_pills_beside_code_holding_their_words_should_not_be_taken_back() {
+        let mut c = composer("secret");
+        c.format(Format::CodeBlock);
+        c.edit.set_selection(6, 6);
+        c.edit.insert("\n");
+        c.edit.toggle_block(Block::Code);
+        c.edit.insert_pill("spoiler", "secret");
+        c.edit.insert_pill("spoiler", "secret");
+        c.keep_pills();
+        let end = c.edit.text.len();
+        c.edit.set_selection(end - "secret".len(), end);
+        c.edit.insert("");
+        assert!(!c.keep_pills());
+        assert_eq!(c.edit.pills().count(), 1);
     }
 
     #[test]

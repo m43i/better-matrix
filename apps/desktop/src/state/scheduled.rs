@@ -151,7 +151,8 @@ impl State {
         if !self.can_schedule(target) {
             return;
         }
-        if let super::slash::Parsed::Command { command, .. } = super::slash::parse(&self.composer(target).edit.text)
+        if !self.composer(target).starts_in_pill()
+            && let super::slash::Parsed::Command { command, .. } = super::slash::parse(&self.composer(target).edit.text)
             && !command.sends_message()
         {
             self.notice = Some(tf!("slash.not_scheduled", command = command.name()));

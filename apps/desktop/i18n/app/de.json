@@ -102,6 +102,7 @@
   "composer.attach": "Dateien anhängen",
   "composer.edit_cancel": "Bearbeiten beenden",
   "composer.editing": "Du bearbeitest deine Nachricht",
+  "composer.spoiler_in_code": "Ein Spoiler kann nicht in einen Codeblock eingefügt werden: Seine Wörter wären sichtbar.",
   "composer.emoji": "Emoji",
   "composer.formatting": "Formatierung",
   "composer.link_apply": "Link übernehmen",
@@ -704,5 +705,6 @@
   "settings.maps_on": "Karten zeigen",
   "settings.maps_on_hint": "Lädt sie von OpenStreetMap, das deine IP-Adresse und den gezeigten Ausschnitt sehen kann.",
   "settings.maps_off": "Nur Name und Koordinaten des Orts zeigen",
-  "slash.not_scheduled": "/{{command}} tut etwas, statt eine Nachricht zu senden, und kann daher nicht geplant werden."
+  "slash.not_scheduled": "/{{command}} tut etwas, statt eine Nachricht zu senden, und kann daher nicht geplant werden.",
+  "slash.no_spoiler": "/{{command}} kann keinen Spoiler aufnehmen: Was der Befehl setzt, sehen alle."
 }

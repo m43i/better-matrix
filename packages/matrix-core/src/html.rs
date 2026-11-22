@@ -241,6 +241,17 @@ pub fn spoiler(words: &str) -> String {
     format!("<span data-mx-spoiler>{}</span>", escape(words).replace('\n', "<br />"))
 }
 
+/// Whether formatted text hides a spoiler. Its plain fallback may then say what the spoiler
+/// hides, so nothing is read from it (link previews, GIFs) before the spoiler is shown.
+///
+/// ```
+/// assert!(matrix_core::html::holds_spoiler("see <span data-mx-spoiler>https://x.org</span>"));
+/// assert!(!matrix_core::html::holds_spoiler("see <b>https://x.org</b>"));
+/// ```
+pub fn holds_spoiler(html: &str) -> bool {
+    html.contains("data-mx-spoiler")
+}
+
 /// The Matrix HTML for a pill that is its label's text alone: custom emoji, `@room`, maths.
 fn atom_html(id: &str, label: &str) -> String {
     if let Some(src) = id.strip_prefix("emote:") {
