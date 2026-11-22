@@ -11,6 +11,7 @@ import { routes } from '../routes';
 import { setCallLayout, showCallChat } from '../state/actions/calls';
 import { setActive, setScope } from '../state/actions/core';
 import { updateComposer } from '../state/composer';
+import { userPill } from '../state/pills';
 import type { Settings } from '../state/settings';
 import type { Store } from '../state/store';
 import { roomKey, threadKey } from '../state/timeline';
@@ -31,9 +32,11 @@ import {
   GRACE,
   KAI,
   READ_BY_SIX,
+  RELEASES,
   ring,
   SCREENSHOT,
   seedEvents,
+  SIGN_OFF,
   TEST_PLAN,
   typingPeople,
   verificationEmojis,
@@ -56,6 +59,40 @@ export interface Scene {
 }
 
 const general = (store: Store) => setScope(store, ADA, { space: WORK_SPACE });
+
+/** #general with `draft` in its composer, the caret at its end. */
+const drafting = (draft: string) => (store: Store) => {
+  general(store);
+  updateComposer(store, ADA, roomKey(GENERAL), (c) => ({
+    ...c,
+    draft,
+    selection: { start: draft.length, end: draft.length },
+  }));
+};
+
+/** Two messages the server holds for #general: one this device wrote, one it can't read. */
+const scheduledEvents = (): EngineEvent[] => [
+  {
+    type: 'ScheduledMessages',
+    data: {
+      account: ADA,
+      messages: [
+        {
+          delay_id: 'demo-delay-1',
+          room_id: GENERAL,
+          send_at_ms: Date.now() + 45 * 60_000,
+          body: 'Reminder: the 0.2 tag goes out at 15:00.',
+        },
+        {
+          delay_id: 'demo-delay-2',
+          room_id: GENERAL,
+          send_at_ms: Date.now() + 26 * 3_600_000,
+          body: null,
+        },
+      ],
+    },
+  },
+];
 
 export const scenes = {
   home: { about: 'Home: sections, unread rooms, direct messages' },
@@ -189,6 +226,74 @@ export const scenes = {
       }
     },
     routes: [routes.room(ADA, GENERAL)],
+  },
+  'message-kinds': {
+    about: '#releases: a mention, an emote, a place, a spoiler and maths, custom emoji, an edit',
+    setup: general,
+    routes: [routes.room(ADA, RELEASES)],
+  },
+  'edit-history': {
+    about: 'An edited message’s earlier versions, from its “edited” label',
+    setup: general,
+    routes: [routes.room(ADA, RELEASES), routes.editHistory(ADA, RELEASES, SIGN_OFF)],
+  },
+  mention: {
+    about: 'Typing @ in the composer: people in the room and @room',
+    setup: drafting('Thanks @'),
+    routes: [routes.room(ADA, GENERAL)],
+  },
+  'mention-pill': {
+    about: 'A draft with a mention pill, sent as a matrix.to link and m.mentions',
+    setup: (store) => {
+      drafting('Thanks @Grace Hopper for the review')(store);
+      updateComposer(store, ADA, roomKey(GENERAL), (c) => ({
+        ...c,
+        pills: [userPill(GRACE, 'Grace Hopper')],
+      }));
+    },
+    routes: [routes.room(ADA, GENERAL)],
+  },
+  commands: {
+    about: 'Typing / in the composer: the slash commands',
+    setup: drafting('/'),
+    routes: [routes.room(ADA, GENERAL)],
+  },
+  'emoji-suggestions': {
+    about: 'Typing :pa in the composer: custom and standard emoji',
+    setup: drafting('Release day :pa'),
+    routes: [routes.room(ADA, GENERAL)],
+  },
+  'emoji-custom': {
+    about: 'The composer’s emoji picker with the custom emoji first',
+    setup: general,
+    routes: [routes.room(ADA, GENERAL), routes.emoji(ADA, GENERAL)],
+  },
+  stickers: {
+    about: 'The sticker picker',
+    setup: general,
+    routes: [routes.room(ADA, GENERAL), routes.stickers(ADA, GENERAL)],
+  },
+  location: {
+    about: 'Sharing a place: the phone’s position or one found by name',
+    setup: general,
+    routes: [routes.room(ADA, GENERAL), routes.location(ADA, GENERAL)],
+  },
+  schedule: {
+    about: 'Scheduling the draft, from a long press on Send',
+    setup: drafting('Reminder: the 0.2 tag goes out at 15:00.'),
+    routes: [routes.room(ADA, GENERAL), routes.schedule(ADA, GENERAL)],
+  },
+  'scheduled-bar': {
+    about: 'The bar above the composer saying what is scheduled here',
+    setup: general,
+    events: scheduledEvents(),
+    routes: [routes.room(ADA, GENERAL)],
+  },
+  scheduled: {
+    about: 'A conversation’s scheduled messages, to send now or cancel',
+    setup: general,
+    events: scheduledEvents(),
+    routes: [routes.room(ADA, GENERAL), routes.scheduled(ADA, GENERAL)],
   },
   typing: {
     about: 'People typing',
