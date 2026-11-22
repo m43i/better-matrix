@@ -7,6 +7,7 @@ import type { router as ExpoRouter } from 'expo-router';
 import { t } from '../../i18n';
 import { routes } from '../../routes';
 import { setActive, setScope } from '../../state/actions/core';
+import { locateMessage } from '../../state/actions/messages';
 import { type LinkRoute, routeLink } from '../../state/linkRoute';
 import { parsePermalink } from '../../state/permalinks';
 import { addNotice } from '../../state/reducer';
@@ -42,7 +43,11 @@ export function openPermalink(
   }
 }
 
-/** Opens a room an account has joined, or shows a joined space as the account's scope on Home. */
+/**
+ * Opens a room an account has joined, or shows a joined space as the account's scope on Home. A
+ * link to a message asks the engine which timeline shows it first, so a reply in a thread opens
+ * in its thread; the room's timeline when the engine can't tell.
+ */
 export function openJoined(
   store: Store,
   route: Extract<LinkRoute, { type: 'room' | 'space' }>,
@@ -53,7 +58,32 @@ export function openJoined(
   if (route.type === 'space') {
     setScope(store, route.account, { space: route.spaceId });
     navigation.navigate(routes.home());
-  } else {
-    navigation.push(routes.room(route.account, route.roomId, route.eventId ?? undefined));
+
+    return;
   }
+
+  const { account, roomId, eventId } = route;
+
+  if (eventId === null) {
+    navigation.push(routes.room(account, roomId));
+
+    return;
+  }
+
+  locateMessage(store, account, roomId, eventId).then(
+    (key) => navigation.push(messageRoute(account, roomId, eventId, key.thread)),
+    () => navigation.push(routes.room(account, roomId, eventId)),
+  );
+}
+
+/** Where a message shows: its thread (the root itself shows in the room), else the room. */
+export function messageRoute(
+  account: AccountId,
+  roomId: string,
+  eventId: string,
+  thread: string | null,
+): ReturnType<typeof routes.room> {
+  return thread !== null && thread !== eventId
+    ? routes.thread(account, roomId, thread, eventId)
+    : routes.room(account, roomId, eventId);
 }

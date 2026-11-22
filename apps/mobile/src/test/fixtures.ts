@@ -71,6 +71,7 @@ export function message(event_id: string, body = event_id): Message {
     reactions: [],
     reply_to: null,
     thread: null,
+    highlighted: false,
   };
 }
 

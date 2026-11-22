@@ -372,3 +372,32 @@ it('should hide an empty forwarding section after searching', () => {
   const direct = roomSummary('!dm:x', 'Grace', 'Direct');
   expect(forwardSections([room, direct], 'gr')).toEqual([{ kind: 'Direct', data: [direct] }]);
 });
+
+describe('emotes and places', () => {
+  it('should draw an emote as the sender’s name before the action', () => {
+    const emote = withContent('$e', { type: 'Emote', data: { body: 'waves', html: null } });
+    expect(prepare(emote).blocks).toEqual([
+      {
+        type: 'paragraph',
+        inlines: [
+          { type: 'text', text: '* Grace ', marks: { italic: true } },
+          { type: 'text', text: 'waves', marks: {} },
+        ],
+      },
+    ]);
+  });
+
+  it('should copy an emote with its sender', () => {
+    const emote = withContent('$e', { type: 'Emote', data: { body: 'waves', html: null } });
+    expect(messageText(emote)).toBe('* Grace waves');
+  });
+
+  it('should copy a place by its name', () => {
+    const place = withContent('$p', {
+      type: 'Location',
+      data: { geo_uri: 'geo:1,2', description: 'Home', map: null },
+    });
+
+    expect(messageText(place)).toBe('Home');
+  });
+});

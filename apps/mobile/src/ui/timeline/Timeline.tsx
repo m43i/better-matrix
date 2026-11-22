@@ -2,7 +2,7 @@
 // list that starts at the newest message and holds the reading position as older pages arrive
 // above it. Scrolling near the top loads the page before; reaching the newest marks it read;
 // scrolled up, a button jumps back down. A quoted message, or the `target` a link names,
-// scrolls into view and is highlighted.
+// scrolls into view and is highlighted; one not loaded yet is looked for a few pages back.
 
 import type { AccountId, Message, TimelineKey } from '@better-matrix/matrix-native/types';
 import {
@@ -30,6 +30,7 @@ import { t } from '../../i18n';
 import { loadOlder, markRead, mayMarkFullyRead, visitRoom } from '../../state/actions/core';
 import { releaseTimeline, retainTimeline } from '../../state/actions/timeline';
 import { clearFocused, setFocused } from '../../state/focus';
+import { addNotice } from '../../state/reducer';
 import {
   MARKER_FADE_MS,
   MARKER_FADE_REDUCED_MS,
@@ -269,31 +270,45 @@ export function Timeline({
     [],
   );
 
+  // A message a quote points at that isn't loaded yet: looked for as a link's target is.
+  const [jump, setJump] = useState<string | null>(null);
+  const wanted = jump ?? target;
+
   // A linked message: scroll to it once loaded, paging back a little to find it.
   const targetDone = useRef<string | null>(null);
   const targetPages = useRef(0);
   useEffect(() => {
-    if (!target || targetDone.current === target) return;
+    if (!wanted || targetDone.current === wanted) return;
 
-    if (rowOf(rows, target) >= 0) {
-      targetDone.current = target;
+    if (rowOf(rows, wanted) >= 0) {
+      targetDone.current = wanted;
       // Once the list laid the rows out; it is positioned once the jump's scroll was reported.
       requestAnimationFrame(() => {
-        scrollTo(target, false);
-        settleTimer.current = setTimeout(() => setPositionedAt(target), SETTLE_MS);
+        scrollTo(wanted, wanted !== jump);
+        settleTimer.current = setTimeout(() => setPositionedAt(wanted), SETTLE_MS);
       });
     } else if (timeline.opening || timeline.loadingOlder || timeline.historyError !== null) {
       // Wait: for the timeline to open, for the page coming, or for Try again after a failure
       // (until then nothing is marked read under the reader).
-    } else if (!reachedStart && (localTarget || targetPages.current < TARGET_PAGES)) {
+    } else if (
+      !reachedStart &&
+      ((localTarget && wanted === target) || targetPages.current < TARGET_PAGES)
+    ) {
       targetPages.current += 1;
       loadMore();
     } else {
-      // Not found: the list stays at the newest.
-      targetDone.current = target;
-      setPositionedAt(target);
+      // Not found: the list stays where it is.
+      targetDone.current = wanted;
+      setPositionedAt(wanted);
+
+      if (wanted === jump)
+        store.update((s) => addNotice(s, t('mobile.conversation.message_missing'), account));
     }
   }, [
+    store,
+    account,
+    jump,
+    wanted,
     target,
     localTarget,
     rows,
@@ -310,7 +325,13 @@ export function Timeline({
       account,
       timelineKey,
       thread,
-      scrollTo: (eventId) => void scrollTo(eventId),
+      scrollTo: (eventId) => {
+        if (scrollTo(eventId)) return;
+        // Not loaded: look for it a few pages back.
+        targetPages.current = 0;
+        targetDone.current = null;
+        setJump(eventId);
+      },
       openActions: (message) => {
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         router.push(

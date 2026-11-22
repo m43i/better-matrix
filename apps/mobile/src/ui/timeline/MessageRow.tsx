@@ -1,13 +1,17 @@
 // One message, as Slack's mobile app lays it out: the sender's face, name (in their identity
 // colour) and time on the first of a run, then what it answers, its content, a linked GIF or a
 // link's card, reactions, its thread and who has read up to it. A long press opens its actions.
+// A message that mentions the user stands out with a warm tint and bar, as Slack's do; its
+// "(edited)" opens the edit history.
 
 import type { Message } from '@better-matrix/matrix-native/types';
+import { router } from 'expo-router';
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
-import { cardLink, prepare } from '../../state/messages';
+import { cardLink, isLocal, prepare } from '../../state/messages';
+import { routes } from '../../routes';
 import { useStore } from '../../state/react';
 import { Icon } from '../icons';
 import { clockTime } from '../../state/timelineText';
@@ -16,6 +20,7 @@ import { Avatar } from '../Avatar';
 import { usePalette } from '../theme';
 import { AttachmentView } from './Attachments';
 import { CallCardView } from './CallCard';
+import { LocationCard } from './LocationCard';
 import { usePinned, useTimelineContext } from './context';
 import { LinkCard, LinkedGif, QuoteBlock, Reactions, ThreadLink } from './Parts';
 import { PollCard } from './PollCard';
@@ -41,7 +46,7 @@ export const MessageRow = memo(function MessageRow({
   highlighted,
 }: MessageRowProps) {
   const palette = usePalette();
-  const { account, thread, openActions } = useTimelineContext();
+  const { account, timelineKey, thread, openActions } = useTimelineContext();
   const readersColumn = useReadersColumn();
   const read = !message.pending && (message.read_receipts?.length ?? 0) > 0;
   const showGifs = useStore((s) => s.settings.showLinkGifs);
@@ -53,12 +58,29 @@ export const MessageRow = memo(function MessageRow({
   const gif = showGifs && item.gif ? item.gif : null;
   const link = showPreviews ? cardLink(item, showGifs) : null;
 
-  const status = [
-    message.edited ? t('message.edited') : null,
-    message.pending ? t('message.sending') : null,
-  ]
-    .filter((s): s is string => s !== null)
-    .join(' · ');
+  const status = message.edited || message.pending;
+
+  const statusLine = status ? (
+    <Text style={[font.meta, styles.status, { color: palette.textMuted }]} numberOfLines={1}>
+      {message.edited ? (
+        <Text
+          accessibilityRole="button"
+          accessibilityHint={t('mobile.conversation.edit_history_hint')}
+          onPress={
+            isLocal(message)
+              ? undefined
+              : () =>
+                  router.push(routes.editHistory(account, timelineKey.room_id, message.event_id))
+          }
+          testID="message-edited"
+        >
+          {t('message.edited')}
+        </Text>
+      ) : null}
+      {message.edited && message.pending ? ' · ' : null}
+      {message.pending ? t('message.sending') : null}
+    </Text>
+  ) : null;
 
   return (
     <Pressable
@@ -75,6 +97,14 @@ export const MessageRow = memo(function MessageRow({
               borderLeftColor: palette.accent,
               paddingLeft: 13,
               backgroundColor: `${palette.accent}0F`,
+            }
+          : null,
+        message.highlighted
+          ? {
+              borderLeftWidth: 3,
+              borderLeftColor: palette.warning,
+              paddingLeft: 13,
+              backgroundColor: `${palette.warning}1A`,
             }
           : null,
         highlighted ? { backgroundColor: `${palette.accent}26` } : null,
@@ -109,14 +139,7 @@ export const MessageRow = memo(function MessageRow({
             <Text style={[font.meta, { color: palette.textMuted }]}>
               {clockTime(message.timestamp_ms)}
             </Text>
-            {status ? (
-              <Text
-                style={[font.meta, styles.status, { color: palette.textMuted }]}
-                numberOfLines={1}
-              >
-                {status}
-              </Text>
-            ) : null}
+            {statusLine}
           </View>
         )}
         {message.reply_to ? <QuoteBlock quote={message.reply_to} /> : null}
@@ -135,9 +158,7 @@ export const MessageRow = memo(function MessageRow({
         {message.thread && thread === null ? (
           <ThreadLink root={message.event_id} thread={message.thread} />
         ) : null}
-        {continues && status ? (
-          <Text style={[font.meta, { color: palette.textMuted }]}>{status}</Text>
-        ) : null}
+        {continues ? statusLine : null}
         {thread === null && !readersColumn && read ? (
           <View style={styles.readersLine}>
             <ReadIndicator message={message} />
@@ -156,11 +177,15 @@ function Body({ message, latestCall }: { message: Message; latestCall: boolean }
   const content = message.content;
 
   switch (content.type) {
-    case 'Text': {
+    case 'Text':
+    case 'Emote': {
       const blocks = prepare(message).blocks;
 
       return blocks ? <RichText blocks={blocks} /> : null;
     }
+
+    case 'Location':
+      return <LocationCard message={message} location={content.data} />;
 
     case 'Attachment':
       // Keyed by message: a recycled row starts its file's state afresh.

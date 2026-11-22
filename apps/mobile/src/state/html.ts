@@ -1,13 +1,17 @@
 // Message formatting: Matrix HTML (`org.matrix.custom.html`) read into a small, safe tree the
 // timeline draws with native text. HTML is never rendered as such: only the tags below become
 // formatting, links keep web, mail and `matrix:` addresses only, and everything else is plain
-// text. Bare web addresses become links too (but not inside code), as on the desktop.
+// text. Bare web addresses become links too (but not inside code), as on the desktop. Matrix's
+// inline objects become their own inlines, as the engine's `html.rs` reads them: mentions
+// (pills), spoilers (`data-mx-spoiler`, hidden until tapped), maths (`data-mx-maths`, shown as
+// Unicode by `math.ts`) and custom emoji (`<img data-mx-emoticon src="mxc://…">`).
 //
 // The tokenizer is ours rather than htmlparser2's: htmlparser2 is ESM-only, which the app's Jest
 // setup doesn't load. Matrix HTML is a small, well-formed subset; anything unexpected reads as
 // text.
 
 import { linkRanges } from './links';
+import { mathToUnicode } from './math';
 import { parsePermalink } from './permalinks';
 
 /** How an inline run of text is formatted. */
@@ -24,7 +28,13 @@ export interface Marks {
 export type Inline =
   | { type: 'text'; text: string; marks: Marks }
   /** A person or a room, linked through matrix.to: drawn as a pill. */
-  | { type: 'mention'; kind: 'user' | 'room'; id: string; label: string };
+  | { type: 'mention'; kind: 'user' | 'room'; id: string; label: string }
+  /** Hidden text (`data-mx-spoiler`), shown once tapped; `reason` is what the sender said of it. */
+  | { type: 'spoiler'; inlines: Inline[]; reason: string }
+  /** A formula: its LaTeX, and the Unicode line it reads as. A block formula has its own line. */
+  | { type: 'math'; latex: string; text: string; block: boolean }
+  /** A custom emoji: its `mxc://` image, and its short code (`:blobcat:`) to read. */
+  | { type: 'emote'; url: string; label: string };
 
 export type Block =
   | { type: 'paragraph'; inlines: Inline[] }
@@ -46,8 +56,21 @@ export function htmlBlocks(html: string): Block[] {
 
 /** The text a tree shows, for copying and accessibility. */
 export function blocksText(blocks: Block[]): string {
-  const inlineText = (inlines: Inline[]) =>
-    inlines.map((i) => (i.type === 'text' ? i.text : i.label)).join('');
+  const inlineText = (inlines: Inline[]): string =>
+    inlines
+      .map((i) => {
+        switch (i.type) {
+          case 'text':
+            return i.text;
+          case 'spoiler':
+            return inlineText(i.inlines);
+          case 'math':
+            return i.text;
+          default:
+            return i.label;
+        }
+      })
+      .join('');
 
   return blocks
     .map((block): string => {
@@ -348,7 +371,12 @@ function toBlocks(nodes: Node[], marks: Marks): Block[] {
     flush();
     const level = HEADINGS.get(node.name);
 
-    if (level !== undefined) {
+    if (node.name === 'div' && node.attrs['data-mx-maths'] !== undefined) {
+      blocks.push({ type: 'paragraph', inlines: [mathInline(node.attrs['data-mx-maths'], true)] });
+    } else if (node.name === 'div' && node.attrs['data-mx-spoiler'] !== undefined) {
+      const inlines = toInlines({ ...node, name: 'span' }, marks);
+      blocks.push({ type: 'paragraph', inlines });
+    } else if (level !== undefined) {
       const inlines = tidy(linkify(node.children.flatMap((child) => toInlines(child, marks))));
 
       if (inlines.length > 0) blocks.push({ type: 'heading', level, inlines });
@@ -440,8 +468,26 @@ function toInlines(node: Node, marks: Marks): Inline[] {
       return [{ type: 'text', text: '\n', marks }];
     case 'img': {
       const alt = node.attrs.alt ?? node.attrs.title ?? '';
+      const src = node.attrs.src ?? '';
 
+      if (node.attrs['data-mx-emoticon'] !== undefined && src.startsWith('mxc://'))
+        return [{ type: 'emote', url: src, label: alt || ':emoji:' }];
+
+      // Other images can't show inline: their description does.
       return alt ? [{ type: 'text', text: alt, marks }] : [];
+    }
+
+    case 'span':
+    case 'div': {
+      const latex = node.attrs['data-mx-maths'];
+
+      if (latex !== undefined) return [mathInline(latex, node.name === 'div')];
+      const reason = node.attrs['data-mx-spoiler'];
+      const inlines = node.children.flatMap((child) => toInlines(child, marks));
+
+      if (reason !== undefined) return [{ type: 'spoiler', inlines: tidy(inlines), reason }];
+
+      return node.name === 'div' ? [...inlines, { type: 'text', text: '\n', marks }] : inlines;
     }
 
     case 'a': {
@@ -477,6 +523,10 @@ function sameMarks(a: Marks, b: Marks): boolean {
     a.code === b.code &&
     a.link === b.link
   );
+}
+
+function mathInline(latex: string, block: boolean): Inline {
+  return { type: 'math', latex, text: mathToUnicode(latex), block };
 }
 
 /** Inlines with runs of the same marks joined, spaces not doubled and the ends trimmed. */
@@ -533,6 +583,8 @@ function tidy(inlines: Inline[]): Inline[] {
 /** Inlines with every bare web address made a link, except in code and existing links. */
 export function linkify(inlines: Inline[]): Inline[] {
   return inlines.flatMap((inline): Inline[] => {
+    if (inline.type === 'spoiler') return [{ ...inline, inlines: linkify(inline.inlines) }];
+
     if (inline.type !== 'text' || inline.marks.code || inline.marks.link) return [inline];
     const ranges = linkRanges(inline.text);
 
