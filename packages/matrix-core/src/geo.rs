@@ -87,7 +87,8 @@ pub fn describe(geo_uri: &str) -> String {
 }
 
 /// The map of a place, to fetch like any media (any size: it is drawn to fit the box asked
-/// for); `None` when the URI names no place.
+/// for); `None` when the URI names no place. Its handle is `osm:<latitude>,<longitude>,<zoom>`,
+/// which an app may also write itself for a place it found on its own (a phone's position).
 pub fn map(geo_uri: &str) -> Option<MediaRef> {
     let (latitude, longitude) = coordinates(geo_uri)?;
     Some(MediaRef(format!("{MAP_PREFIX}{},{},{MAP_ZOOM}", trim_number(latitude), trim_number(longitude))))
@@ -296,7 +297,8 @@ pub(crate) async fn search_places(
         .into_iter()
         .filter_map(|place| {
             let (latitude, longitude) = (place.lat.parse().ok()?, place.lon.parse().ok()?);
-            Some(Place { name: place.display_name, geo_uri: uri(latitude, longitude) })
+            let geo_uri = uri(latitude, longitude);
+            Some(Place { name: place.display_name, map: map(&geo_uri), geo_uri })
         })
         .collect())
 }

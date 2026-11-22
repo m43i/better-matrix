@@ -748,6 +748,8 @@ pub struct Place {
     pub name: String,
     /// Where it is, as a `geo:` URI.
     pub geo_uri: String,
+    /// A map of it, to fetch like any media.
+    pub map: Option<MediaRef>,
 }
 
 /// A call's card in the timeline. Whether the call is still under way is the room's
