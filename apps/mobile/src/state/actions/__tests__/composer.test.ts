@@ -1,9 +1,10 @@
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 
 import { t } from '../../../i18n';
-import { ADA, message, summary } from '../../../test/fixtures';
+import { ADA, message, summary, withContent } from '../../../test/fixtures';
 import { composer, startEdit, startReply } from '../../composer';
 import { applyFormat, continueBlock } from '../../format';
+import { editDraftOf } from '../../messages';
 import { newPollForm } from '../../pollForm';
 import { Store } from '../../store';
 import { roomKey, threadKey } from '../../timeline';
@@ -139,6 +140,32 @@ describe('composer actions', () => {
         },
       },
     ]);
+  });
+
+  it('should keep a spoiler over several lines hidden through an edit of one of its words', () => {
+    const { store, commands } = setUp();
+    setDraft(store, ADA, KEY, '/spoiler he\ndies\n\nsadly');
+    sendComposer(store, ADA, KEY);
+    const sent = commands()[0];
+
+    if (sent?.type !== 'Send' || sent.data.message.type !== 'Text')
+      throw new Error(`not a text message: ${JSON.stringify(sent)}`);
+    const mine = withContent('$mine', { type: 'Text', data: sent.data.message.data });
+    const { draft, pills } = editDraftOf(mine);
+    startEdit(store, ADA, KEY, mine, draft, pills);
+    setDraft(store, ADA, KEY, draft.replace('dies', 'lives'));
+    sendComposer(store, ADA, KEY);
+    const edit = commands()[1];
+
+    expect(edit).toMatchObject({
+      type: 'Edit',
+      data: {
+        body: '[Spoiler]',
+        html:
+          '<p><span data-mx-spoiler>he</span></p><p><span data-mx-spoiler>lives</span></p>' +
+          '<p></p><p><span data-mx-spoiler>sadly</span></p>',
+      },
+    });
   });
 
   it('should bring the draft back when an edit is cancelled', () => {

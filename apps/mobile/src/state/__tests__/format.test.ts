@@ -371,6 +371,31 @@ describe('outgoingText with Matrix markers', () => {
     });
   });
 
+  it('should hide each line of a spoiler written over several, as one spoiler in the body', () => {
+    expect(sent('x ||he\ndies|| y')).toEqual({
+      body: 'x [Spoiler] y',
+      html: '<p>x <span data-mx-spoiler>he</span></p><p><span data-mx-spoiler>dies</span> y</p>',
+    });
+  });
+
+  it('should keep a blank line inside a spoiler hidden with it', () => {
+    expect(sent('||a\n\nb||').body).toBe('[Spoiler]');
+  });
+
+  it('should hide a spoiler’s lines inside their list items', () => {
+    expect(sent('- ||a\n- b||').html).toBe(
+      '<ul><li><span data-mx-spoiler>a</span></li><li><span data-mx-spoiler>b</span></li></ul>',
+    );
+  });
+
+  it('should not carry a spoiler into a code block', () => {
+    expect(sent('||a\n```\nb||\n```').html).toBe('<p>||a</p><pre><code>b||</code></pre>');
+  });
+
+  it('should leave bars no later line closes as text', () => {
+    expect(sent('a ||b\nc')).toEqual({ body: 'a ||b\nc', html: null });
+  });
+
   it('should take an escaped bar literally', () => {
     expect(sent('a \\|\\| b')).toEqual({ body: 'a || b', html: null });
   });
@@ -394,6 +419,25 @@ describe('editDraft', () => {
       draft: ':cat:',
       pills: [pillAt(emotePill('mxc://x.org/c', 'cat'), 0)],
     });
+  });
+
+  it('should bring a spoiler with line breaks back as one pair of markers around its lines', () => {
+    expect(editDraft('', '<span data-mx-spoiler>he<br />dies</span> sadly').draft).toBe(
+      '||he\ndies|| sadly',
+    );
+  });
+
+  it('should put a spoiler’s markers against its words, its spaces and breaks outside', () => {
+    expect(editDraft('', 'a<span data-mx-spoiler><br /> b </span>c').draft).toBe('a\n ||b|| c');
+  });
+
+  it('should bring a link around a spoiler back as its content, not a mention', () => {
+    expect(
+      editDraft(
+        '',
+        '<a href="https://matrix.to/#/@x:y.org"><span data-mx-spoiler>secret</span></a>',
+      ),
+    ).toEqual({ draft: '||secret||', pills: [] });
   });
 
   it('should bring a spoiler back as markers', () => {

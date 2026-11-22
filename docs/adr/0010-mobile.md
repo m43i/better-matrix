@@ -154,7 +154,11 @@ Date: 2026-11-16
   (`data-mx-maths`, its LaTeX the fallback). On send, `state/format.ts` turns the text into the
   body and the Matrix HTML the desktop's rich field sends (as Rune's `to_html` writes it), HTML
   only when formatted; `editDraft` writes a message's HTML back as markers and pills for an
-  edit.
+  edit. Markers are read a line at a time, except a spoiler: a `||` pair over several lines
+  (as `editDraft` writes a spoiler with line breaks, its markers tight against its words) is
+  closed and opened again on each line it covers, after the line's prefix, blank lines
+  included, never into a code block, and only when a later line closes it; the body gives the
+  whole a single `[Spoiler]`. A link or mention around a spoiler comes back as its content.
 - **Mentions and custom emoji are pills beside the text** (`state/pills.ts`, the engine's
   `html.rs` pill ids: `user:@…`, `room:!…`/`room:#…`, `everyone`, `emote:mxc://…`). A picked
   suggestion inserts its label into the draft (`@Grace Hopper`, `#design`, `@room`,

@@ -388,6 +388,8 @@ type BlockKind =
 interface Block {
   kind: BlockKind;
   runs: Run[];
+  /** The line starts inside a spoiler the line before opened (`bridgeSpoilers`). */
+  continuesSpoiler?: boolean;
 }
 
 const PLAIN: Marks = {
@@ -432,8 +434,17 @@ export function outgoingText(draft: string, given: readonly DraftPill[] = []): O
   source += text.slice(at);
   const found = placed.map((p) => p.pill);
   const blocks = parseBlocks(source);
-  const plain = blocks.map((block) => plainRuns(block.runs));
-  const body = expandPills(plain.join('\n').trim(), found, pillText);
+
+  // A spoiler over several lines is one `[Spoiler]`, its line breaks hidden with its words.
+  const plain = blocks
+    .map((block, i) => {
+      const continued = block.continuesSpoiler === true;
+
+      return (i === 0 || continued ? '' : '\n') + plainRuns(block.runs, continued);
+    })
+    .join('');
+
+  const body = expandPills(plain.trim(), found, pillText);
 
   const formatted =
     found.some(pillFormats) ||
@@ -448,10 +459,13 @@ export function outgoingText(draft: string, given: readonly DraftPill[] = []): O
   return { body, html: serialize(trimBlocks(blocks), found), mentions };
 }
 
-/** A line's plain text: a spoiler's words hidden behind `[Spoiler]`, a formula as its LaTeX. */
-function plainRuns(runs: Run[]): string {
+/**
+ * A line's plain text: a spoiler's words hidden behind `[Spoiler]`, a formula as its LaTeX.
+ * `continued` when the line starts inside a spoiler the line before already wrote.
+ */
+function plainRuns(runs: Run[], continued: boolean): string {
   let out = '';
-  let hidden = false;
+  let hidden = continued;
 
   for (const run of runs) {
     if (run.marks.spoiler) {
@@ -508,9 +522,18 @@ function trimBlocks(blocks: Block[]): Block[] {
   return blocks.slice(from, to);
 }
 
+/** A line of the draft: its block, and its text after the block's prefix (`- `, `> `). */
+interface Line {
+  kind: BlockKind;
+  text: string;
+  /** Code, read as written; `null` for a fence, which ends what spoilers can span. */
+  code: boolean | null;
+}
+
 function parseBlocks(text: string): Block[] {
-  const blocks: Block[] = [];
+  const lines: Line[] = [];
   let fenced = false;
+  let previous: BlockKind | undefined;
 
   for (const line of text.split('\n')) {
     if (FENCE.test(line)) {
@@ -518,20 +541,21 @@ function parseBlocks(text: string): Block[] {
       const single = /^ *```(.+)```\s*$/.exec(line);
 
       if (!fenced && single) {
-        blocks.push({ kind: { type: 'code' }, runs: [{ text: single[1] ?? '', marks: PLAIN }] });
+        previous = { type: 'code' };
+        lines.push({ kind: previous, text: single[1] ?? '', code: true });
         continue;
       }
 
       fenced = !fenced;
+      lines.push({ kind: { type: 'code' }, text: '', code: null });
       continue;
     }
 
     if (fenced) {
-      blocks.push({ kind: { type: 'code' }, runs: [{ text: line, marks: PLAIN }] });
+      previous = { type: 'code' };
+      lines.push({ kind: previous, text: line, code: true });
       continue;
     }
-
-    const previous = blocks[blocks.length - 1]?.kind;
 
     const previousLevel =
       previous && (previous.type === 'bullet' || previous.type === 'numbered')
@@ -541,24 +565,147 @@ function parseBlocks(text: string): Block[] {
     const bullet = BULLET.exec(line);
     const numbered = bullet ? null : NUMBERED.exec(line);
     const quote = bullet || numbered ? null : QUOTE.exec(line);
+    const item = bullet ?? numbered;
 
-    if (bullet || numbered) {
-      const match = (bullet ?? numbered)!;
+    if (item) {
       // Two spaces a level, at most one level deeper than the item above.
-      const level = Math.min(Math.floor((match[1] ?? '').length / 2), previousLevel + 1);
-      const type = bullet ? 'bullet' : 'numbered';
-      blocks.push({ kind: { type, level }, runs: parseInline(line.slice(match[0].length)) });
+      const level = Math.min(Math.floor((item[1] ?? '').length / 2), previousLevel + 1);
+      previous = { type: bullet ? 'bullet' : 'numbered', level };
+      lines.push({ kind: previous, text: line.slice(item[0].length), code: false });
     } else if (quote) {
-      blocks.push({ kind: { type: 'quote' }, runs: parseInline(line.slice(quote[0].length)) });
+      previous = { type: 'quote' };
+      lines.push({ kind: previous, text: line.slice(quote[0].length), code: false });
     } else {
-      blocks.push({ kind: { type: 'paragraph' }, runs: parseInline(line) });
+      previous = { type: 'paragraph' };
+      lines.push({ kind: previous, text: line, code: false });
     }
   }
 
-  return blocks;
+  const continued = bridgeSpoilers(lines);
+
+  return lines.flatMap((line, i): Block[] => {
+    if (line.code === null) return [];
+
+    if (line.code) return [{ kind: line.kind, runs: [{ text: line.text, marks: PLAIN }] }];
+
+    return [{ kind: line.kind, runs: parseInline(line.text), continuesSpoiler: continued[i] }];
+  });
+}
+
+/**
+ * Spoilers that span lines (`||he` … `dies||`, as `editDraft` writes a spoiler with line breaks
+ * in it) closed at the end of each line they cover and opened again at the start of the next,
+ * after its prefix, so each line reads its part hidden. A spoiler spans only lines of text, not
+ * a code block, and only when a later line closes it: a lone `||` stays text. Which lines start
+ * inside such a spoiler.
+ */
+function bridgeSpoilers(lines: Line[]): boolean[] {
+  let open = false;
+
+  return lines.map((line, i) => {
+    if (line.code !== false) {
+      open = false;
+
+      return false;
+    }
+
+    const continued = open;
+
+    if (open) {
+      // A blank line inside a spoiler stays in it.
+      if (line.text.trim() === '') return true;
+      const lead = line.text.length - line.text.trimStart().length;
+      line.text = `${line.text.slice(0, lead)}||${line.text.slice(lead)}`;
+    }
+
+    open = unclosedSpoiler(line.text) >= 0 && closedLater(lines, i + 1);
+
+    if (open) {
+      const words = line.text.trimEnd();
+      line.text = `${words}||${line.text.slice(words.length)}`;
+    }
+
+    return continued;
+  });
+}
+
+/** Whether a line from `from` on, before a code block, closes a spoiler opened above it. */
+function closedLater(lines: readonly Line[], from: number): boolean {
+  for (const line of lines.slice(from)) {
+    if (line.code !== false) return false;
+    const text = `||${line.text.trimStart()}`;
+
+    if (line.text.trim() !== '' && findClose(text, 2, '||') >= 0) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Where one line opens a spoiler it doesn't close, as `inline` reads it (code, formulas and
+ * links skipped, other formatting's pairs passed over); -1 when it doesn't.
+ */
+function unclosedSpoiler(source: string): number {
+  let i = 0;
+
+  outer: while (i < source.length) {
+    const c = source[i]!;
+
+    if (c === '\\' && i + 1 < source.length && ESCAPABLE.includes(source[i + 1]!)) {
+      i += 2;
+      continue;
+    }
+
+    if (c === '`') {
+      const close = source.indexOf('`', i + 1);
+
+      if (close > i + 1) {
+        i = close + 1;
+        continue;
+      }
+    }
+
+    if (source.startsWith('$$', i)) {
+      const close = source.indexOf('$$', i + 2);
+
+      if (close > i + 2) {
+        i = close + 2;
+        continue;
+      }
+    }
+
+    if (c === '[') {
+      const link = LINK.exec(source.slice(i));
+
+      if (link) {
+        i += link[0].length;
+        continue;
+      }
+    }
+
+    for (const [delimiter, mark] of DELIMITERS) {
+      if (!source.startsWith(delimiter, i) || !canOpen(source, i, delimiter)) continue;
+      const close = findClose(source, i + delimiter.length, delimiter);
+
+      if (close < 0) {
+        if (mark === 'spoiler') return i;
+        continue;
+      }
+
+      i = close + delimiter.length;
+      continue outer;
+    }
+
+    i++;
+  }
+
+  return -1;
 }
 
 const ESCAPABLE = '\\`*_~[]()>#-.!|$';
+
+/** A link written in the draft: `[label](address)`. */
+const LINK = /^\[([^\]]+)\]\(([^)\s]+)\)/;
 
 /** The runs of one line: its text cut where the marks around it change. */
 export function parseInline(source: string): Run[] {
@@ -641,7 +788,7 @@ function inline(source: string, marks: Marks, out: Run[]): void {
     }
 
     if (c === '[') {
-      const link = /^\[([^\]]+)\]\(([^)\s]+)\)/.exec(source.slice(i));
+      const link = LINK.exec(source.slice(i));
 
       if (link) {
         flush();
@@ -943,7 +1090,8 @@ export function editDraft(body: string, html: string | null): EditDraft {
   let pre = false;
   let quote = 0;
   let skip = 0;
-  const links: string[] = [];
+  /** Each open link's address; `null` for a link around a spoiler, which is no link. */
+  const links: Array<string | null> = [];
 
   const breakLine = () => {
     lines.push(line);
@@ -972,7 +1120,7 @@ export function editDraft(body: string, html: string | null): EditDraft {
       }
 
       if (pre) {
-        const parts = decodeEntities(text).split('\n');
+        const parts = plainOf(text).split('\n');
         parts.forEach((part, index) => {
           if (index > 0) breakLine();
           line += part;
@@ -982,7 +1130,7 @@ export function editDraft(body: string, html: string | null): EditDraft {
 
       // Whitespace between blocks (`</p>\n<p>`) is layout, not text.
       if (/^\s*$/.test(text) && text.includes('\n')) continue;
-      line += decodeEntities(text.replace(/\s*\n\s*/g, ' '));
+      line += plainOf(text.replace(/\s*\n\s*/g, ' '));
       continue;
     }
 
@@ -1027,12 +1175,12 @@ export function editDraft(body: string, html: string | null): EditDraft {
       spans.push(spoiler ? 'spoiler' : 'other');
 
       if (spoiler) {
-        line += '||';
+        line += SPOILER_OPEN;
         continue;
       }
     } else if ((tag === 'span' || tag === 'div') && end) {
       if (spans.pop() === 'spoiler') {
-        line += '||';
+        line += SPOILER_CLOSE;
         continue;
       }
     }
@@ -1071,9 +1219,18 @@ export function editDraft(body: string, html: string | null): EditDraft {
       case 'a':
         if (end) {
           const href = links.pop();
-          line += href === undefined ? '' : `](${href})`;
+          line += href === undefined || href === null ? '' : `](${href})`;
         } else {
           const href = attribute(attrs ?? '', 'href') ?? '';
+          const inner = html.slice(tokens.lastIndex, elementEnd(html, 'a', tokens.lastIndex));
+
+          // A link around a spoiler is no link, nor a mention: its content stays as it is, the
+          // spoiler a spoiler, as `html.ts` reads it.
+          if (/data-mx-spoiler/i.test(inner)) {
+            links.push(null);
+            break;
+          }
+
           const target = mentionOf(href);
 
           if (target) {
@@ -1151,12 +1308,66 @@ export function editDraft(body: string, html: string | null): EditDraft {
 
   if (line !== '' && line !== continuation) lines.push(line);
 
-  const draft = lines
-    .join('\n')
+  const draft = spoilerMarkers(lines.join('\n'))
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
   return draft === '' ? { draft: body, pills: [] } : withPills(draft, pills);
+}
+
+/**
+ * Where a spoiler starts and ends while a message is written back as markers: control characters
+ * no message text keeps (`plainOf`), turned into `||` once the whole draft is known.
+ */
+const SPOILER_OPEN = '\u0002';
+
+const SPOILER_CLOSE = '\u0003';
+
+/** Text from a message's HTML, without the characters that mark spoilers here. */
+function plainOf(text: string): string {
+  return decodeEntities(text).replaceAll(SPOILER_OPEN, '').replaceAll(SPOILER_CLOSE, '');
+}
+
+/**
+ * `marked` with each spoiler's marks written as `||` pairs, each pair tight around the
+ * spoiler's words (`||` opens before a word and closes after one, so space or a line break at
+ * either end of the spoiler stays outside it, where it can't stop the markers reading as a
+ * spoiler). A spoiler over several lines keeps one pair, which `outgoingText` reads across the
+ * lines; nested spoilers are one; an empty one is gone.
+ */
+function spoilerMarkers(marked: string): string {
+  let out = '';
+  let depth = 0;
+  let inner = '';
+
+  const close = () => {
+    const words = inner.trim();
+    const start = inner.length - inner.trimStart().length;
+    out +=
+      words === ''
+        ? inner
+        : `${inner.slice(0, start)}||${words}||${inner.slice(start + words.length)}`;
+    inner = '';
+  };
+
+  for (const c of marked) {
+    if (c === SPOILER_OPEN) {
+      depth += 1;
+    } else if (c === SPOILER_CLOSE) {
+      if (depth === 0) continue;
+      depth -= 1;
+
+      if (depth === 0) close();
+    } else if (depth > 0) {
+      inner += c;
+    } else {
+      out += c;
+    }
+  }
+
+  if (depth > 0) close();
+
+  return out;
 }
 
 /**
