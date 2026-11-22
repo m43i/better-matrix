@@ -18,8 +18,14 @@ import { sentAt } from '../state/timelineText';
 import { font } from '../theme/palette';
 import { Divider, EmptyState } from '../ui/components';
 import { useNow } from '../ui/shell/useNow';
+import { useShown } from '../ui/useShown';
 import { usePalette } from '../ui/theme';
-import { TimelineContext, type TimelineContextValue } from '../ui/timeline/context';
+import {
+  SpoilerContext,
+  TimelineContext,
+  type TimelineContextValue,
+  useSpoilers,
+} from '../ui/timeline/context';
 import { RichText } from '../ui/timeline/RichText';
 
 const NONE: EditVersion[] = [];
@@ -47,7 +53,9 @@ export default function EditHistoryScreen() {
     );
   }, [store, account, roomId, eventId]);
 
-  // Pills and links in a version act for this account, in this room.
+  // Pills and links in a version act for this account, in this room, while the sheet is on show.
+  const shown = useShown();
+
   const context = useMemo<TimelineContextValue>(
     () => ({
       account,
@@ -55,9 +63,12 @@ export default function EditHistoryScreen() {
       thread: null,
       scrollTo: () => undefined,
       openActions: () => undefined,
+      shown: () => shown.current,
     }),
-    [account, roomId],
+    [account, roomId, shown],
   );
+
+  const spoilers = useSpoilers();
 
   const newestFirst = useMemo(
     () => versions.map((version, index) => ({ version, original: index === 0 })).reverse(),
@@ -66,40 +77,43 @@ export default function EditHistoryScreen() {
 
   return (
     <TimelineContext.Provider value={context}>
-      <FlatList
-        testID="edit-history"
-        data={newestFirst}
-        keyExtractor={(item) => item.version.event_id}
-        contentContainerStyle={styles.content}
-        ItemSeparatorComponent={() => <Divider inset={16} />}
-        ListHeaderComponent={
-          <Text style={[font.header, styles.title, { color: palette.text }]}>
-            {t('mobile.conversation.edit_history')}
-          </Text>
-        }
-        ListEmptyComponent={
-          error ? (
-            <EmptyState
-              icon="alert"
-              title={t('mobile.conversation.edit_history_failed', { error })}
-            />
-          ) : (
-            <EmptyState title="" loading />
-          )
-        }
-        renderItem={({ item: { version, original } }) => (
-          <View style={styles.version} testID={`edit-${version.event_id}`}>
-            <Text style={[font.meta, { color: palette.textMuted }]}>
-              {original
-                ? `${sentAt(version.timestamp_ms, now)} · ${t('mobile.conversation.edit_history_original')}`
-                : sentAt(version.timestamp_ms, now)}
+      <SpoilerContext.Provider value={spoilers}>
+        <FlatList
+          testID="edit-history"
+          data={newestFirst}
+          keyExtractor={(item) => item.version.event_id}
+          contentContainerStyle={styles.content}
+          ItemSeparatorComponent={() => <Divider inset={16} />}
+          ListHeaderComponent={
+            <Text style={[font.header, styles.title, { color: palette.text }]}>
+              {t('mobile.conversation.edit_history')}
             </Text>
-            <RichText
-              blocks={version.html ? htmlBlocks(version.html) : plainBlocks(version.body)}
-            />
-          </View>
-        )}
-      />
+          }
+          ListEmptyComponent={
+            error ? (
+              <EmptyState
+                icon="alert"
+                title={t('mobile.conversation.edit_history_failed', { error })}
+              />
+            ) : (
+              <EmptyState title="" loading />
+            )
+          }
+          renderItem={({ item: { version, original } }) => (
+            <View style={styles.version} testID={`edit-${version.event_id}`}>
+              <Text style={[font.meta, { color: palette.textMuted }]}>
+                {original
+                  ? `${sentAt(version.timestamp_ms, now)} · ${t('mobile.conversation.edit_history_original')}`
+                  : sentAt(version.timestamp_ms, now)}
+              </Text>
+              <RichText
+                blocks={version.html ? htmlBlocks(version.html) : plainBlocks(version.body)}
+                owner={version.event_id}
+              />
+            </View>
+          )}
+        />
+      </SpoilerContext.Provider>
     </TimelineContext.Provider>
   );
 }

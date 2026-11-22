@@ -145,7 +145,7 @@ export const MessageRow = memo(function MessageRow({
         {message.reply_to ? <QuoteBlock quote={message.reply_to} /> : null}
         {gif ? (
           <>
-            {gif.rest ? <RichText blocks={gif.rest} /> : null}
+            {gif.rest ? <RichText blocks={gif.rest} owner={message.event_id} /> : null}
             <LinkedGif key={gif.url} url={gif.url} />
           </>
         ) : (
@@ -181,7 +181,7 @@ function Body({ message, latestCall }: { message: Message; latestCall: boolean }
     case 'Emote': {
       const blocks = prepare(message).blocks;
 
-      return blocks ? <RichText blocks={blocks} /> : null;
+      return blocks ? <RichText blocks={blocks} owner={message.event_id} /> : null;
     }
 
     case 'Location':

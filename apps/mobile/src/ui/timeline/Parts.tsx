@@ -165,7 +165,7 @@ const CARD_WORDS_MIN = 100;
 export function LinkCard({ url }: { url: string }) {
   const palette = usePalette();
   const store = useAppStore();
-  const { account } = useTimelineContext();
+  const { account, shown } = useTimelineContext();
   const preview = useStore((s) => s.linkPreviews[previewKey(account, url)]);
   useEffect(() => wantLinkPreview(store, account, url), [store, account, url]);
   const image = useMedia(account, preview?.image?.[0] ?? null, CARD_IMAGE);
@@ -177,7 +177,7 @@ export function LinkCard({ url }: { url: string }) {
 
   return (
     <Pressable
-      onPress={() => openLink(store, url, account)}
+      onPress={() => openLink(store, url, account, shown)}
       accessibilityRole="link"
       accessibilityLabel={preview.title ?? url}
       android_ripple={{ color: palette.hover }}
