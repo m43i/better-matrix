@@ -110,12 +110,18 @@ pub fn preview(s: &State, preview: &Preview, window: [f32; 2], p: &Palette) -> E
             video_view(&preview.attachment, thumbnail.as_ref(), state, (width, height - CONTROLS), p)
         }
         // Held back by the media choice: nothing loaded until Show (ADR 0011).
+        // A card of its own, so the timeline's placeholder behind the dimmed backdrop doesn't
+        // show through it.
         PreviewContent::Held => col()
             .key("preview-held")
             .items_center()
             .gap(14.0)
-            .child(icon(&icons::EYE_OFF, 44.0).color(Color::WHITE.alpha(0.7)))
-            .child(text(t!("safety.hidden_media")).font(font::BODY).color(Color::WHITE.alpha(0.7)))
+            .padding(32.0)
+            .radius(16.0)
+            .fill(p.surface)
+            .border(1.0, p.divider)
+            .child(icon(&icons::EYE_OFF, 44.0).color(p.text_muted))
+            .child(text(t!("safety.hidden_media")).font(font::BODY).color(p.text_muted))
             .child(
                 super::components::button(t!("safety.show_media"), super::components::ButtonKind::Primary, true, p)
                     .key("preview-show-media")

@@ -190,6 +190,17 @@ pub fn preview_batch(s: &mut State) {
     }
 }
 
+/// The batch's recording, opened with pictures and videos held back everywhere, stepped back
+/// onto the held-back video: Show, and nothing fetched.
+pub fn preview_held(s: &mut State) {
+    batch_messages(s);
+    let safety = matrix_core::Safety { media: matrix_core::ShowMedia::Never, ..matrix_core::Safety::default() };
+    apply(s, Event::Safety { account: AccountId::new(ADA), safety });
+    let file = batch_attachments().swap_remove(2);
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$batch-2", &file);
+    s.show_preview_item(1);
+}
+
 /// The batch's video, a third of the way through and paused, with its controls.
 pub fn preview_video(s: &mut State) {
     open_batch(s, 1);

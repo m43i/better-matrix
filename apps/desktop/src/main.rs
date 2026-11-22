@@ -46,6 +46,7 @@ fn spec() -> AppSpec<State> {
             ("demo-preview-batch", demo::preview_batch),
             ("demo-preview-video", demo::preview_video),
             ("demo-preview-audio", demo::preview_audio),
+            ("demo-preview-held", demo::preview_held),
             ("demo-pinned-message", |s| {
                 demo::pinned_messages(s);
                 s.open_thread(demo::DEMO_THREAD.1);
