@@ -183,6 +183,12 @@ describe('pillHtml', () => {
     expect(pillHtml(GRACE)).toBe('<a href="https://matrix.to/#/@grace:x.org">Grace Hopper</a>');
   });
 
+  it('should percent-encode a slash in the ID so the link names the whole ID', () => {
+    expect(pillHtml(userPill('@a/b:x.org', 'AB'))).toBe(
+      '<a href="https://matrix.to/#/@a%2Fb:x.org">AB</a>',
+    );
+  });
+
   it('should link a room by matrix.to with its name', () => {
     expect(pillHtml(roomPill('#rust:x.org', 'rust'))).toBe(
       '<a href="https://matrix.to/#/#rust:x.org">#rust</a>',

@@ -376,6 +376,16 @@ describe('outgoingText with pills', () => {
     });
   });
 
+  it('should keep a private-use character typed in the draft as text, never as a pill', () => {
+    const draft = '\ue000 `@room`';
+
+    expect(outgoingText(draft, [pillAt(EVERYONE, 3)])).toEqual({
+      body: '\ue000 @room',
+      html: '<p>\ue000 <code>@room</code></p>',
+      mentions: { user_ids: [], room: false },
+    });
+  });
+
   it('should send a custom emoji as an image, its short code in the body', () => {
     expect(outgoingText('yay :cat:', [pillAt(emotePill('mxc://x.org/c', 'cat'), 4)])).toEqual({
       body: 'yay :cat:',
@@ -456,6 +466,22 @@ describe('editDraft', () => {
     expect(
       editDraft('Grace: hi', '<a href="https://matrix.to/#/@grace:x.org">Grace</a>: hi'),
     ).toEqual({ draft: '@Grace: hi', pills: [pillAt(userPill('@grace:x.org', 'Grace'), 0)] });
+  });
+
+  it('should keep a private-use character the message holds as text beside a pill', () => {
+    expect(
+      editDraft('\ue000 Grace', '&#xe000; <a href="https://matrix.to/#/@grace:x.org">Grace</a>'),
+    ).toEqual({
+      draft: '\ue000 @Grace',
+      pills: [pillAt(userPill('@grace:x.org', 'Grace'), 2)],
+    });
+  });
+
+  it('should bring a mention whose ID holds a slash back as a pill', () => {
+    expect(editDraft('AB', '<a href="https://matrix.to/#/@a%2Fb:x.org">AB</a>')).toEqual({
+      draft: '@AB',
+      pills: [pillAt(userPill('@a/b:x.org', 'AB'), 0)],
+    });
   });
 
   it('should bring a custom emoji back as a pill', () => {

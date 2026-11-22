@@ -10,7 +10,7 @@ import type {
 } from '@better-matrix/matrix-native/types';
 
 import type { Key } from '../i18n';
-import { type ComposerState, EMPTY_COMPOSER, endEdit, type PendingAttachment } from './composer';
+import { type ComposerState, emptied, endEdit, type PendingAttachment } from './composer';
 import { outgoingText } from './format';
 import { coordinatesText } from './geo';
 import { slashOf } from './slash';
@@ -122,7 +122,7 @@ export function planSend(composer: ComposerState, account: AccountId, key: Timel
 
   return {
     commands,
-    composer: commands.length > 0 ? { ...EMPTY_COMPOSER, kept: composer.kept } : composer,
+    composer: commands.length > 0 ? emptied(composer) : composer,
   };
 }
 
@@ -190,7 +190,7 @@ export function planSchedule(
     },
   };
 
-  return { commands: [command], composer: { ...EMPTY_COMPOSER, kept: composer.kept } };
+  return { commands: [command], composer: emptied(composer) };
 }
 
 function hasText(composer: ComposerState): boolean {

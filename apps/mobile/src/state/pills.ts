@@ -20,6 +20,8 @@
 
 import type { Mentions } from '@better-matrix/matrix-native/types';
 
+import { mentionLink } from './permalinks';
+
 export interface Pill {
   id: string;
   /** What the draft shows for it. */
@@ -296,10 +298,10 @@ export function escapeHtml(text: string): string {
 
 /** A pill as Matrix HTML, as the engine's `from_pills` writes it. */
 export function pillHtml(pill: Pill): string {
-  const mention = /^(user|room):(.+)$/.exec(pill.id);
+  const id = /^(?:user|room):(.+)$/.exec(pill.id)?.[1];
 
-  if (mention)
-    return `<a href="${escapeHtml(`https://matrix.to/#/${mention[2]}`)}">${escapeHtml(pillText(pill))}</a>`;
+  if (id !== undefined)
+    return `<a href="${escapeHtml(mentionLink(id))}">${escapeHtml(pillText(pill))}</a>`;
 
   if (isSpoiler(pill)) return `<span data-mx-spoiler>${spoilerHtml(pill.label)}</span>`;
 

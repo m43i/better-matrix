@@ -390,12 +390,14 @@ export function scheduleComposer(
   for (const command of plan.commands)
     void sendTold(store, command, 'notice.not_sent', () =>
       // A refused schedule gives the composer back as it was (its text, pills and the message
-      // it answered), unless something was written or answered since.
-      updateComposer(store, account, key, (c) =>
-        c.draft === '' && !c.editing && c.replyTo === null
-          ? { ...c, draft: current.draft, pills: current.pills, replyTo: current.replyTo }
-          : c,
-      ),
+      // it answered); were something written, answered or edited since, once that is done.
+      updateComposer(store, account, key, (c) => ({
+        ...c,
+        refused: [
+          ...(c.refused ?? []),
+          { draft: current.draft, pills: current.pills ?? [], replyTo: current.replyTo },
+        ],
+      })),
     );
 
   return true;

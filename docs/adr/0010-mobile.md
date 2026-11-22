@@ -184,8 +184,12 @@ Date: 2026-11-16
   or a formula, which would show its words, those end around it and it goes as its own spoiler
   (in a code block it stays in the block, which readers then draw as text, below).
   On send each placed label becomes one private-use character while the markers are parsed, so
-  markers around it format it and nothing in a name reads as a marker; it then goes as the
-  engine's HTML (`<a href="https://matrix.to/#/@…">Name</a>`, `<img data-mx-emoticon …>`,
+  markers around it format it and nothing in a name reads as a marker (only characters the
+  draft doesn't hold are used, so one typed or pasted stays text; editing a message's HTML back
+  into a draft does the same); it then goes as the
+  engine's HTML (`<a href="https://matrix.to/#/@…">Name</a>`, the ID one percent-encoded segment
+  but for `@`, `#`, `!` and `:` as the engine's `mention_link` writes it, `permalinks.ts`
+  `mentionLink`, so a `/` in it can't cut it short; `<img data-mx-emoticon …>`,
   `@room` as plain text) and its people as `Outgoing::Text.mentions` (`m.mentions`, always
   sent, empty when nobody), edits included. `m.mentions` comes from the parsed runs, not the
   draft's pills: only a pill sent as a live mention counts (a person's matrix.to link, spoiler
@@ -241,7 +245,10 @@ Date: 2026-11-16
   passes, once a due time, then every 30 s while the server still lists it, so a sent one
   leaves the bar; a timer is capped at what JavaScript's can hold); the bar opens the list (`app/scheduled.tsx`) to send each now or cancel it
   (`UpdateScheduled`). A refused schedule gives the composer back: text, pills and the message
-  it answered. Sends are planned as
+  it answered. Should the composer hold something else by then (new text, a reply, files, an
+  edit), the draft waits in `ComposerState.refused` and comes back once that timeline's
+  composer is empty again (`withRefusedBack`, applied on every composer change), as refused
+  edits wait in `kept`; like those it lives for the run only. Sends are planned as
   data (`state/outgoing.ts`): text with the reply first, then each attachment as
   `Upload::Path`; voice memos are AAC `.m4a` from expo-audio, sent with a 100-point waveform
   from the recorder's metering (read 20 times a second, `waveformFromLevels`, on the desktop's
