@@ -138,11 +138,12 @@ async fn room_packs_named(room: &Room, name: &str, keys: Option<&[String]>, serv
         .collect();
     // Of the store's and the server's copies of a pack, the newer counts: the store's may be
     // older (kept from before sliding sync, which brings no pack changes) or newer (a change
-    // in a timeline since the server's state was read).
+    // in a timeline since the server's state was read). Alike in time, the server's does: the
+    // same event, redacted since, keeps its time.
     let at = |event: &Value| event["origin_server_ts"].as_u64().unwrap_or_default();
-    let ours = server.iter().filter(|event| event["type"].as_str() == Some(name));
+    let fetched = server.iter().filter(|event| event["type"].as_str() == Some(name));
     let mut newest: Vec<Value> = Vec::new();
-    for event in local.iter().chain(ours) {
+    for event in fetched.chain(local.iter()) {
         match newest.iter_mut().find(|known| known["state_key"] == event["state_key"]) {
             Some(known) if at(event) > at(known) => *known = event.clone(),
             Some(_) => {}
@@ -323,10 +324,17 @@ mod tests {
             .expect("sync");
         let room = account.client().get_room(matrix_sdk::ruma::room_id!("!room:example.org")).expect("room");
         // The server's copy of `cats` is older than the one sync brought; `birds` sync never did.
-        let from_server = [pack_event("cats", "stalecat"), pack_event("birds", "bird")];
-        let packs = room_packs(&room, None, &from_server).await;
-        let found: Vec<_> = packs.iter().map(|pack| (pack.name.as_str(), pack.images[0].shortcode.as_str())).collect();
-        assert_eq!(found, [("cats", "blobcat"), ("birds", "bird")]);
+        let mut stale = pack_event("cats", "stalecat");
+        stale["origin_server_ts"] = json!(0);
+        let packs = room_packs(&room, None, &[stale, pack_event("birds", "bird")]).await;
+        let mut found: Vec<_> =
+            packs.iter().map(|pack| (pack.name.as_str(), pack.images[0].shortcode.as_str())).collect();
+        found.sort_unstable();
+        assert_eq!(found, [("birds", "bird"), ("cats", "blobcat")]);
+        // The same event redacted on the server since (its time unchanged): no pack.
+        let mut redacted = pack_event("cats", "blobcat");
+        redacted["content"] = json!({});
+        assert!(room_packs(&room, None, &[redacted]).await.is_empty());
         // A newer copy on the server (changed since the store's) counts instead.
         let mut changed = pack_event("cats", "newcat");
         changed["origin_server_ts"] = json!(2);

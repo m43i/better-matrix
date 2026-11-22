@@ -4783,11 +4783,13 @@ async fn typing_people(room: &matrix_sdk::Room, users: Vec<matrix_sdk::ruma::Own
 }
 
 /// `content` in `thread` and answering `reply_to`, as the SDK relates the room messages it
-/// sends: it relates no other kind (stickers, polls) itself.
+/// sends: it relates no other kind (stickers, polls) itself. In a thread without a reply,
+/// `latest` (the thread's latest message) is what clients without threads see it answer.
 fn related(
     content: matrix_sdk::ruma::events::AnyMessageLikeEventContent,
     thread: Option<&str>,
     reply_to: Option<&str>,
+    latest: Option<&str>,
 ) -> Result<matrix_sdk::ruma::events::AnyMessageLikeEventContent, Error> {
     use matrix_sdk::ruma::events::{AnyMessageLikeEventContent, EventContentFromType, MessageLikeEventContent};
     if thread.is_none() && reply_to.is_none() {
@@ -4796,6 +4798,9 @@ fn related(
     let event_type = content.event_type().to_string();
     let mut json = serde_json::to_value(&content).map_err(|e| Error::Storage(e.into()))?;
     crate::scheduled::relate(&mut json, thread, reply_to);
+    if let (Some(_), None, Some(latest)) = (thread, reply_to, latest) {
+        json["m.relates_to"]["m.in_reply_to"]["event_id"] = latest.into();
+    }
     let raw = serde_json::value::to_raw_value(&json).map_err(|e| Error::Storage(e.into()))?;
     AnyMessageLikeEventContent::from_parts(&event_type, &raw).map_err(|e| Error::Storage(e.into()))
 }
@@ -4823,7 +4828,13 @@ async fn send_in(
     match message {
         Outgoing::Poll { .. } | Outgoing::Sticker(_) => {
             if let Some(content) = crate::outgoing::event(message)? {
-                timeline.send(related(content, thread, reply_to.as_deref())?).await?;
+                // In a thread without a reply, the fallback for clients without threads answers
+                // the thread's latest message, as the SDK's own thread messages do.
+                let latest = match (thread, &reply_to) {
+                    (Some(_), None) => timeline.latest_event_id().await.map(|id| id.to_string()),
+                    _ => None,
+                };
+                timeline.send(related(content, thread, reply_to.as_deref(), latest.as_deref())?).await?;
             }
         }
         Outgoing::Text { .. } | Outgoing::Emote { .. } | Outgoing::Location { .. } => {}
@@ -4946,7 +4957,7 @@ mod tests {
             mimetype: Some("image/png".into()),
         };
         let content = crate::outgoing::event(&Outgoing::Sticker(image)).expect("content").expect("a sticker");
-        serde_json::to_value(related(content, thread, reply_to).expect("related")).expect("json")
+        serde_json::to_value(related(content, thread, reply_to, Some("$latest")).expect("related")).expect("json")
     }
 
     #[test]
@@ -4961,6 +4972,9 @@ mod tests {
         let json = sticker_json(Some("$root"), None);
         assert_eq!(json["m.relates_to"]["rel_type"], "m.thread");
         assert_eq!(json["m.relates_to"]["event_id"], "$root");
+        // Clients without threads see it answer the thread's latest message.
+        assert_eq!(json["m.relates_to"]["is_falling_back"], true);
+        assert_eq!(json["m.relates_to"]["m.in_reply_to"]["event_id"], "$latest");
     }
 
     fn mirror(items: &[u32]) -> BoundaryMirror<u32, impl Fn(&u32) -> bool> {

@@ -5,18 +5,27 @@
 // only once the user shows the message's media (a tap on the code does).
 
 import { createContext, memo, useContext } from 'react';
-import { Image, Platform, ScrollView, StyleSheet, Text, type TextStyle, View } from 'react-native';
+import {
+  Image,
+  Platform,
+  ScrollView,
+  type StyleProp,
+  StyleSheet,
+  Text,
+  type TextStyle,
+  View,
+} from 'react-native';
 
 import { t } from '../../i18n';
 import { type Block, type Inline, type Marks } from '../../state/html';
 import { revealMedia } from '../../state/actions/safety';
 import { useAppStore, useStore } from '../../state/react';
 import { inlinePicture } from '../../state/selectors';
-import { spoilerId } from '../../state/spoilers';
+import { hiddenReading, inlineSpoilerId, spoilerCover } from '../../state/spoilers';
 import { font } from '../../theme/palette';
 import { AVATAR_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
-import { useSpoiler, useTimelineContext } from './context';
+import { SpoilerContext, useSpoiler, useTimelineContext } from './context';
 import { openLink, openMention } from './open';
 
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
@@ -83,21 +92,20 @@ function BlockView({ block, muted, owner, place }: { block: Block; muted: boolea
   switch (block.type) {
     case 'paragraph':
       return (
-        <Text style={[font.body, { color }]}>
-          <Inlines inlines={block.inlines} owner={owner} place={place} />
-        </Text>
+        <Line style={[font.body, { color }]} inlines={block.inlines} owner={owner} place={place} />
       );
     case 'heading':
       return (
-        <Text
+        <Line
           style={[
             font.body,
             styles.heading,
             { color, fontSize: block.level === 1 ? 20 : block.level === 2 ? 18 : 16 },
           ]}
-        >
-          <Inlines inlines={block.inlines} owner={owner} place={place} />
-        </Text>
+          inlines={block.inlines}
+          owner={owner}
+          place={place}
+        />
       );
     case 'code':
       return (
@@ -138,6 +146,37 @@ function BlockView({ block, muted, owner, place }: { block: Block; muted: boolea
   }
 }
 
+interface LineProps extends Placed {
+  inlines: Inline[];
+  style: StyleProp<TextStyle>;
+}
+
+/** A paragraph or heading: one native text holding its inlines. */
+function Line(props: LineProps) {
+  return props.inlines.some((inline) => inline.type === 'spoiler') ? (
+    <SpoiledLine {...props} />
+  ) : (
+    <Text style={props.style}>
+      <Inlines inlines={props.inlines} owner={props.owner} place={props.place} />
+    </Text>
+  );
+}
+
+/**
+ * A line holding a spoiler: while one is hidden, it reads each hidden one as the spoiler's
+ * label, not as its blank cover. Only such lines follow the spoilers shown, so a tap redraws them.
+ */
+function SpoiledLine({ inlines, owner, place, style }: LineProps) {
+  const { revealed } = useContext(SpoilerContext);
+  const reading = hiddenReading(inlines, owner, place, revealed, t('mobile.conversation.spoiler'));
+
+  return (
+    <Text style={style} accessibilityLabel={reading ?? undefined}>
+      <Inlines inlines={inlines} owner={owner} place={place} />
+    </Text>
+  );
+}
+
 function Inlines({ inlines, owner, place }: { inlines: Inline[] } & Placed) {
   return (
     <>
@@ -149,7 +188,7 @@ function Inlines({ inlines, owner, place }: { inlines: Inline[] } & Placed) {
             return <Pill key={index} inline={inline} />;
           case 'spoiler':
             return (
-              <Spoiler key={index} id={spoilerId(owner, `${place}/${index}`, inline.text)}>
+              <Spoiler key={index} id={inlineSpoilerId(owner, place, index, inline.text)}>
                 {inline.text}
               </Spoiler>
             );
@@ -164,7 +203,9 @@ function Inlines({ inlines, owner, place }: { inlines: Inline[] } & Placed) {
 }
 
 /**
- * Hidden text: a block of the muted colour until tapped, then its words. A spoiler is only ever
+ * Hidden text: a block of the muted colour until tapped, then its words. While hidden its words
+ * are not in the drawn text at all, only a blank cover as wide (`spoilerCover`): a screen reader
+ * reads a paragraph's text whatever its colours. A spoiler is only ever
  * its plain words (`state/html.ts`): no link, mention or custom emoji inside it shows anything,
  * hidden or not. Whether it is shown is the screen's, by the spoiler's `id` (its message, place
  * and words, `state/spoilers.ts`), not this view's: a recycled row or an edit shows it hidden.
@@ -183,7 +224,7 @@ function Spoiler({ id, children }: { id: string; children: string }) {
       suppressHighlighting
       style={{ color: palette.textMuted, backgroundColor: palette.textMuted }}
     >
-      {children}
+      {spoilerCover(children)}
     </Text>
   );
 }

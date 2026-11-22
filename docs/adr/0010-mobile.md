@@ -236,7 +236,9 @@ Date: 2026-11-16
   when-in-use permission only, configured in `app.json`), looked up only once the user presses
   "Use my location", or a place found by name (`SearchPlaces`, only on submit: Nominatim's
   policy forbids searching as one types), previews it on its map and sends
-  `Outgoing::Location`. The timeline's card (`LocationCard`) draws the map the engine renders
+  `Outgoing::Location`. A sticker or a place answers what that timeline's composer answers (a
+  thread's goes into the thread) and ends the reply, as sending text does and as the desktop's
+  `send_from` does. The timeline's card (`LocationCard`) draws the map the engine renders
   from OpenStreetMap (`osm:<lat>,<lon>,15`, which the app also writes for the phone's own
   position, `state/geo.ts` mirroring `geo.rs`), the description, the coordinates and
   "© OpenStreetMap contributors" on every map; tapping opens openstreetmap.org. The device
@@ -414,8 +416,11 @@ Date: 2026-11-16
   `ftp`, reply fallbacks and scripts are dropped, nesting is capped. Nothing renders raw HTML.
   Matrix's inline objects become inlines of their own, as `html.rs` reads them: mention pills
   (the user's own in the mention colour), spoilers hidden behind a block of the muted colour
-  until tapped (a spoiler is only its plain words, custom emoji as their descriptions, hidden
-  or shown: nothing inside shows its colour or picture or takes a tap; a link or mention
+  until tapped (while hidden its words are not in the drawn text at all, since a screen reader
+  reads a paragraph's text whatever its colours: it draws a blank cover as wide, each character
+  a figure space, its spaces and line breaks kept so it wraps alike (`spoilerCover`), and its
+  paragraph reads each hidden spoiler as "Spoiler, tap to show" (`hiddenReading`); a spoiler is
+  only its plain words, custom emoji as their descriptions, hidden or shown: nothing inside shows its colour or picture or takes a tap; a link or mention
   around a spoiler is neither, its content drawn as it is, so its label or look can't give the
   spoiler away; the engine reads them the same; a span marked both spoiler and formula is a
   spoiler; a code block holding a spoiler is drawn as its lines of text without its code, the

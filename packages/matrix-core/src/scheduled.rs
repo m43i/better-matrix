@@ -219,7 +219,8 @@ impl Account {
         match self.scheduled_messages().await {
             Ok(messages) => Ok(messages),
             Err(error) => {
-                let mut known = self.keep_scheduled(|_| {}).await;
+                // What became of those whose time came is still asked, one by one.
+                let mut known = self.settle_due(&[]).await;
                 known.sort_by_key(|message| (message.failed.is_some(), message.send_at_ms));
                 Err((error, known))
             }
@@ -847,6 +848,15 @@ mod tests {
             .expect("scheduled");
         let Err((_, known)) = account.scheduled_or_known().await else { panic!("the list should fail") };
         assert_eq!(kept_ids(&known), ["d1"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failure_should_be_learnt_while_the_list_fails() {
+        let (server, _) = server(false, Endpoints::BrokenList);
+        let account = account(&server, "broken-list-failed").await;
+        kept_due(&account, "lost").await;
+        let Err((_, known)) = account.scheduled_or_known().await else { panic!("the list should fail") };
+        assert_eq!(known.first().and_then(|message| message.failed.as_deref()), Some("You may not post here"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

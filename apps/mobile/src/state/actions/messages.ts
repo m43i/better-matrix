@@ -1,9 +1,11 @@
 // What the composer's sheets send besides text (stickers, places) and what they look up for it
 // (image packs, places by name), a message's edit history, and where a message is for a jump.
+// A sticker or place answers what the composer answers, as text would, and ends that reply.
 
 import type { AccountId, PackImage, Place, TimelineKey } from '@better-matrix/matrix-native/types';
 
 import { t } from '../../i18n';
+import { composer, updateComposer } from '../composer';
 import { addNotice } from '../reducer';
 import { CommandFailed } from '../requests';
 import type { Store } from '../store';
@@ -13,20 +15,30 @@ export function listImagePacks(store: Store, account: AccountId, roomId: string 
   store.send({ type: 'ListImagePacks', data: { account, room_id: roomId } }, { quiet: true });
 }
 
-/** Sends a pack's image as a sticker. */
+/** The message `key`'s composer answers, taken from it: the next send answers it instead. */
+function takeReply(store: Store, account: AccountId, key: TimelineKey): string | null {
+  const replyTo = composer(store.getState(), account, key).replyTo?.event_id ?? null;
+
+  if (replyTo !== null) updateComposer(store, account, key, (c) => ({ ...c, replyTo: null }));
+
+  return replyTo;
+}
+
+/** Sends a pack's image as a sticker, answering what the timeline's composer answers. */
 export function sendSticker(
   store: Store,
   account: AccountId,
   key: TimelineKey,
   image: PackImage,
 ): void {
+  const replyTo = takeReply(store, account, key);
   store.send({
     type: 'Send',
-    data: { account, key, reply_to: null, message: { type: 'Sticker', data: image } },
+    data: { account, key, reply_to: replyTo, message: { type: 'Sticker', data: image } },
   });
 }
 
-/** Sends a place: a `geo:` URI and what to call it. */
+/** Sends a place (a `geo:` URI and what to call it), answering what the composer answers. */
 export function sendLocation(
   store: Store,
   account: AccountId,
@@ -34,12 +46,13 @@ export function sendLocation(
   geoUri: string,
   description: string | null,
 ): void {
+  const replyTo = takeReply(store, account, key);
   store.send({
     type: 'Send',
     data: {
       account,
       key,
-      reply_to: null,
+      reply_to: replyTo,
       message: { type: 'Location', data: { geo_uri: geoUri, description } },
     },
   });

@@ -1,14 +1,31 @@
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 
-import { ADA, summary } from '../../../test/fixtures';
+import type { PackImage } from '@better-matrix/matrix-native/types';
+
+import { ADA, message, summary } from '../../../test/fixtures';
+import { composer, startReply } from '../../composer';
+import { mxcMedia } from '../../messages';
 import { Store } from '../../store';
+import { roomKey, threadKey } from '../../timeline';
 import {
   listImagePacks,
   locateMessage,
   searchPlaces,
   sendLocation,
+  sendSticker,
   updateScheduled,
 } from '../messages';
+
+const STICKER: PackImage = {
+  shortcode: 'wave',
+  body: 'Wave',
+  url: 'mxc://x/wave',
+  media: mxcMedia('mxc://x/wave'),
+  emoticon: false,
+  sticker: true,
+  dimensions: [256, 256],
+  mimetype: 'image/png',
+};
 
 function setUp() {
   const { engine, sent } = detachedEngine();
@@ -74,6 +91,51 @@ describe('message actions', () => {
       type: 'Send',
       data: { message: { type: 'Location', data: { geo_uri: 'geo:1,2', description: 'Home' } } },
     });
+  });
+
+  it('a sticker should answer the message the composer replies to', () => {
+    const { store, sent } = setUp();
+    startReply(store, ADA, roomKey('!r'), message('$q'));
+    sendSticker(store, ADA, roomKey('!r'), STICKER);
+    expect(sent[0]!.command).toMatchObject({ type: 'Send', data: { reply_to: '$q' } });
+  });
+
+  it('a sticker should end the composer’s reply once sent', () => {
+    const { store } = setUp();
+    startReply(store, ADA, roomKey('!r'), message('$q'));
+    sendSticker(store, ADA, roomKey('!r'), STICKER);
+    expect(composer(store.getState(), ADA, roomKey('!r')).replyTo).toBeNull();
+  });
+
+  it('a sticker should answer nothing when the composer replies to nothing', () => {
+    const { store, sent } = setUp();
+    sendSticker(store, ADA, roomKey('!r'), STICKER);
+    expect(sent[0]!.command).toMatchObject({ type: 'Send', data: { reply_to: null } });
+  });
+
+  it('a place should answer the message the composer replies to, and end the reply', () => {
+    const { store, sent } = setUp();
+    startReply(store, ADA, roomKey('!r'), message('$q'));
+    sendLocation(store, ADA, roomKey('!r'), 'geo:1,2', null);
+    expect([
+      sent[0]!.command,
+      composer(store.getState(), ADA, roomKey('!r')).replyTo,
+    ]).toMatchObject([{ type: 'Send', data: { reply_to: '$q' } }, null]);
+  });
+
+  it('a sticker from a thread’s composer should go into the thread, answering its reply', () => {
+    const { store, sent } = setUp();
+    const thread = threadKey('!r', '$root');
+    startReply(store, ADA, thread, message('$q'));
+    sendSticker(store, ADA, thread, STICKER);
+    expect(sent[0]!.command).toMatchObject({ data: { key: thread, reply_to: '$q' } });
+  });
+
+  it('a sticker should leave another timeline’s reply as it was', () => {
+    const { store } = setUp();
+    startReply(store, ADA, roomKey('!r'), message('$q'));
+    sendSticker(store, ADA, threadKey('!r', '$root'), STICKER);
+    expect(composer(store.getState(), ADA, roomKey('!r')).replyTo?.event_id).toBe('$q');
   });
 
   it('should say when a scheduled message didn’t change', async () => {

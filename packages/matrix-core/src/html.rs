@@ -249,7 +249,9 @@ pub fn spoiler(words: &str) -> String {
 /// assert!(!matrix_core::html::holds_spoiler("see <b>https://x.org</b>"));
 /// ```
 pub fn holds_spoiler(html: &str) -> bool {
-    html.contains("data-mx-spoiler")
+    // Attribute names are any case in HTML.
+    const NAME: &[u8] = b"data-mx-spoiler";
+    html.as_bytes().windows(NAME.len()).any(|window| window.eq_ignore_ascii_case(NAME))
 }
 
 /// What a spoiler's words read as wherever they can't stay hidden: a message's plain body, and
@@ -267,6 +269,11 @@ pub const SPOILER_FALLBACK: &str = "[Spoiler]";
 /// ```
 pub fn shown_text(body: &str, html: Option<&str>) -> String {
     let Some(html) = html.filter(|html| holds_spoiler(html)) else { return body.to_owned() };
+    // Read as the timeline reads it: sanitised, so names are lower case, comments gone and a
+    // `>` in an attribute escaped, whatever the event's raw HTML says.
+    use matrix_sdk::ruma::html::{HtmlSanitizerMode, RemoveReplyFallback, sanitize_html};
+    let sanitized = sanitize_html(html, HtmlSanitizerMode::Compat, RemoveReplyFallback::Yes);
+    let html = sanitized.as_str();
     let mut out = String::with_capacity(html.len());
     // Open elements whose content is left out (a spoiler, a reply's fallback), each with how
     // many of its own kind opened inside it.
@@ -511,6 +518,24 @@ mod tests {
             html: Some("it was <span data-mx-spoiler>the butler</span>".into()),
         };
         assert_eq!(content.plain(), "it was [Spoiler]");
+    }
+
+    #[test]
+    fn shown_text_should_hide_a_spoiler_named_in_capitals() {
+        let html = "a <span DATA-MX-SPOILER>secret</span> b";
+        assert_eq!(super::shown_text("a secret b", Some(html)), "a [Spoiler] b");
+    }
+
+    #[test]
+    fn shown_text_should_not_end_a_spoiler_at_a_closing_tag_in_a_comment() {
+        let html = "a <span data-mx-spoiler><!-- </span> -->secret</span> b";
+        assert_eq!(super::shown_text("a secret b", Some(html)), "a [Spoiler] b");
+    }
+
+    #[test]
+    fn shown_text_should_not_end_a_tag_at_a_quoted_bracket() {
+        let html = "a <span title=\">\" data-mx-spoiler>secret</span> b";
+        assert_eq!(super::shown_text("a secret b", Some(html)), "a [Spoiler] b");
     }
 
     #[test]
