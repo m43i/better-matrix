@@ -12,9 +12,7 @@
 use std::time::Duration;
 
 use matrix_sdk::Room;
-use matrix_sdk::ruma::api::client::delayed_events::{
-    DelayParameters, delayed_message_event, get_all_delayed_events, send_delayed_event, update_delayed_event,
-};
+use matrix_sdk::ruma::api::client::delayed_events::{DelayParameters, delayed_message_event, update_delayed_event};
 use matrix_sdk::ruma::events::{AnyMessageLikeEventContent, MessageLikeEventContent, MessageLikeEventType};
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::ruma::{OwnedUserId, TransactionId};
@@ -23,6 +21,11 @@ use serde_json::Value;
 use crate::account::Crypto;
 use crate::model::{Outgoing, ScheduledAction, ScheduledMessage, TimelineKey};
 use crate::{Account, Error};
+
+mod api;
+
+/// What a server says in `/versions` when it holds delayed events.
+const FEATURE: &str = "org.matrix.msc4140";
 
 /// The longest wait the app offers: a server may allow less, and refuses a longer one.
 pub const LONGEST_DELAY: Duration = Duration::from_secs(60 * 60 * 24 * 30);
@@ -38,6 +41,9 @@ impl Account {
         message: &Outgoing,
         delay: Duration,
     ) -> Result<String, Error> {
+        if !self.can_schedule().await? {
+            return Err(Error::Unsupported("scheduled messages"));
+        }
         let room = self
             .client()
             .get_room(&matrix_sdk::ruma::RoomId::parse(&key.room_id)?)
@@ -64,18 +70,18 @@ impl Account {
             }
             false => (event_type, raw),
         };
-        let delay = delay.min(LONGEST_DELAY);
+        let delay_ms = u64::try_from(delay.min(LONGEST_DELAY).as_millis()).unwrap_or(u64::MAX);
         let txn_id = TransactionId::new();
-        // MSC4140's own endpoint first, then the query parameter on `/send` Synapse took first.
-        let request = send_delayed_event::unstable::Request::new_raw(
-            event_type.as_str().into(),
+        // MSC4140's own endpoint first; then the delay on `/send`, as Synapse took it first. Only
+        // on a server that says it holds delayed events: one that doesn't would ignore the delay
+        // on `/send` and post the message at once.
+        let request = api::schedule::Request::new(
             room.room_id().to_owned(),
+            event_type.as_str().into(),
             txn_id.clone(),
-            delay,
-            None,
+            delay_ms,
             raw.clone().cast_unchecked(),
-        )
-        .map_err(|e| Error::Storage(e.into()))?;
+        );
         match self.client().send(request).await {
             Ok(response) => Ok(response.delay_id),
             Err(error) if unrecognized(&error) => {
@@ -83,7 +89,7 @@ impl Account {
                     room.room_id().to_owned(),
                     txn_id,
                     MessageLikeEventType::from(event_type),
-                    DelayParameters::Timeout { timeout: delay },
+                    DelayParameters::Timeout { timeout: Duration::from_millis(delay_ms) },
                     raw,
                 );
                 Ok(self.client().send(request).await?.delay_id)
@@ -92,29 +98,37 @@ impl Account {
         }
     }
 
+    /// Whether the account's server holds delayed events (`/versions` says so).
+    pub async fn can_schedule(&self) -> Result<bool, Error> {
+        let features = self.client().unstable_features().await?;
+        Ok(features.iter().any(|feature| feature.as_str() == FEATURE))
+    }
+
     /// The messages the server holds for the account, soonest first. A message this device
     /// can't read (another device's encrypted one) has no body.
     pub async fn scheduled_messages(&self) -> Result<Vec<ScheduledMessage>, Error> {
-        let response = self.client().send(get_all_delayed_events::unstable::Request::new()).await?;
+        if !self.can_schedule().await? {
+            return Ok(Vec::new());
+        }
+        let response = self.client().send(api::list::Request::default()).await?;
         let mut messages = Vec::new();
-        for event in response.delayed_events {
+        for event in response.delayed_events.iter().filter_map(api::Listed::read) {
             // Delayed state (a call membership's own expiry) isn't a message, and one already
             // sent, cancelled or failed is done.
-            let finished = event.finalized_ts.is_some() || event.event_id.is_some() || event.error.is_some();
-            if event.state_key.is_some() || finished {
+            if event.state || event.finished {
                 continue;
             }
-            let content: Value = event.content.deserialize_as_unchecked().unwrap_or_default();
-            let body = match event.event_type.to_string().as_str() {
-                "m.room.encrypted" => self.decrypt_scheduled(&event.room_id, &content).await,
-                _ => body_of(&content),
+            let body = match event.event_type.as_str() {
+                "m.room.encrypted" => match matrix_sdk::ruma::RoomId::parse(&event.room_id) {
+                    Ok(room_id) => self.decrypt_scheduled(&room_id, &event.content).await,
+                    Err(_) => None,
+                },
+                _ => body_of(&event.content),
             };
-            let since = u64::from(event.running_since.0);
-            let delay = u64::try_from(event.delay.as_millis()).unwrap_or(u64::MAX);
             messages.push(ScheduledMessage {
                 delay_id: event.delay_id,
-                room_id: event.room_id.to_string(),
-                send_at_ms: since.saturating_add(delay),
+                room_id: event.room_id,
+                send_at_ms: event.send_at_ms,
                 body,
             });
         }
@@ -338,6 +352,8 @@ mod tests {
         Current,
         /// Only Synapse's first (`?org.matrix.msc4140.delay=` on `/send`, the action in the body).
         Older,
+        /// None: `/versions` doesn't name MSC4140, and `/send` would post at once.
+        None,
     }
 
     type Sent = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
@@ -352,10 +368,22 @@ mod tests {
             captured.lock().expect("requests").push(request.to_owned());
             let first = request.lines().next().unwrap_or_default();
             if first.contains("/delayed_event/") {
-                return if endpoints == Endpoints::Current { json!({ "delay_id": "d1" }) } else { unknown() };
+                let body: Value =
+                    serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap_or_default()).unwrap_or_default();
+                return match endpoints {
+                    // As the proposal and Synapse have it: `delay_ms`, the content apart.
+                    Endpoints::Current if body["delay_ms"].is_u64() && body["content"].is_object() => {
+                        json!({ "delay_id": "d1" })
+                    }
+                    Endpoints::Current => json!({ "errcode": "M_BAD_JSON", "error": "no delay_ms" }),
+                    Endpoints::Older | Endpoints::None => unknown(),
+                };
             }
             if first.contains("org.matrix.msc4140.delay=") {
-                return json!({ "delay_id": "d1" });
+                return match endpoints {
+                    Endpoints::None => json!({ "event_id": "$posted-at-once" }),
+                    Endpoints::Current | Endpoints::Older => json!({ "delay_id": "d1" }),
+                };
             }
             if first.starts_with("POST") && first.contains("/delayed_events/") {
                 let in_path = first.contains("/d1/cancel") || first.contains("/d1/send");
@@ -368,18 +396,18 @@ mod tests {
                 let delayed = |id: &str, done: bool| {
                     let mut event = json!({
                         "delay_id": id, "room_id": "!room:example.org", "type": "m.room.message",
-                        "delay": 60000, "running_since": 1000, "content": { "msgtype": "m.text", "body": id }
+                        "delay_ms": 60000, "delayed_since_ts": 1000, "content": { "msgtype": "m.text", "body": id }
                     });
                     if done {
-                        event["finalised_ts"] = json!(2000);
-                        event["event_id"] = json!("$sent");
+                        event["finalised"] = json!({ "event_id": "$sent", "finalised_ts": 2000 });
                     }
                     event
                 };
                 return json!({ "delayed_events": [delayed("waiting", false), delayed("sent", true)] });
             }
             if first.contains("/versions") {
-                return json!({ "versions": ["v1.12"] });
+                let features = json!({ "org.matrix.msc4140": endpoints != Endpoints::None });
+                return json!({ "versions": ["v1.12"], "unstable_features": features });
             }
             if !encrypted && first.contains("/state/m.room.encryption") {
                 return json!({ "errcode": "M_NOT_FOUND", "error": "no encryption" });
@@ -447,7 +475,19 @@ mod tests {
         assert_eq!(id.expect("scheduled"), "d1");
         let (line, body) = scheduled(&sent);
         assert!(line.contains("/org.matrix.msc4140/rooms/!room:example.org/delayed_event/m.room.message/"), "{line}");
-        assert_eq!((body["delay"].as_u64(), body["content"]["body"].as_str()), (Some(90_000), Some("later")));
+        assert_eq!((body["delay_ms"].as_u64(), body["content"]["body"].as_str()), (Some(90_000), Some("later")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_server_without_delayed_events_should_be_sent_nothing() {
+        let (server, sent) = server(false, Endpoints::None);
+        let account = account(&server, "unsupported").await;
+        let id = account
+            .schedule(&TimelineKey::room("!room:example.org"), None, &text("later"), Duration::from_secs(90))
+            .await;
+        assert!(matches!(id, Err(Error::Unsupported(_))), "{id:?}");
+        let sent = sent.lock().expect("requests");
+        assert!(sent.iter().all(|request| !request.starts_with("PUT")), "nothing may be posted");
     }
 
     #[tokio::test(flavor = "multi_thread")]

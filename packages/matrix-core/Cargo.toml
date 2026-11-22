@@ -40,6 +40,12 @@ webpki-root-certs = "1"
 rustls = { workspace = true, features = ["ring"] }
 
 [features]
+default = ["client"]
+# Ruma's request macros generate a request's client side under a `client` feature of the crate
+# using them, its server side under `server` (never built): the MSC4140 requests the pinned ruma
+# lacks (src/scheduled/api.rs).
+client = []
+server = []
 # Serde and TypeScript derives on every type that crosses the engine boundary, for apps that
 # talk to the engine as JSON (the mobile bridge, `packages/matrix-ffi`).
 ffi = ["dep:ts-rs"]

@@ -59,7 +59,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   global display name. A name the app doesn't know stops the send with a notice and keeps the
   text: a typo never goes out. `//` sends a leading slash; `/usr/bin` is a message.
 - **Spoilers and formulas:** received spoilers draw as a block of their own colour, carrying an
-  app link (`SPOILER_LINK`) a press reveals for the run (`State::revealed`). Formulas
+  app link (`SPOILER_LINK`) a press reveals for the run (`State::revealed`). A spoiler is its
+  plain words (a custom emoji by its description): nothing inside it becomes a pill or link that
+  could show or act through it, and a link around a spoiler is no link, its words being hidden. Formulas
   (`data-mx-maths`) show as one line of Unicode on a chip, in italics (`matrix_core::math`:
   Greek and symbols by name, scripts in Unicode's super- and subscripts or `^(…)`, `\frac` as
   `a/b`, unknown commands kept); there is no typesetting engine for Rune, and Unicode keeps
@@ -100,10 +102,14 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   with a reply (mentioning whom it answers) or into a thread (relations written as the SDK
   would); uploads can't (they go when sent), nor commands that do something rather than send
   (`/topic` waits, with a notice). The composer empties as sending does and, if the server
-  refuses, what it held comes back with its reply (`Purpose::Scheduling`). MSC4140's own
-  endpoints are tried first (`/delayed_event/…`, the action in the path), then Synapse's first
-  ones (`org.matrix.msc4140.delay` on `/send`, the action in the body) when the server doesn't
-  know them. In an encrypted room
+  refuses, what it held comes back with its reply (`Purpose::Scheduling`). Only a server whose
+  `/versions` names `org.matrix.msc4140` is asked (one that doesn't is refused with a notice: it
+  would ignore a delay on `/send` and post at once). MSC4140's own endpoints come first, in the
+  proposal's current shape (`/delayed_event/…` with `delay_ms`, the action in the path; ruma 0.17
+  has an older shape, so `scheduled::api` defines these requests), then Synapse's first ones
+  (`org.matrix.msc4140.delay` on `/send`, the action in the body) when the server doesn't know
+  them; lists are read in either shape (`delay_ms`/`delayed_since_ts`/`finalised`, or
+  `delay`/`running_since`/`finalised_ts`). In an encrypted room
   the message is encrypted before the server holds it: the SDK encrypts only what it sends
   itself, so each account's client is built on a base client of the engine's own
   (`account::Crypto`, through the builder's `base_client`, the same SQLite stores and defaults
@@ -112,8 +118,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   (`BaseClient::share_room_key`), then `encrypt_room_event_raw`, under the store's cross-process
   lock and one at a time per account; a failed share discards the room key, as the SDK does. A bar above the room's composer counts the room's scheduled messages and lists them with
   send now and cancel (`Command::UpdateScheduled`); each account's list is asked for once a run,
-  as the list opens and when one of its messages comes due (sent ones aren't listed), and comes
-  back after every change. One this device can't decrypt shows as "Encrypted message".
+  as the list opens and when one of its messages comes due, then every 30 s while the server
+  still lists it (sent ones aren't listed), and comes back after every change. One this device can't decrypt shows as "Encrypted message".
 - **Composer layout:**
   - Room and thread editors grow up to eight lines, then scroll inside their own viewport,
     keeping the caret visible while typing or pasting. Vertical padding and the bottom bar stay outside

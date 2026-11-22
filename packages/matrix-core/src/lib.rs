@@ -105,6 +105,9 @@ pub enum Error {
     /// A Matrix identifier did not parse.
     #[error("invalid Matrix identifier: {0}")]
     Id(#[from] matrix_sdk::IdParseError),
+    /// The homeserver doesn't offer what was asked of it.
+    #[error("your homeserver doesn't support {0}")]
+    Unsupported(&'static str),
     /// A poll needs a question and two to twenty answers.
     #[error("a poll needs two to twenty answers")]
     InvalidPoll,

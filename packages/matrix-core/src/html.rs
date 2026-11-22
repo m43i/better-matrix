@@ -93,6 +93,8 @@ pub fn to_pills(html: &str, purpose: Pills) -> String {
             continue;
         }
         match name.as_str() {
+            // A link around a spoiler isn't one: its words would show as the link's.
+            "a" if inner_html(rest, &name).contains("data-mx-spoiler") => open.push((name, Some(""))),
             "a" => {
                 let pill = attribute(tag, "href").and_then(|href| link_pill(&href));
                 match pill {
@@ -141,8 +143,13 @@ pub fn to_pills(html: &str, purpose: Pills) -> String {
                         out.push_str("</p>");
                     }
                 } else if attribute(tag, "data-mx-spoiler").is_some() {
+                    // Hidden words are words only: nothing inside (a mention, a custom emoji, a
+                    // link) may show or act through them.
+                    let (words, after) = element_text(rest, &name);
+                    rest = after;
                     out.push_str(&pill_open("spoiler"));
-                    open.push((name, Some("</span>")));
+                    out.push_str(&escape(&words));
+                    out.push_str("</span>");
                 } else {
                     out.push_str(tag);
                     if !tag.ends_with("/>") {
@@ -256,8 +263,16 @@ fn is_void(name: &str) -> bool {
     matches!(name, "br" | "hr" | "img" | "input" | "meta" | "link" | "wbr" | "source")
 }
 
-/// The text of the element whose opening tag came just before `rest`, tags dropped and
-/// entities decoded, and what follows its closing tag.
+/// The HTML inside the element whose opening tag came just before `rest`.
+fn inner_html<'a>(rest: &'a str, name: &str) -> &'a str {
+    let after = element_text(rest, name).1;
+    let end = rest.len() - after.len();
+    // Up to its closing tag (`</name>`), which `after` follows.
+    rest[..end].rfind("</").map_or(&rest[..end], |close| &rest[..close])
+}
+
+/// The text of the element whose opening tag came just before `rest`, tags dropped (an image
+/// by its description) and entities decoded, and what follows its closing tag.
 fn element_text<'a>(mut rest: &'a str, name: &str) -> (String, &'a str) {
     let mut text = String::new();
     let mut depth = 1usize;
@@ -267,6 +282,7 @@ fn element_text<'a>(mut rest: &'a str, name: &str) -> (String, &'a str) {
         let tag = &rest[start..=end];
         rest = &rest[end + 1..];
         match tag_name(tag) {
+            Some((image, false)) if image == "img" => text.push_str(&attribute(tag, "alt").unwrap_or_default()),
             Some((tag_name, closing)) if tag_name == name => {
                 if closing {
                     depth -= 1;
@@ -413,11 +429,24 @@ mod tests {
     }
 
     #[test]
-    fn a_spoiler_should_become_a_pill_keeping_its_formatting() {
+    fn a_spoiler_should_become_a_pill_of_its_words() {
         assert_eq!(
             to_pills("<span data-mx-spoiler=\"plot\">he <b>dies</b></span> sadly", Pills::Display),
-            "<span data-pill=\"spoiler\">he <b>dies</b></span> sadly"
+            "<span data-pill=\"spoiler\">he dies</span> sadly"
         );
+    }
+
+    #[test]
+    fn nothing_inside_a_spoiler_should_become_a_pill_of_its_own() {
+        let html = "<span data-mx-spoiler><img src=\"mxc://x.org/cat\" alt=\":cat:\"> and \
+                    <a href=\"https://matrix.to/#/@ada:x.org\">Ada</a> did it</span>";
+        assert_eq!(to_pills(html, Pills::Display), "<span data-pill=\"spoiler\">:cat: and Ada did it</span>");
+    }
+
+    #[test]
+    fn a_mention_around_a_spoiler_should_leave_the_spoiler_hidden() {
+        let html = "<a href=\"https://matrix.to/#/@ada:x.org\"><span data-mx-spoiler>secret</span></a> next";
+        assert_eq!(to_pills(html, Pills::Display), "<span data-pill=\"spoiler\">secret</span> next");
     }
 
     #[test]

@@ -78,6 +78,10 @@ impl Parser<'_> {
                 _ => out.push_str(&self.atom()),
             }
         }
+        // The last thing added counts too.
+        if out.len() > MOST_OUTPUT {
+            self.overflow = true;
+        }
         out
     }
 

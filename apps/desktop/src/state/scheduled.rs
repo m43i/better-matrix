@@ -68,8 +68,9 @@ impl When {
 pub struct Scheduled {
     listed: HashMap<AccountId, Vec<ScheduledMessage>>,
     asked: HashSet<AccountId>,
-    /// Messages whose time came, the list asked for again since: each asks once.
-    due: HashSet<String>,
+    /// When the list was last asked for because a message's time came: while the server still
+    /// lists one (it is sending it, or the answer was lost), it is asked again after a while.
+    due_asked: Option<std::time::Instant>,
 }
 
 impl Scheduled {
@@ -82,6 +83,9 @@ impl Scheduled {
         self.asked.remove(account);
     }
 }
+
+/// How long a message whose time came may still be listed before the list is asked for again.
+const DUE_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// How far the local clock is ahead of UTC at `now_ms`, in milliseconds.
 pub fn local_offset(now_ms: u64) -> i64 {
@@ -102,20 +106,23 @@ impl State {
     }
 
     /// Asks for the account's scheduled messages once a run, and again when one of them comes
-    /// due (the server sent it); wakes when the next one does. Called from `poll`.
+    /// due (the server sent it), every [`DUE_RETRY`] while the server still lists one; wakes
+    /// when the next one does. Called from `poll`.
     pub(super) fn want_scheduled(&mut self, account: &AccountId, tx: &mut rune::Tx) {
-        let now = super::now_ms();
+        let (now, at) = (super::now_ms(), std::time::Instant::now());
         let messages = self.scheduled.listed.get(account).map(Vec::as_slice).unwrap_or_default();
-        let due: Vec<String> = messages
-            .iter()
-            .filter(|message| message.send_at_ms <= now && !self.scheduled.due.contains(&message.delay_id))
-            .map(|message| message.delay_id.clone())
-            .collect();
+        let due = messages.iter().any(|message| message.send_at_ms <= now);
         if let Some(next) = messages.iter().map(|message| message.send_at_ms).filter(|at| *at > now).min() {
             tx.wake_after(std::time::Duration::from_millis(next - now));
         }
-        if self.scheduled.asked.insert(account.clone()) || !due.is_empty() {
-            self.scheduled.due.extend(due);
+        let retry = due && self.scheduled.due_asked.is_none_or(|asked| at.duration_since(asked) >= DUE_RETRY);
+        if due {
+            tx.wake_after(DUE_RETRY);
+        }
+        if self.scheduled.asked.insert(account.clone()) || retry {
+            if retry {
+                self.scheduled.due_asked = Some(at);
+            }
             self.dispatch(Command::ListScheduled { account: account.clone() }, Purpose::ListScheduled);
         }
     }
