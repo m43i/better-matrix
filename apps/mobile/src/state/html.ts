@@ -63,6 +63,22 @@ export function htmlBlocks(html: string): Block[] {
 }
 
 /**
+ * Whether a message's Matrix HTML holds a spoiler (an element marked `data-mx-spoiler`), shown
+ * or not: such a message offers no link to preview or GIF to play, since the plain body a link
+ * is taken from may name what the spoiler hides.
+ */
+export function hasSpoiler(html: string): boolean {
+  return /data-mx-spoiler/i.test(html) && markedSpoiler(buildTree(html));
+}
+
+function markedSpoiler(node: Node): boolean {
+  return (
+    node.type === 'element' &&
+    (node.attrs['data-mx-spoiler'] !== undefined || node.children.some(markedSpoiler))
+  );
+}
+
+/**
  * What a plain projection does with a spoiler: its words (`'words'`, for the spoiler's own
  * placeholder once tapped), or `[Spoiler]` (`'hidden'`, for anything that leaves the message:
  * copying, translating), as the plain body a sender writes for one says.

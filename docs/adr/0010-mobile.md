@@ -407,7 +407,9 @@ Date: 2026-11-16
   spoiler hidden in it, as the engine reads it; a tapped spoiler stays shown while its screen
   is mounted, kept by the screen, not the view, by its message, its place in the message and
   its words (`state/spoilers.ts`), so a row the list recycles for another message, or an edit
-  putting other words where it stood, shows it hidden), formulas as Unicode (`state/math.ts`, a
+  putting other words where it stood, shows it hidden; a message whose HTML holds a spoiler
+  gets no link card and plays no GIF, since both are taken from the plain body, which may name
+  what the spoiler hides, `state/messages.ts`), formulas as Unicode (`state/math.ts`, a
   line-for-line port of `math.rs` run against its `math.json` vectors, bounded as it is: past
   2000 bytes, 32 nested groups or commands, or 8000 bytes of output, a formula shows as its
   LaTeX; a `<div>` formula gets its own line) and custom emoji as pictures in the line.

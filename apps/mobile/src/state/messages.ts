@@ -18,7 +18,7 @@ import type {
 } from '@better-matrix/matrix-native/types';
 
 import { t } from '../i18n';
-import { type Block, blocksText, htmlBlocks, type Inline, plainBlocks } from './html';
+import { type Block, blocksText, hasSpoiler, htmlBlocks, type Inline, plainBlocks } from './html';
 import { findGifLink, findPreviewLink, htmlWithoutLink, withoutLink } from './links';
 import { Lru } from './lru';
 
@@ -48,6 +48,10 @@ function textKey(body: string, html: string | null): string {
 function parseText(body: string, html: string | null): Prepared {
   const blocksOf = (plain: string, markup: string | null) =>
     markup ? htmlBlocks(markup) : plainBlocks(plain);
+
+  // Links are read from the plain body, which may name what a spoiler hides: a message holding
+  // one fetches no preview and plays no GIF, so nothing of it shows before it is tapped.
+  if (html && hasSpoiler(html)) return { blocks: blocksOf(body, html), gif: null, link: null };
 
   const gifUrl = findGifLink(body);
   let gif: Prepared['gif'] = null;

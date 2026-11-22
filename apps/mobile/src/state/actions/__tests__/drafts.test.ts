@@ -5,9 +5,10 @@ import { composer } from '../../composer';
 import { KEEP_EVERY_MS } from '../../drafts';
 import { Store } from '../../store';
 import { roomKey } from '../../timeline';
-import { cancelEdit, sendComposer, setDraft } from '../composer';
+import { cancelEdit, completeDraft, sendComposer, setDraft } from '../composer';
 import { startEdit } from '../../composer';
 import { flushDraft, followDraft } from '../drafts';
+import { pillAt, userPill } from '../../pills';
 import { ADA, message, summary } from '../../../test/fixtures';
 
 const KEY = roomKey('!r:x');
@@ -185,4 +186,25 @@ it('should leave a read answered after a write unheeded', async () => {
     { body: 'replacement', html: null },
     { body: 'original', html: null },
   ]);
+});
+
+it('should send a mention picked before a restart as a mention after it', async () => {
+  const before = setup();
+  followDraft(before.store, ADA, KEY);
+  const ada = pillAt(userPill('@ada:x.org', 'Ada'), 3);
+  completeDraft(before.store, ADA, KEY, 'hi @Ada ', { start: 8, end: 8 }, ada);
+  await settle();
+  flushDraft(before.store, ADA, KEY);
+  const [kept] = saves(before.sent);
+
+  const after = setup();
+  followDraft(after.store, ADA, KEY);
+  answer(after, kept ?? null);
+  sendComposer(after.store, ADA, KEY);
+  const send = after.sent.find(({ command }) => command.type === 'Send')?.command;
+
+  expect(send?.type === 'Send' && send.data.message).toMatchObject({
+    type: 'Text',
+    data: { mentions: { user_ids: ['@ada:x.org'], room: false } },
+  });
 });

@@ -58,6 +58,39 @@ describe('prepare', () => {
     expect(prepare(text('https://media.tenor.com/x/kiwi.gif')).gif?.rest).toBeNull();
   });
 
+  it('should card no link of a message holding a spoiler', () => {
+    const spoiled = text(
+      'the end: https://example.org/ending',
+      'the end: <span data-mx-spoiler>https://example.org/ending</span>',
+    );
+
+    expect(prepare(spoiled).link).toBeNull();
+  });
+
+  it('should play no GIF of a message holding a spoiler', () => {
+    const spoiled = text(
+      'https://media.tenor.com/x/kiwi.gif',
+      '<span data-mx-spoiler="gross">a kiwi</span>',
+    );
+
+    expect(prepare(spoiled).gif).toBeNull();
+  });
+
+  it('should still card a link of a message whose formatting holds no spoiler', () => {
+    const plain = text('see https://matrix.org/blog', 'see <em>https://matrix.org/blog</em>');
+
+    expect(prepare(plain).link).toBe('https://matrix.org/blog');
+  });
+
+  it('should not take words about spoilers for a spoiler', () => {
+    const about = text(
+      'write data-mx-spoiler: https://spec.matrix.org',
+      'write <code>data-mx-spoiler</code>: https://spec.matrix.org',
+    );
+
+    expect(prepare(about).link).toBe('https://spec.matrix.org');
+  });
+
   it('should card a GIF link while GIFs do not play', () => {
     expect(cardLink(prepare(text('https://media.tenor.com/x/kiwi.gif')), false)).toBe(
       'https://media.tenor.com/x/kiwi.gif',
