@@ -8,6 +8,8 @@ import { Pressable, ScrollView, type ScrollViewInstance, StyleSheet, View } from
 
 import { t } from '../../i18n';
 import { thumbnailOf } from '../../state/gallery';
+import { useStore } from '../../state/react';
+import { galleryThumbnail } from '../../state/selectors';
 import { Icon, type IconName } from '../icons';
 import { PREVIEW_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
@@ -28,15 +30,15 @@ export function GalleryStrip({
   items,
   current,
   bottom,
+  roomId,
   onPick,
-  withheld = null,
 }: {
   account: AccountId;
+  /** The room the items were sent in, which decides whether their pictures show (ADR 0011). */
+  roomId: string;
   items: readonly Message[];
   /** The event ID on screen. */
   current: string;
-  /** An item whose picture the account keeps back until Show (ADR 0011): its icon, unfetched. */
-  withheld?: string | null;
   /** The safe area below it. */
   bottom: number;
   onPick: (eventId: string) => void;
@@ -67,6 +69,7 @@ export function GalleryStrip({
           <Thumb
             key={message.event_id}
             account={account}
+            roomId={roomId}
             message={message}
             label={t('mobile.conversation.preview_item', {
               name: message.content.type === 'Attachment' ? message.content.data.name : '',
@@ -74,7 +77,6 @@ export function GalleryStrip({
               count: items.length,
             })}
             current={message.event_id === current}
-            withheld={message.event_id === withheld}
             onPress={() => onPick(message.event_id)}
           />
         ))}
@@ -87,21 +89,23 @@ function Thumb({
   account,
   message,
   label,
+  roomId,
   current,
-  withheld,
   onPress,
 }: {
   account: AccountId;
+  roomId: string;
   message: Message;
   label: string;
   current: boolean;
-  withheld: boolean;
   onPress: () => void;
 }) {
   const palette = usePalette();
   const attachment = message.content.type === 'Attachment' ? message.content.data : null;
-  const picture = attachment && !withheld ? thumbnailOf(attachment) : null;
-  const uri = useMedia(account, picture?.media ?? null, picture?.size ?? PREVIEW_SIZE);
+  // Media the account keeps back fetches nothing: the kind's icon shows (ADR 0011).
+  const media = useStore((s) => galleryThumbnail(s, account, roomId, message));
+  const size = (attachment && thumbnailOf(attachment)?.size) ?? PREVIEW_SIZE;
+  const uri = useMedia(account, media, size);
 
   const icon: IconName =
     attachment?.kind === 'Video'

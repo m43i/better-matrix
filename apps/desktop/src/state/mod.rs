@@ -649,8 +649,11 @@ enum Purpose {
         /// An invitation to decline once the change is saved (ignoring its inviter).
         decline: Option<String>,
     },
-    /// Sending a report from the report dialog, which stays open on failure.
-    Report,
+    /// Sending a report from the report dialog, which stays open on failure. `ignore`: whom to
+    /// ignore once it went through.
+    Report {
+        ignore: Option<(AccountId, String)>,
+    },
     /// Voting in or ending a poll.
     Poll,
     /// A direct chat being opened (or started) to call its person.
@@ -1720,7 +1723,10 @@ impl State {
                 Purpose::Forward if matches!(self.modal, Some(Modal::Forward { sending: Some(waiting), .. }) if waiting == request) => {
                     self.modal = None
                 }
-                Purpose::Report => self.report_sent(request),
+                Purpose::Report { ignore } => {
+                    let ignore = ignore.clone();
+                    self.report_sent(request, ignore);
+                }
                 // The inviter is ignored for good: now their invitation goes.
                 Purpose::Safety { account, decline: Some(room_id) } => {
                     let (account, room_id) = (account.clone(), room_id.clone());
@@ -1922,7 +1928,7 @@ impl State {
             Purpose::Invite => self.notice = Some(tf!("notice.invite", error = error)),
             Purpose::Moderate => self.notice = Some(tf!("notice.moderate", error = error)),
             Purpose::Safety { account, .. } => self.safety_failed(&account, &error),
-            Purpose::Report => self.report_failed(request, &error),
+            Purpose::Report { .. } => self.report_failed(request, &error),
             // The panel stops loading, and says why.
             Purpose::SidePanel(account, room_id, panel) => {
                 match panel {

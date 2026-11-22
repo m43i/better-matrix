@@ -20,6 +20,7 @@ import type {
   SavedMessage,
   RoomSummary,
   Safety,
+  SafetyChange,
   Security,
   Session,
   SharedFile,
@@ -100,8 +101,21 @@ export interface AccountData {
   status: Status;
   /** The status as last saved: what a choice that fails to save falls back to. */
   savedStatus: Status;
-  /** What the user keeps away (ignored people, media, invitations), as last reported. */
+  /**
+   * What the user keeps away (ignored people, media, invitations), as shown: the last reported
+   * choices with the changes still on their way applied (`savedSafety`, `pendingSafety`).
+   */
   safety: Safety;
+  /** The choices as the engine last reported them: what a failed change falls back to. */
+  savedSafety: Safety;
+  /** Changes made on this device that the engine hasn't confirmed or refused yet, in order. */
+  pendingSafety: PendingSafety[];
+}
+
+/** A safety change on its way to the engine; `id` tells it apart from the same change again. */
+export interface PendingSafety {
+  id: number;
+  change: SafetyChange;
 }
 
 /** A verification running for one of the accounts. */

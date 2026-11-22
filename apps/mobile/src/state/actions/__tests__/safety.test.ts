@@ -1,7 +1,7 @@
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 import type { Invitation } from '@better-matrix/matrix-native/types';
 
-import { ADA, GRACE, summary } from '../../../test/fixtures';
+import { ADA, GRACE, message, summary } from '../../../test/fixtures';
 import { DEFAULT_SAFETY, revealKey } from '../../safety';
 import { Store } from '../../store';
 import {
@@ -154,4 +154,76 @@ describe('afterReport', () => {
 
   it('a report that failed should stay to try again', () =>
     expect(afterReport(false, true)).toBe('stay'));
+});
+
+describe('ignoring someone, whichever answer comes first', () => {
+  /** Ada with a room whose newest message is Grace's. */
+  function withGracesMessage() {
+    const setup_ = setup();
+    setup_.engine.emit({
+      type: 'LatestMessage',
+      data: { account: ADA, room_id: '!room:x', message: message('$hi') },
+    });
+
+    return setup_;
+  }
+
+  const latest = (store: Store) => store.getState().accounts[0]!.latest['!room:x'];
+
+  it('an ignore shown before the engine confirms it should drop their preview, and keep it gone', async () => {
+    const { store, engine, sent, finish } = withGracesMessage();
+    const ignored = setIgnored(store, ADA, GRACE, true);
+    engine.emit({
+      type: 'Safety',
+      data: { account: ADA, safety: { ...DEFAULT_SAFETY, ignored: [GRACE] } },
+    });
+    finish(sent.at(-1)!.request);
+    await ignored;
+    expect(latest(store)).toBeUndefined();
+  });
+
+  it('a message from someone ignored that syncs afterwards should not show in the list', () => {
+    const { store, engine } = withGracesMessage();
+    void setIgnored(store, ADA, GRACE, true);
+    engine.emit({
+      type: 'LatestMessage',
+      data: { account: ADA, room_id: '!room:x', message: message('$again') },
+    });
+    expect(latest(store)).toBeUndefined();
+  });
+});
+
+describe('changes that fail in sequence', () => {
+  it('should fall back to what the engine reported, never to an earlier change still pending', async () => {
+    const { store, sent, finish } = setup();
+    const media = changeSafety(store, ADA, { type: 'Media', data: 'Never' });
+    const mediaRequest = sent.at(-1)!.request;
+    const pictures = changeSafety(store, ADA, { type: 'InvitePictures', data: false });
+    const picturesRequest = sent.at(-1)!.request;
+
+    finish(mediaRequest, { Err: 'offline' });
+    await expect(media).rejects.toThrow();
+    expect(safetyOf(store)).toEqual({ ...DEFAULT_SAFETY, invite_pictures: false });
+
+    finish(picturesRequest, { Err: 'offline' });
+    await expect(pictures).rejects.toThrow();
+    expect(safetyOf(store)).toEqual(DEFAULT_SAFETY);
+  });
+
+  it('a change confirmed while another fails should stay', async () => {
+    const { store, engine, sent, finish } = setup();
+    const media = changeSafety(store, ADA, { type: 'Media', data: 'Never' });
+    const mediaRequest = sent.at(-1)!.request;
+    const pictures = changeSafety(store, ADA, { type: 'InvitePictures', data: false });
+    engine.emit({
+      type: 'Safety',
+      data: { account: ADA, safety: { ...DEFAULT_SAFETY, invite_pictures: false } },
+    });
+    finish(sent.at(-1)!.request);
+    await pictures;
+
+    finish(mediaRequest, { Err: 'offline' });
+    await expect(media).rejects.toThrow();
+    expect(safetyOf(store)).toEqual({ ...DEFAULT_SAFETY, invite_pictures: false });
+  });
 });

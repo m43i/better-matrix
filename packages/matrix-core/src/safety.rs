@@ -75,15 +75,15 @@ impl Safety {
     }
 }
 
-/// Where pictures and videos show at once (MSC4278's `media_previews`); elsewhere they wait for a
-/// press. Stickers, avatars and the user's own media always show.
+/// Where pictures, videos and stickers show at once (MSC4278's `media_previews`); elsewhere they
+/// wait for a press. Avatars and the user's own media always show.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum ShowMedia {
     /// Everywhere.
     #[default]
     Always,
-    /// In rooms that aren't public, where only invited people speak.
+    /// In private rooms (invite, knock or restricted), where strangers can't speak.
     Private,
     /// Nowhere.
     Never,
@@ -184,22 +184,20 @@ pub(crate) fn changed_in(account_data: &[Raw<AnyGlobalAccountDataEvent>]) -> boo
 }
 
 /// The choices in the three account data events' contents (absent ones are `Null`). An absent
-/// MSC4278 field shows (the default); a value this app doesn't know hides, as MSC4278 asks.
+/// MSC4278 field shows (the default); any other value this app doesn't know, `null` included,
+/// hides, as MSC4278 asks.
 fn read(ignored: &Value, media: &Value, invites: &Value) -> Safety {
     let mut ignored: Vec<String> =
         ignored["ignored_users"].as_object().map(|users| users.keys().cloned().collect()).unwrap_or_default();
     ignored.sort();
     let defaults = Safety::default();
-    let media_previews = &media["media_previews"];
-    let invite_avatars = &media["invite_avatars"];
     Safety {
         ignored,
-        media: if media_previews.is_null() {
-            defaults.media
-        } else {
-            media_previews.as_str().and_then(ShowMedia::parse).unwrap_or(ShowMedia::Never)
+        media: match media.get("media_previews") {
+            None => defaults.media,
+            Some(value) => value.as_str().and_then(ShowMedia::parse).unwrap_or(ShowMedia::Never),
         },
-        invite_pictures: invite_avatars.is_null() || invite_avatars.as_str() == Some("on"),
+        invite_pictures: media.get("invite_avatars").is_none_or(|value| value.as_str() == Some("on")),
         hide_stranger_invites: invites["hide_strangers"].as_bool().unwrap_or(defaults.hide_stranger_invites),
     }
 }
@@ -270,6 +268,19 @@ impl Account {
                 self.save_account_data(INVITES, &content).await?;
             }
         }
+        // The change is saved: a failure to read the rest back only falls back on this
+        // device's copy with the change applied.
+        match self.server_safety().await {
+            Ok(safety) => Ok(safety),
+            Err(error) => {
+                eprintln!("matrix-engine: could not read the safety choices back: {error}");
+                Ok(self.safety().await?.with(change))
+            }
+        }
+    }
+
+    /// The choices as the server has them now.
+    async fn server_safety(&self) -> Result<Safety, Error> {
         let ignored = self.server_account_data(IGNORED).await?;
         let media = match self.server_account_data(MEDIA).await? {
             Value::Null => self.server_account_data(MEDIA_UNSTABLE).await?,
@@ -308,18 +319,19 @@ impl Account {
     }
 
     /// Sets MSC4278's fields as the SDK and Element do, under the unstable name, and under the
-    /// spec's name only where a client already wrote it there, so neither copy shadows the other
-    /// with an older choice.
+    /// spec's name only where a client already wrote it, so this app never makes a copy that
+    /// shadows the other. Each copy keeps its own other fields; both get the choice that held
+    /// (the spec's copy wins, as everywhere it is read) with this change applied.
     async fn save_media_config(&self, media: Option<ShowMedia>, invite_pictures: Option<bool>) -> Result<(), Error> {
         let stable = self.server_account_data(MEDIA).await?;
-        let current = match &stable {
-            Value::Null => self.server_account_data(MEDIA_UNSTABLE).await?,
-            stable => stable.clone(),
-        };
-        let content = with_media(current, media, invite_pictures);
-        self.save_account_data(MEDIA_UNSTABLE, &content).await?;
-        if !stable.is_null() {
-            self.save_account_data(MEDIA, &content).await?;
+        let unstable = self.server_account_data(MEDIA_UNSTABLE).await?;
+        let held = read(&Value::Null, if stable.is_null() { &unstable } else { &stable }, &Value::Null);
+        let media = Some(media.unwrap_or(held.media));
+        let invite_pictures = Some(invite_pictures.unwrap_or(held.invite_pictures));
+        let stable_existed = !stable.is_null();
+        self.save_account_data(MEDIA_UNSTABLE, &with_media(unstable, media, invite_pictures)).await?;
+        if stable_existed {
+            self.save_account_data(MEDIA, &with_media(stable, media, invite_pictures)).await?;
         }
         Ok(())
     }
@@ -355,15 +367,19 @@ fn with_object(mut content: Value, key: &str, value: Value) -> Value {
 /// strangers' invitations and shares no room with them. The choice is read from the server, as a
 /// push may come while this device's copy is old; this device's copy stands in when it can't be.
 pub(crate) async fn hides_invite_from(client: &matrix_sdk::Client, inviter: &UserId) -> bool {
+    hides_stranger_invites(client).await && !shares_room(client, inviter).await
+}
+
+/// Whether the user hides strangers' invitations, as the server says; this device's copy stands in
+/// when the server can't be asked.
+async fn hides_stranger_invites(client: &matrix_sdk::Client) -> bool {
     let event_type = GlobalAccountDataEventType::from(INVITES);
     let raw = match client.account().fetch_account_data(event_type.clone()).await {
         Ok(raw) => raw,
         Err(_) => client.account().account_data_raw(event_type).await.ok().flatten(),
     };
-    let hidden = raw
-        .and_then(|raw| serde_json::from_str::<Value>(raw.json().get()).ok())
-        .is_some_and(|content| content["hide_strangers"].as_bool() == Some(true));
-    hidden && !shares_room(client, inviter).await
+    raw.and_then(|raw| serde_json::from_str::<Value>(raw.json().get()).ok())
+        .is_some_and(|content| content["hide_strangers"].as_bool() == Some(true))
 }
 
 /// Whether `room_id` is an invitation this device knows that stays out of sight
@@ -375,7 +391,8 @@ pub(crate) async fn hides_invitation(client: &matrix_sdk::Client, room_id: &Room
     }
     match room.invite_details().await {
         Ok(invite) => hides_invite_from(client, &invite.inviter_id).await,
-        Err(_) => false,
+        // An unknown inviter is a stranger.
+        Err(_) => hides_stranger_invites(client).await,
     }
 }
 

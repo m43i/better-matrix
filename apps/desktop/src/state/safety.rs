@@ -24,13 +24,17 @@ impl State {
     pub(super) fn change_safety(&mut self, account: &AccountId, change: SafetyChange, decline: Option<String>) {
         let Some(data) = self.accounts.get(account) else { return };
         let changed = data.safety.clone().with(&change);
-        if changed == data.safety {
-            // Saved already: nothing to wait for.
+        let saved = data.saved_safety.clone().with(&change) == data.saved_safety;
+        if changed == data.safety && (saved || decline.is_none()) {
+            // Saved already: nothing to wait for. (Shown but still being saved, with nothing to
+            // decline: the save on its way covers it.)
             if let Some(room_id) = decline {
                 self.respond_to_invitation(account, &room_id, false);
             }
             return;
         }
+        // Shown but not saved yet, with an invitation to decline: saved again, so the decline
+        // waits for a save of its own.
         self.accounts.set_safety(account, changed);
         self.safety_changed();
         let command = Command::SetSafety { account: account.clone(), change };
@@ -158,23 +162,25 @@ impl State {
             target: form.target.clone(),
             reason: form.reason.text.trim().to_owned(),
         };
+        // They are ignored only once the report went through.
         let ignore =
             form.also_ignore.then(|| form.person.clone()).flatten().map(|user_id| (form.account.clone(), user_id));
-        let request = self.dispatch(command, Purpose::Report);
+        let request = self.dispatch(command, Purpose::Report { ignore });
         if let Some(Modal::Report(form)) = &mut self.modal {
             form.sending = Some(request);
         }
-        if let Some((account, user_id)) = ignore {
-            self.set_safety(&account, SafetyChange::Ignore { user_id, ignored: true });
-        }
     }
 
-    /// The report went through: its dialog closes, with a word that it did.
-    pub(super) fn report_sent(&mut self, request: RequestId) {
+    /// The report went through: its dialog closes, with a word that it did, and whoever it was
+    /// about is ignored if the user asked.
+    pub(super) fn report_sent(&mut self, request: RequestId, ignore: Option<(AccountId, String)>) {
         if matches!(&self.modal, Some(Modal::Report(form)) if form.sending == Some(request)) {
             self.modal = None;
         }
         self.notice = Some(t!("report.sent").to_owned());
+        if let Some((account, user_id)) = ignore {
+            self.set_safety(&account, SafetyChange::Ignore { user_id, ignored: true });
+        }
     }
 
     /// The report failed: its dialog stays open to try again.

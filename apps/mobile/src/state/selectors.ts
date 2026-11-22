@@ -6,10 +6,11 @@ import type {
   Message,
   MediaSize,
   SavedMessage,
+  SharedFile,
   TimelineKey,
 } from '@better-matrix/matrix-native/types';
 
-import { galleryAround } from './gallery';
+import { galleryAround, thumbnailOf } from './gallery';
 import { EMPTY_TIMELINE, mediaKey } from './reducer';
 import { revealKey, showsMedia, shownInvitations } from './safety';
 import { newestMessages, type NewestMessages } from './sections';
@@ -125,9 +126,59 @@ export function mediaHidden(
 }
 
 /**
+ * Whether the attachment preview keeps a message's media back: `mediaHidden`, for pictures and
+ * videos only. Audio and other files never wait for Show (ADR 0011).
+ */
+export function previewHidden(
+  state: State,
+  id: AccountId,
+  roomId: string,
+  message: Message,
+): boolean {
+  const content = message.content;
+
+  const visual =
+    content.type !== 'Attachment' || content.data.kind === 'Image' || content.data.kind === 'Video';
+
+  return visual && mediaHidden(state, id, roomId, message);
+}
+
+/** Each listed file as the preview shows it, made once per file so views see the same object. */
+const listedMessages = new WeakMap<SharedFile, Message>();
+
+/**
+ * A file Room Info lists, as a message the preview can show when no timeline holds it. Its
+ * sender's ID isn't listed, so it counts as someone else's: hidden media stays hidden.
+ */
+function listedMessage(file: SharedFile): Message {
+  let message = listedMessages.get(file);
+
+  if (!message) {
+    message = {
+      event_id: file.event_id,
+      sender_id: '',
+      sender_name: file.sender_name,
+      sender_avatar: null,
+      content: { type: 'Attachment', data: file.attachment },
+      edited: false,
+      editable: false,
+      pending: false,
+      timestamp_ms: file.timestamp,
+      reactions: [],
+      reply_to: null,
+      thread: null,
+    };
+    listedMessages.set(file, message);
+  }
+
+  return message;
+}
+
+/**
  * The attachment preview's gallery around `current`: the batch, without media the account keeps
- * back. The opened message stays, so the preview has its item; the preview shows it hidden until
- * the user taps Show (`mediaHidden`), whichever screen opened it (ADR 0011).
+ * back. The opened message stays, so the preview has its item, and shows hidden until the user
+ * taps Show (`previewHidden`), whichever screen opened it (ADR 0011). A file Room Info listed
+ * that no timeline holds is its own gallery.
  */
 export function previewItems(
   state: State,
@@ -136,7 +187,30 @@ export function previewItems(
   current: string,
   opened: string,
 ): Message[] {
-  return galleryAround(timeline(state, id, key).entries, current, opened, key.thread).filter(
-    (m) => m.event_id === opened || !mediaHidden(state, id, key.room_id, m),
-  );
+  const gallery = galleryAround(timeline(state, id, key).entries, current, opened, key.thread);
+
+  if (gallery.length === 0) {
+    const file = account(state, id)?.files[key.room_id]?.find((f) => f.event_id === opened);
+
+    return file ? [listedMessage(file)] : [];
+  }
+
+  return gallery.filter((m) => m.event_id === opened || !previewHidden(state, id, key.room_id, m));
+}
+
+/**
+ * The picture a gallery thumbnail fetches: none for media the account keeps back, so a hidden
+ * item shows its kind's icon until the user taps Show.
+ */
+export function galleryThumbnail(
+  state: State,
+  id: AccountId,
+  roomId: string,
+  message: Message,
+): MediaRef | null {
+  const attachment = message.content.type === 'Attachment' ? message.content.data : null;
+
+  if (!attachment || previewHidden(state, id, roomId, message)) return null;
+
+  return thumbnailOf(attachment)?.media ?? null;
 }

@@ -87,6 +87,13 @@ fn an_unknown_media_choice_should_hide_as_msc4278_asks() {
 }
 
 #[test]
+fn a_null_media_choice_should_hide() {
+    let safety = read(&Value::Null, &json!({ "media_previews": null, "invite_avatars": null }), &Value::Null);
+    assert_eq!(safety.media, ShowMedia::Never);
+    assert!(!safety.invite_pictures);
+}
+
+#[test]
 fn a_media_choice_without_its_fields_should_show() {
     let safety = read(&Value::Null, &json!({ "other": 1 }), &Value::Null);
     assert_eq!(safety.media, ShowMedia::Always);
@@ -170,11 +177,15 @@ async fn a_media_choice_should_also_update_the_specs_copy_when_one_exists() {
     let server = Homeserver::new(json!([]));
     let account = server.synced_account().await;
     account.save_account_data(MEDIA, &json!({ "invite_avatars": "off" })).await.unwrap();
+    account.save_account_data(MEDIA_UNSTABLE, &json!({ "legacy": true })).await.unwrap();
     let safety = account.change_safety(&SafetyChange::Media(ShowMedia::Private)).await.unwrap();
     assert_eq!(safety.media, ShowMedia::Private);
     assert!(!safety.invite_pictures);
+    let stable = server.sent(&format!("/account_data/{MEDIA}"));
+    assert_eq!(stable.last(), Some(&json!({ "invite_avatars": "off", "media_previews": "private" })));
     let unstable = server.sent(&format!("/account_data/{MEDIA_UNSTABLE}"));
-    assert_eq!(unstable, vec![json!({ "invite_avatars": "off", "media_previews": "private" })]);
+    let both = json!({ "legacy": true, "invite_avatars": "off", "media_previews": "private" });
+    assert_eq!(unstable.last(), Some(&both));
 }
 
 #[tokio::test]

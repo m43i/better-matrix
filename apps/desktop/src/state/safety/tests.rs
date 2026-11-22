@@ -222,15 +222,73 @@ fn a_report_that_failed_should_keep_its_dialog_open_to_try_again() {
     assert!(s.notice.is_some());
 }
 
-#[test]
-fn reporting_with_also_ignore_should_ignore_the_sender() {
-    let (mut s, mut commands) = state();
-    crate::demo::report(&mut s);
-    drain(&mut commands);
+/// Sends the demo report with "Also ignore" ticked; the report's request, with nothing ignored
+/// before it finishes.
+fn report_and_ignore(s: &mut State, commands: &mut DetachedCommands) -> RequestId {
+    crate::demo::report(s);
+    drain(commands);
     s.toggle_report_ignore();
     s.send_report();
+    let sent = drain(commands);
+    assert!(!sent.iter().any(|(_, command)| matches!(command, Command::SetSafety { .. })), "ignored before reporting");
+    sent.into_iter()
+        .find_map(|(request, command)| matches!(command, Command::Report { .. }).then_some(request))
+        .unwrap()
+}
+
+fn ignores_grace(sent: &[(RequestId, Command)]) -> bool {
+    sent.iter().any(|(_, command)| matches!(command,
+        Command::SetSafety { change: SafetyChange::Ignore { user_id, ignored: true }, .. } if user_id == "@grace:example.org"))
+}
+
+#[test]
+fn reporting_with_also_ignore_should_ignore_the_sender_once_reported() {
+    let (mut s, mut commands) = state();
+    let request = report_and_ignore(&mut s, &mut commands);
+    finish(&mut s, request, Ok(()));
+    assert!(ignores_grace(&drain(&mut commands)));
+}
+
+#[test]
+fn a_failed_report_should_not_ignore_anyone() {
+    let (mut s, mut commands) = state();
+    let request = report_and_ignore(&mut s, &mut commands);
+    finish(&mut s, request, Err("offline".into()));
+    assert!(!ignores_grace(&drain(&mut commands)));
+    assert!(!s.accounts.get(&ada()).unwrap().safety.ignores("@grace:example.org"));
+}
+
+#[test]
+fn declining_and_ignoring_while_an_ignore_is_still_saving_should_wait_for_a_save() {
+    let (mut s, mut commands) = state();
+    crate::demo::invitation(&mut s);
+    drain(&mut commands);
+    // Ignored from elsewhere first: shown, not saved yet.
+    s.set_safety(&ada(), SafetyChange::Ignore { user_id: "@grace:example.org".into(), ignored: true });
+    drain(&mut commands);
+    s.ask_to_ignore_inviter(&ada(), "!design:example.org");
+    s.confirm();
+    let sent = drain(&mut commands);
+    assert!(!sent.iter().any(|(_, command)| matches!(command, Command::LeaveRoom { .. })), "declined before saving");
+    let request = sent
+        .into_iter()
+        .find_map(|(request, command)| matches!(command, Command::SetSafety { .. }).then_some(request))
+        .unwrap();
+    finish(&mut s, request, Ok(()));
     assert!(drain(&mut commands).iter().any(|(_, command)| matches!(command,
-        Command::SetSafety { change: SafetyChange::Ignore { user_id, ignored: true }, .. } if user_id == "@grace:example.org")));
+        Command::LeaveRoom { room_id, forget: false, .. } if room_id == "!design:example.org")));
+}
+
+#[test]
+fn declining_and_ignoring_someone_already_ignored_should_decline_at_once() {
+    let (mut s, mut commands) = state();
+    crate::demo::invitation(&mut s);
+    let safety = Safety { ignored: vec!["@grace:example.org".into()], ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+    drain(&mut commands);
+    s.ask_to_ignore_inviter(&ada(), "!design:example.org");
+    s.confirm();
+    assert!(drain(&mut commands).iter().any(|(_, command)| matches!(command, Command::LeaveRoom { .. })));
 }
 
 #[test]

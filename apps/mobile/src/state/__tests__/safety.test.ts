@@ -12,7 +12,13 @@ import {
   withChange,
 } from '../safety';
 import { lastMessage } from '../sections';
-import { activeRoomList, mediaHidden, previewItems } from '../selectors';
+import {
+  activeRoomList,
+  galleryThumbnail,
+  mediaHidden,
+  previewHidden,
+  previewItems,
+} from '../selectors';
 import { roomKey, timelineId } from '../timeline';
 
 const PUBLIC = '!public:x';
@@ -242,5 +248,56 @@ describe('the attachment preview', () => {
     expect(
       previewItems(state, ADA, roomKey(PUBLIC), '$one', '$one').map((m) => m.event_id),
     ).toEqual(['$one', '$two']);
+  });
+});
+
+describe('the preview’s thumbnails and listed files', () => {
+  const picture = (name: string): Attachment => ({
+    kind: 'Image',
+    name,
+    size: 1000,
+    media: `mxc://example.org/${name}`,
+    thumbnail: null,
+    dimensions: null,
+    audio: null,
+  });
+
+  it('a hidden item should fetch no thumbnail while a shown sibling does', () => {
+    const state = {
+      ...signedIn({ ...DEFAULT_SAFETY, media: 'Never' }),
+      revealedMedia: { [revealKey(ADA, '$two')]: true as const },
+    };
+
+    const one = messageEntry('$one', { content: { type: 'Attachment', data: picture('one') } });
+    const two = messageEntry('$two', { content: { type: 'Attachment', data: picture('two') } });
+
+    const thumbs = [one, two].map((e) =>
+      e.kind.type === 'Message' ? galleryThumbnail(state, ADA, PRIVATE, e.kind.data) : 'none',
+    );
+
+    expect(thumbs).toEqual([null, 'mxc://example.org/two']);
+  });
+
+  /** Room Info listed a file from Grace that no timeline holds. */
+  function listed(attachment: Attachment) {
+    const state = signedIn({ ...DEFAULT_SAFETY, media: 'Never' });
+    const file = { event_id: '$file', sender_name: 'Grace', timestamp: 1, attachment };
+
+    return apply(state, { type: 'Files', data: { account: ADA, room_id: PRIVATE, files: [file] } });
+  }
+
+  it('a listed file no timeline holds should still open, kept back as someone else’s', () => {
+    const state = listed(picture('photo'));
+    const items = previewItems(state, ADA, roomKey(PRIVATE), '$file', '$file');
+    expect([items.map((m) => m.event_id), previewHidden(state, ADA, PRIVATE, items[0]!)]).toEqual([
+      ['$file'],
+      true,
+    ]);
+  });
+
+  it('an audio clip should never wait for Show', () => {
+    const state = listed({ ...picture('clip'), kind: 'Audio' });
+    const [clip] = previewItems(state, ADA, roomKey(PRIVATE), '$file', '$file');
+    expect(previewHidden(state, ADA, PRIVATE, clip!)).toBe(false);
   });
 });

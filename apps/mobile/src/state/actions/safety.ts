@@ -9,34 +9,34 @@ import type {
 } from '@better-matrix/matrix-native/types';
 
 import { t } from '../../i18n';
-import { addNotice, updateAccount } from '../reducer';
+import { addNotice, addPendingSafety, settlePendingSafety } from '../reducer';
 import { CommandFailed } from '../requests';
-import { revealKey, withChange } from '../safety';
+import { revealKey } from '../safety';
 import type { Store } from '../store';
 import { answerInvitation, type InvitationAnswer } from './invitations';
 
+/** Tells the changes on their way apart, the same change made twice included. */
+let nextPending = 1;
+
 /**
- * Makes one change on every session. It shows at once; the engine's `Safety` answer confirms it.
- * A failure says why and puts the choices back, unless something changed them meanwhile.
+ * Makes one change on every session. It shows at once, on top of the engine's last report; the
+ * engine's `Safety` answer confirms it. A failure says why and leaves the reported choices with
+ * the other changes still on their way (`settlePendingSafety`).
  */
 export async function changeSafety(
   store: Store,
   account: AccountId,
   change: SafetyChange,
 ): Promise<void> {
-  const before = store.getState().accounts.find((a) => a.summary.id === account)?.safety;
-
-  if (!before) return;
-  const after = withChange(before, change);
-  store.update((s) => updateAccount(s, account, (a) => ({ ...a, safety: after })));
+  if (!store.getState().accounts.some((a) => a.summary.id === account)) return;
+  const pending = { id: nextPending++, change };
+  store.update((s) => addPendingSafety(s, account, pending));
 
   try {
     await store.run({ type: 'SetSafety', data: { account, change } });
   } catch (error) {
     store.update((s) => {
-      const back = updateAccount(s, account, (a) =>
-        a.safety === after ? { ...a, safety: before } : a,
-      );
+      const back = settlePendingSafety(s, account, pending.id);
 
       // A cancelled request says nothing: the user did it.
       if (!(error instanceof CommandFailed) || error.cancelled) return back;
@@ -45,6 +45,8 @@ export async function changeSafety(
     });
     throw error;
   }
+
+  store.update((s) => settlePendingSafety(s, account, pending.id));
 }
 
 /** Ignores someone, or stops ignoring them. */
