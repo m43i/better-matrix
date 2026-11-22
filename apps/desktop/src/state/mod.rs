@@ -4777,6 +4777,10 @@ impl State {
     /// link (true); anything else is left to the editor to paste (false).
     pub fn paste_into_composer(&mut self, target: ComposerTarget, content: &rune::clipboard::ClipboardContent) -> bool {
         let composer = self.composer_mut(target);
+        // A paste over a selection joining a pill onto a code block does nothing, as typing.
+        if composer.replacing_selection_strips_pills() {
+            return true;
+        }
         // An edit changes the text only: nothing attaches to it.
         if composer.editing.is_none() {
             if let Some(image) = content.image() {

@@ -68,7 +68,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   A spoiler wins over everything else an element says (maths too), and a code block holding one
   shows as ordinary text, as fields keep no pills in code blocks; for the same reason the
   composer makes no spoiler or formula inside a code block, nor a code block over a pill, and a
-  Backspace or Delete that would join a paragraph holding a pill onto a code block does nothing.
+  key or paste that would join a paragraph holding a pill onto a code block (Backspace or Delete
+  at the join, or typing, Enter, cutting or pasting over a selection across it) does nothing.
   `/spoiler` writes its spoiler itself (`html::spoiler`), line breaks and all, whatever the field
   held its words as. Formulas
   (`data-mx-maths`) show as one line of Unicode on a chip, in italics (`matrix_core::math`:
@@ -446,6 +447,12 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   cross-process lock still keeps their writes apart). A message scheduled in
   an encrypted room may go out with a room key the room rotated since; members who were given
   that key still decrypt it, a member who joined in between can't.
+- A scheduled message in an encrypted room is encrypted, and its room key shared, when it is
+  scheduled: whoever is a member then can read it once it is sent, even after leaving the room
+  meanwhile (where history visibility lets them see it). Encrypting at the moment of sending
+  would need the user's device then, which is what scheduling on the server avoids.
+- Refused scheduled drafts that wait for a busy composer live for the run, as refused edits do;
+  quitting before the composer is free again drops them. The message itself was never sent.
 - Every map and place search contacts OpenStreetMap's servers from the device (not the
   homeserver): the app's name, the place, and the device's address. Maps can be turned off;
   searches go only when the user asks.

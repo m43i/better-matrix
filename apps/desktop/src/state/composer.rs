@@ -348,7 +348,15 @@ impl Composer {
     /// pills: a spoiler's words would then go as plain code. Such a key does nothing.
     pub fn would_strip_pills(&self, key: &rune::KeyEvent) -> bool {
         if self.edit.anchor != self.edit.focus {
-            return false;
+            // Whatever replaces a selection (typing, Enter, deleting, cutting) joins its ends.
+            let cut = matches!(&key.key, rune::Key::Text(text) if text.eq_ignore_ascii_case("x"))
+                && (key.mods.ctrl || key.mods.cmd);
+            let replaces = cut
+                || (matches!(
+                    key.key,
+                    rune::Key::Backspace | rune::Key::Delete | rune::Key::Enter | rune::Key::Text(_)
+                ) && !(key.mods.ctrl || key.mods.cmd));
+            return replaces && self.replacing_selection_strips_pills();
         }
         let caret = self.edit.focus;
         let paragraphs = self.edit.paragraphs();
@@ -364,6 +372,19 @@ impl Composer {
         let holds_pill =
             self.edit.pills().any(|(range, _)| joined.range.start <= range.start && range.end <= joined.range.end);
         into.block == Block::Code && joined.block != Block::Code && holds_pill
+    }
+
+    /// Whether replacing the selection would join a paragraph holding a pill (after the
+    /// selection's end) onto a code block (where it starts). Pastes ask this too.
+    pub fn replacing_selection_strips_pills(&self) -> bool {
+        let (start, end) = (self.edit.anchor.min(self.edit.focus), self.edit.anchor.max(self.edit.focus));
+        let paragraphs = self.edit.paragraphs();
+        let holding = |at: usize| paragraphs.iter().find(|p| p.range.start <= at && at <= p.range.end);
+        let (Some(first), Some(last)) = (holding(start), holding(end)) else { return false };
+        first.index != last.index
+            && first.block == Block::Code
+            && last.block != Block::Code
+            && self.edit.pills().any(|(range, _)| end <= range.start && range.end <= last.range.end)
     }
 
     /// Whether a pill lies in the paragraphs the selection touches.
@@ -903,6 +924,22 @@ mod tests {
         c.edit.set_selection(start, start);
         let backspace = rune::KeyEvent { key: rune::Key::Backspace, mods: rune::Mods::default() };
         assert!(c.would_strip_pills(&backspace));
+    }
+
+    #[test]
+    fn deleting_a_selection_should_not_join_a_spoiler_onto_a_code_block() {
+        let mut c = composer("let x");
+        c.format(Format::CodeBlock);
+        c.edit.set_selection(5, 5);
+        c.edit.insert("\n");
+        c.edit.toggle_block(Block::Code);
+        c.edit.insert_pill("spoiler", "secret");
+        // The line break alone, selected.
+        c.edit.set_selection(5, 6);
+        for key in [rune::Key::Delete, rune::Key::Backspace, rune::Key::Text(" ".into()), rune::Key::Enter] {
+            assert!(c.would_strip_pills(&rune::KeyEvent { key, mods: rune::Mods::default() }));
+        }
+        assert!(c.replacing_selection_strips_pills());
     }
 
     #[test]
