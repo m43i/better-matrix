@@ -158,10 +158,14 @@ Date: 2026-11-16
 - **Mentions and custom emoji are pills beside the text** (`state/pills.ts`, the engine's
   `html.rs` pill ids: `user:@…`, `room:!…`/`room:#…`, `everyone`, `emote:mxc://…`). A picked
   suggestion inserts its label into the draft (`@Grace Hopper`, `#design`, `@room`,
-  `:party:`) and adds the pill to `ComposerState.pills`; pills are matched by label, not by
-  position, so formatting, emoji and edits elsewhere never move them: each pill takes the
-  earliest place where its label stands whole (not inside a longer word), and a pill whose label
-  was edited away is dropped on the next change (Slack's behaviour: a broken mention is text).
+  `:party:`) and adds the pill to `ComposerState.pills` bound to where it was put
+  (`DraftPill.start`), not to its label: the same words typed elsewhere stay text, and two
+  people with one name keep their own IDs. Each change of the draft moves the pills after it
+  (`trackPills`: the edit is what lies between the old and new text's common start and end,
+  the caret settling where that is ambiguous in repeated text; a suggestion, an emoji or an
+  edit's own text place theirs directly), and a pill whose label was edited, or that now sits
+  inside a longer word, is dropped (Slack's behaviour: a broken mention is text). A refused
+  edit comes back with its pills and the message's own.
   On send each placed label becomes one private-use character while the markers are parsed, so
   markers around it format it and nothing in a name reads as a marker; it then goes as the
   engine's HTML (`<a href="https://matrix.to/#/@…">Name</a>`, `<img data-mx-emoticon …>`,
@@ -175,7 +179,9 @@ Date: 2026-11-16
   list above the field, as Slack's do; the field reports the caret only while the draft holds
   one of the signs, so plain typing still redraws once a keystroke.
 - **Slash commands** (`state/slash.ts`): `/me` (an emote), `/shrug`, `/tableflip`, `/unflip`,
-  `/lenny` (the face before the text), `/plain` (no formatting), `/spoiler`, `/invite`, `/join`
+  `/lenny` (the face before the text), `/plain` (no formatting), `/spoiler` (the text as
+  written in one `<span data-mx-spoiler>`, line breaks as `<br />`, never through markers, so
+  nothing in it can end the spoiler early; `[Spoiler]` the whole body), `/invite`, `/join`
   (opens the room once joined), `/leave` (back to Home), `/topic` (`SetTopic`), `/nick`
   (`SetDisplayName`). A command acts in the draft's place; the reply and attachments wait for
   the next send. An unknown command or one missing its argument keeps the draft and says so;
@@ -185,22 +191,32 @@ Date: 2026-11-16
   emoji picker, writing (not reacting), offers the custom emoji first as pills. Received
   stickers arrive as images (the engine's conversion). Custom emoji in messages are drawn
   inline from their `mxc://` URI, as a media handle written the engine's way
-  (`mxcMedia`: `MediaSource::Plain` as JSON), the one handle the app writes itself.
+  (`mxcMedia`: `MediaSource::Plain` as JSON), the one handle the app writes itself. Any `<img>`
+  from `mxc://` is one (label: `alt`, else `title`), marked `data-mx-emoticon` or not, as the
+  engine's `to_pills` reads it: the SDK's sanitiser drops that attribute. Other images show
+  their `alt`.
 - **Locations:** the sheet (`app/location.tsx`) takes the phone's position (expo-location,
-  when-in-use permission only, configured in `app.json`) or a place found by name
-  (`SearchPlaces`, only on submit: Nominatim's policy forbids searching as one types), previews
-  it on its map and sends `Outgoing::Location`. The timeline's card (`LocationCard`) draws the
-  map the engine renders from OpenStreetMap (`osm:<lat>,<lon>,15`, which the app also writes for
-  the phone's own position, `state/geo.ts` mirroring `geo.rs`), the description, the
-  coordinates and "© OpenStreetMap contributors" on every map; tapping opens openstreetmap.org.
-- **Scheduled messages** (MSC4140): a long press on Send (text only, not an edit, not with
-  attachments, which upload at once) opens the schedule sheet (`app/schedule.tsx`: in 30
+  when-in-use permission only, configured in `app.json`), looked up only once the user presses
+  "Use my location", or a place found by name (`SearchPlaces`, only on submit: Nominatim's
+  policy forbids searching as one types), previews it on its map and sends
+  `Outgoing::Location`. The timeline's card (`LocationCard`) draws the map the engine renders
+  from OpenStreetMap (`osm:<lat>,<lon>,15`, which the app also writes for the phone's own
+  position, `state/geo.ts` mirroring `geo.rs`), the description, the coordinates and
+  "© OpenStreetMap contributors" on every map; tapping opens openstreetmap.org. The device
+  fetches those maps, so OpenStreetMap sees its address and the area shown: Preferences' "Maps
+  from OpenStreetMap" (`Settings.showMaps`, on by default) turns them off, and `MapView` then
+  draws a pin and fetches nothing, in cards and in the sheet alike.
+- **Scheduled messages** (MSC4140): a long press on Send (text, or a command that makes a
+  message: `/me`, `/plain`, `/spoiler`, the faces; not an edit, not with attachments, which
+  upload at once; anything else says why and keeps the draft, `scheduleProblem`, checked again
+  when the time is picked) opens the schedule sheet (`app/schedule.tsx`: in 30
   minutes, in an hour, tomorrow at 9:00, next Monday at 9:00 with when each is, or a custom
   date and time through `@expo/ui`'s date-time picker, at most 30 days ahead), which sends
   `Schedule` with the delay worked out in local time (`state/schedule.ts`). The composer shows
   "N scheduled messages" above itself for its room (`ListScheduled` whenever a conversation
   opens); the bar opens the list (`app/scheduled.tsx`) to send each now or cancel it
-  (`UpdateScheduled`). A refused schedule gives the text back. Sends are planned as
+  (`UpdateScheduled`). A refused schedule gives the composer back: text, pills and the message
+  it answered. Sends are planned as
   data (`state/outgoing.ts`): text with the reply first, then each attachment as
   `Upload::Path`; voice memos are AAC `.m4a` from expo-audio, sent with a 100-point waveform
   from the recorder's metering (read 20 times a second, `waveformFromLevels`, on the desktop's
@@ -348,17 +364,21 @@ Date: 2026-11-16
   `ftp`, reply fallbacks and scripts are dropped, nesting is capped. Nothing renders raw HTML.
   Matrix's inline objects become inlines of their own, as `html.rs` reads them: mention pills
   (the user's own in the mention colour), spoilers hidden behind a block of the muted colour
-  until tapped, formulas as Unicode (`state/math.ts`, a line-for-line port of `math.rs` run
-  against its `math.json` vectors; a `<div>` formula gets its own line) and custom emoji as
-  pictures in the line.
+  until tapped (hidden, a spoiler is an inert placeholder of its plain words: nothing inside
+  shows its colour or picture or takes a tap), formulas as Unicode (`state/math.ts`, a
+  line-for-line port of `math.rs` run against its `math.json` vectors, bounded as it is: past
+  2000 bytes, 32 nested groups or commands, or 8000 bytes of output, a formula shows as its
+  LaTeX; a `<div>` formula gets its own line) and custom emoji as pictures in the line.
 - **Message kinds:** emotes read "* Name action" (`prepare` puts the name before the first
   paragraph); places are `LocationCard`s; a message the push rules say mentions the user
   (`Message.highlighted`) has a warm tint and bar (`palette.warning`), as Slack marks mentions.
   The "(edited)" label opens the edit history (`app/edit-history.tsx`, `ListEdits`, kept in
   `AccountData.edits`, newest first, the original marked).
 - **Jumping to a message:** a quote's tap scrolls to the quoted message, and when it isn't
-  loaded pages back as a link's target does (`Timeline`'s `jump`), saying so if it isn't found;
-  the message flashes highlighted. A permalink to a message in a joined room asks the engine
+  loaded pages back as a link's target does (`Timeline`'s `jump`); still not found, the engine
+  says where it lives (`LocateMessage`, `openElsewhere`) and it opens there when that is another
+  timeline (a reply in a thread, a room message quoted in one), else the app says it isn't
+  found; the message flashes highlighted. A permalink to a message in a joined room asks the engine
   where it is (`LocateMessage`) and opens its thread when it is a reply in one, else the room at
   it (`openJoined`, the room when the engine can't tell).
 - **Demo scenes** (`src/demo`) are the mobile `--scene`: the desktop's fixtures as engine
