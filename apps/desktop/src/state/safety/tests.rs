@@ -574,3 +574,106 @@ fn a_held_back_pictures_file_actions_from_its_message_should_do_nothing() {
     s.act_on_message_attachment(&ada(), DEMO_THREAD.0, "$attachment", &file, AttachmentAction::CopyImage);
     assert!(drain(&mut commands).iter().any(|(_, command)| matches!(command, Command::FetchMedia { .. })));
 }
+
+#[test]
+fn an_open_preview_should_hold_back_someone_elses_picture_once_media_shows_nowhere() {
+    let (mut s, mut commands) = state();
+    crate::demo::attachment_preview(&mut s);
+    assert!(s.preview.is_some() && !s.preview_held());
+    media_never(&mut s);
+    assert!(s.preview_held());
+    drain(&mut commands);
+    let file = s.preview.as_ref().unwrap().attachment.clone();
+    for action in [AttachmentAction::CopyImage, AttachmentAction::Open, AttachmentAction::Download] {
+        s.act_on_attachment(ada(), &file, action);
+    }
+    assert!(drain(&mut commands).is_empty());
+}
+
+#[test]
+fn saved_and_pinned_messages_of_someone_ignored_should_not_show_but_stay_saved_and_pinned() {
+    let (mut s, _) = state();
+    crate::demo::seed(&mut s);
+    let preview = |event_id: &str, sender: &str| matrix_core::MessagePreview {
+        event_id: event_id.into(),
+        sender_name: sender.into(),
+        sender_id: sender.into(),
+        sender_avatar: None,
+        timestamp_ms: Some(1),
+        body: Some("Hello".into()),
+        thread: None,
+    };
+    let room = s.accounts.get(&ada()).unwrap().room(DEMO_THREAD.0).unwrap().clone();
+    let (mut rooms, id) = (vec![room], ada());
+    rooms[0].pinned = vec!["$troll".into(), "$grace".into()];
+    rooms[0].saved = vec!["$troll".into(), "$grace".into()];
+    s.accounts.set_room_list(&id, matrix_core::RoomList { rooms: rooms.clone(), ..Default::default() });
+    let previews = vec![preview("$troll", "@troll:spam.example"), preview("$grace", "@grace:example.org")];
+    s.accounts.set_pins(&id, DEMO_THREAD.0.into(), previews.clone());
+    let saved = previews
+        .iter()
+        .map(|preview| matrix_core::SavedMessage {
+            room_id: DEMO_THREAD.0.into(),
+            saved_at_ms: None,
+            preview: preview.clone(),
+        })
+        .collect();
+    s.accounts.set_saved_messages(&id, saved);
+    let safety = Safety { ignored: vec!["@troll:spam.example".into()], ..Safety::default() };
+    s.apply(Event::Safety { account: id.clone(), safety }, &mut Tx::default());
+    let data = s.accounts.get(&id).unwrap();
+    let shown = |ids: Vec<&str>| ids.into_iter().map(str::to_owned).collect::<Vec<_>>();
+    assert_eq!(data.saved_messages().map(|m| m.preview.event_id.clone()).collect::<Vec<_>>(), shown(vec!["$grace"]));
+    assert_eq!(
+        data.pinned_messages(&rooms[0]).unwrap().map(|m| m.event_id.clone()).collect::<Vec<_>>(),
+        shown(vec!["$grace"])
+    );
+    assert_eq!(data.room(DEMO_THREAD.0).unwrap().pinned.len(), 2, "still pinned");
+    assert!(data.is_saved(DEMO_THREAD.0, "$troll"), "still saved");
+}
+
+#[test]
+fn pinned_messages_of_someone_ignored_should_not_fetch_their_pictures() {
+    let (mut s, mut commands) = state();
+    crate::demo::seed(&mut s);
+    let id = ada();
+    let mut room = s.accounts.get(&id).unwrap().room(DEMO_THREAD.0).unwrap().clone();
+    room.pinned = vec!["$troll".into(), "$grace".into()];
+    let rooms = s
+        .accounts
+        .get(&id)
+        .unwrap()
+        .rooms
+        .iter()
+        .map(|r| if r.room_id == room.room_id { room.clone() } else { r.clone() })
+        .collect();
+    s.accounts.set_room_list(&id, matrix_core::RoomList { rooms, ..Default::default() });
+    s.select_room(DEMO_THREAD.0);
+    s.show_side(crate::state::SidePanel::Pins);
+    let safety = Safety { ignored: vec!["@troll:spam.example".into()], ..Safety::default() };
+    s.apply(Event::Safety { account: id.clone(), safety }, &mut Tx::default());
+    s.media = crate::state::MediaCache::default();
+    s.media.attach(std::sync::Arc::new(|| {}));
+    drain(&mut commands);
+    let pin = |event_id: &str, sender: &str, picture: &str| matrix_core::MessagePreview {
+        event_id: event_id.into(),
+        sender_name: sender.into(),
+        sender_id: sender.into(),
+        sender_avatar: Some(matrix_core::MediaRef::opaque(picture)),
+        timestamp_ms: Some(1),
+        body: Some("Hello".into()),
+        thread: None,
+    };
+    let messages =
+        vec![pin("$troll", "@troll:spam.example", "troll-face"), pin("$grace", "@grace:example.org", "grace-face")];
+    s.apply(Event::PinnedMessages { account: id, room_id: DEMO_THREAD.0.into(), messages }, &mut Tx::default());
+    let fetched: Vec<_> = drain(&mut commands)
+        .into_iter()
+        .filter_map(|(_, command)| match command {
+            Command::FetchMedia { media, .. } => Some(media),
+            _ => None,
+        })
+        .collect();
+    assert!(fetched.contains(&matrix_core::MediaRef::opaque("grace-face")));
+    assert!(!fetched.contains(&matrix_core::MediaRef::opaque("troll-face")));
+}

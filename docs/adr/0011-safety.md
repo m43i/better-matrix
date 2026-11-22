@@ -32,9 +32,10 @@ Date: 2026-11-22
   `Safety::shows_invitation` and `Safety::ignores` (mirrored in the phones' selectors).
 - **Stored in account data**, never on the device:
   - ignored people in `m.ignored_user_list`; the SDK's event cache clears every room when a sync
-    brings a new list, so earlier messages from them disappear too. Until then, and for the
-    previews the apps keep themselves (a room's latest message), the apps drop what an ignored
-    person sent;
+    brings a new list, so earlier messages from them disappear too. Until then, and for what
+    the apps keep themselves (a room's latest message, saved and pinned messages, the Files
+    list), the apps leave out what an ignored person sent: dropped once the server confirms the
+    ignore, filtered where shown while it is saving, so a failed ignore brings it back;
   - media and invitation pictures in MSC4278's event, keeping fields other clients set: read
     under the spec's name first, then the unstable one (as the SDK does); written under the
     unstable name, as the SDK and Element write it, and under the spec's name only where one
@@ -73,8 +74,9 @@ Date: 2026-11-22
   video posters, linked GIFs and link cards' images that may not show draw a placeholder of the
   same size with Show; a press reveals that message's media until the app restarts. Nothing is
   fetched before; the attachment preview applies the same rule wherever it opens from (a file
-  whose sender isn't known counts as someone else's). The user's own media and avatars always
-  show.
+  whose sender isn't known counts as someone else's), as do every file action (download, copy,
+  open, share) and an open preview when the choice changes. The user's own media and avatars
+  always show.
 
 ## Consequences
 

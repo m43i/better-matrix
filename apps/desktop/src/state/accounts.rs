@@ -799,9 +799,18 @@ impl AccountData {
     }
 
     /// The saved messages listed, as rooms' summaries know them now: one no longer saved
-    /// leaves at once.
+    /// leaves at once, and those of people the user ignores don't show (they stay saved).
     pub fn saved_messages(&self) -> impl Iterator<Item = &matrix_core::SavedMessage> {
-        self.saved.iter().flatten().filter(|saved| self.is_saved(&saved.room_id, &saved.preview.event_id))
+        self.saved.iter().flatten().filter(|saved| {
+            self.is_saved(&saved.room_id, &saved.preview.event_id) && !self.safety.ignores(&saved.preview.sender_id)
+        })
+    }
+
+    /// A room's pinned messages as listed, those still pinned, but not those of people the user
+    /// ignores (they stay pinned).
+    pub fn pinned_messages(&self, room: &RoomSummary) -> Option<impl Iterator<Item = &matrix_core::MessagePreview>> {
+        let pins = self.pins.get(&room.room_id)?;
+        Some(pins.iter().filter(|pin| room.pinned.contains(&pin.event_id) && !self.safety.ignores(&pin.sender_id)))
     }
 
     /// Whether a message saved in some room isn't in the list yet: saved here or on another

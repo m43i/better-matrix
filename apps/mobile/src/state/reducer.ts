@@ -293,23 +293,23 @@ function fromIgnored(account: AccountData, message: { sender_id: string }): bool
 function hiddenIfIgnored(
   ignored: ReadonlySet<string>,
   entry: TimelineEntry,
-  hidden: string[],
+  hidden: Array<[string, string]>,
 ): TimelineEntry {
   if (entry.kind.type !== 'Message' || !ignored.has(entry.kind.data.sender_id)) return entry;
-  hidden.push(entry.kind.data.event_id);
+  hidden.push([entry.kind.data.event_id, entry.kind.data.sender_id]);
 
   return { id: entry.id, kind: { type: 'Other' } };
 }
 
-/** `hiddenEvents` with `ids` added; the same object when there are none. */
+/** `hiddenEvents` with `events` (event ID, sender) added; the same object when there are none. */
 function withHidden(
   hiddenEvents: AccountData['hiddenEvents'],
-  ids: string[],
+  events: Array<[string, string]>,
 ): AccountData['hiddenEvents'] {
-  if (ids.length === 0) return hiddenEvents;
+  if (events.length === 0) return hiddenEvents;
   const next = { ...hiddenEvents };
 
-  for (const id of ids) next[id] = true;
+  for (const [id, sender] of events) next[id] = sender;
 
   return next;
 }
@@ -366,7 +366,7 @@ function withoutRedactedFiles(
 function diffsWithoutIgnored(
   diffs: TimelineDiff[],
   ignored: ReadonlySet<string>,
-  hidden: string[],
+  hidden: Array<[string, string]>,
 ): TimelineDiff[] {
   if (ignored.size === 0) return diffs;
   const hide = (entry: TimelineEntry) => hiddenIfIgnored(ignored, entry, hidden);
@@ -404,7 +404,7 @@ function withoutIgnored(account: AccountData, ignored: ReadonlySet<string>): Acc
   );
 
   const timelines: Record<string, Timeline> = {};
-  const hidden: string[] = [];
+  const hidden: Array<[string, string]> = [];
 
   for (const [id, timeline] of Object.entries(account.timelines)) {
     const hit = timeline.entries.some(
@@ -498,7 +498,7 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'TimelineChanged': {
       const owner = state.accounts.find((a) => a.summary.id === event.data.account);
       const ignored = new Set(owner?.savedSafety.ignored);
-      const hidden: string[] = [];
+      const hidden: Array<[string, string]> = [];
       const diffs = diffsWithoutIgnored(event.data.diffs, ignored, hidden);
 
       const next = updateTimeline(state, event.data.account, event.data.key, (t) => ({

@@ -1,11 +1,13 @@
 // File actions shared by a message's action sheet and its full-screen attachment preview.
 
-import type { AccountId, Attachment } from '@better-matrix/matrix-native/types';
+import type { AccountId, Attachment, Message } from '@better-matrix/matrix-native/types';
 import { useEffect, useRef, useState } from 'react';
 
 import { t, type Key } from '../../i18n';
-import { attachmentActions, type AttachmentAction } from '../../state/messages';
-import { useAppStore } from '../../state/react';
+import { type AttachmentAction, attachmentRows } from '../../state/messages';
+import { revealMedia } from '../../state/actions/safety';
+import { useAppStore, useStore } from '../../state/react';
+import { previewHidden } from '../../state/selectors';
 import { ListRow } from '../components';
 import type { IconName } from '../icons';
 import { copyAttachmentImage, openAttachment, saveAttachment, shareAttachment } from './files';
@@ -19,14 +21,23 @@ const actions = {
 
 export function AttachmentActions({
   account,
+  roomId,
+  message,
   attachment,
   onDone,
+  offersShow = false,
 }: {
   account: AccountId;
+  /** The room and message it was sent in, which decide whether its media is held (ADR 0011). */
+  roomId: string;
+  message: Message;
   attachment: Attachment;
   onDone: () => void;
+  /** Offer Show while the media is held back, as the sheet has nothing else (`attachmentRows`). */
+  offersShow?: boolean;
 }) {
   const store = useAppStore();
+  const held = useStore((s) => previewHidden(s, account, roomId, message));
   const [busy, setBusy] = useState<AttachmentAction | null>(null);
   const mounted = useRef(false);
   useEffect(() => {
@@ -38,7 +49,8 @@ export function AttachmentActions({
   }, []);
 
   const run = (action: AttachmentAction) => {
-    if (busy !== null) return;
+    // Checked again as it runs: nothing held back is fetched, whatever the sheet showed.
+    if (busy !== null || previewHidden(store.getState(), account, roomId, message)) return;
     setBusy(action);
     void actions[action]
       .run(store, account, attachment)
@@ -50,15 +62,26 @@ export function AttachmentActions({
       });
   };
 
-  return attachmentActions(attachment).map((action) => (
-    <ListRow
-      key={action}
-      icon={actions[action].icon}
-      title={t(actions[action].label)}
-      chevron={false}
-      value={busy === action ? '…' : undefined}
-      testID={`attachment-actions-${action}`}
-      onPress={busy === null ? () => run(action) : undefined}
-    />
-  ));
+  return attachmentRows(attachment, held, offersShow).map((action) =>
+    action === 'show' ? (
+      <ListRow
+        key={action}
+        icon="eye"
+        title={t('safety.show_media')}
+        chevron={false}
+        testID="attachment-actions-show"
+        onPress={() => revealMedia(store, account, message.event_id)}
+      />
+    ) : (
+      <ListRow
+        key={action}
+        icon={actions[action].icon}
+        title={t(actions[action].label)}
+        chevron={false}
+        value={busy === action ? '…' : undefined}
+        testID={`attachment-actions-${action}`}
+        onPress={busy === null ? () => run(action) : undefined}
+      />
+    ),
+  );
 }

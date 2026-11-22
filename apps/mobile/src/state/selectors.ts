@@ -5,6 +5,7 @@ import type {
   MediaRef,
   Message,
   MediaSize,
+  MessagePreview,
   RoomPreview,
   SavedMessage,
   SharedFile,
@@ -147,7 +148,31 @@ export function savedMessages(state: State, id: AccountId): SavedMessage[] | und
     data.rooms.flatMap((r) => r.saved.map((eventId) => `${r.room_id}|${eventId}`)),
   );
 
-  return data.saved.filter((m) => saved.has(`${m.room_id}|${m.preview.event_id}`));
+  // What people the user ignores said stays out of the list; the saved IDs stay as they are.
+  return data.saved.filter(
+    (m) =>
+      saved.has(`${m.room_id}|${m.preview.event_id}`) && !ignores(data.safety, m.preview.sender_id),
+  );
+}
+
+/**
+ * A room's pinned messages as its list shows them: those still pinned, without what people the
+ * user ignores said. The room's pins themselves stay as they are.
+ */
+export function pinnedPreviews(
+  state: State,
+  id: AccountId,
+  roomId: string,
+): MessagePreview[] | undefined {
+  const data = account(state, id);
+  const pins = data?.pins[roomId];
+
+  if (!data || !pins) return undefined;
+  const pinned = data.rooms.find((r) => r.room_id === roomId)?.pinned ?? [];
+
+  return pins.filter(
+    (pin) => pinned.includes(pin.event_id) && !ignores(data.safety, pin.sender_id),
+  );
 }
 
 /** Every saved message's room and event, as one string: it changes when anything is saved. */
@@ -259,6 +284,19 @@ export function previewItems(
   return found.filter((m) => m.event_id === opened || !previewHidden(state, id, key.room_id, m));
 }
 
+/**
+ * The message the attachment preview shows for `eventId`, found as the preview finds it (in a
+ * thread, or rebuilt from Room Info's files): what its More sheet acts on.
+ */
+export function previewMessage(
+  state: State,
+  id: AccountId,
+  key: TimelineKey,
+  eventId: string,
+): Message | undefined {
+  return previewItems(state, id, key, eventId, eventId).find((m) => m.event_id === eventId);
+}
+
 /** The gallery around `opened` in whichever of the room's kept thread timelines holds it. */
 function inThreads(
   data: AccountData,
@@ -302,7 +340,10 @@ export function shownFiles(state: State, id: AccountId, roomId: string): SharedF
 
 /** Whether any of a room's kept timelines holds `eventId`, or held it from an ignored sender. */
 function heldAnywhere(data: AccountData, roomId: string, eventId: string): boolean {
-  if (data.hiddenEvents[eventId]) return true;
+  // Hidden as its sender is ignored: only while they still are, so stopping gives it back.
+  const hiddenFrom = data.hiddenEvents[eventId];
+
+  if (hiddenFrom !== undefined && ignores(data.safety, hiddenFrom)) return true;
 
   return Object.entries(data.timelines).some(
     ([id, kept]) =>

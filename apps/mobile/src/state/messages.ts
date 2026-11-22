@@ -208,13 +208,33 @@ export function findMessage(
 
 export type AttachmentAction = 'copyImage' | 'open' | 'share' | 'save';
 
-/** File actions shared by a message's long-press sheet and its attachment preview. */
-export function attachmentActions(attachment: Attachment): AttachmentAction[] {
-  if (!attachment.media) return [];
+/**
+ * File actions shared by a message's long-press sheet and its attachment preview. None while the
+ * account keeps the media back (`held`, ADR 0011): opening, sharing or saving would fetch it.
+ */
+export function attachmentActions(attachment: Attachment, held = false): AttachmentAction[] {
+  if (!attachment.media || held) return [];
 
   return attachment.kind === 'Image'
     ? ['copyImage', 'open', 'share', 'save']
     : ['open', 'share', 'save'];
+}
+
+/** A row of a file action sheet: an action, or Show while its media is held back. */
+export type AttachmentRow = AttachmentAction | 'show';
+
+/**
+ * What a file action sheet offers: its actions, or, where the sheet stands for the media alone
+ * (`offersShow`), Show by itself while the media is held back, rather than nothing (ADR 0011).
+ */
+export function attachmentRows(
+  attachment: Attachment,
+  held: boolean,
+  offersShow: boolean,
+): AttachmentRow[] {
+  if (held && offersShow && attachment.media) return ['show'];
+
+  return attachmentActions(attachment, held);
 }
 
 /** The size timelines fetch image previews at, as the desktop's `MediaSize::PREVIEW`. */

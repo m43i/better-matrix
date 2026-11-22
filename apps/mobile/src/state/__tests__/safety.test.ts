@@ -19,7 +19,10 @@ import {
   roomPreviewPicture,
   shownFiles,
   previewHidden,
+  pinnedPreviews,
   previewItems,
+  previewMessage,
+  savedMessages,
 } from '../selectors';
 import { roomKey, timelineId } from '../timeline';
 
@@ -478,4 +481,150 @@ it('a previewed room held as an invitation should hide its picture, whatever the
   };
 
   expect(roomPreviewPicture(state, ADA, preview)).toBeNull();
+});
+
+describe('round five', () => {
+  const photo: Attachment = {
+    kind: 'Image',
+    name: 'photo.png',
+    size: 1000,
+    media: 'mxc://example.org/photo',
+    thumbnail: null,
+    dimensions: null,
+    audio: null,
+  };
+
+  const preview = (event_id: string, sender_id: string) => ({
+    event_id,
+    sender_name: sender_id,
+    sender_id,
+    sender_avatar: null,
+    timestamp_ms: 1,
+    body: 'hi',
+    thread: null,
+  });
+
+  /** The private room pins and saves `$a` (Grace's) and `$b` (Ada's). */
+  function pinnedAndSaved(safety: Safety) {
+    let state = signedIn(safety);
+    state = apply(state, {
+      type: 'RoomsUpdated',
+      data: {
+        account: ADA,
+        list: {
+          rooms: [{ ...roomSummary(PRIVATE), pinned: ['$a', '$b'], saved: ['$a', '$b'] }],
+          spaces: [],
+          invitations: [],
+        },
+      },
+    });
+    state = apply(state, {
+      type: 'PinnedMessages',
+      data: {
+        account: ADA,
+        room_id: PRIVATE,
+        messages: [preview('$a', GRACE), preview('$b', ADA)],
+      },
+    });
+
+    return apply(state, {
+      type: 'SavedMessages',
+      data: {
+        account: ADA,
+        messages: ['$a', '$b'].map((id, i) => ({
+          room_id: PRIVATE,
+          saved_at_ms: null,
+          preview: preview(id, i === 0 ? GRACE : ADA),
+        })),
+      },
+    });
+  }
+
+  it('pinned and saved lists should leave out what ignored people said, keeping the IDs', () => {
+    const state = pinnedAndSaved({ ...DEFAULT_SAFETY, ignored: [GRACE] });
+    expect([
+      pinnedPreviews(state, ADA, PRIVATE)?.map((p) => p.event_id),
+      savedMessages(state, ADA)?.map((m) => m.preview.event_id),
+      state.accounts[0]!.rooms[0]!.pinned,
+    ]).toEqual([['$b'], ['$b'], ['$a', '$b']]);
+  });
+
+  it('More on an attachment held only in a thread should find it', () => {
+    const state = apply(signedIn(), {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: { room_id: PRIVATE, thread: '$root' },
+        diffs: [
+          {
+            type: 'Reset',
+            data: [messageEntry('$shot', { content: { type: 'Attachment', data: photo } })],
+          },
+        ],
+      },
+    });
+
+    expect(previewMessage(state, ADA, roomKey(PRIVATE), '$shot')?.event_id).toBe('$shot');
+  });
+
+  it('More on a file rebuilt from Room Info’s list should find it', () => {
+    const file = {
+      event_id: '$f',
+      sender_id: GRACE,
+      sender_name: 'Grace',
+      timestamp: 1,
+      attachment: photo,
+    };
+
+    const state = apply(signedIn(), {
+      type: 'Files',
+      data: { account: ADA, room_id: PRIVATE, files: [file] },
+    });
+
+    expect(previewMessage(state, ADA, roomKey(PRIVATE), '$f')?.event_id).toBe('$f');
+  });
+
+  it('after stopping ignoring someone, their listed file should open again', () => {
+    const file = {
+      event_id: '$f',
+      sender_id: GRACE,
+      sender_name: 'Grace',
+      timestamp: 1,
+      attachment: photo,
+    };
+
+    let state = signedIn();
+    state = apply(state, {
+      type: 'Files',
+      data: { account: ADA, room_id: PRIVATE, files: [file] },
+    });
+    state = apply(state, {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: roomKey(PRIVATE),
+        diffs: [
+          {
+            type: 'Reset',
+            data: [messageEntry('$f', { content: { type: 'Attachment', data: photo } })],
+          },
+        ],
+      },
+    });
+
+    const ignoring = apply(state, {
+      type: 'Safety',
+      data: { account: ADA, safety: { ...DEFAULT_SAFETY, ignored: [GRACE] } },
+    });
+
+    const stopped = apply(ignoring, {
+      type: 'Safety',
+      data: { account: ADA, safety: DEFAULT_SAFETY },
+    });
+
+    expect([
+      previewItems(ignoring, ADA, roomKey(PRIVATE), '$f', '$f').length,
+      previewItems(stopped, ADA, roomKey(PRIVATE), '$f', '$f').map((m) => m.event_id),
+    ]).toEqual([0, ['$f']]);
+  });
 });

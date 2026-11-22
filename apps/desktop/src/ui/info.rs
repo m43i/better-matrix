@@ -250,7 +250,7 @@ pub fn pins(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -
                 ),
         );
     }
-    match account.pins.get(&room.room_id) {
+    match account.pinned_messages(room) {
         None if account.pin_errors.contains_key(&room.room_id) => {}
         None => list = list.child(text(t!("info.loading")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0)),
         Some(pins) => {
@@ -258,7 +258,7 @@ pub fn pins(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -
                 list =
                     list.child(text(t!("info.no_pins")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0).wrap());
             }
-            for pin in pins.iter().filter(|pin| room.pinned.contains(&pin.event_id)) {
+            for pin in pins {
                 let destination =
                     matrix_core::TimelineKey { room_id: room.room_id.clone(), thread: pin.thread.clone() };
                 let event_id = pin.event_id.clone();

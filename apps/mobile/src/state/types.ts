@@ -111,10 +111,10 @@ export interface AccountData {
   /** Changes made on this device that the engine hasn't confirmed or refused yet, in order. */
   pendingSafety: PendingSafety[];
   /**
-   * Events whose sender the user ignores, drawn as nothing in their timelines: nothing shows
-   * them in another form (a file Room Info listed) until the app restarts.
+   * Events drawn as nothing in their timelines as their sender is ignored, with that sender: while
+   * the user still ignores them, nothing shows the event in another form (a file Room Info listed).
    */
-  hiddenEvents: Record<string, true>;
+  hiddenEvents: Record<string, string>;
 }
 
 /** A safety change on its way to the engine; `id` tells it apart from the same change again. */

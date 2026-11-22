@@ -2527,9 +2527,11 @@ impl State {
             let pins = self
                 .active_room_id()
                 .filter(|_| self.side == Some(SidePanel::Pins))
-                .and_then(|room| account.pins.get(room))
+                // As the panel lists them: none of people the user ignores.
+                .and_then(|room| account.room(room))
+                .and_then(|room| account.pinned_messages(room))
                 .into_iter()
-                .flat_map(|pins| pins.iter().take(MEMBER_PICTURES).filter_map(|pin| pin.sender_avatar.clone()));
+                .flat_map(|pins| pins.take(MEMBER_PICTURES).filter_map(|pin| pin.sender_avatar.clone()));
             // The open person panel's picture: the member list's, else the message's.
             let person = match (&self.side, self.active_room_id()) {
                 (Some(SidePanel::Person(shown_as)), Some(room_id)) => account
@@ -3337,6 +3339,30 @@ impl State {
                 data.hides_listed_media(&preview.room_id, &item.event_id, &item.attachment, &self.revealed_media)
             })
         })
+    }
+
+    /// The media choice changed: an item the preview shows that it now holds back (and the user
+    /// didn't reveal) gives way to Show, letting go of what showed as stepping does.
+    pub(super) fn hold_preview(&mut self) {
+        let Some(preview) = &self.preview else { return };
+        if matches!(preview.content, PreviewContent::Held) {
+            return;
+        }
+        let Some(item) = preview.batch.get(preview.index).cloned() else { return };
+        if !self.preview_holds(&item) {
+            return;
+        }
+        self.leave_preview_item();
+        if matches!(self.popover, Some(Popover::AttachmentMenu { .. })) {
+            self.popover = None;
+        }
+        // A file still on its way for what showed lands nowhere.
+        self.preview_visits += 1;
+        let visit = self.preview_visits;
+        if let Some(preview) = self.preview.as_mut() {
+            preview.content = PreviewContent::Held;
+            preview.visit = visit;
+        }
     }
 
     /// Shows the held-back item the preview is on, and loads it.
