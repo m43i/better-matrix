@@ -60,6 +60,27 @@ export function parseTyped(text: string): Permalink | null {
 }
 
 /**
+ * The matrix.to link to a person or room, as the engine's `mention_link` writes it: the ID as one
+ * segment, percent-encoded but for its sigils and server colon (`@`, `#`, `!`, `:`), so a `/` or
+ * `?` in it can't end it. It reads back as the same ID (`parsePermalink`).
+ */
+export function mentionLink(id: string): string {
+  let segment = '';
+
+  for (const c of id) {
+    const code = c.codePointAt(0) ?? 0;
+
+    if (/^[A-Za-z0-9\-._~@#!:]$/.test(c)) segment += c;
+    else if (code < 0x80) segment += `%${code.toString(16).toUpperCase().padStart(2, '0')}`;
+    // A lone surrogate is no character: written as U+FFFD, as Rust's strings would hold it.
+    else if (code >= 0xd800 && code <= 0xdfff) segment += '%EF%BF%BD';
+    else segment += encodeURIComponent(c);
+  }
+
+  return `https://matrix.to/#/${segment}`;
+}
+
+/**
  * `link` written as a `matrix:` URI, which reads back as the same link: how a typed link reaches
  * the link screen, which takes a URI.
  */

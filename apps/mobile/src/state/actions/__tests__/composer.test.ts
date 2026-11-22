@@ -574,6 +574,58 @@ describe('scheduling from the composer', () => {
     ]);
   });
 
+  it('a refused schedule should wait while the composer holds new text', async () => {
+    const { store, fail } = setUp();
+    setDraft(store, ADA, KEY, 'later');
+    scheduleComposer(store, ADA, KEY, 1_000);
+    setDraft(store, ADA, KEY, 'next');
+    fail(0, 'unsupported');
+    await flush();
+    expect(composer(store.getState(), ADA, KEY).draft).toBe('next');
+  });
+
+  it('a refused schedule should come back with its pills and reply once the composer is emptied', async () => {
+    const { store, fail } = setUp();
+    const grace = pillAt(userPill('@grace:x', 'Grace'), 6);
+    startReply(store, ADA, KEY, message('$q', 'when?'));
+    completeDraft(store, ADA, KEY, 'later @Grace', { start: 12, end: 12 }, grace);
+    scheduleComposer(store, ADA, KEY, 1_000);
+    setDraft(store, ADA, KEY, 'next');
+    fail(0, 'unsupported');
+    await flush();
+    setDraft(store, ADA, KEY, '');
+    const after = composer(store.getState(), ADA, KEY);
+    expect([after.draft, after.pills, after.replyTo?.event_id, after.refused]).toEqual([
+      'later @Grace',
+      [grace],
+      '$q',
+      [],
+    ]);
+  });
+
+  it('a refused schedule should come back once the message typed since is sent', async () => {
+    const { store, fail } = setUp();
+    setDraft(store, ADA, KEY, 'later');
+    scheduleComposer(store, ADA, KEY, 1_000);
+    setDraft(store, ADA, KEY, 'next');
+    fail(0, 'unsupported');
+    await flush();
+    sendComposer(store, ADA, KEY);
+    expect(composer(store.getState(), ADA, KEY).draft).toBe('later');
+  });
+
+  it('a refused schedule should wait for an edit under way to end', async () => {
+    const { store, fail } = setUp();
+    setDraft(store, ADA, KEY, 'later');
+    scheduleComposer(store, ADA, KEY, 1_000);
+    startEdit(store, ADA, KEY, message('$m', 'old'), 'old');
+    fail(0, 'unsupported');
+    await flush();
+    const during = composer(store.getState(), ADA, KEY).draft;
+    cancelEdit(store, ADA, KEY);
+    expect([during, composer(store.getState(), ADA, KEY).draft]).toEqual(['old', 'later']);
+  });
+
   it('should not schedule attachments', () => {
     const { store, commands } = setUp();
     setDraft(store, ADA, KEY, 'x');

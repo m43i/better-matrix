@@ -409,11 +409,32 @@ const PLAIN: Marks = {
 
 /**
  * Where pills stand while a draft is parsed: each is one character of Unicode's private use area,
- * so markers around a pill format it and nothing inside its label reads as a marker.
+ * so markers around a pill format it and nothing inside its label reads as a marker. Only
+ * characters the text doesn't hold are used (`placeholders`): one typed or pasted stays text.
  */
-const PILL_BASE = 0xe000;
+const PILL_FIRST = 0xe000;
+
+const PILL_LAST = 0xf8ff;
 
 const PILL_CHAR = /[\ue000-\uf8ff]/g;
+
+/** The pills of a text being parsed, by the private-use character that stands for each. */
+type Placeholders = ReadonlyMap<string, Pill>;
+
+/**
+ * Hands out private-use characters `text` doesn't hold, one per call, `null` once none is
+ * left: a character in the text never reads as a pill.
+ */
+function placeholders(text: string): () => string | null {
+  const used = new Set(text.match(PILL_CHAR));
+  let code = PILL_FIRST;
+
+  return () => {
+    while (code <= PILL_LAST && used.has(String.fromCharCode(code))) code++;
+
+    return code <= PILL_LAST ? String.fromCharCode(code++) : null;
+  };
+}
 
 /** The body and HTML the desktop sends for the same text, formatting and pills. */
 export function outgoingText(draft: string, given: readonly DraftPill[] = []): OutgoingText {
@@ -429,16 +450,21 @@ export function outgoingText(draft: string, given: readonly DraftPill[] = []): O
           start: draft.slice(0, pill.start).replace(/\r\n?/g, '\n').length,
         }));
 
-  const placed = placePills(text, pills).slice(0, 0x1900);
+  const next = placeholders(text);
+  const found = new Map<string, Pill>();
   let source = '';
   let at = 0;
 
-  placed.forEach((p, i) => {
-    source += text.slice(at, p.start) + String.fromCharCode(PILL_BASE + i);
+  for (const p of placePills(text, pills)) {
+    const c = next();
+
+    if (c === null) break;
+    source += text.slice(at, p.start) + c;
+    found.set(c, p.pill);
     at = p.end;
-  });
+  }
+
   source += text.slice(at);
-  const found = placed.map((p) => p.pill);
   const blocks = parseBlocks(source);
 
   // A spoiler over several lines is one `[Spoiler]`, its line breaks hidden with its words.
@@ -453,7 +479,7 @@ export function outgoingText(draft: string, given: readonly DraftPill[] = []): O
   const body = expandPills(plain.trim(), found, pillText);
 
   const formatted =
-    found.some(pillFormats) ||
+    [...found.values()].some(pillFormats) ||
     blocks.some(
       (block) => block.kind.type !== 'paragraph' || block.runs.some((run) => !isPlain(run.marks)),
     );
@@ -470,7 +496,7 @@ export function outgoingText(draft: string, given: readonly DraftPill[] = []): O
  * and the room when `@room` goes as words a reader sees. A pill in code or a formula is only its
  * label, and `@room` in a spoiler is hidden behind `[Spoiler]`: neither mentions anyone.
  */
-function sentMentions(blocks: readonly Block[], pills: readonly Pill[]): Mentions {
+function sentMentions(blocks: readonly Block[], pills: Placeholders): Mentions {
   const sent: Pill[] = [];
 
   for (const block of blocks) {
@@ -480,7 +506,7 @@ function sentMentions(blocks: readonly Block[], pills: readonly Pill[]): Mention
       if (run.marks.code || run.marks.math) continue;
 
       for (const c of run.text) {
-        const pill = pillOf(c, pills);
+        const pill = pills.get(c);
 
         if (pill && !(pill.id === EVERYONE.id && run.marks.spoiler)) sent.push(pill);
       }
@@ -513,9 +539,9 @@ function plainRuns(runs: Run[], continued: boolean): string {
 }
 
 /** `text` with each pill's character written as `write` says. */
-function expandPills(text: string, pills: readonly Pill[], write: (pill: Pill) => string): string {
+function expandPills(text: string, pills: Placeholders, write: (pill: Pill) => string): string {
   return text.replace(PILL_CHAR, (c) => {
-    const pill = pills[c.charCodeAt(0) - PILL_BASE];
+    const pill = pills.get(c);
 
     return pill ? write(pill) : c;
   });
@@ -894,7 +920,7 @@ function escapeHtml(text: string): string {
   );
 }
 
-function serializeRuns(runs: Run[], pills: readonly Pill[]): string {
+function serializeRuns(runs: Run[], pills: Placeholders): string {
   let out = '';
   let spoiler = false;
 
@@ -919,12 +945,12 @@ function serializeRuns(runs: Run[], pills: readonly Pill[]): string {
 }
 
 /** `text` cut so that each spoiler pill in it is a part of its own. */
-function spoilerParts(text: string, pills: readonly Pill[]) {
+function spoilerParts(text: string, pills: Placeholders) {
   const parts: Array<{ text: string; spoiler: boolean }> = [];
   let plain = '';
 
   for (const c of text) {
-    const pill = pillOf(c, pills);
+    const pill = pills.get(c);
 
     if (pill && isSpoiler(pill)) {
       if (plain) parts.push({ text: plain, spoiler: false });
@@ -940,16 +966,7 @@ function spoilerParts(text: string, pills: readonly Pill[]) {
   return parts;
 }
 
-/** The pill a private-use character stands for while a draft is parsed. */
-function pillOf(c: string, pills: readonly Pill[]): Pill | undefined {
-  const code = c.charCodeAt(0);
-
-  return c.length === 1 && code >= PILL_BASE && code <= 0xf8ff
-    ? pills[code - PILL_BASE]
-    : undefined;
-}
-
-function serializeRun(text: string, marks: Marks, pills: readonly Pill[]): string {
+function serializeRun(text: string, marks: Marks, pills: Placeholders): string {
   if (marks.math) {
     // A formula's LaTeX is its fallback, as the engine's `from_pills` writes it.
     const latex = escapeHtml(expandPills(text, pills, (pill) => pill.label));
@@ -1029,7 +1046,7 @@ function directions(blocks: Block[]): string[] {
   });
 }
 
-function serialize(blocks: Block[], pills: readonly Pill[]): string {
+function serialize(blocks: Block[], pills: Placeholders): string {
   const dirs = directions(blocks);
   let out = '';
   let i = 0;
@@ -1148,14 +1165,18 @@ export interface EditDraft {
 /** A message's draft for editing, with the pills its mentions and custom emoji come back as. */
 export function editDraft(body: string, html: string | null): EditDraft {
   if (!html) return { draft: body, pills: [] };
-  // Each pill is written as one private-use character while lines are joined and trimmed, then
-  // as its label, so its place is known (as `outgoingText` marks them).
-  const pills: Pill[] = [];
+  // Each pill is written as one private-use character the message doesn't hold while lines are
+  // joined and trimmed, then as its label, so its place is known (as `outgoingText` marks them).
+  const pills = new Map<string, Pill>();
+  const next = placeholders(html + decodeEntities(html));
 
   const mark = (pill: Pill) => {
-    pills.push(pill);
+    const c = next();
 
-    return String.fromCharCode(PILL_BASE + ((pills.length - 1) % 0x1900));
+    if (c === null) return pill.label;
+    pills.set(c, pill);
+
+    return c;
   };
 
   /** A mention being read: what it stands for, and its words so far. */
@@ -1439,17 +1460,17 @@ function spoilerWords(inner: string, pre: boolean): string {
 }
 
 /**
- * `marked` with its pills' characters (the `next`th pill's, in order) written as their labels,
- * and the pills where they stand. A private-use character the message itself held stays.
+ * `marked` with its pills' characters written as their labels, and the pills where they stand.
+ * A private-use character the message itself held stays.
  */
-function withPills(marked: string, pills: readonly Pill[]): EditDraft {
+function withPills(marked: string, pills: Placeholders): EditDraft {
   const placed: DraftPill[] = [];
   let draft = '';
 
   for (const c of marked) {
-    const pill = pills[placed.length];
+    const pill = pills.get(c);
 
-    if (pill && c === String.fromCharCode(PILL_BASE + (placed.length % 0x1900))) {
+    if (pill) {
       placed.push(pillAt(pill, draft.length));
       draft += pill.label;
     } else {
