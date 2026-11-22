@@ -1,4 +1,4 @@
-import { type Block, blocksText, htmlBlocks, plainBlocks } from '../html';
+import { type Block, blocksText, htmlBlocks, inlinesText, plainBlocks } from '../html';
 
 const paragraph = (blocks: Block[]) => {
   const first = blocks[0];
@@ -241,5 +241,17 @@ describe('htmlBlocks with Matrix’s inline objects', () => {
         htmlBlocks('a <span data-mx-spoiler>b</span> <span data-mx-maths="\\pi">π</span>'),
       ),
     ).toBe('a b π');
+  });
+
+  it('should read a hidden spoiler as plain words, its links, mentions and pictures as text', () => {
+    const [spoiler] = paragraph(
+      htmlBlocks(
+        '<span data-mx-spoiler><a href="https://matrix.to/#/@grace:x.org">Grace</a> at <a href="https://x.org">x.org</a> <img src="mxc://x.org/c" alt=":cat:"></span>',
+      ),
+    );
+
+    expect(spoiler?.type === 'spoiler' ? inlinesText(spoiler.inlines) : null).toBe(
+      'Grace at x.org :cat:',
+    );
   });
 });

@@ -55,30 +55,35 @@ export function htmlBlocks(html: string): Block[] {
   return toBlocks(buildTree(html).children, {});
 }
 
+/**
+ * The text inlines show, as plain words: for copying, accessibility, and a spoiler's hidden
+ * placeholder (which draws none of its links, mentions or pictures).
+ */
+export function inlinesText(inlines: Inline[]): string {
+  return inlines
+    .map((i) => {
+      switch (i.type) {
+        case 'text':
+          return i.text;
+        case 'spoiler':
+          return inlinesText(i.inlines);
+        case 'math':
+          return i.text;
+        default:
+          return i.label;
+      }
+    })
+    .join('');
+}
+
 /** The text a tree shows, for copying and accessibility. */
 export function blocksText(blocks: Block[]): string {
-  const inlineText = (inlines: Inline[]): string =>
-    inlines
-      .map((i) => {
-        switch (i.type) {
-          case 'text':
-            return i.text;
-          case 'spoiler':
-            return inlineText(i.inlines);
-          case 'math':
-            return i.text;
-          default:
-            return i.label;
-        }
-      })
-      .join('');
-
   return blocks
     .map((block): string => {
       switch (block.type) {
         case 'paragraph':
         case 'heading':
-          return inlineText(block.inlines);
+          return inlinesText(block.inlines);
         case 'code':
           return block.text;
         case 'quote':

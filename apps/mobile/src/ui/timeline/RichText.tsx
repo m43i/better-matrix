@@ -6,7 +6,7 @@ import { memo, useState } from 'react';
 import { Image, Platform, ScrollView, StyleSheet, Text, type TextStyle, View } from 'react-native';
 
 import { t } from '../../i18n';
-import type { Block, Inline, Marks } from '../../state/html';
+import { type Block, type Inline, inlinesText, type Marks } from '../../state/html';
 import { mxcMedia } from '../../state/messages';
 import { useAppStore } from '../../state/react';
 import { font } from '../../theme/palette';
@@ -116,7 +116,11 @@ function Inlines({ inlines }: { inlines: Inline[] }) {
   );
 }
 
-/** Hidden text: a block of the muted colour until tapped, then the text as sent. */
+/**
+ * Hidden text: a block of the muted colour until tapped, then the text as sent. Hidden, it is
+ * an inert placeholder of its plain words: no link or mention inside shows its colour or takes
+ * the tap, and no custom emoji shows its picture.
+ */
 function Spoiler({ inlines }: { inlines: Inline[] }) {
   const palette = usePalette();
   const [shown, setShown] = useState(false);
@@ -131,7 +135,7 @@ function Spoiler({ inlines }: { inlines: Inline[] }) {
       suppressHighlighting
       style={{ color: palette.textMuted, backgroundColor: palette.textMuted }}
     >
-      <Inlines inlines={inlines} />
+      {inlinesText(inlines)}
     </Text>
   );
 }
