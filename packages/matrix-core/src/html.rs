@@ -120,7 +120,7 @@ pub fn to_pills(html: &str, purpose: Pills) -> String {
             "span" | "div" => {
                 if let Some(latex) = attribute(tag, "data-mx-maths") {
                     let block = name == "div";
-                    rest = skip_element(rest, &name);
+                    rest = element_text(rest, &name).1;
                     let (id, label) = match purpose {
                         Pills::Display => (
                             format!("{}:{latex}", if block { "math-block" } else { "math" }),
@@ -251,11 +251,6 @@ fn tag_name(tag: &str) -> Option<(String, bool)> {
 
 fn is_void(name: &str) -> bool {
     matches!(name, "br" | "hr" | "img" | "input" | "meta" | "link" | "wbr" | "source")
-}
-
-/// `rest` after the element whose opening tag came just before it, nested ones included.
-fn skip_element<'a>(rest: &'a str, name: &str) -> &'a str {
-    element_text(rest, name).1
 }
 
 /// The text of the element whose opening tag came just before `rest`, tags dropped and

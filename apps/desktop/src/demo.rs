@@ -1210,3 +1210,237 @@ pub fn update() -> crate::platform::updates::Release {
         digest: format!("sha256:{}", "a".repeat(64)),
     }
 }
+
+/// The custom emoji the demo's messages and packs use.
+pub const DEMO_EMOJI: &str = "mxc://example.org/party";
+
+/// Messages showing what the composer can send: a mention of the user and a room, an emote, a
+/// spoiler, formulas, a custom emoji, a place, and an edited reply.
+pub fn message_features(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    let at = |minutes: u64| DEMO_DAY_MS + (14 * 60 + minutes) * 60_000;
+    let message = |id: &str, sender: &str, name: &str, minutes: u64, content: MessageContent| Message {
+        event_id: id.into(),
+        sender_id: sender.into(),
+        sender_name: name.into(),
+        timestamp_ms: at(minutes),
+        content,
+        ..Message::default()
+    };
+    let mention = Message {
+        highlighted: true,
+        ..message(
+            "$mention",
+            GRACE,
+            "Grace Hopper",
+            0,
+            html(
+                "Ada Lovelace: can you check #design before the release?",
+                "<a href=\"https://matrix.to/#/@ada:example.org\">Ada Lovelace</a>: can you check \
+                 <a href=\"https://matrix.to/#/#design:example.org\">#design</a> before the release?",
+            ),
+        )
+    };
+    let messages = vec![
+        mention,
+        message(
+            "$emote",
+            ALAN,
+            "Alan Turing",
+            2,
+            MessageContent::Emote { body: "waves from the train".into(), html: None },
+        ),
+        message(
+            "$spoiler",
+            KAI,
+            "Kai",
+            4,
+            html("The ending: [Spoiler]", "The ending: <span data-mx-spoiler>the butler did it</span>"),
+        ),
+        message(
+            "$math",
+            GRACE,
+            "Grace Hopper",
+            6,
+            html(
+                "Euler: e^{i\\pi} + 1 = 0, and the sum: \\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}",
+                "Euler: <span data-mx-maths=\"e^{i\\pi} + 1 = 0\"><code>e^{i\\pi} + 1 = 0</code></span>, and the sum: \
+                 <span data-mx-maths=\"\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}\"><code>…</code></span>",
+            ),
+        ),
+        message(
+            "$emoji",
+            ALAN,
+            "Alan Turing",
+            8,
+            html(
+                "Shipped :party: nice work",
+                &format!("Shipped <img data-mx-emoticon src=\"{DEMO_EMOJI}\" alt=\":party:\" height=\"32\"> nice work"),
+            ),
+        ),
+        message(
+            "$place",
+            KAI,
+            "Kai",
+            10,
+            MessageContent::Location(matrix_core::Location {
+                geo_uri: "geo:52.516275,13.377704".into(),
+                description: Some("Brandenburger Tor, Berlin".into()),
+                map: matrix_core::geo::map("geo:52.516275,13.377704"),
+            }),
+        ),
+        Message {
+            edited: true,
+            editable: true,
+            reply_to: Some(Quote {
+                event_id: "$mention".into(),
+                sender_name: Some("Grace Hopper".into()),
+                body: Some("Ada Lovelace: can you check #design before the release?".into()),
+                call: None,
+            }),
+            ..message("$reply", ADA, "Ada Lovelace", 12, text("Sure, I'll look at it this afternoon."))
+        },
+    ];
+    let entries = messages
+        .into_iter()
+        .map(|message| TimelineEntry { id: message.event_id.clone(), kind: EntryKind::Message(Box::new(message)) })
+        .collect();
+    apply(
+        s,
+        Event::TimelineChanged {
+            account: AccountId::new(ADA),
+            key: TimelineKey::room(DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(entries)],
+        },
+    );
+    demo_pack_pictures(s);
+}
+
+/// The picture behind the demo's custom emoji and stickers: the app's icon.
+fn demo_pack_pictures(s: &mut State) {
+    s.media.attach(std::sync::Arc::new(|| {}));
+    let icon = include_bytes!("../../../packaging/icons/better-matrix-256.png");
+    for url in [DEMO_EMOJI, "mxc://example.org/wave", "mxc://example.org/ship"] {
+        if let Some(media) = matrix_core::MediaRef::from_mxc(url) {
+            s.media.loaded(media, icon.as_slice().into(), Some((256, 256)));
+        }
+    }
+}
+
+/// The room's image pack: a custom emoji and two stickers.
+pub fn image_packs(s: &mut State) {
+    let image = |shortcode: &str, url: &str, emoticon: bool, sticker: bool| matrix_core::PackImage {
+        shortcode: shortcode.into(),
+        body: shortcode.replace('_', " "),
+        url: url.into(),
+        media: matrix_core::MediaRef::from_mxc(url).unwrap_or_else(|| matrix_core::MediaRef::opaque(url)),
+        emoticon,
+        sticker,
+        dimensions: Some((256, 256)),
+        mimetype: Some("image/png".into()),
+    };
+    let pack = matrix_core::ImagePack {
+        id: format!("{}/", DEMO_THREAD.0),
+        name: "Better Matrix".into(),
+        avatar: None,
+        images: vec![
+            image("party", DEMO_EMOJI, true, false),
+            image("wave", "mxc://example.org/wave", false, true),
+            image("ship_it", "mxc://example.org/ship", false, true),
+        ],
+    };
+    apply(
+        s,
+        Event::ImagePacks { account: AccountId::new(ADA), room_id: Some(DEMO_THREAD.0.into()), packs: vec![pack] },
+    );
+    demo_pack_pictures(s);
+}
+
+/// The room with `typed` in its composer, the caret at its end.
+pub fn typing(s: &mut State, typed: &str) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    image_packs(s);
+    s.composer.edit.insert(typed);
+    s.composer.edit.focused = true;
+}
+
+/// A draft holding a mention, a spoiler and a formula as pills.
+pub fn pills_draft(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    let edit = &mut s.composer.edit;
+    edit.insert("Thanks ");
+    edit.insert_pill("user:@grace:example.org", "Grace Hopper");
+    edit.insert(", the twist is ");
+    edit.insert_pill("spoiler", "the butler did it");
+    edit.insert(" and the bound is ");
+    edit.insert_pill("math", "O(n \\log n)");
+    edit.focused = true;
+    s.composer.formatting = true;
+}
+
+/// The location dialog with a place found and chosen.
+pub fn location(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    s.open_location(crate::state::ComposerTarget::Room);
+    s.location.search = rune::TextEdit::new("Brandenburger Tor");
+    let place = |name: &str, uri: &str| matrix_core::Place {
+        name: name.into(),
+        geo_uri: uri.into(),
+        map: matrix_core::geo::map(uri),
+    };
+    s.location.places = Some(vec![
+        place("Brandenburger Tor, Pariser Platz, Mitte, Berlin, 10117, Deutschland", "geo:52.516275,13.377704"),
+        place("Brandenburger Tor, Potsdam, Brandenburg, Deutschland", "geo:52.399929,13.047917"),
+    ]);
+    s.location.chosen = s.location.places.as_ref().and_then(|places| places.first().cloned());
+}
+
+/// The edit history of the user's edited reply.
+pub fn edit_history(s: &mut State) {
+    message_features(s);
+    s.open_edit_history(DEMO_THREAD.0, "$reply");
+    let version = |id: &str, body: &str, minutes: u64| matrix_core::EditVersion {
+        event_id: id.into(),
+        body: body.into(),
+        html: None,
+        timestamp_ms: DEMO_DAY_MS + (14 * 60 + minutes) * 60_000,
+    };
+    apply(
+        s,
+        Event::EditHistory {
+            account: AccountId::new(ADA),
+            room_id: DEMO_THREAD.0.into(),
+            event_id: "$reply".into(),
+            versions: vec![
+                version("$reply", "Sure, I'll look at it", 12),
+                version("$reply-2", "Sure, I'll look at it later", 13),
+                version("$reply-3", "Sure, I'll look at it this afternoon.", 15),
+            ],
+        },
+    );
+}
+
+/// A message being written, two already scheduled in the room.
+pub fn scheduled(s: &mut State) {
+    typing(s, "Reminder: release notes are due at noon.");
+    let message = |id: &str, hours: u64, body: Option<&str>| matrix_core::ScheduledMessage {
+        delay_id: id.into(),
+        room_id: DEMO_THREAD.0.into(),
+        send_at_ms: crate::state::now_ms() + hours * 3_600_000,
+        body: body.map(Into::into),
+    };
+    apply(
+        s,
+        Event::ScheduledMessages {
+            account: AccountId::new(ADA),
+            messages: vec![
+                message("d1", 2, Some("Stand-up moved to 10:30 today.")),
+                message("d2", 26, Some("Happy release day, everyone!")),
+            ],
+        },
+    );
+}

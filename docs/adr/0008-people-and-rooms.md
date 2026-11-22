@@ -298,8 +298,8 @@ Date: 2026-11-14
 - **Permalinks on the desktop:** `State::open_permalink` handles every matrix.to link and
   `matrix:` URI, from a message (`open_link`), from the OS (`App::on_open_url`, the launch
   handoff of [0001](0001-stack-and-tooling.md)) or from launch. A room ID one of the accounts
-  has joined opens at once, preferring the active account. The desktop has no jump to a
-  message, so a link to one opens its room. Anything else opens `Modal::Link`, stepping through
+  has joined opens at once, preferring the active account; a link to a message in it then
+  jumps to the message ([0006](0006-timelines.md)). Anything else opens `Modal::Link`, stepping through
   `LinkStep`: `Previewing`, then `Preview` (or `NoPreview`, which still offers Join), `Joining`,
   or `Person`; a failed join returns to the preview with a notice. A link that comes before any
   account is ready waits for the first room list.

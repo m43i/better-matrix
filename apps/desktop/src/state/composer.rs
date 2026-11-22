@@ -19,10 +19,14 @@ pub enum Format {
     NumberedList,
     Quote,
     CodeBlock,
+    /// Hides the selection until a reader reveals it.
+    Spoiler,
+    /// The selection is a formula (LaTeX), shown typeset as Unicode.
+    Math,
 }
 
 impl Format {
-    pub const ALL: [Format; 9] = [
+    pub const ALL: [Format; 11] = [
         Format::Bold,
         Format::Italic,
         Format::Strike,
@@ -32,6 +36,8 @@ impl Format {
         Format::NumberedList,
         Format::Quote,
         Format::CodeBlock,
+        Format::Spoiler,
+        Format::Math,
     ];
 
     fn mark(self) -> Option<Mark> {
@@ -66,12 +72,23 @@ impl Format {
             Format::NumberedList => "numbers",
             Format::Quote => "quote",
             Format::CodeBlock => "code-block",
+            Format::Spoiler => "spoiler",
+            Format::Math => "math",
         }
     }
 
     /// Whether this starts a new group in the toolbar.
     pub fn starts_group(self) -> bool {
-        matches!(self, Format::Link | Format::BulletList | Format::CodeBlock)
+        matches!(self, Format::Link | Format::BulletList | Format::CodeBlock | Format::Spoiler)
+    }
+
+    /// The pill this turns a selection into, by id ([`matrix_core::html`]).
+    fn pill(self) -> Option<&'static str> {
+        match self {
+            Format::Spoiler => Some("spoiler"),
+            Format::Math => Some("math"),
+            _ => None,
+        }
     }
 }
 
@@ -120,6 +137,8 @@ pub struct Composer {
     /// The timeline whose draft this composer holds; `State::follow_drafts` swaps drafts as
     /// the timeline on screen changes.
     pub owner: Option<(AccountId, TimelineKey)>,
+    /// The suggestions offered for what is being typed (`@`, `#`, `:`, `/`).
+    pub suggest: super::suggest::Suggest,
     /// [`Composer::stored_draft`], and a fingerprint of the field it was read from: drafts are
     /// checked every frame, and read again only once the field changed.
     stored: Option<(u64, Option<matrix_core::Draft>)>,
@@ -138,15 +157,50 @@ impl Default for Composer {
             editing: None,
             revealed_caret: None,
             owner: None,
+            suggest: super::suggest::Suggest::default(),
             stored: None,
         }
     }
 }
 
-/// A field's text as Matrix HTML: only when it carries formatting.
+/// A field's text as Matrix HTML: only when it carries formatting (pills count: a mention is
+/// a link). Pills go as what they stand for ([`matrix_core::html::from_pills`]).
 fn html_of(edit: &TextEdit) -> Option<String> {
     let formatted = !edit.marks().is_empty() || edit.blocks().iter().any(|b| *b != Block::Paragraph);
-    formatted.then(|| edit.to_html())
+    formatted.then(|| matrix_core::html::from_pills(&edit.to_html()))
+}
+
+/// A field's plain body: its text, with each spoiler's words kept out of it, as clients that
+/// show only the body would show them to everyone.
+pub(super) fn body_of(edit: &TextEdit) -> String {
+    let mut body = edit.text.clone();
+    let mut spoilers: Vec<_> = edit.pills().filter(|(_, id)| *id == "spoiler").map(|(range, _)| range).collect();
+    spoilers.sort_by_key(|range| std::cmp::Reverse(range.start));
+    for range in spoilers {
+        body.replace_range(range, crate::i18n::t!("composer.spoiler_fallback"));
+    }
+    body.trim().to_owned()
+}
+
+/// Whom a field's pills mention on purpose.
+pub(super) fn mentions_of(edit: &TextEdit) -> matrix_core::Mentions {
+    let mut mentions = matrix_core::Mentions::default();
+    for (_, id) in edit.pills() {
+        if id == "everyone" {
+            mentions.room = true;
+        } else if let Some(user) = id.strip_prefix("user:")
+            && !mentions.user_ids.iter().any(|known| known == user)
+        {
+            mentions.user_ids.push(user.to_owned());
+        }
+    }
+    mentions
+}
+
+/// Puts Matrix HTML into a field, its mentions, spoilers, maths and custom emoji as pills.
+fn paste_matrix_html(field: &mut TextEdit, html: &str, body: &str) {
+    let pills = matrix_core::html::to_pills(html, matrix_core::html::Pills::Compose);
+    let _ = field.paste_html_with_pills(&pills, body);
 }
 
 /// Which message an edit changes: the account's message `event_id` in the timeline `key`.
@@ -205,9 +259,7 @@ impl Draft {
 fn field_of(draft: &matrix_core::Draft) -> TextEdit {
     let mut field = new_edit();
     match &draft.html {
-        Some(html) => {
-            let _ = field.paste_html(html, &draft.body);
-        }
+        Some(html) => paste_matrix_html(&mut field, html, &draft.body),
         None => field.insert(&draft.body),
     }
     field.clear_history();
@@ -226,6 +278,7 @@ pub struct Edit {
     pub target: EditTarget,
     pub body: String,
     pub html: Option<String>,
+    pub mentions: matrix_core::Mentions,
     field: TextEdit,
     original: (String, Option<String>),
 }
@@ -234,12 +287,23 @@ pub struct Edit {
 fn new_edit() -> TextEdit {
     TextEdit::new("")
         .rich()
-        .allow_marks([Mark::Bold, Mark::Italic, Mark::Strike, Mark::Code, Mark::Link(String::new())])
+        .allow_marks([
+            Mark::Bold,
+            Mark::Italic,
+            Mark::Strike,
+            Mark::Code,
+            Mark::Link(String::new()),
+            Mark::Pill(String::new()),
+        ])
         .allow_blocks([Block::Bullet(0), Block::Numbered(0), Block::Quote, Block::Code])
 }
 
 impl Composer {
     pub fn is_active(&self, format: Format) -> bool {
+        if let Some(pill) = format.pill() {
+            let caret = self.edit.focus;
+            return self.edit.pills().any(|(range, id)| id == pill && range.start < caret && caret <= range.end);
+        }
         match (format.mark(), format.block()) {
             (Some(mark), _) => self.edit.has_mark(&mark),
             (_, Some(block)) => std::mem::discriminant(&self.edit.active_block()) == std::mem::discriminant(&block),
@@ -248,6 +312,15 @@ impl Composer {
     }
 
     pub fn format(&mut self, format: Format) {
+        if let Some(pill) = format.pill() {
+            // The selection becomes the pill; nothing selected, nothing to hide or typeset.
+            let (start, end) = (self.edit.anchor.min(self.edit.focus), self.edit.anchor.max(self.edit.focus));
+            let label = self.edit.text[start..end].trim().to_owned();
+            if !label.is_empty() {
+                self.edit.replace_with_pill(start..end, pill, &label);
+            }
+            return;
+        }
         match (format.mark(), format.block()) {
             (Some(mark), _) => {
                 let selection = (self.edit.anchor.min(self.edit.focus), self.edit.anchor.max(self.edit.focus));
@@ -289,19 +362,52 @@ impl Composer {
         });
     }
 
+    /// Puts a suggestion in for the word being typed (`query`), one undo step: a pill for a
+    /// mention or custom emoji, the emoji itself, or a command's name; a space follows, so the
+    /// next word starts at once.
+    pub fn accept_suggestion(&mut self, query: &super::suggest::Query, suggestion: &super::suggest::Suggestion) {
+        use super::suggest::Suggestion;
+        let range = query.range.clone();
+        let pill = match suggestion {
+            Suggestion::Person { user_id, name, .. } => {
+                matrix_core::html::mention_id(user_id).map(|id| (id, name.clone()))
+            }
+            Suggestion::Room { room_id, name, .. } => {
+                matrix_core::html::mention_id(room_id).map(|id| (id, format!("#{name}")))
+            }
+            Suggestion::Everyone => Some(("everyone".to_owned(), "@room".to_owned())),
+            Suggestion::Custom(image) => Some((format!("emote:{}", image.url), format!(":{}:", image.shortcode))),
+            Suggestion::Emoji { .. } | Suggestion::Command(_) => None,
+        };
+        self.edit.undo_group(|edit| {
+            match (pill, suggestion) {
+                (Some((id, label)), _) => edit.replace_with_pill(range, id, &label),
+                (None, Suggestion::Emoji { emoji, .. }) => {
+                    edit.set_selection(range.start, range.end);
+                    edit.insert(emoji);
+                }
+                (None, Suggestion::Command(command)) => {
+                    edit.set_selection(range.start, range.end);
+                    edit.insert(&format!("/{}", command.name()));
+                }
+                (None, _) => return,
+            }
+            edit.insert(" ");
+        });
+        self.suggest.reset();
+    }
+
     /// Starts editing the user's message `event_id` in `key`: the field takes its text and
     /// formatting, and the draft (with its reply and attachments) is set aside until the edit
     /// is sent or dropped.
     pub fn start_edit(&mut self, target: EditTarget, body: &str, html: Option<&str>) {
         let mut field = new_edit();
         match html {
-            Some(html) => {
-                let _ = field.paste_html(html, body);
-            }
+            Some(html) => paste_matrix_html(&mut field, html, body),
             None => field.insert(body),
         }
         field.clear_history();
-        let original = (field.text.trim().to_owned(), html_of(&field));
+        let original = (body_of(&field), html_of(&field));
         self.edit_with(target, field, original);
     }
 
@@ -332,8 +438,9 @@ impl Composer {
         let editing = self.editing.as_ref()?;
         let edit = Edit {
             target: editing.target.clone(),
-            body: self.edit.text.trim().to_owned(),
+            body: body_of(&self.edit),
             html: html_of(&self.edit),
+            mentions: mentions_of(&self.edit),
             field: self.edit.clone(),
             original: editing.original.clone(),
         };
@@ -443,6 +550,48 @@ impl Composer {
         }
     }
 
+    /// Takes the field's first `len` bytes away (a command's name), one undo step.
+    pub fn cut_front(&mut self, len: usize) {
+        let len = len.min(self.edit.text.len());
+        self.edit.undo_group(|edit| {
+            edit.set_selection(0, len);
+            edit.insert("");
+            // The space after a command's name goes too.
+            let space = edit.text.len() - edit.text.trim_start().len();
+            if space > 0 {
+                edit.set_selection(0, space);
+                edit.insert("");
+            }
+        });
+    }
+
+    /// Adds `text` at the end of the field, a space before it when the field holds anything.
+    pub fn append(&mut self, text: &str) {
+        let end = self.edit.text.len();
+        self.edit.set_selection(end, end);
+        if self.edit.text.trim().is_empty() {
+            self.edit.insert(text);
+        } else {
+            self.edit.insert(&format!(" {text}"));
+        }
+    }
+
+    /// Hides the whole field's text as one spoiler (`/spoiler`).
+    pub fn hide_all(&mut self) {
+        let end = self.edit.text.len();
+        self.edit.set_selection(0, end);
+        self.format(Format::Spoiler);
+    }
+
+    /// Empties the field and drops its reply, keeping its focus: a command took its text.
+    pub fn clear(&mut self) {
+        let focused = self.edit.focused;
+        self.edit = new_edit();
+        self.edit.focused = focused;
+        self.reply_to = None;
+        self.suggest.reset();
+    }
+
     /// Opens or closes the formatting toolbar.
     pub fn toggle_formatting(&mut self) {
         self.formatting = !self.formatting;
@@ -489,9 +638,9 @@ impl Composer {
     /// carries formatting. The reply target, if any, goes with the first message.
     pub fn take_outgoing(&mut self) -> (Option<ReplyTarget>, Vec<Outgoing>) {
         let mut outgoing = Vec::new();
-        let body = self.edit.text.trim().to_owned();
+        let body = body_of(&self.edit);
         if !body.is_empty() {
-            outgoing.push(Outgoing::Text { body, html: html_of(&self.edit) });
+            outgoing.push(Outgoing::Text { body, html: html_of(&self.edit), mentions: mentions_of(&self.edit) });
         }
         outgoing.extend(self.attachments.drain(..).map(Outgoing::File));
         // The emptied field keeps its focus, so the next message can follow straight away.
@@ -515,7 +664,10 @@ mod tests {
 
     #[test]
     fn plain_text_should_be_sent_without_html() {
-        assert_eq!(composer("hello").take_outgoing().1, [Outgoing::Text { body: "hello".into(), html: None }]);
+        assert_eq!(
+            composer("hello").take_outgoing().1,
+            [Outgoing::Text { body: "hello".into(), html: None, mentions: Default::default() }]
+        );
     }
 
     #[test]

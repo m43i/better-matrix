@@ -76,11 +76,15 @@ impl State {
             return;
         };
         self.popover = None;
-        if let LinkTarget::Room { room, .. } = &permalink.target
+        if let LinkTarget::Room { room, event } = &permalink.target
             && let Some(joined) = self.joined_account(room, &account)
         {
             self.modal = None;
             self.open_linked(&joined, room, false);
+            // A link to a message goes on to it, wherever it shows (the room, or a thread).
+            if let Some(event) = event {
+                self.jump_to_message(&joined, room, event);
+            }
             return;
         }
         self.modal =

@@ -34,6 +34,10 @@ icons! {
     NUMBERS = "numbers": r#"<path d="M10 6h10M10 12h10M10 18h10M4 4h1.5v5M4 9h3M4 15.2c.3-.7 1-1.2 1.8-1.2 1 0 1.7.7 1.7 1.5 0 1.3-3.5 2.4-3.5 4.5h3.5"/>"#;
     QUOTE = "quote": r#"<path d="M5 5v14M10 8h9M10 12h9M10 16h6"/>"#;
     CODE_BLOCK = "code-block": r#"<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m10 10-2 2 2 2M14 10l2 2-2 2"/>"#;
+    MAP_PIN = "map-pin": r#"<path d="M20 10c0 5-8 12-8 12s-8-7-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/>"#;
+    STICKER = "sticker": r#"<path d="M15.5 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h9.5L21 15.5V6a3 3 0 0 0-3-3z"/><path d="M15 21v-3a3 3 0 0 1 3-3h3M9 9h.01M15 9h.01M8.5 14a4.5 4.5 0 0 0 5 1"/>"#;
+    SIGMA = "sigma": r#"<path d="M18 7V4H6l6 8-6 8h12v-3"/>"#;
+    CLOCK = "clock": r#"<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>"#;
     PAPERCLIP = "paperclip": r#"<path d="m20.5 11.5-8.4 8.4a5.5 5.5 0 0 1-7.8-7.8l8.4-8.4a3.7 3.7 0 0 1 5.2 5.2l-8.4 8.4a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/>"#;
     SEND = "send": r#"<path d="M21 3 10 14M21 3l-6.5 18-4.5-7-7-4.5z"/>"#;
     CLOSE = "close": r#"<path d="M6 6l12 12M18 6 6 18"/>"#;

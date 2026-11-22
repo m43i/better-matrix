@@ -134,6 +134,7 @@ impl Parser<'_> {
             "vec" => self.argument().chars().flat_map(|c| [c, '\u{20d7}']).collect(),
             "dot" => self.argument().chars().flat_map(|c| [c, '\u{307}']).collect(),
             "tilde" => self.argument().chars().flat_map(|c| [c, '\u{303}']).collect(),
+            function if FUNCTIONS.contains(&function) => function.to_owned(),
             other => match symbol(other) {
                 Some(symbol) => symbol.to_owned(),
                 // Kept, set apart from what follows it.
@@ -391,46 +392,15 @@ fn symbol(name: &str) -> Option<&'static str> {
         "rceil" => "⌉",
         "vert" | "lvert" | "rvert" => "|",
         "Vert" | "lVert" | "rVert" => "‖",
-        "sin" | "cos" | "tan" | "log" | "ln" | "exp" | "lim" | "max" | "min" | "det" | "sup" | "inf" | "arg"
-        | "deg" | "dim" | "gcd" | "mod" | "sinh" | "cosh" | "tanh" | "arcsin" | "arccos" | "arctan" | "sec" | "csc"
-        | "cot" | "ker" | "Pr" => return Some(function(name)),
         _ => return None,
     })
 }
 
-/// A named function, written out (`\sin` → `sin`).
-fn function(name: &str) -> &'static str {
-    match name {
-        "sin" => "sin",
-        "cos" => "cos",
-        "tan" => "tan",
-        "log" => "log",
-        "ln" => "ln",
-        "exp" => "exp",
-        "lim" => "lim",
-        "max" => "max",
-        "min" => "min",
-        "det" => "det",
-        "sup" => "sup",
-        "inf" => "inf",
-        "arg" => "arg",
-        "deg" => "deg",
-        "dim" => "dim",
-        "gcd" => "gcd",
-        "mod" => "mod",
-        "sinh" => "sinh",
-        "cosh" => "cosh",
-        "tanh" => "tanh",
-        "arcsin" => "arcsin",
-        "arccos" => "arccos",
-        "arctan" => "arctan",
-        "sec" => "sec",
-        "csc" => "csc",
-        "cot" => "cot",
-        "ker" => "ker",
-        _ => "Pr",
-    }
-}
+/// Named functions, written out as they are (`\\sin` → `sin`).
+const FUNCTIONS: [&str; 28] = [
+    "sin", "cos", "tan", "log", "ln", "exp", "lim", "max", "min", "det", "sup", "inf", "arg", "deg", "dim", "gcd",
+    "mod", "sinh", "cosh", "tanh", "arcsin", "arccos", "arctan", "sec", "csc", "cot", "ker", "Pr",
+];
 
 #[cfg(test)]
 mod tests {

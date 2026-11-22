@@ -65,6 +65,10 @@ pub struct Context<'a> {
     /// The widest a message's content can be, once the timeline has a size: pictures and GIFs
     /// fit it, so they never reach into the readers' column.
     pub content_width: f32,
+    /// The message just jumped to, lit a moment.
+    pub flash: Option<&'a str>,
+    /// Spoilers the user revealed.
+    pub revealed: &'a std::collections::HashSet<String>,
 }
 
 impl<'a> Context<'a> {
@@ -88,7 +92,14 @@ impl<'a> Context<'a> {
             reader_faces: crate::state::READER_FACES,
             readers_column: key.thread.is_none(),
             content_width: f32::INFINITY,
+            flash: s.flash.as_ref().map(|flash| flash.event_id.as_str()),
+            revealed: &s.revealed,
         }
+    }
+
+    /// What the text of the message `event_id` needs to draw.
+    fn look(&self, event_id: &'a str) -> super::message_text::Look<'a> {
+        super::message_text::Look { event_id, me: self.account.as_str(), revealed: self.revealed, media: self.media }
     }
 
     fn in_thread(&self) -> bool {
@@ -650,13 +661,13 @@ fn message_row(
     let interactive = !matches!(message.content, MessageContent::Call(_));
     let mut body = col().w_full().gap(4.0);
     if let Some(quote) = &message.reply_to {
-        body = body.child(quote_block(quote, p));
+        body = body.child(quote_block(cx, quote, p));
     }
     // A GIF link shows as the GIF, below the rest of the message (if any) like an attachment.
     match item.gif.as_ref().filter(|gif| cx.show_gifs && !cx.gifs.has_failed(&gif.url)) {
         Some(gif) => {
             if let Some(rest) = &gif.rest {
-                body = body.child(text_body(&message.event_id, &rest.plain, rest.rich.as_ref(), p));
+                body = body.child(text_body(&message.event_id, &rest.plain, rest.rich.as_ref(), cx, p));
             }
             body = body.child(linked_gif(&gif.url, cx.content_width, cx.gifs, p));
         }
@@ -688,14 +699,23 @@ fn message_row(
         body = body.child(row().w_full().justify_end().child(indicator));
     }
 
-    let mut status = Vec::new();
-    if message.edited {
-        status.push(t!("message.edited"));
-    }
-    if message.pending {
-        status.push(t!("message.sending"));
-    }
-    let status = (!status.is_empty()).then(|| text(status.join(" · ")).font(font::META).color(p.text_muted));
+    // "edited" opens the message's earlier versions.
+    let edited = message.edited.then(|| {
+        let (room_id, event_id) = (cx.key.room_id.clone(), message.event_id.clone());
+        text(t!("message.edited"))
+            .key(cx.key(&format!("edited-{}", message.event_id)))
+            .font(font::META)
+            .color(p.text_muted)
+            .role("button")
+            .label(t!("message.edit_history"))
+            .help(t!("message.edit_history"))
+            .cursor(rune::Cursor::Pointer)
+            .focusable(true)
+            .on_press(move |s: &mut State| s.open_edit_history(&room_id, &event_id))
+    });
+    let sending = message.pending.then(|| text(t!("message.sending")).font(font::META).color(p.text_muted));
+    let status =
+        (edited.is_some() || sending.is_some()).then(|| row().gap(6.0).center_y().children(edited).children(sending));
     let content = if continues {
         let mut content = col().grow(1.0).min_w(0.0).child(body);
         if let Some(status) = status {
@@ -785,8 +805,13 @@ fn message_row(
         }
         row = row.child(readers);
     }
-    if pinned {
+    // The message jumped to lights up a moment; one mentioning the user keeps a warm mark.
+    if cx.flash == Some(message.event_id.as_str()) {
+        row = row.fill(p.accent.alpha(0.16)).border_sides([0.0, 0.0, 0.0, 3.0], p.accent);
+    } else if pinned {
         row = row.fill(p.accent.alpha(0.06)).border_sides([0.0, 0.0, 0.0, 3.0], p.accent);
+    } else if message.highlighted && message.sender_id != cx.account.as_str() {
+        row = row.fill(p.warning.alpha(0.10)).border_sides([0.0, 0.0, 0.0, 3.0], p.warning);
     }
     if interactive {
         row = row.hover(p.hover);
@@ -889,18 +914,31 @@ fn toolbar(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
     bar
 }
 
-/// The message a reply answers: who wrote it and an excerpt, behind a bar.
-fn quote_block(quote: &Quote, p: &Palette) -> El {
+/// The message a reply answers: who wrote it and an excerpt, behind a bar. Pressing it goes to
+/// that message.
+fn quote_block(cx: &Context<'_>, quote: &Quote, p: &Palette) -> El {
     let sender = quote.sender_name.clone().unwrap_or_default();
     let body = quote_text(quote);
-    row().max_w(560.0).gap(8.0).child(el().w(3.0).h_full().min_h(32.0).radius(2.0).fill(p.text_muted.alpha(0.5))).child(
-        col()
-            .grow(1.0)
-            .min_w(0.0)
-            .py(2.0)
-            .child(text(sender).font(font::META.family(rune::Family::Sans)).color(p.text).truncate())
-            .child(text(body).font(font::META).color(p.text_muted).max_lines(2).truncate()),
-    )
+    let (account, room_id, event_id) = (cx.account.clone(), cx.key.room_id.clone(), quote.event_id.clone());
+    row()
+        .key(cx.key(&format!("quote-{}", quote.event_id)))
+        .max_w(560.0)
+        .gap(8.0)
+        .radius(4.0)
+        .hover(p.hover)
+        .role("button")
+        .label(tf!("quote.jump", name = sender))
+        .cursor(rune::Cursor::Pointer)
+        .on_press(move |s: &mut State| s.jump_to_message(&account, &room_id, &event_id))
+        .child(el().w(3.0).h_full().min_h(32.0).radius(2.0).fill(p.text_muted.alpha(0.5)))
+        .child(
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .py(2.0)
+                .child(text(sender).font(font::META.family(rune::Family::Sans)).color(p.text).truncate())
+                .child(text(body).font(font::META).color(p.text_muted).max_lines(2).truncate()),
+        )
 }
 
 /// What a quote says of the answered message: its text, the kind of call it was, or that it
@@ -1002,7 +1040,9 @@ fn linked_gif(url: &str, max_width: f32, gifs: &GifCache, p: &Palette) -> El {
 fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Palette) -> El {
     let media = cx.media;
     match (&item.message.content, &item.rich) {
-        (MessageContent::Text { body, .. }, rich) => text_body(&item.message.event_id, body, rich.as_ref(), p),
+        (MessageContent::Text { body, .. }, rich) => text_body(&item.message.event_id, body, rich.as_ref(), cx, p),
+        (MessageContent::Emote { body, .. }, rich) => emote_body(item, body, rich.as_ref(), cx, p),
+        (MessageContent::Location(location), _) => location_card(&item.message.event_id, location, cx, p),
         (MessageContent::Attachment(attachment), _)
             if attachment.kind == AttachmentKind::Audio && audio_supported() =>
         {
@@ -1090,9 +1130,9 @@ fn call_card(cx: &Context<'_>, event_id: &str, card: &CallCard, latest_call: boo
 
 /// Message text, formatted when the sender formatted it. It selects, so it shows the text cursor
 /// even inside a row that opens its thread.
-fn text_body(event_id: &str, plain: &str, rich: Option<&rune::TextEdit>, p: &Palette) -> El {
+fn text_body(event_id: &str, plain: &str, rich: Option<&rune::TextEdit>, cx: &Context<'_>, p: &Palette) -> El {
     match rich {
-        Some(rich) => super::message_text::formatted(&format!("rich-{event_id}"), rich, p),
+        Some(rich) => super::message_text::formatted(&format!("rich-{event_id}"), rich, cx.look(event_id), p),
         // Its own handler keeps the clicks, and those just beside it: a double-click takes a
         // word, a triple-click the paragraph, rather than opening the thread.
         None => super::message_text::reach(
@@ -1109,6 +1149,89 @@ fn text_body(event_id: &str, plain: &str, rich: Option<&rune::TextEdit>, p: &Pal
                 .on_press(|_: &mut State| {}),
         ),
     }
+}
+
+/// An emote: the sender's name, then what they do, in italics ("* Ada waves").
+fn emote_body(item: &TimelineItem, body: &str, rich: Option<&rune::TextEdit>, cx: &Context<'_>, p: &Palette) -> El {
+    let event_id = &item.message.event_id;
+    let name = &item.message.sender_name;
+    match rich {
+        Some(rich) => row()
+            .gap(4.0)
+            .items_start()
+            .child(text(format!("* {name}")).font(font::BODY.italic()).color(p.text_muted))
+            .child(super::message_text::formatted(&format!("rich-{event_id}"), rich, cx.look(event_id), p).shrink()),
+        None => super::message_text::reach(
+            text(format!("* {name} {body}"))
+                .key(format!("text-{event_id}"))
+                .font(font::BODY.italic())
+                .color(p.text)
+                .self_start()
+                .wrap_anywhere()
+                .selectable(true)
+                .cursor(rune::Cursor::Text)
+                .on_press(|_: &mut State| {}),
+        ),
+    }
+}
+
+/// A shared place: its map from OpenStreetMap with a pin, what the sender called it and its
+/// coordinates, the map's credit, and a way to open it on openstreetmap.org.
+fn location_card(event_id: &str, location: &matrix_core::Location, cx: &Context<'_>, p: &Palette) -> El {
+    let (w, h) = (crate::state::MAP_PIXELS.0 as f32, crate::state::MAP_PIXELS.1 as f32);
+    let width = w.min(cx.content_width.max(120.0) - 2.0).min(360.0);
+    let height = (width * h / w).round();
+    let image = location.map.as_ref().and_then(|map| cx.media.image(map));
+    let map = el()
+        .key(cx.key(&format!("map-{event_id}")))
+        .size(width, height)
+        .fill(p.surface)
+        .role("img")
+        .label(t!("location.map"));
+    let map = match image {
+        Some(image) => map.pixels_fit(image.pixels(), SurfaceFit::Fill),
+        None => map.center().child(icon(&icons::MAP_PIN, 28.0).color(p.text_muted)),
+    };
+    let coordinates = matrix_core::geo::coordinates(&location.geo_uri)
+        .map(|(latitude, longitude)| format!("{latitude:.5}, {longitude:.5}"))
+        .unwrap_or_else(|| location.geo_uri.clone());
+    let title = location.description.clone().unwrap_or_else(|| t!("location.shared").to_owned());
+    let link = matrix_core::geo::web_link(&location.geo_uri);
+    let mut words = col()
+        .w_full()
+        .px(12.0)
+        .py(8.0)
+        .gap(2.0)
+        .child(text(title).font(font::BODY_STRONG).color(p.text).wrap())
+        .child(text(coordinates).font(font::META).color(p.text_muted).selectable(true));
+    let credit = text(t!("location.credit")).font(font::META).color(p.text_muted).shrink().truncate();
+    let mut footer = row().w_full().gap(8.0).center_y().child(credit).child(el().grow(1.0));
+    if let Some(link) = link.clone() {
+        footer = footer.child(
+            text(t!("location.open"))
+                .key(cx.key(&format!("map-open-{event_id}")))
+                .font(font::META)
+                .color(p.accent)
+                .role("link")
+                .cursor(rune::Cursor::Pointer)
+                .on_press_tx(move |s: &mut State, tx| s.open_link(&link, tx)),
+        );
+    }
+    words = words.child(footer.pt(4.0));
+    let mut card = col()
+        .key(cx.key(&format!("location-{event_id}")))
+        .w(width + 2.0)
+        .mt(4.0)
+        .radius(10.0)
+        .clip_rounded(10.0)
+        .fill(p.surface)
+        .border(1.0, p.divider)
+        .child(map)
+        .child(words);
+    if let Some(link) = link {
+        card = card.cursor(rune::Cursor::Pointer).on_press_tx(move |s: &mut State, tx| s.open_link(&link, tx));
+    }
+    card
 }
 
 /// A message's stand-in when its content can't be shown.

@@ -41,6 +41,8 @@ pub struct TimelineItem {
     pub gif: Option<GifLink>,
     /// The first other link in the text, which gets a preview card.
     pub link: Option<String>,
+    /// The custom emoji its text shows, to fetch while it is on screen.
+    pub emotes: Vec<matrix_core::MediaRef>,
 }
 
 /// One entry of a room's timeline, ready to render.
@@ -114,6 +116,22 @@ impl Entry {
             _ => (None, None),
         };
         first.into_iter().chain(second)
+    }
+
+    /// The custom emoji its text shows.
+    pub fn emotes(&self) -> &[matrix_core::MediaRef] {
+        match &self.kind {
+            EntryView::Message(item) => &item.emotes,
+            _ => &[],
+        }
+    }
+
+    /// The map of the place it shares, if it shares one.
+    pub fn location_map(&self) -> Option<&matrix_core::MediaRef> {
+        match &self.message()?.content {
+            MessageContent::Location(location) => location.map.as_ref(),
+            _ => None,
+        }
     }
 
     /// The image attachment it shows a preview of, if any.
@@ -556,6 +574,7 @@ impl TimelineItem {
             _ => None,
         };
         let (rich, gif) = match &message.content {
+            MessageContent::Emote { body, html } => (rich_body(body, html.as_deref()), None),
             MessageContent::Text { body, html } => {
                 let gif = matrix_core::links::find_gif_link(body).map(|url| {
                     let plain = matrix_core::links::without_link(body, url);
@@ -567,7 +586,13 @@ impl TimelineItem {
             }
             _ => (None, None),
         };
-        Self { message, rich, gif, link }
+        let emotes = rich
+            .iter()
+            .chain(gif.as_ref().and_then(|gif| gif.rest.as_ref()).and_then(|rest| rest.rich.as_ref()))
+            .flat_map(|edit| edit.pills())
+            .filter_map(|(_, id)| id.strip_prefix("emote:").and_then(matrix_core::MediaRef::from_mxc))
+            .collect();
+        Self { message, rich, gif, link, emotes }
     }
 }
 
@@ -577,7 +602,8 @@ impl TimelineItem {
 fn rich_body(plain: &str, html: Option<&str>) -> Option<TextEdit> {
     use rune::{Mark, MarkRange};
     let mut edit = match html {
-        Some(html) => TextEdit::from_html(html),
+        // Mentions, spoilers, maths and custom emoji become pills the view draws.
+        Some(html) => TextEdit::from_html(&matrix_core::html::to_pills(html, matrix_core::html::Pills::Display)),
         None if matrix_core::links::link_ranges(plain).next().is_some() => {
             TextEdit::from_parts(plain, Vec::new(), Vec::new())
         }
@@ -585,7 +611,9 @@ fn rich_body(plain: &str, html: Option<&str>) -> Option<TextEdit> {
     };
     let taken = |range: &std::ops::Range<usize>| {
         edit.marks().iter().any(|mark| {
-            matches!(mark.mark, Mark::Link(_) | Mark::Code) && mark.start < range.end && range.start < mark.end
+            matches!(mark.mark, Mark::Link(_) | Mark::Code | Mark::Pill(_))
+                && mark.start < range.end
+                && range.start < mark.end
         })
     };
     let links: Vec<MarkRange> = matrix_core::links::link_ranges(&edit.text)

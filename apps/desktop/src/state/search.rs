@@ -348,7 +348,9 @@ impl super::State {
         }) {
             let prefix = if jump.key.thread.is_some() { "thread-msg" } else { "msg" };
             tx.scroll_into_view(format!("{prefix}-{}", entry.id));
+            let event_id = jump.event_id.clone();
             self.message_jump = None;
+            self.flash(&event_id);
             return true;
         }
         if timeline.loading || timeline.history_error.is_some() {

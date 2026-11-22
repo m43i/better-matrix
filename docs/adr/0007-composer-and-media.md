@@ -23,7 +23,80 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     text. Pressing a link opens it in the browser (`on_link`, `State::open_link`).
   - A pasted lone web address goes into the draft as a link, and pasted over a selection links
     the selection (`Composer::paste_link`, one undo step); text typed after it is plain.
-  - `Format` lists every toolbar action; the toolbar renders the list.
+  - `Format` lists every toolbar action; the toolbar renders the list. Spoiler and Formula
+    turn the selection into a pill (below).
+- **Pills:** what Matrix HTML carries that isn't formatting is one pill in a field (Rune's
+  `Mark::Pill`, `<span data-pill="id">` in its HTML): mentions (`user:@…`, `room:#…` or a room
+  ID), `@room` (`everyone`), spoilers (`spoiler`), formulas (`math`) and custom emoji
+  (`emote:mxc://…`). `matrix_core::html` is the one translation, both ways: `to_pills` reads a
+  message's HTML for showing it (`Pills::Display`: formulas as Unicode) or editing it
+  (`Pills::Compose`: formulas as their LaTeX), `from_pills` writes a field's pills as Matrix
+  HTML (a matrix.to link, `data-mx-spoiler`, `data-mx-maths` with the LaTeX as its `<code>`
+  fallback, `<img data-mx-emoticon>` 32 px high). A field with a pill counts as formatted, so it
+  goes with HTML. Drafts keep Matrix HTML and come back as pills, as edits do. A spoiler's words
+  stay out of the plain body (`[Spoiler]`), so clients that show only the body don't show them.
+- **Mentions:** every text, emote and edit carries `m.mentions` (`Outgoing::Text::mentions`,
+  `Command::Edit::mentions`), empty when it mentions nobody: a message mentions only the people
+  its pills name, never someone whose name its words happen to hold (the spec's intentional
+  mentions). A reply adds the replied-to sender, as the SDK does. Received mention links show as
+  chips in the accent colour; one naming the reader is filled, and the row of a message whose
+  push rules highlight it (`Message::highlighted`) gets a warm tint and bar, as in Slack.
+- **Suggestions** (`state::suggest`): the word before the caret asks for them when it starts
+  with `@` (room members, then `@room`), `#` (joined rooms, not direct chats), `:` and two
+  letters (the packs' custom emoji, then emoji whose short code starts with it, then whose name
+  holds it) or `/` at the start of the message (commands). Never inside code, a pill or a
+  selection. The list is worked out from the field each frame, eight at most; a composer keeps
+  only the pick and a dismissal for the word they were made for (`Suggest`), so typing on keeps
+  them and a new word starts over. Up and Down move round, Tab and Enter take, Escape hides the
+  list for that word; a press takes one. Taking one puts in a pill (mentions by display name,
+  as Element does; rooms as `#name`) or the emoji, then a space. Members load when `@` is first
+  typed in a room whose list isn't here (`load_for_suggestions`, from `poll`). The list sits on
+  the composer's frame at the window's root and takes no focus.
+- **Slash commands** (`state::slash`): `/me`, `/shrug`, `/tableflip`, `/unflip`, `/lenny`,
+  `/plain`, `/spoiler`, `/invite`, `/join`, `/leave`, `/topic`, `/nick`. Each becomes something
+  that exists: an emote or text through the usual send (with the draft's reply), an invite, the
+  link dialog for a join (`open_typed_link`), the leave confirmation, `Command::SetTopic`, the
+  global display name. A name the app doesn't know stops the send with a notice and keeps the
+  text: a typo never goes out. `//` sends a leading slash; `/usr/bin` is a message.
+- **Spoilers and formulas:** received spoilers draw as a block of their own colour, carrying an
+  app link (`SPOILER_LINK`) a press reveals for the run (`State::revealed`). Formulas
+  (`data-mx-maths`) show as one line of Unicode on a chip, in italics (`matrix_core::math`:
+  Greek and symbols by name, scripts in Unicode's super- and subscripts or `^(…)`, `\frac` as
+  `a/b`, unknown commands kept); there is no typesetting engine for Rune, and Unicode keeps
+  selection and copy working. The mobile port runs the same vectors (`math.json`).
+- **Custom emoji and stickers** (MSC2545 image packs, `matrix_core::packs`): the user's pack
+  (`im.ponies.user_emotes`), the room's (`im.ponies.room_emotes`, one per state key) and those
+  enabled everywhere (`im.ponies.emote_rooms`), read from the store, listed per room once a run
+  (`Command::ListImagePacks`; the sticker picker lists again as it opens). The emoji picker
+  leads with the room's custom emoji; a sticker button opens a grid of the packs' stickers, a
+  press sends `Outgoing::Sticker` (`m.sticker`). Received custom emoji draw as their picture
+  inline (`El::inline_icon`), their short code kept as unseen text so copying gives `:code:`;
+  pictures load like other media on screen (`TimelineItem::emotes`, 128 px). Adding to packs
+  stays with clients that edit them.
+- **Locations** (`matrix_core::geo`): `Outgoing::Location` sends `m.location` with a
+  `geo:` URI, a pin asset (MSC3488) and the place's name as its body (else its coordinates).
+  Maps come from OpenStreetMap, as asked: a map is a `MediaRef` (`osm:lat,lon,zoom`) that
+  `Command::FetchMedia` draws from the standard tiles at the size asked for, with a pin, so maps
+  load, cache and retry as pictures do on both apps. Tiles are fetched two at a time and the last
+  64 kept in memory, with a User-Agent naming the app and its home (OpenStreetMap's tile policy);
+  every map credits "© OpenStreetMap contributors". The location dialog (`Modal::Location`) finds
+  places with Nominatim on Enter or Search only (its policy forbids searching as one types), in
+  the app's language, or takes typed coordinates; the timeline's card shows the map, the name,
+  the coordinates and "Open in OpenStreetMap". The desktop has no position of its own to share.
+- **Scheduled messages** (MSC4140 delayed events, `matrix_core::scheduled`): the button beside
+  send (or right-clicking send) offers in 30 minutes, in an hour, tomorrow 09:00 and next Monday
+  09:00, local time; the server sends the message then, whether or not the app runs. Text,
+  emotes, stickers, places and polls can be scheduled, with a reply or into a thread
+  (relations written as the SDK would); uploads can't (they go when sent). In an encrypted room
+  the message is encrypted before the server holds it: the SDK encrypts only what it sends
+  itself, so each account's client is built on a base client of the engine's own
+  (`account::Crypto`, through the builder's `base_client`, the same SQLite stores and defaults
+  the builder would make) whose `OlmMachine` the engine drives as the SDK's send path does:
+  members synced, unknown or outdated devices queried, sessions claimed, the room key shared
+  (`BaseClient::share_room_key`), then `encrypt_room_event_raw`, under the store's cross-process
+  lock. A bar above the room's composer counts the room's scheduled messages and lists them with
+  send now and cancel (`Command::UpdateScheduled`); each account's list is asked for once a run
+  and comes back after every change. One this device can't decrypt shows as "Encrypted message".
 - **Composer layout:**
   - Room and thread editors grow up to eight lines, then scroll inside their own viewport,
     keeping the caret visible while typing or pasting. Vertical padding and the bottom bar stay outside
@@ -318,8 +391,17 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
 
 ## Consequences
 
-- What you type is what others see, through one model. Tags outside Rune's subset (tables,
-  colours, spoilers) render as plain text.
+- What you type is what others see, through one model. Tags outside Rune's subset and the pills
+  (tables, colours) render as plain text.
+- Formulas read as Unicode, not typeset: fractions and roots stay on one line.
+- Scheduled messages depend on the server enabling MSC4140 (Synapse's
+  `max_event_delay_duration`, which also caps how far ahead); a server without it refuses with a
+  notice. Their encryption follows the SDK's send path by hand: an SDK upgrade must be checked
+  against `Room::preshare_room_key` and `ensure_room_encryption_ready`. A message scheduled in
+  an encrypted room may go out with a room key the room rotated since; members who were given
+  that key still decrypt it, a member who joined in between can't.
+- Every map and place search contacts OpenStreetMap's servers from the device (not the
+  homeserver): the app's name, the place, and the device's address.
 - Only what the user looks at is downloaded, and a server hiccup heals without a restart.
 - Two media with the same bytes share one decode in Rune but count twice here; an animation
   whose frame count can't be read counts as one frame.

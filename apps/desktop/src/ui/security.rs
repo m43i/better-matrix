@@ -37,6 +37,8 @@ pub fn dialog_for(modal: &Modal, p: &Palette) -> Option<El> {
         | Modal::Invitation { .. }
         | Modal::PublicRooms { .. }
         | Modal::Poll
+        | Modal::Location
+        | Modal::EditHistory(_)
         | Modal::Link(_) => return None,
     })
 }

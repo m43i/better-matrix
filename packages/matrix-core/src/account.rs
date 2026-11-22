@@ -85,7 +85,7 @@ pub struct Account {
     pub(crate) drafts: crate::drafts::DraftQueue,
     /// The client's own crypto, for sends the SDK doesn't encrypt itself (`crate::scheduled`);
     /// `None` in tests.
-    pub(crate) crypto: Option<Crypto>,
+    pub(crate) crypto: Option<Box<Crypto>>,
 }
 
 /// The base client a [`Client`] was built on, kept to reach its encryption machine: the SDK
@@ -335,7 +335,7 @@ impl Account {
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
-            crypto: Some(crypto),
+            crypto: Some(Box::new(crypto)),
         }
     }
 
@@ -479,7 +479,7 @@ impl Account {
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
-            crypto: Some(crypto),
+            crypto: Some(Box::new(crypto)),
         })
     }
 

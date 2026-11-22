@@ -254,7 +254,55 @@ keeps it, coming back brings it back, and its text stays in this device's store 
 reply and attachments while the app runs).
 
 **Format**
-: One composer formatting action (bold, link, bulleted list, …).
+: One composer formatting action (bold, link, bulleted list, spoiler, formula, …).
+
+**Pill**
+: Something in a text that isn't plain words, held as one piece the caret steps over: a
+mention, `@room`, a spoiler, a formula, a custom emoji. A field holds it as Rune's
+`Mark::Pill` with an id (`user:@ada:x`, `room:#rust:x`, `everyone`, `spoiler`, `math`,
+`emote:mxc://…`); `matrix_core::html` turns Matrix HTML into pills and back.
+
+**Mention**
+: A message naming someone (or a room) on purpose: a link to them on matrix.to in its HTML,
+and their ID in its `m.mentions`, so they are notified whatever the text says. `@room` mentions
+everyone. A message mentioning the user is **highlighted** (`Message::highlighted`).
+
+**Suggestion**
+: What the composer offers for the word being typed: people after `@`, rooms after `#`, emoji
+and custom emoji after `:` and two letters, slash commands at the start (`state::suggest`).
+
+**Slash command**
+: A message starting with `/name` that does something instead of being sent as it is: `/me`,
+`/shrug`, `/invite`, `/join`, `/topic`, … (`SlashCommand`). `//` sends a leading slash.
+
+**Emote**
+: A message that says what its sender does ("* Ada waves"), sent with `/me`
+(`MessageContent::Emote`, `Outgoing::Emote`).
+
+**Spoiler**
+: Words hidden until the reader presses them (`data-mx-spoiler`).
+
+**Formula**
+: LaTeX in a message (`data-mx-maths`), shown as Unicode text (`matrix_core::math`).
+
+**Image pack**
+: A set of images with short codes, the user's own or a room's (MSC2545), each usable as a
+**custom emoji** in text, a **sticker** sent on its own, or both (`ImagePack`, `PackImage`).
+
+**Location**
+: A place a message shares (`m.location`), shown with a **map** drawn from OpenStreetMap's
+tiles (`matrix_core::geo`), fetched like any media.
+
+**Scheduled message**
+: A message the server holds to send later (MSC4140's delayed events), encrypted like any
+other in an encrypted room (`ScheduledMessage`).
+
+**Edit history**
+: Every version an edited message went through, from its "edited" label (`EditVersion`).
+
+**Message jump**
+: Going to one message from a link, a reply's quote, a pin or a search hit: its timeline opens
+(the room's, or its thread's) and history loads until it shows; it then **flashes** a moment.
 
 **Attachment**
 : A file sent with a message: an image, video, audio clip or other file.

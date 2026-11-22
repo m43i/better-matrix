@@ -16,12 +16,16 @@ mod call_glow;
 mod call_layout;
 mod composer;
 mod drafts;
+mod edit_history;
 mod gifs;
+mod jump;
 mod link_previews;
 mod links;
+mod location;
 mod media;
 mod message_actions;
 mod navigation;
+mod packs;
 mod panes;
 mod poll;
 mod preview;
@@ -30,11 +34,14 @@ mod readers;
 mod receipts;
 mod retry;
 mod room_discovery;
+mod scheduled;
 mod search;
 mod sections;
 mod settings;
 mod sign_in;
+mod slash;
 mod status_message;
+mod suggest;
 mod typing;
 mod updates;
 
@@ -59,11 +66,14 @@ pub use attachments::{AttachmentAction, can_open_attachment};
 pub use call::Call;
 pub use call_layout::{CallLayout, CallTile};
 pub use composer::{Composer, EditTarget, Format, ReplyTarget, VoiceMemo};
+pub use edit_history::EditHistory;
 pub use gifs::GifCache;
 pub use link_previews::LinkPreviews;
 pub use links::{LinkDialog, LinkStep};
+pub use location::{LocationForm, MAP_PIXELS, MAP_SIZE};
 pub use media::MediaCache;
 pub use navigation::{navigate, navigate_now};
+pub use packs::PACK_IMAGE_SIZE;
 pub use panes::{Pane, PaneLayout, PaneSize, PaneWidths};
 pub use poll::{MAX_ANSWERS, PollForm};
 pub use preview::{
@@ -72,15 +82,20 @@ pub use preview::{
 pub use profile::{ContactStep, ProfileForm};
 pub use readers::{READER_FACES, ReaderMenu};
 pub use room_discovery::Directory;
+pub use scheduled::{When, local_offset};
 pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches};
 pub use sections::{DIRECT, INVITATIONS, ROOMS, SectionView, is_builtin, ordered_spaces, sections};
 pub use settings::{Appearance, PlaybackSpeed, Settings, SettingsSection, Zoom};
 pub use sign_in::{SignInForm, SignInStep};
 pub use status_message::{leading_emoji, suggestions as status_suggestions};
+pub use suggest::{Suggestion, Trigger};
 pub use updates::Update;
 
 use crate::i18n::{Language, t, tf};
 use crate::platform::{Shell, Toast};
+
+/// What the link ids a spoiler's words carry start with ([`State::open_link`] reveals them).
+pub const SPOILER_LINK: &str = "better-matrix:spoiler/";
 
 /// Which screen the window shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -142,6 +157,12 @@ pub enum Popover {
     CallLayout,
     /// The options of a select in settings.
     Select(SelectFor),
+    /// The stickers of the room's image packs, for a composer.
+    Stickers(ComposerTarget),
+    /// When to send a composer's message later, from beside its send button.
+    Schedule(ComposerTarget),
+    /// The room's scheduled messages, from the bar above its composer.
+    Scheduled,
 }
 
 /// Which setting a select chooses.
@@ -376,6 +397,10 @@ pub enum Modal {
     SignIn,
     /// Writing a poll (`State::poll_form`).
     Poll,
+    /// Sharing a place (`State::location`).
+    Location,
+    /// The versions an edited message went through.
+    EditHistory(Box<EditHistory>),
     /// "Are you sure?" before something that can't be undone.
     Confirm(Confirm),
     /// Verifying this session with another of the user's sessions. `flow_id` is `None` while
@@ -541,6 +566,20 @@ enum Purpose {
     Delete,
     /// Message utilities whose failures become a notice.
     MessageAction,
+    /// A slash command's own action (a topic, a display name); a failure becomes a notice.
+    Command,
+    /// Listing a room's image packs; a failure leaves the pickers without them.
+    Packs,
+    /// Searching places for the location dialog; a failure shows in it.
+    Places,
+    /// Finding where a linked or quoted message shows.
+    Locate,
+    /// Listing the account's scheduled messages; a server without them lists none.
+    ListScheduled,
+    /// Scheduling a message, or sending or cancelling a scheduled one.
+    Schedule,
+    /// Reading a message's versions for the edit history dialog.
+    EditHistory,
     /// Listing the messages an account saved; a failure shows in the list.
     Saved(AccountId),
     /// Reading the draft the store keeps for a timeline; a failure lets the next visit ask again.
@@ -689,6 +728,16 @@ pub struct State {
     /// The top bar's search.
     pub search: PeopleSearch,
     pub message_jump: Option<search::MessageJump>,
+    /// The message just jumped to, lit a moment.
+    pub flash: Option<jump::Flash>,
+    /// Rooms' custom emoji and sticker packs.
+    pub packs: packs::Packs,
+    /// The location dialog, while [`Modal::Location`] shows.
+    pub location: LocationForm,
+    /// Each account's scheduled messages.
+    pub scheduled: scheduled::Scheduled,
+    /// Spoilers the user revealed, by the link id their words carry in a message.
+    pub revealed: HashSet<String>,
     /// The invite dialog's search.
     pub invite_search: PeopleSearch,
     /// The new-chat search.
@@ -834,6 +883,11 @@ impl State {
             preview: None,
             search: PeopleSearch::default(),
             message_jump: None,
+            flash: None,
+            packs: packs::Packs::default(),
+            location: LocationForm::default(),
+            scheduled: scheduled::Scheduled::default(),
+            revealed: HashSet::new(),
             invite_search: PeopleSearch::default(),
             chat_search: PeopleSearch::default(),
             audio: None,
@@ -1091,6 +1145,8 @@ impl State {
             }
             Event::AccountRemoved(id) => {
                 self.directories.retain(|(account, _), _| *account != id);
+                self.packs.forget(&id);
+                self.scheduled.forget(&id);
                 // A suspended account stays listed in `suspended`: removing it is what suspending
                 // does here.
                 self.accounts.remove(&id);
@@ -1492,6 +1548,17 @@ impl State {
             Event::Files { account, room_id, files } => self.accounts.set_files(&account, room_id, files),
             // Pushes are for phones: the desktop syncs while it runs and never registers a pusher.
             Event::PushContent { .. } => {}
+            Event::EditHistory { event_id, versions, .. } => self.edit_history_listed(&event_id, versions),
+            Event::MessageLocated { account, key, event_id, .. } => self.message_located(&account, &key, &event_id),
+            Event::ScheduledMessages { account, messages } => self.scheduled.listed(account, messages),
+            Event::ImagePacks { account, room_id, packs } => {
+                if let Some(room_id) = room_id {
+                    self.packs.listed(account, room_id, packs);
+                }
+                self.request_pack_images();
+                self.request_timeline_media();
+            }
+            Event::PlacesFound { request, places } => self.places_found(request, places),
         }
         self.remember_account();
         if !location.is_current(self) {
@@ -1750,6 +1817,12 @@ impl State {
                 self.resume_edits();
             }
             Purpose::MessageAction => self.notice = Some(tf!("notice.message_action", error = error)),
+            Purpose::Command => self.notice = Some(tf!("notice.command", error = error)),
+            Purpose::Packs | Purpose::ListScheduled => {}
+            Purpose::Places => self.places_failed(request, error),
+            Purpose::Locate => self.notice = Some(t!("search.message_unavailable").to_owned()),
+            Purpose::Schedule => self.notice = Some(tf!("notice.schedule", error = error)),
+            Purpose::EditHistory => self.edit_history_failed(error),
             Purpose::Saved(account) => self.accounts.saved_failed(&account, error),
             Purpose::Draft(owner) => {
                 self.drafts_asked.remove(&owner);
@@ -2057,6 +2130,14 @@ impl State {
         self.retry_due(now, tx);
         changed |= self.search_people(now);
         changed |= self.position_message(tx);
+        changed |= self.expire_flash(now, tx);
+        self.load_for_suggestions();
+        if self.screen() == Screen::Chat
+            && let Some(account) = self.nav.account.clone()
+            && self.accounts.get(&account).is_some_and(|data| !data.rooms.is_empty())
+        {
+            self.want_scheduled(&account);
+        }
         // Searches go out for the active account; with none, nothing waits.
         if let Some(wait) = [&self.search, &self.invite_search, &self.chat_search]
             .iter()
@@ -2379,6 +2460,13 @@ impl State {
             }
             for media in entry.avatars() {
                 wanted.push((account.clone(), media.clone(), AVATAR_SIZE, Some(AVATAR_PIXELS)));
+            }
+            // Custom emoji in its text, and the map of a place it shares.
+            for media in entry.emotes() {
+                wanted.push((account.clone(), media.clone(), PACK_IMAGE_SIZE, Some((128, 128))));
+            }
+            if let Some(map) = entry.location_map() {
+                wanted.push((account.clone(), map.clone(), MAP_SIZE, Some(MAP_PIXELS)));
             }
             // A link card's image.
             if self.settings.show_link_previews
@@ -4508,14 +4596,28 @@ impl State {
                     self.composer_mut(other).cancel_edit();
                 }
                 let composer::EditTarget { account, key, event_id } = edit.target.clone();
-                let (body, html) = (edit.body.clone(), edit.html.clone());
-                self.dispatch(Command::Edit { account, key, event_id, body, html }, Purpose::Edit(Box::new(edit)));
+                let (body, html, mentions) = (edit.body.clone(), edit.html.clone(), edit.mentions.clone());
+                self.dispatch(
+                    Command::Edit { account, key, event_id, body, html, mentions },
+                    Purpose::Edit(Box::new(edit)),
+                );
             }
             self.resume_edits();
             return;
         }
-        let (reply_to, messages) = self.composer_mut(target).take_outgoing();
+        let Some((reply_to, messages)) = self.take_messages(target) else { return };
         self.send_from(target, reply_to, messages, tx);
+    }
+
+    /// What a composer sends and the message it answers, its text run as a slash command when
+    /// it is one; `None` when a command did all there was to do or stopped with a notice (the
+    /// reply then stays).
+    fn take_messages(&mut self, target: ComposerTarget) -> Option<(Option<ReplyTarget>, Vec<matrix_core::Outgoing>)> {
+        match self.run_command(target) {
+            None => Some(self.composer_mut(target).take_outgoing()),
+            Some(messages) if messages.is_empty() => None,
+            Some(messages) => Some((self.composer_mut(target).reply_to.take(), messages)),
+        }
     }
 
     /// Sends messages from a composer's room or thread; the first answers `reply_to`, if any.
@@ -4681,6 +4783,11 @@ impl State {
 
     /// Opens a link: a permalink in the app, anything else in the browser.
     pub fn open_link(&mut self, url: &str, tx: &mut Tx) {
+        // A spoiler's words carry a link of the app's own: pressing them reveals them.
+        if url.starts_with(SPOILER_LINK) {
+            self.revealed.insert(url.to_owned());
+            return;
+        }
         if matrix_core::Permalink::is_permalink(url) {
             navigation::navigate_now(self, tx, |s| s.open_permalink(url));
         } else if let Err(error) = tx.open_url(url) {

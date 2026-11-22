@@ -156,10 +156,12 @@ fn tiles_for(latitude: f64, longitude: f64, zoom: u8, width: u32, height: u32) -
 }
 
 type Tile = Arc<image::RgbaImage>;
-
 /// Decoded tiles by zoom, column and row, the newest last.
-fn tile_cache() -> &'static Mutex<Vec<((u8, u32, u32), Tile)>> {
-    static CACHE: OnceLock<Mutex<Vec<((u8, u32, u32), Tile)>>> = OnceLock::new();
+type Tiles = Mutex<Vec<((u8, u32, u32), Tile)>>;
+
+/// The tiles kept, shared by every map.
+fn tile_cache() -> &'static Tiles {
+    static CACHE: OnceLock<Tiles> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(Vec::new()))
 }
 
@@ -366,6 +368,10 @@ mod tests {
         let http = crate::links::http_client().expect("client");
         let media = map("geo:52.5163,13.3777").expect("a map");
         let png = draw_map(&http, &media, MediaSize::Thumbnail { width: 400, height: 240 }).await.expect("drawn");
+        // To look at it: `MAP_PNG=/tmp/map.png cargo test -p matrix-core -- --ignored geo::`.
+        if let Ok(path) = std::env::var("MAP_PNG") {
+            std::fs::write(path, &png).expect("written");
+        }
         assert_eq!(image::load_from_memory(&png).expect("a PNG").into_rgba8().dimensions(), (400, 240));
     }
 

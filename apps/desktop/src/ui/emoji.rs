@@ -128,6 +128,43 @@ pub fn picker(s: &State, chosen_for: &EmojiFor, anchor: String, p: &Palette) -> 
         .w(344.0)
         .child(row().w_full().px(8.0).pt(8.0).pb(4.0).child(search_bar));
     let mut grid = col().w_full().px(8.0).pb(8.0).gap(6.0);
+    // A composer's picker leads with the room's custom emoji.
+    if let EmojiFor::Composer(target) = chosen_for
+        && let (Some(account), Some(room_id)) = (s.nav.account.as_ref(), s.active_room_id())
+    {
+        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+        let custom: Vec<_> = s
+            .custom_emoji(account, room_id)
+            .into_iter()
+            .filter(|image| words.iter().all(|word| image.shortcode.to_lowercase().contains(word.as_str())))
+            .collect();
+        if !custom.is_empty() {
+            let target = *target;
+            let set = custom.into_iter().fold(row().w_full().flex_wrap(), |set, image| {
+                let picture = el().size(24.0, 24.0);
+                let picture = match s.media.image(&image.media) {
+                    Some(loaded) => picture.pixels_fit(loaded.pixels(), rune::SurfaceFit::Fit),
+                    None => picture.radius(4.0).fill(p.hover),
+                };
+                let chosen = image.clone();
+                set.child(
+                    el().key(format!("emoji-custom-{}", image.url))
+                        .size(32.0, 32.0)
+                        .radius(6.0)
+                        .center()
+                        .hover(p.hover.alpha(p.hover.a * 3.0))
+                        .role("button")
+                        .cursor(rune::Cursor::Pointer)
+                        .label(format!(":{}:", image.shortcode))
+                        .help(format!(":{}:", image.shortcode))
+                        .child(picture)
+                        .on_press(move |s: &mut State| s.choose_custom_emoji(target, &chosen)),
+                )
+            });
+            grid =
+                grid.child(text(t!("emoji.custom")).font(font::SECTION).color(p.text_muted).px(4.0).pt(4.0)).child(set);
+        }
+    }
     if query.is_empty() {
         let quick =
             QUICK.iter().fold(row().w_full().px(8.0).gap(2.0), |row, emoji| row.child(button(emoji, 36.0, "quick")));

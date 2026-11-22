@@ -213,7 +213,24 @@ see who is typing there.
   as ended, or declined in a direct chat. Call cards take no reactions, and a reply quotes the
   call's kind (`Quote::call`; a one-to-one call is just "Call" there, its offer not embedded).
   Call memberships stay hidden.
-- **Stickers** show as images (`convert::sticker`).
+- **Stickers** show as images (`convert::sticker`); sending them is in
+  [0007](0007-composer-and-media.md).
+- **Emotes** are their own content (`MessageContent::Emote`), drawn in italics after the
+  sender's name ("* Ada waves"), formatting and pills kept.
+- **Locations** (`MessageContent::Location`): a card with the place's map, name and
+  coordinates ([0007](0007-composer-and-media.md)).
+- **Edit history:** an edited message's "edited" is a button opening every version, newest
+  first (`Modal::EditHistory`, `Command::ListEdits`): the original event and its `m.replace`
+  relations (decrypted by the SDK, up to 200), counting only the sender's own edits as the spec
+  says. Phones open the same list in a sheet.
+- **Message jump:** a link to a message (from a message, the OS or a typed link), a reply's
+  quote, a pin, a saved message or a search hit goes to the message. One the timeline on screen
+  holds is scrolled to; else the engine first finds where it shows
+  (`Command::LocateMessage`: the room's timeline, or the thread its relation names), then the
+  shared jump opens it there and loads history until it shows (`State::open_message`). The
+  message then flashes in the accent colour for 2.4 s (`State::flash`, `FLASH`). Opening at the
+  message without the history before it (an event-focused timeline) is not done: the timeline
+  model is the room's or a thread's, and paging back keeps one history per timeline.
 - **Room events:** `EntryKind::RoomEvent` holds the sender (a `Person`) and a `RoomChange`,
   converted from matrix-sdk-ui's membership, profile and state items.
   - Kinds: created; joined, left; invited, invite withdrawn or declined; removed, banned,

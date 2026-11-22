@@ -30,6 +30,7 @@ fn key(target: ComposerTarget, name: &str) -> String {
 
 pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palette, cx: &mut Cx<State>) -> El {
     let c = s.composer(target);
+    let pill_palette = *p;
     let input = text_input(&c.edit, font::BODY)
         .key(composer_field(target))
         .placeholder(placeholder.to_owned(), p.text_muted)
@@ -40,7 +41,12 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
         .on_submit(move |s: &mut State, tx| s.send_message(target, tx))
         // A pasted image or file joins the draft as an attachment; text pastes as usual.
         .on_input_paste(move |s: &mut State, content, _| s.paste_into_composer(target, content))
+        .pill_style(move |id| pill_look(id, &pill_palette))
         .on_input_key(move |s: &mut State, key, tx| {
+            // A list of suggestions takes the keys that move through it, pick or dismiss it.
+            if s.suggestion_key(target, key) {
+                return true;
+            }
             s.composer_mut(target).before_key(key);
             let c = s.composer(target);
             match key.key {
@@ -117,7 +123,7 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
     // While a memo records, the voice lights a glow around the frame, drawn under it.
     let glow = c.voice.as_ref().map(|memo| voice_glow(target, memo, s.reduced_motion.get(), p));
     let framed = col().key(key(target, "composer-framed")).w_full().children(glow).child(frame);
-    col().w_full().px(20.0).pt(4.0).child(framed).child(below)
+    col().w_full().px(20.0).pt(4.0).children(scheduled_bar(s, target, p)).child(framed).child(below)
 }
 
 /// Rune follows keyboard edits itself; pointer selection also needs its moving end revealed.
@@ -287,8 +293,54 @@ fn format_look(format: Format) -> (&'static rune::Icon, &'static str) {
         Format::NumberedList => (&icons::NUMBERS, t!("format.numbers")),
         Format::Quote => (&icons::QUOTE, t!("format.quote")),
         Format::CodeBlock => (&icons::CODE_BLOCK, t!("format.code_block")),
+        Format::Spoiler => (&icons::EYE_OFF, t!("format.spoiler")),
+        Format::Math => (&icons::SIGMA, t!("format.math")),
     }
 }
+
+/// How a pill looks in the field: a mention in the accent, `@room` in the warning colour, a
+/// spoiler dark, a formula and a custom emoji on the surface.
+fn pill_look(id: &str, p: &Palette) -> rune::PillStyle {
+    let style = rune::PillStyle::new();
+    match id {
+        "everyone" => style.bg(p.warning.alpha(0.2)).fg(p.text),
+        "spoiler" => style.bg(p.text_muted.alpha(0.35)).fg(p.text).icon(&icons::EYE_OFF),
+        "math" => style.bg(p.hover).fg(p.text).icon(&icons::SIGMA),
+        id if id.starts_with("emote:") => style.bg(p.hover).fg(p.text),
+        _ => style.bg(p.accent.alpha(0.16)).fg(p.accent),
+    }
+}
+
+/// "2 scheduled messages" above the room's composer, opening their list.
+fn scheduled_bar(s: &State, target: ComposerTarget, p: &Palette) -> Option<El> {
+    if target != ComposerTarget::Room {
+        return None;
+    }
+    let count = s.scheduled_here().len();
+    if count == 0 {
+        return None;
+    }
+    Some(
+        row()
+            .key(SCHEDULED_BAR)
+            .px(10.0)
+            .py(4.0)
+            .mb(4.0)
+            .gap(6.0)
+            .center_y()
+            .self_start()
+            .radius(6.0)
+            .hover(p.hover)
+            .role("button")
+            .cursor(rune::Cursor::Pointer)
+            .on_press(|s: &mut State| s.toggle_popover(Popover::Scheduled))
+            .child(icon(&icons::CLOCK, 14.0).color(p.accent))
+            .child(text(crate::i18n::tp!("schedule.count", count)).font(font::META).color(p.accent)),
+    )
+}
+
+/// The key of the bar listing the room's scheduled messages, which their list anchors to.
+pub const SCHEDULED_BAR: &str = "scheduled-bar";
 
 fn link_entry(target: ComposerTarget, link: &rune::TextEdit, p: &Palette) -> El {
     let field = text_input(link, font::BODY)
@@ -362,6 +414,21 @@ pub fn emoji_button(target: ComposerTarget) -> String {
     key(target, "emoji")
 }
 
+/// The element key of a composer's sticker button, which the sticker picker anchors to.
+pub fn sticker_button(target: ComposerTarget) -> String {
+    key(target, "stickers")
+}
+
+/// The element key of the button beside send, which the schedule menu anchors to.
+pub fn schedule_button(target: ComposerTarget) -> String {
+    key(target, "schedule")
+}
+
+/// The element key of a composer's frame, which its suggestions sit on.
+pub fn frame_key(target: ComposerTarget) -> String {
+    key(target, "composer-frame")
+}
+
 fn bottom_bar(s: &State, target: ComposerTarget, p: &Palette) -> El {
     let c = s.composer(target);
     let can_send = !c.is_empty();
@@ -376,6 +443,26 @@ fn bottom_bar(s: &State, target: ComposerTarget, p: &Palette) -> El {
         .label(t!("composer.send"))
         .child(icon(&icons::SEND, 16.0).color(if can_send { p.on_accent } else { p.text_muted }));
     let send = if can_send { send.on_press_tx(move |s: &mut State, tx| s.send_message(target, tx)) } else { send };
+    // Beside send: send later. Right-clicking send opens the same menu.
+    let send = if s.can_schedule(target) {
+        send.on_secondary_press(move |s: &mut State, _, _| s.toggle_popover(Popover::Schedule(target)))
+    } else {
+        send
+    };
+    let schedule = s.can_schedule(target).then(|| {
+        el().key(schedule_button(target))
+            .size(18.0, 28.0)
+            .radius(6.0)
+            .center()
+            .hover(p.hover.alpha(p.hover.a * 2.0))
+            .role("button")
+            .cursor(rune::Cursor::Pointer)
+            .label(t!("schedule.button"))
+            .help(t!("schedule.button"))
+            .focusable(false)
+            .child(icon(&icons::CHEVRON_DOWN, 14.0).color(p.text_muted))
+            .on_press(move |s: &mut State| s.toggle_popover(Popover::Schedule(target)))
+    });
     let separator = || el().w(1.0).h(18.0).mx(4.0).fill(p.divider);
     let picking_emoji = s.popover == Some(Popover::Emoji(EmojiFor::Composer(target)));
     let voice = if voice_memos_supported() {
@@ -412,8 +499,14 @@ fn bottom_bar(s: &State, target: ComposerTarget, p: &Palette) -> El {
         .child(
             bar_button(&icons::SMILE, t!("composer.emoji"), picking_emoji, p)
                 .key(emoji_button(target))
-                .on_press(move |s: &mut State| s.toggle_popover(Popover::Emoji(EmojiFor::Composer(target)))),
+                .on_press(move |s: &mut State| s.open_composer_emoji(target)),
         )
+        .children((!editing).then(|| {
+            bar_button(&icons::STICKER, t!("composer.stickers"), s.popover == Some(Popover::Stickers(target)), p)
+                .key(sticker_button(target))
+                .help(t!("composer.stickers"))
+                .on_press(move |s: &mut State| s.open_stickers(target))
+        }))
         .child(
             el().key(key(target, "formatting"))
                 .size(28.0, 28.0)
@@ -429,14 +522,23 @@ fn bottom_bar(s: &State, target: ComposerTarget, p: &Palette) -> El {
                 .on_press(move |s: &mut State| s.composer_mut(target).toggle_formatting()),
         );
     if !editing {
-        bar = bar.child(separator()).child(voice).child(
-            bar_button(&icons::POLL, t!("composer.poll"), false, p)
-                .key(key(target, "poll"))
-                .help(t!("composer.poll"))
-                .on_press(move |s: &mut State| s.open_poll_form(target)),
-        );
+        bar = bar
+            .child(separator())
+            .child(voice)
+            .child(
+                bar_button(&icons::POLL, t!("composer.poll"), false, p)
+                    .key(key(target, "poll"))
+                    .help(t!("composer.poll"))
+                    .on_press(move |s: &mut State| s.open_poll_form(target)),
+            )
+            .child(
+                bar_button(&icons::MAP_PIN, t!("composer.location"), false, p)
+                    .key(key(target, "location"))
+                    .help(t!("composer.location"))
+                    .on_press(move |s: &mut State| s.open_location(target)),
+            );
     }
-    bar.child(el().grow(1.0)).child(send)
+    bar.child(el().grow(1.0)).child(send).children(schedule)
 }
 
 /// Voice memos record on every desktop, through the app's own sound (`platform::sound`).

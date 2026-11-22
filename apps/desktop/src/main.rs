@@ -63,6 +63,25 @@ fn spec() -> AppSpec<State> {
                 });
             }),
             ("demo-saved", demo::saved_messages),
+            ("demo-messages", demo::message_features),
+            ("demo-mentions", |s| demo::typing(s, "Thanks @gr")),
+            ("demo-commands", |s| demo::typing(s, "/")),
+            ("demo-emoji-suggestions", |s| demo::typing(s, "Great :pa")),
+            ("demo-pills", demo::pills_draft),
+            ("demo-location", demo::location),
+            ("demo-edit-history", demo::edit_history),
+            ("demo-stickers", |s| {
+                demo::typing(s, "");
+                s.popover = Some(Popover::Stickers(state::ComposerTarget::Room));
+            }),
+            ("demo-schedule", |s| {
+                demo::scheduled(s);
+                s.popover = Some(Popover::Schedule(state::ComposerTarget::Room));
+            }),
+            ("demo-scheduled", |s| {
+                demo::scheduled(s);
+                s.popover = Some(Popover::Scheduled);
+            }),
             ("demo-saved-menu", |s| {
                 demo::saved_messages(s);
                 s.close_modal();

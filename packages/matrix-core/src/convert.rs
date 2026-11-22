@@ -223,6 +223,18 @@ impl MediaRef {
     pub(crate) fn of(source: &MediaSource) -> Option<Self> {
         serde_json::to_string(source).ok().map(Self)
     }
+
+    /// The handle for unencrypted media at an `mxc://` URI, as messages' HTML names it (a
+    /// custom emoji's image); `None` for anything else.
+    ///
+    /// ```
+    /// assert!(matrix_core::MediaRef::from_mxc("mxc://example.org/cat").is_some());
+    /// assert!(matrix_core::MediaRef::from_mxc("https://example.org/cat.png").is_none());
+    /// ```
+    pub fn from_mxc(url: &str) -> Option<Self> {
+        let url = matrix_sdk::ruma::OwnedMxcUri::from(url);
+        url.is_valid().then(|| avatar(url)).flatten()
+    }
 }
 
 pub(crate) fn media_source(media: &MediaRef) -> Result<MediaSource, Error> {
