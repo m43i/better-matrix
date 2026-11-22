@@ -243,6 +243,17 @@ describe('htmlBlocks with Matrix’s inline objects', () => {
     ).toBe('a b π');
   });
 
+  it('should read each spoiler as [Spoiler] when spoilers are hidden', () => {
+    expect(
+      blocksText(
+        htmlBlocks(
+          '<p>a <span data-mx-spoiler>b</span></p><blockquote><span data-mx-spoiler="why">c</span></blockquote><ul><li><span data-mx-spoiler>d</span></li></ul>',
+        ),
+        'hidden',
+      ),
+    ).toBe('a [Spoiler]\n[Spoiler]\n[Spoiler]');
+  });
+
   it('should read a spoiler as plain words, its links, mentions and pictures as text', () => {
     expect(
       paragraph(

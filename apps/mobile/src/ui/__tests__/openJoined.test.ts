@@ -155,8 +155,32 @@ describe('openElsewhere', () => {
     ]);
   });
 
-  it('a quoted message that would show in this timeline should open nothing', async () => {
-    expect(await located({ thread: '$root' }, '$root')).toEqual(['missing', []]);
+  it('a quoted message that shows in this timeline should open nothing, but be looked for here', async () => {
+    expect(await located({ thread: '$root' }, '$root')).toEqual(['here', []]);
+  });
+
+  it('a quoted thread root, from the room, should be looked for in the room', async () => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+
+    const outcome = openElsewhere(
+      store,
+      ADA,
+      { room_id: '!r:x', thread: null },
+      '$q',
+      beginJump(),
+      navigation,
+    );
+
+    const request = sent[0]!.request;
+    engine.emit({
+      type: 'MessageLocated',
+      data: { request, account: ADA, key: { room_id: '!r:x', thread: '$q' }, event_id: '$q' },
+    });
+    engine.emit({ type: 'Finished', data: { request, result: { Ok: null } } });
+
+    expect([await outcome, navigation.push.mock.calls]).toEqual(['here', []]);
   });
 
   it('a quoted message the engine can’t find should open nothing', async () => {

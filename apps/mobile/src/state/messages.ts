@@ -133,19 +133,22 @@ export function cardLink(item: Prepared, gifsShown: boolean): string | null {
   return item.link ?? (item.gif && !gifsShown ? item.gif.url : null);
 }
 
-/** The message's text, for copying and editing: its words as written, or a file's name. */
+/**
+ * The message's text, for copying and translating: its words as they read, each spoiler
+ * `[Spoiler]` (what it hides never leaves the message), or a file's name.
+ */
 export function messageText(message: Message): string | null {
   switch (message.content.type) {
     case 'Text': {
       const { body, html } = message.content.data;
 
-      return html ? blocksText(htmlBlocks(html)) : body;
+      return html ? blocksText(htmlBlocks(html), 'hidden') : body;
     }
 
     case 'Emote': {
       const { body, html } = message.content.data;
 
-      return `* ${message.sender_name} ${html ? blocksText(htmlBlocks(html)) : body}`;
+      return `* ${message.sender_name} ${html ? blocksText(htmlBlocks(html), 'hidden') : body}`;
     }
 
     case 'Location':

@@ -404,8 +404,11 @@ Date: 2026-11-16
 - **Jumping to a message:** a quote's tap scrolls to the quoted message, and when it isn't
   loaded pages back as a link's target does (`Timeline`'s `jump`); still not found, the engine
   says where it lives (`LocateMessage`, `openElsewhere`) and it opens there when that is another
-  timeline (a reply in a thread, a room message quoted in one), else the app says it isn't
-  found; the message flashes highlighted. A permalink to a message in a joined room asks the engine
+  timeline (a reply in a thread, a room message quoted in one); when it is this timeline, the
+  search pages on past its budget until it finds it or history starts (`seekStep`, `quoteHere`
+  in `state/seek.ts`), stopping quietly once a later jump began or its screen left; the app
+  says it isn't found when history starts without it or the engine can't find it; the message
+  flashes highlighted. A permalink to a message in a joined room asks the engine
   where it is (`LocateMessage`) and opens its thread when it is a reply in one, else the room at
   it (`openJoined`, the room when the engine can't tell). Either answer navigates only while
   its jump is the latest one begun and the screen that asked is still on show (`ui/links/jumps.ts`;
@@ -457,6 +460,10 @@ Date: 2026-11-16
     video or clip before it.
 - **File actions:** message sheets offer Copy image only for images with media, plus Open,
   Share and Download; they never offer Copy message for an attachment filename or empty text.
+  Copy Text and Translate take the message's plain text with each spoiler as `[Spoiler]`
+  (`messageText`, `blocksText(…, 'hidden')`), the same literal in every language as the body a
+  sender writes for one, so what a spoiler hides never leaves the message (nor reaches the
+  translation service) before, or after, it is tapped.
   Attachment surfaces forward long presses to the message sheet, including image/video
   previews and audio controls. The full-screen preview opens a file-only fitted sheet from
   More or a long press on an image or audio clip (`attachment-actions`), preserving the

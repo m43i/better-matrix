@@ -104,11 +104,11 @@ export function openJoined(
 }
 
 /**
- * What became of a jump to a message elsewhere: it opened, the message is missing (it would
- * show in the timeline that asked, so it is gone, or the engine can't find it), or the answer
- * came once the jump was no longer wanted.
+ * What became of a jump to a message elsewhere: it opened, it shows in the timeline that asked
+ * after all (further back than it paged: look on), the engine can't find it, or the answer came
+ * once the jump was no longer wanted.
  */
-export type Elsewhere = 'opened' | 'missing' | 'stale';
+export type Elsewhere = 'opened' | 'here' | 'missing' | 'stale';
 
 /**
  * Opens a message the timeline `current` didn't find by paging back (a quote of a reply in a
@@ -137,7 +137,7 @@ export async function openElsewhere(
   if (!wanted()) return 'stale';
   const thread = located.thread !== null && located.thread !== eventId ? located.thread : null;
 
-  if (thread === current.thread) return 'missing';
+  if (thread === current.thread) return 'here';
   navigation.push(messageRoute(account, current.room_id, eventId, thread));
 
   return 'opened';

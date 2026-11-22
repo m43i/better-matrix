@@ -16,6 +16,7 @@
 import { linkRanges } from './links';
 import { mathToUnicode } from './math';
 import { parsePermalink } from './permalinks';
+import { SPOILER_FALLBACK } from './pills';
 
 /** How an inline run of text is formatted. */
 export interface Marks {
@@ -62,17 +63,24 @@ export function htmlBlocks(html: string): Block[] {
 }
 
 /**
+ * What a plain projection does with a spoiler: its words (`'words'`, for the spoiler's own
+ * placeholder once tapped), or `[Spoiler]` (`'hidden'`, for anything that leaves the message:
+ * copying, translating), as the plain body a sender writes for one says.
+ */
+export type SpoilerText = 'words' | 'hidden';
+
+/**
  * The text inlines show, as plain words: for copying, accessibility, and a spoiler's hidden
  * placeholder (which draws none of its links, mentions or pictures).
  */
-export function inlinesText(inlines: Inline[]): string {
+export function inlinesText(inlines: Inline[], spoilers: SpoilerText = 'words'): string {
   return inlines
     .map((i) => {
       switch (i.type) {
         case 'text':
           return i.text;
         case 'spoiler':
-          return i.text;
+          return spoilers === 'hidden' ? SPOILER_FALLBACK : i.text;
         case 'math':
           return i.text;
         default:
@@ -82,20 +90,20 @@ export function inlinesText(inlines: Inline[]): string {
     .join('');
 }
 
-/** The text a tree shows, for copying and accessibility. */
-export function blocksText(blocks: Block[]): string {
+/** The text a tree shows, for copying and accessibility; spoilers as `spoilers` says. */
+export function blocksText(blocks: Block[], spoilers: SpoilerText = 'words'): string {
   return blocks
     .map((block): string => {
       switch (block.type) {
         case 'paragraph':
         case 'heading':
-          return inlinesText(block.inlines);
+          return inlinesText(block.inlines, spoilers);
         case 'code':
           return block.text;
         case 'quote':
-          return blocksText(block.blocks);
+          return blocksText(block.blocks, spoilers);
         case 'list':
-          return block.items.map((item) => blocksText(item)).join('\n');
+          return block.items.map((item) => blocksText(item, spoilers)).join('\n');
         case 'rule':
           return '';
       }
