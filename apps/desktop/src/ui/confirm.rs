@@ -1,8 +1,8 @@
 //! The confirmation dialog for actions that can't be undone.
 
-use rune::{El, text};
+use rune::{El, col, text};
 
-use super::components::{ButtonKind, button, dialog};
+use super::components::{ButtonKind, button, check_row, dialog};
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf};
 use crate::state::{Confirm, State};
@@ -31,19 +31,43 @@ fn wording(confirm: &Confirm) -> (String, String, &'static str) {
             t!("confirm.delete_message_body").to_owned(),
             t!("actions.delete"),
         ),
+        Confirm::Ignore { name, decline: None, .. } => {
+            (tf!("confirm.ignore_title", name = name), t!("confirm.ignore_body").to_owned(), t!("safety.ignore"))
+        }
+        Confirm::Ignore { name, decline: Some(_), .. } => (
+            tf!("confirm.ignore_title", name = name),
+            t!("confirm.ignore_inviter_body").to_owned(),
+            t!("confirm.ignore_inviter"),
+        ),
+        Confirm::RemoveWidget { name, .. } => (
+            tf!("confirm.remove_widget_title", name = name),
+            t!("confirm.remove_widget_body").to_owned(),
+            t!("widgets.remove"),
+        ),
         // The question can be long: it goes in the body, which scrolls.
         Confirm::EndPoll { question, .. } => {
             (t!("confirm.end_poll_title").to_owned(), tf!("confirm.end_poll_body", question = question), t!("poll.end"))
+        }
+        Confirm::Deactivate { account, .. } => {
+            (t!("deactivate.title").to_owned(), tf!("deactivate.body", account = account), t!("deactivate.confirm"))
         }
     }
 }
 
 pub fn confirm(confirm: &Confirm, p: &Palette) -> El {
     let (title, body, action) = wording(confirm);
+    let mut content = col().w_full().gap(12.0).child(text(body).font(font::BODY).color(p.text_muted).wrap());
+    if let Confirm::Deactivate { erase, .. } = confirm {
+        content = content.child(
+            check_row(t!("deactivate.erase"), Some(t!("deactivate.erase_hint")), *erase, p)
+                .key("deactivate-erase")
+                .on_press(State::toggle_deactivate_erase),
+        );
+    }
     dialog(
         "confirm-dialog",
         &title,
-        text(body).font(font::BODY).color(p.text_muted).wrap(),
+        content,
         vec![
             button(t!("common.cancel"), ButtonKind::Secondary, true, p)
                 .key("confirm-cancel")

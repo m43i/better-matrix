@@ -1,7 +1,8 @@
-//! A room's context menu: a notifications submenu, then leaving the room (or, for a direct chat,
+//! A room's context menu: marking it unread or read, putting it among the favourites or the low
+//! priority rooms, a notifications submenu, then leaving the room (or, for a direct chat,
 //! deleting it), which asks for confirmation first.
 
-use matrix_core::{NotificationMode, RoomKind, RoomSummary};
+use matrix_core::{NotificationMode, RoomKind, RoomPriority, RoomSummary};
 use rune::{Align, El, Side, col, icon, text};
 
 use super::components::{Tone, divider, menu_action, menu_icon, menu_row, popover_panel, submenu_row};
@@ -44,10 +45,46 @@ pub fn room_menu(account: &AccountData, room_id: &str, notifications_open: bool,
         RoomKind::Direct => (t!("room_menu.delete_chat"), &icons::TRASH),
     };
     let leave = room.room_id.clone();
+    // Read when it has anything unread (also when muted), else unread.
+    let unread = !(room.marked_unread || room.unread > 0 || room.mentions > 0);
+    let (unread_label, unread_icon) =
+        if unread { (t!("room_menu.mark_unread"), &icons::UNREAD) } else { (t!("room_menu.mark_read"), &icons::CHECK) };
+    let mark = room.room_id.clone();
+    let favourite = room.priority == RoomPriority::Favourite;
+    let (favourite_label, favourite_icon) = if favourite {
+        (t!("room_menu.unfavourite"), &icons::STAR_OFF)
+    } else {
+        (t!("room_menu.favourite"), &icons::STAR)
+    };
+    let low = room.priority == RoomPriority::Low;
+    let (low_label, low_icon) = if low {
+        (t!("room_menu.not_low_priority"), &icons::ARROW_UP)
+    } else {
+        (t!("room_menu.low_priority"), &icons::ARROW_DOWN)
+    };
+    let (to_favourite, to_low) = (room.room_id.clone(), room.room_id.clone());
     let menu = popover_panel(p)
         .w(260.0)
         .key("room-menu")
         .child(text(room.name.clone()).font(font::SECTION).color(p.text_muted).px(12.0).py(6.0).truncate())
+        .child(
+            menu_action(unread_icon, unread_label, Tone::Normal, p)
+                .key("room-menu-unread")
+                .on_press(move |s: &mut State| s.set_unread(&mark, unread)),
+        )
+        .child(menu_action(favourite_icon, favourite_label, Tone::Normal, p).key("room-menu-favourite").on_press(
+            move |s: &mut State| {
+                let priority = if favourite { RoomPriority::Normal } else { RoomPriority::Favourite };
+                s.set_room_priority(&to_favourite, priority);
+            },
+        ))
+        .child(menu_action(low_icon, low_label, Tone::Normal, p).key("room-menu-low-priority").on_press(
+            move |s: &mut State| {
+                let priority = if low { RoomPriority::Normal } else { RoomPriority::Low };
+                s.set_room_priority(&to_low, priority);
+            },
+        ))
+        .child(divider(p))
         .child(
             submenu_row(&icons::BELL, t!("notify.heading"), notifications_open, p)
                 .key(NOTIFICATIONS_ROW)
@@ -59,6 +96,12 @@ pub fn room_menu(account: &AccountData, room_id: &str, notifications_open: bool,
                 }),
         )
         .child(divider(p))
+        .child({
+            let reported = room.room_id.clone();
+            menu_action(&icons::FLAG, t!("report.room_action"), Tone::Normal, p)
+                .key("room-menu-report")
+                .on_press(move |s: &mut State| s.report_room(&reported))
+        })
         .child(
             menu_action(leave_icon, leave_label, Tone::Danger, p)
                 .key("room-menu-leave")

@@ -17,7 +17,7 @@ use matrix_sdk::{Room, RoomMemberships};
 use crate::Error;
 use crate::model::{
     AccountId, Attachment, AttachmentKind, AudioDetails, HistoryVisibility, MediaRef, MediaSize, Message,
-    MessageContent, Notification, NotificationMode, RoomKind, RoomSummary, SpaceSummary,
+    MessageContent, Notification, NotificationMode, RoomKind, RoomPriority, RoomSummary, SpaceSummary,
 };
 
 async fn display_name(room: &Room) -> String {
@@ -41,7 +41,12 @@ async fn partner_avatar(room: &Room, partner: Option<&String>) -> Option<MediaRe
 
 /// A room as the room list shows it. `settings` are the account's push rules, read once for the
 /// whole list: reading them per room cost two store reads each, on every sync.
-pub(crate) async fn room_summary(room: &Room, settings: &NotificationSettings, rtc_service: bool) -> RoomSummary {
+pub(crate) async fn room_summary(
+    room: &Room,
+    settings: &NotificationSettings,
+    rtc_service: bool,
+    sticky: &crate::calls::StickyMembers,
+) -> RoomSummary {
     let name = display_name(room).await;
     let custom = settings.get_user_defined_room_notification_mode(room.room_id()).await;
     let mode = match custom {
@@ -80,32 +85,55 @@ pub(crate) async fn room_summary(room: &Room, settings: &NotificationSettings, r
         history: history_visibility(room.history_visibility_or_default()),
         notifications: notification_mode(mode),
         custom_notifications: custom.is_some(),
-        call: call_in(room, kind, rtc_service, power.as_ref()),
+        call: call_in(room, kind, rtc_service, power.as_ref(), crate::calls::joined_sticky(room, sticky, false).await),
         activity_ms: room.latest_event_timestamp().map(|at| at.get().into()),
         encrypted: room.encryption_state().is_encrypted(),
+        public: !private_join_rule(room.join_rule().as_ref()),
         can_rename: may_send_state(StateEventType::RoomName),
         pinned: room.pinned_event_ids().unwrap_or_default().iter().map(ToString::to_string).collect(),
         saved: crate::saved::saved_ids(room).await,
         can_pin: may_send_state(StateEventType::RoomPinnedEvents),
+        priority: if room.is_favourite() {
+            RoomPriority::Favourite
+        } else if room.is_low_priority() {
+            RoomPriority::Low
+        } else {
+            RoomPriority::Normal
+        },
+        marked_unread: room.is_marked_unread(),
     }
 }
 
 /// How a call would start in the room, and who is in its call now.
-pub(crate) async fn room_call(room: &Room, kind: RoomKind, rtc_service: bool) -> crate::calls::RoomCall {
-    call_in(room, kind, rtc_service, room.power_levels().await.ok().as_ref())
+pub(crate) async fn room_call(
+    room: &Room,
+    kind: RoomKind,
+    rtc_service: bool,
+    sticky: &crate::calls::StickyMembers,
+) -> crate::calls::RoomCall {
+    let sticky = crate::calls::joined_sticky(room, sticky, false).await;
+    call_in(room, kind, rtc_service, room.power_levels().await.ok().as_ref(), sticky)
 }
 
 /// [`room_call`] with the room's power levels already read.
-fn call_in(room: &Room, kind: RoomKind, rtc_service: bool, power: Option<&RoomPowerLevels>) -> crate::calls::RoomCall {
+fn call_in(
+    room: &Room,
+    kind: RoomKind,
+    rtc_service: bool,
+    power: Option<&RoomPowerLevels>,
+    sticky: Vec<crate::calls::Member>,
+) -> crate::calls::RoomCall {
     use matrix_sdk::ruma::events::MessageLikeEventType;
     let me = room.own_user_id();
     let may_join = power.is_some_and(|power| power.user_can_send_state(me, StateEventType::CallMember));
     let may_call = power.is_some_and(|power| power.user_can_send_message(me, MessageLikeEventType::CallInvite));
     let one_to_one = kind == RoomKind::Direct && room.active_members_count() == 2 && may_call;
-    crate::calls::RoomCall {
-        via: crate::calls::via(rtc_service, may_join, one_to_one),
-        participants: room.active_room_call_participants().iter().map(ToString::to_string).collect(),
+    let mut participants: Vec<String> = room.active_room_call_participants().iter().map(ToString::to_string).collect();
+    // matrix_2_0 members, from their sticky memberships.
+    for member in sticky {
+        participants.push(member.user_id);
     }
+    crate::calls::RoomCall { via: crate::calls::via(rtc_service, may_join, one_to_one), participants }
 }
 
 pub(crate) async fn space_summary(room: &Room) -> SpaceSummary {
@@ -194,6 +222,14 @@ async fn sender_name(room: &Room, sender: &matrix_sdk::ruma::UserId) -> String {
 }
 
 /// A push notification for a room message, if it is one the user should hear about.
+/// Whether a join rule keeps strangers out, as MSC4278 lists private rooms: invite, knock,
+/// restricted and knock-restricted. Anything else, public, rules this app doesn't know and a room
+/// whose rule hasn't loaded, counts as public, so media there waits for a press.
+fn private_join_rule(rule: Option<&matrix_sdk::ruma::events::room::join_rules::JoinRule>) -> bool {
+    use matrix_sdk::ruma::events::room::join_rules::JoinRule;
+    matches!(rule, Some(JoinRule::Invite | JoinRule::Knock | JoinRule::Restricted(_) | JoinRule::KnockRestricted(_)))
+}
+
 pub(crate) async fn notification(
     account: &AccountId,
     room: &Room,
@@ -415,6 +451,25 @@ mod tests {
         let MessageContent::Text { html: Some(html), .. } = content else { panic!("formatted text") };
         let pills = crate::html::to_pills(&html, crate::html::Pills::Display);
         assert!(pills.contains("data-pill=\"spoiler\"") && pills.contains("data-pill=\"math:x^2\""), "{pills}");
+    }
+
+    #[test]
+    fn invite_knock_and_restricted_join_rules_should_count_as_private() {
+        use matrix_sdk::ruma::events::room::join_rules::{JoinRule, Restricted};
+        assert!(private_join_rule(Some(&JoinRule::Invite)));
+        assert!(private_join_rule(Some(&JoinRule::Knock)));
+        assert!(private_join_rule(Some(&JoinRule::Restricted(Restricted::new(Vec::new())))));
+        assert!(private_join_rule(Some(&JoinRule::KnockRestricted(Restricted::new(Vec::new())))));
+    }
+
+    #[test]
+    fn public_unknown_and_missing_join_rules_should_count_as_public() {
+        use matrix_sdk::ruma::events::room::join_rules::JoinRule;
+        assert!(!private_join_rule(None));
+        assert!(!private_join_rule(Some(&JoinRule::Public)));
+        assert!(!private_join_rule(Some(&JoinRule::Private)));
+        let custom: JoinRule = serde_json::from_value(serde_json::json!({ "join_rule": "org.example.open" })).unwrap();
+        assert!(!private_join_rule(Some(&custom)));
     }
 
     #[test]

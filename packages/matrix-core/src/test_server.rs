@@ -6,6 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
+/// A key a reply sets to answer 404 Not Found instead of 200 OK.
+pub(crate) const NOT_FOUND_STATUS: &str = "__not_found";
+
 pub(crate) struct Server {
     address: SocketAddr,
     stopped: Arc<AtomicBool>,
@@ -19,7 +22,7 @@ impl Server {
         let stopped = Arc::new(AtomicBool::new(false));
         let stop = Arc::clone(&stopped);
         let thread = std::thread::spawn(move || {
-            for stream in listener.incoming() {
+            'connections: for stream in listener.incoming() {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
@@ -28,7 +31,8 @@ impl Server {
                 let mut request = Vec::new();
                 let mut bytes = [0; 4096];
                 loop {
-                    let n = stream.read(&mut bytes).expect("read request");
+                    // A client that gave up on its request (a cancelled long poll) sends nothing.
+                    let Ok(n) = stream.read(&mut bytes) else { continue 'connections };
                     if n == 0 {
                         break;
                     }
@@ -48,9 +52,14 @@ impl Server {
                         }
                     }
                 }
-                let reply = reply(&String::from_utf8_lossy(&request));
-                // A Matrix "not found" goes with its status, as servers send it.
-                let status = if reply["errcode"] == "M_NOT_FOUND" { "404 Not Found" } else { "200 OK" };
+                let mut reply = reply(&String::from_utf8_lossy(&request));
+                // A reply naming `NOT_FOUND_STATUS` answers 404 with the rest as its error body,
+                // as does a Matrix "not found", as servers send it.
+                let status = match reply.as_object_mut().and_then(|reply| reply.remove(NOT_FOUND_STATUS)) {
+                    Some(_) => "404 Not Found",
+                    None if reply["errcode"] == "M_NOT_FOUND" => "404 Not Found",
+                    None => "200 OK",
+                };
                 let body = reply.to_string();
                 let response = format!(
                     "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

@@ -24,7 +24,11 @@ pub mod people;
 pub mod permalinks;
 pub mod profile;
 pub mod push;
+pub mod qr;
+pub mod qr_login;
+pub mod registration;
 pub mod rooms;
+pub mod safety;
 pub mod search;
 pub mod secrets;
 pub mod security;
@@ -36,18 +40,21 @@ mod convert;
 mod drafts;
 mod edits;
 mod history;
+mod offline_device;
 mod outgoing;
 mod packs;
 mod polls;
 mod saved;
 mod scheduled;
 mod session;
+mod source;
 #[cfg(test)]
 mod test_server;
 mod thumbnail;
 mod timeline;
 mod timeline_bootstrap;
 mod tls;
+pub mod widgets;
 
 pub mod links;
 
@@ -58,16 +65,16 @@ pub use calls::{
 };
 pub use discovery::{Homeserver, SignInInput};
 pub use engine::{
-    Command, DetachedCommands, Engine, EngineConfig, EngineHandle, EngineStopped, Event, EventSink, RequestId,
+    Answer, Command, DetachedCommands, Engine, EngineConfig, EngineHandle, EngineStopped, Event, EventSink, RequestId,
     StoreSharing,
 };
 pub use model::{
-    AccountId, AccountSummary, Attachment, AttachmentKind, AudioDetails, CallCard, EditVersion, EntryKind,
+    AccountId, AccountSummary, Attachment, AttachmentKind, AudioDetails, CallCard, EditVersion, EntryKind, HiddenEvent,
     HistoryVisibility, ImagePack, Invitation, Location, LoginMethods, MediaRef, MediaSize, Mentions, Message,
     MessageContent, Notification, NotificationMode, Outgoing, PackImage, Password, Person, Place, Poll, PollAnswer,
     PublicRoom, PushContent, PushTarget, Pusher, Quote, Reaction, ReadReceipt, RoomChange, RoomEvent, RoomKind,
-    RoomList, RoomSummary, ScheduledAction, ScheduledMessage, SignInMethod, SpaceSummary, ThreadSummary, TimelineDiff,
-    TimelineEntry, TimelineKey, Upload,
+    RoomList, RoomPriority, RoomSummary, ScheduledAction, ScheduledMessage, SignInMethod, SpaceSummary, ThreadSummary,
+    TimelineDiff, TimelineEntry, TimelineKey, Upload,
 };
 
 /// How many messages a timeline page holds: what a room shows when it opens, and what each
@@ -78,14 +85,20 @@ pub use history::{MessagePreview, SharedFile, ThreadInfo};
 pub use people::{MemberRole, Members, Moderation, PersonPresence, Presence, RoomMember};
 pub use permalinks::{LinkAction, LinkTarget, Permalink};
 pub use profile::{AccountPage, ContactDetail, ContactKind, Contacts, PendingContact};
+pub use qr::QrImage;
+pub use qr_login::{QrLoginStep, QrSignIn};
+pub use registration::{Policy, RegisterRequest, RegistrationStep};
 pub use rooms::{DirectoryKind, JoinRule, RoomPreview};
+pub use safety::{ReportTarget, Safety, SafetyChange, ShowMedia};
 pub use saved::SavedMessage;
 pub use search::{MessageHit, SearchUsage};
 pub use secrets::{FileSecrets, MemorySecrets, SecretError, SecretStore};
-pub use security::{RecoveryStatus, SasEmoji, Security, Session, VerificationStep};
+pub use security::{Identity, KeyImport, OfflineDevice, RecoveryStatus, SasEmoji, Security, Session, VerificationStep};
 pub use sidebar::{ScopeLayout, Section, SidebarLayout};
+pub use source::EventSource;
 pub use status::Status;
 pub use store::StoreLayout;
+pub use widgets::{Widget, Widgets};
 
 /// Shown to other devices and in the server's session list.
 pub const DEVICE_DISPLAY_NAME: &str = "Better Matrix";
@@ -108,6 +121,9 @@ pub enum Error {
     /// The homeserver doesn't offer what was asked of it.
     #[error("your homeserver doesn't support {0}")]
     Unsupported(&'static str),
+    /// A widget's address isn't a web page (`http` or `https`).
+    #[error("a widget needs a web address")]
+    InvalidWidgetUrl,
     /// A poll needs a question and two to twenty answers.
     #[error("a poll needs two to twenty answers")]
     InvalidPoll,
@@ -216,6 +232,9 @@ pub enum Error {
     /// Something about the account itself failed.
     #[error("{0}")]
     Account(String),
+    /// A room has unread messages but none this device can mark read yet.
+    #[error("there is no message to mark read yet")]
+    NothingToRead,
     /// A command needs a room's timeline open first.
     #[error("the timeline of {0} is not open")]
     TimelineClosed(String),
@@ -228,6 +247,50 @@ pub enum Error {
     /// The server accepted a login but the client reports no user.
     #[error("the server accepted the login but reported no user ID")]
     NoUserId,
+    /// A QR code couldn't be drawn or read.
+    #[error("could not read or draw the QR code: {0}")]
+    QrCode(String),
+    /// Signing in with a QR code failed.
+    #[error("signing in with the QR code failed: {0}")]
+    QrLogin(String),
+    /// The scanned code isn't one for signing in.
+    #[error("that QR code isn't for signing in")]
+    NotASignInCode,
+    /// The scanned sign-in code is from the wrong side: a new device's where a signed-in
+    /// device's was needed, or the other way round.
+    #[error("scan this code from the other device instead")]
+    WrongSignInCode,
+    /// The scanned code isn't the other side's verification code.
+    #[error("that QR code isn't the other side's verification code")]
+    NotAVerificationCode,
+    /// Verifying someone takes a direct chat both have joined.
+    #[error("start a direct chat with them first, and verify once they've joined it")]
+    NoDirectChat,
+    /// The other person hasn't set up encryption, so they can't be verified.
+    #[error("they haven't set up encryption yet, so they can't be verified")]
+    NoTheirIdentity,
+    /// Importing message keys failed, e.g. a wrong passphrase.
+    #[error("could not import the keys: {0}")]
+    KeyImport(String),
+    /// The offline device failed.
+    #[error("offline device: {0}")]
+    OfflineDevice(String),
+    /// The offline device's key doesn't open the device on the server (replaced elsewhere).
+    #[error("the offline device was replaced with another key")]
+    StaleOfflineKey,
+    /// Turning the offline device on needs the recovery key.
+    #[error("the recovery key is needed for this")]
+    RecoveryKeyRequired,
+    /// The recovery key doesn't unlock the account's secrets.
+    #[error("that recovery key is not right")]
+    WrongRecoveryKey,
+    /// A QR sign-in was for an account this device has already (signed in, or suspended: sign
+    /// in again from its entry, which keeps its data).
+    #[error("{0} is already on this device; sign in again from its entry instead")]
+    AlreadySignedIn(String),
+    /// The server asks for a registration step no client can take.
+    #[error("this server doesn't let the app create accounts")]
+    RegistrationUnsupported,
 }
 
 /// `bytes` random bytes from the OS, as lowercase hex.

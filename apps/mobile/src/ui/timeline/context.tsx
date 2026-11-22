@@ -13,6 +13,8 @@ export interface TimelineContextValue {
   timelineKey: TimelineKey;
   /** The thread's root, in a thread's timeline. */
   thread: string | null;
+  /** Whom bubbles leave unnamed: the other person of a one-to-one direct chat. */
+  unnamed: ReadonlySet<string>;
   /** Scrolls to a message, if it is loaded, and highlights it. */
   scrollTo: (eventId: string) => void;
   /** Opens a message's actions (a long press). */
@@ -36,6 +38,16 @@ export function useTimelineContext(): TimelineContextValue {
  * a new set only when the pins change.
  */
 export const PinnedContext = createContext<ReadonlySet<string>>(new Set());
+
+/**
+ * The side of the timeline a message keeps to: the start, or the end for the user's own in chat
+ * bubbles. Media, cards and thread links read it rather than pin themselves to the start.
+ */
+export const MessageSideContext = createContext<'flex-start' | 'flex-end'>('flex-start');
+
+export function useMessageSide(): 'flex-start' | 'flex-end' {
+  return useContext(MessageSideContext);
+}
 
 /** Whether the message with `eventId` is pinned in the timeline's room. */
 export function usePinned(eventId: string): boolean {

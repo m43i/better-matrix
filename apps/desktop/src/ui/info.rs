@@ -111,20 +111,44 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .child(
             link_row(&icons::FILE, t!("info.files"), None, "info-files", p)
                 .on_press(|s: &mut State| s.show_side(SidePanel::Files)),
+        )
+        .child(
+            link_row(&icons::LAYOUT, t!("widgets.title"), None, "info-widgets", p)
+                .on_press(|s: &mut State| s.show_side(SidePanel::Widgets)),
         );
-    // Leaving sits apart from the rest, at the bottom, however long the topic.
-    let footer = col().w_full().child(divider(p)).child(leave.mb(8.0));
+    let reported = room.room_id.clone();
+    let report = row()
+        .key("info-report")
+        .w_full()
+        .h(44.0)
+        .px(16.0)
+        .gap(12.0)
+        .center_y()
+        .hover(p.hover.alpha(p.hover.a * 2.0))
+        .role("button")
+        .cursor(rune::Cursor::Pointer)
+        .focusable(true)
+        .label(t!("report.room_action").to_owned())
+        .child(icon(&icons::FLAG, 18.0).color(p.text_muted))
+        .child(text(t!("report.room_action")).font(font::BODY).color(p.text))
+        .on_press(move |s: &mut State| s.report_room(&reported));
+    // Reporting and leaving sit apart from the rest, at the bottom, however long the topic.
+    let footer = col().w_full().child(divider(p)).child(report).child(leave.mb(8.0));
     frame("info-panel", t!("info.title"), content, Some(footer), p)
 }
 
-/// The room's threads; pressing one opens it.
+/// The room's threads, but those started by people the user ignores; pressing one opens it.
 pub fn threads(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
-    let list = match account.threads.get(&room.room_id) {
+    let listed: Option<Vec<_>> = account
+        .threads
+        .get(&room.room_id)
+        .map(|threads| threads.iter().filter(|thread| !account.ignores(&thread.sender_id)).collect());
+    let list = match listed {
         None => col().w_full().child(text(t!("info.loading")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0)),
         Some(threads) if threads.is_empty() => {
             col().w_full().child(text(t!("info.no_threads")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0))
         }
-        Some(threads) => threads.iter().fold(col().w_full(), |list, thread| {
+        Some(threads) => threads.into_iter().fold(col().w_full(), |list, thread| {
             let root = thread.root.clone();
             let mut meta = tp!("thread.replies", thread.replies);
             if let Some(at) = thread.latest_at {
@@ -153,19 +177,31 @@ pub fn threads(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
     frame("threads-panel", t!("info.threads"), list, None, p)
 }
 
-/// The files shared in the room; pressing one opens it.
-pub fn files(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
-    let list = match account.files.get(&room.room_id) {
+/// The files shared in the room, but those of people the user ignores; pressing one opens it. A
+/// picture or video the media choice holds back says so, and the first press shows it (ADR 0011).
+pub fn files(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
+    let listed: Option<Vec<_>> = account
+        .files
+        .get(&room.room_id)
+        .map(|files| files.iter().filter(|file| !account.ignores(&file.sender_id)).collect());
+    let list = match listed {
         None => col().w_full().child(text(t!("info.loading")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0)),
         Some(files) if files.is_empty() => {
             col().w_full().child(text(t!("info.no_files")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0))
         }
-        Some(files) => files.iter().fold(col().w_full(), |list, file| {
+        Some(files) => files.into_iter().fold(col().w_full(), |list, file| {
+            let held = account.hides_listed_media(&room.room_id, &file.event_id, &file.attachment, &s.revealed_media);
             let glyph = match file.attachment.kind {
+                _ if held => &icons::EYE_OFF,
                 AttachmentKind::Image => &icons::IMAGE,
                 AttachmentKind::Video => &icons::VIDEO,
                 AttachmentKind::Audio => &icons::AUDIO,
                 AttachmentKind::File => &icons::FILE,
+            };
+            let detail = if held {
+                format!("{} · {}", file.sender_name, t!("safety.hidden_media_press"))
+            } else {
+                format!("{} · {}", file.sender_name, when(file.timestamp))
             };
             let (opened, key, id) =
                 (file.attachment.clone(), matrix_core::TimelineKey::room(&room.room_id), file.event_id.clone());
@@ -195,12 +231,7 @@ pub fn files(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
                             .grow(1.0)
                             .min_w(0.0)
                             .child(text(file.attachment.name.clone()).font(font::BODY).color(p.text).truncate())
-                            .child(
-                                text(format!("{} · {}", file.sender_name, when(file.timestamp)))
-                                    .font(font::META)
-                                    .color(p.text_muted)
-                                    .truncate(),
-                            ),
+                            .child(text(detail).font(font::META).color(p.text_muted).truncate()),
                     )
                     .on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened)),
             )
@@ -227,7 +258,7 @@ pub fn pins(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -
                 ),
         );
     }
-    match account.pins.get(&room.room_id) {
+    match account.pinned_messages(room) {
         None if account.pin_errors.contains_key(&room.room_id) => {}
         None => list = list.child(text(t!("info.loading")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0)),
         Some(pins) => {
@@ -235,7 +266,7 @@ pub fn pins(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -
                 list =
                     list.child(text(t!("info.no_pins")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0).wrap());
             }
-            for pin in pins.iter().filter(|pin| room.pinned.contains(&pin.event_id)) {
+            for pin in pins {
                 let destination =
                     matrix_core::TimelineKey { room_id: room.room_id.clone(), thread: pin.thread.clone() };
                 let event_id = pin.event_id.clone();

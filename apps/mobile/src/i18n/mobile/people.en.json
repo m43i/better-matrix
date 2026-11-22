@@ -11,5 +11,8 @@
   "mobile.people.invited_to": "{{name}} was invited to {{room}}.",
   "mobile.people.space": "Space",
   "mobile.people.no_space": "None",
-  "mobile.people.no_members": "Nobody matches your search."
+  "mobile.people.no_members": "Nobody matches your search.",
+  "mobile.people.verify": "Verify",
+  "mobile.people.verify_hint": "Verify that {{name}} is who they say, by scanning a QR code or comparing emoji together.",
+  "mobile.people.identity_changed": "{{name}}'s identity changed since you verified them. Verify them again to trust them."
 }

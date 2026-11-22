@@ -29,6 +29,7 @@ import {
 
 import { t } from '../../i18n';
 import { loadOlder, markRead, mayMarkFullyRead, visitRoom } from '../../state/actions/core';
+import { unmarkOpened } from '../../state/actions/shell';
 import { releaseTimeline, retainTimeline } from '../../state/actions/timeline';
 import { clearFocused, setFocused } from '../../state/focus';
 import { addNotice } from '../../state/reducer';
@@ -61,7 +62,14 @@ import {
   sought,
   soughtReach,
 } from '../../state/seek';
-import { room as roomOf, timeline as timelineOf } from '../../state/selectors';
+import {
+  account as accountOf,
+  room as roomOf,
+  shownIgnored,
+  shownTimeline,
+  timeline as timelineOf,
+  unnamedSenders,
+} from '../../state/selectors';
 import { routes } from '../../routes';
 import { font } from '../../theme/palette';
 import { Icon } from '../icons';
@@ -83,11 +91,15 @@ import {
   LoadingRow,
   NewMarker,
   RepliesDivider,
+  HiddenEventLine,
   RoomEventLine,
   StartBlock,
 } from './Rows';
 
 const NO_PINS: string[] = [];
+
+/** No one ignored, as one array, so the plan isn't made again for a new empty one. */
+const NO_ONE: string[] = [];
 
 /** Within this far of the newest message counts as at it. */
 const AT_LATEST = 48;
@@ -155,7 +167,8 @@ export function Timeline({
   // The spoilers tapped open, by message, place and words, while the timeline is on screen.
   const spoilers = useSpoilers();
   const thread = timelineKey.thread;
-  const timeline = useStore((s) => timelineOf(s, account, timelineKey));
+  // What people whose ignore is still on its way said draws as nothing (ADR 0011).
+  const timeline = useStore((s) => shownTimeline(s, account, timelineKey));
 
   // The room's pins, once for every row (each row asking would search the rooms per change).
   const pinnedIds = useStore(
@@ -164,6 +177,15 @@ export function Timeline({
   );
 
   const pinned = useMemo(() => new Set(pinnedIds), [pinnedIds]);
+
+  // Whom bubbles leave unnamed here, read alone: a room's other changes don't redraw the list.
+  const unnamedIds = useStore(
+    (s) => unnamedSenders(roomOf(s, account, timelineKey.room_id)),
+    shallow,
+  );
+
+  const unnamed = useMemo(() => new Set(unnamedIds), [unnamedIds]);
+
   // The "New" divider stays where it first showed and fades once read past (state/newMarker.ts),
   // derived during render so it is there on the first frame.
   const sdkMarker = useMemo(() => sdkBoundary(timeline.entries), [timeline.entries]);
@@ -185,9 +207,14 @@ export function Timeline({
   }, [fading, reducedMotion]);
   const shownMarker = marker.shown;
 
+  const showHidden = useStore((s) => s.settings.showHiddenEvents);
+  // What people the user ignores sent never draws, hidden events included, and nor does what
+  // someone whose ignore is being undone sent until that is saved (ADR 0011).
+  const ignored = useStore((s) => shownIgnored(accountOf(s, account)) ?? NO_ONE, shallow);
+
   const rows = useMemo(
-    () => planTimeline(timeline, { thread, root, marker: shownMarker }),
-    [timeline, thread, root, shownMarker],
+    () => planTimeline(timeline, { thread, root, marker: shownMarker, showHidden, ignored }),
+    [timeline, thread, root, shownMarker, showHidden, ignored],
   );
 
   const list = useRef<FlashListRef<Row>>(null);
@@ -204,9 +231,15 @@ export function Timeline({
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const onScreen = useOnScreen(account, timelineKey);
 
+  // Seeing the room, on opening it or coming back to it, takes away its unread mark.
+  useEffect(() => {
+    if (onScreen && timelineKey.thread === null) unmarkOpened(store, account, timelineKey.room_id);
+  }, [onScreen, store, account, timelineKey]);
+
   // The engine follows the timeline while a screen shows it (sheets over it act on it too).
   useEffect(() => {
     if (timelineKey.thread === null) visitRoom(store, account, timelineKey.room_id);
+
     retainTimeline(store, account, timelineKey);
 
     return () => releaseTimeline(store, account, timelineKey);
@@ -411,6 +444,7 @@ export function Timeline({
       account,
       timelineKey,
       thread,
+      unnamed,
       scrollTo: (eventId) => {
         // The tap is the jump: from now on an earlier one's late answer (a link being looked up,
         // another quote's) opens nothing, and this one's goes on only while this screen is on show.
@@ -441,7 +475,7 @@ export function Timeline({
       },
       shown: () => shown.current,
     }),
-    [account, timelineKey, thread, scrollTo, shown],
+    [account, timelineKey, thread, unnamed, scrollTo, shown],
   );
 
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -476,6 +510,8 @@ export function Timeline({
         return <HistoryFailedRow error={item.error} />;
       case 'replies':
         return <RepliesDivider count={item.count} />;
+      case 'hidden':
+        return <HiddenEventLine event={item.event} />;
     }
   }, []);
 

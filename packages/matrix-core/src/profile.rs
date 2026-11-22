@@ -1,5 +1,6 @@
 //! The user's profile for one account: display name and picture, the contact details (email
-//! addresses and phone numbers) linked to the account, and the homeserver's account page.
+//! addresses and phone numbers) linked to the account, the password, deactivating the account,
+//! and the homeserver's account page.
 
 use std::path::Path;
 
@@ -63,8 +64,10 @@ pub struct PendingContact {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub enum AccountPage {
-    /// Name, picture and contact details.
+    /// Name, picture, contact details and password.
     Profile,
+    /// Deactivating the account.
+    Deactivate,
 }
 
 impl PendingContact {
@@ -81,6 +84,39 @@ impl PendingContact {
 }
 
 impl Account {
+    /// Changes the password of a password account, which signs its other sessions out. The
+    /// server asks for the current `password` (else this fails with
+    /// [`Error::PasswordRequired`]). An OAuth account changes it on its account page.
+    pub async fn change_password(&self, new: &str, password: Option<&str>) -> Result<(), Error> {
+        let account = self.client().account();
+        match account.change_password(new, None).await {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                let Some(info) = error.as_uiaa_response() else { return Err(error.into()) };
+                let auth = self.password_auth(password.ok_or(Error::PasswordRequired)?, info.session.clone());
+                account.change_password(new, Some(auth)).await?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Deactivates a password account for good: nobody can sign in to it again, and its user ID
+    /// can't be taken again. With `erase`, the server also forgets the messages it sent, as far
+    /// as it can. The server asks for the `password` (else this fails with
+    /// [`Error::PasswordRequired`]). An OAuth account is deactivated on its account page.
+    pub async fn deactivate(&self, erase: bool, password: Option<&str>) -> Result<(), Error> {
+        let account = self.client().account();
+        match account.deactivate(None, None, erase).await {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                let Some(info) = error.as_uiaa_response() else { return Err(error.into()) };
+                let auth = self.password_auth(password.ok_or(Error::PasswordRequired)?, info.session.clone());
+                account.deactivate(None, Some(auth), erase).await?;
+                Ok(())
+            }
+        }
+    }
+
     /// Sets the display name; an empty name removes it.
     pub async fn set_display_name(&self, name: &str) -> Result<(), Error> {
         let name = name.trim();
@@ -198,6 +234,7 @@ impl Account {
     pub async fn account_page(&self, page: AccountPage) -> Result<String, Error> {
         let action = match page {
             AccountPage::Profile => AccountManagementActionData::Profile,
+            AccountPage::Deactivate => AccountManagementActionData::AccountDeactivate,
         };
         self.account_page_url(action).await
     }

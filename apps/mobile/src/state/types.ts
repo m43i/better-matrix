@@ -12,6 +12,7 @@ import type {
   Contacts,
   EditVersion,
   ImagePack,
+  Identity,
   IncomingCall,
   Invitation,
   LinkPreview,
@@ -22,6 +23,8 @@ import type {
   SavedMessage,
   RoomSummary,
   ScheduledMessage,
+  Safety,
+  SafetyChange,
   Security,
   Session,
   SharedFile,
@@ -31,6 +34,7 @@ import type {
   ThreadInfo,
   TimelineEntry,
   VerificationStep,
+  Widgets,
 } from '@better-matrix/matrix-native/types';
 
 import type { CallView } from './callView';
@@ -87,11 +91,18 @@ export interface AccountData {
   /** Who is typing, by room ID. */
   typing: Record<string, Person[]>;
   security: Security | null;
+  /**
+   * What the user knows of other people's identities, by user ID, once asked for (`LoadIdentity`)
+   * or after verifying them; `null` when they have none to verify.
+   */
+  identities: Record<string, Identity | null>;
   sessions: Session[] | null;
   contacts: Contacts | null;
   members: Record<string, Members>;
   threads: Record<string, ThreadInfo[]>;
   files: Record<string, SharedFile[]>;
+  /** Rooms' widgets, by room ID, once listed. */
+  widgets: Record<string, Widgets>;
   pins: Record<string, MessagePreview[]>;
   /** The messages the user saved, most recently saved first, once listed. */
   saved: SavedMessage[] | null;
@@ -108,6 +119,28 @@ export interface AccountData {
   status: Status;
   /** The status as last saved: what a choice that fails to save falls back to. */
   savedStatus: Status;
+  /** The words that notify the user wherever they are written, once the engine reports them. */
+  keywords: string[] | null;
+  /**
+   * What the user keeps away (ignored people, media, invitations), as shown: the last reported
+   * choices with the changes still on their way applied (`savedSafety`, `pendingSafety`).
+   */
+  safety: Safety;
+  /** The choices as the engine last reported them: what a failed change falls back to. */
+  savedSafety: Safety;
+  /** Changes made on this device that the engine hasn't confirmed or refused yet, in order. */
+  pendingSafety: PendingSafety[];
+  /**
+   * Events drawn as nothing in their timelines as their sender is ignored, with that sender: while
+   * the user still ignores them, nothing shows the event in another form (a file Room Info listed).
+   */
+  hiddenEvents: Record<string, string>;
+}
+
+/** A safety change on its way to the engine; `id` tells it apart from the same change again. */
+export interface PendingSafety {
+  id: number;
+  change: SafetyChange;
 }
 
 /** A verification running for one of the accounts. */
@@ -115,6 +148,8 @@ export interface Verification {
   account: AccountId;
   flowId: string;
   step: VerificationStep;
+  /** The person on the other side, when it isn't one of the user's own sessions (from `Incoming`). */
+  user: Person | null;
 }
 
 /** Something to tell the user once, such as a command that failed. */
@@ -155,6 +190,8 @@ export interface State {
   media: Record<string, string>;
   /** Linked GIF files, by URL. */
   gifs: Record<string, string>;
+  /** Hidden media the user tapped Show on, by `revealKey`, until the app restarts. */
+  revealedMedia: Record<string, true>;
   /** Link cards, by `previewKey`; `null` when the page has none. */
   linkPreviews: Record<string, LinkPreview | null>;
   call: CallState;

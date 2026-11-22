@@ -136,6 +136,8 @@ impl Bridge {
                 oauth_redirect,
                 // The iOS push extension and Android's headless push task open them too.
                 stores: matrix_core::StoreSharing::WithPush,
+                // The phones scan verification codes with the camera.
+                scans_qr: true,
             },
             sink,
         )

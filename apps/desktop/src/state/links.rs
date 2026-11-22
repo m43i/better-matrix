@@ -272,12 +272,25 @@ impl State {
         }
     }
 
+    /// Whether the link dialog's room preview shows initials rather than the room's picture: the
+    /// account is invited there (as the preview says, or as its invitations hold the room) and
+    /// hides invitations' pictures (ADR 0011).
+    pub fn link_hides_picture(&self, dialog: &LinkDialog, preview: &RoomPreview) -> bool {
+        self.accounts.get(&dialog.account).is_some_and(|data| {
+            let invited = preview.invited || data.invitations.iter().any(|invite| invite.room_id == preview.room_id);
+            invited && !data.safety.invite_pictures
+        })
+    }
+
     /// The pictures the link dialog shows: the room's or the person's, from its account.
     pub(super) fn link_pictures(&self) -> Option<(AccountId, matrix_core::MediaRef)> {
         let Some(Modal::Link(dialog)) = &self.modal else { return None };
         let picture = match &dialog.step {
             LinkStep::Person { person, .. } => person.avatar.clone(),
-            _ => dialog.preview().and_then(|preview| preview.avatar.clone()),
+            _ => dialog
+                .preview()
+                .filter(|preview| !self.link_hides_picture(dialog, preview))
+                .and_then(|preview| preview.avatar.clone()),
         }?;
         Some((dialog.account.clone(), picture))
     }
@@ -345,10 +358,13 @@ mod tests {
                 call: matrix_core::RoomCall::default(),
                 activity_ms: None,
                 encrypted: false,
+                public: false,
                 can_rename: false,
                 pinned: Vec::new(),
                 can_pin: true,
                 saved: Vec::new(),
+                priority: matrix_core::RoomPriority::Normal,
+                marked_unread: false,
             })
             .collect();
         apply(

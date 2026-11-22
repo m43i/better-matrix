@@ -1,10 +1,12 @@
 import type { TimelineEntry } from '@better-matrix/matrix-native/types';
 
 import { atStart, GROUP_WINDOW_MS, newestSent, planTimeline, rowOf, shouldMarkRead } from '../plan';
+import { hiddenEntry as hiddenStandIn } from '../safety';
 import {
   ADA,
   entry,
   GRACE,
+  hiddenEntry,
   message,
   messageEntry,
   person,
@@ -88,7 +90,7 @@ describe('planTimeline', () => {
   });
 
   it('should merge joins across hidden entries', () => {
-    const hidden: TimelineEntry = { id: 'h', kind: { type: 'Other' } };
+    const hidden = hiddenEntry('h');
 
     const rows = planTimeline(
       timelineOf([
@@ -150,7 +152,71 @@ describe('planTimeline', () => {
   });
 
   it('should leave hidden entries out', () => {
-    expect(kinds([{ id: 'h', kind: { type: 'Other' } }])).toEqual([]);
+    expect(kinds([hiddenEntry('h')])).toEqual([]);
+  });
+
+  it('should give hidden entries a row while hidden events show', () => {
+    const rows = planTimeline(timelineOf([hiddenEntry('h')]), { ...room, showHidden: true });
+
+    expect(rows.map((r) => (r.kind === 'hidden' ? r.event.event_type : r.kind))).toEqual([
+      'm.room.server_acl',
+    ]);
+  });
+
+  it('should never draw what an ignored person sent, even while hidden events show', () => {
+    const rows = planTimeline(
+      timelineOf([hiddenEntry('h'), messageEntry('$m', { sender_id: ADA })]),
+      {
+        ...room,
+        showHidden: true,
+        ignored: [GRACE],
+      },
+    );
+
+    expect(rows.map((r) => r.kind)).toEqual(['message']);
+  });
+
+  it('should merge joins across an ignored person’s hidden event, even while hidden events show', () => {
+    const rows = planTimeline(
+      timelineOf([
+        roomEventEntry('1', ada, { type: 'Joined' }),
+        hiddenEntry('h'),
+        roomEventEntry('2', grace, { type: 'Joined' }),
+      ]),
+      { ...room, showHidden: true, ignored: [GRACE] },
+    );
+
+    expect(rows.map((r) => r.kind)).toEqual(['events']);
+  });
+
+  it('should never draw a stand-in for an ignored person’s message, even once they aren’t', () => {
+    const standIn = hiddenStandIn('s', message('$spam'));
+    const rows = planTimeline(timelineOf([standIn]), { ...room, showHidden: true, ignored: [] });
+
+    expect(rows).toEqual([]);
+  });
+
+  it('should not draw a thread’s root from the room’s timeline when its sender is ignored', () => {
+    const rows = planTimeline(timelineOf([]), {
+      thread: '$root',
+      root: message('$root'),
+      ignored: [GRACE],
+    });
+
+    expect(rows.map((r) => r.kind)).toEqual([]);
+  });
+
+  it('should not merge joins across a hidden event that shows', () => {
+    const rows = planTimeline(
+      timelineOf([
+        roomEventEntry('1', ada, { type: 'Joined' }),
+        hiddenEntry('h'),
+        roomEventEntry('2', grace, { type: 'Joined' }),
+      ]),
+      { ...room, showHidden: true },
+    );
+
+    expect(rows.map((r) => r.kind)).toEqual(['events', 'hidden', 'events']);
   });
 
   it('should mark only the newest call card as the latest', () => {

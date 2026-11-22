@@ -24,7 +24,10 @@ describe('unverifiedAccount', () => {
   it('should name the account on screen when its session is unverified', () => {
     const state = apply(signedIn, {
       type: 'SecurityChanged',
-      data: { account: ADA, security: { session_verified: false, recovery: 'Enabled' } },
+      data: {
+        account: ADA,
+        security: { session_verified: false, recovery: 'Enabled', offline_device: 'Off' },
+      },
     });
 
     expect(unverifiedAccount(state)).toBe(ADA);

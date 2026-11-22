@@ -3,6 +3,7 @@ import type { Attachment, CallCard, Poll } from '@better-matrix/matrix-native/ty
 import {
   attachmentPreview,
   attachmentActions,
+  attachmentRows,
   callStatus,
   cardLink,
   messageActions,
@@ -164,6 +165,14 @@ describe('messageActions', () => {
     expect(messageActions(message('$m'), ADA, false).delete).toBe(false);
   });
 
+  it('should offer reporting someone else message', () => {
+    expect(messageActions(message('$m'), ADA, false).report).toBe(true);
+  });
+
+  it('should not offer reporting the user own message', () => {
+    expect(messageActions({ ...message('$m'), sender_id: ADA }, ADA, false).report).toBe(false);
+  });
+
   it('should not offer reactions on a call card', () => {
     const call = withContent('$m', {
       type: 'Call',
@@ -218,6 +227,22 @@ describe('attachmentActions', () => {
 
   it('should offer no file actions without the original media', () => {
     expect(attachmentActions({ ...file, media: null })).toEqual([]);
+  });
+
+  it('should offer no file actions while the media is held back', () => {
+    expect(attachmentActions(file, true)).toEqual([]);
+  });
+
+  it('a sheet standing for held-back media alone should offer Show instead of nothing', () => {
+    expect(attachmentRows(file, true, true)).toEqual(['show']);
+  });
+
+  it('a message sheet should offer nothing for held-back media, so it draws no divider', () => {
+    expect(attachmentRows(file, true, false)).toEqual([]);
+  });
+
+  it('shown media should offer its actions, not Show', () => {
+    expect(attachmentRows(file, false, true)).toEqual(['copyImage', 'open', 'share', 'save']);
   });
 });
 

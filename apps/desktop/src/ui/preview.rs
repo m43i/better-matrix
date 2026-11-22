@@ -109,6 +109,24 @@ pub fn preview(s: &State, preview: &Preview, window: [f32; 2], p: &Palette) -> E
         PreviewContent::Video { thumbnail, status: state } => {
             video_view(&preview.attachment, thumbnail.as_ref(), state, (width, height - CONTROLS), p)
         }
+        // Held back by the media choice: nothing loaded until Show (ADR 0011).
+        // A card of its own, so the timeline's placeholder behind the dimmed backdrop doesn't
+        // show through it.
+        PreviewContent::Held => col()
+            .key("preview-held")
+            .items_center()
+            .gap(14.0)
+            .padding(32.0)
+            .radius(16.0)
+            .fill(p.surface)
+            .border(1.0, p.divider)
+            .child(icon(&icons::EYE_OFF, 44.0).color(p.text_muted))
+            .child(text(t!("safety.hidden_media")).font(font::BODY).color(p.text_muted))
+            .child(
+                super::components::button(t!("safety.show_media"), super::components::ButtonKind::Primary, true, p)
+                    .key("preview-show-media")
+                    .on_press(State::reveal_preview_item),
+            ),
         PreviewContent::Audio => {
             let clips = Clips { audio: s.audio.as_ref(), decoded: &s.decoded_audio, speed: s.settings.playback_speed };
             col()
@@ -136,7 +154,10 @@ pub fn preview(s: &State, preview: &Preview, window: [f32; 2], p: &Palette) -> E
         .modal(false, State::close_preview)
         .label(preview.attachment.name.clone())
         .on_secondary_press(|s: &mut State, point, _| {
-            s.popover = Some(Popover::AttachmentMenu { at: (point.x as i32, point.y as i32) });
+            // A held-back file has no file actions until shown.
+            if !s.preview_held() {
+                s.popover = Some(Popover::AttachmentMenu { at: (point.x as i32, point.y as i32) });
+            }
         })
         .child(backdrop)
         .child(col().w_full().h_full().pb(bottom).center().child(content))
@@ -160,9 +181,14 @@ fn bar(preview: &Preview) -> El {
         let place = tf!("preview.position", index = preview.index + 1, count = preview.batch.len());
         bar = bar.child(text(place).font(font::META).color(Color::WHITE.alpha(0.7)));
     }
-    bar.child(el().grow(1.0))
-        .child(action(&icons::DOWNLOAD, t!("preview.download"), "preview-download").on_press(State::download_preview))
-        .child(action(&icons::CLOSE, t!("preview.close"), "preview-close").on_press(State::close_preview))
+    bar = bar.child(el().grow(1.0));
+    // A held-back file can't be downloaded until shown.
+    if !matches!(preview.content, PreviewContent::Held) {
+        bar = bar.child(
+            action(&icons::DOWNLOAD, t!("preview.download"), "preview-download").on_press(State::download_preview),
+        );
+    }
+    bar.child(action(&icons::CLOSE, t!("preview.close"), "preview-close").on_press(State::close_preview))
 }
 
 /// A round button on the dark layer.
@@ -193,7 +219,8 @@ fn strip(s: &State, preview: &Preview, window_width: f32, p: &Palette) -> El {
     let thumbs = preview.batch.iter().enumerate().map(|(index, item)| {
         let current = index == preview.index;
         let attachment = &item.attachment;
-        let image = attachment.preview().and_then(|(media, _)| s.media.image(&media));
+        let held = s.preview_holds(item);
+        let image = attachment.preview().and_then(|(media, _)| s.media.image(&media)).filter(|_| !held);
         let mut thumb = el()
             .key(format!("preview-thumb-{index}"))
             .size(THUMB, THUMB)
@@ -207,7 +234,9 @@ fn strip(s: &State, preview: &Preview, window_width: f32, p: &Palette) -> El {
             .on_press(move |s: &mut State| s.show_preview_item(index));
         thumb = match image {
             Some(image) => thumb.pixels_fit(image.pixels(), SurfaceFit::Fill),
-            None => thumb.fill(Color::WHITE.alpha(0.12)).child(icon(kind_icon(attachment), 22.0).color(Color::WHITE)),
+            None => thumb
+                .fill(Color::WHITE.alpha(0.12))
+                .child(icon(if held { &icons::EYE_OFF } else { kind_icon(attachment) }, 22.0).color(Color::WHITE)),
         };
         if attachment.kind == AttachmentKind::Video && image.is_some() {
             thumb = thumb.child(

@@ -7,11 +7,15 @@ import { ADA, GRACE, summary } from '../../../test/fixtures';
 import { Store } from '../../store';
 import {
   addContact,
+  addKeyword,
   editableName,
   installAccountEffects,
   nameChanged,
+  otherWays,
+  parseEmail,
   parseSignInInput,
   removeEnded,
+  removeKeyword,
   requestContactCode,
   serverName,
   setStatus,
@@ -82,13 +86,17 @@ describe('parseSignInInput', () => {
 
 describe('serverName', () => {
   it('should prefer the server name', () => {
-    expect(serverName(homeserver({ oauth: true, password: false }))).toBe('example.org');
+    expect(
+      serverName(homeserver({ oauth: true, password: false, create_account: false, qr: false })),
+    ).toBe('example.org');
   });
 
   it('should fall back to the host of the URL', () => {
-    expect(serverName(homeserver({ oauth: true, password: false }, null))).toBe(
-      'matrix.example.org',
-    );
+    expect(
+      serverName(
+        homeserver({ oauth: true, password: false, create_account: false, qr: false }, null),
+      ),
+    ).toBe('matrix.example.org');
   });
 });
 
@@ -124,20 +132,29 @@ describe('SignInFlow', () => {
   });
 
   it('should show the password form for a password server', () => {
-    const { flow } = discovered(homeserver({ oauth: false, password: true }));
+    const { flow } = discovered(
+      homeserver({ oauth: false, password: true, create_account: false, qr: false }),
+    );
+
     expect(flow.snapshot().step.type).toBe('password');
   });
 
   it('should start the browser sign-in for an OAuth server', () => {
-    const { last } = discovered(homeserver({ oauth: true, password: true }));
+    const { last } = discovered(
+      homeserver({ oauth: true, password: true, create_account: false, qr: false }),
+    );
+
     expect(last().command).toEqual({
       type: 'LoginOAuth',
-      data: { homeserver: 'https://matrix.example.org/', resume: null },
+      data: { homeserver: 'https://matrix.example.org/', resume: null, create: false },
     });
   });
 
   it('should say so when a server offers no way to sign in', () => {
-    const { flow } = discovered(homeserver({ oauth: false, password: false }));
+    const { flow } = discovered(
+      homeserver({ oauth: false, password: false, create_account: false, qr: false }),
+    );
+
     expect(flow.snapshot().step).toEqual({
       type: 'server',
       error: t('sign_in.no_method', { server: 'example.org' }),
@@ -145,7 +162,10 @@ describe('SignInFlow', () => {
   });
 
   it('should open the sign-in page in a session returning to the app', () => {
-    const { engine, last, browser } = discovered(homeserver({ oauth: true, password: false }));
+    const { engine, last, browser } = discovered(
+      homeserver({ oauth: true, password: false, create_account: false, qr: false }),
+    );
+
     engine.emit({
       type: 'OpenUrl',
       data: { request: last().request, url: 'https://auth.example.org/login' },
@@ -157,7 +177,7 @@ describe('SignInFlow', () => {
     const back = `${OAUTH_REDIRECT}?code=1&state=2`;
 
     const { engine, last, commands } = discovered(
-      homeserver({ oauth: true, password: false }),
+      homeserver({ oauth: true, password: false, create_account: false, qr: false }),
       back,
     );
 
@@ -172,7 +192,7 @@ describe('SignInFlow', () => {
 
   it('should cancel the sign-in when the browser is closed without an answer', async () => {
     const { engine, last, commands } = discovered(
-      homeserver({ oauth: true, password: false }),
+      homeserver({ oauth: true, password: false, create_account: false, qr: false }),
       null,
     );
 
@@ -186,14 +206,20 @@ describe('SignInFlow', () => {
   });
 
   it('should offer to try again without an error after a cancelled browser sign-in', async () => {
-    const { last, finish, flow } = discovered(homeserver({ oauth: true, password: false }));
+    const { last, finish, flow } = discovered(
+      homeserver({ oauth: true, password: false, create_account: false, qr: false }),
+    );
+
     finish(last().request, 'cancelled');
     await flush();
     expect(flow.snapshot().step).toMatchObject({ type: 'browser', request: null, error: null });
   });
 
   it('should log in with the username and password', () => {
-    const { flow, last } = discovered(homeserver({ oauth: false, password: true }));
+    const { flow, last } = discovered(
+      homeserver({ oauth: false, password: true, create_account: false, qr: false }),
+    );
+
     flow.submitPassword(' alice ', 'secret');
     expect(last().command).toEqual({
       type: 'Login',
@@ -207,7 +233,10 @@ describe('SignInFlow', () => {
   });
 
   it('should ask for both fields when the password is missing', () => {
-    const { flow, sent } = discovered(homeserver({ oauth: false, password: true }));
+    const { flow, sent } = discovered(
+      homeserver({ oauth: false, password: true, create_account: false, qr: false }),
+    );
+
     const before = sent.length;
     flow.submitPassword('alice', '');
     expect(sent.length).toBe(before);
@@ -215,7 +244,10 @@ describe('SignInFlow', () => {
   });
 
   it('should keep the password form with the error when the login fails', async () => {
-    const { flow, last, finish } = discovered(homeserver({ oauth: false, password: true }));
+    const { flow, last, finish } = discovered(
+      homeserver({ oauth: false, password: true, create_account: false, qr: false }),
+    );
+
     flow.submitPassword('alice', 'wrong');
     finish(last().request, 'Invalid password');
     await flush();
@@ -228,15 +260,30 @@ describe('SignInFlow', () => {
 
   it('should put the added account on screen once signed in', async () => {
     const { flow, last, finish, engine, store } = discovered(
-      homeserver({ oauth: false, password: true }),
+      homeserver({ oauth: false, password: true, create_account: false, qr: false }),
     );
 
     engine.emit({ type: 'AccountAdded', data: summary(ADA) });
     flow.submitPassword('grace', 'secret');
     engine.emit({ type: 'AccountAdded', data: summary(GRACE, 'Grace') });
+    engine.emit({ type: 'SignedIn', data: { request: last().request, account: GRACE } });
     finish(last().request);
     await flush();
     expect(flow.snapshot().step).toEqual({ type: 'done', account: GRACE });
+    expect(store.getState().active).toBe(GRACE);
+  });
+
+  it('should not put an account restored meanwhile on screen', async () => {
+    const { flow, last, finish, engine, store } = discovered(
+      homeserver({ oauth: false, password: true, create_account: false, qr: false }),
+    );
+
+    flow.submitPassword('grace', 'secret');
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    engine.emit({ type: 'AccountAdded', data: summary(GRACE, 'Grace') });
+    engine.emit({ type: 'SignedIn', data: { request: last().request, account: GRACE } });
+    finish(last().request);
+    await flush();
     expect(store.getState().active).toBe(GRACE);
   });
 
@@ -248,16 +295,22 @@ describe('SignInFlow', () => {
     const discover = last().request;
     engine.emit({
       type: 'HomeserverDiscovered',
-      data: { request: discover, homeserver: homeserver({ oauth: true, password: false }) },
+      data: {
+        request: discover,
+        homeserver: homeserver({ oauth: true, password: false, create_account: false, qr: false }),
+      },
     });
     expect(last().command).toEqual({
       type: 'LoginOAuth',
-      data: { homeserver: 'https://matrix.example.org/', resume: ADA },
+      data: { homeserver: 'https://matrix.example.org/', resume: ADA, create: false },
     });
   });
 
   it('should cancel the browser sign-in when switching to the password', () => {
-    const { flow, last, commands } = discovered(homeserver({ oauth: true, password: true }));
+    const { flow, last, commands } = discovered(
+      homeserver({ oauth: true, password: true, create_account: false, qr: false }),
+    );
+
     const login = last().request;
     flow.usePassword();
     expect(commands()).toContainEqual({ type: 'Cancel', data: login });
@@ -272,6 +325,201 @@ describe('SignInFlow', () => {
     flow.changeServer();
     expect(commands()).toContainEqual({ type: 'Cancel', data: discover });
     expect(flow.snapshot().step).toEqual({ type: 'server', error: null });
+  });
+});
+
+describe('creating an account', () => {
+  const oauth = homeserver({ oauth: true, password: false, create_account: true, qr: false });
+  const password = homeserver({ oauth: false, password: true, create_account: true, qr: false });
+
+  /** A sign-in on `server` with the registration form open, and the pages it opened. */
+  function registering(server = password) {
+    const env = setup();
+    const opened: string[] = [];
+    const browser = jest.fn(() => Promise.resolve(null));
+    const flow = new SignInFlow(env.store, browser, (url) => opened.push(url));
+    flow.submitServer('example.org', true);
+    const discover = env.last().request;
+    env.engine.emit({
+      type: 'HomeserverDiscovered',
+      data: { request: discover, homeserver: server },
+    });
+    env.finish(discover);
+
+    return { ...env, flow, opened };
+  }
+
+  it('should create an account on the page of an OAuth server', () => {
+    const { last } = registering(oauth);
+    expect(last().command).toEqual({
+      type: 'LoginOAuth',
+      data: { homeserver: 'https://matrix.example.org/', resume: null, create: true },
+    });
+  });
+
+  it('should open the registration form on a password server', () => {
+    const { flow } = registering();
+    expect(flow.snapshot().step).toEqual({
+      type: 'register',
+      server: password,
+      request: null,
+      question: null,
+      error: null,
+    });
+  });
+
+  it('should offer account creation from the sign-in step', () => {
+    const { flow } = discovered(password);
+    flow.createAccount();
+    expect(flow.snapshot().step.type).toBe('register');
+  });
+
+  it('should create the account with the username and password', () => {
+    const { flow, last } = registering();
+    flow.submitRegistration(' alice ', 'secret', 'secret');
+    expect(last().command).toEqual({
+      type: 'Register',
+      data: { homeserver: 'https://matrix.example.org/', username: 'alice', password: 'secret' },
+    });
+  });
+
+  it('should refuse passwords that do not match', () => {
+    const { flow, sent } = registering();
+    const before = sent.length;
+    flow.submitRegistration('alice', 'secret', 'secert');
+    expect([sent.length, flow.snapshot().step]).toEqual([
+      before,
+      expect.objectContaining({ error: t('mobile.accounts.register_mismatch') }),
+    ]);
+  });
+
+  it('should show what the server asks', () => {
+    const { engine, flow, last } = registering();
+    flow.submitRegistration('alice', 'secret', 'secret');
+    engine.emit({
+      type: 'Registration',
+      data: { request: last().request, step: { type: 'Token' } },
+    });
+    expect(flow.snapshot().step).toMatchObject({ question: { type: 'Token' } });
+  });
+
+  it('should answer what the server asked', () => {
+    const { engine, flow, last } = registering();
+    flow.submitRegistration('alice', 'secret', 'secret');
+    const request = last().request;
+    engine.emit({ type: 'Registration', data: { request, step: { type: 'Terms', data: [] } } });
+    flow.answerRegistration({ type: 'Agree' });
+    expect([last().command, flow.snapshot().step]).toEqual([
+      { type: 'Answer', data: { request, answer: { type: 'Agree' } } },
+      expect.objectContaining({ question: null }),
+    ]);
+  });
+
+  it('should answer with the email address the server asked for, trimmed', () => {
+    const { engine, flow, last } = registering();
+    flow.submitRegistration('alice', 'secret', 'secret');
+    const request = last().request;
+    engine.emit({ type: 'Registration', data: { request, step: { type: 'Email' } } });
+    flow.answerRegistration({ type: 'Email', data: ' ada@example.org ' });
+    expect(last().command).toEqual({
+      type: 'Answer',
+      data: { request, answer: { type: 'Email', data: 'ada@example.org' } },
+    });
+  });
+
+  it('should refuse something that is not an email address', () => {
+    const { engine, flow, last, sent } = registering();
+    flow.submitRegistration('alice', 'secret', 'secret');
+    const request = last().request;
+    engine.emit({ type: 'Registration', data: { request, step: { type: 'Email' } } });
+    const before = sent.length;
+    flow.answerRegistration({ type: 'Email', data: 'ada' });
+    expect([sent.length, flow.snapshot().step]).toEqual([
+      before,
+      expect.objectContaining({
+        question: { type: 'Email' },
+        error: t('mobile.accounts.registration_email_invalid'),
+      }),
+    ]);
+  });
+
+  it('should continue once the emailed link was opened', () => {
+    const { engine, flow, last } = registering();
+    flow.submitRegistration('alice', 'secret', 'secret');
+    const request = last().request;
+    engine.emit({
+      type: 'Registration',
+      data: {
+        request,
+        step: { type: 'EmailSent', data: { address: 'ada@example.org', unconfirmed: true } },
+      },
+    });
+    flow.answerRegistration({ type: 'Continue' });
+    expect(last().command).toEqual({
+      type: 'Answer',
+      data: { request, answer: { type: 'Continue' } },
+    });
+  });
+
+  it('should show where the server sent the link', () => {
+    const { engine, flow, last } = registering();
+    flow.submitRegistration('alice', 'secret', 'secret');
+    const sentTo = { address: 'ada@example.org', unconfirmed: false };
+    engine.emit({
+      type: 'Registration',
+      data: { request: last().request, step: { type: 'EmailSent', data: sentTo } },
+    });
+    expect(flow.snapshot().step).toMatchObject({ question: { type: 'EmailSent', data: sentTo } });
+  });
+
+  it('should open the server’s page for a step it runs itself', () => {
+    const { engine, flow, last, opened } = registering();
+    flow.submitRegistration('alice', 'secret', 'secret');
+    engine.emit({
+      type: 'OpenUrl',
+      data: { request: last().request, url: 'https://matrix.example.org/fallback' },
+    });
+    expect(opened).toEqual(['https://matrix.example.org/fallback']);
+  });
+});
+
+describe('parseEmail', () => {
+  it('should take an email address, trimmed', () =>
+    expect(parseEmail(' ada@example.org ')).toBe('ada@example.org'));
+  it('should refuse an address without a domain', () => expect(parseEmail('ada@')).toBeNull());
+  it('should refuse text with spaces', () => expect(parseEmail('ada @example.org')).toBeNull());
+});
+
+describe('signing in again as a suspended account', () => {
+  const both = homeserver({ oauth: false, password: true, create_account: true, qr: true });
+
+  /** Ada signed out softly, with her ID typed in and her server discovered. */
+  function resuming() {
+    const env = setup();
+    env.engine.emit({ type: 'SessionEnded', data: { account: ADA, kept: true } });
+    const flow = new SignInFlow(env.store, jest.fn());
+    flow.submitServer(ADA);
+    env.engine.emit({
+      type: 'HomeserverDiscovered',
+      data: { request: env.last().request, homeserver: both },
+    });
+
+    return { ...env, flow };
+  }
+
+  it('should offer neither a QR sign-in nor creating an account', () => {
+    const { flow } = resuming();
+    expect(otherWays(both, flow.snapshot().resume)).toEqual({ create: false, qr: false });
+  });
+
+  it('should offer both when not signing in again', () => {
+    expect(otherWays(both, null)).toEqual({ create: true, qr: true });
+  });
+
+  it('should not create an account instead', () => {
+    const { flow } = resuming();
+    flow.createAccount();
+    expect(flow.snapshot().step.type).toBe('password');
   });
 });
 
@@ -331,18 +579,30 @@ describe('installAccountEffects', () => {
     const { engine, commands } = withEffects();
     engine.emit({
       type: 'SecurityChanged',
-      data: { account: ADA, security: { session_verified: false, recovery: 'Enabled' } },
+      data: {
+        account: ADA,
+        security: { session_verified: false, recovery: 'Enabled', offline_device: 'Off' },
+      },
     });
     engine.emit({
       type: 'SecurityChanged',
-      data: { account: ADA, security: { session_verified: true, recovery: 'Enabled' } },
+      data: {
+        account: ADA,
+        security: { session_verified: true, recovery: 'Enabled', offline_device: 'Off' },
+      },
     });
     expect(commands()).toEqual([{ type: 'FetchRoomKeys', data: ADA }]);
   });
 
   it('should not fetch room keys again when nothing changed', () => {
     const { engine, sent } = withEffects();
-    const security = { session_verified: true, recovery: 'Enabled' } as const;
+
+    const security = {
+      session_verified: true,
+      recovery: 'Enabled',
+      offline_device: 'Off',
+    } as const;
+
     engine.emit({ type: 'SecurityChanged', data: { account: ADA, security } });
     engine.emit({ type: 'SecurityChanged', data: { account: ADA, security } });
     expect(sent.length).toBe(1);
@@ -482,6 +742,59 @@ describe('setStatus', () => {
     expect(status(store)).toBe('Online');
     expect(store.getState().notices.map((n) => n.message)).toContain(
       t('notice.status', { error: 'offline' }),
+    );
+  });
+});
+
+describe('notification keywords', () => {
+  function withKeywords(keywords: string[]) {
+    const env = setup();
+    env.engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    env.engine.emit({ type: 'Keywords', data: { account: ADA, keywords } });
+
+    return { ...env, keywords: () => env.store.getState().accounts[0]!.keywords };
+  }
+
+  it('adding a keyword should show it at once, sorted, and tell the engine', () => {
+    const { store, commands, keywords } = withKeywords(['zebra']);
+    expect(addKeyword(store, ADA, '  Apple ')).toBe(true);
+    expect(keywords()).toEqual(['Apple', 'zebra']);
+    expect(commands().at(-1)).toEqual({
+      type: 'SetKeyword',
+      data: { account: ADA, keyword: 'Apple', enabled: true },
+    });
+  });
+
+  it('a blank keyword should not be added', () => {
+    const { store, commands } = withKeywords([]);
+    expect(addKeyword(store, ADA, '   ')).toBe(false);
+    expect(commands()).toEqual([]);
+  });
+
+  it('a keyword the account has already should be listed once but still checked with the server', () => {
+    const { store, commands } = withKeywords(['deploy']);
+    expect(addKeyword(store, ADA, 'deploy')).toBe(true);
+    expect(store.getState().accounts[0]!.keywords).toEqual(['deploy']);
+    expect(commands()).toHaveLength(1);
+  });
+
+  it('removing a keyword should hide it at once and tell the engine', () => {
+    const { store, commands, keywords } = withKeywords(['deploy', 'release']);
+    removeKeyword(store, ADA, 'deploy');
+    expect(keywords()).toEqual(['release']);
+    expect(commands().at(-1)).toEqual({
+      type: 'SetKeyword',
+      data: { account: ADA, keyword: 'deploy', enabled: false },
+    });
+  });
+
+  it('a keyword that failed to save should tell the user', async () => {
+    const { store, last, finish } = withKeywords([]);
+    addKeyword(store, ADA, 'deploy');
+    finish(last().request, 'offline');
+    await flush();
+    expect(store.getState().notices.at(-1)!.message).toBe(
+      t('notice.notification_setting', { error: 'offline' }),
     );
   });
 });

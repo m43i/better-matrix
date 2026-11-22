@@ -40,6 +40,49 @@ Date: 2026-11-14
     `Running::opening` still names that request.
   - An open that finishes after its close, or after a newer open, parks it in the warm set
     (`WARM_TIMELINES` = 8 per account).
+- **Two syncs where the server has sliding sync** (MSC4186, `org.matrix.simplified_msc3575` in
+  `/versions`, asked again after every failed sync):
+  - Rooms come through the SDK's `RoomListService` (the room list sync): the newest rooms first,
+    then the rest a batch at a time, each with its last 10 events (`ROOM_LIST_EVENTS`, as many
+    as a long-poll sync's, so a burst such as a call invite and a message arrives whole for the
+    call handlers and notifications) and the state the list needs, its position kept in the
+    store. A big account shows its rooms at once instead of waiting for a whole long-poll
+    initial sync. The rooms open timelines show are subscribed for their recent events and
+    full state (`Account::follow_room`; the SDK replaces the whole set at once, so the account
+    keeps it, and a new room list sync after a failure subscribes it again); a room is let go
+    when its last timeline closes, the set changing at once so a later open follows it again
+    (and an open that finishes after its close lets it go).
+  - Beside it a long-poll sync that asks for no rooms (`SyncedRooms::None`) carries what sliding
+    sync can't: to-device messages and device keys under the crypto store's lock, presence
+    (MSC4186 has no presence; this is why it isn't the SDK's `SyncService`, whose encryption
+    sync would leave none), and account data. Both announce the same presence
+    (`Client::set_presence` without a request).
+  - Both feed the same paths: the room updates the SDK broadcasts go through
+    `report_room_updates` and the `RoomFeed`. Notifications come from the SDK's notification
+    handler, only for events sent after syncing started and once each (`Notified`): the list
+    reaching a room late, or a subscription, brings events again. An encrypted one whose key is
+    still on its way through the other sync is decrypted again for a few seconds, beside the
+    sync (which waits for each handler), its push rules worked out for what it says
+    (`decrypted_soon`). Known gap: in a room set to mentions only, the SDK drops an unreadable
+    message before the handler, so a mention whose key comes after it doesn't notify.
+  - Known gap: a server that names sliding sync and then refuses it, after the room-less sync
+    moved past a removal from a room, may keep that room listed until the app starts again.
+  - A sliding sync that starts afresh (the first after an upgrade, or once the server forgot
+    its position) lists only rooms joined now, never ones left meanwhile on another device:
+    as it starts, rooms this device held as joined that the server's `/joined_rooms` no longer
+    lists are marked left (`leave_rooms_left_elsewhere`; only rooms held as joined before asking
+    and still when marked, and none a sync reported as joined, or whose membership changed,
+    while asking, so a rejoin or an invitation back keeps it; asked again with backoff until
+    the server answers). Known gap: a rejoin elsewhere applied in the instant between that check
+    and the write is undone until the room's next update.
+  - The first failure of either ends both; `sync_loop` waits and starts again. A server that
+    names sliding sync but refuses the endpoint (`M_UNRECOGNIZED`, 404: a proxy in front, a
+    rollout half done) gets the long-poll sync for every room until the app starts again; its
+    first response brings every room's whole state (`full_state`), as the room-less sync before
+    moved the token past changes sliding sync never delivered.
+  - Subscription updates run one at a time, each reading the set when its turn comes, so the
+    newest set is applied last; an open that fails lets its room go.
+  - Elsewhere one long-poll sync brings everything, as before.
 - **One room feed per account:**
   - Every re-read of rooms goes through the account's `RoomFeed`: the sync, the unread listener,
     the space-member fetch, and commands that change rooms (rename, leave, notification modes).
@@ -52,7 +95,7 @@ Date: 2026-11-14
   - Every room is read once when the sync starts. The unread listener lives as long as the
     sync loop, through failed syncs and the waits between them, so a retry re-reads nothing.
 - **Idle costs nothing on the desktop:** the engine's runtime has at most four workers
-  (`WORKERS`), and nothing polls: syncs long-poll, and a store shared with no other process
+  (`WORKERS`), and nothing polls: both syncs long-poll, and a store shared with no other process
   takes no cross-process locks ([0010](0010-mobile.md)).
   - Spaces without loaded members are queued from the store at start, from every sync, and
     after a failed sync. A failed member fetch (a space that forbids it, a server error) is

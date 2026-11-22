@@ -12,7 +12,7 @@
       "bundleIdentifier": "chat.bettermatrix.mobile",
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Better Matrix uses the camera for video calls and to send photos.",
+        "NSCameraUsageDescription": "Better Matrix uses the camera for video calls, to send photos and to scan QR codes.",
         "NSMicrophoneUsageDescription": "Better Matrix uses the microphone for calls and voice messages.",
         "NSPhotoLibraryUsageDescription": "Better Matrix lets you send photos and videos from your library.",
         "UIBackgroundModes": ["audio", "voip"]
@@ -80,7 +80,15 @@
         "expo-image-picker",
         {
           "photosPermission": "Better Matrix lets you send photos and videos from your library.",
-          "cameraPermission": "Better Matrix uses the camera to send photos."
+          "cameraPermission": "Better Matrix uses the camera for video calls, to send photos and to scan QR codes."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Better Matrix uses the camera for video calls, to send photos and to scan QR codes.",
+          "microphonePermission": "Better Matrix uses the microphone for calls and voice messages.",
+          "recordAudioAndroid": true
         }
       ],
       [

@@ -54,6 +54,9 @@ pub enum Command {
         homeserver: String,
         /// A suspended account to sign in as again, taking back its store and device.
         resume: Option<AccountId>,
+        /// Create a new account on the server's page first (when
+        /// [`LoginMethods::create_account`](crate::LoginMethods::create_account)).
+        create: bool,
     },
     /// The browser came back to the app's own redirect URI ([`OAuthRedirect::App`]) for the
     /// sign-in `request` started: finishes it. Unknown or finished sign-ins answer cancelled.
@@ -64,6 +67,37 @@ pub enum Command {
         request: RequestId,
         /// The full URL the app received, query included.
         url: String,
+    },
+    /// Create an account on a password homeserver and sign it in. The server may ask first:
+    /// [`Event::Registration`] says what, [`Command::Answer`] replies. An OAuth homeserver
+    /// creates accounts in the browser instead ([`Command::LoginOAuth`] with `create`).
+    Register(crate::RegisterRequest),
+    /// Sign another account in with a QR code exchanged with a device where it is signed in
+    /// (MSC4108). [`Event::QrLogin`] reports each step; the check code goes back with
+    /// [`Command::Answer`]. The new session starts verified.
+    SignInWithQr(crate::QrSignIn),
+    /// Approve a new device's sign-in with a QR code from this verified session: show a code
+    /// for it to scan (`scanned` is `None`), or take the code it shows. [`Event::QrLogin`]
+    /// reports each step, [`Event::OpenUrl`] opens the account page to approve it on, and the
+    /// check code goes back with [`Command::Answer`].
+    LinkDevice {
+        /// The signed-in account.
+        account: AccountId,
+        /// The new device's code, as scanned.
+        scanned: Option<Vec<u8>>,
+    },
+    /// Answer a question a running command asked (a check code, a registration step).
+    /// Answers to finished or unknown commands are dropped.
+    Answer {
+        /// The command that asked.
+        request: RequestId,
+        /// The answer.
+        answer: Answer,
+    },
+    /// Read the QR code in a picture (a camera frame); answered by [`Event::QrCodeRead`].
+    ReadQrCode {
+        /// The picture, a PNG or JPEG file.
+        picture: PathBuf,
     },
     /// Sign an account out on the server and forget it locally, its data included. A
     /// suspended account is only forgotten.
@@ -328,6 +362,45 @@ pub enum Command {
         /// The new default.
         mode: NotificationMode,
     },
+    /// Add a word that notifies the user wherever it is written, or remove one; an
+    /// [`Event::Keywords`] follows.
+    SetKeyword {
+        /// Which account.
+        account: AccountId,
+        /// The word.
+        keyword: String,
+        /// Add when true, remove when false.
+        enabled: bool,
+    },
+    /// Put a room among the favourites or the low priority rooms, or neither (room tags); an
+    /// updated [`Event::RoomsUpdated`] follows.
+    SetRoomPriority {
+        /// Whose room.
+        account: AccountId,
+        /// The room's ID.
+        room_id: String,
+        /// Where it goes.
+        priority: crate::RoomPriority,
+    },
+    /// Mark a room unread (MSC2867's flag), or take the mark away; nothing is read. An updated
+    /// [`Event::RoomsUpdated`] follows.
+    SetUnread {
+        /// Whose room.
+        account: AccountId,
+        /// The room's ID.
+        room_id: String,
+        /// Mark unread when true, take the mark away when false.
+        unread: bool,
+    },
+    /// Read a room without opening it: a read receipt for its latest message when it has unread
+    /// ones, and its unread mark taken away. Fails when it has unread messages but none to mark
+    /// read yet. An updated [`Event::RoomsUpdated`] follows.
+    MarkRoomRead {
+        /// Whose room.
+        account: AccountId,
+        /// The room's ID.
+        room_id: String,
+    },
     /// Set what others see of the user (online, away or hidden) on every session of this app;
     /// an [`Event::Status`] follows.
     SetStatus {
@@ -516,6 +589,42 @@ pub enum Command {
         /// it, only the members this device knows (enough for a few faces), with no request.
         all: bool,
     },
+    /// An event's JSON, for developer tools; answered by [`Event::EventSource`].
+    ViewSource {
+        /// Whose room.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+        /// The event.
+        event_id: String,
+    },
+    /// List a room's widgets; answered by [`Event::Widgets`].
+    ListWidgets {
+        /// Whose room.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+    },
+    /// Pin a web page to a room as a widget. The room's widgets are listed again after.
+    AddWidget {
+        /// Whose room.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+        /// What to call it; the page's host when blank.
+        name: String,
+        /// The page, `http` or `https`. It may hold template variables (`$matrix_user_id`, …).
+        url: String,
+    },
+    /// Take a widget off a room. The room's widgets are listed again after.
+    RemoveWidget {
+        /// Whose room.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+        /// The widget (`Widget::id`).
+        widget_id: String,
+    },
     /// List a room's threads; answered by [`Event::Threads`].
     ListThreads {
         /// Whose room.
@@ -529,6 +638,23 @@ pub enum Command {
         account: AccountId,
         /// The room.
         room_id: String,
+    },
+    /// Change what the user keeps away (ignored people, media, invitations) on every session;
+    /// an [`Event::Safety`] with the choices after it follows.
+    SetSafety {
+        /// Whose.
+        account: AccountId,
+        /// The change.
+        change: crate::SafetyChange,
+    },
+    /// Report a message, a room or a person to the homeserver's admins.
+    Report {
+        /// Who reports.
+        account: AccountId,
+        /// What is reported.
+        target: crate::ReportTarget,
+        /// Why, in the user's words; may be empty.
+        reason: String,
     },
     /// Kick, ban or change the role of a room member; [`Event::Members`] follows.
     ModerateMember {
@@ -664,6 +790,90 @@ pub enum Command {
     FetchRoomKeys(AccountId),
     /// Ask the user's other sessions to verify this one; [`Event::Verification`] follows.
     VerifyThisSession(AccountId),
+    /// Ask another person to verify each other, in the direct chat both have joined (else it
+    /// fails with [`Error::NoDirectChat`](crate::Error::NoDirectChat)); [`Event::Verification`]
+    /// follows, then [`Event::Identity`] once it ends.
+    VerifyUser {
+        /// Which account.
+        account: AccountId,
+        /// Whom.
+        user_id: String,
+    },
+    /// Compare emoji instead of scanning a code, in a verification both sides are ready for.
+    CompareEmoji {
+        /// Which account.
+        account: AccountId,
+        /// The verification.
+        flow_id: String,
+    },
+    /// The code the other side of a verification shows, as scanned.
+    ScanVerificationCode {
+        /// Which account.
+        account: AccountId,
+        /// The verification.
+        flow_id: String,
+        /// The code's raw bytes.
+        code: Vec<u8>,
+    },
+    /// Find out whether the user verified someone; answered by [`Event::Identity`].
+    LoadIdentity {
+        /// Which account.
+        account: AccountId,
+        /// Whom.
+        user_id: String,
+    },
+    /// Write every message key this session holds to a file, encrypted with a passphrase.
+    ExportRoomKeys {
+        /// Whose keys.
+        account: AccountId,
+        /// The file to write.
+        path: PathBuf,
+        /// What the file is encrypted with.
+        passphrase: Password,
+    },
+    /// Read message keys from a file another session or client exported; answered by
+    /// [`Event::KeysImported`]. Messages they unlock decrypt by themselves.
+    ImportRoomKeys {
+        /// Which account.
+        account: AccountId,
+        /// The file.
+        path: PathBuf,
+        /// What it was encrypted with.
+        passphrase: Password,
+    },
+    /// Turn the offline device on (with the recovery key) or off on this session; an
+    /// [`Event::SecurityChanged`] follows.
+    SetOfflineDevice {
+        /// Which account.
+        account: AccountId,
+        /// On or off.
+        on: bool,
+        /// The recovery key, to turn it on.
+        recovery_key: Option<Password>,
+    },
+    /// Change a password account's password, which signs its other sessions out. The server
+    /// asks for the current one: [`Event::PasswordNeeded`] (send again with it). An OAuth
+    /// account changes it on its account page ([`Command::OpenAccountPage`]).
+    ChangePassword {
+        /// Which account.
+        account: AccountId,
+        /// The new password.
+        new_password: Password,
+        /// The current password, when the server asked for it.
+        password: Option<Password>,
+    },
+    /// Deactivate an account for good, then forget it here ([`Event::AccountRemoved`]). A
+    /// password account may answer with [`Event::PasswordNeeded`] (send again with it); an OAuth
+    /// account answers with [`Event::OpenUrl`] for its account page, where it is deactivated
+    /// (its session then ends).
+    DeactivateAccount {
+        /// Which account.
+        account: AccountId,
+        /// Also ask the server to forget the messages it sent, as far as it can.
+        erase: bool,
+        /// The account password, when the server asked for it.
+        password: Option<Password>,
+    },
     /// Accept a verification request from another of the user's sessions.
     AcceptVerification {
         /// Which account.
@@ -768,6 +978,24 @@ pub enum Command {
     },
 }
 
+/// The app's answer to a question a running command asked ([`Command::Answer`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
+pub enum Answer {
+    /// The two digits the other device shows ([`QrLoginStep::EnterCheckCode`](crate::QrLoginStep::EnterCheckCode)).
+    CheckCode(u8),
+    /// The registration token ([`RegistrationStep::Token`](crate::RegistrationStep::Token)).
+    RegistrationToken(String),
+    /// The user agrees to the policies ([`RegistrationStep::Terms`](crate::RegistrationStep::Terms)).
+    Agree,
+    /// The email address to confirm ([`RegistrationStep::Email`](crate::RegistrationStep::Email)).
+    Email(String),
+    /// The user finished the step in the browser ([`RegistrationStep::Browser`](crate::RegistrationStep::Browser)),
+    /// or opened the emailed link ([`RegistrationStep::EmailSent`](crate::RegistrationStep::EmailSent)).
+    Continue,
+}
+
 /// What the engine reports. Delivered on the engine's threads; a sink forwards them to its UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, ts_rs::TS))]
@@ -796,6 +1024,14 @@ pub enum Event {
     },
     /// An account signed in, or was restored at startup.
     AccountAdded(AccountSummary),
+    /// Which account a sign-in command (`Login`, `LoginOAuth`, `Register`, `SignInWithQr`)
+    /// signed in, right after its [`Event::AccountAdded`] and before its [`Event::Finished`].
+    SignedIn {
+        /// The command it answers.
+        request: RequestId,
+        /// The account.
+        account: AccountId,
+    },
     /// An account's summary changed (its default notification mode, say).
     AccountChanged(AccountSummary),
     /// The server no longer accepts this account's session: it was signed out elsewhere, or its
@@ -941,6 +1177,22 @@ pub enum Event {
         /// Ranked excerpts and their match highlights.
         messages: Vec<crate::MessageHit>,
     },
+    /// An event's source, for [`Command::ViewSource`].
+    EventSource {
+        /// The request it answers.
+        request: RequestId,
+        /// The event's JSON.
+        source: crate::EventSource,
+    },
+    /// A room's widgets, for [`Command::ListWidgets`] and after adding or removing one.
+    Widgets {
+        /// Whose room.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+        /// Its widgets.
+        widgets: crate::Widgets,
+    },
     /// People found for [`Command::SearchPeople`].
     PeopleFound {
         /// The search it answers.
@@ -997,6 +1249,23 @@ pub enum Event {
         /// The arrangement.
         layout: crate::SidebarLayout,
     },
+    /// What the user keeps away on an account (ignored people, media, invitations): sent once
+    /// an account is ready, when a sync changes it (here or on another session), and after
+    /// [`Command::SetSafety`].
+    Safety {
+        /// Whose.
+        account: AccountId,
+        /// The choices.
+        safety: crate::Safety,
+    },
+    /// The account's notification keywords, sorted: sent once an account is ready and whenever
+    /// they change, here or on another session.
+    Keywords {
+        /// Whose.
+        account: AccountId,
+        /// The words.
+        keywords: Vec<String>,
+    },
     /// The status the user set for an account, as saved: sent once an account is ready and
     /// whenever it changes, here or on another session.
     Status {
@@ -1028,7 +1297,58 @@ pub enum Event {
         /// The command that asked.
         request: RequestId,
     },
-    /// A verification between this session and another of the user's moved on.
+    /// Where signing in with a QR code stands, for [`Command::SignInWithQr`] or
+    /// [`Command::LinkDevice`].
+    QrLogin {
+        /// The command it reports on.
+        request: RequestId,
+        /// Where it stands.
+        step: crate::QrLoginStep,
+    },
+    /// What the server asks before creating an account, for [`Command::Register`]: answer with
+    /// [`Command::Answer`].
+    Registration {
+        /// The command it asks for.
+        request: RequestId,
+        /// What it asks.
+        step: crate::RegistrationStep,
+    },
+    /// The QR code in a picture, for [`Command::ReadQrCode`]; `None` when none reads.
+    QrCodeRead {
+        /// The command it answers.
+        request: RequestId,
+        /// The code's raw bytes.
+        code: Option<Vec<u8>>,
+    },
+    /// Whether the user verified someone: for [`Command::LoadIdentity`], and once a
+    /// verification with them ends. `None` when they have no identity (no encryption) yet.
+    Identity {
+        /// Which account.
+        account: AccountId,
+        /// Whom.
+        user_id: String,
+        /// What the user knows of their identity.
+        identity: Option<crate::Identity>,
+    },
+    /// Message keys read from a file, for [`Command::ImportRoomKeys`].
+    KeysImported {
+        /// The command it answers.
+        request: RequestId,
+        /// How many were new.
+        import: crate::KeyImport,
+    },
+    /// The verification [`Command::VerifyThisSession`] or [`Command::VerifyUser`] started: its
+    /// [`Event::Verification`]s carry this `flow_id`, and come after this.
+    VerificationRequested {
+        /// The command it answers.
+        request: RequestId,
+        /// Which account.
+        account: AccountId,
+        /// The new verification.
+        flow_id: String,
+    },
+    /// A verification moved on: between this session and another of the user's, or with
+    /// another person.
     Verification {
         /// Which account.
         account: AccountId,
@@ -1236,6 +1556,9 @@ pub struct EngineConfig {
     pub oauth_redirect: crate::account::OAuthRedirect,
     /// Whether anything besides the engine opens an account's store.
     pub stores: StoreSharing,
+    /// Whether the app can scan QR codes (it has a camera to, and sends what it scans): it then
+    /// offers to scan the other side's code in verifications.
+    pub scans_qr: bool,
 }
 
 /// Whether anything besides the engine opens an account's store (ADR 0010).
@@ -1257,6 +1580,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("identity", &self.identity)
             .field("oauth_redirect", &self.oauth_redirect)
             .field("stores", &self.stores)
+            .field("scans_qr", &self.scans_qr)
             .finish()
     }
 }
@@ -1339,7 +1663,7 @@ enum Outcome {
     Done,
     /// Signed in, with what this device knows about the account: it shows before the command
     /// that signed in is answered.
-    LoggedIn(Account, Box<AccountSummary>),
+    LoggedIn(Box<Account>, Box<AccountSummary>),
     LoggedOut(AccountId),
     TimelineOpened(Box<OpenTimeline>),
 }
@@ -1415,6 +1739,8 @@ impl Engine {
             identity: config.identity,
             oauth_redirect: config.oauth_redirect,
             oauth_returns: HashMap::new(),
+            answers: HashMap::new(),
+            scans_qr: config.scans_qr,
             sink: Arc::new(sink),
             accounts: HashMap::new(),
             tasks: JoinSet::new(),
@@ -1455,7 +1781,7 @@ struct Running {
     /// The account's room list: every re-read of rooms goes through it.
     feed: RoomFeed,
     /// The handlers hearing the account's call signals.
-    call_handlers: Vec<matrix_sdk::event_handler::EventHandlerHandle>,
+    handlers: Vec<matrix_sdk::event_handler::EventHandlerHandle>,
 }
 
 /// How many closed timelines an account keeps warm: the rooms and threads switched between.
@@ -1465,6 +1791,11 @@ impl Running {
     /// Stops following a timeline and keeps it warm.
     fn close_timeline(&mut self, key: &TimelineKey) {
         self.opening.remove(key);
+        // The room's last open timeline (a room's and its threads' share it), shown or still
+        // opening. The set changes now, so a later open's follow comes after it.
+        if !self.timelines.keys().chain(self.opening.keys()).any(|open| open != key && open.room_id == key.room_id) {
+            self.account.unfollow_room(&key.room_id);
+        }
         let Some((timeline, forward)) = self.timelines.remove(key) else { return };
         forward.abort();
         self.keep_warm(key.clone(), timeline);
@@ -1473,7 +1804,15 @@ impl Running {
     /// Forgets the open `request` was making, once it failed or was cancelled: nothing will
     /// show its timeline.
     fn forget_opening(&mut self, request: RequestId) {
+        let failed: Vec<TimelineKey> =
+            self.opening.iter().filter(|(_, opening)| **opening == request).map(|(key, _)| key.clone()).collect();
         self.opening.retain(|_, opening| *opening != request);
+        // An open that failed followed its room for nothing, unless another timeline shows it.
+        for key in failed {
+            if !self.timelines.keys().chain(self.opening.keys()).any(|open| open.room_id == key.room_id) {
+                self.account.unfollow_room(&key.room_id);
+            }
+        }
     }
 
     fn keep_warm(&mut self, key: TimelineKey, timeline: Arc<matrix_sdk_ui::timeline::Timeline>) {
@@ -1494,11 +1833,20 @@ impl Running {
 /// A signed-in account and its summary from this device's store (no requests).
 async fn signed_in(account: Account) -> Outcome {
     let cached = account.cached_summary().await;
-    Outcome::LoggedIn(account, Box::new(cached))
+    Outcome::LoggedIn(Box::new(account), Box::new(cached))
 }
 
 /// Stops a task when the work that started it ends.
 struct AbortOnDrop(AbortHandle);
+
+/// Clears a flag when dropped: a loop that ends, however it ends.
+struct ClearOnDrop(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for ClearOnDrop {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Relaxed);
+    }
+}
 
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
@@ -1511,9 +1859,10 @@ impl Drop for Running {
         for task in self.background.iter().chain(self.timelines.values().map(|(_, following)| &following.forward)) {
             task.abort();
         }
-        for handler in self.call_handlers.drain(..) {
+        for handler in self.handlers.drain(..) {
             self.account.client().remove_event_handler(handler);
         }
+        self.flows.stop();
     }
 }
 
@@ -1542,11 +1891,22 @@ impl Ring {
 
 /// Whether the user is in the room's call on another device. One entry per device: this
 /// device's own (stale, after a crash) doesn't count.
-fn joined_elsewhere(room: &matrix_sdk::Room) -> bool {
+fn joined_elsewhere(room: &matrix_sdk::Room, sticky: &crate::calls::StickyMembers) -> bool {
     let me = room.own_user_id();
     let mine = room.active_room_call_participants().iter().filter(|user| *user == me).count();
     let here = room.client().device_id().is_some_and(|device| room.is_device_in_active_room_call(me, device));
-    mine > usize::from(here)
+    let device = room.client().device_id().map(ToString::to_string).unwrap_or_default();
+    // A matrix_2_0 membership of the user's on another device.
+    let elsewhere = sticky
+        .members(room.room_id().as_str(), now_ms())
+        .iter()
+        .any(|member| member.user_id == me.as_str() && member.device_id != device);
+    mine > usize::from(here) || elsewhere
+}
+
+/// Whether anyone is in the room's call: a membership of either standard.
+fn call_under_way(room: &matrix_sdk::Room, sticky: &crate::calls::StickyMembers) -> bool {
+    room.has_active_room_call() || !sticky.members(room.room_id().as_str(), now_ms()).is_empty()
 }
 
 /// One of the account's rooms, by ID.
@@ -1554,7 +1914,7 @@ fn room_of(account: &Account, room_id: &str) -> Option<matrix_sdk::Room> {
     matrix_sdk::ruma::RoomId::parse(room_id).ok().and_then(|id| account.client().get_room(&id))
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     matrix_sdk::ruma::MilliSecondsSinceUnixEpoch::now().get().into()
 }
 
@@ -1567,6 +1927,10 @@ struct State {
     oauth_redirect: crate::account::OAuthRedirect,
     /// Browser sign-ins waiting for the app to hand their redirect back, by request.
     oauth_returns: HashMap<RequestId, tokio::sync::oneshot::Sender<String>>,
+    /// Running commands that ask the app questions, by request: where its answers go.
+    answers: HashMap<RequestId, mpsc::UnboundedSender<Answer>>,
+    /// Whether the app scans QR codes ([`EngineConfig::scans_qr`]).
+    scans_qr: bool,
     sink: Arc<dyn EventSink>,
     accounts: HashMap<AccountId, Running>,
     tasks: JoinSet<Completion>,
@@ -1595,6 +1959,13 @@ struct State {
 }
 
 impl State {
+    /// Where the app's answers to `request`'s questions go ([`Command::Answer`]).
+    fn answers_for(&mut self, request: RequestId) -> mpsc::UnboundedReceiver<Answer> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        self.answers.insert(request, sender);
+        receiver
+    }
+
     fn flows(&self, account: &AccountId) -> Result<crate::security::Flows, Error> {
         self.accounts
             .get(account)
@@ -1742,6 +2113,12 @@ impl State {
                 }
             }
             Signal::Members { ref account, ref room_id } => {
+                // Its summary names who is in its call: matrix_2_0 members are heard apart from
+                // the sync's room updates.
+                if let Some(running) = self.accounts.get(account) {
+                    let (feed, changed) = (running.feed.clone(), HashSet::from([room_id.clone()]));
+                    tokio::spawn(async move { feed.refresh(Some(&changed)).await });
+                }
                 if ours(account, room_id)
                     && let Some(call) = call
                 {
@@ -1750,8 +2127,11 @@ impl State {
                 // A ring is over once its session emptied, or once the user joined it from
                 // another device.
                 if matches!(self.rings.get(&(account.clone(), room_id.clone())), Some((_, Ring::Rtc { .. }))) {
-                    let room = self.accounts.get(account).and_then(|r| room_of(&r.account, room_id));
-                    let over = room.is_some_and(|room| !room.has_active_room_call() || joined_elsewhere(&room));
+                    let found = self.accounts.get(account).map(|r| &r.account);
+                    let over =
+                        found.and_then(|found| room_of(found, room_id).map(|room| (room, &found.sticky))).is_some_and(
+                            |(room, sticky)| !call_under_way(&room, sticky) || joined_elsewhere(&room, sticky),
+                        );
                     if over {
                         let (account, room_id) = (account.clone(), room_id.clone());
                         self.end_ring(&account, &room_id);
@@ -1763,7 +2143,7 @@ impl State {
                 let Some(found) = self.accounts.get(&account).map(|r| &r.account) else { return };
                 let me = found.id().to_string();
                 // A ring whose caller already left (it came late, in a catch-up sync) is over.
-                let live = room_of(found, &room_id).is_some_and(|room| room.has_active_room_call());
+                let live = room_of(found, &room_id).is_some_and(|room| call_under_way(&room, &found.sticky));
                 if until <= now_ms()
                     || me == caller
                     || ours(&account, &room_id)
@@ -1897,7 +2277,15 @@ impl State {
                 self.sink.emit(Event::Finished { request, result });
                 return;
             }
+            Command::Answer { request: asking, answer } => {
+                if let Some(answers) = self.answers.get(&asking) {
+                    let _ = answers.send(answer);
+                }
+                self.sink.emit(Event::Finished { request, result: Ok(()) });
+                return;
+            }
             Command::Cancel(target) => {
+                self.answers.remove(&target);
                 if let Some(handle) = self.running.remove(&target) {
                     handle.abort();
                     self.forget_opening(target);
@@ -2016,6 +2404,16 @@ impl State {
                 let (warm, fetch_keys) = self.accounts.get_mut(&id).map_or((None, false), |running| {
                     running.opening.insert(key.clone(), request);
                     let fetch_keys = key.thread.is_none() && running.keys_fetched.insert(key.room_id.clone());
+                    // Whether a matrix_2_0 call is under way here, from members who joined before
+                    // this session heard them (once per room until a reconnect; nothing where the
+                    // server has no sticky events).
+                    if let Some(room) = room_of(&running.account, &key.room_id) {
+                        let account = running.account.clone();
+                        tokio::spawn(async move {
+                            let http = room.client().http_client().clone();
+                            account.sticky.fetch(&room, &http).await;
+                        });
+                    }
                     (running.take_warm(&key), fetch_keys)
                 });
                 Box::pin(async move {
@@ -2372,6 +2770,45 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            Command::ViewSource { account: id, room_id, event_id } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let source = account?.event_source(&room_id, &event_id).await?;
+                    sink.emit(Event::EventSource { request, source });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ListWidgets { account: id, room_id } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let widgets = account?.widgets(&room_id).await?;
+                    sink.emit(Event::Widgets { account: id, room_id, widgets });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::AddWidget { account: id, room_id, name, url } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let account = account?;
+                    account.add_widget(&room_id, &name, &url).await?;
+                    // Added, even when the list can't be read again: retrying would add another.
+                    if let Some(widgets) = account.widgets_after_write(&room_id).await {
+                        sink.emit(Event::Widgets { account: id, room_id, widgets });
+                    }
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::RemoveWidget { account: id, room_id, widget_id } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let account = account?;
+                    account.remove_widget(&room_id, &widget_id).await?;
+                    if let Some(widgets) = account.widgets_after_write(&room_id).await {
+                        sink.emit(Event::Widgets { account: id, room_id, widgets });
+                    }
+                    Ok(Outcome::Done)
+                })
+            }
             Command::ListThreads { account: id, room_id } => {
                 let account = self.account(&id);
                 Box::pin(async move {
@@ -2509,6 +2946,25 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            // Queued now, in the order the commands came: two quick choices end on the later.
+            Command::SetSafety { account: id, change } => {
+                let changed = self.account(&id).map(|account| {
+                    let queue = account.safety_queue.clone();
+                    queue.run(async move { account.change_safety(&change).await })
+                });
+                Box::pin(async move {
+                    let safety = changed?.await?;
+                    sink.emit(Event::Safety { account: id, safety });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::Report { account, target, reason } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    account?.report(&target, &reason).await?;
+                    Ok(Outcome::Done)
+                })
+            }
             Command::SetSidebarLayout { account, layout } => {
                 let account = self.account(&account);
                 Box::pin(async move {
@@ -2545,17 +3001,104 @@ impl State {
                 })
             }
             Command::VerifyThisSession(id) => {
-                let (account, flows) = (self.account(&id), self.flows(&id));
+                let (account, flows, scans_qr) = (self.account(&id), self.flows(&id), self.scans_qr);
                 Box::pin(async move {
-                    account?.verify_with_other_device(&flows?, sink).await?;
+                    let started = |flow_id| sink.emit(Event::VerificationRequested { request, account: id, flow_id });
+                    account?.request_verification(None, &flows?, scans_qr, Arc::clone(&sink), started).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::VerifyUser { account: id, user_id } => {
+                let (account, flows, scans_qr) = (self.account(&id), self.flows(&id), self.scans_qr);
+                Box::pin(async move {
+                    let started = |flow_id| sink.emit(Event::VerificationRequested { request, account: id, flow_id });
+                    account?
+                        .request_verification(Some(&user_id), &flows?, scans_qr, Arc::clone(&sink), started)
+                        .await?;
                     Ok(Outcome::Done)
                 })
             }
             Command::AcceptVerification { account, flow_id } => {
+                let (flows, scans_qr) = (self.flows(&account), self.scans_qr);
+                Box::pin(async move {
+                    flows?.accept(&flow_id, scans_qr).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::CompareEmoji { account, flow_id } => {
                 let flows = self.flows(&account);
                 Box::pin(async move {
-                    flows?.accept(&flow_id).await?;
+                    flows?.compare_emoji(&flow_id).await?;
                     Ok(Outcome::Done)
+                })
+            }
+            Command::ScanVerificationCode { account, flow_id, code } => {
+                let flows = self.flows(&account);
+                Box::pin(async move {
+                    flows?.scan(&flow_id, &code).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::LoadIdentity { account: id, user_id } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let identity = account?.identity(&user_id).await?;
+                    sink.emit(Event::Identity { account: id, user_id, identity });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ExportRoomKeys { account, path, passphrase } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    account?.export_room_keys(&path, &passphrase.0).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ImportRoomKeys { account, path, passphrase } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    let import = account?.import_room_keys(&path, &passphrase.0).await?;
+                    sink.emit(Event::KeysImported { request, import });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::SetOfflineDevice { account, on, recovery_key } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    account?.set_offline_device(on, recovery_key.as_ref().map(|k| k.0.as_str())).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ChangePassword { account, new_password, password } => {
+                let account = self.account(&account);
+                Box::pin(async move {
+                    let password = password.as_ref().map(|p| p.0.as_str());
+                    match account?.change_password(&new_password.0, password).await {
+                        Ok(()) => Ok(Outcome::Done),
+                        Err(error) => Err(asked_for_password(error, request, &*sink)),
+                    }
+                })
+            }
+            Command::DeactivateAccount { account: id, erase, password } => {
+                let (account, sessions) = (self.account(&id), self.sessions.clone());
+                Box::pin(async move {
+                    let account = account?;
+                    if account.client().oauth().client_id().is_some() {
+                        let url = account.account_page(crate::AccountPage::Deactivate).await?;
+                        sink.emit(Event::OpenUrl { request, url });
+                        return Ok(Outcome::Done);
+                    }
+                    match account.deactivate(erase, password.as_ref().map(|p| p.0.as_str())).await {
+                        Ok(()) => {
+                            // The account is gone on the server whatever happens here: it stops
+                            // either way, and data left behind only costs disk.
+                            if let Err(error) = crate::account::forget(&sessions, &id).await {
+                                eprintln!("matrix-engine: could not forget the deactivated account: {error}");
+                            }
+                            Ok(Outcome::LoggedOut(id))
+                        }
+                        Err(error) => Err(asked_for_password(error, request, &*sink)),
+                    }
                 })
             }
             Command::ConfirmVerification { account, flow_id, matches } => {
@@ -2600,7 +3143,54 @@ impl State {
                     Ok(signed_in(Account::login_password(&layout, &sessions, holder, &login).await?).await)
                 })
             }
-            Command::LoginOAuth { homeserver, resume } => {
+            Command::Register(registration) => {
+                let (layout, sessions, holder) = (self.layout.clone(), self.sessions.clone(), self.holder);
+                let answers = self.answers_for(request);
+                Box::pin(async move {
+                    let ask = |step: crate::RegistrationStep| {
+                        if let crate::RegistrationStep::Browser { url } = &step {
+                            sink.emit(Event::OpenUrl { request, url: url.clone() });
+                        }
+                        sink.emit(Event::Registration { request, step });
+                    };
+                    let account = Account::register(&layout, &sessions, holder, &registration, &ask, answers).await?;
+                    Ok(signed_in(account).await)
+                })
+            }
+            Command::SignInWithQr(start) => {
+                let (layout, sessions, holder) = (self.layout.clone(), self.sessions.clone(), self.holder);
+                let identity = self.identity.clone();
+                let answers = self.answers_for(request);
+                Box::pin(async move {
+                    let report = |step: crate::QrLoginStep| sink.emit(Event::QrLogin { request, step });
+                    let account =
+                        Account::sign_in_with_qr(&layout, &sessions, holder, &identity, start, &report, answers)
+                            .await?;
+                    Ok(signed_in(account).await)
+                })
+            }
+            Command::LinkDevice { account, scanned } => {
+                let account = self.account(&account);
+                let answers = self.answers_for(request);
+                Box::pin(async move {
+                    let report = |step: crate::QrLoginStep| {
+                        if let crate::QrLoginStep::Approve { url } = &step {
+                            sink.emit(Event::OpenUrl { request, url: url.clone() });
+                        }
+                        sink.emit(Event::QrLogin { request, step });
+                    };
+                    account?.link_device(scanned, &report, answers).await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ReadQrCode { picture } => Box::pin(async move {
+                let code = tokio::task::spawn_blocking(move || crate::qr::read_picture(&picture))
+                    .await
+                    .map_err(|e| Error::QrCode(e.to_string()))??;
+                sink.emit(Event::QrCodeRead { request, code });
+                Ok(Outcome::Done)
+            }),
+            Command::LoginOAuth { homeserver, resume, create } => {
                 let (layout, sessions, identity) = (self.layout.clone(), self.sessions.clone(), self.identity.clone());
                 let holder = self.holder;
                 self.oauth_returns.retain(|_, waiting| !waiting.is_closed());
@@ -2617,9 +3207,8 @@ impl State {
                         &layout,
                         &sessions,
                         holder,
-                        &homeserver,
                         &identity,
-                        resume.as_ref(),
+                        crate::account::OAuthTarget { homeserver: &homeserver, resume: resume.as_ref(), create },
                         app_redirect,
                     )
                     .await?;
@@ -2765,6 +3354,69 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            // Queued now, in the order the commands came, like the room changes below.
+            Command::SetKeyword { account: id, keyword, enabled } => {
+                let (sink, id) = (Arc::clone(&sink), id);
+                let changed = self.account(&id).map(|account| {
+                    let queue = account.organising.clone();
+                    // Reported in the queue too, so a slower report never lands after a later one.
+                    queue.run(async move {
+                        let result = account.set_keyword(&keyword, enabled).await;
+                        // As the change left them; after a failure, as the server has them (or,
+                        // unreachable, as last synced).
+                        let keywords = match &result {
+                            Ok(keywords) => keywords.clone(),
+                            Err(_) => match account.server_keywords().await {
+                                Ok(keywords) => keywords,
+                                Err(_) => account.keywords().await,
+                            },
+                        };
+                        sink.emit(Event::Keywords { account: id, keywords });
+                        result.map(drop)
+                    })
+                });
+                Box::pin(async move {
+                    changed?.await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            // Queued now, in the order the commands came: a quick change back lands last.
+            Command::SetRoomPriority { account: id, room_id, priority } => {
+                let feed = self.feed(&id);
+                let changed = self.account(&id).map(|account| {
+                    let (queue, room_id) = (account.organising.clone(), room_id.clone());
+                    queue.run(async move { account.set_room_priority(&room_id, priority).await })
+                });
+                Box::pin(async move {
+                    changed?.await?;
+                    feed?.refresh(Some(&HashSet::from([room_id]))).await;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::SetUnread { account: id, room_id, unread } => {
+                let feed = self.feed(&id);
+                let changed = self.account(&id).map(|account| {
+                    let (queue, room_id) = (account.organising.clone(), room_id.clone());
+                    queue.run(async move { account.set_unread(&room_id, unread).await })
+                });
+                Box::pin(async move {
+                    changed?.await?;
+                    feed?.refresh(Some(&HashSet::from([room_id]))).await;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::MarkRoomRead { account: id, room_id } => {
+                let feed = self.feed(&id);
+                let changed = self.account(&id).map(|account| {
+                    let (queue, room_id) = (account.organising.clone(), room_id.clone());
+                    queue.run(async move { account.mark_room_read(&room_id).await })
+                });
+                Box::pin(async move {
+                    changed?.await?;
+                    feed?.refresh(Some(&HashSet::from([room_id]))).await;
+                    Ok(Outcome::Done)
+                })
+            }
             Command::RegisterPusher { account, pusher } => {
                 let account = self.account(&account);
                 Box::pin(async move {
@@ -2804,24 +3456,38 @@ impl State {
     fn complete(&mut self, Completion { request, result }: Completion) {
         if let Some(request) = request {
             self.running.remove(&request);
+            self.answers.remove(&request);
         }
         let result = match result {
             Ok(Outcome::Done) => Ok(()),
             Ok(Outcome::LoggedIn(account, cached)) => {
+                let account = *account;
                 // Shown now, before the sign-in's `Finished`: the app selects an account it is
                 // adding when it arrives.
                 self.sink.emit(Event::AccountAdded((*cached).clone()));
+                if let Some(request) = request {
+                    self.sink.emit(Event::SignedIn { request, account: account.id().clone() });
+                }
                 // Saving refreshed tokens comes first: the summary's requests may refresh them.
                 let tokens = tokio::spawn(watch_session(account.clone(), Arc::clone(&self.sink)));
                 let flows = crate::security::Flows::default();
                 let feed = RoomFeed { account: account.clone(), sink: Arc::clone(&self.sink), cache: Arc::default() };
-                let call_handlers = crate::calls::listen(account.client(), account.id(), &self.signals);
+                account.sticky.report_to(account.id().clone(), self.signals.clone());
+                let mut handlers = crate::calls::listen(account.client(), account.id(), &self.signals, &account.sticky);
+                handlers.extend(crate::security::listen(&account, &flows, self.scans_qr, &self.sink));
                 // The rest waits on the server, so it runs beside the engine rather than holding
                 // up every account's commands. The account shows before anything about it.
                 let started = {
-                    let (account, flows, sink, feed) =
-                        (account.clone(), flows.clone(), Arc::clone(&self.sink), feed.clone());
+                    let (account, sink, feed) = (account.clone(), Arc::clone(&self.sink), feed.clone());
                     tokio::spawn(async move {
+                        // The safety choices as this device stored them, before any room or
+                        // invitation shows (the room list follows from the sync loop below): an
+                        // app hides what they hide from the first frame. The server's follow, as
+                        // a save may not have synced here before the app quit.
+                        match account.safety().await {
+                            Ok(safety) => sink.emit(Event::Safety { account: account.id().clone(), safety }),
+                            Err(error) => eprintln!("matrix-engine: could not read the safety choices: {error}"),
+                        }
                         // What this device knew showed at once, even offline; the server's
                         // profile follows.
                         let profile = async {
@@ -2841,6 +3507,17 @@ impl State {
                                 retry = (retry * 2).min(std::time::Duration::from_secs(60));
                             };
                             sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
+                        };
+                        let safety = async {
+                            if let Some(safety) = account.synced_safety().await {
+                                sink.emit(Event::Safety { account: account.id().clone(), safety });
+                            }
+                        };
+                        let keywords = async {
+                            sink.emit(Event::Keywords {
+                                account: account.id().clone(),
+                                keywords: account.keywords().await,
+                            });
                         };
                         let status = account
                             .report_status(|status| sink.emit(Event::Status { account: account.id().clone(), status }));
@@ -2873,10 +3550,12 @@ impl State {
                         tokio::join!(
                             profile,
                             layout,
+                            safety,
+                            keywords,
                             status,
                             own,
                             calls,
-                            crate::security::watch(account.clone(), flows, Arc::clone(&sink)),
+                            crate::security::watch(account.clone(), Arc::clone(&sink)),
                             sync_loop(account.clone(), Arc::clone(&sink), feed, Arc::clone(&own_refresh)),
                         );
                     })
@@ -2893,7 +3572,7 @@ impl State {
                     opening: HashMap::new(),
                     keys_fetched: HashSet::new(),
                     feed,
-                    call_handlers,
+                    handlers,
                 };
                 self.accounts.insert(running.account.id().clone(), running);
                 Ok(())
@@ -2910,6 +3589,15 @@ impl State {
                         }
                     } else if !running.timelines.contains_key(&open.key) && !running.opening.contains_key(&open.key) {
                         // Closed while opening: nothing shows it, but switching back is instant.
+                        // Its follow came after the close let the room go, so it goes again.
+                        if !running
+                            .timelines
+                            .keys()
+                            .chain(running.opening.keys())
+                            .any(|key| key.room_id == open.key.room_id)
+                        {
+                            running.account.unfollow_room(&open.key.room_id);
+                        }
                         running.keep_warm(open.key, open.timeline);
                     }
                 }
@@ -2937,6 +3625,11 @@ impl State {
 /// Syncs one account until it fails or is aborted, reporting rooms, new messages and
 /// notifications. The first response only catches up, so it notifies about nothing.
 /// `own_refresh` asks for the user's own presence to be read again.
+///
+/// Where the server offers sliding sync (MSC4186), rooms come through the SDK's
+/// `RoomListService`, a few at a time and newest first, so a big account shows its rooms at
+/// once; a long-poll sync that asks for no rooms carries what sliding sync can't: to-device
+/// messages and keys, presence and account data. Elsewhere one long-poll sync brings it all.
 async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, own_refresh: Arc<tokio::sync::Notify>) {
     // Waits between failed syncs: from a few seconds, doubling, to a minute.
     const FIRST_RETRY: std::time::Duration = std::time::Duration::from_secs(2);
@@ -2953,6 +3646,21 @@ async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, o
     let (wanted_members, members) = fetch_space_members(feed.clone());
     let _members = AbortOnDrop(members);
     let _unread = AbortOnDrop(follow_notable_updates(feed.clone(), updates));
+    // Until the first long-poll sync has caught up, the room list's sliding sync marks no one
+    // present either (`status::sync_presence`).
+    let _ = account.client().set_presence(PresenceState::Offline, None, false).await;
+    let sliding = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    notify_from_sliding_sync(&account, &sink, &sliding).await;
+    // Once the loop ends (the account signed out), notifications still waiting for their key
+    // stay unshown.
+    let _stopped = ClearOnDrop(Arc::clone(&sliding));
+    // A server that names sliding sync but whose endpoint refuses it (a proxy in front, a
+    // rollout half done) gets the long-poll sync for every room, until the app starts again.
+    let mut refused_sliding = false;
+    // Once sliding sync was refused, the first long-poll sync for every room brings each room's
+    // whole state: the room-less sync before moved the token past changes sliding sync never
+    // delivered.
+    let mut full_rooms = SyncedRooms::All;
     let mut retry = FIRST_RETRY;
     loop {
         // Spaces arrive from the store now and from syncs later (all of them, after a fresh
@@ -2961,8 +3669,47 @@ async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, o
             want_members(&wanted_members, &room);
         }
         let started = std::time::Instant::now();
-        let Err(error) = sync_until_error(&account, &sink, &feed, &caught_up, &own_refresh, &wanted_members).await
-        else {
+        // Asked again after every failure: a server may gain (or lose) sliding sync.
+        let rooms_sliding = !refused_sliding && supports_sliding_sync(account.client()).await;
+        sliding.store(rooms_sliding, Ordering::Relaxed);
+        let mut rooms = if rooms_sliding { SyncedRooms::None } else { full_rooms };
+        let long_poll = sync_until_error(&account, &sink, &feed, &caught_up, &own_refresh, &wanted_members, &mut rooms);
+        let result = if rooms_sliding {
+            tokio::select! {
+                result = long_poll => result,
+                result = sync_room_list(&account, &sink, &feed, &wanted_members) => {
+                    refused_sliding = result.as_ref().is_err_and(endpoint_refused);
+                    result
+                }
+            }
+        } else {
+            long_poll.await
+        };
+        full_rooms = match (rooms_sliding, refused_sliding) {
+            (true, true) => SyncedRooms::Reconcile,
+            (true, false) => SyncedRooms::All,
+            // Still `Reconcile` until its first response came.
+            (false, _) => rooms,
+        };
+        account.set_room_list(None).await;
+        // Sticky memberships sent meanwhile may have come only in the sync that failed: the
+        // rooms on screen (a call's among them) ask again now, the others when next opened.
+        account.sticky.fetch_again();
+        for room_id in account.followed_rooms() {
+            if let Some(room) = room_of(&account, &room_id) {
+                let sticky = account.sticky.clone();
+                tokio::spawn(async move {
+                    // The connection may still be down: tried again until it answers.
+                    let http = room.client().http_client().clone();
+                    let mut wait = std::time::Duration::from_secs(5);
+                    while !sticky.fetch(&room, &http).await && wait < std::time::Duration::from_secs(600) {
+                        tokio::time::sleep(wait).await;
+                        wait *= 2;
+                    }
+                });
+            }
+        }
+        let Err(error) = result else {
             return;
         };
         // The session is over. The SDK broadcasts every ending as `UnknownToken`, with whether
@@ -3118,33 +3865,21 @@ async fn sync_until_error(
     caught_up: &Arc<std::sync::atomic::AtomicBool>,
     own_refresh: &Arc<tokio::sync::Notify>,
     wanted_members: &WantedMembers,
+    rooms: &mut SyncedRooms,
 ) -> Result<(), matrix_sdk::Error> {
     // Members load as rooms need them (lazy loading): a first sync doesn't download every member
     // of every room.
-    let filter = matrix_sdk::ruma::api::client::filter::FilterDefinition::with_lazy_loading();
+    let mut filter = matrix_sdk::ruma::api::client::filter::FilterDefinition::with_lazy_loading();
+    if *rooms == SyncedRooms::None {
+        filter.room.rooms = Some(Vec::new());
+    }
     let settings = SyncSettings::default()
         .timeout(std::time::Duration::from_secs(30))
         .filter(matrix_sdk::ruma::api::client::sync::sync_events::v3::Filter::FilterDefinition(filter));
     let on_response = |response: matrix_sdk::sync::SyncResponse, sent: PresenceState| {
         let (account, sink, caught_up, feed) = (account.clone(), Arc::clone(sink), Arc::clone(caught_up), feed.clone());
         async move {
-            for (room_id, update) in &response.rooms.joined {
-                let Some(room) = account.client().get_room(room_id) else { continue };
-                if members_changed(update) {
-                    sink.emit(Event::MembersInvalidated {
-                        account: account.id().clone(),
-                        room_id: room_id.to_string(),
-                    });
-                }
-                want_members(wanted_members, &room);
-                if let Some(message) = convert::latest_message(&room, &update.timeline.events).await {
-                    sink.emit(Event::LatestMessage {
-                        account: account.id().clone(),
-                        room_id: room_id.to_string(),
-                        message: Box::new(message),
-                    });
-                }
-            }
+            let changed = report_room_updates(&account, &sink, wanted_members, &response.rooms).await;
             if caught_up.swap(true, Ordering::Relaxed) {
                 for (room_id, notifications) in &response.notifications {
                     let Some(room) = account.client().get_room(room_id) else { continue };
@@ -3157,23 +3892,26 @@ async fn sync_until_error(
             }
             // Only the rooms this sync changed are read again; direct chats and push rules can
             // change any room, so they read them all.
-            let rooms = &response.rooms;
-            let changed: HashSet<String> = rooms
-                .joined
-                .iter()
-                .filter(|(_, update)| summary_may_change(update))
-                .map(|(room_id, _)| room_id)
-                .chain(rooms.left.keys())
-                .chain(rooms.invited.keys())
-                .map(ToString::to_string)
-                .collect();
             let all = response.account_data.iter().any(|event| {
                 matches!(event.get_field::<String>("type").ok().flatten().as_deref(), Some("m.direct" | "m.push_rules"))
             });
+            // Keywords are push rules too, changed here or on another session.
+            if response
+                .account_data
+                .iter()
+                .any(|event| event.get_field::<String>("type").ok().flatten().as_deref() == Some("m.push_rules"))
+            {
+                sink.emit(Event::Keywords { account: account.id().clone(), keywords: account.keywords().await });
+            }
             if crate::sidebar::changed_in(&response.account_data)
                 && let Ok(layout) = account.sidebar_layout().await
             {
                 sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
+            }
+            if crate::safety::changed_in(&response.account_data)
+                && let Some(safety) = account.synced_safety().await
+            {
+                sink.emit(Event::Safety { account: account.id().clone(), safety });
             }
             // The user's own, as the server says now: the sync may predate a status message saved
             // meanwhile.
@@ -3190,6 +3928,7 @@ async fn sync_until_error(
             }
             let report = |status| sink.emit(Event::Status { account: account.id().clone(), status });
             account.follow_status(&response.account_data, &sent, report).await;
+            account.follow_offline_device(&response.account_data).await;
             feed.refresh((!all).then_some(&changed)).await;
             LoopCtrl::Continue
         }
@@ -3207,17 +3946,322 @@ async fn sync_until_error(
         // Each sync announces the status as last synced, so one set elsewhere holds here too.
         let sent = crate::status::sync_presence(account.status().await, caught_up.load(Ordering::Relaxed));
         settings = settings.set_presence(sent.clone());
-        let response = match account.sync_once_locked(settings.clone()).await {
+        // The room list's sliding sync announces the same.
+        let _ = account.client().set_presence(sent.clone(), None, false).await;
+        let whole_state = *rooms == SyncedRooms::Reconcile;
+        let response = match account.sync_once_locked(settings.clone().full_state(whole_state)).await {
             Ok(response) => response,
             Err(error) => {
                 account.sync_failed(&sent).await;
                 return Err(error);
             }
         };
+        if whole_state {
+            *rooms = SyncedRooms::All;
+        }
         settings = settings.token(response.next_batch.clone());
         if on_response(response, sent).await == LoopCtrl::Break {
             return Ok(());
         }
+    }
+}
+
+/// Which rooms the long-poll sync asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SyncedRooms {
+    /// Every room: the server has no sliding sync.
+    All,
+    /// None: the room list's sliding sync brings them.
+    None,
+    /// Every room, the first response with each room's whole state: after the room list's
+    /// sliding sync was refused, as the room-less sync moved the token past what it missed.
+    Reconcile,
+}
+
+/// Whether the server offers sliding sync (MSC4186), which the SDK then uses for the room list.
+async fn supports_sliding_sync(client: &matrix_sdk::Client) -> bool {
+    use matrix_sdk::sliding_sync::Version;
+    let native =
+        client.available_sliding_sync_versions().await.into_iter().any(|version| matches!(version, Version::Native));
+    client.set_sliding_sync_version(if native { Version::Native } else { Version::None });
+    native
+}
+
+/// What a sync brought for rooms, reported: members to read again, spaces whose members to
+/// fetch, each room's latest message. Returns the rooms whose summary may have changed.
+async fn report_room_updates(
+    account: &Account,
+    sink: &Arc<dyn EventSink>,
+    wanted_members: &WantedMembers,
+    rooms: &matrix_sdk::sync::RoomUpdates,
+) -> HashSet<String> {
+    for (room_id, update) in &rooms.joined {
+        let Some(room) = account.client().get_room(room_id) else { continue };
+        if members_changed(update) {
+            sink.emit(Event::MembersInvalidated { account: account.id().clone(), room_id: room_id.to_string() });
+        }
+        want_members(wanted_members, &room);
+        if let Some(message) = convert::latest_message(&room, &update.timeline.events).await {
+            sink.emit(Event::LatestMessage {
+                account: account.id().clone(),
+                room_id: room_id.to_string(),
+                message: Box::new(message),
+            });
+        }
+    }
+    rooms
+        .joined
+        .iter()
+        .filter(|(_, update)| summary_may_change(update))
+        .map(|(room_id, _)| room_id)
+        .chain(rooms.left.keys())
+        .chain(rooms.invited.keys())
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// Marks as left the rooms this device holds as joined that the server no longer lists: left
+/// on another device while the room list's sliding sync couldn't say. Only rooms held as
+/// joined before asking, and still when marked, count: one joined meanwhile stays, and one
+/// whose membership changed meanwhile (an invitation back) keeps it. The rooms marked left,
+/// `None` when the server couldn't say.
+async fn leave_rooms_left_elsewhere(account: &Account) -> Option<HashSet<String>> {
+    use matrix_sdk::ruma::api::client::membership::joined_rooms;
+    use matrix_sdk_base::RoomInfoNotableUpdateReasons as Reasons;
+    // What syncs bring while the server is asked is newer than its answer: a room they report
+    // as joined (a rejoin) or whose membership they change (an invitation back) keeps that.
+    let mut updates = account.client().room_info_notable_update_receiver();
+    let mut synced = account.client().subscribe_to_all_room_updates();
+    let held: Vec<matrix_sdk::Room> = account.client().joined_rooms();
+    let joined = account.client().send(joined_rooms::v3::Request::new()).await.ok()?.joined_rooms;
+    let mut changed = HashSet::new();
+    loop {
+        match synced.try_recv() {
+            Ok(rooms) => changed.extend(rooms.joined.into_keys()),
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => return None,
+            Err(_) => break,
+        }
+    }
+    loop {
+        match updates.try_recv() {
+            Ok(update) if update.reasons.contains(Reasons::MEMBERSHIP) => {
+                changed.insert(update.room_id);
+            }
+            Ok(_) => {}
+            // Missed some: any room may have changed, so ask again later.
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => return None,
+            Err(_) => break,
+        }
+    }
+    let mut left = HashSet::new();
+    let stale = held
+        .into_iter()
+        .filter(|room| !joined.iter().any(|id| id == room.room_id()) && !changed.contains(room.room_id()));
+    for room in stale {
+        let marked = room
+            .update_and_save_room_info(|mut info| {
+                if info.state() != matrix_sdk_base::RoomState::Joined {
+                    return (info, Reasons::NONE);
+                }
+                info.mark_as_left();
+                (info, Reasons::MEMBERSHIP)
+            })
+            .await;
+        if marked.is_ok() && room.state() == matrix_sdk_base::RoomState::Left {
+            left.insert(room.room_id().to_string());
+        }
+    }
+    Some(left)
+}
+
+/// Whether the server refused an endpoint it named: it doesn't know it (`M_UNRECOGNIZED`, 404).
+fn endpoint_refused(error: &matrix_sdk::Error) -> bool {
+    use matrix_sdk::ruma::api::error::ErrorKind;
+    let matrix_sdk::Error::Http(http) = error else { return false };
+    matches!(http.client_api_error_kind(), Some(ErrorKind::Unrecognized))
+        || http.as_client_api_error().is_some_and(|api| api.status_code.as_u16() == 404)
+}
+
+/// How many of each room's latest events the room list's sliding sync brings.
+const ROOM_LIST_EVENTS: u32 = 10;
+
+/// Runs the room list's sliding sync until it fails, reporting the rooms each response
+/// changed. It only reads rooms into the store: the room list itself is read from there.
+async fn sync_room_list(
+    account: &Account,
+    sink: &Arc<dyn EventSink>,
+    feed: &RoomFeed,
+    wanted_members: &WantedMembers,
+) -> Result<(), matrix_sdk::Error> {
+    use futures_util::StreamExt;
+    use tokio::sync::broadcast::error::RecvError;
+    // Each room comes with its last few events, as many as a long-poll sync's: a burst between
+    // two responses (a call invite, then a message) arrives whole, for the call handlers and
+    // notifications, rather than as the last event and a gap.
+    let service =
+        matrix_sdk_ui::RoomListService::new_with(account.client().clone(), true, "room-list", ROOM_LIST_EVENTS)
+            .await
+            .map_err(room_list_error)?;
+    let service = Arc::new(service);
+    // Heard from before the first request, so no response goes unread.
+    let mut updates = account.client().subscribe_to_all_room_updates();
+    account.set_room_list(Some(Arc::clone(&service))).await;
+    // A sliding sync that starts afresh (the first after an upgrade, or once the server forgot
+    // its position) lists only the rooms joined now, never the ones left meanwhile.
+    let reconcile = {
+        let feed = feed.clone();
+        tokio::spawn(async move {
+            // Asked again while the sync runs until the server answers (a network handoff).
+            let mut wait = std::time::Duration::from_secs(5);
+            let left = loop {
+                if let Some(left) = leave_rooms_left_elsewhere(&feed.account).await {
+                    break left;
+                }
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(std::time::Duration::from_secs(300));
+            };
+            if !left.is_empty() {
+                feed.refresh(Some(&left)).await;
+            }
+        })
+    };
+    let _reconcile = AbortOnDrop(reconcile.abort_handle());
+    let report = async {
+        loop {
+            match updates.recv().await {
+                Ok(rooms) => {
+                    let changed = report_room_updates(account, sink, wanted_members, &rooms).await;
+                    if !changed.is_empty() {
+                        feed.refresh(Some(&changed)).await;
+                    }
+                }
+                // Missed updates: any room may have changed.
+                Err(RecvError::Lagged(_)) => feed.refresh(None).await,
+                Err(RecvError::Closed) => std::future::pending().await,
+            }
+        }
+    };
+    let sync = async {
+        let stream = service.sync();
+        futures_util::pin_mut!(stream);
+        while let Some(result) = stream.next().await {
+            result.map_err(room_list_error)?;
+        }
+        Ok(())
+    };
+    tokio::select! {
+        result = sync => result,
+        () = report => Ok(()),
+    }
+}
+
+fn room_list_error(error: matrix_sdk_ui::room_list_service::Error) -> matrix_sdk::Error {
+    match error {
+        matrix_sdk_ui::room_list_service::Error::SlidingSync(error) => error,
+        other => matrix_sdk::Error::UnknownError(Box::new(other)),
+    }
+}
+
+/// Notifications from the room list's sliding sync, while it brings the rooms (`sliding`).
+/// Only for events that came after syncing started, once each: a room the list reaches late,
+/// or one opened (which asks for its recent events again), brings events already seen.
+async fn notify_from_sliding_sync(
+    account: &Account,
+    sink: &Arc<dyn EventSink>,
+    sliding: &Arc<std::sync::atomic::AtomicBool>,
+) {
+    let seen = Arc::new(std::sync::Mutex::new(Notified::since(now_ms())));
+    let (account_id, sink, sliding) = (account.id().clone(), Arc::clone(sink), Arc::clone(sliding));
+    account
+        .client()
+        .register_notification_handler(move |notification, room, _| {
+            let (account_id, sink, sliding, seen) =
+                (account_id.clone(), Arc::clone(&sink), Arc::clone(&sliding), Arc::clone(&seen));
+            async move {
+                if !sliding.load(Ordering::Relaxed) {
+                    return;
+                }
+                // Beside the sync, which waits for each handler: an encrypted one may wait for
+                // its key.
+                tokio::spawn(async move {
+                    let Some(notification) = decrypted_soon(&room, notification).await else { return };
+                    let Some(shown) = convert::notification(&account_id, &room, &notification).await else { return };
+                    let matrix_sdk::deserialized_responses::RawAnySyncOrStrippedTimelineEvent::Sync(raw) =
+                        &notification.event
+                    else {
+                        return;
+                    };
+                    let sent = raw.get_field::<u64>("origin_server_ts").ok().flatten().unwrap_or(0);
+                    // Not once the account stopped syncing (signed out) while this waited.
+                    if sliding.load(Ordering::Relaxed)
+                        && seen.lock().is_ok_and(|mut seen| seen.first_time(&shown.event_id, sent))
+                    {
+                        sink.emit(Event::Notification(shown));
+                    }
+                });
+            }
+        })
+        .await;
+}
+
+/// A notification as it reads decrypted. Its key may still be on its way, through the long-poll
+/// sync beside the room list's: tried again for a few seconds, and its push rules worked out
+/// again for what it says. `None` when it stays unreadable.
+async fn decrypted_soon(
+    room: &matrix_sdk::Room,
+    notification: matrix_sdk::sync::Notification,
+) -> Option<matrix_sdk::sync::Notification> {
+    use matrix_sdk::deserialized_responses::RawAnySyncOrStrippedTimelineEvent as Raw;
+    let Raw::Sync(raw) = &notification.event else { return Some(notification) };
+    if raw.get_field::<String>("type").ok().flatten().as_deref() != Some("m.room.encrypted") {
+        return Some(notification);
+    }
+    for attempt in 0..10 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        // Without its key the SDK answers with the event still unreadable, not an error.
+        if let Ok(event) = room.decrypt_event(raw.cast_ref_unchecked(), None).await
+            && event.encryption_info().is_some()
+        {
+            let decrypted = event.into_raw();
+            let actions = match room.push_context().await {
+                Ok(Some(context)) => context.for_event(&decrypted).await,
+                _ => notification.actions.clone(),
+            };
+            return Some(matrix_sdk::sync::Notification { actions, event: Raw::Sync(decrypted) });
+        }
+    }
+    None
+}
+
+/// Which events have notified already.
+#[derive(Debug)]
+struct Notified {
+    /// When syncing started: anything sent before is old news.
+    since_ms: u64,
+    /// The latest notified, oldest first.
+    recent: std::collections::VecDeque<String>,
+}
+
+impl Notified {
+    /// How many notified events are remembered: far more than one room's catch-up brings.
+    const KEPT: usize = 256;
+
+    fn since(since_ms: u64) -> Self {
+        Self { since_ms, recent: std::collections::VecDeque::new() }
+    }
+
+    /// Whether an event sent at `sent_ms` should notify, remembering that it did.
+    fn first_time(&mut self, event_id: &str, sent_ms: u64) -> bool {
+        if sent_ms < self.since_ms || self.recent.iter().any(|seen| seen == event_id) {
+            return false;
+        }
+        if self.recent.len() == Self::KEPT {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(event_id.to_owned());
+        true
     }
 }
 
@@ -3304,6 +4348,7 @@ async fn open_timeline(
     fetch_keys: bool,
 ) -> Result<OpenTimeline, Error> {
     let me = account.user_id()?;
+    account.follow_room(&key.room_id).await;
     // Keys missing from this device may wait in the backup; fetching them doesn't hold up
     // opening, and the timeline decrypts again once they are stored.
     if fetch_keys {
@@ -3816,10 +4861,170 @@ mod tests {
             opening: HashMap::from([(TimelineKey::room("!room:example.org"), RequestId(3))]),
             keys_fetched: HashSet::new(),
             feed,
-            call_handlers: Vec::new(),
+            handlers: Vec::new(),
         };
         running.forget_opening(RequestId(3));
         assert!(running.opening.is_empty());
+    }
+
+    #[test]
+    fn an_event_sent_before_syncing_started_should_not_notify() {
+        let mut notified = Notified::since(1_000);
+        assert!(!notified.first_time("$old", 999));
+    }
+
+    #[test]
+    fn an_event_should_notify_only_the_first_time_it_arrives() {
+        let mut notified = Notified::since(1_000);
+        assert!(notified.first_time("$new", 1_500));
+        assert!(!notified.first_time("$new", 1_500));
+    }
+
+    #[test]
+    fn the_oldest_notified_event_should_be_forgotten_once_too_many_are_kept() {
+        let mut notified = Notified::since(0);
+        for n in 0..=Notified::KEPT {
+            assert!(notified.first_time(&format!("${n}"), 1));
+        }
+        assert!(notified.first_time("$0", 1), "the first is forgotten");
+        assert!(!notified.first_time(&format!("${}", Notified::KEPT), 1), "the latest is kept");
+    }
+
+    /// A homeserver with sliding sync that knows one room, `!slide:example.org`.
+    fn sliding_server(requests: std::sync::mpsc::Sender<String>) -> crate::test_server::Server {
+        crate::test_server::Server::new(move |request| {
+            let line = request.lines().next().unwrap_or_default().to_owned();
+            let _ = requests.send(line.clone());
+            if line.contains("simplified_msc3575/sync") {
+                return serde_json::json!({
+                    "pos": "1",
+                    "lists": {"all_rooms": {"count": 1}},
+                    "rooms": {"!slide:example.org": {
+                        "name": "Sliding",
+                        "initial": true,
+                        "required_state": [
+                            {"type":"m.room.create","state_key":"","sender":"@a:example.org","event_id":"$create","origin_server_ts":0,"content":{"creator":"@a:example.org","room_version":"10"}},
+                            {"type":"m.room.member","state_key":"@a:example.org","sender":"@a:example.org","event_id":"$join","origin_server_ts":0,"content":{"membership":"join"}}
+                        ],
+                        "timeline": [],
+                        "joined_count": 1
+                    }},
+                    "extensions": {}
+                });
+            }
+            if line.contains("/sync?") {
+                return serde_json::json!({"next_batch": "s1"});
+            }
+            serde_json::json!({})
+        })
+    }
+
+    #[tokio::test]
+    async fn rooms_should_come_from_the_room_lists_sliding_sync() {
+        let (requests, _) = std::sync::mpsc::channel();
+        let server = sliding_server(requests);
+        let account = Account::for_test(&server.url()).await;
+        account.client().set_sliding_sync_version(matrix_sdk::sliding_sync::Version::Native);
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let sink: Arc<dyn EventSink> = Arc::new(move |event| {
+            let _ = events.send(event);
+        });
+        let feed = RoomFeed { account: account.clone(), sink: Arc::clone(&sink), cache: Arc::default() };
+        let (wanted, members) = fetch_space_members(feed.clone());
+        let _members = AbortOnDrop(members);
+        let sync = {
+            let (account, sink, feed) = (account.clone(), Arc::clone(&sink), feed.clone());
+            tokio::spawn(async move { sync_room_list(&account, &sink, &feed, &wanted).await })
+        };
+        let listed = tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(event) = received.recv().await {
+                if let Event::RoomsUpdated { list, .. } = event
+                    && list.rooms.iter().any(|room| room.room_id == "!slide:example.org")
+                {
+                    return true;
+                }
+            }
+            false
+        })
+        .await;
+        sync.abort();
+        assert_eq!(listed, Ok(true), "the room the sliding sync brought is listed");
+    }
+
+    #[tokio::test]
+    async fn a_room_the_server_no_longer_lists_as_joined_should_be_left() {
+        let server = crate::test_server::Server::new(|request| {
+            if request.contains("/joined_rooms") {
+                return serde_json::json!({"joined_rooms": []});
+            }
+            crate::test_server::thread_response(request)
+        });
+        let account = Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
+        assert_eq!(account.client().joined_rooms().len(), 1);
+        let left = leave_rooms_left_elsewhere(&account).await;
+        assert_eq!(left, Some(HashSet::from(["!room:example.org".to_owned()])));
+        assert!(account.client().joined_rooms().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_room_whose_membership_changed_while_asking_should_keep_it() {
+        // The server answers `/joined_rooms` only once the test let it, after a rejoin landed.
+        let (asked, was_asked) = std::sync::mpsc::channel();
+        let (answer, may_answer) = std::sync::mpsc::channel::<()>();
+        let may_answer = std::sync::Mutex::new(may_answer);
+        let server = crate::test_server::Server::new(move |request| {
+            if request.contains("/joined_rooms") {
+                let _ = asked.send(());
+                let _ = may_answer.lock().map(|may| may.recv());
+                return serde_json::json!({"joined_rooms": []});
+            }
+            crate::test_server::thread_response(request)
+        });
+        let account = Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
+        let room = account.client().joined_rooms().pop().expect("the room");
+        let reconcile = {
+            let account = account.clone();
+            tokio::spawn(async move { leave_rooms_left_elsewhere(&account).await })
+        };
+        tokio::task::spawn_blocking(move || was_asked.recv()).await.expect("asked").expect("asked");
+        // A rejoin elsewhere, which the room list's sync applied while the server was asked.
+        room.update_and_save_room_info(|info| (info, matrix_sdk_base::RoomInfoNotableUpdateReasons::MEMBERSHIP))
+            .await
+            .expect("rejoined");
+        answer.send(()).expect("answer");
+        assert_eq!(reconcile.await.expect("reconciled"), Some(HashSet::new()));
+        assert_eq!(room.state(), matrix_sdk_base::RoomState::Joined);
+    }
+
+    #[tokio::test]
+    async fn the_long_poll_beside_sliding_sync_should_ask_for_no_rooms() {
+        let (requests, received) = std::sync::mpsc::channel();
+        let server = sliding_server(requests);
+        let account = Account::for_test(&server.url()).await;
+        let sink: Arc<dyn EventSink> = Arc::new(|_| {});
+        let feed = RoomFeed { account: account.clone(), sink: Arc::clone(&sink), cache: Arc::default() };
+        let (wanted, members) = fetch_space_members(feed.clone());
+        let _members = AbortOnDrop(members);
+        let sync = {
+            let account = account.clone();
+            tokio::spawn(async move {
+                let (caught_up, own) = (Arc::default(), Arc::default());
+                sync_until_error(&account, &sink, &feed, &caught_up, &own, &wanted, &mut SyncedRooms::None).await
+            })
+        };
+        let line = tokio::task::spawn_blocking(move || {
+            received.iter().find(|line| line.contains("/sync?")).expect("a long-poll sync")
+        })
+        .await
+        .expect("request");
+        sync.abort();
+        let decoded = url::form_urlencoded::parse(line.as_bytes())
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        assert!(decoded.contains(r#""rooms":[]"#), "{decoded}");
     }
 
     #[tokio::test]
@@ -4069,17 +5274,23 @@ mod tests {
     }
 
     fn start() -> (EngineHandle, std_mpsc::Receiver<Event>) {
+        start_as("engine", false)
+    }
+
+    /// An engine with a data directory of its own (`name`), scanning QR codes or not.
+    fn start_as(name: &str, scans_qr: bool) -> (EngineHandle, std_mpsc::Receiver<Event>) {
         let (events, received) = std_mpsc::channel();
         let sink = move |event| {
             let _ = events.send(event);
         };
-        let data_dir = std::env::temp_dir().join(format!("matrix-core-engine-{}", std::process::id()));
+        let data_dir = std::env::temp_dir().join(format!("matrix-core-{name}-{}", std::process::id()));
         let config = EngineConfig {
             data_dir,
             secrets: Arc::new(MemorySecrets::default()),
             identity: ClientIdentity { name: "Test".into(), uri: "https://example.org".parse().unwrap() },
             oauth_redirect: crate::OAuthRedirect::Loopback,
             stores: StoreSharing::Alone,
+            scans_qr,
         };
         (Engine::start(config, sink).expect("engine starts"), received)
     }
@@ -4112,6 +5323,35 @@ mod tests {
         };
         let _ = asked_for_password(Error::WrongCode, RequestId(7), &sink);
         assert!(received.try_recv().is_err());
+    }
+
+    #[test]
+    fn an_answer_to_a_command_that_asked_nothing_should_be_dropped() {
+        let (engine, events) = start();
+        let request = engine.send(Command::Answer { request: RequestId(9_999), answer: Answer::Agree });
+        assert_eq!(finished(&events, request), Ok(()));
+    }
+
+    #[test]
+    fn a_picture_of_a_qr_code_should_read_back_its_bytes() {
+        let code = crate::QrImage::encode(&[0, 159, 255, 7]).expect("encodes");
+        let side = (code.width + 8) * 4;
+        let picture = image::GrayImage::from_fn(side, side, |x, y| {
+            let dark = code.is_dark((x / 4).wrapping_sub(4), (y / 4).wrapping_sub(4));
+            image::Luma([if dark { 0 } else { 255 }])
+        });
+        let path = std::env::temp_dir().join(format!("matrix-core-qr-{}.png", std::process::id()));
+        picture.save(&path).expect("saves");
+        let (engine, events) = start();
+        let request = engine.send(Command::ReadQrCode { picture: path.clone() });
+        let code = loop {
+            match events.recv_timeout(std::time::Duration::from_secs(10)).expect("an event") {
+                Event::QrCodeRead { request: read, code } if read == request => break code,
+                _ => {}
+            }
+        };
+        let _ = std::fs::remove_file(path);
+        assert_eq!(code, Some(vec![0, 159, 255, 7]));
     }
 
     #[test]
@@ -4186,6 +5426,254 @@ mod tests {
             }
         };
         assert!(homeserver.methods.oauth && homeserver.url.contains("matrix-client"), "{homeserver:?}");
+    }
+
+    /// Sends `command` and collects the events until it finishes.
+    fn run(
+        engine: &EngineHandle,
+        events: &std_mpsc::Receiver<Event>,
+        command: Command,
+    ) -> (Result<(), String>, Vec<Event>) {
+        let request = engine.send(command);
+        let mut seen = Vec::new();
+        loop {
+            match events.recv_timeout(Duration::from_secs(60)).expect("an event") {
+                Event::Finished { request: r, result } if r == request => return (result, seen),
+                event => seen.push(event),
+            }
+        }
+    }
+
+    /// An account's life on a real homeserver with open registration (a local Synapse with
+    /// `enable_registration_without_verification` and `experimental_features.msc3814_enabled`):
+    /// `BM_LIVE_HOMESERVER=http://127.0.0.1:8008 cargo test -p matrix-core -- --ignored live_account`.
+    #[test]
+    #[ignore = "needs a homeserver with open registration"]
+    fn live_account_should_register_move_keys_keep_an_offline_device_and_close() {
+        let Ok(server) = std::env::var("BM_LIVE_HOMESERVER") else { return };
+        let (engine, events) = start();
+        let (found, seen) = run(&engine, &events, Command::Discover { server });
+        found.expect("discovered");
+        let homeserver = seen
+            .into_iter()
+            .find_map(|e| match e {
+                Event::HomeserverDiscovered { homeserver, .. } => Some(homeserver),
+                _ => None,
+            })
+            .expect("a homeserver");
+        assert!(homeserver.methods.create_account, "{homeserver:?}");
+
+        let username = format!("live{}", now_ms());
+        let password = Password("first password".into());
+        let registration = crate::RegisterRequest { homeserver: homeserver.url, username: username.clone(), password };
+        let (registered, seen) = run(&engine, &events, Command::Register(registration));
+        registered.expect("registered");
+        let account = seen
+            .iter()
+            .find_map(|e| match e {
+                Event::SignedIn { account, .. } => Some(account.clone()),
+                _ => None,
+            })
+            .expect("signed in");
+        assert!(account.as_str().starts_with(&format!("@{username}:")));
+
+        let (set_up, seen) = run(&engine, &events, Command::SetUpRecovery(account.clone()));
+        set_up.expect("recovery set up");
+        let key = seen
+            .into_iter()
+            .find_map(|e| match e {
+                Event::RecoveryKey { key, .. } => Some(key),
+                _ => None,
+            })
+            .expect("a recovery key");
+
+        let file = std::env::temp_dir().join(format!("matrix-core-live-keys-{}.txt", std::process::id()));
+        let passphrase = Password("file passphrase".into());
+        let export =
+            Command::ExportRoomKeys { account: account.clone(), path: file.clone(), passphrase: passphrase.clone() };
+        run(&engine, &events, export).0.expect("exported");
+        assert!(std::fs::read_to_string(&file).expect("a key file").contains("BEGIN MEGOLM SESSION DATA"));
+        let wrong =
+            Command::ImportRoomKeys { account: account.clone(), path: file.clone(), passphrase: Password("no".into()) };
+        assert!(run(&engine, &events, wrong).0.is_err(), "a wrong passphrase is refused");
+        let import = Command::ImportRoomKeys { account: account.clone(), path: file.clone(), passphrase };
+        let (imported, seen) = run(&engine, &events, import);
+        imported.expect("imported");
+        assert!(seen.iter().any(|e| matches!(e, Event::KeysImported { .. })));
+        let _ = std::fs::remove_file(&file);
+
+        let on = Command::SetOfflineDevice { account: account.clone(), on: true, recovery_key: Some(key) };
+        run(&engine, &events, on).0.expect("offline device on");
+        let off = Command::SetOfflineDevice { account: account.clone(), on: false, recovery_key: None };
+        run(&engine, &events, off).0.expect("offline device off");
+
+        let change = Command::ChangePassword {
+            account: account.clone(),
+            new_password: Password("second password".into()),
+            password: Some(Password("first password".into())),
+        };
+        run(&engine, &events, change).0.expect("password changed");
+
+        let close = Command::DeactivateAccount {
+            account: account.clone(),
+            erase: false,
+            password: Some(Password("second password".into())),
+        };
+        let (closed, seen) = run(&engine, &events, close);
+        closed.expect("deactivated");
+        assert!(seen.iter().any(|e| matches!(e, Event::AccountRemoved(gone) if *gone == account)));
+    }
+
+    /// Registers a fresh account on `homeserver` (a resolved URL) and returns it.
+    fn register_live(
+        engine: &EngineHandle,
+        events: &std_mpsc::Receiver<Event>,
+        homeserver: &str,
+        name: &str,
+    ) -> AccountId {
+        let username = format!("{name}{}", now_ms());
+        let registration = crate::RegisterRequest {
+            homeserver: homeserver.to_owned(),
+            username,
+            password: Password("a password".into()),
+        };
+        let (registered, seen) = run(engine, events, Command::Register(registration));
+        registered.expect("registered");
+        seen.into_iter()
+            .find_map(|e| match e {
+                Event::SignedIn { account, .. } => Some(account),
+                _ => None,
+            })
+            .expect("signed in")
+    }
+
+    /// The bytes a phone's camera would read from a code drawn on a screen.
+    fn photographed(code: &crate::QrImage) -> Vec<u8> {
+        let side = (code.width + 8) * 4;
+        let picture = image::GrayImage::from_fn(side, side, |x, y| {
+            let dark = code.is_dark((x / 4).wrapping_sub(4), (y / 4).wrapping_sub(4));
+            image::Luma([if dark { 0 } else { 255 }])
+        });
+        crate::qr::read_luma(&picture).expect("the code reads")
+    }
+
+    /// Two people verify each other on a real homeserver: a desktop shows its code, a phone
+    /// scans it, the desktop confirms, and the desktop then sees the phone's user as verified.
+    /// `BM_LIVE_HOMESERVER=http://127.0.0.1:8008 cargo test -p matrix-core -- --ignored live_people`.
+    #[test]
+    #[ignore = "needs a homeserver with open registration"]
+    fn live_people_should_verify_each_other_by_qr_code() {
+        let Ok(server) = std::env::var("BM_LIVE_HOMESERVER") else { return };
+        let (desktop, desktop_events) = start_as("live-desktop", false);
+        let (phone, phone_events) = start_as("live-phone", true);
+        let ada = register_live(&desktop, &desktop_events, &server, "ada");
+        let grace = register_live(&phone, &phone_events, &server, "grace");
+        // Each sets up encryption's identity: cross-signing comes with recovery.
+        run(&desktop, &desktop_events, Command::SetUpRecovery(ada.clone())).0.expect("ada's recovery");
+        run(&phone, &phone_events, Command::SetUpRecovery(grace.clone())).0.expect("grace's recovery");
+
+        // Not before they share a chat: Grace's client would drop a request from Ada's devices,
+        // which it doesn't know yet.
+        let early = Command::VerifyUser { account: ada.clone(), user_id: grace.to_string() };
+        let refused = run(&desktop, &desktop_events, early).0.expect_err("refused without a chat");
+        assert!(refused.contains("direct chat"), "{refused}");
+        // They already chat: verification starts in their direct chat, where each side knows the
+        // other's devices.
+        run(&desktop, &desktop_events, Command::OpenDirectChat { account: ada.clone(), user_id: grace.to_string() })
+            .0
+            .expect("a direct chat");
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        let mut joined = false;
+        while !joined {
+            assert!(std::time::Instant::now() < deadline, "the invitation never came");
+            if let Ok(Event::RoomsUpdated { list, .. }) = phone_events.recv_timeout(Duration::from_secs(1))
+                && let Some(invite) = list.invitations.first()
+            {
+                let join =
+                    Command::JoinRoom { account: grace.clone(), room_id: invite.room_id.clone(), via: Vec::new() };
+                run(&phone, &phone_events, join).0.expect("joined");
+                joined = true;
+            }
+        }
+        // Each side's sync learns the other's devices.
+        std::thread::sleep(Duration::from_secs(3));
+        while desktop_events.try_recv().is_ok() {}
+        desktop.send(Command::VerifyUser { account: ada.clone(), user_id: grace.to_string() });
+        let (mut scanned, mut verified) = (false, false);
+        let mut ada_code = None;
+        while !verified {
+            assert!(std::time::Instant::now() < deadline, "the verification didn't finish in time");
+            while let Ok(event) = phone_events.try_recv() {
+                if std::env::var("BM_LIVE_TRACE").is_ok()
+                    && matches!(
+                        event,
+                        Event::Verification { .. }
+                            | Event::Finished { .. }
+                            | Event::RoomsUpdated { .. }
+                            | Event::RoomJoined { .. }
+                    )
+                {
+                    eprintln!("phone: {event:?}");
+                }
+                match event {
+                    Event::Verification { flow_id, step: crate::VerificationStep::Incoming { user, .. }, .. } => {
+                        assert_eq!(user.map(|p| p.id), Some(ada.to_string()), "the request names Ada");
+                        phone.send(Command::AcceptVerification { account: grace.clone(), flow_id });
+                    }
+                    Event::Verification {
+                        flow_id, step: crate::VerificationStep::Ready { scan: true, .. }, ..
+                    } => {
+                        while ada_code.is_none() {
+                            assert!(std::time::Instant::now() < deadline, "Ada never showed her code");
+                            if let Ok(Event::Verification {
+                                step: crate::VerificationStep::Ready { qr: Some(qr), .. },
+                                ..
+                            }) = desktop_events.recv_timeout(Duration::from_secs(1))
+                            {
+                                ada_code = Some(photographed(&qr));
+                            }
+                        }
+                        let code = ada_code.clone().unwrap_or_default();
+                        phone.send(Command::ScanVerificationCode { account: grace.clone(), flow_id, code });
+                        scanned = true;
+                    }
+                    Event::Verification { step: crate::VerificationStep::Cancelled(why), .. } => {
+                        panic!("cancelled: {why}")
+                    }
+                    _ => {}
+                }
+            }
+            while let Ok(event) = desktop_events.try_recv() {
+                if std::env::var("BM_LIVE_TRACE").is_ok()
+                    && matches!(
+                        event,
+                        Event::Verification { .. }
+                            | Event::VerificationRequested { .. }
+                            | Event::Finished { result: Err(_), .. }
+                    )
+                {
+                    eprintln!("desktop: {event:?}");
+                }
+                match event {
+                    Event::Verification { step: crate::VerificationStep::Ready { qr: Some(qr), .. }, .. } => {
+                        ada_code = Some(photographed(&qr));
+                    }
+                    Event::Verification { flow_id, step: crate::VerificationStep::Scanned, .. } => {
+                        desktop.send(Command::ConfirmVerification { account: ada.clone(), flow_id, matches: true });
+                    }
+                    Event::Verification { step: crate::VerificationStep::Cancelled(why), .. } => {
+                        panic!("cancelled: {why}")
+                    }
+                    Event::Identity { user_id, identity, .. } if user_id == grace.as_str() => {
+                        assert_eq!(identity, Some(crate::Identity { verified: true, changed: false }));
+                        verified = true;
+                    }
+                    _ => {}
+                }
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(scanned, "the phone scanned the desktop's code");
     }
 
     #[test]

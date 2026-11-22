@@ -9,6 +9,7 @@ import type {
   CallInfo,
   EditVersion,
   ImagePack,
+  EventSource,
   IncomingCall,
   Invitation,
   MemberRole,
@@ -16,18 +17,22 @@ import type {
   Message,
   MessageContent,
   PackImage,
+  Identity,
   Person,
   Place,
   Presence,
+  QrImage,
   RoomMember,
   RoomPreview,
   RoomSummary,
+  Safety,
   SasEmoji,
   Session,
   SharedFile,
   SpaceSummary,
   ThreadInfo,
   TimelineEntry,
+  Widgets,
 } from '@better-matrix/matrix-native/types';
 
 import { mapOf } from '../state/geo';
@@ -374,10 +379,13 @@ function room(
     call: { via: 'Rtc', participants: [] },
     activity_ms: null,
     encrypted: true,
+    public: false,
     pinned: id === GENERAL ? [DEMO_THREAD.root, TEST_PLAN] : [],
     can_pin: true,
     saved: id === GENERAL ? [TEST_PLAN] : [],
     can_rename: true,
+    priority: 'Normal',
+    marked_unread: false,
   };
 }
 
@@ -682,7 +690,12 @@ function work(): Fixture {
     rooms: [
       [room(GENERAL, 'general', 'Company-wide announcements and chatter', 0, 0), room0],
       [
-        room(DESIGN, 'design', 'Mockups, reviews and the component library', 3, 0),
+        // Public: anyone may join and post, so the account's media choice may hold its
+        // pictures back (ADR 0011).
+        {
+          ...room(DESIGN, 'design', 'Mockups, reviews and the component library', 3, 0),
+          public: true,
+        },
         messages([
           [GRACE, 'Grace Hopper', text('New sidebar spacing is ready for review.'), 0],
           [
@@ -709,9 +722,11 @@ function work(): Fixture {
         },
         [],
       ],
-      [room('!lab:example.org', 'lab', 'My own scratch room', 0, 0), []],
+      // Organised as the desktop's demo: lab among the low priority rooms, Grace's chat a
+      // favourite, Alan's muted chat marked unread.
+      [{ ...room('!lab:example.org', 'lab', 'My own scratch room', 0, 0), priority: 'Low' }, []],
       [
-        dm(DM_GRACE, GRACE, 'Grace Hopper', 2),
+        { ...dm(DM_GRACE, GRACE, 'Grace Hopper', 2), priority: 'Favourite' },
         messages([
           [ADA, 'Ada Lovelace', callCard(true), 0],
           [GRACE, 'Grace Hopper', text('Do you have a minute to look at the sync loop?'), 1],
@@ -719,7 +734,14 @@ function work(): Fixture {
           [GRACE, 'Grace Hopper', voiceMemo(), 1],
         ]),
       ],
-      [{ ...dm('!dm-alan:example.org', ALAN, 'Alan Turing', 0), notifications: 'Mute' }, []],
+      [
+        {
+          ...dm('!dm-alan:example.org', ALAN, 'Alan Turing', 0),
+          notifications: 'Mute',
+          marked_unread: true,
+        },
+        [],
+      ],
       // Kai is calling: the card shows the call under way, with the way in.
       [
         { ...dm(DM_KAI, KAI, 'Kai', 1), call: { via: 'Rtc', participants: [KAI] } },
@@ -741,9 +763,58 @@ function work(): Fixture {
         inviter: person(GRACE, 'Grace Hopper'),
         space: false,
         kind: 'Group',
+        stranger: false,
       },
     ],
   };
+}
+
+/** Someone Ada shares no room with, ignored in the safety scenes. */
+export const SPAMMER = '@prizes:spam.example';
+
+/** An invitation from a stranger, which the safety scenes hide. */
+export const STRANGER_INVITE = '!free-crypto:spam.example';
+
+/**
+ * The safety scenes: Ada hides strangers' invitations (one waits, from someone she shares no
+ * room with), shows media in private rooms only, and ignores a spammer.
+ */
+export function safetyEvents(): EngineEvent[] {
+  const fixture = work();
+
+  const safety: Safety = {
+    ignored: [SPAMMER],
+    media: 'Private',
+    invite_pictures: false,
+    hide_stranger_invites: true,
+  };
+
+  return [
+    {
+      type: 'RoomsUpdated',
+      data: {
+        account: ADA,
+        list: {
+          rooms: fixture.rooms.map(([r]) => r),
+          spaces: fixture.spaces,
+          invitations: [
+            ...(fixture.invitations ?? []),
+            {
+              room_id: STRANGER_INVITE,
+              name: 'Free crypto giveaway',
+              topic: 'Claim your prize now!',
+              avatar: null,
+              inviter: person(SPAMMER, 'Prize Desk'),
+              space: false,
+              kind: 'Group',
+              stranger: true,
+            },
+          ],
+        },
+      },
+    },
+    { type: 'Safety', data: { account: ADA, safety } },
+  ];
 }
 
 function hobby(): Fixture {
@@ -799,6 +870,7 @@ function accountEvents(
       },
     },
     { type: 'SidebarLayout', data: { account: id, layout: { scopes: {}, changed_at: 0 } } },
+    { type: 'Keywords', data: { account: id, keywords: ['deploy', 'release'] } },
   ];
 
   for (const [summary, list] of fixture.rooms) {
@@ -902,6 +974,7 @@ export function demoThreads(): ThreadInfo[] {
   return [
     {
       root: DEMO_THREAD.root,
+      sender_id: ALAN,
       sender_name: 'Alan Turing',
       body: 'Cross-signing verification passes on Linux, macOS and Windows.',
       replies: 3,
@@ -915,23 +988,24 @@ export function demoFiles(): SharedFile[] {
   const shared = (
     name: string,
     kind: Attachment['kind'],
-    who: string,
+    [senderId, who]: [string, string],
     minutes: number,
     extra: Partial<Attachment> = {},
   ): SharedFile => ({
     event_id: `$file-${name}`,
+    sender_id: senderId,
     sender_name: who,
     timestamp: DEMO_DAY_MS + 10 * 3_600_000 + minutes * 60_000,
     attachment: file(name, kind, extra),
   });
 
   return [
-    shared('release-notes-0.2.pdf', 'File', 'Ada Lovelace', 33),
-    shared('screenshot-sidebar.png', 'Image', 'Grace Hopper', 12, {
+    shared('release-notes-0.2.pdf', 'File', [ADA, 'Ada Lovelace'], 33),
+    shared('screenshot-sidebar.png', 'Image', [GRACE, 'Grace Hopper'], 12, {
       media: DEMO_MEDIA.screenshot,
       dimensions: [1024, 1024],
     }),
-    shared('standup.ogg', 'Audio', 'Kai', 2),
+    shared('standup.ogg', 'Audio', [KAI, 'Kai'], 2),
   ];
 }
 
@@ -946,6 +1020,46 @@ export function verificationEmojis(): SasEmoji[] {
     ['🍕', 'Pizza'],
     ['⚓', 'Anchor'],
   ].map(([symbol, description]) => ({ symbol: symbol!, description: description! }));
+}
+
+/**
+ * A QR code's look for the demo: finder patterns in three corners, timing lines, and modules
+ * from a fixed sequence. It reads as nothing; the demo engine answers scans itself.
+ */
+export function demoQr(width = 29): QrImage {
+  let seed = 20_769;
+  const dark: boolean[] = [];
+
+  const finder = (x: number, y: number) => {
+    const ring = Math.max(Math.abs(x - 3), Math.abs(y - 3));
+
+    return ring !== 2 && ring !== 4;
+  };
+
+  for (let y = 0; y < width; y++) {
+    for (let x = 0; x < width; x++) {
+      seed = (seed * 48_271) % 2_147_483_647;
+
+      if (x < 8 && y < 8) dark.push(finder(x, y));
+      else if (x >= width - 8 && y < 8) dark.push(finder(x - (width - 7), y));
+      else if (x < 8 && y >= width - 8) dark.push(finder(x, y - (width - 7)));
+      else if (x === 6 || y === 6) dark.push((x + y) % 2 === 0);
+      else dark.push(seed % 7 < 3);
+    }
+  }
+
+  return { width, dark };
+}
+
+/** A homeserver that only signs in with passwords, so accounts are created in the app. */
+export const PASSWORD_SERVER = 'password.example.org';
+
+/** What the demo's engine reads from any picture: some code's bytes. */
+export const DEMO_QR_BYTES = [77, 65, 84, 82, 73, 88, 3, 0];
+
+/** What Ada knows of her co-workers' identities: Grace verified, Alan's changed since. */
+export function demoIdentity(userId: string): Identity {
+  return { verified: userId === GRACE || userId === ALAN, changed: userId === ALAN };
 }
 
 /** Everything the demo starts with: Ada's work and hobby accounts, as the engine reports them. */
@@ -995,11 +1109,17 @@ export function seedEvents(): EngineEvent[] {
     },
     {
       type: 'SecurityChanged',
-      data: { account: ADA, security: { session_verified: true, recovery: 'Enabled' } },
+      data: {
+        account: ADA,
+        security: { session_verified: true, recovery: 'Enabled', offline_device: 'Off' },
+      },
     },
     {
       type: 'SecurityChanged',
-      data: { account: ADA_HOBBY, security: { session_verified: false, recovery: 'Enabled' } },
+      data: {
+        account: ADA_HOBBY,
+        security: { session_verified: false, recovery: 'Enabled', offline_device: 'Off' },
+      },
     },
     { type: 'Sessions', data: { account: ADA, sessions: demoSessions() } },
     { type: 'Threads', data: { account: ADA, room_id: GENERAL, threads: demoThreads() } },
@@ -1098,5 +1218,94 @@ export function typingPeople(): Person[] {
     person(ALAN, 'Alan Turing'),
     person(KAI, 'Kai'),
     person('@mira:example.org', 'Mira'),
+  ];
+}
+
+/** The widgets pinned to #general: a board, a dashboard and a Jitsi meeting. */
+export function demoWidgets(): Widgets {
+  const widget = (id: string, name: string, kind: string, host: string, path: string) => ({
+    id,
+    name,
+    kind,
+    url: `https://${host}${path}`,
+    host,
+    creator: GRACE,
+    can_remove: true,
+  });
+
+  return {
+    widgets: [
+      widget('board', 'Sprint board', 'm.custom', 'board.example.org', '/team'),
+      widget('grafana', 'Server dashboard', 'm.grafana', 'grafana.example.org', '/d/1'),
+      widget('standup', 'Standup', 'jitsi', 'meet.example.org', '/TeamStandup'),
+    ],
+    can_add: true,
+  };
+}
+
+/** A message's source, as an encrypted room's event reads decrypted and as it was sent. */
+export function demoSource(roomId: string, eventId: string): EventSource {
+  const envelope = { sender: ALAN, event_id: eventId, origin_server_ts: DEMO_DAY_MS };
+
+  return {
+    room_id: roomId,
+    event_id: eventId,
+    json: JSON.stringify(
+      {
+        type: 'm.room.message',
+        ...envelope,
+        content: { msgtype: 'm.text', body: 'Has anyone tried the new build?' },
+      },
+      null,
+      2,
+    ),
+    encrypted: JSON.stringify(
+      {
+        type: 'm.room.encrypted',
+        ...envelope,
+        content: {
+          algorithm: 'm.megolm.v1.aes-sha2',
+          ciphertext: 'AwgAEpABqOCzJ2Tp…',
+          device_id: 'ALANLAPTOP',
+          sender_key: 'Hc1gJ8i3y1cCi0ZmRp3K7XcfuF0pB6wd1Sx4nT2EYfQ',
+          session_id: '3yv1Q3wN1cZ9u2lO0d5XG4WeV8m7n2Ck1lZ6aQpTb3Y',
+        },
+      },
+      null,
+      2,
+    ),
+  };
+}
+
+/** Room state #general's timeline leaves out, drawn while hidden events show. */
+export function hiddenEvents(): EngineEvent[] {
+  const hidden = (id: string, kind: string, sender: Person, minutes: number): TimelineEntry => ({
+    id,
+    kind: {
+      type: 'Hidden',
+      data: {
+        event_id: `$${id}`,
+        sender,
+        event_type: kind,
+        timestamp_ms: DEMO_DAY_MS + 12 * 3_600_000 + minutes * 60_000,
+      },
+    },
+  });
+
+  const grace = { id: GRACE, name: 'Grace Hopper', avatar: null };
+  const alan = { id: ALAN, name: 'Alan Turing', avatar: null };
+
+  return [
+    {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: { room_id: GENERAL, thread: null },
+        diffs: [
+          { type: 'PushBack', data: hidden('hidden-acl', 'm.room.server_acl', grace, 1) },
+          { type: 'PushBack', data: hidden('hidden-widget', 'im.vector.modular.widgets', alan, 2) },
+        ],
+      },
+    },
   ];
 }

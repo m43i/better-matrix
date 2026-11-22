@@ -37,6 +37,13 @@ export function SettingsRows() {
           />
           <Divider inset={52} />
           <ListRow
+            testID="open-safety"
+            icon="safety"
+            title={t('settings.safety')}
+            onPress={() => router.push(routes.settingsSafety(active))}
+          />
+          <Divider inset={52} />
+          <ListRow
             testID="open-sessions"
             icon="devices"
             title={t('settings.sessions')}

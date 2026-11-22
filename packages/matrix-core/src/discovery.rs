@@ -57,15 +57,22 @@ impl Homeserver {
 /// Resolves `server` (a server name or URL) and asks it for its sign-in methods.
 pub(crate) async fn discover(server: &str) -> Result<Homeserver, Error> {
     let client = crate::tls::sdk(Client::builder()).server_name_or_homeserver_url(server).build().await?;
-    let oauth = client.oauth().server_metadata().await.is_ok();
+    use matrix_sdk::ruma::api::client::discovery::get_authorization_server_metadata::v1::Prompt;
+    let metadata = client.oauth().server_metadata().await.ok();
+    let oauth = metadata.is_some();
     let password = match client.matrix_auth().get_login_types().await {
         Ok(response) => response.flows.iter().any(|flow| matches!(flow, LoginType::Password(_))),
         Err(_) => false,
     };
+    let create_account = match &metadata {
+        Some(metadata) => metadata.prompt_values_supported.contains(&Prompt::Create),
+        None => password && crate::registration::password_registration(&client).await,
+    };
+    let qr = metadata.as_ref().is_some_and(|metadata| metadata.device_authorization_endpoint.is_some());
     Ok(Homeserver {
         server_name: client.server().and_then(|url| url.host_str().map(str::to_owned)),
         url: client.homeserver().to_string(),
-        methods: LoginMethods { oauth, password },
+        methods: LoginMethods { oauth, password, create_account, qr },
     })
 }
 

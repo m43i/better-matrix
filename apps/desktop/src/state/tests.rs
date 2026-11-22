@@ -46,10 +46,13 @@ fn room(room_id: &str) -> RoomSummary {
         call: matrix_core::RoomCall::default(),
         activity_ms: None,
         encrypted: false,
+        public: false,
         can_rename: true,
         pinned: Vec::new(),
         can_pin: true,
         saved: Vec::new(),
+        priority: matrix_core::RoomPriority::Normal,
+        marked_unread: false,
     }
 }
 
@@ -70,7 +73,7 @@ fn discover(s: &mut State, commands: &mut DetachedCommands, oauth: bool, passwor
     let homeserver = Homeserver {
         server_name: Some("example.org".into()),
         url: "https://matrix.example.org/".into(),
-        methods: LoginMethods { oauth, password },
+        methods: LoginMethods { oauth, password, create_account: false, qr: false },
     };
     apply(s, Event::HomeserverDiscovered { request, homeserver });
     drain(commands).into_iter().map(|(_, c)| c).collect()
@@ -338,7 +341,7 @@ fn an_oauth_server_should_go_straight_to_the_browser() {
     let (mut s, mut commands) = state();
     let sent = discover(&mut s, &mut commands, true, true);
     assert!(
-        matches!(&sent[..], [Command::LoginOAuth { homeserver, resume: None }] if homeserver == "https://matrix.example.org/")
+        matches!(&sent[..], [Command::LoginOAuth { homeserver, resume: None, create: false }] if homeserver == "https://matrix.example.org/")
     );
 }
 
@@ -387,7 +390,7 @@ fn a_browser_sign_in_should_remember_the_url_to_reopen() {
     let homeserver = Homeserver {
         server_name: None,
         url: "https://hs/".into(),
-        methods: LoginMethods { oauth: true, password: false },
+        methods: LoginMethods { oauth: true, password: false, create_account: false, qr: false },
     };
     apply(&mut s, Event::HomeserverDiscovered { request: discovery, homeserver });
     let (request, _) = commands.try_next().unwrap();
@@ -1080,7 +1083,11 @@ fn verifying_the_session_should_fetch_the_keys_of_open_rooms() {
     let (mut s, mut commands) = state();
     let id = AccountId::new("@a:example.org");
     with_rooms(&mut s, &id, &["!one:x"], Vec::new());
-    let unverified = matrix_core::Security { session_verified: false, recovery: matrix_core::RecoveryStatus::Enabled };
+    let unverified = matrix_core::Security {
+        session_verified: false,
+        recovery: matrix_core::RecoveryStatus::Enabled,
+        offline_device: matrix_core::OfflineDevice::Unsupported,
+    };
     apply(&mut s, Event::SecurityChanged { account: id.clone(), security: unverified });
     drain(&mut commands);
     let verified = matrix_core::Security { session_verified: true, ..unverified };
@@ -1094,7 +1101,11 @@ fn an_unverified_session_should_not_fetch_room_keys() {
     let id = AccountId::new("@a:example.org");
     with_rooms(&mut s, &id, &["!one:x"], Vec::new());
     drain(&mut commands);
-    let unverified = matrix_core::Security { session_verified: false, recovery: matrix_core::RecoveryStatus::Enabled };
+    let unverified = matrix_core::Security {
+        session_verified: false,
+        recovery: matrix_core::RecoveryStatus::Enabled,
+        offline_device: matrix_core::OfflineDevice::Unsupported,
+    };
     apply(&mut s, Event::SecurityChanged { account: id, security: unverified });
     assert!(commands.try_next().is_none());
 }
@@ -1178,9 +1189,27 @@ fn a_verification_request_from_another_session_should_open_a_dialog() {
     let (mut s, _) = state();
     let id = AccountId::new("@a:example.org");
     with_rooms(&mut s, &id, &["!one:x"], Vec::new());
-    let step = VerificationStep::Incoming { other_device: "Phone".into() };
+    let step = VerificationStep::Incoming { other_device: "Phone".into(), user: None };
     apply(&mut s, Event::Verification { account: id, flow_id: "f".into(), step });
-    assert!(matches!(&s.modal, Some(Modal::Verification { flow_id: Some(f), .. }) if f == "f"));
+    assert!(matches!(&s.modal, Some(Modal::Verification { flow: VerificationFlow::Following(f), .. }) if f == "f"));
+}
+
+#[test]
+fn verifying_this_session_should_follow_the_flow_its_request_names() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    drain(&mut commands);
+    s.verify_with_other_device();
+    let (request, _) = commands.try_next().unwrap();
+    apply(&mut s, Event::VerificationRequested { request, account: id.clone(), flow_id: "mine".into() });
+    let step = VerificationStep::Ready { qr: None, scan: true };
+    apply(&mut s, Event::Verification { account: id.clone(), flow_id: "other".into(), step });
+    apply(&mut s, Event::Verification { account: id, flow_id: "mine".into(), step: VerificationStep::Scanned });
+    assert!(matches!(
+        &s.modal,
+        Some(Modal::Verification { flow: VerificationFlow::Following(f), step: VerificationStep::Scanned, .. }) if f == "mine"
+    ));
 }
 
 #[test]
@@ -1188,7 +1217,7 @@ fn accepting_and_confirming_should_answer_the_open_verification() {
     let (mut s, mut commands) = state();
     let id = AccountId::new("@a:example.org");
     with_rooms(&mut s, &id, &["!one:x"], Vec::new());
-    let step = VerificationStep::Incoming { other_device: "Phone".into() };
+    let step = VerificationStep::Incoming { other_device: "Phone".into(), user: None };
     apply(&mut s, Event::Verification { account: id.clone(), flow_id: "f".into(), step });
     drain(&mut commands);
     s.accept_verification();
@@ -1531,7 +1560,7 @@ fn signing_in_again_should_look_up_the_server_of_the_account() {
 /// Answers the discovery just sent with an OAuth server, returning the commands after it.
 fn discovered(s: &mut State, commands: &mut DetachedCommands) -> Vec<Command> {
     let (request, _) = commands.try_next().unwrap();
-    let methods = LoginMethods { oauth: true, password: false };
+    let methods = LoginMethods { oauth: true, password: false, create_account: false, qr: false };
     let homeserver = Homeserver { server_name: None, url: "https://matrix.example.org/".into(), methods };
     apply(s, Event::HomeserverDiscovered { request, homeserver });
     drain(commands).into_iter().map(|(_, c)| c).collect()
@@ -2090,6 +2119,7 @@ fn playing_clip(s: &mut State) -> matrix_core::Attachment {
         play: true,
         held: false,
         scrub_from: None,
+        sender: None,
     });
     memo
 }
@@ -2476,6 +2506,67 @@ fn coming_back_to_the_window_should_mark_the_open_room_read() {
     drain(&mut commands);
     s.focus_changed(true);
     assert!(all_commands(&mut commands).iter().any(|c| matches!(c, Command::MarkRead { .. })));
+}
+
+#[test]
+fn coming_back_to_the_window_should_take_the_open_rooms_unread_mark_away() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    s.set_unread("!one:x", true);
+    s.focus_changed(false);
+    drain(&mut commands);
+    s.focus_changed(true);
+    let unmark = Command::SetUnread { account: id, room_id: "!one:x".into(), unread: false };
+    assert!(all_commands(&mut commands).contains(&unmark));
+}
+
+#[test]
+fn switching_back_to_an_account_should_take_its_open_rooms_unread_mark_away() {
+    let (mut s, mut commands) = state();
+    let (a, b) = (AccountId::new("@a:example.org"), AccountId::new("@b:example.org"));
+    with_rooms(&mut s, &a, &["!one:x"], Vec::new());
+    s.select_account(&a);
+    s.select_room("!one:x");
+    with_rooms(&mut s, &b, &["!two:x"], Vec::new());
+    s.select_account(&b);
+    s.accounts.set_marked(&a, "!one:x", true);
+    drain(&mut commands);
+    s.switch_account(&a);
+    assert!(!s.accounts.get(&a).unwrap().room("!one:x").unwrap().marked_unread);
+    let unmark = Command::SetUnread { account: a, room_id: "!one:x".into(), unread: false };
+    assert!(all_commands(&mut commands).contains(&unmark));
+}
+
+#[test]
+fn opening_another_rooms_notification_should_leave_the_remembered_rooms_mark() {
+    let (mut s, mut commands) = state();
+    let (a, b) = (AccountId::new("@a:example.org"), AccountId::new("@b:example.org"));
+    with_rooms(&mut s, &a, &["!one:x", "!two:x"], Vec::new());
+    s.select_account(&a);
+    s.select_room("!one:x");
+    with_rooms(&mut s, &b, &["!three:x"], Vec::new());
+    s.select_account(&b);
+    s.accounts.set_marked(&a, "!one:x", true);
+    drain(&mut commands);
+    s.open_room(&a, "!two:x");
+    assert!(
+        !all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::SetUnread { room_id, .. } if room_id == "!one:x"))
+    );
+}
+
+#[test]
+fn a_layout_change_that_changes_nothing_should_save_nothing() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    apply(&mut s, Event::SidebarLayout { account: id, layout: matrix_core::SidebarLayout::default() });
+    drain(&mut commands);
+    s.change_layout(|_, _| {});
+    assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::SetSidebarLayout { .. })));
 }
 
 #[test]
@@ -6164,4 +6255,384 @@ fn a_refused_scheduled_draft_should_wait_for_its_composer_to_be_free() {
     s.send_message(ComposerTarget::Room, &mut Tx::default());
     s.poll(&mut Tx::default());
     assert_eq!(s.composer.edit.text, "later");
+}
+
+// ----- developer tools and widgets -----------------------------------------------------------
+
+fn source(event_id: &str) -> matrix_core::EventSource {
+    matrix_core::EventSource {
+        room_id: "!one:x".into(),
+        event_id: event_id.into(),
+        json: "{\"type\": \"m.room.message\"}".into(),
+        encrypted: None,
+    }
+}
+
+#[test]
+fn viewing_a_source_should_show_it_once_the_engine_answers() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    drain(&mut commands);
+    s.view_source(id, "!one:x".into(), "$event".into());
+    let (request, command) = commands.try_next().expect("a command");
+    assert!(matches!(command, Command::ViewSource { event_id, .. } if event_id == "$event"));
+    assert_eq!(s.modal, Some(Modal::Source(SourceView::Loading(request))));
+    apply(&mut s, Event::EventSource { request, source: source("$event") });
+    assert_eq!(s.modal, Some(Modal::Source(SourceView::Shown(Box::new(source("$event"))))));
+}
+
+#[test]
+fn a_source_arriving_after_its_dialog_closed_should_open_nothing() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    drain(&mut commands);
+    s.view_source(id, "!one:x".into(), "$event".into());
+    let (request, _) = commands.try_next().expect("a command");
+    s.close_modal();
+    apply(&mut s, Event::EventSource { request, source: source("$event") });
+    assert_eq!(s.modal, None);
+}
+
+#[test]
+fn a_source_that_failed_should_close_its_dialog_and_say_why() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    drain(&mut commands);
+    s.view_source(id, "!one:x".into(), "$event".into());
+    let (request, _) = commands.try_next().expect("a command");
+    apply(&mut s, Event::Finished { request, result: Err("gone".into()) });
+    assert_eq!(s.modal, None);
+    assert!(s.notice.as_deref().is_some_and(|notice| notice.contains("gone")));
+}
+
+#[test]
+fn showing_hidden_events_should_be_kept_and_replan_timelines() {
+    let (mut s, _commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.select_room("!one:x");
+    let key = TimelineKey::room("!one:x");
+    apply(&mut s, Event::TimelineChanged { account: id, key: key.clone(), diffs: Vec::new() });
+    let before = s.active_account().and_then(|data| data.timeline(&key)).map(|timeline| timeline.revision);
+    s.set_show_hidden_events(true);
+    assert!(s.settings.show_hidden_events);
+    let after = s.active_account().and_then(|data| data.timeline(&key)).map(|timeline| timeline.revision);
+    assert_ne!(before, after, "the timeline plans its rows again");
+}
+
+#[test]
+fn opening_the_widgets_panel_should_list_the_rooms_widgets() {
+    let (mut s, mut commands) = state();
+    signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.select_room("!one:x");
+    drain(&mut commands);
+    s.show_side(SidePanel::Widgets);
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::ListWidgets { room_id, .. } if room_id == "!one:x"))
+    );
+}
+
+#[test]
+fn listed_widgets_should_be_kept_for_their_room() {
+    let (mut s, _commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    let widgets = matrix_core::Widgets { widgets: Vec::new(), can_add: true };
+    apply(&mut s, Event::Widgets { account: id.clone(), room_id: "!one:x".into(), widgets: widgets.clone() });
+    assert_eq!(s.accounts.get(&id).and_then(|data| data.widgets.get("!one:x")), Some(&widgets));
+}
+
+#[test]
+fn adding_a_widget_should_send_its_name_and_address() {
+    let (mut s, mut commands) = state();
+    signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.start_add_widget("!one:x");
+    s.room_form_field(false).text = "Board".into();
+    s.room_form_field(true).text = " https://board.example ".into();
+    drain(&mut commands);
+    s.submit_room_form();
+    assert_eq!(s.modal, None);
+    assert!(all_commands(&mut commands).iter().any(|c| matches!(
+        c,
+        Command::AddWidget { room_id, name, url, .. } if room_id == "!one:x" && name == "Board" && url == "https://board.example"
+    )));
+}
+
+#[test]
+fn a_widget_without_an_address_should_keep_its_form_open() {
+    let (mut s, mut commands) = state();
+    signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.start_add_widget("!one:x");
+    s.room_form_field(false).text = "Board".into();
+    drain(&mut commands);
+    s.submit_room_form();
+    assert!(matches!(s.modal, Some(Modal::RoomForm { form: RoomForm::AddWidget { .. }, .. })));
+    assert!(all_commands(&mut commands).is_empty());
+}
+
+#[test]
+fn removing_a_widget_should_ask_first() {
+    let (mut s, mut commands) = state();
+    signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    drain(&mut commands);
+    s.ask_to_remove_widget("!one:x", "w1", "Board");
+    assert!(all_commands(&mut commands).is_empty(), "nothing goes before the user confirms");
+    s.confirm();
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::RemoveWidget { widget_id, .. } if widget_id == "w1"))
+    );
+}
+
+fn with_summaries(s: &mut State, id: &AccountId, rooms: Vec<RoomSummary>) {
+    apply(s, Event::AccountAdded(account(id.as_str())));
+    apply(
+        s,
+        Event::RoomsUpdated {
+            account: id.clone(),
+            list: RoomList { rooms, spaces: Vec::new(), invitations: Vec::new() },
+        },
+    );
+}
+
+fn section_ids(s: &State, id: &AccountId, layout: &matrix_core::SidebarLayout) -> Vec<(String, Vec<String>)> {
+    let data = s.accounts.get(id).unwrap();
+    super::sections(data, layout, &Scope::Home)
+        .into_iter()
+        .map(|view| (view.id, view.rooms.iter().map(|room| room.room_id.clone()).collect()))
+        .collect()
+}
+
+#[test]
+fn favourites_should_come_first_and_low_priority_rooms_last() {
+    let (mut s, _commands) = state();
+    let id = AccountId::new("@a:example.org");
+    let rooms = vec![
+        RoomSummary { priority: matrix_core::RoomPriority::Low, ..room("!low:x") },
+        room("!plain:x"),
+        RoomSummary { priority: matrix_core::RoomPriority::Favourite, kind: RoomKind::Direct, ..room("!fav:x") },
+    ];
+    with_summaries(&mut s, &id, rooms);
+    let shown = section_ids(&s, &id, &matrix_core::SidebarLayout::default());
+    assert_eq!(
+        shown,
+        [
+            (FAVOURITES.to_owned(), vec!["!fav:x".to_owned()]),
+            (ROOMS.to_owned(), vec!["!plain:x".to_owned()]),
+            (DIRECT.to_owned(), Vec::new()),
+            (LOW_PRIORITY.to_owned(), vec!["!low:x".to_owned()]),
+        ]
+    );
+}
+
+#[test]
+fn a_favourite_should_leave_the_users_own_section() {
+    let (mut s, _commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_summaries(&mut s, &id, vec![RoomSummary { priority: matrix_core::RoomPriority::Favourite, ..room("!r:x") }]);
+    let mut layout = matrix_core::SidebarLayout::default();
+    let mine = sections::add_section(&mut layout, &Scope::Home, "Mine");
+    sections::move_room(&mut layout, &Scope::Home, "!r:x", &mine, 0);
+    let shown = section_ids(&s, &id, &layout);
+    assert!(shown.contains(&(FAVOURITES.to_owned(), vec!["!r:x".to_owned()])));
+    assert!(shown.contains(&(mine, Vec::new())));
+}
+
+#[test]
+fn favourites_should_stay_first_under_an_order_saved_before_them() {
+    let (mut s, _commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_summaries(&mut s, &id, vec![RoomSummary { priority: matrix_core::RoomPriority::Favourite, ..room("!r:x") }]);
+    let mut layout = matrix_core::SidebarLayout::default();
+    let shown = [ROOMS.to_owned(), DIRECT.to_owned()];
+    sections::move_section(&mut layout, &Scope::Home, &shown, DIRECT, 0);
+    let ids: Vec<String> = section_ids(&s, &id, &layout).into_iter().map(|(id, _)| id).collect();
+    assert_eq!(ids, [FAVOURITES, DIRECT, ROOMS, LOW_PRIORITY]);
+}
+
+#[test]
+fn adding_a_room_to_favourites_should_show_it_there_and_tell_the_server() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!r:x"], Vec::new());
+    drain(&mut commands);
+    s.set_room_priority("!r:x", matrix_core::RoomPriority::Favourite);
+    assert_eq!(s.accounts.get(&id).unwrap().room("!r:x").unwrap().priority, matrix_core::RoomPriority::Favourite);
+    assert_eq!(
+        all_commands(&mut commands),
+        [Command::SetRoomPriority {
+            account: id,
+            room_id: "!r:x".into(),
+            priority: matrix_core::RoomPriority::Favourite
+        }]
+    );
+}
+
+#[test]
+fn choosing_a_rooms_current_priority_should_send_nothing() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!r:x"], Vec::new());
+    drain(&mut commands);
+    s.set_room_priority("!r:x", matrix_core::RoomPriority::Normal);
+    assert!(all_commands(&mut commands).is_empty());
+}
+
+#[test]
+fn marking_a_room_unread_should_draw_attention_to_it_and_tell_the_server() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_summaries(&mut s, &id, vec![RoomSummary { unread: 0, ..room("!r:x") }]);
+    drain(&mut commands);
+    s.set_unread("!r:x", true);
+    assert!(wants_attention(s.accounts.get(&id).unwrap().room("!r:x").unwrap()));
+    assert_eq!(all_commands(&mut commands), [Command::SetUnread { account: id, room_id: "!r:x".into(), unread: true }]);
+}
+
+#[test]
+fn marking_a_room_with_unread_messages_read_should_clear_its_counts_and_read_it() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!r:x"], Vec::new());
+    drain(&mut commands);
+    s.set_unread("!r:x", false);
+    assert!(!wants_attention(s.accounts.get(&id).unwrap().room("!r:x").unwrap()));
+    assert_eq!(all_commands(&mut commands), [Command::MarkRoomRead { account: id, room_id: "!r:x".into() }]);
+}
+
+#[test]
+fn marking_a_room_only_marked_unread_read_should_just_take_the_mark_away() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_summaries(&mut s, &id, vec![RoomSummary { unread: 0, marked_unread: true, ..room("!r:x") }]);
+    drain(&mut commands);
+    s.set_unread("!r:x", false);
+    assert_eq!(
+        all_commands(&mut commands),
+        [Command::SetUnread { account: id, room_id: "!r:x".into(), unread: false }]
+    );
+}
+
+#[test]
+fn a_refused_favourite_should_show_the_room_where_it_was() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!r:x"], Vec::new());
+    drain(&mut commands);
+    s.set_room_priority("!r:x", matrix_core::RoomPriority::Favourite);
+    let (request, _) = drain(&mut commands).pop().unwrap();
+    apply(&mut s, Event::Finished { request, result: Err("forbidden".into()) });
+    assert_eq!(s.accounts.get(&id).unwrap().room("!r:x").unwrap().priority, matrix_core::RoomPriority::Normal);
+    assert!(s.notice.is_some());
+}
+
+#[test]
+fn a_refused_read_should_show_the_room_unread_again() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!r:x"], Vec::new());
+    drain(&mut commands);
+    s.set_unread("!r:x", false);
+    let (request, _) = drain(&mut commands).pop().unwrap();
+    apply(&mut s, Event::Finished { request, result: Err("nothing to read".into()) });
+    assert!(wants_attention(s.accounts.get(&id).unwrap().room("!r:x").unwrap()));
+}
+
+#[test]
+fn an_empty_built_in_section_should_not_count_among_those_shown() {
+    let (mut s, _commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!r:x"], Vec::new());
+    assert_eq!(s.shown_sections(), [ROOMS]);
+}
+
+#[test]
+fn opening_a_room_marked_unread_should_take_the_mark_away() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_summaries(&mut s, &id, vec![RoomSummary { unread: 0, marked_unread: true, ..room("!r:x") }]);
+    drain(&mut commands);
+    s.select_room("!r:x");
+    assert!(!s.accounts.get(&id).unwrap().room("!r:x").unwrap().marked_unread);
+    let unmark = Command::SetUnread { account: id, room_id: "!r:x".into(), unread: false };
+    assert!(all_commands(&mut commands).contains(&unmark));
+}
+
+#[test]
+fn opening_a_room_not_marked_unread_should_not_unmark_it() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!r:x"], Vec::new());
+    drain(&mut commands);
+    s.select_room("!r:x");
+    assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::SetUnread { .. })));
+}
+
+#[test]
+fn keywords_from_the_engine_should_show_in_settings() {
+    let (mut s, _commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &[], Vec::new());
+    apply(&mut s, Event::Keywords { account: id.clone(), keywords: vec!["rust".into()] });
+    assert_eq!(s.accounts.get(&id).unwrap().keywords.as_deref(), Some(&["rust".to_owned()][..]));
+}
+
+#[test]
+fn adding_a_keyword_should_show_it_at_once_and_tell_the_server() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &[], Vec::new());
+    apply(&mut s, Event::Keywords { account: id.clone(), keywords: vec!["zebra".into()] });
+    drain(&mut commands);
+    s.keyword_drafts.insert(id.clone(), TextEdit::new("  Apple "));
+    s.add_keyword(&id);
+    assert_eq!(s.accounts.get(&id).unwrap().keywords.as_deref(), Some(&["Apple".to_owned(), "zebra".to_owned()][..]));
+    assert!(s.keyword_drafts[&id].text.is_empty());
+    assert_eq!(
+        all_commands(&mut commands),
+        [Command::SetKeyword { account: id, keyword: "Apple".into(), enabled: true }]
+    );
+}
+
+#[test]
+fn adding_a_keyword_already_listed_should_still_ask_the_server() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &[], Vec::new());
+    apply(&mut s, Event::Keywords { account: id.clone(), keywords: vec!["deploy".into()] });
+    drain(&mut commands);
+    s.keyword_drafts.insert(id.clone(), TextEdit::new("deploy"));
+    s.add_keyword(&id);
+    assert_eq!(s.accounts.get(&id).unwrap().keywords.as_deref(), Some(&["deploy".to_owned()][..]));
+    assert_eq!(
+        all_commands(&mut commands),
+        [Command::SetKeyword { account: id, keyword: "deploy".into(), enabled: true }]
+    );
+}
+
+#[test]
+fn a_blank_keyword_should_not_be_added() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &[], Vec::new());
+    drain(&mut commands);
+    s.keyword_drafts.insert(id.clone(), TextEdit::new("   "));
+    s.add_keyword(&id);
+    assert!(all_commands(&mut commands).is_empty());
+}
+
+#[test]
+fn removing_a_keyword_should_hide_it_at_once_and_tell_the_server() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &[], Vec::new());
+    apply(&mut s, Event::Keywords { account: id.clone(), keywords: vec!["rust".into(), "zig".into()] });
+    drain(&mut commands);
+    s.remove_keyword(&id, "rust");
+    assert_eq!(s.accounts.get(&id).unwrap().keywords.as_deref(), Some(&["zig".to_owned()][..]));
+    assert_eq!(
+        all_commands(&mut commands),
+        [Command::SetKeyword { account: id, keyword: "rust".into(), enabled: false }]
+    );
 }

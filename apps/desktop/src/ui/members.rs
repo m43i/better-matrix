@@ -4,12 +4,14 @@
 //! them: start a chat, call, invite to another room, and with the rights, change their role,
 //! kick or ban. Someone's name or picture on a message opens their person panel in its place.
 
-use matrix_core::{MemberRole, Members, Moderation, Person, PersonPresence, RoomKind, RoomMember, RoomSummary};
+use matrix_core::{
+    Identity, MemberRole, Members, Moderation, Person, PersonPresence, RoomKind, RoomMember, RoomSummary,
+};
 use rune::{Align, El, ScrollSpec, Side, col, el, icon, row, text, text_input};
 
 use super::components::{
-    Tone, divider, icon_button, media_avatar, menu_action, menu_icon, menu_row, popover_panel, submenu_row,
-    with_presence,
+    ButtonKind, Tone, button, divider, icon_button, media_avatar, menu_action, menu_icon, menu_row, popover_panel,
+    submenu_row, with_presence,
 };
 use super::icons;
 use super::theme::{Palette, font};
@@ -246,7 +248,12 @@ pub fn person(s: &State, account: &AccountData, room: &RoomSummary, shown_as: &P
         head = head.child(text(words).key("person-presence").font(font::BODY).color(p.text_muted).wrap_anywhere());
     }
     let role = member.and_then(|member| role_label(member.role));
-    let verified = member.is_some_and(|member| member.verified);
+    // What the engine said of their identity is newer than the member list.
+    let identity = account.identities.get(&person.id);
+    let verified = match identity {
+        Some(identity) => identity.is_some_and(|identity| identity.verified && !identity.changed),
+        None => member.is_some_and(|member| member.verified),
+    };
     if role.is_some() || verified {
         head = head.child(
             row()
@@ -258,8 +265,45 @@ pub fn person(s: &State, account: &AccountData, room: &RoomSummary, shown_as: &P
                 .children(role.map(|role| text(role).font(font::META).color(p.text_muted))),
         );
     }
-    let content = col().w_full().child(head).child(person_actions(account, &person.id, me, p));
+    let mut content = col().w_full().child(head).child(person_actions(account, &person.id, me, p));
+    if !me && let Some(identity) = identity {
+        content = content.child(verification(person, *identity, p));
+    }
     super::info::frame("person-panel", t!("person.title"), content, None, p)
+}
+
+/// Whether the user verified them, and the way to: a warning when their identity changed since,
+/// a word when they have nothing to verify yet.
+fn verification(person: &Person, identity: Option<Identity>, p: &Palette) -> El {
+    let section = col().key("person-verification").w_full().px(20.0).pb(20.0).gap(10.0);
+    let Some(identity) = identity else {
+        return section.child(
+            text(t!("person.cannot_verify")).key("person-cannot-verify").font(font::META).color(p.text_muted).wrap(),
+        );
+    };
+    if identity.verified && !identity.changed {
+        return section;
+    }
+    let (message, color, label) = if identity.changed {
+        (t!("person.identity_changed"), p.warning, t!("person.verify_again"))
+    } else {
+        (t!("person.not_verified"), p.text_muted, t!("person.verify"))
+    };
+    let shown = person.clone();
+    section
+        .child(
+            row()
+                .w_full()
+                .gap(8.0)
+                .child(icon(if identity.changed { &icons::ALERT } else { &icons::SHIELD }, 16.0).color(color).mt(1.0))
+                .child(text(message).key("person-identity").font(font::META).color(p.text_muted).grow(1.0).wrap()),
+        )
+        .child(
+            button(label, ButtonKind::Secondary, true, p)
+                .key("person-verify")
+                .w_full()
+                .on_press(move |s: &mut State| s.verify_person(&shown)),
+        )
 }
 
 /// What the person panel offers: for someone else a chat, calls where their direct chat allows
@@ -449,6 +493,31 @@ pub fn menu(
                     .on_press(move |s: &mut State| s.moderate(&id, action)),
             );
         }
+    }
+    // Keeping them away: on every room, not this one alone.
+    panel = panel.child(divider(p));
+    {
+        let (id, name) = (id.clone(), person.name.clone());
+        panel = panel.child(
+            menu_action(&icons::FLAG, t!("report.action"), Tone::Normal, p)
+                .key("member-menu-report")
+                .on_press(move |s: &mut State| s.report_person(&id, &name)),
+        );
+    }
+    if account.safety.ignores(user_id) {
+        let owner = account.summary.id.clone();
+        panel = panel.child(
+            menu_action(&icons::USER_X, t!("safety.stop_ignoring"), Tone::Normal, p)
+                .key("member-menu-unignore")
+                .on_press(move |s: &mut State| s.stop_ignoring(&owner, &id)),
+        );
+    } else {
+        let name = person.name.clone();
+        panel = panel.child(
+            menu_action(&icons::USER_X, t!("safety.ignore"), Tone::Danger, p)
+                .key("member-menu-ignore")
+                .on_press(move |s: &mut State| s.ask_to_ignore(&id, &name)),
+        );
     }
     let mut panels = vec![col().child(panel).anchored(anchor.to_owned(), Side::Left, Align::Start, 6.0)];
     match submenu {

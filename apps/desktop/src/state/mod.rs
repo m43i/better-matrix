@@ -7,6 +7,7 @@
 //!
 //! Side effects on the OS (dialogs, notifications) go through [`Shell`].
 
+mod account_actions;
 mod accounts;
 mod attachments;
 pub mod backdrop;
@@ -15,6 +16,8 @@ mod call;
 mod call_glow;
 mod call_layout;
 mod composer;
+mod developer;
+pub use developer::SourceView;
 mod drafts;
 mod edit_history;
 mod gifs;
@@ -30,10 +33,12 @@ mod panes;
 mod poll;
 mod preview;
 mod profile;
+mod qr_login;
 mod readers;
 mod receipts;
 mod retry;
 mod room_discovery;
+mod safety;
 mod scheduled;
 mod search;
 mod sections;
@@ -57,9 +62,10 @@ use matrix_core::{
 };
 use rune::{TextEdit, Tx};
 
+pub use account_actions::{KeyFile, KeyFileStep, KeyTransfer, PasswordForm, RecoveryKeyFor};
 pub use accounts::READ_MARKER_FADE;
 pub use accounts::{
-    AccountData, Accounts, EntryView, Landing, RoomTimeline, Scope, TimelineItem, continues_group, now_ms,
+    AccountData, Accounts, EntryView, Landing, RoomTimeline, Scope, TimelineItem, continues_group, now_ms, visual,
     wants_attention,
 };
 pub use attachments::{AttachmentAction, can_open_attachment};
@@ -80,13 +86,16 @@ pub use preview::{
     DocumentStatus, ImageStatus, Opens, Preview, PreviewContent, PreviewItem, VideoStatus, render_document,
 };
 pub use profile::{ContactStep, ProfileForm};
+pub use qr_login::QrLogin;
 pub use readers::{READER_FACES, ReaderMenu};
 pub use room_discovery::Directory;
 pub use scheduled::{When, local_offset};
 pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches};
-pub use sections::{DIRECT, INVITATIONS, ROOMS, SectionView, is_builtin, ordered_spaces, sections};
-pub use settings::{Appearance, PlaybackSpeed, Settings, SettingsSection, Zoom};
-pub use sign_in::{SignInForm, SignInStep};
+pub use sections::{
+    DIRECT, FAVOURITES, INVITATIONS, LOW_PRIORITY, ROOMS, SectionView, is_builtin, ordered_spaces, sections,
+};
+pub use settings::{Appearance, MessageLayout, PlaybackSpeed, Settings, SettingsSection, Zoom};
+pub use sign_in::{Asked, SignInForm, SignInStep};
 pub use status_message::{leading_emoji, suggestions as status_suggestions};
 pub use suggest::{Suggestion, Trigger};
 pub use updates::Update;
@@ -186,6 +195,8 @@ pub enum SidePanel {
     Threads,
     Files,
     Pins,
+    /// The room's widgets: web apps pinned to it, opened in the browser.
+    Widgets,
     /// Someone's profile, from their name or picture on a message: as the message shows them,
     /// for when the member list doesn't know them.
     Person(matrix_core::Person),
@@ -210,6 +221,10 @@ pub enum RoomForm {
     NewSpace,
     /// A new name for a room or space.
     Rename {
+        room_id: String,
+    },
+    /// A web page to pin to a room as a widget: its name, and its address in the second field.
+    AddWidget {
         room_id: String,
     },
 }
@@ -246,6 +261,8 @@ pub enum PickFor {
     Attachments(ComposerTarget),
     /// A new profile picture.
     Avatar,
+    /// A file of exported message keys to import.
+    KeyFile,
 }
 
 /// Something dragged in the sidebar or on the rail: a room, a whole section, or a space.
@@ -299,6 +316,9 @@ pub struct AudioClip {
     /// Where it was and whether it was to play when the pointer went down on its waveform, to go
     /// back to if the drag is cancelled; `None` when that press picked it.
     pub scrub_from: Option<(f64, bool)>,
+    /// The account and the person who sent it, when a kept timeline names them: it stops once
+    /// the user ignores them.
+    pub sender: Option<(AccountId, String)>,
 }
 
 /// A step of a press or drag along a clip's waveform (`State::scrub_audio`).
@@ -368,6 +388,23 @@ pub enum EmojiFor {
     StatusMessage,
 }
 
+/// Which verification the Verification dialog follows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VerificationFlow {
+    /// The one this request asks for, until [`Event::VerificationRequested`] names it: steps of
+    /// other verifications leave the dialog alone meanwhile.
+    ///
+    /// [`Event::VerificationRequested`]: matrix_core::Event::VerificationRequested
+    Requested(RequestId),
+    /// This flow.
+    Following(String),
+}
+
+/// Whether a verification is over, done or not: another may take its dialog.
+fn verification_ended(step: &VerificationStep) -> bool {
+    matches!(step, VerificationStep::Done | VerificationStep::Cancelled(_))
+}
+
 /// A dialog over the whole window, with the rest dimmed. At most one is open; new kinds are new
 /// variants.
 #[derive(Clone, Debug, PartialEq)]
@@ -403,19 +440,29 @@ pub enum Modal {
     EditHistory(Box<EditHistory>),
     /// "Are you sure?" before something that can't be undone.
     Confirm(Confirm),
-    /// Verifying this session with another of the user's sessions. `flow_id` is `None` while
-    /// the request is on its way.
+    /// Verifying this session with another of the user's sessions, or another person (`with`).
     Verification {
         account: AccountId,
-        flow_id: Option<String>,
+        flow: VerificationFlow,
         step: VerificationStep,
+        with: Option<matrix_core::Person>,
     },
-    /// Entering the recovery key to verify this session.
+    /// Entering the recovery key, for what `purpose` says.
     RecoveryKeyEntry {
         account: AccountId,
         edit: TextEdit,
         error: Option<String>,
         submitting: bool,
+        purpose: RecoveryKeyFor,
+    },
+    /// The passphrase of a key export or import, then how it went.
+    KeyFile(Box<KeyFile>),
+    /// A new password for a password account.
+    ChangePassword(Box<PasswordForm>),
+    /// Approving a new device's sign-in with a QR code from this session.
+    LinkDevice {
+        account: AccountId,
+        flow: QrLogin,
     },
     /// A new recovery key, shown once.
     NewRecoveryKey {
@@ -467,6 +514,25 @@ pub enum Modal {
         device_id: String,
         edit: TextEdit,
     },
+    /// Reporting a message, a room or a person to the homeserver's admins.
+    Report(Box<ReportForm>),
+    /// An event's source, for developer tools.
+    Source(developer::SourceView),
+}
+
+/// The report dialog: what is reported, the user's reason, and whether to ignore them too.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReportForm {
+    pub account: AccountId,
+    pub target: matrix_core::ReportTarget,
+    /// What the dialog calls the reported room or person.
+    pub name: String,
+    /// Who sent the message or is reported, when the report can also ignore them.
+    pub person: Option<String>,
+    pub reason: TextEdit,
+    pub also_ignore: bool,
+    /// The report on its way; the dialog waits for it.
+    pub sending: Option<RequestId>,
 }
 
 /// An action that waits for the user's confirmation. New destructive actions are new variants.
@@ -491,6 +557,13 @@ pub enum Confirm {
         name: String,
         action: matrix_core::Moderation,
     },
+    /// Take a widget off a room, for everyone in it.
+    RemoveWidget {
+        account: AccountId,
+        room_id: String,
+        widget_id: String,
+        name: String,
+    },
     /// Delete one of the user's messages, for everyone.
     DeleteMessage {
         account: AccountId,
@@ -504,6 +577,19 @@ pub enum Confirm {
         poll_id: String,
         question: String,
     },
+    /// Ignore someone: their messages disappear, on every session. `decline`: an invitation from
+    /// them to decline as well.
+    Ignore {
+        account: AccountId,
+        user_id: String,
+        name: String,
+        decline: Option<String>,
+    },
+    /// Close the account for good on its server, also erasing its messages when `erase`.
+    Deactivate {
+        account: AccountId,
+        erase: bool,
+    },
 }
 
 /// An action the server may guard with the account password ([`Event::PasswordNeeded`]). New
@@ -513,11 +599,17 @@ pub enum Guarded {
     EndSession { device_id: String },
     ResetIdentity,
     AddContact { pending: PendingContact },
+    ChangePassword { new_password: Password },
+    Deactivate { erase: bool },
 }
 
 impl Guarded {
     fn command(&self, account: AccountId, password: Option<Password>) -> Command {
         match self {
+            Self::ChangePassword { new_password } => {
+                Command::ChangePassword { account, new_password: new_password.clone(), password }
+            }
+            Self::Deactivate { erase } => Command::DeactivateAccount { account, erase: *erase, password },
             Self::EndSession { device_id } => Command::EndSession { account, device_id: device_id.clone(), password },
             Self::ResetIdentity => Command::ResetIdentity { account, password },
             Self::AddContact { pending } => Command::AddContact { account, pending: pending.clone(), password },
@@ -599,6 +691,13 @@ enum Purpose {
         dimensions: Option<(u32, u32)>,
     },
     NotificationMode,
+    /// Marking a room unread or read, or moving it among the favourites or low priority rooms:
+    /// failing, that change is taken back.
+    RoomMark {
+        account: AccountId,
+        room_id: String,
+        undo: accounts::RoomUndo,
+    },
     /// Setting the user's status to `chosen`; failing, the account shows its saved status again,
     /// unless another status was chosen or reported since.
     Status {
@@ -618,6 +717,14 @@ enum Purpose {
         action: Guarded,
     },
     Security,
+    /// Asking for a verification; a failure ends its dialog with the error.
+    Verification,
+    /// Asking whether the user verified someone; a failure leaves it unknown.
+    Identity,
+    /// Exporting or importing message keys; the key file dialog shows how it went.
+    KeyFile,
+    /// Linking a new device with a QR code; its dialog shows each step.
+    LinkDevice,
     /// Profile changes whose failure is a notice: removing a contact detail.
     Profile,
     ProfileName,
@@ -661,6 +768,17 @@ enum Purpose {
     DirectChat(AccountId),
     /// Kicking, banning or changing a member's role.
     Moderate,
+    /// Changing an account's safety choices; failing, the account shows the saved ones again.
+    Safety {
+        account: AccountId,
+        /// An invitation to decline once the change is saved (ignoring its inviter).
+        decline: Option<String>,
+    },
+    /// Sending a report from the report dialog, which stays open on failure. `ignore`: whom to
+    /// ignore once it went through.
+    Report {
+        ignore: Option<(AccountId, String)>,
+    },
     /// Voting in or ending a poll.
     Poll,
     /// A direct chat being opened (or started) to call its person.
@@ -682,6 +800,10 @@ enum Purpose {
     },
     /// Renaming a room or space.
     Rename,
+    /// Adding or removing a room's widget.
+    Widget,
+    /// An event's source, for the source dialog showing that request.
+    Source,
     /// Downloading audio to play from `path`.
     Audio {
         media: MediaRef,
@@ -806,6 +928,9 @@ pub struct State {
     pub gifs: GifCache,
     /// Links' preview cards.
     pub link_previews: LinkPreviews,
+    /// Messages whose hidden media the user chose to show, by account and event ID: shown until
+    /// the app restarts.
+    pub revealed_media: HashSet<(AccountId, String)>,
     pub popover: Option<Popover>,
     pub modal: Option<Modal>,
     /// What the emoji picker searches for.
@@ -835,6 +960,8 @@ pub struct State {
     side_loaded: Option<(AccountId, String, SidePanel)>,
     /// What the member list is filtered by.
     pub member_search: TextEdit,
+    /// The notification keyword being typed in Settings, per account.
+    pub keyword_drafts: HashMap<AccountId, TextEdit>,
     /// The call under way, from any account.
     pub call: Option<Call>,
     /// Calls ringing for the user, oldest first.
@@ -927,6 +1054,7 @@ impl State {
             media: MediaCache::default(),
             gifs: GifCache::default(),
             link_previews: LinkPreviews::default(),
+            revealed_media: HashSet::new(),
             popover: None,
             modal: None,
             emoji_search: TextEdit::default(),
@@ -941,6 +1069,7 @@ impl State {
             panes: PaneWidths::default(),
             side_loaded: None,
             member_search: TextEdit::default(),
+            keyword_drafts: HashMap::new(),
             call: None,
             rings: Vec::new(),
             ring_sound: None,
@@ -1068,12 +1197,16 @@ impl State {
         let location = navigation::Location::of(self);
         match event {
             Event::Finished { request, result } => self.finish(request, result),
+            // The sign-in in progress takes its account from `AccountAdded`.
+            Event::SignedIn { .. } => {}
             Event::HomeserverDiscovered { request, homeserver } => {
                 if self.sign_in.step == SignInStep::Discovering(request) {
                     self.continue_sign_in(homeserver);
                 }
             }
-            Event::OpenUrl { request, url } if self.pending.get(&request) == Some(&Purpose::AccountPage) => {
+            Event::OpenUrl { request, url }
+                if matches!(self.pending.get(&request), Some(Purpose::AccountPage | Purpose::LinkDevice)) =>
+            {
                 if let Err(error) = tx.open_url(&url) {
                     self.notice = Some(tf!("notice.browser", error = error));
                 }
@@ -1090,16 +1223,27 @@ impl State {
                     self.notice = Some(tf!("notice.browser", error = error));
                 }
             }
-            Event::OpenUrl { request, url } => {
-                if let SignInStep::Browser { request: Some(waiting), url: shown, .. } = &mut self.sign_in.step
-                    && *waiting == request
-                {
+            Event::OpenUrl { request, url } => match &mut self.sign_in.step {
+                SignInStep::Browser { request: Some(waiting), url: shown, .. } if *waiting == request => {
                     if let Err(error) = tx.open_url(&url) {
                         self.notice = Some(tf!("notice.browser", error = error));
                     }
                     *shown = Some(url);
                 }
-            }
+                // A registration stage on the server's page; its step keeps the URL to open again.
+                SignInStep::Register { request: Some(waiting), .. } if *waiting == request => {
+                    if let Err(error) = tx.open_url(&url) {
+                        self.notice = Some(tf!("notice.browser", error = error));
+                    }
+                }
+                _ => {}
+            },
+            Event::QrLogin { request, step } => self.qr_login_moved(request, step),
+            Event::Registration { request, step } => self.sign_in.registration_asked(request, step),
+            // The desktop has no camera: it never reads codes from pictures.
+            Event::QrCodeRead { .. } => {}
+            Event::Identity { account, user_id, identity } => self.accounts.set_identity(&account, user_id, identity),
+            Event::KeysImported { request, import } => self.keys_imported(request, import),
             Event::Restoring(accounts) => {
                 if self.nav.account.as_ref().is_some_and(|id| !accounts.contains(id)) {
                     self.nav.account = None;
@@ -1196,6 +1340,9 @@ impl State {
                         old.map(|r| &r.pinned) != new.map(|r| &r.pinned)
                     });
                 self.accounts.set_room_list(&account, list);
+                // A room turning public (or private) may hold back (or show) its media: the
+                // preview's, and what its rows on screen load.
+                self.safety_changed();
                 self.saved_changed(&account);
                 if pins_changed && self.side == Some(SidePanel::Pins) {
                     self.side_loaded = None;
@@ -1359,7 +1506,9 @@ impl State {
             Event::Sessions { account, sessions } => self.accounts.set_sessions(&account, sessions),
             Event::ContactDetails { account, contacts } => self.accounts.set_contacts(&account, contacts),
             Event::Status { account, status } => self.accounts.status_saved(&account, status),
+            Event::Safety { account, safety } => self.safety_reported(&account, safety),
             Event::Presence { account, people } => self.accounts.set_presence(&account, people),
+            Event::Keywords { account, keywords } => self.accounts.set_keywords(&account, keywords),
             Event::SidebarLayout { account, layout } => {
                 let newer = self
                     .accounts
@@ -1432,6 +1581,9 @@ impl State {
                     let edit = focused(TextEdit::new("").secure());
                     self.modal = Some(Modal::Password { account, action, edit, error: None, submitting: false });
                 }
+            }
+            Event::VerificationRequested { request, account, flow_id } => {
+                self.verification_requested(request, account, flow_id)
             }
             Event::Verification { account, flow_id, step } => self.verification_moved(account, flow_id, step),
             Event::HistoryLoaded { account, key, reached_start } => {
@@ -1559,6 +1711,8 @@ impl State {
             }
             Event::DraftLoaded { account, key, draft, .. } => self.draft_loaded((account, key), draft),
             Event::Files { account, room_id, files } => self.accounts.set_files(&account, room_id, files),
+            Event::Widgets { account, room_id, widgets } => self.accounts.set_widgets(&account, room_id, widgets),
+            Event::EventSource { request, source } => self.source_loaded(request, source),
             // Pushes are for phones: the desktop syncs while it runs and never registers a pusher.
             Event::PushContent { .. } => {}
             Event::EditHistory { event_id, versions, .. } => self.edit_history_listed(&event_id, versions),
@@ -1767,10 +1921,24 @@ impl State {
                 Purpose::Forward if matches!(self.modal, Some(Modal::Forward { sending: Some(waiting), .. }) if waiting == request) => {
                     self.modal = None
                 }
+                Purpose::Report { ignore } => {
+                    let ignore = ignore.clone();
+                    self.report_sent(request, ignore);
+                }
+                // The inviter is ignored for good: now their invitation goes.
+                Purpose::Safety { account, decline } => {
+                    let (account, decline) = (account.clone(), decline.clone());
+                    self.safety_finished(&account, request);
+                    if let Some(room_id) = decline {
+                        self.respond_to_invitation(&account, &room_id, false);
+                    }
+                }
                 Purpose::Membership { account, room_id, action, scope } => {
                     self.membership_finished(account, room_id, *action, scope)
                 }
                 Purpose::Recover if matches!(self.modal, Some(Modal::RecoveryKeyEntry { .. })) => self.modal = None,
+                Purpose::KeyFile => self.key_file_done(request),
+                Purpose::Guarded { action: Guarded::ChangePassword { .. }, .. } => self.password_changed(),
                 Purpose::Guarded { account, action: Guarded::ResetIdentity } if self.resetting_identity() => {
                     self.modal = Some(Modal::ResetIdentity { account: account.clone(), step: ResetStep::Done });
                 }
@@ -1871,6 +2039,10 @@ impl State {
             Purpose::Delete => self.notice = Some(tf!("notice.not_deleted", error = error)),
             Purpose::Logout => self.notice = Some(tf!("notice.sign_out", error = error)),
             Purpose::NotificationMode => self.notice = Some(tf!("notice.notification_setting", error = error)),
+            Purpose::RoomMark { account, room_id, undo } => {
+                self.accounts.undo(&account, &room_id, &undo);
+                self.notice = Some(tf!("notice.room_mark", error = error));
+            }
             Purpose::Status { account, chosen } => {
                 if let Some(data) = self.accounts.get(&account)
                     && data.status == chosen
@@ -1912,6 +2084,10 @@ impl State {
                     *shown = Some(error);
                     *submitting = false;
                 }
+                Some(Modal::ChangePassword(form)) => {
+                    form.error = Some(error);
+                    form.submitting = false;
+                }
                 Some(Modal::ResetIdentity { step, .. }) if matches!(step, ResetStep::Resetting { .. }) => {
                     *step = ResetStep::Warning { error: Some(error) };
                 }
@@ -1937,7 +2113,7 @@ impl State {
                     match &mut preview.content {
                         PreviewContent::Document { status, .. } => *status = DocumentStatus::Failed(error),
                         PreviewContent::Image { status, .. } => *status = ImageStatus::Failed(error),
-                        PreviewContent::Video { .. } | PreviewContent::Audio => {}
+                        PreviewContent::Video { .. } | PreviewContent::Audio | PreviewContent::Held => {}
                     }
                 }
             }
@@ -1952,6 +2128,14 @@ impl State {
             Purpose::CopyImage => self.notice = Some(tf!("notice.copy_image", error = error)),
             Purpose::OpenFile(_) => self.notice = Some(tf!("notice.open_attachment", error = error)),
             Purpose::RecoveryKey | Purpose::Security => self.notice = Some(error),
+            Purpose::Verification => self.verification_failed(request, error),
+            Purpose::Identity => {}
+            Purpose::KeyFile => self.key_file_failed(request, error),
+            Purpose::LinkDevice => {
+                if let Some(Modal::LinkDevice { flow, .. }) = &mut self.modal {
+                    flow.fail(request, error);
+                }
+            }
             Purpose::Gif(url) => {
                 self.gifs.failed(&url, std::time::Instant::now());
                 self.schedule_retry();
@@ -1974,6 +2158,8 @@ impl State {
             }
             Purpose::Create { .. } => self.notice = Some(tf!("notice.create", error = error)),
             Purpose::Rename => self.notice = Some(tf!("notice.rename", error = error)),
+            Purpose::Widget => self.notice = Some(tf!("notice.widget", error = error)),
+            Purpose::Source => self.source_failed(request, &error),
             Purpose::Audio { media, .. } => {
                 self.scratch_files.remove(&media);
                 self.video_failed(&media, &error);
@@ -1981,11 +2167,14 @@ impl State {
             }
             Purpose::Invite => self.notice = Some(tf!("notice.invite", error = error)),
             Purpose::Moderate => self.notice = Some(tf!("notice.moderate", error = error)),
+            Purpose::Safety { account, .. } => self.safety_failed(&account, request, &error),
+            Purpose::Report { .. } => self.report_failed(request, &error),
             // The panel stops loading, and says why.
             Purpose::SidePanel(account, room_id, panel) => {
                 match panel {
                     SidePanel::Threads => self.accounts.set_threads(&account, room_id, Vec::new()),
                     SidePanel::Files => self.accounts.set_files(&account, room_id, Vec::new()),
+                    SidePanel::Widgets => self.accounts.set_widgets(&account, room_id, matrix_core::Widgets::default()),
                     SidePanel::Pins => {
                         self.accounts.pins_failed(&account, room_id, error.clone());
                     }
@@ -2094,8 +2283,11 @@ impl State {
 
     /// Asks for the open side panel's list (threads or files) of the room shown, once per room.
     fn sync_side(&mut self) {
-        let (Some(account), Some(room_id), Some(panel @ (SidePanel::Threads | SidePanel::Files | SidePanel::Pins))) =
-            (self.nav.account.clone(), self.active_room_id().map(str::to_owned), self.side.clone())
+        let (
+            Some(account),
+            Some(room_id),
+            Some(panel @ (SidePanel::Threads | SidePanel::Files | SidePanel::Pins | SidePanel::Widgets)),
+        ) = (self.nav.account.clone(), self.active_room_id().map(str::to_owned), self.side.clone())
         else {
             return;
         };
@@ -2108,6 +2300,7 @@ impl State {
         let command = match panel {
             SidePanel::Threads => Command::ListThreads { account, room_id },
             SidePanel::Pins => Command::ListPinnedMessages { account, room_id },
+            SidePanel::Widgets => Command::ListWidgets { account, room_id },
             _ => Command::ListFiles { account, room_id },
         };
         self.dispatch(command, purpose);
@@ -2125,6 +2318,7 @@ impl State {
         }
         self.breath.ask();
         for (account, key) in self.open_timelines.clone() {
+            self.unmark(&account, &key.room_id);
             self.accounts.mark_read(&account, &key.room_id);
             let marker = self
                 .accounts
@@ -2391,15 +2585,19 @@ impl State {
     }
 
     /// The entries of the open timelines on screen, with their account and timeline.
+    /// The entries of the open timelines on screen, but messages from people the user ignores,
+    /// which have no row and load nothing.
     fn entries_on_screen(&self) -> impl Iterator<Item = ((&AccountId, &TimelineKey), &accounts::Entry)> {
         self.open_timelines.iter().flat_map(move |open| {
             let (account, key) = open;
             let shown = self.on_screen.get(open);
-            self.accounts
-                .get(account)
-                .and_then(|data| data.timeline(key))
-                .into_iter()
-                .flat_map(move |timeline| timeline.on_screen(shown).map(move |entry| ((account, key), entry)))
+            self.accounts.get(account).into_iter().flat_map(move |data| {
+                data.timeline(key)
+                    .into_iter()
+                    .flat_map(move |timeline| timeline.on_screen(shown))
+                    .filter(move |entry| entry.message().is_none_or(|m| !data.ignores(&m.sender_id)))
+                    .map(move |entry| ((account, key), entry))
+            })
         })
     }
 
@@ -2430,8 +2628,14 @@ impl State {
         if !self.settings.show_link_gifs {
             return;
         }
-        let shown: HashSet<String> =
-            self.entries_on_screen().filter_map(|(_, entry)| entry.gif_link()).map(str::to_owned).collect();
+        let shown: HashSet<String> = self
+            .entries_on_screen()
+            .filter(|((account, key), entry)| {
+                entry.message().is_none_or(|message| !self.hides_media(account, &key.room_id, message))
+            })
+            .filter_map(|(_, entry)| entry.gif_link())
+            .map(str::to_owned)
+            .collect();
         let mut wanted: Vec<String> = shown.iter().filter(|url| self.gifs.wants(url, now)).cloned().collect();
         self.gifs.show(shown, self.window_focused);
         wanted.sort_unstable();
@@ -2473,7 +2677,10 @@ impl State {
         let mut seen = HashSet::new();
         let mut wanted = Vec::new();
         for ((account, key), entry) in self.entries_on_screen() {
-            if let Some(attachment) = entry.image()
+            // Media the account's choice holds back is fetched only once shown.
+            let held = entry.message().is_some_and(|message| self.hides_media(account, &key.room_id, message));
+            if !held
+                && let Some(attachment) = entry.image()
                 && let Some((media, size)) = attachment.preview()
             {
                 let dimensions = media::preview_size(size, attachment.dimensions);
@@ -2505,6 +2712,7 @@ impl State {
             }
             // A link card's image.
             if self.settings.show_link_previews
+                && !held
                 && let Some((media, size)) = entry
                     .preview_link(self.settings.show_link_gifs)
                     .and_then(|url| self.link_previews.get(account, url))
@@ -2516,7 +2724,8 @@ impl State {
         }
         // The preview's strip shows its batch's previews, rows on screen or not.
         if let Some(preview) = self.preview.as_ref().filter(|preview| preview.batch.len() > 1) {
-            for attachment in preview.batch.iter().map(|item| &item.attachment) {
+            for item in preview.batch.iter().filter(|item| !self.preview_holds(item)) {
+                let attachment = &item.attachment;
                 if let Some((media, size)) = attachment.preview() {
                     let dimensions = media::preview_size(size, attachment.dimensions);
                     wanted.push((preview.account.clone(), media, size, dimensions));
@@ -2583,9 +2792,11 @@ impl State {
             let pins = self
                 .active_room_id()
                 .filter(|_| self.side == Some(SidePanel::Pins))
-                .and_then(|room| account.pins.get(room))
+                // As the panel lists them: none of people the user ignores.
+                .and_then(|room| account.room(room))
+                .and_then(|room| account.pinned_messages(room))
                 .into_iter()
-                .flat_map(|pins| pins.iter().take(MEMBER_PICTURES).filter_map(|pin| pin.sender_avatar.clone()));
+                .flat_map(|pins| pins.take(MEMBER_PICTURES).filter_map(|pin| pin.sender_avatar.clone()));
             // The open person panel's picture: the member list's, else the message's.
             let person = match (&self.side, self.active_room_id()) {
                 (Some(SidePanel::Person(shown_as)), Some(room_id)) => account
@@ -2658,7 +2869,11 @@ impl State {
                 let id = &account.summary.id;
                 let rooms = account.rooms.iter().filter_map(|room| room.avatar.as_ref());
                 let spaces = account.spaces.iter().filter_map(|space| space.avatar.as_ref());
-                let invitations = account.invitations.iter().filter_map(|invite| invite.avatar.as_ref());
+                // Invitations' pictures only where the user shows them.
+                let invitations = account
+                    .listed_invitations()
+                    .filter(|_| account.safety.invite_pictures)
+                    .filter_map(|invite| invite.avatar.as_ref());
                 rooms.chain(spaces).chain(invitations).map(move |media| (id, media))
             });
             own.chain(active)
@@ -2744,8 +2959,9 @@ impl State {
     pub fn submit_room_form(&mut self) {
         let Some(account) = self.nav.account.clone() else { return };
         let Some(Modal::RoomForm { form, name, topic }) = self.modal.take() else { return };
-        let name = name.text.trim().to_owned();
-        if name.is_empty() {
+        // A widget may go without a name (its host stands in); everything else needs one.
+        let name_text = name.text.trim().to_owned();
+        if name_text.is_empty() && !matches!(form, RoomForm::AddWidget { .. }) {
             self.modal = Some(Modal::RoomForm { form, name: Box::new(TextEdit::new("")), topic });
             return;
         }
@@ -2753,15 +2969,16 @@ impl State {
             RoomForm::NewRoom { space } => {
                 let topic = Some(topic.text.trim().to_owned()).filter(|t| !t.is_empty());
                 let purpose = Purpose::Create { account: account.clone(), space: false };
-                self.dispatch(Command::CreateRoom { account, name, topic, space }, purpose);
+                self.dispatch(Command::CreateRoom { account, name: name_text, topic, space }, purpose);
             }
             RoomForm::NewSpace => {
                 let purpose = Purpose::Create { account: account.clone(), space: true };
-                self.dispatch(Command::CreateSpace { account, name }, purpose);
+                self.dispatch(Command::CreateSpace { account, name: name_text }, purpose);
             }
             RoomForm::Rename { room_id } => {
-                self.dispatch(Command::RenameRoom { account, room_id, name }, Purpose::Rename);
+                self.dispatch(Command::RenameRoom { account, room_id, name: name_text }, Purpose::Rename);
             }
+            RoomForm::AddWidget { room_id } => self.add_widget(account, room_id, name, topic),
         }
     }
 
@@ -2791,6 +3008,10 @@ impl State {
         }
         let mut layout = account.sidebar.clone();
         change(&mut layout, &scope);
+        // Nothing changed (a section dropped back in place): nothing to save over other sessions'.
+        if layout == account.sidebar {
+            return;
+        }
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
         // Later than the layout it changes, even when this device's clock is behind.
         layout.changed_at = u64::try_from(now).unwrap_or(u64::MAX).max(layout.changed_at + 1);
@@ -2910,9 +3131,14 @@ impl State {
     }
 
     /// The sections as shown now, in order.
+    /// The sections the sidebar draws, in order: built-in ones show once they hold something.
     fn shown_sections(&self) -> Vec<String> {
         let Some(account) = self.active_account() else { return Vec::new() };
-        sections(account, &account.sidebar, &self.active_scope()).into_iter().map(|view| view.id).collect()
+        sections(account, &account.sidebar, &self.active_scope())
+            .into_iter()
+            .filter(|view| !(is_builtin(&view.id) && view.rooms.is_empty()))
+            .map(|view| view.id)
+            .collect()
     }
 
     /// Where something dragged to `point` would land.
@@ -2946,6 +3172,13 @@ impl State {
                     shown.contains(id) && x >= *zx && x <= zx + zw && y >= *zy && y <= zy + zh
                 })?;
                 let account = self.active_account()?;
+                // Rooms and Direct messages take only their own kind.
+                let kind = account.room(room_id)?.kind;
+                if (section == ROOMS && kind != matrix_core::RoomKind::Group)
+                    || (section == DIRECT && kind != matrix_core::RoomKind::Direct)
+                {
+                    return None;
+                }
                 let view = sections(account, &account.sidebar, &self.active_scope());
                 let rooms = &view.iter().find(|s| s.id == *section)?.rooms;
                 let index = rooms
@@ -2976,13 +3209,29 @@ impl State {
             }
             rune::Phase::Up => {
                 let Some(SidebarDrag { item, target: Some(target), .. }) = self.dragging.take() else { return };
+                // A room dropped into Favourites or Low priority takes that tag; dropped anywhere
+                // else, it loses it, so it shows where it was dropped.
+                let loaded = self.active_account().is_some_and(|account| account.sidebar_loaded);
+                if let (Dragged::Room(room_id), DropTarget::Room { section, .. }) = (&item, &target)
+                    && let Some(account) = self.nav.account.clone()
+                    && loaded
+                {
+                    self.change_priority(account, room_id, sections::priority_in(section));
+                }
                 let (shown, spaces) = (self.shown_sections(), self.shown_spaces());
+                let all: Vec<String> = self.active_account().map_or_else(Vec::new, |account| {
+                    sections(account, &account.sidebar, &self.active_scope()).into_iter().map(|view| view.id).collect()
+                });
                 self.change_layout(|layout, scope| match (item, target) {
+                    // Into Favourites or Low priority only the tag changes: a section of the
+                    // user's that holds the room keeps it for when the tag goes.
+                    (Dragged::Room(_), DropTarget::Room { section, .. })
+                        if section == FAVOURITES || section == LOW_PRIORITY => {}
                     (Dragged::Room(room_id), DropTarget::Room { section, index }) => {
                         sections::move_room(layout, scope, &room_id, &section, index);
                     }
                     (Dragged::Section(id), DropTarget::Section { index }) => {
-                        sections::move_section(layout, scope, &shown, &id, index);
+                        sections::move_shown_section(layout, scope, &all, &shown, &id, index);
                     }
                     (Dragged::Space(id), DropTarget::Space { index }) => {
                         sections::move_space(layout, &spaces, &id, index);
@@ -3212,7 +3461,13 @@ impl State {
         // Picked by a press on its waveform, the release decides; else, picked at its very end,
         // it waits there for play.
         let play = held || start_at.is_none_or(|share| share < 1.0);
-        self.audio = Some(AudioClip { id, media: media.clone(), player: None, start_at, play, held, scrub_from: None });
+        let sender = self
+            .accounts
+            .get(&account)
+            .and_then(|data| data.sender_of_media(&media))
+            .map(|sender| (account.clone(), sender));
+        self.audio =
+            Some(AudioClip { id, media: media.clone(), player: None, start_at, play, held, scrub_from: None, sender });
         match self.scratch_files.get(&media).cloned() {
             Some(ScratchFile::Saved(path)) => self.open_audio(path),
             Some(ScratchFile::Downloading) => {}
@@ -3274,12 +3529,32 @@ impl State {
     /// full size, with the rest of its batch to step through; any other file saves.
     pub fn open_attachment(&mut self, key: &TimelineKey, event_id: &str, attachment: &matrix_core::Attachment) {
         let (Some(account), Some(media)) = (self.nav.account.clone(), attachment.media.clone()) else { return };
+        // Nothing opens of what someone the user ignores sent.
+        if self.accounts.get(&account).is_some_and(|data| data.ignores_sender_of(&key.room_id, event_id)) {
+            return;
+        }
+        // Held-back media shows in its place first; it opens from there. Opened from outside the
+        // loaded timeline (the Files panel), its sender may be unknown: it counts as someone else.
+        let held = self
+            .accounts
+            .get(&account)
+            .is_some_and(|data| data.hides_listed_media(&key.room_id, event_id, attachment, &self.revealed_media));
+        if held {
+            self.reveal_media(&account, event_id);
+            return;
+        }
         if !Opens::previews(attachment) {
             self.download(account, media, &attachment.name);
             return;
         }
+        // The whole batch, audio and documents included: its pictures and videos the media
+        // choice holds back wait for a press when stepped onto (`show_preview_item`).
         let entries = self.accounts.get(&account).and_then(|data| data.timeline(key)).map(|t| t.entries.as_slice());
         let mut batch = preview::batch(entries.unwrap_or_default(), event_id);
+        // Nothing of people the user ignores.
+        if let Some(data) = self.accounts.get(&account) {
+            batch.retain(|item| !data.ignores_sender_of(&key.room_id, &item.event_id));
+        }
         let index = match batch.iter().position(|item| item.event_id == event_id) {
             Some(index) => index,
             None => {
@@ -3293,7 +3568,8 @@ impl State {
         self.preview_visits += 1;
         self.reveal_thumbnail = true;
         let visit = self.preview_visits;
-        self.preview = Some(Preview { account, attachment, media, content, batch, index, visit });
+        let room_id = key.room_id.clone();
+        self.preview = Some(Preview { account, room_id, attachment, media, content, batch, index, visit });
         self.load_preview_item(&item);
         self.request_timeline_media();
     }
@@ -3318,7 +3594,8 @@ impl State {
         let Some(media) = item.attachment.media.clone() else { return };
         self.leave_preview_item();
         self.popover = None;
-        let content = self.preview_content(&item.attachment);
+        let content =
+            if self.preview_holds(&item) { PreviewContent::Held } else { self.preview_content(&item.attachment) };
         self.preview_visits += 1;
         self.reveal_thumbnail = true;
         let Some(preview) = self.preview.as_mut() else { return };
@@ -3362,8 +3639,85 @@ impl State {
                     self.dispatch(command, Purpose::Video { media, path });
                 }
             },
-            PreviewContent::Audio => {}
+            PreviewContent::Audio | PreviewContent::Held => {}
         }
+    }
+
+    /// Whether a batch item of the open preview is a picture or video the media choice holds
+    /// back: it waits for a press, its thumbnail unfetched.
+    /// Whether the item the preview shows was sent by someone the user ignores.
+    pub fn preview_item_ignored(&self) -> bool {
+        self.preview.as_ref().is_some_and(|preview| {
+            preview.batch.get(preview.index).is_some_and(|item| {
+                self.accounts
+                    .get(&preview.account)
+                    .is_some_and(|data| data.ignores_sender_of(&preview.room_id, &item.event_id))
+            })
+        })
+    }
+
+    pub fn preview_holds(&self, item: &PreviewItem) -> bool {
+        self.preview.as_ref().is_some_and(|preview| {
+            self.accounts.get(&preview.account).is_some_and(|data| {
+                data.hides_listed_media(&preview.room_id, &item.event_id, &item.attachment, &self.revealed_media)
+            })
+        })
+    }
+
+    /// The media choice or a room changed: an item the preview shows that it now holds back (and
+    /// the user didn't reveal) gives way to Show, letting go of what showed as stepping does; one
+    /// it held back that may now show loads, as stepping onto it would.
+    /// The item's sender now ignored, the preview closes.
+    pub(super) fn reconcile_preview(&mut self) {
+        if self.preview_item_ignored() {
+            self.close_preview();
+            return;
+        }
+        let Some(preview) = &self.preview else { return };
+        let held = matches!(preview.content, PreviewContent::Held);
+        let Some(item) = preview.batch.get(preview.index).cloned() else { return };
+        let holds = self.preview_holds(&item);
+        if held && !holds {
+            let content = self.preview_content(&item.attachment);
+            self.preview_visits += 1;
+            let visit = self.preview_visits;
+            if let Some(preview) = self.preview.as_mut() {
+                preview.content = content;
+                preview.visit = visit;
+            }
+            self.load_preview_item(&item.attachment);
+            return;
+        }
+        if held || !holds {
+            return;
+        }
+        self.leave_preview_item();
+        if matches!(self.popover, Some(Popover::AttachmentMenu { .. })) {
+            self.popover = None;
+        }
+        // A file still on its way for what showed lands nowhere.
+        self.preview_visits += 1;
+        let visit = self.preview_visits;
+        if let Some(preview) = self.preview.as_mut() {
+            preview.content = PreviewContent::Held;
+            preview.visit = visit;
+        }
+    }
+
+    /// Shows the held-back item the preview is on, and loads it.
+    pub fn reveal_preview_item(&mut self) {
+        let Some(preview) = &self.preview else { return };
+        let Some(item) = preview.batch.get(preview.index).cloned() else { return };
+        let account = preview.account.clone();
+        self.reveal_media(&account, &item.event_id);
+        let content = self.preview_content(&item.attachment);
+        self.preview_visits += 1;
+        let visit = self.preview_visits;
+        if let Some(preview) = self.preview.as_mut() {
+            preview.content = content;
+            preview.visit = visit;
+        }
+        self.load_preview_item(&item.attachment);
     }
 
     /// Lets go of the preview's current attachment: stops its PDF render, drops its video and
@@ -3418,6 +3772,18 @@ impl State {
         }) = self.preview.as_mut().filter(|preview| preview.media == *media)
         {
             *status = VideoStatus::Failed(error.to_owned());
+        }
+    }
+
+    /// The clip's sender is now ignored: it stops, and doesn't start once its file comes.
+    pub(super) fn stop_ignored_audio(&mut self) {
+        let ignored = self
+            .audio
+            .as_ref()
+            .and_then(|clip| clip.sender.as_ref())
+            .is_some_and(|(account, sender)| self.accounts.get(account).is_some_and(|data| data.ignores(sender)));
+        if ignored {
+            self.pause_audio();
         }
     }
 
@@ -3529,6 +3895,12 @@ impl State {
         self.preview = None;
     }
 
+    /// Whether the preview shows a held-back picture or video, waiting for Show: its file
+    /// actions aren't offered.
+    pub fn preview_held(&self) -> bool {
+        self.preview.as_ref().is_some_and(|preview| matches!(preview.content, PreviewContent::Held))
+    }
+
     /// Saves the previewed file where the user picks.
     pub fn download_preview(&mut self) {
         let Some(preview) = &self.preview else { return };
@@ -3554,6 +3926,15 @@ impl State {
         if self.settings.last_account != self.nav.account {
             self.settings.last_account.clone_from(&self.nav.account);
             self.shell.save_settings(self.settings.clone());
+        }
+    }
+
+    /// Switches to an account from the account menu: its conversation shows again, and seeing it
+    /// takes away its unread mark.
+    pub fn switch_account(&mut self, id: &AccountId) {
+        self.select_account(id);
+        if let Some(room_id) = self.nav.rooms.get(id).cloned() {
+            self.unmark(id, &room_id);
         }
     }
 
@@ -3636,6 +4017,7 @@ impl State {
 
     pub fn select_room(&mut self, room_id: &str) {
         let Some(account) = self.nav.account.clone() else { return };
+        self.unmark(&account, room_id);
         self.accounts.mark_read(&account, room_id);
         if self.nav.rooms.get(&account).map(String::as_str) != Some(room_id) {
             self.nav.threads.remove(&account);
@@ -3712,15 +4094,17 @@ impl State {
                 self.list_all_members();
             }
             // Opened again, its list is fresh.
-            Some(SidePanel::Threads | SidePanel::Files | SidePanel::Pins) => {
+            Some(SidePanel::Threads | SidePanel::Files | SidePanel::Pins | SidePanel::Widgets) => {
                 self.side_loaded = None;
                 self.sync_side();
             }
             // Their role and whether they are verified come from the member list, as complete
             // as the readers' list asks for; their picture may be one no row has fetched.
-            Some(SidePanel::Person(_)) => {
+            Some(SidePanel::Person(person)) => {
+                let user_id = person.id.clone();
                 self.list_all_members();
                 self.request_avatars();
+                self.load_identity(&user_id);
             }
             Some(SidePanel::Info) | None => {}
         }
@@ -3859,6 +4243,14 @@ impl State {
     /// Carries out the action the open confirmation asks about.
     pub fn confirm(&mut self) {
         let Some(Modal::Confirm(confirm)) = self.modal.take() else { return };
+        // A guarded action: the server may ask for the password first.
+        let confirm = match confirm {
+            Confirm::Deactivate { account, erase } => {
+                self.guarded(account, Guarded::Deactivate { erase });
+                return;
+            }
+            other => other,
+        };
         let (command, purpose) = match confirm {
             Confirm::LeaveRoom { account, room_id, .. } => {
                 (Command::LeaveRoom { account, room_id, forget: false }, Purpose::Leave)
@@ -3875,6 +4267,15 @@ impl State {
             Confirm::DeleteMessage { account, key, event_id } => {
                 (Command::Redact { account, key, event_id }, Purpose::Delete)
             }
+            Confirm::RemoveWidget { account, room_id, widget_id, .. } => {
+                (Command::RemoveWidget { account, room_id, widget_id }, Purpose::Widget)
+            }
+            Confirm::Ignore { account, user_id, decline, .. } => {
+                // An invitation is declined only once the ignore is saved: failing, it stays.
+                self.change_safety(&account, matrix_core::SafetyChange::Ignore { user_id, ignored: true }, decline);
+                return;
+            }
+            Confirm::Deactivate { .. } => return,
         };
         self.dispatch(command, purpose);
     }
@@ -3892,6 +4293,96 @@ impl State {
     pub fn set_default_notifications(&mut self, account: &AccountId, mode: NotificationMode) {
         self.accounts.set_default_notifications(account, mode);
         let command = Command::SetDefaultNotificationMode { account: account.clone(), mode };
+        self.dispatch(command, Purpose::NotificationMode);
+    }
+
+    /// Takes away the unread mark of a room the user sees (opened, or shown again as the window
+    /// comes back) on every session; its read receipt follows as the timeline shows its messages,
+    /// and may not be sent at all when nothing new came.
+    fn unmark(&mut self, account: &AccountId, room_id: &str) {
+        if !self.accounts.get(account).and_then(|data| data.room(room_id)).is_some_and(|room| room.marked_unread) {
+            return;
+        }
+        self.accounts.set_marked(account, room_id, false);
+        let command = Command::SetUnread { account: account.clone(), room_id: room_id.to_owned(), unread: false };
+        let undo = accounts::RoomUndo::Mark(true);
+        self.dispatch(command, Purpose::RoomMark { account: account.clone(), room_id: room_id.to_owned(), undo });
+    }
+
+    /// Marks a room unread, or read, on every session, and closes the menu.
+    pub fn set_unread(&mut self, room_id: &str, unread: bool) {
+        self.popover = None;
+        let Some(account) = self.nav.account.clone() else { return };
+        let Some(before) = self.accounts.get(&account).and_then(|data| data.room(room_id)).cloned() else { return };
+        let (id, room_id) = (room_id.to_owned(), room_id.to_owned());
+        // Reading a room with unread messages needs a receipt; one only marked loses the mark.
+        let (command, undo) = if unread {
+            self.accounts.set_marked(&account, &room_id, true);
+            (
+                Command::SetUnread { account: account.clone(), room_id, unread },
+                accounts::RoomUndo::Mark(before.marked_unread),
+            )
+        } else if before.unread > 0 || before.mentions > 0 {
+            self.accounts.mark_read(&account, &room_id);
+            let undo = accounts::RoomUndo::Read {
+                marked: before.marked_unread,
+                unread: before.unread,
+                mentions: before.mentions,
+            };
+            (Command::MarkRoomRead { account: account.clone(), room_id }, undo)
+        } else {
+            self.accounts.mark_read(&account, &room_id);
+            (
+                Command::SetUnread { account: account.clone(), room_id, unread },
+                accounts::RoomUndo::Mark(before.marked_unread),
+            )
+        };
+        self.dispatch(command, Purpose::RoomMark { account, room_id: id, undo });
+    }
+
+    /// Puts a room among the favourites or the low priority rooms, or neither, on every client,
+    /// and closes the menu.
+    pub fn set_room_priority(&mut self, room_id: &str, priority: matrix_core::RoomPriority) {
+        self.popover = None;
+        let Some(account) = self.nav.account.clone() else { return };
+        self.change_priority(account, room_id, priority);
+    }
+
+    fn change_priority(&mut self, account: AccountId, room_id: &str, priority: matrix_core::RoomPriority) {
+        let current = self.accounts.get(&account).and_then(|data| data.room(room_id)).map(|room| room.priority);
+        let Some(before) = current.filter(|current| *current != priority) else { return };
+        self.accounts.set_priority(&account, room_id, priority);
+        let command = Command::SetRoomPriority { account: account.clone(), room_id: room_id.to_owned(), priority };
+        let undo = accounts::RoomUndo::Priority(before);
+        self.dispatch(command, Purpose::RoomMark { account, room_id: room_id.to_owned(), undo });
+    }
+
+    /// Adds the keyword typed for an account, showing it at once.
+    pub fn add_keyword(&mut self, account: &AccountId) {
+        let Some(draft) = self.keyword_drafts.get_mut(account) else { return };
+        let keyword = draft.text.trim().to_owned();
+        if keyword.is_empty() {
+            return;
+        }
+        *draft = TextEdit::default();
+        // Sent even when listed: a sync older than a removal may still list it, and the engine
+        // checks the server's rules.
+        let mut keywords = self.accounts.get(account).and_then(|data| data.keywords.clone()).unwrap_or_default();
+        if !keywords.contains(&keyword) {
+            keywords.push(keyword.clone());
+            keywords.sort_by_cached_key(|keyword| (keyword.to_lowercase(), keyword.clone()));
+            self.accounts.set_keywords(account, keywords);
+        }
+        let command = Command::SetKeyword { account: account.clone(), keyword, enabled: true };
+        self.dispatch(command, Purpose::NotificationMode);
+    }
+
+    /// Removes one of an account's keywords, showing it gone at once.
+    pub fn remove_keyword(&mut self, account: &AccountId, keyword: &str) {
+        let mut keywords = self.accounts.get(account).and_then(|data| data.keywords.clone()).unwrap_or_default();
+        keywords.retain(|known| known != keyword);
+        self.accounts.set_keywords(account, keywords);
+        let command = Command::SetKeyword { account: account.clone(), keyword: keyword.to_owned(), enabled: false };
         self.dispatch(command, Purpose::NotificationMode);
     }
 
@@ -3917,22 +4408,56 @@ impl State {
     /// Asks the user's other sessions to verify this one.
     pub fn verify_with_other_device(&mut self) {
         let Some(account) = self.nav.account.clone() else { return };
-        self.modal =
-            Some(Modal::Verification { account: account.clone(), flow_id: None, step: VerificationStep::Waiting });
-        self.dispatch(Command::VerifyThisSession(account), Purpose::Security);
+        self.request_verification(account, None);
     }
 
-    /// Follows a verification: opens the dialog for a new incoming request, updates an open one.
+    /// Opens the Verification dialog for a verification asked for now: of this session (`with`
+    /// is `None`) or with a person; it follows the flow the request starts.
+    pub(super) fn request_verification(&mut self, account: AccountId, with: Option<matrix_core::Person>) {
+        let command = match &with {
+            Some(person) => Command::VerifyUser { account: account.clone(), user_id: person.id.clone() },
+            None => Command::VerifyThisSession(account.clone()),
+        };
+        let request = self.dispatch(command, Purpose::Verification);
+        let flow = VerificationFlow::Requested(request);
+        self.modal = Some(Modal::Verification { account, flow, step: VerificationStep::Waiting, with });
+    }
+
+    /// A verification this app asked for started: its dialog follows it from now on. One whose
+    /// dialog was closed meanwhile is stopped.
+    fn verification_requested(&mut self, request: RequestId, account: AccountId, flow_id: String) {
+        match &mut self.modal {
+            Some(Modal::Verification { account: shown, flow, .. })
+                if *shown == account && *flow == VerificationFlow::Requested(request) =>
+            {
+                *flow = VerificationFlow::Following(flow_id);
+            }
+            _ => {
+                self.dispatch(Command::CancelVerification { account, flow_id }, Purpose::Cancel);
+            }
+        }
+    }
+
+    /// Follows a verification: updates the open dialog with its own flow's steps, opens the
+    /// dialog for a new incoming request unless another verification is in progress.
     fn verification_moved(&mut self, account: AccountId, flow_id: String, step: VerificationStep) {
         match &mut self.modal {
-            Some(Modal::Verification { account: shown, flow_id: open, step: current })
-                if *shown == account && open.as_ref().is_none_or(|open| *open == flow_id) =>
-            {
-                *open = Some(flow_id);
+            Some(Modal::Verification {
+                account: shown,
+                flow: VerificationFlow::Following(open),
+                step: current,
+                ..
+            }) if *shown == account && *open == flow_id => {
                 *current = step;
             }
+            Some(Modal::Verification { step: current, .. }) if !verification_ended(current) => {}
             _ if matches!(step, VerificationStep::Incoming { .. }) => {
-                self.modal = Some(Modal::Verification { account, flow_id: Some(flow_id), step });
+                let with = match &step {
+                    VerificationStep::Incoming { user, .. } => user.clone(),
+                    _ => None,
+                };
+                let flow = VerificationFlow::Following(flow_id);
+                self.modal = Some(Modal::Verification { account, flow, step, with });
             }
             _ => {}
         }
@@ -3940,7 +4465,7 @@ impl State {
 
     fn open_verification(&self) -> Option<(AccountId, String)> {
         match &self.modal {
-            Some(Modal::Verification { account, flow_id: Some(flow_id), .. }) => {
+            Some(Modal::Verification { account, flow: VerificationFlow::Following(flow_id), .. }) => {
                 Some((account.clone(), flow_id.clone()))
             }
             _ => None,
@@ -3957,19 +4482,30 @@ impl State {
         self.dispatch(Command::ConfirmVerification { account, flow_id, matches }, Purpose::Security);
     }
 
-    /// Stops the open verification and closes its dialog.
+    /// Stops the open verification and closes its dialog. One still being asked for is stopped
+    /// once it starts ([`Self::verification_requested`]), and its request's end goes unheard.
     pub fn cancel_verification(&mut self) {
-        if let Some((account, flow_id)) = self.open_verification()
-            && let Some(Modal::Verification { step, .. }) = &self.modal
-            && !matches!(step, VerificationStep::Done | VerificationStep::Cancelled(_))
+        if let Some(Modal::Verification { account, flow, step, .. }) = &self.modal
+            && !verification_ended(step)
         {
-            self.dispatch(Command::CancelVerification { account, flow_id }, Purpose::Cancel);
+            match flow.clone() {
+                VerificationFlow::Following(flow_id) => {
+                    let account = account.clone();
+                    self.dispatch(Command::CancelVerification { account, flow_id }, Purpose::Cancel);
+                }
+                VerificationFlow::Requested(request) => {
+                    self.pending.remove(&request);
+                }
+            }
         }
         self.modal = None;
     }
 
     /// The text field of the open dialog, for its input's `on_edit`.
     pub fn modal_field(&mut self) -> &mut TextEdit {
+        if matches!(self.modal, Some(Modal::KeyFile(_) | Modal::ChangePassword(_))) {
+            return self.modal_field_at(0);
+        }
         match &mut self.modal {
             Some(
                 Modal::Forward { search: edit, .. }
@@ -3978,26 +4514,59 @@ impl State {
                 | Modal::RenameSession { edit, .. }
                 | Modal::SectionName { edit, .. },
             ) => edit,
+            Some(Modal::Report(form)) => &mut form.reason,
+            Some(Modal::LinkDevice { flow, .. }) => &mut flow.code,
             _ => &mut self.scratch,
         }
     }
 
+    /// The `index`th text field of a dialog with several, for its inputs' `on_edit`: a key
+    /// file's passphrase and its confirmation; the current, new and confirmed password.
+    pub fn modal_field_at(&mut self, index: usize) -> &mut TextEdit {
+        let field = match &mut self.modal {
+            Some(Modal::KeyFile(file)) => {
+                [Some(&mut file.passphrase), Some(&mut file.confirm), None].into_iter().nth(index).flatten()
+            }
+            Some(Modal::ChangePassword(form)) => {
+                [&mut form.current, &mut form.new, &mut form.confirm].into_iter().nth(index)
+            }
+            _ => None,
+        };
+        match field {
+            Some(field) => field,
+            None => &mut self.scratch,
+        }
+    }
+
+    /// Asks for the recovery key to verify this session.
     pub fn open_recovery_key_entry(&mut self) {
+        self.ask_recovery_key(RecoveryKeyFor::Verify);
+    }
+
+    /// Asks for the recovery key, for `purpose`.
+    fn ask_recovery_key(&mut self, purpose: RecoveryKeyFor) {
         let Some(account) = self.nav.account.clone() else { return };
         self.modal = Some(Modal::RecoveryKeyEntry {
             account,
             edit: focused(TextEdit::new("").secure()),
             error: None,
             submitting: false,
+            purpose,
         });
     }
 
     pub fn submit_recovery_key(&mut self) {
-        let Some(Modal::RecoveryKeyEntry { account, edit, error, submitting }) = &mut self.modal else { return };
+        let Some(Modal::RecoveryKeyEntry { account, edit, error, submitting, purpose }) = &mut self.modal else {
+            return;
+        };
         if *submitting || edit.text.trim().is_empty() {
             return;
         }
-        let command = Command::Recover { account: account.clone(), key: Password(edit.text.clone()) };
+        let (account, key) = (account.clone(), Password(edit.text.clone()));
+        let command = match purpose {
+            RecoveryKeyFor::Verify => Command::Recover { account, key },
+            RecoveryKeyFor::OfflineDevice => Command::SetOfflineDevice { account, on: true, recovery_key: Some(key) },
+        };
         *error = None;
         *submitting = true;
         self.dispatch(command, Purpose::Recover);
@@ -4255,6 +4824,12 @@ impl State {
             Some(Modal::ResetIdentity { step: ResetStep::Resetting { request, .. }, .. }) => {
                 self.dispatch(Command::Cancel(request), Purpose::Cancel);
             }
+            // Closing a QR sign-in still under way stops it.
+            Some(Modal::LinkDevice { flow, .. }) if !flow.ended() => {
+                if let Some(request) = flow.request {
+                    self.dispatch(Command::Cancel(request), Purpose::Cancel);
+                }
+            }
             // Giving up on the password leaves the contact detail waiting to be confirmed.
             Some(Modal::Password { action: Guarded::AddContact { pending }, .. }) => {
                 if let ContactStep::Sent { busy, .. } = &mut self.profile.contact_mut(pending.kind).step {
@@ -4273,6 +4848,12 @@ impl State {
 
     pub fn set_appearance(&mut self, appearance: Appearance) {
         self.settings.appearance = appearance;
+        self.shell.save_settings(self.settings.clone());
+    }
+
+    /// Lays messages out in classic rows or chat bubbles, in every timeline.
+    pub fn set_message_layout(&mut self, layout: MessageLayout) {
+        self.settings.message_layout = layout;
         self.shell.save_settings(self.settings.clone());
     }
 
@@ -4340,7 +4921,7 @@ impl State {
     /// Step 2, chosen by what the server offers: the browser for OAuth, else the password form.
     fn continue_sign_in(&mut self, server: Homeserver) {
         if server.methods.oauth {
-            self.start_browser(server);
+            self.start_browser(server, false);
         } else if server.methods.password {
             self.sign_in.step = SignInStep::Password { server, submitting: None, error: None };
         } else {
@@ -4349,17 +4930,21 @@ impl State {
         }
     }
 
-    fn start_browser(&mut self, server: Homeserver) {
-        let command = Command::LoginOAuth { homeserver: server.url.clone(), resume: self.sign_in.resume.clone() };
+    /// The browser sign-in; with `create`, the page creates the account first.
+    fn start_browser(&mut self, server: Homeserver, create: bool) {
+        let command =
+            Command::LoginOAuth { homeserver: server.url.clone(), resume: self.sign_in.resume.clone(), create };
         let request = self.dispatch(command, Purpose::SignIn);
-        self.sign_in.step = SignInStep::Browser { server, request: Some(request), url: None, error: None };
+        self.sign_in.step = SignInStep::Browser { server, request: Some(request), url: None, create, error: None };
     }
 
-    /// Starts the browser sign-in again, after a failure or from the password form.
+    /// Starts the browser sign-in again, after a failure or from another way of signing in. A
+    /// failed account creation tries again as one.
     pub fn retry_browser(&mut self) {
         let Some(server) = self.sign_in.server().filter(|s| s.methods.oauth).cloned() else { return };
+        let create = matches!(self.sign_in.step, SignInStep::Browser { create: true, request: None, .. });
         self.cancel_pending();
-        self.start_browser(server);
+        self.start_browser(server, create);
     }
 
     /// Switches step 2 to the password form, on a server that offers both.
@@ -4776,6 +5361,11 @@ impl State {
             PickFor::Avatar => {
                 if let Some(path) = paths.first() {
                     self.set_avatar(Some(path.clone()));
+                }
+            }
+            PickFor::KeyFile => {
+                if let Some(path) = paths.first() {
+                    self.key_file_chosen(KeyTransfer::Import, path.clone());
                 }
             }
         }

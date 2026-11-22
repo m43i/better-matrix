@@ -24,6 +24,7 @@ import {
 } from '../state/linkRoute';
 import { parsePermalink } from '../state/permalinks';
 import { shallow, useAppStore, useStore } from '../state/react';
+import { roomPreviewPicture } from '../state/selectors';
 import type { CommandFailed } from '../state/requests';
 import { font } from '../theme/palette';
 import { Avatar } from '../ui/Avatar';
@@ -225,18 +226,14 @@ function RoomHead({
   preview: RoomPreview | null;
 }) {
   const palette = usePalette();
+  // An invited room's picture follows the account's choice for invitations (ADR 0011).
+  const picture = useStore((s) => roomPreviewPicture(s, account, preview));
   const name = preview?.name ?? preview?.alias ?? id;
   const address = preview?.alias ?? (preview ? preview.room_id : null);
 
   return (
     <View style={styles.head}>
-      <Avatar
-        account={account}
-        id={preview?.room_id ?? id}
-        name={name}
-        media={preview?.avatar}
-        size={72}
-      />
+      <Avatar account={account} id={preview?.room_id ?? id} name={name} media={picture} size={72} />
       <Text style={[font.title, styles.centered, { color: palette.text }]} numberOfLines={2}>
         {name}
       </Text>

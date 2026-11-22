@@ -5,8 +5,8 @@ import { FlatList, View } from 'react-native';
 import { t } from '../i18n';
 import { routes } from '../routes';
 import { listPins, setPinned } from '../state/actions/message-actions';
-import { useAppStore, useStore } from '../state/react';
-import { account as accountOf, room as roomOf } from '../state/selectors';
+import { shallow, useAppStore, useStore } from '../state/react';
+import { pinnedPreviews, room as roomOf } from '../state/selectors';
 import { Divider, EmptyState, ListRow } from '../ui/components';
 import { PreviewRow } from '../ui/people/PreviewRow';
 
@@ -15,7 +15,8 @@ export default function PinnedMessagesScreen() {
   const store = useAppStore();
   const router = useRouter();
   const room = useStore((s) => roomOf(s, account, roomId));
-  const pins = useStore((s) => accountOf(s, account)?.pins[roomId]);
+  // Still pinned, and without what people the user ignores said (ADR 0011).
+  const pins = useStore((s) => pinnedPreviews(s, account, roomId), shallow);
   const signature = JSON.stringify(room?.pinned ?? []);
   const [retry, setRetry] = useState(0);
 
@@ -49,7 +50,7 @@ export default function PinnedMessagesScreen() {
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{ paddingVertical: 8 }}
         ItemSeparatorComponent={() => <Divider inset={62} />}
-        data={(pins ?? []).filter((pin) => room?.pinned.includes(pin.event_id))}
+        data={pins ?? []}
         keyExtractor={(pin) => pin.event_id}
         ListHeaderComponent={
           status.error ? (

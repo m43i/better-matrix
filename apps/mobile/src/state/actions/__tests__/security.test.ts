@@ -5,15 +5,28 @@ import { CommandFailed } from '../../requests';
 import { Store } from '../../store';
 import type { Verification } from '../../types';
 import {
+  AskedVerification,
+  changePassword,
+  compareEmoji,
+  confirmationProblem,
+  deactivateAccount,
   endSession,
+  exportRoomKeys,
   followedVerification,
+  importRoomKeysAsking,
+  loadIdentity,
   newIncoming,
+  readQrCode,
   recoveryKeyFor,
   renameSession,
   type ResetStep,
   resetIdentity,
   runGuarded,
+  scanVerificationCode,
+  setOfflineDevice,
   setUpRecovery,
+  turnOnOfflineDevice,
+  untilAccepted,
   verificationKey,
   verificationView,
 } from '../security';
@@ -165,22 +178,34 @@ describe('verifications', () => {
   const incoming: Verification = {
     account: ADA,
     flowId: 'in',
-    step: { type: 'Incoming', data: { other_device: 'Phone' } },
+    step: { type: 'Incoming', data: { other_device: 'Phone', user: null } },
+    user: null,
   };
 
-  const waiting: Verification = { account: ADA, flowId: 'mine', step: { type: 'Waiting' } };
-  const graces: Verification = { account: GRACE, flowId: 'other', step: { type: 'Waiting' } };
+  const waiting: Verification = {
+    account: ADA,
+    flowId: 'mine',
+    step: { type: 'Waiting' },
+    user: null,
+  };
+
+  const graces: Verification = {
+    account: GRACE,
+    flowId: 'other',
+    step: { type: 'Waiting' },
+    user: null,
+  };
 
   it('should follow the flow it was opened for', () => {
-    expect(followedVerification([waiting, incoming], ADA, 'in', [])).toBe(incoming);
+    expect(followedVerification([waiting, incoming], ADA, 'in')).toBe(incoming);
   });
 
-  it('should follow the first new flow of the account when opened without one', () => {
-    expect(followedVerification([incoming, graces, waiting], ADA, null, ['in'])).toBe(waiting);
+  it('should follow nothing until the flow it asked for is known', () => {
+    expect(followedVerification([incoming, waiting], ADA, null)).toBeUndefined();
   });
 
-  it('should follow nothing until the request it started shows up', () => {
-    expect(followedVerification([incoming], ADA, null, ['in'])).toBeUndefined();
+  it('should not follow a flow of the same ID on another account', () => {
+    expect(followedVerification([graces], ADA, 'other')).toBeUndefined();
   });
 
   it('should find incoming requests not seen yet', () => {
@@ -212,6 +237,228 @@ describe('verifications', () => {
 
   it('should only close a stopped verification', () => {
     expect(verificationView({ type: 'Cancelled', data: 'mismatch' }).actions).toEqual(['close']);
+  });
+
+  it('should offer to scan their code or compare emoji once both sides are ready', () => {
+    expect(verificationView({ type: 'Ready', data: { qr: null, scan: true } }).actions).toEqual([
+      'scan',
+      'emoji',
+      'cancel',
+    ]);
+  });
+
+  it('should not offer to scan a code the other side does not show', () => {
+    expect(
+      verificationView({ type: 'Ready', data: { qr: { width: 1, dark: [true] }, scan: false } })
+        .actions,
+    ).toEqual(['emoji', 'cancel']);
+  });
+
+  it('should ask whether the other side scanned the code', () => {
+    expect(verificationView({ type: 'Scanned' }).actions).toEqual(['notScanned', 'scanned']);
+  });
+
+  it('should title a verification with another person by their name', () => {
+    expect(verificationView({ type: 'Waiting' }, true).title).toBe(
+      'mobile.accounts.verify_person_title',
+    );
+  });
+
+  it('should say the person is verified when done', () => {
+    expect(verificationView({ type: 'Done' }, true).title).toBe(
+      'mobile.accounts.verify_person_done_title',
+    );
+  });
+});
+
+describe('verifying people and codes', () => {
+  it('should ask another person to verify', () => {
+    const { store, sent } = setup();
+    new AskedVerification(store, ADA, GRACE).start();
+    expect(sent[0]!.command).toEqual({
+      type: 'VerifyUser',
+      data: { account: ADA, user_id: GRACE },
+    });
+  });
+
+  it('should ask what the user knows of someone’s identity', () => {
+    const { store, sent } = setup();
+    loadIdentity(store, ADA, GRACE);
+    expect(sent[0]!.command).toEqual({
+      type: 'LoadIdentity',
+      data: { account: ADA, user_id: GRACE },
+    });
+  });
+
+  it('should switch a verification to emoji', () => {
+    const { store, sent } = setup();
+    compareEmoji(store, ADA, 'f');
+    expect(sent[0]!.command).toEqual({
+      type: 'CompareEmoji',
+      data: { account: ADA, flow_id: 'f' },
+    });
+  });
+
+  it('should hand a verification the code the camera read', () => {
+    const { store, sent } = setup();
+    scanVerificationCode(store, ADA, 'f', [1, 2, 3]);
+    expect(sent[0]!.command).toEqual({
+      type: 'ScanVerificationCode',
+      data: { account: ADA, flow_id: 'f', code: [1, 2, 3] },
+    });
+  });
+
+  it('should read a picture’s code in the engine', async () => {
+    const { engine, store, sent, finish } = setup();
+    const read = readQrCode(store, '/cache/picture.jpg');
+    const { request, command } = sent[0]!;
+    expect(command).toEqual({ type: 'ReadQrCode', data: { picture: '/cache/picture.jpg' } });
+    engine.emit({ type: 'QrCodeRead', data: { request, code: [9, 8] } });
+    finish(request);
+    await expect(read).resolves.toEqual([9, 8]);
+  });
+
+  it('should read nothing from a picture without a code', async () => {
+    const { engine, store, sent, finish } = setup();
+    const read = readQrCode(store, '/cache/picture.jpg');
+    engine.emit({ type: 'QrCodeRead', data: { request: sent[0]!.request, code: null } });
+    finish(sent[0]!.request);
+    await expect(read).resolves.toBeNull();
+  });
+});
+
+describe('the offline device', () => {
+  it('should turn the offline device on with the recovery key', () => {
+    const { store, sent } = setup();
+    void setOfflineDevice(store, ADA, true, ' EsT0 abcd ');
+    expect(sent[0]!.command).toEqual({
+      type: 'SetOfflineDevice',
+      data: { account: ADA, on: true, recovery_key: 'EsT0 abcd' },
+    });
+  });
+
+  it('should turn the offline device off without a key', () => {
+    const { store, sent } = setup();
+    void setOfflineDevice(store, ADA, false, 'EsT0');
+    expect(sent[0]!.command).toEqual({
+      type: 'SetOfflineDevice',
+      data: { account: ADA, on: false, recovery_key: null },
+    });
+  });
+
+  it('should ask for the recovery key again when it is wrong', async () => {
+    const { store, sent, finish } = setup();
+    const ask = jest.fn<Promise<string | null>, [string | null]>(() => Promise.resolve('key'));
+    void turnOnOfflineDevice(store, ADA, ask);
+    await flush();
+    finish(sent[0]!.request, 'that recovery key is not right');
+    await flush();
+    expect(ask).toHaveBeenLastCalledWith('that recovery key is not right');
+  });
+
+  it('should stop asking once the user gives up', async () => {
+    const { store } = setup();
+    await expect(turnOnOfflineDevice(store, ADA, () => Promise.resolve(null))).resolves.toBe(false);
+  });
+});
+
+describe('untilAccepted', () => {
+  it('should resolve with what the accepted attempt resolved with', async () => {
+    await expect(
+      untilAccepted(
+        () => Promise.resolve('secret'),
+        (secret) => Promise.resolve(secret.length),
+      ),
+    ).resolves.toBe(6);
+  });
+
+  it('should end when an attempt is cancelled', async () => {
+    await expect(
+      untilAccepted(
+        () => Promise.resolve('secret'),
+        () => Promise.reject(new CommandFailed('cancelled', 1)),
+      ),
+    ).rejects.toThrow('cancelled');
+  });
+});
+
+describe('message keys', () => {
+  it('should export the keys to the file with the passphrase', () => {
+    const { store, sent } = setup();
+    void exportRoomKeys(store, ADA, '/cache/keys.txt', 'horse battery');
+    expect(sent[0]!.command).toEqual({
+      type: 'ExportRoomKeys',
+      data: { account: ADA, path: '/cache/keys.txt', passphrase: 'horse battery' },
+    });
+  });
+
+  it('should import the keys and say how many were new', async () => {
+    const { engine, store, sent, finish } = setup();
+    const done = importRoomKeysAsking(store, ADA, '/cache/keys.txt', () => Promise.resolve('pass'));
+    await flush();
+    const { request, command } = sent[0]!;
+    expect(command).toEqual({
+      type: 'ImportRoomKeys',
+      data: { account: ADA, path: '/cache/keys.txt', passphrase: 'pass' },
+    });
+    engine.emit({ type: 'KeysImported', data: { request, import: { imported: 3, total: 5 } } });
+    finish(request);
+    await expect(done).resolves.toEqual({ imported: 3, total: 5 });
+  });
+
+  it('should want a passphrase', () => {
+    expect(confirmationProblem('', '')).toBe('empty');
+  });
+
+  it('should want the passphrase typed the same twice', () => {
+    expect(confirmationProblem('horse', 'house')).toBe('mismatch');
+  });
+
+  it('should take a passphrase typed the same twice', () => {
+    expect(confirmationProblem('horse', 'horse')).toBeNull();
+  });
+});
+
+describe('password and deactivation', () => {
+  it('should change the password with the current one', () => {
+    const { store, sent } = setup();
+    void changePassword(store, ADA, 'old', 'new');
+    expect(sent[0]!.command).toEqual({
+      type: 'ChangePassword',
+      data: { account: ADA, new_password: 'new', password: 'old' },
+    });
+  });
+
+  it('should reject with why the server refused the current password', async () => {
+    const { store, sent, finish } = setup();
+    const done = changePassword(store, ADA, 'wrong', 'new');
+    finish(sent[0]!.request, 'Invalid password');
+    await expect(done).rejects.toThrow('Invalid password');
+  });
+
+  it('should deactivate with the password the server asked for', async () => {
+    const { engine, store, sent, finish, askPassword } = setup();
+    void deactivateAccount(store, ADA, true, { askPassword });
+    engine.emit({ type: 'PasswordNeeded', data: { request: sent[0]!.request } });
+    finish(sent[0]!.request, 'password required');
+    await flush();
+    expect(sent[1]!.command).toEqual({
+      type: 'DeactivateAccount',
+      data: { account: ADA, erase: true, password: 'secret' },
+    });
+  });
+
+  it('should open the account page an OAuth account deactivates on', async () => {
+    const { engine, store, sent, finish, askPassword } = setup();
+    const openUrl = jest.fn();
+    const done = deactivateAccount(store, ADA, false, { askPassword, openUrl });
+    engine.emit({
+      type: 'OpenUrl',
+      data: { request: sent[0]!.request, url: 'https://account.example.org/deactivate' },
+    });
+    finish(sent[0]!.request);
+    await expect(done).resolves.toBe(true);
+    expect(openUrl).toHaveBeenCalledWith('https://account.example.org/deactivate');
   });
 });
 
@@ -265,5 +512,105 @@ describe('sessions', () => {
       type: 'RenameSession',
       data: { account: ADA, device_id: 'DEV', name: 'Phone' },
     });
+  });
+});
+
+describe('AskedVerification', () => {
+  /** Ada's request to verify Alice's identity, with the store's verifications as followed. */
+  function asking(userId: string | null = '@alice:example.org') {
+    const env = setup();
+    const asked = new AskedVerification(env.store, ADA, userId);
+    asked.start();
+    const request = env.sent[0]!.request;
+
+    const step = (flowId: string, verificationStep: Verification['step']) =>
+      env.engine.emit({
+        type: 'Verification',
+        data: { account: ADA, flow_id: flowId, step: verificationStep },
+      });
+
+    const requested = (flowId: string) =>
+      env.engine.emit({
+        type: 'VerificationRequested',
+        data: { request, account: ADA, flow_id: flowId },
+      });
+
+    const followed = () =>
+      followedVerification(env.store.getState().verifications, ADA, asked.flowId());
+
+    return { ...env, asked, request, step, requested, followed };
+  }
+
+  it('should verify this session without a person', () => {
+    const { sent } = asking(null);
+    expect(sent[0]!.command).toEqual({ type: 'VerifyThisSession', data: ADA });
+  });
+
+  it('should bind to the flow its request started', () => {
+    const { asked, requested } = asking();
+    requested('alice-flow');
+    expect(asked.flowId()).toBe('alice-flow');
+  });
+
+  it('should not be taken over by a request from Bob arriving while waiting on Alice', () => {
+    const { step, requested, followed } = asking();
+    step('bob-flow', {
+      type: 'Incoming',
+      data: {
+        other_device: 'BOBPHONE',
+        user: { id: '@bob:example.org', name: 'Bob', avatar: null },
+      },
+    });
+    requested('alice-flow');
+    step('alice-flow', { type: 'Waiting' });
+    expect(followed()?.flowId).toBe('alice-flow');
+  });
+
+  it('should follow nothing before its request named a flow, whatever else comes in', () => {
+    const { step, followed } = asking();
+    step('bob-flow', { type: 'Waiting' });
+    expect(followed()).toBeUndefined();
+  });
+
+  it('should cancel only its own flow when closed', () => {
+    const { asked, sent, step, requested } = asking();
+    step('bob-flow', { type: 'Waiting' });
+    requested('alice-flow');
+    step('alice-flow', { type: 'Waiting' });
+    asked.close();
+    expect(sent.slice(1).map((s) => s.command)).toEqual([
+      { type: 'CancelVerification', data: { account: ADA, flow_id: 'alice-flow' } },
+    ]);
+  });
+
+  it('should not cancel a request still on its way when closed', () => {
+    const { asked, sent } = asking();
+    asked.close();
+    expect(sent).toHaveLength(1);
+  });
+
+  it('should cancel the flow a request closed before named it started', () => {
+    const { asked, sent, requested } = asking();
+    asked.close();
+    requested('alice-flow');
+    expect(sent[1]!.command).toEqual({
+      type: 'CancelVerification',
+      data: { account: ADA, flow_id: 'alice-flow' },
+    });
+  });
+
+  it('should leave a finished verification alone when closed', () => {
+    const { asked, sent, step, requested } = asking();
+    requested('alice-flow');
+    step('alice-flow', { type: 'Done' });
+    asked.close();
+    expect(sent).toHaveLength(1);
+  });
+
+  it('should say why the request failed', async () => {
+    const { store, request, finish } = asking();
+    finish(request, 'no identity');
+    await flush();
+    expect(store.getState().notices.map((n) => n.message)).toContain('no identity');
   });
 });

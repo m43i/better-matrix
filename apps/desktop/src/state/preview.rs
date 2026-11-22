@@ -18,6 +18,9 @@ pub enum PreviewContent {
     Video { thumbnail: Option<Image>, status: VideoStatus },
     /// An audio clip: it plays as the timeline's cards do, through `State::audio`.
     Audio,
+    /// A picture or video the user's media choice holds back (ADR 0011): nothing loads until
+    /// they press Show.
+    Held,
 }
 
 /// A PDF's pages, each with its size in pixels.
@@ -75,6 +78,8 @@ pub enum DocumentStatus {
 #[derive(Debug)]
 pub struct Preview {
     pub account: AccountId,
+    /// The room its batch was sent in.
+    pub room_id: String,
     /// The attachment shown: `batch[index]`'s.
     pub attachment: Attachment,
     /// The file as uploaded.
@@ -170,7 +175,7 @@ fn attachment(entry: &Entry) -> Option<Result<&Message, ()>> {
             MessageContent::Attachment(_) => Some(Ok(&item.message)),
             _ => Some(Err(())),
         },
-        EntryView::ReadMarker | EntryView::Other => None,
+        EntryView::ReadMarker | EntryView::Hidden(_) => None,
         _ => Some(Err(())),
     }
 }

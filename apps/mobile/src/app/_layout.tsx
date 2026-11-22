@@ -28,6 +28,7 @@ import { VerificationPrompt } from '../ui/accounts/VerificationPrompt';
 import { Rings } from '../ui/call/Rings';
 import { LinkOpener } from '../ui/links/LinkOpener';
 import { Notices } from '../ui/Notices';
+import { ScannerPlaceholder } from '../ui/qr/QrScanner';
 import { headerTint, PaletteProvider, usePalette } from '../ui/theme';
 
 void SplashScreen.preventAutoHideAsync();
@@ -101,6 +102,9 @@ function Routes({ scene }: { scene: SceneName | null }) {
           <Stack.Screen name="forward-message" options={{ presentation: 'modal' }} />
           <Stack.Screen name="pinned-messages" />
           <Stack.Screen name="saved-messages" />
+          <Stack.Screen name="widgets" />
+          <Stack.Screen name="add-widget" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="event-source" options={sheet} />
           <Stack.Screen name="emoji" options={sheet} />
           <Stack.Screen name="member" options={fittedSheet} />
           <Stack.Screen name="readers" options={sheet} />
@@ -115,10 +119,12 @@ function Routes({ scene }: { scene: SceneName | null }) {
           <Stack.Screen name="new-room" options={{ presentation: 'modal' }} />
           <Stack.Screen name="new-space" options={{ presentation: 'modal' }} />
           <Stack.Screen name="rename-room" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="report" options={{ presentation: 'modal' }} />
           <Stack.Screen name="invite" options={{ presentation: 'modal' }} />
           <Stack.Screen name="settings" options={{ headerShown: false }} />
           <Stack.Screen name="verify" options={{ ...sheet, sheetAllowedDetents: [0.75, 1] }} />
           <Stack.Screen name="recovery" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="link-device" options={{ presentation: 'modal' }} />
           <Stack.Screen
             name="preview"
             options={{ presentation: 'fullScreenModal', headerShown: false, animation: 'fade' }}
@@ -187,7 +193,10 @@ export default function RootLayout() {
       <KeyboardProvider>
         <StoreProvider store={app.store}>
           <PaletteProvider>
-            <Routes key={app.generation} scene={app.scene} />
+            {/* Demo scenes have no camera to point at a code. */}
+            <ScannerPlaceholder value={app.scene !== null}>
+              <Routes key={app.generation} scene={app.scene} />
+            </ScannerPlaceholder>
           </PaletteProvider>
         </StoreProvider>
       </KeyboardProvider>

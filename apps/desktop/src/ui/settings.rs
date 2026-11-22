@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use rune::{Color, El, ScrollSpec, col, el, icon, row, text};
+use rune::{Color, El, ScrollSpec, TextEdit, col, el, icon, row, text};
 
 use super::components::{
     ButtonKind, account_avatar, button, choice_row, field_input, icon_button, select_button, select_menu,
@@ -13,10 +13,10 @@ use super::room_menu::{mode_id, modes};
 use super::theme::{Palette, font};
 use crate::i18n::{Language, t, tf};
 use crate::state::{
-    AccountData, Appearance, ContactStep, MediaCache, Popover, SelectFor, SettingsSection, State, Zoom,
+    AccountData, Appearance, ContactStep, MediaCache, MessageLayout, Popover, SelectFor, SettingsSection, State, Zoom,
 };
 use crate::third_party;
-use matrix_core::{ContactDetail, ContactKind, RecoveryStatus, Session, SignInMethod};
+use matrix_core::{ContactDetail, ContactKind, OfflineDevice, RecoveryStatus, Session, SignInMethod};
 
 /// How much of the whole window (rail and sidebar included) the modal takes, each way.
 const SHARE: f32 = 0.9;
@@ -27,6 +27,9 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
             .key("settings-nav")
             .w(220.0)
             .h_full()
+            .min_h(0.0)
+            // A short window at a large interface size scrolls the sections rather than cut Info off.
+            .scroll(ScrollSpec { stick_bottom: false })
             .padding(12.0)
             .gap(2.0)
             .fill(p.surface.mix(p.bg, 0.5))
@@ -36,8 +39,10 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
             let selected = item == section;
             let glyph = match item {
                 SettingsSection::General => &icons::SETTINGS,
+                SettingsSection::Appearance => &icons::SUN_MOON,
                 SettingsSection::Profile => &icons::USER,
                 SettingsSection::Notifications => &icons::BELL,
+                SettingsSection::Safety => &icons::EYE_OFF,
                 SettingsSection::Account => &icons::SHIELD,
                 SettingsSection::Sessions => &icons::LAPTOP,
                 SettingsSection::VoiceVideo => &icons::MIC,
@@ -69,8 +74,10 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
 
     let body = match section {
         SettingsSection::General => general(s, p),
+        SettingsSection::Appearance => appearance(s, p),
         SettingsSection::Profile => profile(s, p),
         SettingsSection::Notifications => notifications(s, p),
+        SettingsSection::Safety => safety(s, p),
         SettingsSection::Account => account(s, p),
         SettingsSection::Sessions => sessions(s, p),
         SettingsSection::VoiceVideo => voice_video(s, p),
@@ -190,13 +197,6 @@ fn component_row(component: &third_party::Component, p: &Palette) -> El {
 
 fn general(s: &State, p: &Palette) -> El {
     let languages = select(s, SelectFor::Language, &s.settings.language.label(), None, p);
-    let appearances = Appearance::ALL.into_iter().fold(col().w_full().gap(8.0), |list, appearance| {
-        list.child(
-            choice_row(appearance.label(), None, s.settings.appearance == appearance, p)
-                .key(format!("appearance-{}", appearance.id()))
-                .on_press(move |s: &mut State| s.set_appearance(appearance)),
-        )
-    });
     let gifs =
         [(true, t!("settings.gifs_on"), Some(t!("settings.gifs_on_hint"))), (false, t!("settings.gifs_off"), None)]
             .into_iter()
@@ -229,21 +229,50 @@ fn general(s: &State, p: &Palette) -> El {
                         .on_press(move |s: &mut State| s.set_show_maps(on)),
                 )
             });
+    let hidden = [
+        (true, t!("settings.hidden_events_on"), Some(t!("settings.hidden_events_on_hint"))),
+        (false, t!("settings.hidden_events_off"), None),
+    ]
+    .into_iter()
+    .fold(col().w_full().gap(8.0), |list, (on, title, hint)| {
+        list.child(
+            choice_row(title, hint, s.settings.show_hidden_events == on, p)
+                .key(format!("hidden-events-{on}"))
+                .on_press(move |s: &mut State| s.set_show_hidden_events(on)),
+        )
+    });
     col()
         .w_full()
         .gap(32.0)
         .child(setting_group(&icons::LANGUAGE, t!("settings.language"), t!("settings.language_hint"), languages, p))
-        .child(setting_group(
-            &icons::SUN_MOON,
-            t!("settings.appearance"),
-            t!("settings.appearance_hint"),
-            appearances,
-            p,
-        ))
-        .child(setting_group(&icons::ZOOM, t!("settings.zoom"), t!("settings.zoom_hint"), zoom(s, p), p))
         .child(setting_group(&icons::LINK, t!("settings.previews"), t!("settings.previews_hint"), previews, p))
         .child(setting_group(&icons::IMAGE, t!("settings.gifs"), t!("settings.gifs_hint"), gifs, p))
         .child(setting_group(&icons::MAP_PIN, t!("settings.maps"), t!("settings.maps_hint"), maps, p))
+        .child(setting_group(&icons::CODE, t!("settings.developer"), t!("settings.developer_hint"), hidden, p))
+}
+
+/// How the app looks: the theme, how messages lay out, and the interface size.
+fn appearance(s: &State, p: &Palette) -> El {
+    let themes = Appearance::ALL.into_iter().fold(col().w_full().gap(8.0), |list, appearance| {
+        list.child(
+            choice_row(appearance.label(), None, s.settings.appearance == appearance, p)
+                .key(format!("appearance-{}", appearance.id()))
+                .on_press(move |s: &mut State| s.set_appearance(appearance)),
+        )
+    });
+    let layouts = MessageLayout::ALL.into_iter().fold(col().w_full().gap(8.0), |list, layout| {
+        list.child(
+            choice_row(layout.label(), Some(layout.hint()), s.settings.message_layout == layout, p)
+                .key(format!("message-layout-{}", layout.id()))
+                .on_press(move |s: &mut State| s.set_message_layout(layout)),
+        )
+    });
+    col()
+        .w_full()
+        .gap(32.0)
+        .child(setting_group(&icons::SUN_MOON, t!("settings.theme"), t!("settings.theme_hint"), themes, p))
+        .child(setting_group(&icons::CHAT, t!("settings.messages"), t!("settings.messages_hint"), layouts, p))
+        .child(setting_group(&icons::ZOOM, t!("settings.zoom"), t!("settings.zoom_hint"), zoom(s, p), p))
 }
 
 /// Smaller, the current size, larger, and back to the default.
@@ -292,7 +321,7 @@ fn notifications(s: &State, p: &Palette) -> El {
             .find(|(mode, ..)| *mode == summary.default_notifications)
             .map_or(("", ""), |(_, title, hint, _)| (title, hint));
         let choice = select(s, SelectFor::Notifications(summary.id.clone()), title, Some(hint), p);
-        list.child(col().w_full().gap(10.0).child(heading).child(choice))
+        list.child(col().w_full().gap(10.0).child(heading).child(choice).child(keywords(s, account, p)))
     });
     // How an incoming call rings: aloud, or only the notification and the card.
     let (title, hint) =
@@ -309,6 +338,186 @@ fn notifications(s: &State, p: &Palette) -> El {
             accounts,
             p,
         ))
+}
+
+/// What the active account keeps away (ADR 0011): where media shows, strangers' invitations
+/// (with those hidden, to open), pictures in invitations, and the people the user ignores.
+fn safety(s: &State, p: &Palette) -> El {
+    use matrix_core::{SafetyChange, ShowMedia};
+    let Some(account) = s.settings_account() else { return col() };
+    let id = &account.summary.id;
+    let safety = &account.safety;
+    let media = [
+        (ShowMedia::Always, t!("safety.media_always"), None),
+        (ShowMedia::Private, t!("safety.media_private"), Some(t!("safety.media_private_hint"))),
+        (ShowMedia::Never, t!("safety.media_never"), None),
+    ]
+    .into_iter()
+    .fold(col().w_full().gap(8.0), |list, (choice, title, hint)| {
+        let owner = id.clone();
+        list.child(
+            choice_row(title, hint, safety.media == choice, p)
+                .key(format!("safety-media-{choice:?}"))
+                .on_press(move |s: &mut State| s.set_safety(&owner, SafetyChange::Media(choice))),
+        )
+    });
+    let mut strangers = [
+        (false, t!("safety.strangers_show"), None),
+        (true, t!("safety.strangers_hide"), Some(t!("safety.strangers_hide_hint"))),
+    ]
+    .into_iter()
+    .fold(col().w_full().gap(8.0), |list, (hide, title, hint)| {
+        let owner = id.clone();
+        list.child(
+            choice_row(title, hint, safety.hide_stranger_invites == hide, p)
+                .key(format!("safety-strangers-{hide}"))
+                .on_press(move |s: &mut State| s.set_safety(&owner, SafetyChange::HideStrangerInvites(hide))),
+        )
+    });
+    let hidden: Vec<_> = account.hidden_invitations().collect();
+    if !hidden.is_empty() {
+        strangers = strangers.child(
+            text(tf!("safety.hidden_invitations", count = hidden.len()))
+                .key("safety-hidden-heading")
+                .font(font::SECTION)
+                .color(p.text_muted)
+                .mt(8.0),
+        );
+        for invite in hidden {
+            let room_id = invite.room_id.clone();
+            let from =
+                invite.inviter.as_ref().map(|inviter| tf!("invitations.from", name = inviter.name, user = inviter.id));
+            let mut titles = col()
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(2.0)
+                .child(text(invite.name.clone()).font(font::BODY_STRONG).color(p.text).truncate());
+            if let Some(from) = from {
+                titles = titles.child(text(from).font(font::META).color(p.text_muted).truncate());
+            }
+            strangers = strangers.child(
+                row()
+                    .key(format!("safety-hidden-{room_id}"))
+                    .w_full()
+                    .px(14.0)
+                    .py(10.0)
+                    .gap(12.0)
+                    .center_y()
+                    .radius(8.0)
+                    .border(1.0, p.divider)
+                    .hover(p.hover.alpha(p.hover.a * 2.0))
+                    .role("button")
+                    .cursor(rune::Cursor::Pointer)
+                    .focusable(true)
+                    .label(invite.name.clone())
+                    .child(super::room_discovery::invitation_picture(s, account, invite, 28.0))
+                    .child(titles)
+                    .child(icon(&icons::CHEVRON_RIGHT, 18.0).color(p.text_muted))
+                    .on_press(move |s: &mut State| s.show_invitation(&room_id)),
+            );
+        }
+    }
+    let pictures = [(true, t!("safety.pictures_show")), (false, t!("safety.pictures_hide"))].into_iter().fold(
+        col().w_full().gap(8.0),
+        |list, (shown, title)| {
+            let owner = id.clone();
+            list.child(
+                choice_row(title, None, safety.invite_pictures == shown, p)
+                    .key(format!("safety-pictures-{shown}"))
+                    .on_press(move |s: &mut State| s.set_safety(&owner, SafetyChange::InvitePictures(shown))),
+            )
+        },
+    );
+    let ignored = if safety.ignored.is_empty() {
+        col().child(text(t!("safety.ignored_none")).key("safety-ignored-none").font(font::BODY).color(p.text_muted))
+    } else {
+        safety.ignored.iter().fold(col().w_full().gap(8.0), |list, user_id| {
+            let (owner, user) = (id.clone(), user_id.clone());
+            list.child(
+                row()
+                    .key(format!("safety-ignored-{user_id}"))
+                    .w_full()
+                    .px(14.0)
+                    .py(8.0)
+                    .gap(12.0)
+                    .center_y()
+                    .radius(8.0)
+                    .border(1.0, p.divider)
+                    .child(super::components::avatar(user_id, user_id, 28.0))
+                    .child(text(user_id.clone()).font(font::BODY).color(p.text).grow(1.0).min_w(0.0).truncate())
+                    .child(
+                        button(t!("safety.stop_ignoring"), ButtonKind::Secondary, true, p)
+                            .key(format!("safety-unignore-{user_id}"))
+                            .on_press(move |s: &mut State| s.stop_ignoring(&owner, &user)),
+                    ),
+            )
+        })
+    };
+    col()
+        .w_full()
+        .gap(32.0)
+        .child(account_heading(account, &s.media, p))
+        .child(setting_group(&icons::IMAGE, t!("safety.media"), t!("safety.media_hint"), media, p))
+        .child(setting_group(&icons::USER_PLUS, t!("safety.strangers"), t!("safety.strangers_hint"), strangers, p))
+        .child(setting_group(&icons::EYE_OFF, t!("safety.pictures"), t!("safety.pictures_hint"), pictures, p))
+        .child(setting_group(&icons::USER_X, t!("safety.ignored"), t!("safety.ignored_hint"), ignored, p))
+}
+
+/// An account's notification keywords, each with its remove button, then the field adding one.
+fn keywords(s: &State, account: &AccountData, p: &Palette) -> El {
+    let id = account.summary.id.clone();
+    let mut list = col()
+        .w_full()
+        .gap(8.0)
+        .child(text(t!("settings.keywords")).font(font::BODY_STRONG).color(p.text))
+        .child(text(t!("settings.keywords_hint")).font(font::META).color(p.text_muted).wrap());
+    match &account.keywords {
+        None => list = list.child(text(t!("profile.loading")).font(font::BODY).color(p.text_muted)),
+        Some(keywords) => {
+            for keyword in keywords {
+                let (account, removed) = (id.clone(), keyword.clone());
+                list = list.child(
+                    row()
+                        .key(format!("keyword-{id}-{keyword}"))
+                        .w_full()
+                        .h(40.0)
+                        .px(12.0)
+                        .gap(10.0)
+                        .center_y()
+                        .radius(8.0)
+                        .border(1.0, p.divider)
+                        .child(text(keyword.clone()).font(font::BODY).color(p.text).grow(1.0).truncate())
+                        .child(
+                            icon_button(
+                                &icons::TRASH,
+                                &tf!("settings.keyword_remove", keyword = keyword),
+                                false,
+                                p.text_muted,
+                                p,
+                            )
+                            .key(format!("keyword-remove-{id}-{keyword}"))
+                            .on_press(move |s: &mut State| s.remove_keyword(&account, &removed)),
+                        ),
+                );
+            }
+        }
+    }
+    let empty = TextEdit::default();
+    let draft = s.keyword_drafts.get(&id).unwrap_or(&empty);
+    let typed = !draft.text.trim().is_empty();
+    let (edit, submit, add) = (id.clone(), id.clone(), id.clone());
+    let field = field_input(draft, t!("settings.keyword_placeholder"), p)
+        .key(format!("keyword-new-{id}"))
+        .label(t!("settings.keyword_placeholder"))
+        .on_edit(move |s: &mut State| s.keyword_drafts.entry(edit.clone()).or_default())
+        .on_submit(move |s: &mut State, _| s.add_keyword(&submit));
+    list.child(
+        row().w_full().gap(8.0).center_y().child(col().grow(1.0).min_w(0.0).child(field)).child(
+            button(t!("settings.keyword_add"), ButtonKind::Secondary, typed, p)
+                .key(format!("keyword-add-{id}"))
+                .on_press(move |s: &mut State| s.add_keyword(&add)),
+        ),
+    )
 }
 
 fn ring_choices() -> [(bool, &'static str, &'static str); 2] {
@@ -743,12 +952,86 @@ fn account(s: &State, p: &Palette) -> El {
         RecoveryStatus::Incomplete => status_line(&icons::KEY, t!("recovery.incomplete"), p.warning, p),
         RecoveryStatus::Unknown => status_line(&icons::KEY, t!("recovery.unknown"), p.text_muted, p),
     };
-    col()
+    let oauth = account.summary.sign_in == SignInMethod::OAuth;
+    let mut page = col()
         .w_full()
         .gap(32.0)
         .child(account_heading(account, &s.media, p))
         .child(setting_group(&icons::SHIELD, t!("account.session"), t!("account.session_hint"), verification, p))
-        .child(setting_group(&icons::KEY, t!("recovery.title"), t!("recovery.hint"), recovery, p))
+        .child(setting_group(&icons::KEY, t!("recovery.title"), t!("recovery.hint"), recovery, p));
+    if let Some(offline) = offline_device(security, p) {
+        page =
+            page.child(setting_group(&icons::CLOUD, t!("offline_device.title"), t!("offline_device.hint"), offline, p));
+    }
+    let keys = row()
+        .gap(8.0)
+        .child(
+            button(t!("keys.export_button"), ButtonKind::Secondary, true, p)
+                .key("keys-export")
+                .on_press(State::export_room_keys),
+        )
+        .child(
+            button(t!("keys.import_button"), ButtonKind::Secondary, true, p)
+                .key("keys-import")
+                .on_press(State::import_room_keys),
+        );
+    let (password_hint, password_label) = if oauth {
+        (t!("password.hint_oauth"), t!("password.change_on_page"))
+    } else {
+        (t!("password.hint"), t!("password.change_title"))
+    };
+    let password = row().child(
+        button(password_label, ButtonKind::Secondary, true, p)
+            .key("password-change")
+            .on_press(State::open_change_password),
+    );
+    let deactivate = row().child(
+        button(t!("deactivate.button"), ButtonKind::Danger, true, p)
+            .key("deactivate-account")
+            .on_press(State::ask_to_deactivate),
+    );
+    page.child(setting_group(&icons::FILE, t!("keys.title"), t!("keys.hint"), keys, p))
+        .child(setting_group(&icons::LOCK, t!("password.title"), password_hint, password, p))
+        .child(setting_group(
+            &icons::ALERT,
+            t!("deactivate.heading"),
+            if oauth { t!("deactivate.hint_oauth") } else { t!("deactivate.hint") },
+            deactivate,
+            p,
+        ))
+}
+
+/// The offline device's state and the switch for it, where the server keeps one.
+fn offline_device(security: matrix_core::Security, p: &Palette) -> Option<El> {
+    let column = col().w_full().gap(12.0).items_start();
+    match security.offline_device {
+        OfflineDevice::On => Some(
+            column.child(status_line(&icons::CLOUD, t!("offline_device.on"), p.success, p)).child(
+                button(t!("offline_device.turn_off"), ButtonKind::Secondary, true, p)
+                    .key("offline-device-off")
+                    .on_press(|s: &mut State| s.set_offline_device(false)),
+            ),
+        ),
+        OfflineDevice::Off => {
+            // It keeps its key with the recovery key, from a verified session.
+            let ready = security.session_verified && security.recovery == RecoveryStatus::Enabled;
+            let mut column = column.child(status_line(&icons::CLOUD, t!("offline_device.off"), p.text_muted, p));
+            if !ready {
+                column =
+                    column.child(text(t!("offline_device.needs_recovery")).font(font::BODY).color(p.text_muted).wrap());
+            }
+            Some(column.child(
+                button(t!("offline_device.turn_on"), ButtonKind::Primary, ready, p).key("offline-device-on").on_press(
+                    move |s: &mut State| {
+                        if ready {
+                            s.set_offline_device(true);
+                        }
+                    },
+                ),
+            ))
+        }
+        OfflineDevice::Unknown | OfflineDevice::Unsupported => None,
+    }
 }
 
 /// Every signed-in session: this one first, each with its last activity, verification, and
@@ -761,13 +1044,22 @@ fn sessions(s: &State, p: &Palette) -> El {
             sessions.iter().fold(col().w_full().gap(10.0), |list, session| list.child(session_card(session, p)))
         }
     };
-    col().w_full().gap(32.0).child(account_heading(account, &s.media, p)).child(setting_group(
-        &icons::LAPTOP,
-        t!("settings.sessions"),
-        t!("sessions.hint"),
-        list,
-        p,
-    ))
+    let mut page = col().w_full().gap(32.0).child(account_heading(account, &s.media, p));
+    // A QR sign-in hands this session's secrets over: OAuth accounts, from a verified session.
+    if account.summary.sign_in == SignInMethod::OAuth {
+        let verified = account.security.is_some_and(|security| security.session_verified);
+        let mut link = col().w_full().gap(10.0).items_start();
+        if !verified {
+            link = link.child(text(t!("link_device.verify_first")).font(font::BODY).color(p.text_muted).wrap());
+        }
+        link = link.child(
+            button(t!("link_device.button"), ButtonKind::Primary, verified, p)
+                .key("link-device")
+                .on_press(State::link_device),
+        );
+        page = page.child(setting_group(&icons::QR, t!("link_device.title"), t!("link_device.hint"), link, p));
+    }
+    page.child(setting_group(&icons::LAPTOP, t!("settings.sessions"), t!("sessions.hint"), list, p))
 }
 
 fn session_card(session: &Session, p: &Palette) -> El {

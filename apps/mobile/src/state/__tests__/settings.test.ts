@@ -37,4 +37,19 @@ describe('parseSettings', () => {
       false,
     );
   });
+
+  it('messages should lay out in classic rows by default', () => {
+    expect(parseSettings(null).messageLayout).toBe('rows');
+  });
+
+  it('a saved message layout should be read back', () => {
+    expect(
+      parseSettings(JSON.stringify({ ...DEFAULT_SETTINGS, messageLayout: 'bubbles' }))
+        .messageLayout,
+    ).toBe('bubbles');
+  });
+
+  it('an unknown message layout should show classic rows', () => {
+    expect(parseSettings(JSON.stringify({ messageLayout: 'cards' })).messageLayout).toBe('rows');
+  });
 });

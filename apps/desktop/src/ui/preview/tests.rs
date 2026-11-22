@@ -14,6 +14,7 @@ fn the_cached_thumbnail_should_stay_in_place_when_the_original_arrives() {
     image.wait().unwrap();
     let file = Preview {
         account: AccountId::new("@a:example.org"),
+        room_id: "!room:example.org".into(),
         attachment: Attachment {
             kind: AttachmentKind::Image,
             name: "picture.png".into(),

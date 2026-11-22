@@ -1,5 +1,6 @@
 // A message's actions, from a long press (Slack's sheet): quick reactions and the picker, reply,
-// reply in thread, copy, edit and delete the user's own, end their poll, save or share a file.
+// reply in thread, copy, edit and delete the user's own, end their poll, save or share a file,
+// and view its source.
 
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -10,9 +11,15 @@ import { locale, t } from '../i18n';
 import { setPinned, setSaved, messageLink, translationUrl } from '../state/actions/message-actions';
 import { deleteMessage, react } from '../state/actions/timeline';
 import { startEdit, startReply } from '../state/composer';
-import { editDraftOf, findMessage, messageActions, messageText } from '../state/messages';
+import {
+  attachmentRows,
+  editDraftOf,
+  findMessage,
+  messageActions,
+  messageText,
+} from '../state/messages';
 import { useAppStore, useStore } from '../state/react';
-import { room, timeline } from '../state/selectors';
+import { previewHidden, room, timeline } from '../state/selectors';
 import { roomKey, threadKey } from '../state/timeline';
 import { routes } from '../routes';
 import { Divider, EmptyState, ListRow } from '../ui/components';
@@ -42,6 +49,8 @@ export default function MessageActionsScreen() {
 
   const message = useStore((s) => findMessage(timeline(s, account, key).entries, eventId));
   const summary = useStore((s) => room(s, account, roomId));
+  // Held-back media offers no file actions here (ADR 0011), and then no divider either.
+  const held = useStore((s) => (message ? previewHidden(s, account, roomId, message) : false));
 
   if (!message) {
     return (
@@ -139,9 +148,15 @@ export default function MessageActionsScreen() {
       <View
         style={[styles.list, { backgroundColor: palette.surface, borderColor: palette.divider }]}
       >
-        {can.file && attachment ? (
+        {can.file && attachment && attachmentRows(attachment, held, false).length > 0 ? (
           <>
-            <AttachmentActions account={account} attachment={attachment} onDone={close} />
+            <AttachmentActions
+              account={account}
+              roomId={roomId}
+              message={message}
+              attachment={attachment}
+              onDone={close}
+            />
             <Divider inset={52} />
           </>
         ) : null}
@@ -249,6 +264,15 @@ export default function MessageActionsScreen() {
             onPress={translate}
           />
         ) : null}
+        {can.link ? (
+          <ListRow
+            icon="code"
+            title={t('actions.view_source')}
+            chevron={false}
+            testID="message-actions-source"
+            onPress={() => router.replace(routes.eventSource(account, roomId, eventId))}
+          />
+        ) : null}
         {can.endPoll && message.content.type === 'Poll' ? (
           <ListRow
             icon="poll"
@@ -260,6 +284,29 @@ export default function MessageActionsScreen() {
               confirmEndPoll(store, account, key, message.event_id, question, close);
             }}
           />
+        ) : null}
+        {can.report ? (
+          <>
+            <Divider inset={52} />
+            <ListRow
+              icon="flag"
+              title={t('report.action')}
+              danger
+              chevron={false}
+              testID="message-actions-report"
+              onPress={() => {
+                close();
+                router.push(
+                  routes.report(
+                    account,
+                    { type: 'Message', data: { room_id: roomId, event_id: message.event_id } },
+                    message.sender_name,
+                    message.sender_id,
+                  ),
+                );
+              }}
+            />
+          </>
         ) : null}
         {can.delete ? (
           <>

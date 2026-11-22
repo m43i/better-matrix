@@ -33,10 +33,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { t } from '../i18n';
 import { routes } from '../routes';
-import { galleryAround, showsStrip, stepGallery } from '../state/gallery';
+import { revealMedia } from '../state/actions/safety';
+import { showsStrip, stepGallery } from '../state/gallery';
 import { attachmentPreview } from '../state/messages';
 import { shallow, useAppStore, useStore } from '../state/react';
-import { timeline } from '../state/selectors';
+import { previewHidden, previewIgnored, previewItems } from '../state/selectors';
 import { roomKey, threadKey } from '../state/timeline';
 import { sentAt } from '../state/timelineText';
 import { font } from '../theme/palette';
@@ -78,14 +79,17 @@ export default function PreviewScreen() {
   // The item on screen, which the strip and swipes move; the opened one at first.
   const [current, setCurrent] = useState(eventId);
 
-  const gallery = useStore(
-    (s) => galleryAround(timeline(s, account, key).entries, current, eventId, thread ?? null),
-    shallow,
-  );
+  // Media the account keeps back stays in the gallery, held (ADR 0011): its thumbnail shows an
+  // eye, and selected it shows Show until revealed, from wherever it was opened.
+  const gallery = useStore((s) => previewItems(s, account, key, current, eventId), shallow);
 
   const found = gallery.findIndex((m) => m.event_id === current);
   const index = found < 0 ? gallery.findIndex((m) => m.event_id === eventId) : found;
-  const message = gallery[index] ?? null;
+  // An item whose sender the user now ignores shows nothing, not another item (ADR 0011).
+  const ignored = useStore((s) => previewIgnored(s, account, key, current));
+  const shown = ignored ? null : (gallery[index] ?? null);
+  const hidden = useStore((s) => shown !== null && previewHidden(s, account, roomId, shown));
+  const message = hidden ? null : shown;
   const attachment = message?.content.type === 'Attachment' ? message.content.data : null;
   const strip = showsStrip(gallery);
   const [busy, setBusy] = useState(false);
@@ -107,7 +111,8 @@ export default function PreviewScreen() {
   const frame = { top: insets.top + BAR, bottom: insets.bottom + (strip ? STRIP_HEIGHT : 0) };
 
   const run = (action: typeof shareAttachment) => {
-    if (!attachment) return;
+    // Read as it runs, as the attachment sheet does: media held since the render isn't fetched.
+    if (!attachment || !shown || previewHidden(store.getState(), account, roomId, shown)) return;
     setBusy(true);
     void action(store, account, attachment).finally(() => setBusy(false));
   };
@@ -144,6 +149,12 @@ export default function PreviewScreen() {
             onLongPress={showActions}
           />
         )
+      ) : hidden && shown ? (
+        <HeldContent
+          key={shown.event_id}
+          onShow={() => revealMedia(store, account, shown.event_id)}
+          onSwipe={onSwipe}
+        />
       ) : (
         <Text style={[font.body, styles.status]}>{t('mobile.conversation.message_missing')}</Text>
       )}
@@ -155,13 +166,13 @@ export default function PreviewScreen() {
           testID="preview-close"
         />
         <View style={styles.who}>
-          {message ? (
+          {shown ? (
             <>
               <Text style={[font.bodyStrong, styles.white]} numberOfLines={1}>
-                {message.sender_name}
+                {shown.sender_name}
               </Text>
               <Text style={[font.meta, styles.dim]} numberOfLines={1}>
-                {sentAt(message.timestamp_ms, now)}
+                {sentAt(shown.timestamp_ms, now)}
               </Text>
             </>
           ) : null}
@@ -192,11 +203,12 @@ export default function PreviewScreen() {
           </>
         ) : null}
       </View>
-      {strip && message ? (
+      {strip && shown ? (
         <GalleryStrip
           account={account}
           items={gallery}
-          current={message.event_id}
+          current={shown.event_id}
+          roomId={roomId}
           bottom={insets.bottom}
           onPick={setCurrent}
         />
@@ -265,6 +277,25 @@ function ImageContent({
     <View style={area}>
       <Zoomable uri={uri} label={attachment.name} onSwipe={onSwipe} onLongPress={onLongPress} />
     </View>
+  );
+}
+
+/** A held item: Show, which reveals it; a swipe steps on through the gallery, held items too. */
+function HeldContent({ onShow, onSwipe }: { onShow: () => void; onSwipe: Swipe }) {
+  const swipe = useSwipe(onSwipe);
+
+  return (
+    <GestureDetector gesture={swipe}>
+      <Pressable
+        testID="preview-show"
+        onPress={onShow}
+        accessibilityRole="button"
+        style={styles.hidden}
+      >
+        <Icon name="eyeOff" size={32} color="#ffffff" />
+        <Text style={[font.bodyStrong, styles.white]}>{t('safety.show_media')}</Text>
+      </Pressable>
+    </GestureDetector>
   );
 }
 
@@ -429,6 +460,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000000' },
   loading: { alignItems: 'center', justifyContent: 'center' },
   status: { color: '#ffffffcc', textAlign: 'center', marginTop: 160 },
+  hidden: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   bar: {
     position: 'absolute',
     left: 0,

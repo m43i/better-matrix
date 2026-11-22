@@ -11,5 +11,8 @@
   "mobile.people.invited_to": "{{name}} wurde in {{room}} eingeladen.",
   "mobile.people.space": "Space",
   "mobile.people.no_space": "Keiner",
-  "mobile.people.no_members": "Niemand passt zu deiner Suche."
+  "mobile.people.no_members": "Niemand passt zu deiner Suche.",
+  "mobile.people.verify": "Verifizieren",
+  "mobile.people.verify_hint": "Prüfe, ob {{name}} wirklich die Person ist, für die sie sich ausgibt, indem ihr gemeinsam einen QR-Code scannt oder Emoji vergleicht.",
+  "mobile.people.identity_changed": "Die Identität von {{name}} hat sich seit deiner Verifizierung geändert. Verifiziere die Person erneut, um ihr wieder zu vertrauen."
 }

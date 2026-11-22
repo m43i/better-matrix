@@ -164,6 +164,31 @@ see who is typing there.
   a list request finishes; phones run list requests one at a time). Opening a row uses the shared
   message jump; its bookmark button stops saving it. The desktop's rows act on the dialog's
   account, which need not be the one on screen.
+- **Message layout:** a device setting (`Settings::message_layout`, `messageLayout` on phones),
+  classic rows by default. Both layouts are built from the same plan and the same parts
+  (`message_parts`: what a message says, then what hangs off it), so a feature added to a
+  message shows in both.
+  - Classic rows: the sender's picture, name and time head a run; the row tints on hover.
+  - Chat bubbles: other people's messages sit at the left beside their picture (on the first of
+    a run) with their name in their identity colour inside the bubble; the user's own sit at the
+    right with neither (`Context::on_right`). Only the other person of a one-to-one direct chat
+    goes unnamed (`names_sender`, `unnamedSenders`): once someone else is there, or for anyone
+    who was and left, names show. The rule reads the summary's `dm_users` and joined count, not
+    live membership, so a partner who left while someone else stayed goes unnamed too.
+  - Words get a bubble (`bubble`, `bubble_own` palette roles), at most 80% of the content width
+    and 600 points on desktop, 85% of the row on phones, hugging short text. A compact desktop
+    timeline (content under 320 points) gives bubbles all of it, with 8 points of padding. At
+    the smallest window and 175% zoom (about 37 points of content) a time can still spill out,
+    as classic rows truncate there. Media and cards
+    bring their own frames and stand without one, in the width a classic row gives them, which
+    they are sized for, keeping to their message's side (phones: `MessageSideContext`). What a
+    bubble holds sizes itself to the bubble (desktop: `message_parts`'s card width; phones:
+    `ContentWidthContext`).
+  - The time (with "edited" or "sending") closes the bubble in `bubble_meta`, which keeps 4.5:1
+    on either bubble, as do muted words inside it (a quote, a notice; phones: `InBubble`); reactions and the thread hang below it, on its side. The readers' column,
+    menu and press-to-open-thread are the classic row's; the hover toolbar moves to the row's
+    left over the user's own bubbles, which take its usual place (in a timeline too narrow for
+    both it may cover a long first line, as it does a classic row's).
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
     reaction's count and whether the user is among them. The picker offers quick reactions,
@@ -246,6 +271,23 @@ see who is typing there.
   - Runs of a kind that `groups()` (joined, left) merge into one line, "Grace, Alan, Kai, Mira
     and 2 more joined", with up to four stacked pictures; hovering "and 2 more" shows everyone.
     Merging is in the view, so entries stay one per event and diff indices stay true.
+- **Hidden events** (developer tools): every timeline item the app draws nothing for (state it
+  has no `RoomChange` for, events that didn't parse, membership events that changed nothing)
+  is `EntryKind::Hidden` with its sender, type and event ID, so diff indices stay true. Whether
+  they show is a setting on this device ("Show hidden events", off by default; the desktop's
+  General settings, the phone's Preferences), not an engine mode: turning it on plans the rows
+  again (`Accounts::replan_timelines` on the desktop) and each shows as a small line, "Grace
+  sent m.room.server_acl", whose source button (a press on phones) opens its source. Hidden
+  entries that don't show don't break a run of joins; ones that show do. Events the SDK's
+  timeline can't represent at all (unknown message types, edits and reactions it folds into
+  their message) have no entry, so they don't show either.
+- **Event source** (developer tools): "View source" in a message's menu (any sent message) and
+  on a hidden event's line asks `Command::ViewSource`, answered by `Event::EventSource`: the
+  event as this device reads it (from the event cache, else the server; decrypted when it came
+  encrypted) and, for an encrypted event, as the server holds it (`get_room_event`, unprocessed),
+  each pretty-printed. The desktop shows it in a dialog (`Modal::Source`, selectable, Copy JSON);
+  a source that arrives after its dialog closed opens nothing, one that fails closes it with a
+  notice. Phones show it in a sheet (`app/event-source.tsx`).
 - **Pictures:** messages carry the sender's picture (`sender_avatar`), loaded as 128 px
   thumbnails and drawn by `media_avatar`.
   - Fallback initials: first letters of the display name's first two words, one for a single

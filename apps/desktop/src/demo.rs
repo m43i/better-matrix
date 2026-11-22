@@ -5,13 +5,14 @@ use std::path::PathBuf;
 
 use matrix_core::{
     AccountId, AccountSummary, Attachment, AttachmentKind, ContactDetail, ContactKind, Contacts, EntryKind, Event,
-    HistoryVisibility, Homeserver, LoginMethods, Message, MessageContent, NotificationMode, Person, Quote, Reaction,
-    RecoveryStatus, RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary, SasEmoji, Security, Session, SignInMethod,
-    SpaceSummary, ThreadSummary, TimelineDiff, TimelineEntry, TimelineKey,
+    HistoryVisibility, Homeserver, LoginMethods, Message, MessageContent, NotificationMode, OfflineDevice, Person,
+    Policy, QrImage, QrLoginStep, Quote, Reaction, RecoveryStatus, RegistrationStep, RequestId, RoomChange, RoomEvent,
+    RoomKind, RoomList, RoomSummary, SasEmoji, Security, Session, SignInMethod, SpaceSummary, ThreadSummary,
+    TimelineDiff, TimelineEntry, TimelineKey,
 };
 use rune::Tx;
 
-use crate::state::{Format, SignInStep, State};
+use crate::state::{Asked, Format, QrLogin, SignInStep, State};
 
 pub const WORK_SPACE: &str = "!engines:example.org";
 
@@ -190,6 +191,17 @@ pub fn preview_batch(s: &mut State) {
     }
 }
 
+/// The batch's recording, opened with pictures and videos held back everywhere, stepped back
+/// onto the held-back video: Show, and nothing fetched.
+pub fn preview_held(s: &mut State) {
+    batch_messages(s);
+    let safety = matrix_core::Safety { media: matrix_core::ShowMedia::Never, ..matrix_core::Safety::default() };
+    apply(s, Event::Safety { account: AccountId::new(ADA), safety });
+    let file = batch_attachments().swap_remove(2);
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$batch-2", &file);
+    s.show_preview_item(1);
+}
+
 /// The batch's video, a third of the way through and paused, with its controls.
 pub fn preview_video(s: &mut State) {
     open_batch(s, 1);
@@ -243,10 +255,63 @@ pub fn invitation(s: &mut State) {
             inviter: Some(Person { id: GRACE.into(), name: "Grace Hopper".into(), avatar: None }),
             space: false,
             kind: RoomKind::Group,
+            stranger: false,
         }],
     };
     apply(s, Event::RoomsUpdated { account, list });
     s.show_invitation("!design:example.org");
+}
+
+/// Settings → Safety: someone ignored, media shown in private rooms only, and a stranger's
+/// invitation hidden there rather than in the sidebar.
+pub fn safety(s: &mut State) {
+    invitation(s);
+    s.close_modal();
+    let account = AccountId::new(ADA);
+    let Some(data) = s.accounts.get(&account) else { return };
+    let mut list =
+        RoomList { rooms: data.rooms.clone(), spaces: data.spaces.clone(), invitations: data.invitations.clone() };
+    list.invitations.push(matrix_core::Invitation {
+        room_id: "!prizes:spam.example".into(),
+        name: "Claim your prize".into(),
+        topic: None,
+        avatar: None,
+        inviter: Some(Person { id: "@winner:spam.example".into(), name: "Prize desk".into(), avatar: None }),
+        space: false,
+        kind: RoomKind::Group,
+        stranger: true,
+    });
+    apply(s, Event::RoomsUpdated { account: account.clone(), list });
+    let safety = matrix_core::Safety {
+        ignored: vec!["@troll:spam.example".into()],
+        media: matrix_core::ShowMedia::Private,
+        invite_pictures: false,
+        hide_stranger_invites: true,
+    };
+    apply(s, Event::Safety { account, safety });
+    s.open_settings();
+    s.show_settings_section(crate::state::SettingsSection::Safety);
+}
+
+/// Reporting someone else's message.
+pub fn report(s: &mut State) {
+    attachment_message(s);
+    s.report_message(&TimelineKey::room(DEMO_THREAD.0), "$attachment");
+}
+
+/// A picture in a public room, held back by media shown in private rooms only.
+pub fn hidden_media(s: &mut State) {
+    attachment_message(s);
+    let account = AccountId::new(ADA);
+    let Some(data) = s.accounts.get(&account) else { return };
+    let mut list =
+        RoomList { rooms: data.rooms.clone(), spaces: data.spaces.clone(), invitations: data.invitations.clone() };
+    for room in list.rooms.iter_mut().filter(|room| room.room_id == DEMO_THREAD.0) {
+        room.public = true;
+    }
+    apply(s, Event::RoomsUpdated { account: account.clone(), list });
+    let safety = matrix_core::Safety { media: matrix_core::ShowMedia::Private, ..matrix_core::Safety::default() };
+    apply(s, Event::Safety { account, safety });
 }
 
 /// A space with public rooms to discover and join.
@@ -270,6 +335,17 @@ pub fn discovery(s: &mut State) {
 /// A link with a preview card in the demo.
 const RELEASE_NOTES: &str = "https://bettermatrix.example.org/blog/0.2";
 const KAI: &str = "@kai:example.org";
+
+/// The demo, organised: Grace's chat among the favourites, lab moved to low priority, Alan's muted
+/// chat marked unread, and two notification keywords.
+pub fn organised(s: &mut State) {
+    seed(s);
+    let ada = AccountId::new(ADA);
+    s.accounts.set_priority(&ada, "!dm-grace:example.org", matrix_core::RoomPriority::Favourite);
+    s.accounts.set_priority(&ada, "!lab:example.org", matrix_core::RoomPriority::Low);
+    s.accounts.set_marked(&ada, "!dm-alan:example.org", true);
+    s.accounts.set_keywords(&ada, vec!["deploy".into(), "release".into()]);
+}
 
 pub fn seed(s: &mut State) {
     add_account(s, ADA, "Ada Lovelace", "example.org", SignInMethod::Password, work());
@@ -334,9 +410,11 @@ pub fn seed(s: &mut State) {
         shown("@alan:example.org", Presence::Offline, None),
     ];
     apply(s, Event::Presence { account: AccountId::new(ADA), people });
-    let verified = Security { session_verified: true, recovery: RecoveryStatus::Enabled };
+    let verified =
+        Security { session_verified: true, recovery: RecoveryStatus::Enabled, offline_device: OfflineDevice::Off };
     apply(s, Event::SecurityChanged { account: AccountId::new(ADA), security: verified });
-    let fresh = Security { session_verified: false, recovery: RecoveryStatus::Enabled };
+    let fresh =
+        Security { session_verified: false, recovery: RecoveryStatus::Enabled, offline_device: OfflineDevice::Off };
     apply(s, Event::SecurityChanged { account: AccountId::new("@ada:hobby.chat"), security: fresh });
     apply(s, Event::Sessions { account: AccountId::new(ADA), sessions: sessions() });
     s.select_account(&AccountId::new(ADA));
@@ -379,8 +457,113 @@ fn homeserver(oauth: bool, password: bool) -> Homeserver {
     Homeserver {
         server_name: Some("example.org".into()),
         url: "https://matrix.example.org/".into(),
-        methods: LoginMethods { oauth, password },
+        methods: LoginMethods { oauth, password, create_account: true, qr: oauth },
     }
+}
+
+/// A QR code the size of a real one (MSC4108 and verification codes carry about 150 bytes).
+pub fn qr_code() -> QrImage {
+    let data: Vec<u8> = b"MATRIX\x02\x03".iter().copied().chain((0..140u8).map(|i| i.wrapping_mul(37))).collect();
+    QrImage::encode(&data).unwrap_or(QrImage { width: 0, dark: Vec::new() })
+}
+
+/// Verifying Grace from her profile, both sides ready: this side shows its code. After [`seed`].
+pub fn verify_person_qr(s: &mut State) {
+    s.select_room(DEMO_THREAD.0);
+    let grace = Person { id: "@grace:example.org".into(), name: "Grace Hopper".into(), avatar: None };
+    s.verify_person(&grace);
+    if let Some(crate::state::Modal::Verification {
+        flow: crate::state::VerificationFlow::Requested(request), ..
+    }) = &s.modal
+    {
+        let request = *request;
+        apply(s, Event::VerificationRequested { request, account: AccountId::new(ADA), flow_id: "flow".into() });
+    }
+    let step = matrix_core::VerificationStep::Ready { qr: Some(qr_code()), scan: false };
+    apply(s, Event::Verification { account: AccountId::new(ADA), flow_id: "flow".into(), step });
+}
+
+/// Grace's profile beside the room, with whether Ada verified her. After [`seed`].
+pub fn person(s: &mut State, identity: Option<matrix_core::Identity>) {
+    s.select_room(DEMO_THREAD.0);
+    s.show_side(crate::state::SidePanel::Person(Person {
+        id: "@grace:example.org".into(),
+        name: "Grace Hopper".into(),
+        avatar: None,
+    }));
+    apply(s, Event::Identity { account: AccountId::new(ADA), user_id: "@grace:example.org".into(), identity });
+}
+
+/// Ada's OAuth account, verified here, showing a code for a new device to scan. After [`seed`].
+pub fn link_device(s: &mut State) {
+    let hobby = AccountId::new("@ada:hobby.chat");
+    let verified =
+        Security { session_verified: true, recovery: RecoveryStatus::Enabled, offline_device: OfflineDevice::On };
+    apply(s, Event::SecurityChanged { account: hobby.clone(), security: verified });
+    s.select_account(&hobby);
+    s.open_settings();
+    s.show_settings_section(crate::state::SettingsSection::Sessions);
+    s.link_device();
+    if let Some(crate::state::Modal::LinkDevice { flow: QrLogin { request: Some(request), .. }, .. }) = &s.modal {
+        let request = *request;
+        apply(s, Event::QrLogin { request, step: QrLoginStep::Show(qr_code()) });
+    }
+}
+
+/// Signing in on a new device with a QR code, showing it for a signed-in device to scan.
+pub fn sign_in_qr(s: &mut State) {
+    let mut flow = QrLogin::started(RequestId(1));
+    flow.moved(RequestId(1), QrLoginStep::Show(qr_code()));
+    s.sign_in.step = SignInStep::Qr { server: homeserver(true, false), flow: Box::new(flow) };
+}
+
+/// Creating an account on a password server, which asks to agree to its policies.
+pub fn registration_terms(s: &mut State) {
+    let policies = vec![
+        Policy { name: "Terms of Service".into(), url: "https://example.org/terms".into() },
+        Policy { name: "Privacy Policy".into(), url: "https://example.org/privacy".into() },
+    ];
+    s.sign_in.step = SignInStep::Register {
+        server: homeserver(false, true),
+        request: Some(RequestId(1)),
+        asked: Some(Asked { step: RegistrationStep::Terms(policies), answered: false }),
+        error: None,
+    };
+}
+
+/// Creating an account on a password server, which sent a link to confirm the email address
+/// and hasn't seen it opened yet.
+pub fn registration_email_sent(s: &mut State) {
+    let step = RegistrationStep::EmailSent { address: "ada@hobby.chat".into(), unconfirmed: true };
+    s.sign_in.step = SignInStep::Register {
+        server: homeserver(false, true),
+        request: Some(RequestId(1)),
+        asked: Some(Asked { step, answered: false }),
+        error: None,
+    };
+}
+
+/// Creating an account on a password server, which asks for an email address to confirm.
+pub fn registration_email(s: &mut State) {
+    s.sign_in.step = SignInStep::Register {
+        server: homeserver(false, true),
+        request: Some(RequestId(1)),
+        asked: Some(Asked { step: RegistrationStep::Email, answered: false }),
+        error: None,
+    };
+    s.sign_in.email = rune::TextEdit::new("ada@hobby.chat");
+}
+
+/// Signing in again as a suspended account on an OAuth server: no QR code, no new account.
+pub fn sign_in_resume(s: &mut State) {
+    sign_in_browser(s);
+    s.sign_in.resume = Some(AccountId::new("@ada:hobby.chat"));
+}
+
+/// The registration form on a password server.
+pub fn registration_form(s: &mut State) {
+    s.sign_in.step = SignInStep::Register { server: homeserver(false, true), request: None, asked: None, error: None };
+    s.sign_in.username = rune::TextEdit::new("ada");
 }
 
 /// Sign-in step 2 on a password-only server.
@@ -394,6 +577,7 @@ pub fn sign_in_browser(s: &mut State) {
         server: homeserver(true, true),
         request: Some(matrix_core::RequestId(1)),
         url: Some("https://auth.example.org/authorize".into()),
+        create: false,
         error: None,
     };
 }
@@ -408,14 +592,16 @@ pub fn room_history(s: &mut State) {
     let thread = matrix_core::ThreadInfo {
         root: DEMO_THREAD.1.into(),
         sender_name: "Alan Turing".into(),
+        sender_id: ALAN.into(),
         body: "Cross-signing verification passes on Linux, macOS and Windows.".into(),
         replies: 3,
         latest_at: Some(DEMO_DAY_MS + 11 * 3_600_000 + 36 * 60_000),
     };
     apply(s, Event::Threads { account: AccountId::new(ADA), room_id: room_id.clone(), threads: vec![thread] });
-    let file = |name: &str, kind: AttachmentKind, who: &str, minutes: u64| matrix_core::SharedFile {
+    let file = |name: &str, kind: AttachmentKind, (id, who): (&str, &str), minutes: u64| matrix_core::SharedFile {
         event_id: format!("$file-{name}"),
         sender_name: who.into(),
+        sender_id: id.into(),
         timestamp: DEMO_DAY_MS + 10 * 3_600_000 + minutes * 60_000,
         attachment: Attachment {
             kind,
@@ -428,9 +614,9 @@ pub fn room_history(s: &mut State) {
         },
     };
     let files = vec![
-        file("release-notes-0.2.pdf", AttachmentKind::File, "Ada Lovelace", 33),
-        file("screenshot-sidebar.png", AttachmentKind::Image, "Grace Hopper", 12),
-        file("standup.ogg", AttachmentKind::Audio, "Kai", 2),
+        file("release-notes-0.2.pdf", AttachmentKind::File, (ADA, "Ada Lovelace"), 33),
+        file("screenshot-sidebar.png", AttachmentKind::Image, (GRACE, "Grace Hopper"), 12),
+        file("standup.ogg", AttachmentKind::Audio, (KAI, "Kai"), 2),
     ];
     apply(s, Event::Files { account: AccountId::new(ADA), room_id, files });
 }
@@ -720,10 +906,13 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
         call: matrix_core::RoomCall { via: Some(matrix_core::CallVia::Rtc), ..matrix_core::RoomCall::default() },
         activity_ms: None,
         encrypted: true,
+        public: false,
         can_rename: true,
         pinned: Vec::new(),
         can_pin: true,
         saved: Vec::new(),
+        priority: matrix_core::RoomPriority::Normal,
+        marked_unread: false,
     }
 }
 
@@ -1450,4 +1639,103 @@ pub fn scheduled(s: &mut State) {
             ],
         },
     );
+}
+
+/// The general room with hidden events showing: room state the timeline otherwise leaves out.
+pub fn hidden_events(s: &mut State) {
+    seed(s);
+    let account = AccountId::new(ADA);
+    let hidden = |id: &str, kind: &str, name: &str, at: u64| matrix_core::TimelineEntry {
+        id: id.into(),
+        kind: matrix_core::EntryKind::Hidden(Box::new(matrix_core::HiddenEvent {
+            event_id: Some(format!("${id}")),
+            sender: matrix_core::Person {
+                id: format!("@{}:example.org", name.to_lowercase()),
+                name: name.into(),
+                avatar: None,
+            },
+            event_type: kind.into(),
+            timestamp_ms: at,
+        })),
+    };
+    let key = TimelineKey::room(DEMO_THREAD.0);
+    for (id, kind, name, at) in [
+        ("hidden-acl", "m.room.server_acl", "Grace", 1_700_000_000_000),
+        ("hidden-widget", "im.vector.modular.widgets", "Alan", 1_700_000_100_000),
+    ] {
+        seed_timeline(s, &account, &key, TimelineDiff::PushBack(hidden(id, kind, name, at)));
+    }
+    s.set_show_hidden_events(true);
+    s.select_room(DEMO_THREAD.0);
+}
+
+/// The general room's widgets panel: a board, a dashboard and a Jitsi meeting.
+pub fn widgets(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    s.show_side(crate::state::SidePanel::Widgets);
+    let widget = |id: &str, name: &str, kind: &str, url: &str, host: &str| matrix_core::Widget {
+        id: id.into(),
+        name: name.into(),
+        kind: kind.into(),
+        url: url.into(),
+        host: host.into(),
+        creator: Some("@grace:example.org".into()),
+        can_remove: true,
+    };
+    let widgets = matrix_core::Widgets {
+        widgets: vec![
+            widget("board", "Sprint board", "m.custom", "https://board.example.org/team", "board.example.org"),
+            widget(
+                "grafana",
+                "Server dashboard",
+                "m.grafana",
+                "https://grafana.example.org/d/1",
+                "grafana.example.org",
+            ),
+            widget("standup", "Standup", "jitsi", "https://meet.example.org/TeamStandup", "meet.example.org"),
+        ],
+        can_add: true,
+    };
+    s.accounts.set_widgets(&AccountId::new(ADA), DEMO_THREAD.0.into(), widgets);
+}
+
+/// The source of an encrypted message: as this device reads it, and as it was sent.
+pub fn event_source(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    let source = matrix_core::EventSource {
+        room_id: DEMO_THREAD.0.into(),
+        event_id: DEMO_THREAD.1.into(),
+        json: format!(
+            r#"{{
+  "type": "m.room.message",
+  "sender": "@alan:example.org",
+  "event_id": "{event}",
+  "origin_server_ts": 1700000000000,
+  "content": {{
+    "msgtype": "m.text",
+    "body": "Has anyone tried the new build?"
+  }}
+}}"#,
+            event = DEMO_THREAD.1
+        ),
+        encrypted: Some(format!(
+            r#"{{
+  "type": "m.room.encrypted",
+  "sender": "@alan:example.org",
+  "event_id": "{event}",
+  "origin_server_ts": 1700000000000,
+  "content": {{
+    "algorithm": "m.megolm.v1.aes-sha2",
+    "ciphertext": "AwgAEpABqOCzJ2Tp…",
+    "device_id": "ALANLAPTOP",
+    "sender_key": "Hc1gJ8i3y1cCi0ZmRp3K7XcfuF0pB6wd1Sx4nT2EYfQ",
+    "session_id": "3yv1Q3wN1cZ9u2lO0d5XG4WeV8m7n2Ck1lZ6aQpTb3Y"
+  }}
+}}"#,
+            event = DEMO_THREAD.1
+        )),
+    };
+    s.modal = Some(crate::state::Modal::Source(crate::state::SourceView::Shown(Box::new(source))));
 }

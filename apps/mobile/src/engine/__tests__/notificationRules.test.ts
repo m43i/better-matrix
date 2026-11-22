@@ -148,6 +148,7 @@ describe('tapRoute', () => {
                   space: false,
                   kind: 'Group',
                   inviter: null,
+                  stranger: false,
                 },
               ]
             : [],

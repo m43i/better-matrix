@@ -79,8 +79,36 @@ pub enum AttachmentAction {
 }
 
 impl State {
+    /// Acts on a file from its message in `room_id`: nothing while its media is held back there
+    /// (ADR 0011), as the menu doesn't offer it then.
+    pub fn act_on_message_attachment(
+        &mut self,
+        account: &AccountId,
+        room_id: &str,
+        event_id: &str,
+        file: &Attachment,
+        action: AttachmentAction,
+    ) {
+        let held = self.accounts.get(account).is_some_and(|data| {
+            data.hides_listed_media(room_id, event_id, file, &self.revealed_media)
+                || data.ignores_sender_of(room_id, event_id)
+        });
+        if held {
+            self.popover = None;
+            return;
+        }
+        self.act_on_attachment(account.clone(), file, action);
+    }
+
     pub fn act_on_attachment(&mut self, account: AccountId, file: &Attachment, action: AttachmentAction) {
         self.popover = None;
+        // What the preview holds back can't be saved, copied or opened either (ADR 0011).
+        // Nor what someone the user ignores sent.
+        if (self.preview_held() || self.preview_item_ignored())
+            && self.preview.as_ref().is_some_and(|preview| preview.attachment == *file)
+        {
+            return;
+        }
         let Some(media) = file.media.clone() else { return };
         match action {
             AttachmentAction::CopyImage if file.kind == AttachmentKind::Image => {

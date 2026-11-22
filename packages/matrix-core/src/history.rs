@@ -26,6 +26,8 @@ pub struct ThreadInfo {
     pub root: String,
     /// Who started it.
     pub sender_name: String,
+    /// Their Matrix ID: whether the user ignores them.
+    pub sender_id: String,
     /// The root message's text.
     pub body: String,
     /// How many replies it has.
@@ -42,6 +44,8 @@ pub struct SharedFile {
     pub event_id: String,
     /// Who shared it.
     pub sender_name: String,
+    /// Their Matrix ID: whether the user ignores them, and whether the file is the user's own.
+    pub sender_id: String,
     /// When, in milliseconds since the epoch.
     pub timestamp: u64,
     /// The file.
@@ -189,6 +193,7 @@ impl Account {
             threads.push(ThreadInfo {
                 root: event["event_id"].as_str().unwrap_or_default().to_owned(),
                 sender_name: sender_name(&room, &event).await,
+                sender_id: event["sender"].as_str().unwrap_or_default().to_owned(),
                 body: event["content"]["body"].as_str().unwrap_or_default().to_owned(),
                 replies: thread["count"].as_u64().unwrap_or_default(),
                 latest_at: thread["latest_event"]["origin_server_ts"].as_u64(),
@@ -219,6 +224,7 @@ impl Account {
                     files.push(SharedFile {
                         event_id: event["event_id"].as_str().unwrap_or_default().to_owned(),
                         sender_name: sender_name(&room, &event).await,
+                        sender_id: event["sender"].as_str().unwrap_or_default().to_owned(),
                         timestamp: event["origin_server_ts"].as_u64().unwrap_or_default(),
                         attachment,
                     });

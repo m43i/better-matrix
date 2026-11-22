@@ -156,7 +156,13 @@ pub(crate) async fn fetch(
         }
         found => found,
     };
-    Ok(match status {
+    let content = match status {
+        Ok(NotificationStatus::Event(item))
+            if matches!(item.event, NotificationEvent::Invite(_))
+                && crate::safety::hides_invite_from(client, item.event.sender()).await =>
+        {
+            PushContent::Nothing
+        }
         Ok(NotificationStatus::Event(item)) => content_of(account, room_id, event_id, *item),
         Ok(NotificationStatus::EventFilteredOut | NotificationStatus::EventRedacted) => PushContent::Nothing,
         Ok(NotificationStatus::EventNotFound) => hidden(),
@@ -164,7 +170,13 @@ pub(crate) async fn fetch(
             eprintln!("matrix-core: could not fetch a push's event: {error}");
             hidden()
         }
-    })
+    };
+    // An invitation whose event couldn't be read is still known by its room.
+    let invited = || notifications.get_room(&room).or_else(|| client.get_room(&room));
+    if matches!(content, PushContent::Hidden { .. }) && crate::safety::hides_invitation(client, invited()).await {
+        return Ok(PushContent::Nothing);
+    }
+    Ok(content)
 }
 
 /// What a fetched notification shows.

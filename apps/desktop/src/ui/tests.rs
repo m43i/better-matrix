@@ -694,6 +694,7 @@ fn an_executable_attachment_menu_should_offer_download_without_open() {
             rune::col().w_full().h_full().children(super::attachments::actions(
                 &AccountId::new(demo::ADA),
                 file,
+                None,
                 &super::theme::palette(true),
             ))
         },
@@ -1156,6 +1157,7 @@ fn a_voice_memo_in_a_cramped_timeline_should_keep_its_controls_inside_it() {
             play: true,
             held: false,
             scrub_from: None,
+            sender: None,
         });
         // The widest speed label.
         s.settings.playback_speed = crate::state::PlaybackSpeed::Faster;
@@ -1338,6 +1340,7 @@ fn escape_should_close_an_attachment_preview_before_the_dialog_beneath_it() {
             s.show_settings_section(SettingsSection::General);
             s.preview = Some(Preview {
                 account: AccountId::new(demo::ADA),
+                room_id: demo::DEMO_THREAD.0.into(),
                 attachment: Attachment {
                     kind: if document { AttachmentKind::File } else { AttachmentKind::Image },
                     name: if document { "notes.pdf" } else { "photo.png" }.into(),
@@ -2080,4 +2083,1004 @@ fn switching_to_a_room_should_show_its_first_page_whole_on_its_first_frame() {
             "{entry} {row:?} outside {viewport:?}"
         );
     }
+}
+
+#[test]
+fn held_back_media_should_show_a_placeholder_until_show_is_pressed() {
+    let mut rt = runtime(demo::hidden_media);
+    assert!(rt.find("hidden-media-$attachment").is_some());
+    assert!(rt.find("image-better-matrix.png").is_none());
+    press(&mut rt, "show-media-$attachment");
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("hidden-media-$attachment").is_none());
+    assert!(rt.find("image-better-matrix.png").is_some());
+}
+
+#[test]
+fn a_strangers_hidden_invitation_should_stay_out_of_the_sidebar_but_open_from_settings() {
+    let mut rt = runtime(demo::safety);
+    assert!(rt.find("invitation-!prizes:spam.example").is_none());
+    press(&mut rt, "safety-hidden-!prizes:spam.example");
+    assert!(
+        matches!(&rt.state.modal, Some(crate::state::Modal::Invitation { room_id, .. }) if room_id == "!prizes:spam.example")
+    );
+}
+
+#[test]
+fn stop_ignoring_in_settings_should_remove_the_person_from_the_list() {
+    // A window tall enough for the list at the bottom of the page.
+    let mut state = State::detached();
+    demo::safety(&mut state);
+    let mut rt = Runtime::new(state, super::view, (1200.0, 1500.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, "safety-unignore-@troll:spam.example");
+    assert!(rt.find("safety-ignored-@troll:spam.example").is_none());
+    assert!(rt.find("safety-ignored-none").is_some());
+}
+
+#[test]
+fn choosing_where_media_shows_should_select_it() {
+    let mut rt = runtime(demo::safety);
+    press(&mut rt, "safety-media-Never");
+    assert_eq!(rt.state.active_account().unwrap().safety.media, matrix_core::ShowMedia::Never);
+}
+
+#[test]
+fn someone_elses_message_should_offer_a_report_that_opens_the_dialog() {
+    let mut rt = runtime(|s| {
+        demo::attachment_message(s);
+        s.popover = Some(crate::state::Popover::MessageMenu {
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            event_id: "$attachment".into(),
+            at: Some((600, 200)),
+        });
+    });
+    press(&mut rt, "message-report");
+    assert!(rt.find("report-dialog").is_some());
+}
+
+#[test]
+fn the_report_dialog_should_tick_also_ignore_when_pressed() {
+    let mut rt = runtime(demo::report);
+    press(&mut rt, "report-ignore");
+    assert!(matches!(&rt.state.modal, Some(crate::state::Modal::Report(form)) if form.also_ignore));
+}
+
+#[test]
+fn the_member_menu_should_offer_to_ignore_and_report() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.show_side(SidePanel::Person(matrix_core::Person {
+            id: "@grace:example.org".into(),
+            name: "Grace Hopper".into(),
+            avatar: None,
+        }));
+        s.toggle_member_menu("@grace:example.org");
+    });
+    assert!(rt.find("member-menu-report").is_some());
+    press(&mut rt, "member-menu-ignore");
+    assert!(matches!(
+        &rt.state.modal,
+        Some(crate::state::Modal::Confirm(crate::state::Confirm::Ignore { user_id, .. })) if user_id == "@grace:example.org"
+    ));
+}
+
+#[test]
+fn the_files_panel_should_leave_out_files_of_people_the_user_ignores() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.toggle_side(SidePanel::Files);
+        demo::room_history(s);
+        let safety =
+            matrix_core::Safety { ignored: vec!["@grace:example.org".into()], ..matrix_core::Safety::default() };
+        s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, &mut rune::Tx::default());
+    });
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("listed-file-$file-screenshot-sidebar.png").is_none());
+    assert!(rt.find("listed-file-$file-standup.ogg").is_some());
+}
+
+#[test]
+fn a_held_preview_should_offer_no_file_actions() {
+    let mut rt = runtime(demo::preview_held);
+    assert!(rt.find("preview-download").is_none());
+    let (x, y) = rt.find("preview-held").expect("the held card");
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.popover.is_none());
+}
+
+#[test]
+fn a_held_back_pictures_message_menu_should_offer_no_file_actions() {
+    let menu = |s: &mut State| {
+        s.popover = Some(crate::state::Popover::MessageMenu {
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            event_id: "$attachment".into(),
+            at: Some((600, 200)),
+        });
+    };
+    let rt = runtime(|s| {
+        demo::hidden_media(s);
+        menu(s);
+    });
+    assert!(rt.find("message-menu").is_some());
+    for key in ["attachment-copy-image", "attachment-open", "attachment-download"] {
+        assert!(rt.find(key).is_none(), "{key} offered while held");
+    }
+    let rt = runtime(|s| {
+        demo::hidden_media(s);
+        s.revealed_media.insert((AccountId::new(demo::ADA), "$attachment".into()));
+        menu(s);
+    });
+    assert!(rt.find("attachment-download").is_some());
+}
+
+#[test]
+fn a_kept_timeline_should_draw_no_messages_from_someone_ignored_since() {
+    let mut rt = runtime(demo::attachment_message);
+    assert!(rt.find("msg-attachment").is_some());
+    let safety = matrix_core::Safety { ignored: vec!["@grace:example.org".into()], ..matrix_core::Safety::default() };
+    rt.update(|s, tx| s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, tx));
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("msg-attachment").is_none());
+    // The stored entry stays, for when they are no longer ignored.
+    let key = TimelineKey::room(demo::DEMO_THREAD.0);
+    assert_eq!(rt.state.active_account().unwrap().timeline(&key).map(|t| t.entries.len()), Some(1));
+}
+
+#[test]
+fn a_held_back_video_without_a_poster_should_offer_show_on_its_file_card() {
+    let video = matrix_core::Attachment {
+        kind: matrix_core::AttachmentKind::Video,
+        name: "clip.mp4".into(),
+        size: None,
+        media: Some(matrix_core::MediaRef::opaque("clip")),
+        thumbnail: None,
+        dimensions: None,
+        audio: None,
+    };
+    let mut rt = runtime(move |s| {
+        demo::image_message(s, video);
+        let safety = matrix_core::Safety { media: matrix_core::ShowMedia::Never, ..matrix_core::Safety::default() };
+        s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, &mut rune::Tx::default());
+    });
+    assert!(rt.find("show-media-$attachment").is_some());
+    // The card itself does nothing while held: neither shows nor opens it.
+    let (x, y) = rt.find("file-clip.mp4").expect("the file card");
+    rt.pointer_down(x - 100.0, y);
+    rt.pointer_up(x - 100.0, y);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.preview.is_none() && rt.state.revealed_media.is_empty());
+    press(&mut rt, "show-media-$attachment");
+    assert!(rt.find("show-media-$attachment").is_none());
+    press(&mut rt, "file-clip.mp4");
+    assert!(rt.state.preview.is_some());
+}
+
+#[test]
+fn the_threads_panel_should_leave_out_threads_of_people_the_user_ignores() {
+    let thread = format!("listed-thread-{}", demo::DEMO_THREAD.1);
+    let open = |s: &mut State| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.toggle_side(SidePanel::Threads);
+        demo::room_history(s);
+    };
+    let rt = runtime(open);
+    assert!(rt.find(&thread).is_some());
+    let rt = runtime(move |s| {
+        open(s);
+        let safety =
+            matrix_core::Safety { ignored: vec!["@alan:example.org".into()], ..matrix_core::Safety::default() };
+        s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, &mut rune::Tx::default());
+    });
+    assert!(rt.find(&thread).is_none());
+}
+
+/// The hidden-media scene with Grace's message linking a page whose card has a picture.
+fn held_link_card(s: &mut State) {
+    demo::hidden_media(s);
+    let account = AccountId::new(demo::ADA);
+    let message = Message {
+        event_id: "$link".into(),
+        sender_id: "@grace:example.org".into(),
+        sender_name: "Grace Hopper".into(),
+        timestamp_ms: 1,
+        content: MessageContent::Text { body: "Look: https://x.org/a".into(), html: None },
+        ..Message::default()
+    };
+    let entry = TimelineEntry { id: "link".into(), kind: EntryKind::Message(Box::new(message)) };
+    s.apply(
+        Event::TimelineChanged {
+            account: account.clone(),
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(vec![entry])],
+        },
+        &mut rune::Tx::default(),
+    );
+    let preview = matrix_core::links::LinkPreview {
+        title: Some("A page".into()),
+        image: Some((matrix_core::MediaRef::opaque("page-image"), None)),
+        ..Default::default()
+    };
+    let event = Event::LinkPreview { account, url: "https://x.org/a".into(), preview: Some(Box::new(preview)) };
+    s.apply(event, &mut rune::Tx::default());
+}
+
+#[test]
+fn a_held_back_link_card_image_should_say_show_and_reveal_without_opening_the_link() {
+    let mut rt = runtime(held_link_card);
+    let thumb = rt.presented("link-$link-hidden").expect("the held-back image").0;
+    let inside = |rect: [f32; 4]| {
+        rect[0] >= thumb[0] && rect[1] >= thumb[1] && rect[0] <= thumb[0] + thumb[2] && rect[1] <= thumb[1] + thumb[3]
+    };
+    assert!(
+        rt.elements().iter().any(|element| element.text.as_deref() == Some("Show") && inside(element.rect)),
+        "the placeholder says Show"
+    );
+    rt.take_url_requests();
+    press(&mut rt, "link-$link-hidden");
+    assert!(rt.state.revealed_media.contains(&(AccountId::new(demo::ADA), "$link".to_owned())));
+    assert!(rt.take_url_requests().is_empty(), "showing the image doesn't open the link");
+}
+
+#[test]
+fn search_should_leave_out_messages_of_people_the_user_ignores_found_before_too() {
+    let found = |rt: &Runtime<State>, sender: &str| {
+        rt.state
+            .search
+            .messages
+            .iter()
+            .filter(|hit| hit.sender == sender)
+            .any(|hit| rt.find(&format!("found-message-{}-{}", hit.room_id, hit.event_id)).is_some())
+    };
+    let rt = runtime(demo::search);
+    let sender = rt.state.search.messages.first().map(|hit| hit.sender.clone()).expect("a message hit");
+    assert!(found(&rt, &sender));
+    let mut rt = runtime(demo::search);
+    let safety = matrix_core::Safety { ignored: vec![sender.clone()], ..matrix_core::Safety::default() };
+    rt.update(|s, tx| s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, tx));
+    rt.frame(1.0 / 60.0);
+    assert!(!rt.state.search.messages.is_empty(), "the results held are kept");
+    assert!(!found(&rt, &sender));
+}
+
+#[test]
+fn hidden_events_should_show_only_while_turned_on() {
+    let shown = runtime(demo::hidden_events);
+    assert!(shown.find("hidden-acl").is_some(), "a line for the server ACL change");
+    let left_out = runtime(|s| {
+        demo::hidden_events(s);
+        s.set_show_hidden_events(false);
+    });
+    assert!(left_out.find("hidden-acl").is_none());
+}
+
+#[test]
+fn a_hidden_events_source_button_should_ask_for_its_source() {
+    let mut rt = runtime(demo::hidden_events);
+    press(&mut rt, "hidden-acl-source");
+    assert!(matches!(rt.state.modal, Some(crate::state::Modal::Source(crate::state::SourceView::Loading(_)))));
+}
+
+#[test]
+fn the_message_menu_should_offer_the_messages_source() {
+    let mut rt = runtime(|s| {
+        demo::pinned_messages(s);
+        s.popover = Some(crate::state::Popover::MessageMenu {
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            event_id: demo::DEMO_THREAD.1.into(),
+            at: Some((600, 280)),
+        });
+    });
+    press(&mut rt, "message-source");
+    assert!(matches!(rt.state.modal, Some(crate::state::Modal::Source(_))));
+}
+
+#[test]
+fn the_widgets_panel_should_list_widgets_and_ask_before_removing_one() {
+    let mut rt = runtime(demo::widgets);
+    assert!(rt.find("widget-open-board").is_some());
+    assert!(rt.find("widget-open-standup").is_some());
+    press(&mut rt, "widget-remove-board");
+    assert!(matches!(rt.state.modal, Some(crate::state::Modal::Confirm(crate::state::Confirm::RemoveWidget { .. }))));
+}
+
+#[test]
+fn the_source_dialog_should_show_both_the_decrypted_and_the_sent_event() {
+    let rt = runtime(demo::event_source);
+    assert!(rt.find("source-dialog").is_some());
+    assert!(rt.find("source-copy").is_some());
+}
+
+#[test]
+fn choosing_chat_bubbles_in_the_appearance_settings_should_lay_messages_out_in_bubbles() {
+    let mut rt = runtime(|s| {
+        s.open_settings();
+        s.show_settings_section(SettingsSection::Appearance);
+    });
+    press(&mut rt, "message-layout-bubbles");
+    assert_eq!(rt.state.settings.message_layout, crate::state::MessageLayout::Bubbles);
+}
+
+#[test]
+fn classic_rows_should_hold_messages_in_no_bubble() {
+    let rt = runtime(|s| short_room(s, 1));
+    assert!(rt.find("msg-short-0-bubble").is_none());
+    assert!(rt.find("msg-short-0-sender-face").is_some());
+}
+
+/// [`short_room`] in chat bubbles, with Grace's message followed by one of Ada's own.
+fn bubble_room(s: &mut State) {
+    s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+    s.select_room(demo::DEMO_THREAD.0);
+    let mut own = short_message("own", 1);
+    if let EntryKind::Message(message) = &mut own.kind {
+        message.sender_id = demo::ADA.into();
+        message.sender_name = "Ada Lovelace".into();
+    }
+    s.apply(
+        Event::TimelineChanged {
+            account: AccountId::new(demo::ADA),
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(vec![short_message("short-0", 0), own])],
+        },
+        &mut rune::Tx::default(),
+    );
+}
+
+#[test]
+fn in_bubbles_other_peoples_messages_should_sit_at_the_left_beside_their_picture() {
+    let rt = runtime(bubble_room);
+    let face = element_rect(&rt, "msg-short-0-sender-face");
+    let bubble = element_rect(&rt, "msg-short-0-bubble");
+    let own = element_rect(&rt, "msg-own-bubble");
+    assert!(bubble[0] > face[0] + face[2] - 1.0, "the bubble follows the picture");
+    assert!(bubble[0] + bubble[2] < own[0] + own[2], "it ends short of the user's own");
+}
+
+#[test]
+fn in_bubbles_the_users_own_messages_should_sit_at_the_right_without_a_picture() {
+    let rt = runtime(bubble_room);
+    let other = element_rect(&rt, "msg-short-0-bubble");
+    let own = element_rect(&rt, "msg-own-bubble");
+    let row = element_rect(&rt, "msg-own");
+    assert!(rt.find("msg-own-sender-face").is_none());
+    assert!(rt.find("msg-own-sender-name").is_none());
+    assert!(own[0] > other[0] + other[2] / 2.0, "the user's own bubble starts right of the other's");
+    assert!(own[0] > row[0] + row[2] / 2.0, "and sits in the timeline's right half");
+}
+
+#[test]
+fn pressing_a_bubble_beside_its_text_should_open_its_thread() {
+    let mut rt = runtime(bubble_room);
+    // In the bubble's padding, under the words and left of the time: the text keeps its own
+    // presses for selecting.
+    let bubble = element_rect(&rt, "msg-own-bubble");
+    let (x, y) = (bubble[0] + 4.0, bubble[1] + bubble[3] - 3.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.active_thread(), Some("$own"));
+}
+
+#[test]
+fn in_bubbles_the_toolbar_of_the_users_own_message_should_keep_clear_of_its_bubble() {
+    let rt = runtime(bubble_room);
+    let toolbar = element_rect(&rt, "actions-$own");
+    let own = element_rect(&rt, "msg-own-bubble");
+    assert!(toolbar[0] + toolbar[2] < own[0], "the toolbar sits left of the bubble");
+}
+
+#[test]
+fn in_bubbles_the_users_own_voice_message_should_sit_at_the_right() {
+    use matrix_core::{Attachment, AttachmentKind, AudioDetails, MediaRef};
+
+    let rt = runtime(|s| {
+        bubble_room(s);
+        let mut voice = short_message("voice", 2);
+        if let EntryKind::Message(message) = &mut voice.kind {
+            message.sender_id = demo::ADA.into();
+            message.content = MessageContent::Attachment(Attachment {
+                kind: AttachmentKind::Audio,
+                name: "memo.ogg".into(),
+                size: None,
+                media: Some(MediaRef::opaque("memo")),
+                thumbnail: None,
+                dimensions: None,
+                audio: Some(AudioDetails { voice: true, duration_ms: Some(4_000), waveform: vec![500; 40] }),
+            });
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::PushBack(voice)],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let card = element_rect(&rt, "audio-$voice");
+    let text = element_rect(&rt, "msg-own-bubble");
+    assert!((card[0] + card[2] - (text[0] + text[2])).abs() < 1.0, "the card ends where the user's bubbles do");
+}
+
+#[test]
+fn bubbles_should_name_senders_in_a_direct_chat_a_third_person_joined() {
+    let mut room = demo_dm();
+    room.member_count = 3;
+    assert!(super::timeline::names_sender(&room, "@grace:example.org"));
+}
+
+#[test]
+fn bubbles_should_not_name_the_other_person_of_a_one_to_one_chat() {
+    assert!(!super::timeline::names_sender(&demo_dm(), "@grace:example.org"));
+}
+
+#[test]
+fn bubbles_should_name_someone_who_left_a_direct_chat() {
+    assert!(super::timeline::names_sender(&demo_dm(), "@alan:example.org"));
+}
+
+/// The demo's one-to-one chat with Grace.
+fn demo_dm() -> matrix_core::RoomSummary {
+    let mut s = State::detached();
+    demo::seed(&mut s);
+    s.accounts.get(&AccountId::new(demo::ADA)).and_then(|a| a.room("!dm-grace:example.org")).unwrap().clone()
+}
+
+#[test]
+fn in_bubbles_the_caption_of_the_users_own_gif_should_keep_to_the_gifs_side() {
+    let rt = runtime(|s| {
+        bubble_room(s);
+        let mut gif = short_message("gif", 2);
+        if let EntryKind::Message(message) = &mut gif.kind {
+            message.sender_id = demo::ADA.into();
+            message.content = MessageContent::Text { body: "Ha https://x.org/a.gif".into(), html: None };
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::PushBack(gif)],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let gif = element_rect(&rt, "gif-https://x.org/a.gif");
+    let caption = element_rect(&rt, "text-$gif");
+    // The words' box reaches `REACH` past them on either side.
+    let words_end = caption[0] + caption[2] - super::message_text::REACH;
+    assert!((words_end - (gif[0] + gif[2])).abs() < 1.0, "the caption ends where the GIF does");
+}
+
+#[test]
+fn in_bubbles_a_formatted_caption_of_the_users_own_gif_should_keep_to_the_gifs_side() {
+    let rt = runtime(|s| {
+        bubble_room(s);
+        let mut gif = short_message("gif", 2);
+        if let EntryKind::Message(message) = &mut gif.kind {
+            message.sender_id = demo::ADA.into();
+            message.content = MessageContent::Text {
+                body: "Ha https://x.org/a.gif".into(),
+                html: Some("<b>Ha</b> https://x.org/a.gif".into()),
+            };
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::PushBack(gif)],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let gif = element_rect(&rt, "gif-https://x.org/a.gif");
+    let caption = element_rect(&rt, "rich-$gif");
+    assert!(
+        caption[0] > gif[0],
+        "the caption starts within the GIF's span, not at the row's left: {caption:?} {gif:?}"
+    );
+}
+
+#[test]
+fn in_bubbles_the_users_own_card_should_be_no_wider_than_a_classic_rows() {
+    let rt = runtime(|s| {
+        bubble_room(s);
+        let mut poll = short_message("poll", 2);
+        if let EntryKind::Message(message) = &mut poll.kind {
+            message.sender_id = demo::ADA.into();
+            message.content = MessageContent::Poll(matrix_core::Poll {
+                question: "Lunch?".into(),
+                answers: vec![
+                    matrix_core::PollAnswer { id: "a".into(), text: "Yes".into(), votes: 0, mine: false },
+                    matrix_core::PollAnswer { id: "b".into(), text: "No".into(), votes: 0, mine: false },
+                ],
+                ..matrix_core::Poll::default()
+            });
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::PushBack(poll)],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let own = element_rect(&rt, "msg-poll-bubble");
+    let face = element_rect(&rt, "msg-short-0-sender-face");
+    assert!(own[0] >= face[0] + face[2] - 1.0, "the card leaves the picture's gutter free");
+}
+
+#[test]
+fn in_bubbles_the_picture_of_an_unnamed_sender_should_take_keyboard_focus() {
+    let rt = runtime(|s| {
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+        s.select_room("!dm-grace:example.org");
+    });
+    let faces: Vec<_> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.key.as_deref().is_some_and(|key| key.ends_with("-sender-face")))
+        .collect();
+    assert!(!faces.is_empty() && faces.iter().all(|face| face.focusable));
+}
+
+#[test]
+fn every_settings_section_should_be_reachable_in_the_smallest_window_at_a_large_size() {
+    // The smallest window, 720 by 480 points, at 125% zoom.
+    let mut rt = runtime(State::open_settings);
+    rt.set_viewport((576.0, 384.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    let nav = rt.presented("settings-nav").expect("the sections").0;
+    rt.wheel(nav[0] + nav[2] / 2.0, nav[1] + nav[3] / 2.0, -400.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    let info = rt.presented("settings-info").expect("Info").0;
+    let modal = rt.presented("settings-modal").expect("the dialog").0;
+    assert!(
+        info[1] + info[3] <= nav[1] + nav[3] + 0.5,
+        "Info scrolls into the dialog: info {info:?} nav {nav:?} modal {modal:?}"
+    );
+    press(&mut rt, "settings-info");
+    assert_eq!(rt.state.modal, Some(crate::state::Modal::Settings(SettingsSection::Info)));
+}
+
+#[test]
+fn in_bubbles_a_compact_timeline_should_keep_the_time_inside_the_bubble() {
+    // The smallest window, 720 by 480 points, at 150% zoom: a compact timeline.
+    let mut rt = runtime(|s| {
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+        s.select_room("!dm-grace:example.org");
+    });
+    rt.set_viewport((480.0, 320.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    let timeline = rt.presented("timeline").expect("the timeline").0;
+    let bubbles: Vec<_> = rt
+        .elements()
+        .into_iter()
+        .filter_map(|e| Some((e.key.clone()?, e.rect)))
+        .filter(|(key, _)| key.ends_with("-bubble"))
+        .collect();
+    assert!(!bubbles.is_empty(), "the timeline shows bubbles");
+    for (key, bubble) in bubbles {
+        let message = key.trim_end_matches("-bubble");
+        let Some(time) = rt.presented(&format!("{message}-time")) else { continue };
+        let time = time.0;
+        assert!(
+            time[0] >= bubble[0] - 0.5 && time[0] + time[2] <= bubble[0] + bubble[2] + 0.5,
+            "{message}: the time {time:?} leaves its bubble {bubble:?} in a timeline {timeline:?}"
+        );
+    }
+}
+
+#[test]
+fn in_bubbles_a_thread_link_should_stay_within_a_narrow_timeline() {
+    let mut rt = runtime(|s| {
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+        s.select_room(demo::DEMO_THREAD.0);
+    });
+    rt.set_viewport((640.0, 480.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    let timeline = rt.presented("timeline").expect("the timeline").0;
+    let link = rt.presented(&format!("thread-link-{}", demo::DEMO_THREAD.1)).expect("the thread link").0;
+    assert!(link[0] + link[2] <= timeline[0] + timeline[2], "the link {link:?} ends past the timeline {timeline:?}");
+}
+
+#[test]
+fn in_bubbles_wrapped_reactions_on_the_users_own_message_should_keep_to_the_right() {
+    let rt = runtime(|s| {
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+        s.select_room(demo::DEMO_THREAD.0);
+        let mut own = short_message("own", 1);
+        if let EntryKind::Message(message) = &mut own.kind {
+            message.sender_id = demo::ADA.into();
+            message.reactions =
+                (0..24).map(|i| matrix_core::Reaction { key: format!(":r{i}:"), count: 1, mine: false }).collect();
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::Reset(vec![own])],
+            },
+            &mut rune::Tx::default(),
+        );
+    });
+    let bubble = element_rect(&rt, "msg-own-bubble");
+    let last = element_rect(&rt, "reaction-$own-:r23:");
+    let first = element_rect(&rt, "reaction-$own-:r0:");
+    assert!(last[1] > first[1], "the chips wrap");
+    assert!((last[0] + last[2] - (bubble[0] + bubble[2])).abs() < 1.0, "the last line ends where the bubble does");
+}
+
+#[test]
+fn stop_ignoring_should_show_their_messages_only_once_saved() {
+    let mut rt = runtime(|s| {
+        demo::attachment_message(s);
+        // Grace's message is the room's newest: its preview, once shown.
+        let message = Message {
+            event_id: "$late".into(),
+            sender_id: "@grace:example.org".into(),
+            sender_name: "Grace Hopper".into(),
+            timestamp_ms: u64::MAX / 2,
+            content: MessageContent::Text { body: "Still here".into(), html: None },
+            ..Message::default()
+        };
+        let entry = TimelineEntry { id: "late".into(), kind: EntryKind::Message(Box::new(message)) };
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::Reset(vec![entry])],
+            },
+            &mut rune::Tx::default(),
+        );
+        let safety =
+            matrix_core::Safety { ignored: vec!["@grace:example.org".into()], ..matrix_core::Safety::default() };
+        s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, &mut rune::Tx::default());
+    });
+    let preview = |rt: &Runtime<State>| {
+        rt.state.active_account().unwrap().last_message(demo::DEMO_THREAD.0).map(|m| m.event_id.clone())
+    };
+    let settle = |rt: &mut Runtime<State>| {
+        for _ in 0..10 {
+            rt.frame(1.0 / 60.0);
+        }
+    };
+    assert!(rt.find("msg-late").is_none());
+    let ada = AccountId::new(demo::ADA);
+    let owner = ada.clone();
+    rt.update(move |s, _| s.stop_ignoring(&owner, "@grace:example.org"));
+    settle(&mut rt);
+    assert!(rt.find("msg-late").is_none(), "still hidden while Stop ignoring saves");
+    assert_ne!(preview(&rt).as_deref(), Some("$late"));
+    // Saved: the engine reports the list without them.
+    rt.update(move |s, tx| s.apply(Event::Safety { account: ada, safety: matrix_core::Safety::default() }, tx));
+    settle(&mut rt);
+    assert!(rt.find("msg-late").is_some());
+    assert_eq!(preview(&rt).as_deref(), Some("$late"));
+}
+
+#[test]
+fn held_back_media_in_bubbles_should_show_a_placeholder_until_show_is_pressed() {
+    let mut rt = runtime(|s| {
+        demo::hidden_media(s);
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+    });
+    assert!(rt.find("hidden-media-$attachment").is_some());
+    assert!(rt.find("image-better-matrix.png").is_none());
+    press(&mut rt, "show-media-$attachment");
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("hidden-media-$attachment").is_none());
+    assert!(rt.find("image-better-matrix.png").is_some());
+}
+
+#[test]
+fn bubbles_should_draw_no_messages_from_someone_ignored() {
+    let mut rt = runtime(|s| {
+        demo::attachment_message(s);
+        s.settings.message_layout = crate::state::MessageLayout::Bubbles;
+    });
+    assert!(rt.find("msg-attachment").is_some());
+    let safety = matrix_core::Safety { ignored: vec!["@grace:example.org".into()], ..matrix_core::Safety::default() };
+    rt.update(|s, tx| s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, tx));
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("msg-attachment").is_none());
+}
+
+#[test]
+fn a_narrow_link_card_should_keep_its_held_back_picture_under_the_words() {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    held_link_card(&mut state);
+    state.settings.message_layout = crate::state::MessageLayout::Bubbles;
+    let safety = matrix_core::Safety { media: matrix_core::ShowMedia::Never, ..matrix_core::Safety::default() };
+    state.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, &mut rune::Tx::default());
+    let mut rt = Runtime::new(state, super::view, (620.0, 760.0), Env::new(true, 1.0));
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    let card = rt.presented("link-$link").expect("the card").0;
+    let thumb = rt.presented("link-$link-hidden").expect("Show, even when narrow").0;
+    assert!(thumb[1] > card[1] + 20.0, "under the words, not beside them");
+    press(&mut rt, "link-$link-hidden");
+    assert!(rt.state.revealed_media.contains(&(AccountId::new(demo::ADA), "$link".to_owned())));
+}
+
+#[test]
+fn a_held_back_link_card_image_that_failed_should_still_offer_show_and_try_again() {
+    let page = matrix_core::MediaRef::opaque("page-image");
+    let failed = page.clone();
+    let mut rt = runtime(move |s| {
+        held_link_card(s);
+        s.media.failed(failed, std::time::Instant::now());
+    });
+    assert!(rt.state.media.has_failed(&page));
+    assert!(rt.find("link-$link-hidden").is_some(), "Show stays");
+    press(&mut rt, "link-$link-hidden");
+    assert!(rt.state.revealed_media.contains(&(AccountId::new(demo::ADA), "$link".to_owned())));
+    assert!(!rt.state.media.has_failed(&page), "tried again");
+}
+
+#[test]
+fn a_held_back_gif_that_failed_should_still_offer_show_and_try_again() {
+    let url = "https://x.org/party.gif";
+    let mut rt = runtime(move |s| {
+        demo::hidden_media(s);
+        let message = Message {
+            event_id: "$gif".into(),
+            sender_id: "@grace:example.org".into(),
+            sender_name: "Grace Hopper".into(),
+            timestamp_ms: 1,
+            content: MessageContent::Text { body: url.into(), html: None },
+            ..Message::default()
+        };
+        let entry = TimelineEntry { id: "gif".into(), kind: EntryKind::Message(Box::new(message)) };
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::Reset(vec![entry])],
+            },
+            &mut rune::Tx::default(),
+        );
+        s.gifs.failed(url, std::time::Instant::now());
+    });
+    assert!(rt.state.gifs.has_failed(url));
+    assert!(rt.find("hidden-media-$gif").is_some(), "Show stays");
+    press(&mut rt, "show-media-$gif");
+    assert!(rt.state.revealed_media.contains(&(AccountId::new(demo::ADA), "$gif".to_owned())));
+    assert!(!rt.state.gifs.has_failed(url), "tried again");
+}
+
+// ----- verification, account actions, linking devices, signing up ------------------------
+
+fn grace_identity(verified: bool, changed: bool) -> Option<matrix_core::Identity> {
+    Some(matrix_core::Identity { verified, changed })
+}
+
+#[test]
+fn a_verification_ready_for_a_code_should_show_it_to_scan() {
+    let rt = runtime(demo::verify_person_qr);
+    assert!(rt.find("verify-qr").is_some() && rt.find("verify-emoji").is_some());
+}
+
+#[test]
+fn the_verification_code_should_be_square_and_fit_its_dialog() {
+    let rt = runtime(demo::verify_person_qr);
+    let code = rt.presented("verify-qr").unwrap().0;
+    let dialog = rt.presented("verify-dialog").unwrap().0;
+    assert!((code[2] - code[3]).abs() < 0.5, "{code:?}");
+    assert!(code[0] >= dialog[0] && code[0] + code[2] <= dialog[0] + dialog[2], "{code:?} in {dialog:?}");
+}
+
+#[test]
+fn a_verified_person_should_show_the_badge_and_no_verify_button() {
+    let rt = runtime(|s| demo::person(s, grace_identity(true, false)));
+    let shown = rt.elements().into_iter().filter_map(|e| e.text).any(|text| text == "Verified");
+    assert!(shown && rt.find("person-verify").is_none());
+}
+
+#[test]
+fn an_unverified_person_should_offer_to_verify_them() {
+    let mut rt = runtime(|s| demo::person(s, grace_identity(false, false)));
+    press(&mut rt, "person-verify");
+    assert!(matches!(
+        &rt.state.modal,
+        Some(crate::state::Modal::Verification { with: Some(person), .. }) if person.id == "@grace:example.org"
+    ));
+}
+
+#[test]
+fn a_person_whose_identity_changed_should_be_warned_about() {
+    let rt = runtime(|s| demo::person(s, grace_identity(true, true)));
+    assert!(rt.find("person-identity").is_some() && rt.find("person-verify").is_some());
+}
+
+#[test]
+fn a_person_without_encryption_should_say_there_is_nothing_to_verify() {
+    let rt = runtime(|s| demo::person(s, None));
+    assert!(rt.find("person-cannot-verify").is_some() && rt.find("person-verify").is_none());
+}
+
+#[test]
+fn the_account_page_should_offer_the_offline_device_keys_password_and_deactivation() {
+    let rt = runtime(|s| s.open_account_settings());
+    for key in ["offline-device-on", "keys-export", "keys-import", "password-change", "deactivate-account"] {
+        assert!(rt.find(key).is_some(), "no {key}");
+    }
+}
+
+#[test]
+fn an_offline_device_the_server_does_not_keep_should_not_show() {
+    let rt = runtime(|s| {
+        let security = matrix_core::Security {
+            session_verified: true,
+            recovery: matrix_core::RecoveryStatus::Enabled,
+            offline_device: matrix_core::OfflineDevice::Unsupported,
+        };
+        s.apply(Event::SecurityChanged { account: AccountId::new(demo::ADA), security }, &mut rune::Tx::default());
+        s.open_account_settings();
+    });
+    assert!(rt.find("offline-device-on").is_none() && rt.find("offline-device-off").is_none());
+}
+
+#[test]
+fn turning_the_offline_device_on_should_ask_for_the_recovery_key() {
+    let mut rt = runtime(|s| s.open_account_settings());
+    press(&mut rt, "offline-device-on");
+    assert!(rt.find("recovery-key").is_some() && rt.find("recovery-forgot").is_none());
+}
+
+#[test]
+fn deactivating_should_confirm_with_a_choice_to_erase_messages() {
+    let mut rt = runtime(|s| {
+        s.open_account_settings();
+        s.ask_to_deactivate();
+    });
+    press(&mut rt, "deactivate-erase");
+    assert!(matches!(
+        rt.state.modal,
+        Some(crate::state::Modal::Confirm(crate::state::Confirm::Deactivate { erase: true, .. }))
+    ));
+}
+
+#[test]
+fn an_empty_new_password_should_show_why_it_was_not_sent() {
+    let mut rt = runtime(|s| {
+        s.open_account_settings();
+        s.open_change_password();
+    });
+    press(&mut rt, "password-change-submit");
+    assert!(rt.find("dialog-error").is_some());
+}
+
+#[test]
+fn the_sessions_page_of_a_verified_oauth_account_should_link_a_new_device() {
+    let mut rt = runtime(|s| {
+        demo::link_device(s);
+        s.modal = Some(crate::state::Modal::Settings(SettingsSection::Sessions));
+    });
+    press(&mut rt, "link-device");
+    assert!(matches!(rt.state.modal, Some(crate::state::Modal::LinkDevice { .. })));
+}
+
+#[test]
+fn a_password_account_should_not_offer_to_link_a_device() {
+    let rt = runtime(|s| {
+        s.open_settings();
+        s.show_settings_section(SettingsSection::Sessions);
+    });
+    assert!(rt.find("link-device").is_none());
+}
+
+#[test]
+fn linking_a_device_should_show_the_code_to_scan() {
+    let rt = runtime(demo::link_device);
+    assert!(rt.find("qr-login-code").is_some());
+}
+
+#[test]
+fn the_approval_page_of_a_device_link_should_open_again_on_request() {
+    let mut rt = runtime(demo::link_device);
+    let url = "https://account.hobby.chat/device".to_owned();
+    rt.update(|s, _| {
+        if let Some(crate::state::Modal::LinkDevice { flow, .. }) = &mut s.modal
+            && let Some(request) = flow.request
+        {
+            flow.moved(request, matrix_core::QrLoginStep::Approve { url: url.clone() });
+        }
+    });
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, "qr-login-reopen");
+    assert_eq!(rt.take_url_requests(), [url]);
+}
+
+#[test]
+fn signing_in_with_a_qr_code_should_show_the_code_to_scan() {
+    let rt = runtime(|s| {
+        s.nav.account = None;
+        s.accounts = crate::state::Accounts::default();
+        demo::sign_in_qr(s);
+    });
+    assert!(rt.find("qr-login-code").is_some());
+}
+
+#[test]
+fn signing_in_again_as_a_suspended_account_should_not_offer_a_qr_code_or_a_new_account() {
+    let rt = runtime(|s| {
+        s.start_adding_account();
+        demo::sign_in_resume(s);
+    });
+    assert!(rt.find("use-qr").is_none() && rt.find("create-account").is_none());
+}
+
+#[test]
+fn signing_in_to_a_new_account_should_offer_a_qr_code_and_a_new_account() {
+    let rt = runtime(|s| {
+        s.start_adding_account();
+        demo::sign_in_browser(s);
+    });
+    assert!(rt.find("use-qr").is_some() && rt.find("create-account").is_some());
+}
+
+#[test]
+fn an_email_address_should_answer_the_registration() {
+    let mut rt = runtime(|s| {
+        s.start_adding_account();
+        demo::registration_email(s);
+    });
+    press(&mut rt, "registration-email-submit");
+    assert!(matches!(
+        rt.state.sign_in.step,
+        crate::state::SignInStep::Register { asked: Some(crate::state::Asked { answered: true, .. }), .. }
+    ));
+}
+
+#[test]
+fn a_link_not_yet_opened_should_say_so() {
+    let rt = runtime(|s| {
+        s.start_adding_account();
+        demo::registration_email_sent(s);
+    });
+    assert!(rt.find("registration-email-unconfirmed").is_some() && rt.find("registration-continue").is_some());
+}
+
+#[test]
+fn a_policy_to_agree_to_should_open_in_the_browser() {
+    let mut rt = runtime(|s| {
+        s.start_adding_account();
+        demo::registration_terms(s);
+    });
+    press(&mut rt, "policy-0");
+    assert_eq!(rt.take_url_requests(), ["https://example.org/terms"]);
+}
+
+#[test]
+fn agreeing_to_the_policies_should_answer_the_registration() {
+    let mut rt = runtime(|s| {
+        s.start_adding_account();
+        demo::registration_terms(s);
+    });
+    press(&mut rt, "registration-agree");
+    assert!(matches!(
+        rt.state.sign_in.step,
+        crate::state::SignInStep::Register { asked: Some(crate::state::Asked { answered: true, .. }), .. }
+    ));
 }

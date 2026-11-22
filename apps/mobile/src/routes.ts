@@ -1,7 +1,7 @@
 // Every screen's address, built in one place so params are always encoded the same way.
 // Account and room IDs contain `@`, `!`, `:` and `$`; expo-router encodes object params.
 
-import type { AccountId } from '@better-matrix/matrix-native/types';
+import type { AccountId, ReportTarget } from '@better-matrix/matrix-native/types';
 import type { Href } from 'expo-router';
 
 import type { Reach } from './state/seek';
@@ -13,6 +13,10 @@ export const routes = {
     pathname: '/sign-in',
     params: resume ? { resume } : {},
   }),
+  /** Signing in by scanning a signed-in device's QR code. */
+  signInWithQr: (): Href => ({ pathname: '/sign-in', params: { qr: '1' } }),
+  /** Creating an account on `server`, which the sign-in looks up first. */
+  register: (server: string): Href => ({ pathname: '/sign-in', params: { server, create: '1' } }),
   /** The account menu, from the avatar in the header: switch or add accounts, settings. */
   accountMenu: (): Href => '/account-menu',
   /** Home and the spaces of the account on screen, from Home's title. */
@@ -54,6 +58,21 @@ export const routes = {
   }),
   pins: (account: AccountId, roomId: string): Href => ({
     pathname: '/pinned-messages',
+    params: { account, roomId },
+  }),
+  /** An event's source (developer tools). */
+  eventSource: (account: AccountId, roomId: string, eventId: string): Href => ({
+    pathname: '/event-source',
+    params: { account, roomId, eventId },
+  }),
+  /** A room's widgets: web apps pinned to it, opened in the browser. */
+  widgets: (account: AccountId, roomId: string): Href => ({
+    pathname: '/widgets',
+    params: { account, roomId },
+  }),
+  /** Pinning a web page to a room as a widget. */
+  addWidget: (account: AccountId, roomId: string): Href => ({
+    pathname: '/add-widget',
     params: { account, roomId },
   }),
   /** The messages the account saved, from the account menu. */
@@ -133,6 +152,18 @@ export const routes = {
     pathname: '/invite',
     params: { account, roomId },
   }),
+  /**
+   * Reporting a message, a room or a person to the homeserver's admins. `name` is the person's or
+   * room's name, or a message's sender's; `sender` is a message's sender, whom the user may also
+   * ignore.
+   */
+  report: (account: AccountId, target: ReportTarget, name: string, sender?: string): Href => {
+    const params: ReportParams = { account, name, ...reportParams(target) };
+
+    if (sender) params.userId = sender;
+
+    return { pathname: '/report', params };
+  },
   newChat: (): Href => '/new-chat',
   newRoom: (space?: string): Href => ({ pathname: '/new-room', params: space ? { space } : {} }),
   newSpace: (): Href => '/new-space',
@@ -154,6 +185,26 @@ export const routes = {
     pathname: '/settings/sessions',
     params: { account },
   }),
+  /** What the account keeps away: media, strangers' invitations, ignored people (ADR 0011). */
+  settingsSafety: (account: AccountId): Href => ({
+    pathname: '/settings/safety',
+    params: { account },
+  }),
+  /** Linking a new device with a QR code: showing this session's code, or scanning the new one's. */
+  linkDevice: (account: AccountId, scan = false): Href => ({
+    pathname: '/link-device',
+    params: scan ? { account, scan: '1' } : { account },
+  }),
+  /** Exporting the account's message keys to a file, protected with a passphrase. */
+  settingsExportKeys: (account: AccountId): Href => ({
+    pathname: '/settings/export-keys',
+    params: { account },
+  }),
+  /** Changing a password account's password. */
+  settingsPassword: (account: AccountId): Href => ({
+    pathname: '/settings/password',
+    params: { account },
+  }),
   settingsInfo: (): Href => '/settings/info',
   /** This device's preferences: language, appearance, link previews and GIFs. */
   settingsPreferences: (): Href => '/settings/preferences',
@@ -167,9 +218,15 @@ export const routes = {
     pathname: '/settings/recovery-key',
     params: reset ? { account, reset: '1' } : { account },
   }),
+  /** The verification sheet: following `flowId`, else verifying this session. */
   verify: (account: AccountId, flowId?: string): Href => ({
     pathname: '/verify',
     params: flowId ? { account, flowId } : { account },
+  }),
+  /** Verifying another person, from their profile. */
+  verifyUser: (account: AccountId, userId: string): Href => ({
+    pathname: '/verify',
+    params: { account, userId },
   }),
   recovery: (account: AccountId): Href => ({ pathname: '/recovery', params: { account } }),
   call: (): Href => '/call',
@@ -206,4 +263,49 @@ function messageParams(
   }
 
   return params;
+}
+
+/** The report screen's params: who reports, the name its title shows, and the target. */
+type ReportParams = {
+  account: AccountId;
+  name: string;
+  about: 'message' | 'room' | 'person';
+  roomId?: string;
+  eventId?: string;
+  userId?: string;
+};
+
+/** A report's target as route params: what it is about, and its IDs. */
+function reportParams(target: ReportTarget) {
+  switch (target.type) {
+    case 'Message':
+      return {
+        about: 'message' as const,
+        roomId: target.data.room_id,
+        eventId: target.data.event_id,
+      };
+    case 'Room':
+      return { about: 'room' as const, roomId: target.data.room_id };
+    case 'Person':
+      return { about: 'person' as const, userId: target.data.user_id };
+  }
+}
+
+/** The report target `routes.report` put in its params, if they name one. */
+export function reportTarget(params: {
+  about?: string;
+  roomId?: string;
+  eventId?: string;
+  userId?: string;
+}): ReportTarget | null {
+  const { about, roomId, eventId, userId } = params;
+
+  if (about === 'message' && roomId && eventId)
+    return { type: 'Message', data: { room_id: roomId, event_id: eventId } };
+
+  if (about === 'room' && roomId) return { type: 'Room', data: { room_id: roomId } };
+
+  if (about === 'person' && userId) return { type: 'Person', data: { user_id: userId } };
+
+  return null;
 }

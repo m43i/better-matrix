@@ -394,6 +394,13 @@ Date: 2026-11-16
   pending invitation (`tapRoute`), once the account's lists know the room as joined or invited:
   the cached list from before the first sync may lack what came while the app was closed, so a
   tap waits for sync, up to 15 s, then opens the room.
+- **Developer tools and widgets** follow the desktop (ADR 0006, ADR 0008) in the platform's
+  shapes: "Show hidden events" is a switch in Preferences (`Settings::showHiddenEvents`), and
+  the timeline plan gives each hidden event a line that opens its source; "View source" in a
+  message's sheet opens `app/event-source.tsx` (selectable JSON, Copy JSON). A room's details
+  lead to `app/widgets.tsx`, which opens a widget in the browser (`Linking.openURL`) and, for
+  whoever may change them, offers Remove (with an alert) and a + in the header to
+  `app/add-widget.tsx`. No widget is embedded: no web view.
 - **Message HTML** is parsed by a small tokenizer of our own (`state/html.ts`) into a safe node
   tree: only the desktop's allowed tags become formatting, links keep `http(s)`, `mailto` and
   `ftp`, reply fallbacks and scripts are dropped, nesting is capped. Nothing renders raw HTML.
@@ -443,6 +450,14 @@ Date: 2026-11-16
   (`TimelineContext.shown`). Read marking waits for the opening only (`state/seek.ts`): a
   timeline opened at a link's message is positioned once it got there, gave up looking, or the
   reader tapped a quote; a quote's own search never holds it back.
+- **QR codes** (ADR 0004): one scanner (`ui/qr/QrScanner.tsx`, `expo-camera`) serves
+  verification, signing in with a QR code and linking a device. Matrix's codes are binary and
+  the camera's barcode result is lossy text, so a sighted QR code (or a 2.5 s timer) only
+  triggers a small picture, which `Command::ReadQrCode` reads in Rust. `QrCode` draws a
+  `QrImage` from Views, black on white with a quiet zone. Sign-in and linking share one panel
+  (`QrLoginPanel`) driven by `QrLoginStep`s through `Store.run`. Demo scenes show a placeholder
+  instead of the camera that reads a demo code when tapped, and the demo engine holds QR sign-in,
+  linking and registration until they are answered or cancelled.
 - **Demo scenes** (`src/demo`) are the mobile `--scene`: the desktop's fixtures as engine
   events through `apply`, on a demo engine that finishes every command and answers lists,
   searches, sends and calls from the fixtures (media from the app's own assets). Dev builds
@@ -536,7 +551,13 @@ Date: 2026-11-16
     front was tried and dropped: cancelling `Client::sync_once` when the app leaves the front can
     lose a response the SDK already counted as processed, the iOS marker is not an atomic
     handshake, and the engine's own push fetch (`MultipleProcesses`) writes the store beside the
-    sync. Lowering this cost needs the lock held only while a response is processed.
+    sync. Lowering this cost needs the lock held only while a response is processed. With
+    sliding sync (ADR 0002) the lock covers the room-less long-poll sync, which carries every
+    to-device message and key; the room list's sliding sync runs outside it, as the SDK
+    designs `RoomListService` (and Element X runs it beside its push process). Decrypting room
+    events there can still write a Megolm session's sender data, as an open timeline's
+    decryption always could: a push process improving the same session at that moment could
+    lose its improvement.
   - _Android:_ the push is an FCM data message (through Expo); expo-notifications runs the push
     task (`engine/pushTask.ts`, defined by the entry `index.ts` before the router, headless when
     the app isn't running). With the engine running it asks the engine; headless it calls

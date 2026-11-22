@@ -7,9 +7,12 @@ import type { CallInfo } from "./CallInfo";
 import type { Contacts } from "./Contacts";
 import type { Draft } from "./Draft";
 import type { EditVersion } from "./EditVersion";
+import type { EventSource } from "./EventSource";
 import type { Homeserver } from "./Homeserver";
+import type { Identity } from "./Identity";
 import type { ImagePack } from "./ImagePack";
 import type { IncomingCall } from "./IncomingCall";
+import type { KeyImport } from "./KeyImport";
 import type { LinkPreview } from "./LinkPreview";
 import type { MediaRef } from "./MediaRef";
 import type { MediaSize } from "./MediaSize";
@@ -26,9 +29,12 @@ import type { PersonPresence } from "./PersonPresence";
 import type { Place } from "./Place";
 import type { PublicRoom } from "./PublicRoom";
 import type { PushContent } from "./PushContent";
+import type { QrLoginStep } from "./QrLoginStep";
+import type { RegistrationStep } from "./RegistrationStep";
 import type { RequestId } from "./RequestId";
 import type { RoomList } from "./RoomList";
 import type { RoomPreview } from "./RoomPreview";
+import type { Safety } from "./Safety";
 import type { SavedMessage } from "./SavedMessage";
 import type { ScheduledMessage } from "./ScheduledMessage";
 import type { SearchUsage } from "./SearchUsage";
@@ -41,6 +47,7 @@ import type { ThreadInfo } from "./ThreadInfo";
 import type { TimelineDiff } from "./TimelineDiff";
 import type { TimelineKey } from "./TimelineKey";
 import type { VerificationStep } from "./VerificationStep";
+import type { Widgets } from "./Widgets";
 
 /**
  * What the engine reports. Delivered on the engine's threads; a sink forwards them to its UI.
@@ -69,7 +76,15 @@ request: RequestId,
 /**
  * The URL.
  */
-url: string, } } | { "type": "AccountAdded", "data": AccountSummary } | { "type": "AccountChanged", "data": AccountSummary } | { "type": "SessionEnded", "data": { 
+url: string, } } | { "type": "AccountAdded", "data": AccountSummary } | { "type": "SignedIn", "data": { 
+/**
+ * The command it answers.
+ */
+request: RequestId, 
+/**
+ * The account.
+ */
+account: AccountId, } } | { "type": "AccountChanged", "data": AccountSummary } | { "type": "SessionEnded", "data": { 
 /**
  * Which account.
  */
@@ -237,7 +252,27 @@ request: RequestId,
 /**
  * Ranked excerpts and their match highlights.
  */
-messages: Array<MessageHit>, } } | { "type": "PeopleFound", "data": { 
+messages: Array<MessageHit>, } } | { "type": "EventSource", "data": { 
+/**
+ * The request it answers.
+ */
+request: RequestId, 
+/**
+ * The event's JSON.
+ */
+source: EventSource, } } | { "type": "Widgets", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, 
+/**
+ * Its widgets.
+ */
+widgets: Widgets, } } | { "type": "PeopleFound", "data": { 
 /**
  * The search it answers.
  */
@@ -301,7 +336,23 @@ account: AccountId,
 /**
  * The arrangement.
  */
-layout: SidebarLayout, } } | { "type": "Status", "data": { 
+layout: SidebarLayout, } } | { "type": "Safety", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The choices.
+ */
+safety: Safety, } } | { "type": "Keywords", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The words.
+ */
+keywords: Array<string>, } } | { "type": "Status", "data": { 
 /**
  * Whose.
  */
@@ -329,7 +380,63 @@ key: Password, } } | { "type": "PasswordNeeded", "data": {
 /**
  * The command that asked.
  */
-request: RequestId, } } | { "type": "Verification", "data": { 
+request: RequestId, } } | { "type": "QrLogin", "data": { 
+/**
+ * The command it reports on.
+ */
+request: RequestId, 
+/**
+ * Where it stands.
+ */
+step: QrLoginStep, } } | { "type": "Registration", "data": { 
+/**
+ * The command it asks for.
+ */
+request: RequestId, 
+/**
+ * What it asks.
+ */
+step: RegistrationStep, } } | { "type": "QrCodeRead", "data": { 
+/**
+ * The command it answers.
+ */
+request: RequestId, 
+/**
+ * The code's raw bytes.
+ */
+code: Array<number> | null, } } | { "type": "Identity", "data": { 
+/**
+ * Which account.
+ */
+account: AccountId, 
+/**
+ * Whom.
+ */
+user_id: string, 
+/**
+ * What the user knows of their identity.
+ */
+identity: Identity | null, } } | { "type": "KeysImported", "data": { 
+/**
+ * The command it answers.
+ */
+request: RequestId, 
+/**
+ * How many were new.
+ */
+import: KeyImport, } } | { "type": "VerificationRequested", "data": { 
+/**
+ * The command it answers.
+ */
+request: RequestId, 
+/**
+ * Which account.
+ */
+account: AccountId, 
+/**
+ * The new verification.
+ */
+flow_id: string, } } | { "type": "Verification", "data": { 
 /**
  * Which account.
  */

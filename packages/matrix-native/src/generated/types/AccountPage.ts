@@ -3,4 +3,4 @@
 /**
  * A page of the homeserver's account management, for OAuth accounts.
  */
-export type AccountPage = "Profile";
+export type AccountPage = "Profile" | "Deactivate";

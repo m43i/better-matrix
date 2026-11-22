@@ -217,6 +217,12 @@ impl MediaCache {
         self.retries.keep_latest(FAILURES_KEPT);
     }
 
+    /// Lets a failed download be tried again at once, its wait forgotten: media the user just
+    /// chose to show.
+    pub fn try_again(&mut self, media: &MediaRef) {
+        self.retries.succeeded(media);
+    }
+
     /// When the next failed download may be tried again, after `now`.
     pub fn next_retry(&self, now: Instant) -> Option<Instant> {
         self.retries.next_after(now)

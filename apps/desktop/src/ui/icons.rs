@@ -19,6 +19,11 @@ macro_rules! icons {
 icons! {
     UNPIN = "unpin": r#"<path d="M16 3H8l1 6-4 4v2h6v7M13 15h6v-2l-4-4M3 3l18 18"/>"#;
     PIN = "pin": r#"<path d="M16 3H8l1 6-4 4v2h6v7h2v-7h6v-2l-4-4z"/>"#;
+    STAR = "star": r#"<path d="m12 2.5 2.9 5.9 6.6 1-4.8 4.6 1.1 6.5L12 17.4l-5.8 3.1 1.1-6.5-4.8-4.6 6.6-1z"/>"#;
+    STAR_OFF = "star-off": r#"<path d="M8.6 8.6 2.5 9.4l4.8 4.6-1.1 6.5 5.8-3.1 5.8 3.1-.4-2.4M10.3 5.9 12 2.5l2.9 5.9 6.6 1-3.4 3.3M3 3l18 18"/>"#;
+    ARROW_DOWN = "arrow-down": r#"<path d="M12 5v14M19 12l-7 7-7-7"/>"#;
+    ARROW_UP = "arrow-up": r#"<path d="M12 19V5M5 12l7-7 7 7"/>"#;
+    UNREAD = "unread": r#"<path d="M21 12a9 9 0 0 1-13.2 8L3 21l1.1-4.6A9 9 0 0 1 13.5 3.1"/><circle cx="19" cy="5" r="2.5"/>"#;
     BOOKMARK = "bookmark": r#"<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>"#;
     UNBOOKMARK = "unbookmark": r#"<path d="M19 13.5V5a2 2 0 0 0-2-2H8.5M5 5v16l7-5 7 5v-2M3 3l18 18"/>"#;
     COPY = "copy": r#"<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>"#;
@@ -61,6 +66,8 @@ icons! {
     LEAVE = "leave": r#"<path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5M10 17l-5-5 5-5M5 12h11"/>"#;
     TRASH = "trash": r#"<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>"#;
     EYE_OFF = "eye-off": r#"<path d="M10.7 5.1A10 10 0 0 1 12 5c7 0 10 7 10 7a13 13 0 0 1-1.7 2.7M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6M2 2l20 20M9.9 9.9a3 3 0 0 0 4.2 4.2"/>"#;
+    FLAG = "flag": r#"<path d="M4 22V4M4 4h13l-2.5 4.5L17 13H4"/>"#;
+    USER_X = "user-x": r#"<circle cx="9" cy="8" r="4"/><path d="M2 21v-1a7 7 0 0 1 10.5-6M16 15l5 5M21 15l-5 5"/>"#;
     SMILE = "smile": r#"<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/>"#;
     REPLY = "reply": r#"<path d="m9 17-5-5 5-5M4 12h11a5 5 0 0 1 5 5v2"/>"#;
     THREAD = "thread": r#"<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5"/>"#;
@@ -99,5 +106,7 @@ icons! {
     LAPTOP = "laptop": r#"<rect x="4" y="4" width="16" height="11" rx="2"/><path d="M2 20h20"/>"#;
     MORE = "more": r#"<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>"#;
     PENCIL = "pencil": r#"<path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>"#;
+    QR = "qr": r#"<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>"#;
+    CLOUD = "cloud": r#"<path d="M17.5 19H7a5 5 0 1 1 1-9.9A6 6 0 0 1 19.4 11a4 4 0 0 1-1.9 8z"/>"#;
     GLOBE = "globe": r#"<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/>"#;
 }

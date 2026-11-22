@@ -2,10 +2,17 @@ import type { SavedMessage } from '@better-matrix/matrix-native/types';
 
 import { apply, initialState } from '../reducer';
 import { shallow } from '../react';
-import { activeRoomList, savedMessages, savedSignature } from '../selectors';
+import {
+  activeRoomList,
+  identityOf,
+  knownPerson,
+  savedMessages,
+  savedSignature,
+  unnamedSenders,
+} from '../selectors';
 import type { TimelineDiff } from '@better-matrix/matrix-native/types';
 
-import { ADA, messageEntry, person, roomSummary, summary } from '../../test/fixtures';
+import { ADA, GRACE, messageEntry, person, roomSummary, summary } from '../../test/fixtures';
 
 function saved(room_id: string, event_id: string): SavedMessage {
   return {
@@ -101,5 +108,75 @@ describe('activeRoomList', () => {
     const after = changed(before, [{ type: 'PushBack', data: messageEntry('$new') }]);
     expect(shallow(activeRoomList(before), activeRoomList(after))).toBe(false);
     expect(activeRoomList(after)?.newest['!r:x']?.event_id).toBe('$new');
+  });
+});
+
+describe('unnamedSenders', () => {
+  it('bubbles should name everyone in a room', () => {
+    expect(unnamedSenders(roomSummary('!r:x'))).toEqual([]);
+  });
+
+  it('bubbles should not name the other person of a one-to-one chat', () => {
+    const chat = { ...roomSummary('!d:x', 'Grace', 'Direct'), dm_users: ['@grace:x'] };
+    expect(unnamedSenders(chat)).toEqual(['@grace:x']);
+  });
+
+  it('bubbles should name everyone in a direct chat a third person joined', () => {
+    const chat = { ...roomSummary('!d:x', 'Grace', 'Direct'), dm_users: ['@grace:x'] };
+    expect(unnamedSenders({ ...chat, member_count: 3 })).toEqual([]);
+  });
+});
+
+describe('people', () => {
+  function withGrace() {
+    const state = apply(initialState(), { type: 'AccountAdded', data: summary(ADA) });
+
+    return apply(state, {
+      type: 'Members',
+      data: {
+        request: null,
+        account: ADA,
+        room_id: '!r:x',
+        members: {
+          people: [
+            {
+              person: person(GRACE, 'Grace'),
+              role: 'Member',
+              presence: 'Online',
+              status_message: null,
+              verified: false,
+              level: 0,
+            },
+          ],
+          complete: true,
+          can_invite: false,
+          own_level: 0,
+          can_kick: false,
+          can_ban: false,
+          can_set_roles: false,
+        },
+      },
+    });
+  }
+
+  it('should know someone from a room’s member list', () => {
+    expect(knownPerson(withGrace(), ADA, GRACE)).toEqual(person(GRACE, 'Grace'));
+  });
+
+  it('should know nobody the member lists lack', () => {
+    expect(knownPerson(withGrace(), ADA, '@nobody:x')).toBeUndefined();
+  });
+
+  it('should know nothing of an identity before it is reported', () => {
+    expect(identityOf(withGrace(), ADA, GRACE)).toBeUndefined();
+  });
+
+  it('should read the identity reported for someone', () => {
+    const state = apply(withGrace(), {
+      type: 'Identity',
+      data: { account: ADA, user_id: GRACE, identity: { verified: false, changed: true } },
+    });
+
+    expect(identityOf(state, ADA, GRACE)).toEqual({ verified: false, changed: true });
   });
 });

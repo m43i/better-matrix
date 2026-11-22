@@ -105,6 +105,9 @@ pub struct RoomSummary {
     pub activity_ms: Option<u64>,
     /// Whether messages here are end-to-end encrypted.
     pub encrypted: bool,
+    /// Whether anyone may join (the public join rule): strangers may speak, so media may wait
+    /// for a press ([`Safety::shows_media`](crate::Safety::shows_media)).
+    pub public: bool,
     /// Whether the user may rename the room.
     pub can_rename: bool,
     /// Event IDs pinned in this room, in server order.
@@ -113,6 +116,26 @@ pub struct RoomSummary {
     pub can_pin: bool,
     /// Event IDs the user saved in this room, most recently saved first. Private to the user.
     pub saved: Vec<String>,
+    /// Whether the user put the room among their favourites or their low priority rooms (room
+    /// tags, which every client shares).
+    pub priority: RoomPriority,
+    /// Whether the user marked the room unread (MSC2867); reading it clears the mark.
+    pub marked_unread: bool,
+}
+
+/// Where the user put a room: among their favourites, their low priority rooms, or neither.
+/// Kept as the room tags `m.favourite` and `m.lowpriority`, so every client groups it the same.
+/// A room tagged both counts as a favourite.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub enum RoomPriority {
+    /// A favourite (`m.favourite`).
+    Favourite,
+    /// Neither tag.
+    #[default]
+    Normal,
+    /// Low priority (`m.lowpriority`).
+    Low,
 }
 
 /// Who can read a room's messages from before they joined, by the room's settings. The server
@@ -164,8 +187,23 @@ pub enum EntryKind {
     ReadMarker,
     /// The start of what this user can see of the room.
     Start,
-    /// An event not drawn yet (membership changes, state, polls).
-    Other,
+    /// An event timelines don't draw (unknown or unsupported state, events that didn't parse,
+    /// membership events that changed nothing). Shown only with "Show hidden events".
+    Hidden(Box<HiddenEvent>),
+}
+
+/// An event timelines don't draw, as developer tools show it: its type and who sent it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct HiddenEvent {
+    /// Its event ID; `None` while it is being sent.
+    pub event_id: Option<String>,
+    /// Who sent it.
+    pub sender: Person,
+    /// Its type, e.g. `m.room.server_acl`.
+    pub event_type: String,
+    /// When it was sent, in milliseconds since the Unix epoch.
+    pub timestamp_ms: u64,
 }
 
 /// One change to a room's timeline, in the order the timeline applies them. Mirrors the
@@ -328,6 +366,11 @@ pub struct LoginMethods {
     pub oauth: bool,
     /// Username and password in the app.
     pub password: bool,
+    /// New accounts can be created: on the account page (OAuth), else in the app.
+    pub create_account: bool,
+    /// Signing in with a QR code from a signed-in device (MSC4108): an OAuth server that grants
+    /// devices sign-ins.
+    pub qr: bool,
 }
 
 /// A space: a room that groups other rooms. Never listed among [`RoomList::rooms`].
@@ -380,6 +423,10 @@ pub struct Invitation {
     pub space: bool,
     /// A group room or direct chat, for its navigation label.
     pub kind: RoomKind,
+    /// Whether the inviter shares no joined room with the account, as far as this device knows:
+    /// someone the user may not know, whose invitation the user can hide
+    /// ([`Safety::hide_stranger_invites`](crate::Safety::hide_stranger_invites)).
+    pub stranger: bool,
 }
 
 /// A public room discovered in a space hierarchy.

@@ -36,8 +36,11 @@ pub fn menu(
         !matches!(message.content, MessageContent::Redacted | MessageContent::Undecryptable | MessageContent::Call(_));
     let action = |glyph, label, id| menu_action(glyph, label, Tone::Normal, p).key(id);
     let mut panel = popover_panel(p).key("message-menu").w(300.0);
-    if let MessageContent::Attachment(file) = &message.content {
-        let actions = super::attachments::actions(&account.summary.id, file, p);
+    // Held-back media offers no file actions until shown (ADR 0011).
+    if let MessageContent::Attachment(file) = &message.content
+        && !account.hides_listed_media(&key.room_id, event_id, file, &s.revealed_media)
+    {
+        let actions = super::attachments::actions(&account.summary.id, file, Some((&key.room_id, event_id)), p);
         if !actions.is_empty() {
             panel = panel.children(actions).child(divider(p));
         }
@@ -124,6 +127,20 @@ pub fn menu(
                 },
             ));
         }
+    }
+    let (owner, room_id, id) = (account.summary.id.clone(), key.room_id.clone(), event_id.to_owned());
+    panel = panel.child(
+        action(&icons::CODE, t!("actions.view_source"), "message-source")
+            .on_press(move |s: &mut State| s.view_source(owner.clone(), room_id.clone(), id.clone())),
+    );
+    // Someone else's message can go to the homeserver's admins.
+    if message.sender_id != account.summary.id.as_str() {
+        let (key, id) = (key.clone(), event_id.to_owned());
+        panel = panel.child(divider(p)).child(
+            menu_action(&icons::FLAG, t!("report.message_action"), Tone::Danger, p)
+                .key("message-report")
+                .on_press(move |s: &mut State| s.report_message(&key, &id)),
+        );
     }
     if message.sender_id == account.summary.id.as_str() {
         if let MessageContent::Poll(poll) = &message.content

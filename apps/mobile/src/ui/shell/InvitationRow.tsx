@@ -8,6 +8,8 @@ import { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { routes } from '../../routes';
+import { useStore } from '../../state/react';
+import { account as accountOf } from '../../state/selectors';
 import { font } from '../../theme/palette';
 import { Avatar } from '../Avatar';
 import { Touchable } from '../components';
@@ -24,6 +26,8 @@ export const InvitationRow = memo(function InvitationRow({
   invitation: Invitation;
 }) {
   const palette = usePalette();
+  // With pictures in invitations off (ADR 0011), initials, and nothing fetched.
+  const pictures = useStore((s) => accountOf(s, account)?.safety.invite_pictures ?? true);
   const room = !invitation.space && invitation.kind === 'Group';
 
   return (
@@ -42,7 +46,7 @@ export const InvitationRow = memo(function InvitationRow({
             account={account}
             id={invitation.room_id}
             name={invitation.name}
-            media={invitation.avatar}
+            media={pictures ? invitation.avatar : null}
             size={AVATAR}
           />
         )}

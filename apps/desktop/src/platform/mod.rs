@@ -23,7 +23,7 @@ pub use notify::Toast;
 pub use secrets::system_secrets;
 
 use crate::i18n::Language;
-use crate::state::{Appearance, PlaybackSpeed, Settings, State, Zoom};
+use crate::state::{Appearance, MessageLayout, PlaybackSpeed, Settings, State, Zoom};
 
 /// The OS services the app uses, or inert stand-ins when headless.
 pub struct Shell {
@@ -282,6 +282,7 @@ impl Shell {
 
 const LANGUAGE: &str = "language";
 const APPEARANCE: &str = "appearance";
+const MESSAGE_LAYOUT: &str = "message_layout";
 const LINK_GIFS: &str = "link_gifs";
 const LINK_PREVIEWS: &str = "link_previews";
 const MAPS: &str = "maps";
@@ -292,10 +293,12 @@ const MICROPHONE: &str = "microphone";
 const SPEAKER: &str = "speaker";
 const CAMERA: &str = "camera";
 const LAST_ACCOUNT: &str = "last_account";
+const HIDDEN_EVENTS: &str = "hidden_events";
 
 fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::prefs::PrefsError> {
     prefs.set(LANGUAGE, &settings.language.id())?;
     prefs.set(APPEARANCE, &settings.appearance.id())?;
+    prefs.set(MESSAGE_LAYOUT, &settings.message_layout.id())?;
     prefs.set(ZOOM, &settings.zoom.percent())?;
     prefs.set(LINK_GIFS, &settings.show_link_gifs)?;
     prefs.set(LINK_PREVIEWS, &settings.show_link_previews)?;
@@ -305,6 +308,7 @@ fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::pr
     prefs.set(MICROPHONE, &settings.devices.microphone)?;
     prefs.set(SPEAKER, &settings.devices.speaker)?;
     prefs.set(CAMERA, &settings.devices.camera)?;
+    prefs.set(HIDDEN_EVENTS, &settings.show_hidden_events)?;
     prefs.set(LAST_ACCOUNT, &settings.last_account.as_ref().map(matrix_core::AccountId::as_str))
 }
 
@@ -314,6 +318,9 @@ pub fn load_settings(prefs: &Prefs) -> Settings {
         last_account: prefs.get::<String>(LAST_ACCOUNT).map(matrix_core::AccountId::new),
         language: prefs.get::<String>(LANGUAGE).map_or(Language::System, |id| Language::from_id(&id)),
         appearance: prefs.get::<String>(APPEARANCE).map_or(Appearance::System, |id| Appearance::from_id(&id)),
+        message_layout: prefs
+            .get::<String>(MESSAGE_LAYOUT)
+            .map_or_else(MessageLayout::default, |id| MessageLayout::from_id(&id)),
         zoom: prefs.get::<u16>(ZOOM).map_or_else(Zoom::default, Zoom::from_percent),
         show_link_gifs: prefs.get::<bool>(LINK_GIFS).unwrap_or(true),
         show_link_previews: prefs.get::<bool>(LINK_PREVIEWS).unwrap_or(true),
@@ -325,6 +332,7 @@ pub fn load_settings(prefs: &Prefs) -> Settings {
         },
         ring_sound: prefs.get::<bool>(RING_SOUND).unwrap_or(true),
         playback_speed: prefs.get::<u16>(PLAYBACK_SPEED).map_or_else(Default::default, PlaybackSpeed::from_percent),
+        show_hidden_events: prefs.get::<bool>(HIDDEN_EVENTS).unwrap_or(false),
     }
 }
 

@@ -191,6 +191,12 @@ impl GifCache {
         self.retries.failed(url.to_owned(), now);
     }
 
+    /// Lets a failed download be tried again at once, its wait forgotten: a GIF the user just
+    /// chose to show.
+    pub fn try_again(&mut self, url: &str) {
+        self.retries.succeeded(&url.to_owned());
+    }
+
     /// When the next failed download may be tried again, after `now`.
     pub fn next_retry(&self, now: Instant) -> Option<Instant> {
         self.retries.next_after(now)

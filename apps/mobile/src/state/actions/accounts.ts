@@ -4,12 +4,15 @@
 import type { EngineEvent } from '@better-matrix/matrix-native/client';
 import type {
   AccountId,
+  AccountPage,
+  Answer,
   Command,
   ContactDetail,
   ContactKind,
   Homeserver,
   NotificationMode,
   PendingContact,
+  RegistrationStep,
   RequestId,
   Security,
   Status,
@@ -79,6 +82,17 @@ export type SignInStep =
     }
   /** Step 2 on a password server. `submitting` is the login in flight. */
   | { type: 'password'; server: Homeserver; submitting: RequestId | null; error: string | null }
+  /**
+   * Creating an account on a password server: the form, then what the server asks
+   * (`question`) while `request` runs.
+   */
+  | {
+      type: 'register';
+      server: Homeserver;
+      request: RequestId | null;
+      question: RegistrationStep | null;
+      error: string | null;
+    }
   /** Signed in: the account was added. */
   | { type: 'done'; account: AccountId | null };
 
@@ -91,6 +105,8 @@ export function pendingRequest(step: SignInStep): RequestId | null {
       return step.request;
     case 'password':
       return step.submitting;
+    case 'register':
+      return step.request;
     case 'server':
     case 'done':
       return null;
@@ -106,6 +122,10 @@ export function failStep(step: SignInStep, request: RequestId, message: string |
       return step.request === request ? { ...step, request: null, error: message } : step;
     case 'password':
       return step.submitting === request ? { ...step, submitting: null, error: message } : step;
+    case 'register':
+      return step.request === request
+        ? { ...step, request: null, question: null, error: message }
+        : step;
     case 'server':
     case 'done':
       return step;
@@ -121,6 +141,31 @@ export function stepFor(
   if (server.methods.password) return 'password';
 
   return { type: 'server', error: t('sign_in.no_method', { server: serverName(server) }) };
+}
+
+/** Which of step 2's other ways in it offers. */
+export interface OtherWaysOffered {
+  create: boolean;
+  qr: boolean;
+}
+
+/**
+ * Step 2's other ways in besides signing in: creating an account and a QR code, where the server
+ * takes them. Signing in again as a suspended account (`resume`) offers neither: both make a new
+ * store, and a QR sign-in as that account would replace the data it kept.
+ */
+export function otherWays(server: Homeserver, resume: AccountId | null): OtherWaysOffered {
+  return {
+    create: resume === null && server.methods.create_account,
+    qr: resume === null && server.methods.qr,
+  };
+}
+
+/** An email address as typed, trimmed; `null` when it can't be one. */
+export function parseEmail(text: string): string | null {
+  const trimmed = text.trim();
+
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : null;
 }
 
 /** Opens the sign-in page in a browser session that returns to the app; the URL it came back with. */
@@ -145,12 +190,19 @@ export class SignInFlow {
     resume: null,
   };
   private readonly listeners = new Set<() => void>();
-  /** The accounts signed in before the login, to find the one it added. */
-  private before: AccountId[] = [];
+  /** The account each sign-in command signed in, from its `SignedIn`. */
+  private readonly signedIn = new Map<RequestId, AccountId>();
+
+  /** Keeps the account a sign-in command names as the one it signed in. */
+  private readonly hear = (event: EngineEvent): void => {
+    if (event.type === 'SignedIn') this.signedIn.set(event.data.request, event.data.account);
+  };
 
   constructor(
     private readonly store: Store,
     private readonly browser: AuthBrowser,
+    /** Opens a page in the in-app browser: a registration step the server runs itself. */
+    private readonly openPage: (url: string) => void = () => undefined,
   ) {}
 
   snapshot = (): SignInSnapshot => this.state;
@@ -173,8 +225,11 @@ export class SignInFlow {
     this.set({ step });
   }
 
-  /** Step 1: resolve what the user typed. A full Matrix ID also fills in the username. */
-  submitServer(text: string): void {
+  /**
+   * Step 1: resolve what the user typed. A full Matrix ID also fills in the username. With
+   * `create`, step 2 creates an account where the server allows it.
+   */
+  submitServer(text: string, create = false): void {
     if (pendingRequest(this.state.step) !== null) return;
     const input = parseSignInInput(text);
 
@@ -193,7 +248,7 @@ export class SignInFlow {
 
     const run = this.store.run({ type: 'Discover', data: { server: input.server } }, (event) => {
       if (event.type === 'HomeserverDiscovered')
-        this.discovered(event.data.request, event.data.homeserver);
+        this.discovered(event.data.request, event.data.homeserver, create);
     });
 
     this.set({ username: input.username ?? this.state.username, resume });
@@ -201,10 +256,17 @@ export class SignInFlow {
     run.catch((cause: unknown) => this.failed(run.request, cause));
   }
 
-  private discovered(request: RequestId, server: Homeserver): void {
+  private discovered(request: RequestId, server: Homeserver, create: boolean): void {
     const step = this.state.step;
 
     if (step.type !== 'discovering' || step.request !== request) return;
+
+    if (create && otherWays(server, this.state.resume).create) {
+      this.create(server);
+
+      return;
+    }
+
     const next = stepFor(server);
 
     if (next === 'browser') this.startBrowser(server);
@@ -213,15 +275,16 @@ export class SignInFlow {
     else this.setStep(next);
   }
 
-  private startBrowser(server: Homeserver): void {
-    this.before = this.store.getState().accounts.map((a) => a.summary.id);
-
+  /** Signs in (or with `create`, creates an account first) on the server's page. */
+  private startBrowser(server: Homeserver, create = false): void {
     const command: Command = {
       type: 'LoginOAuth',
-      data: { homeserver: server.url, resume: this.state.resume },
+      data: { homeserver: server.url, resume: this.state.resume, create },
     };
 
     const run = this.store.run(command, (event) => {
+      this.hear(event);
+
       if (event.type !== 'OpenUrl') return;
       const step = this.state.step;
 
@@ -274,11 +337,102 @@ export class SignInFlow {
     this.startBrowser(step.server);
   }
 
+  /**
+   * Creates an account instead of signing in: on the server's page for OAuth servers, else with
+   * the registration form.
+   */
+  createAccount(): void {
+    const step = this.state.step;
+
+    if (step.type !== 'browser' && step.type !== 'password') return;
+
+    if (!otherWays(step.server, this.state.resume).create) return;
+    this.cancelPending();
+    this.create(step.server);
+  }
+
+  private create(server: Homeserver): void {
+    if (server.methods.oauth) this.startBrowser(server, true);
+    else this.setStep({ type: 'register', server, request: null, question: null, error: null });
+  }
+
+  /** Creates the account the registration form describes. */
+  submitRegistration(username: string, password: string, confirmation: string): void {
+    const step = this.state.step;
+
+    if (step.type !== 'register' || step.request !== null) return;
+    const user = username.trim();
+
+    if (!user || !password) {
+      this.setStep({ ...step, error: t('sign_in.fill_in') });
+
+      return;
+    }
+
+    if (password !== confirmation) {
+      this.setStep({ ...step, error: t('mobile.accounts.register_mismatch') });
+
+      return;
+    }
+
+    const run = this.store.run(
+      { type: 'Register', data: { homeserver: step.server.url, username: user, password } },
+      (event) => {
+        this.hear(event);
+        const current = this.state.step;
+
+        if (current.type !== 'register' || current.request !== run.request) return;
+
+        if (event.type === 'Registration') this.setStep({ ...current, question: event.data.step });
+        else if (event.type === 'OpenUrl') this.openPage(event.data.url);
+      },
+    );
+
+    this.set({ username: user, step: { ...step, request: run.request, error: null } });
+    run.then(
+      () => this.finished(run.request),
+      (cause: unknown) => this.failed(run.request, cause),
+    );
+  }
+
+  /** Answers what the server asked while creating the account; an email address must be one. */
+  answerRegistration(answer: Answer): void {
+    const step = this.state.step;
+
+    if (step.type !== 'register' || step.request === null || step.question === null) return;
+
+    const address = answer.type === 'Email' ? parseEmail(answer.data) : null;
+
+    if (answer.type === 'Email' && address === null) {
+      this.setStep({ ...step, error: t('mobile.accounts.registration_email_invalid') });
+
+      return;
+    }
+
+    answerRequest(
+      this.store,
+      step.request,
+      address === null ? answer : { type: 'Email', data: address },
+    );
+    this.setStep({ ...step, question: null, error: null });
+  }
+
+  /** Opens the server's page for a registration step again. */
+  reopenRegistrationPage(): void {
+    const step = this.state.step;
+
+    if (step.type === 'register' && step.question?.type === 'Browser')
+      this.openPage(step.question.data.url);
+  }
+
   /** Switches step 2 to the password form, on a server that offers both. */
   usePassword(): void {
     const step = this.state.step;
 
-    if ((step.type !== 'browser' && step.type !== 'password') || !step.server.methods.password)
+    if (
+      (step.type !== 'browser' && step.type !== 'password' && step.type !== 'register') ||
+      !step.server.methods.password
+    )
       return;
     this.cancelPending();
     this.setStep({ type: 'password', server: step.server, submitting: null, error: null });
@@ -303,12 +457,13 @@ export class SignInFlow {
       return;
     }
 
-    this.before = this.store.getState().accounts.map((a) => a.summary.id);
-
-    const run = this.store.run({
-      type: 'Login',
-      data: { homeserver: step.server.url, username: user, password, resume: this.state.resume },
-    });
+    const run = this.store.run(
+      {
+        type: 'Login',
+        data: { homeserver: step.server.url, username: user, password, resume: this.state.resume },
+      },
+      this.hear,
+    );
 
     this.set({ username: user, step: { ...step, submitting: run.request, error: null } });
     run.then(
@@ -331,7 +486,9 @@ export class SignInFlow {
   private finished(request: RequestId): void {
     if (pendingRequest(this.state.step) !== request) return;
     const accounts = this.store.getState().accounts.map((a) => a.summary.id);
-    const added = accounts.find((id) => !this.before.includes(id)) ?? this.state.resume;
+    const added = this.signedIn.get(request) ?? null;
+
+    this.signedIn.delete(request);
 
     if (added !== null && accounts.includes(added)) setActive(this.store, added);
     this.setStep({ type: 'done', account: added });
@@ -454,6 +611,65 @@ export function setDefaultNotificationMode(
   store.send({ type: 'SetDefaultNotificationMode', data: { account, mode } });
 }
 
+/** Keywords sorted as the engine reports them: case-insensitively. */
+function sortedKeywords(keywords: string[]): string[] {
+  return [...keywords].sort((a, b) => {
+    const [x, y] = [a.toLowerCase(), b.toLowerCase()];
+
+    if (x !== y) return x < y ? -1 : 1;
+
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+}
+
+/** Sends a keyword change; a failure tells the user, and the engine reports the keywords again. */
+function sendKeyword(store: Store, account: AccountId, keyword: string, enabled: boolean): void {
+  store.run({ type: 'SetKeyword', data: { account, keyword, enabled } }).catch((cause: unknown) => {
+    if (cause instanceof CommandFailed && cause.cancelled) return;
+    const message = cause instanceof Error ? cause.message : String(cause);
+    store.update((s) =>
+      addNotice(s, t('notice.notification_setting', { error: message }), account),
+    );
+  });
+}
+
+/**
+ * Adds a word that notifies the user wherever it is written, shown at once. Blank words and
+ * ones the account has already are left alone; returns whether it was added.
+ */
+export function addKeyword(store: Store, account: AccountId, keyword: string): boolean {
+  const word = keyword.trim();
+  const known = store.getState().accounts.find((a) => a.summary.id === account)?.keywords ?? [];
+
+  if (!word) return false;
+
+  // Sent even when listed: a sync older than a removal may still list it, and the engine checks
+  // the server's rules.
+  if (!known.includes(word)) {
+    store.update((s) =>
+      updateAccount(s, account, (a) => ({
+        ...a,
+        keywords: sortedKeywords([...(a.keywords ?? []), word]),
+      })),
+    );
+  }
+
+  sendKeyword(store, account, word, true);
+
+  return true;
+}
+
+/** Removes one of the account's notification keywords, shown gone at once. */
+export function removeKeyword(store: Store, account: AccountId, keyword: string): void {
+  store.update((s) =>
+    updateAccount(s, account, (a) => ({
+      ...a,
+      keywords: (a.keywords ?? []).filter((known) => known !== keyword),
+    })),
+  );
+  sendKeyword(store, account, keyword, false);
+}
+
 /**
  * Sets what others see of the user on an account (online, away, hidden), showing it at once;
  * if the server refuses, the saved status shows again (unless another was chosen since) with a
@@ -556,13 +772,19 @@ export function contactLabel(contact: ContactDetail): string {
   return contact.kind === 'Phone' ? `+${contact.address}` : contact.address;
 }
 
-/** Opens the homeserver's account page (OAuth accounts) with `open`. */
+/** Opens a page of the homeserver's account management (OAuth accounts) with `open`. */
 export async function openAccountPage(
   store: Store,
   account: AccountId,
   open: (url: string) => void,
+  page: AccountPage = 'Profile',
 ): Promise<void> {
-  await store.run({ type: 'OpenAccountPage', data: { account, page: 'Profile' } }, (event) => {
+  await store.run({ type: 'OpenAccountPage', data: { account, page } }, (event) => {
     if (event.type === 'OpenUrl') open(event.data.url);
   });
+}
+
+/** Answers a question a running command asked (a check code, a registration step). */
+export function answerRequest(store: Store, request: RequestId, answer: Answer): void {
+  store.send({ type: 'Answer', data: { request, answer } });
 }

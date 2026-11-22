@@ -154,8 +154,17 @@ keeping its current content and formatting and removing its reply, thread and ed
 : React, reply and reply-in-thread buttons at a message's top right, shown while it is hovered.
 
 **Section**
-: A group in the sidebar: the built-in Rooms and Direct messages, or one of the user's own,
-per Home or space. See [ADR 0005](adr/0005-navigation-and-settings.md).
+: A group in the sidebar: the built-in Rooms, Direct messages, Favourites and Low priority, or one
+of the user's own, per Home or space. See [ADR 0005](adr/0005-navigation-and-settings.md).
+
+**Room priority**
+: Whether the user put a room among their **Favourites** or their **Low priority** rooms, or
+neither (`RoomPriority`): the room tags `m.favourite` and `m.lowpriority`, shared with every
+client. Each has its built-in section.
+
+**Marked unread**
+: A room the user marked unread by hand (MSC2867, `RoomSummary::marked_unread`). It wants
+attention until it is opened or marked read, on every client.
 
 **Voice memo**
 : A recording sent as a Matrix voice message (`Outgoing::Voice`), with its waveform. It shows as
@@ -181,6 +190,23 @@ louder.
 : Something that happened to a room rather than something written: a join, an invite, a new
 name (`RoomEvent`, `RoomChange`). Shown as a small line; joins and leaves in a row merge. See
 [ADR 0006](adr/0006-timelines.md).
+
+**Hidden event**
+: An event timelines leave out: room state the app draws no line for, an event that didn't
+parse, a membership event that changed nothing (`EntryKind::Hidden`, `HiddenEvent`). With "Show
+hidden events" (developer tools, a setting on this device) each shows as a small line naming its
+sender and type, which opens its event source. See [ADR 0006](adr/0006-timelines.md).
+
+**Event source**
+: An event's JSON, for developer tools: as this device reads it (decrypted) and, for an encrypted
+event, as it was sent (`EventSource`, `Command::ViewSource`). "View source" in a message's
+menu. See [ADR 0006](adr/0006-timelines.md).
+
+**Widget**
+: A web app pinned to a room as state (`im.vector.modular.widgets`, `m.widget`): a board, a
+dashboard, a Jitsi meeting (`Widget`). Listed in the room's details and opened in the browser
+with its URL's template variables filled in; whoever may change the room's state adds and removes
+them. See [ADR 0008](adr/0008-people-and-rooms.md).
 
 **Attachment preview**
 : An image, PDF, video or audio clip shown full size over the window, with download, close and
@@ -315,6 +341,10 @@ thumbnail), or a video's poster (only the sender's thumbnail).
 **Notification mode**
 : When a room notifies: all messages, mentions only, or mute. Stored as push rules on the server.
 
+**Keyword**
+: A word that notifies the user like a mention wherever it is written: a content push rule on
+the server, edited under each account in Settings, Notifications (`Event::Keywords`).
+
 **Default notification mode**
 : An account's notification mode for every room that doesn't set its own. A room set back to
 "Use the default" follows it again.
@@ -322,6 +352,19 @@ thumbnail), or a video's poster (only the sender's thumbnail).
 **Settings**
 : The modal for this device's preferences (language, appearance) and each account's default
 notification mode, in sections (`SettingsSection`).
+
+**Appearance** (settings section)
+: The settings section for how the app looks: the theme (light, dark or the system's;
+`Appearance`), the message layout and the interface size. On phones these sit under Preferences,
+less the interface size.
+
+**Message layout**
+: How timelines lay out messages (`MessageLayout`, `messageLayout`): **classic rows**, the
+default, every message under its sender's name and picture as in Slack, or **chat bubbles**,
+other people's messages at the left beside their picture and the user's own at the right. A
+bubble holds words (text, a deleted or undecryptable message) with the sender's name (left out
+in a one-to-one direct chat) and the time; pictures, files, clips, polls, call cards and GIFs stand without one. Reactions and the
+thread hang below. See [ADR 0006](adr/0006-timelines.md).
 
 **Interface size** (zoom)
 : How large the whole interface draws, as a browser's page zoom (`Zoom`). 100% is the design
@@ -332,13 +375,34 @@ size. See [ADR 0005](adr/0005-navigation-and-settings.md).
 
 **Wants attention**
 : A room drawing the eye (bold name, rail and account dots): unread messages, or only mentions
-when it notifies for mentions only or is muted.
+when it notifies for mentions only or is muted; and any room marked unread.
 
 **Popover**
 : A floating panel over the window (account menu, room menu). One at a time.
 
 **Modal**
 : A dialog over the whole window with the rest dimmed (settings, confirmations). One at a time.
+
+**Safety**
+: What the user keeps away on one account: people they ignore, where pictures and videos show,
+and invitations from strangers (`Safety`). Settings → Safety; kept in the account's data. See
+[ADR 0011](adr/0011-safety.md).
+
+**Ignored person**
+: Someone the user ignores (Matrix's ignore list): the server sends nothing from them, earlier
+messages disappear, and they aren't told. Ignore is in the member menu and person panel.
+
+**Report**
+: Telling the homeserver's admins about a message, a room or a person, with an optional reason
+(`Command::Report`, `ReportTarget`).
+
+**Stranger**
+: Someone the account shares no joined room with, as this device knows (`Invitation::stranger`).
+Their invitations can be hidden: out of the sidebar and pushes, listed in Settings → Safety.
+
+**Hidden media**
+: A picture, video, linked GIF or link card image the media choice (`ShowMedia`: always, in
+private rooms, never) keeps back: a placeholder with Show until pressed.
 
 **Room menu**
 : A room's right-click menu: the Notifications submenu, then Leave room, or Delete chat for a
@@ -425,8 +489,41 @@ so it survives a restart. The Sessions page in settings lists every session of t
 encrypted history. See [ADR 0004](adr/0004-encryption.md).
 
 **Verification**
-: Confirming a new session from one already verified by comparing the same emoji on both
-(`VerificationStep`). An incoming verification request comes from the user's other session.
+: Confirming a new session from one already verified, or another person's identity, by
+comparing the same emoji on both sides or scanning one side's QR code with the other
+(`VerificationStep`). An incoming request comes from the user's other session or, in a direct
+chat, from another person.
+
+**Verified person**
+: Someone whose identity the user verified (`Identity::verified`). When their identity changes
+afterwards (`Identity::changed`), whoever holds it now may not be them.
+
+**Offline device**
+: A device the server keeps for the account (a dehydrated device, MSC3814) so a session signed
+in later reads messages sent while no session was signed in. Turned on with the recovery key
+(`OfflineDevice`). See [ADR 0004](adr/0004-encryption.md).
+
+**Key export**
+: The account's message keys written to a file, encrypted with a passphrase, for importing on
+another session or client (`ExportRoomKeys`, `ImportRoomKeys`).
+
+**QR sign-in** (link a device)
+: Signing a new device in with a QR code exchanged with a device where the account is signed in
+already, which approves it and hands over the secrets, so it starts verified (MSC4108,
+`QrLoginStep`). See [ADR 0003](adr/0003-accounts-and-sign-in.md).
+
+**Check code**
+: The two digits a device shows after scanning a QR sign-in code, typed on the other device to
+prove the two are talking to each other.
+
+**Registration**
+: Creating an account: on the account page for OAuth servers, in the app for password servers,
+which may ask for a registration token, agreement to policies (`Policy`), or a step on the
+server's page (`RegistrationStep`).
+
+**Deactivation**
+: Closing an account for good on its server; nobody can sign in to it again
+(`DeactivateAccount`).
 
 **Identity reset**
 : Replacing the account's cryptographic identity when the recovery key and every verified session
@@ -435,7 +532,8 @@ unreadable. See [ADR 0004](adr/0004-encryption.md).
 
 **Guarded action**
 : An action the server may protect with the account password (`Guarded`): ending a session,
-resetting the identity, adding a contact detail. They share one password dialog and retry.
+resetting the identity, adding a contact detail, changing the password, deactivating the account.
+They share one password dialog and retry.
 
 **Profile**
 : The account's display name and picture, plus its contact details. An OAuth account manages
@@ -489,6 +587,12 @@ once it ends. See [ADR 0006](adr/0006-timelines.md).
 : Voice or video with the people in a room: a MatrixRTC session through the homeserver's
 LiveKit service, or a one-to-one call device to device in a direct chat. One runs at a time.
 See [ADR 0009](adr/0009-calls.md).
+
+**Sticky membership**
+: A call membership as Element Call's "matrix_2_0" mode writes it: a sticky `m.rtc.member`
+event (MSC4354) with a random member ID, current for at most an hour unless sent again, rather
+than a state event (`calls::sticky`). Read alongside state memberships. See
+[ADR 0009](adr/0009-calls.md).
 
 **Call stage**
 : What a room shows in place of its timeline during its call: faces (voice) or the video grid,
@@ -561,6 +665,12 @@ characters that scramble under the pointer (`state::backdrop`, `ui::backdrop`). 
 **Engine**
 : `matrix-core`'s actor: owns every account, runs their syncs and carries out commands on a
 background runtime. See [ADR 0002](adr/0002-engine-and-desktop-state.md).
+
+**Room list sync**
+: The SDK's `RoomListService`: rooms over sliding sync (MSC4186), newest first, a batch at a
+time, on servers that offer it. Beside it a long-poll sync that asks for no rooms carries
+to-device messages, keys, presence and account data. See
+[ADR 0002](adr/0002-engine-and-desktop-state.md).
 
 **Command**
 : A request from an app to the engine (`Command`). Gets a **request ID** (`RequestId`) and ends

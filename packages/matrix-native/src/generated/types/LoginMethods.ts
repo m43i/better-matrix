@@ -11,4 +11,13 @@ oauth: boolean,
 /**
  * Username and password in the app.
  */
-password: boolean, };
+password: boolean, 
+/**
+ * New accounts can be created: on the account page (OAuth), else in the app.
+ */
+create_account: boolean, 
+/**
+ * Signing in with a QR code from a signed-in device (MSC4108): an OAuth server that grants
+ * devices sign-ins.
+ */
+qr: boolean, };

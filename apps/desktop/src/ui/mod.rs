@@ -1,6 +1,7 @@
 //! The view: one function from [`State`] to elements, composed from the screens below, which
 //! are composed from [`components`]. Popovers draw last, at the root, over everything.
 
+mod account_dialogs;
 mod account_menu;
 mod attachments;
 mod backdrop;
@@ -8,6 +9,7 @@ mod call;
 mod components;
 mod composer;
 mod confirm;
+mod developer;
 mod edit_history;
 mod emoji;
 mod icons;
@@ -22,11 +24,13 @@ mod panes;
 mod people;
 mod poll;
 mod preview;
+mod qr;
 mod rail;
 mod readers;
 mod room;
 mod room_discovery;
 mod room_menu;
+mod safety;
 mod saved;
 mod schedule;
 mod search;
@@ -171,6 +175,8 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             Some(settings::settings(s, *section, window, &p))
         }
         Some(Modal::Confirm(action)) => Some(confirm::confirm(action, &p)),
+        Some(Modal::Report(form)) => Some(safety::report(form, &p)),
+        Some(Modal::Source(view)) => Some(developer::source(view, &p)),
         Some(Modal::Forward { .. } | Modal::Translate(_)) => message_actions::dialog(s, &p),
         Some(Modal::Saved(id)) => s.accounts.get(id).map(|account| saved::saved(s, account, &p)),
         Some(Modal::Poll) => Some(poll::form(s, &p)),
@@ -209,7 +215,9 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     }
     if let Some(preview) = preview {
         root = root.child(preview);
-        if let (Some(Popover::AttachmentMenu { at }), Some(preview)) = (&s.popover, &s.preview) {
+        if let (Some(Popover::AttachmentMenu { at }), Some(preview)) = (&s.popover, &s.preview)
+            && !s.preview_held()
+        {
             let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
             root = root.child(attachments::menu(&preview.account, &preview.attachment, *at, window, &p));
         }

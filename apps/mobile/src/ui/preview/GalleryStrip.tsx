@@ -8,6 +8,8 @@ import { Pressable, ScrollView, type ScrollViewInstance, StyleSheet, View } from
 
 import { t } from '../../i18n';
 import { thumbnailOf } from '../../state/gallery';
+import { useStore } from '../../state/react';
+import { galleryThumbnail, previewHidden } from '../../state/selectors';
 import { Icon, type IconName } from '../icons';
 import { PREVIEW_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
@@ -28,9 +30,12 @@ export function GalleryStrip({
   items,
   current,
   bottom,
+  roomId,
   onPick,
 }: {
   account: AccountId;
+  /** The room the items were sent in, which decides whether their pictures show (ADR 0011). */
+  roomId: string;
   items: readonly Message[];
   /** The event ID on screen. */
   current: string;
@@ -64,6 +69,7 @@ export function GalleryStrip({
           <Thumb
             key={message.event_id}
             account={account}
+            roomId={roomId}
             message={message}
             label={t('mobile.conversation.preview_item', {
               name: message.content.type === 'Attachment' ? message.content.data.name : '',
@@ -83,10 +89,12 @@ function Thumb({
   account,
   message,
   label,
+  roomId,
   current,
   onPress,
 }: {
   account: AccountId;
+  roomId: string;
   message: Message;
   label: string;
   current: boolean;
@@ -94,11 +102,15 @@ function Thumb({
 }) {
   const palette = usePalette();
   const attachment = message.content.type === 'Attachment' ? message.content.data : null;
-  const picture = attachment ? thumbnailOf(attachment) : null;
-  const uri = useMedia(account, picture?.media ?? null, picture?.size ?? PREVIEW_SIZE);
+  // Media the account keeps back fetches nothing: the kind's icon shows (ADR 0011).
+  const media = useStore((s) => galleryThumbnail(s, account, roomId, message));
+  const size = (attachment && thumbnailOf(attachment)?.size) ?? PREVIEW_SIZE;
+  const uri = useMedia(account, media, size);
+  const held = useStore((s) => previewHidden(s, account, roomId, message));
 
-  const icon: IconName =
-    attachment?.kind === 'Video'
+  const icon: IconName = held
+    ? 'eyeOff'
+    : attachment?.kind === 'Video'
       ? 'video'
       : attachment?.kind === 'Audio'
         ? attachment.audio?.voice

@@ -20,8 +20,8 @@ use matrix_sdk::{Client, Room, SessionChange};
 use tokio::sync::broadcast;
 
 use crate::model::{
-    AccountId, AccountSummary, MediaRef, MediaSize, NotificationMode, Outgoing, RoomList, SignInMethod, TimelineKey,
-    Upload,
+    AccountId, AccountSummary, MediaRef, MediaSize, NotificationMode, Outgoing, RoomList, RoomPriority, SignInMethod,
+    TimelineKey, Upload,
 };
 use crate::session::{Sessions, StoredAccount, StoredAuth, StoredSecrets, new_passphrase};
 use crate::store::StoreLayout;
@@ -81,6 +81,31 @@ pub struct Account {
     pub(crate) status_saves: Arc<tokio::sync::Mutex<()>>,
     /// Held while a room's saved messages change: one change at a time (`crate::saved`).
     pub(crate) saved_changes: Arc<tokio::sync::Mutex<()>>,
+    /// Held while a safety choice changes: one change at a time, each on the server's latest
+    /// copy; it holds the choices the server last confirmed (`crate::safety`).
+    pub(crate) safety_changes: Arc<tokio::sync::Mutex<Option<crate::Safety>>>,
+    /// Safety changes, run in the order they were asked for: two quick choices of one setting
+    /// end on the later one (`crate::safety`).
+    pub(crate) safety_queue: crate::drafts::DraftQueue,
+    /// Draft reads and writes, in the order they were asked for (`crate::drafts`).
+    pub(crate) drafts: crate::drafts::DraftQueue,
+    /// The room list's sliding sync, while it runs (servers with MSC4186; ADR 0002).
+    room_list: Arc<Mutex<Option<Arc<matrix_sdk_ui::RoomListService>>>>,
+    /// The rooms open timelines show, which the room list's sliding sync subscribes to.
+    followed: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Held while the room list's subscriptions are updated (`Account::subscribe_followed`).
+    subscribing: Arc<tokio::sync::Mutex<()>>,
+    /// Call memberships in Element Call's matrix_2_0 mode, which the SDK doesn't keep.
+    pub(crate) sticky: crate::calls::StickyMembers,
+    /// Changes to rooms' tags and unread marks and to the keywords, run one at a time in the
+    /// order the engine was asked for them (queued as commands arrive, not as their tasks start).
+    pub(crate) organising: crate::drafts::DraftQueue,
+    /// Whether this session runs the account's offline device (`crate::offline_device`).
+    pub(crate) offline_device: Arc<tokio::sync::watch::Sender<crate::OfflineDevice>>,
+    /// Held while the offline device is turned on or off, taken over or replaced: one at a time.
+    pub(crate) offline_changes: Arc<tokio::sync::Mutex<()>>,
+    /// Where the account's secrets are saved (none in tests): the offline device's key goes there.
+    pub(crate) sessions: Option<Sessions>,
     /// Held while a scheduled message is encrypted: one at a time (`crate::scheduled`).
     pub(crate) scheduling: Arc<tokio::sync::Mutex<()>>,
     /// Held while the scheduled messages are listed and reported: lists go out in the order
@@ -89,8 +114,6 @@ pub struct Account {
     /// Held while the messages this account scheduled are read and written in its store, for a
     /// server that can't list them (`crate::scheduled`).
     pub(crate) scheduled_here: Arc<tokio::sync::Mutex<()>>,
-    /// Draft reads and writes, in the order they were asked for (`crate::drafts`).
-    pub(crate) drafts: crate::drafts::DraftQueue,
     /// The client's own crypto, for sends the SDK doesn't encrypt itself (`crate::scheduled`);
     /// `None` in tests.
     pub(crate) crypto: Option<Box<Crypto>>,
@@ -127,6 +150,66 @@ pub(crate) enum Redirect {
     Loopback(LocalServerRedirectHandle),
     /// The app, with the full URL its scheme received.
     App(tokio::sync::oneshot::Receiver<String>),
+}
+
+/// The store directory of a sign-in that hasn't saved its session yet: removed when the sign-in
+/// fails or is cancelled (its task dropped), kept once [`NewStore::signed_in`] saved an account in it.
+pub(crate) struct NewStore(Option<PathBuf>);
+
+impl NewStore {
+    /// A fresh, empty store directory.
+    pub(crate) fn new(layout: &StoreLayout) -> Result<Self, Error> {
+        Ok(Self(Some(layout.new_account_dir()?)))
+    }
+
+    /// Its directory.
+    pub(crate) fn path(&self) -> PathBuf {
+        self.0.clone().unwrap_or_default()
+    }
+
+    /// Saves the session `client` signed in, into this store, and keeps the store. The saving
+    /// runs on a task of its own: a sign-in cancelled meanwhile still finishes saving (the
+    /// account then comes back at the next start), and never loses the store a saved account
+    /// points at.
+    pub(crate) async fn signed_in(
+        mut self,
+        client: Client,
+        crypto: Crypto,
+        sessions: &Sessions,
+        holder: Holder,
+        passphrase: String,
+    ) -> Result<Account, Error> {
+        let sessions = sessions.clone();
+        let saving = tokio::spawn(async move {
+            let account = Account::signed_in(client, crypto, &sessions, holder, self.path(), passphrase).await?;
+            // Saved: the store stays.
+            self.0.take();
+            Ok(account)
+        });
+        saving.await.map_err(|e| Error::Storage(std::io::Error::other(e.to_string())))?
+    }
+}
+
+impl Drop for NewStore {
+    fn drop(&mut self) {
+        let Some(dir) = self.0.take() else { return };
+        let remove = move || {
+            let _ = std::fs::remove_dir_all(dir);
+        };
+        // File I/O stays off the engine's workers where there is a runtime to hand it to.
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => drop(runtime.spawn_blocking(remove)),
+            Err(_) => remove(),
+        }
+    }
+}
+
+/// Where a browser sign-in goes: the server, the suspended account it resumes, and whether it
+/// creates a new account first.
+pub(crate) struct OAuthTarget<'a> {
+    pub homeserver: &'a str,
+    pub resume: Option<&'a AccountId>,
+    pub create: bool,
 }
 
 /// A browser sign-in waiting for the user: the URL to open, and the redirect to wait for.
@@ -172,6 +255,9 @@ pub(crate) struct RoomCache {
     rooms: HashMap<String, crate::RoomSummary>,
     spaces: HashMap<String, crate::SpaceSummary>,
     invitations: HashMap<String, crate::Invitation>,
+    /// The joined rooms when invitations were last read: joining or leaving one can make an
+    /// inviter a stranger or not, so every invitation is read again when they change.
+    joined: std::collections::BTreeSet<String>,
     /// Whether a list was built from it yet: the first is, even when empty.
     listed: bool,
 }
@@ -342,10 +428,20 @@ impl Account {
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
+            safety_changes: Arc::default(),
+            safety_queue: crate::drafts::DraftQueue::default(),
+            drafts: crate::drafts::DraftQueue::default(),
+            room_list: Arc::default(),
+            followed: Arc::default(),
+            subscribing: Arc::default(),
+            sticky: crate::calls::StickyMembers::default(),
+            organising: crate::drafts::DraftQueue::default(),
+            offline_device: Arc::new(tokio::sync::watch::Sender::new(crate::OfflineDevice::Unknown)),
+            offline_changes: Arc::default(),
+            sessions: Some(sessions),
             scheduling: Arc::default(),
             listing_scheduled: Arc::default(),
             scheduled_here: Arc::default(),
-            drafts: crate::drafts::DraftQueue::default(),
             crypto: Some(Box::new(crypto)),
         }
     }
@@ -372,10 +468,20 @@ impl Account {
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
+            safety_changes: Arc::default(),
+            safety_queue: crate::drafts::DraftQueue::default(),
+            drafts: crate::drafts::DraftQueue::default(),
+            room_list: Arc::default(),
+            followed: Arc::default(),
+            subscribing: Arc::default(),
+            sticky: crate::calls::StickyMembers::default(),
+            organising: crate::drafts::DraftQueue::default(),
+            offline_device: Arc::new(tokio::sync::watch::Sender::new(crate::OfflineDevice::Unknown)),
+            offline_changes: Arc::default(),
+            sessions: None,
             scheduling: Arc::default(),
             listing_scheduled: Arc::default(),
             scheduled_here: Arc::default(),
-            drafts: crate::drafts::DraftQueue::default(),
             crypto: None,
         }
     }
@@ -407,11 +513,11 @@ impl Account {
         layout: &StoreLayout,
         sessions: &Sessions,
         holder: Holder,
-        homeserver: &str,
         identity: &ClientIdentity,
-        resume: Option<&AccountId>,
+        target: OAuthTarget<'_>,
         app_redirect: Option<(Url, tokio::sync::oneshot::Receiver<String>)>,
     ) -> Result<PendingOAuth, Error> {
+        let OAuthTarget { homeserver, resume, create } = target;
         let (store_dir, passphrase, device) = store_for(layout, sessions, resume, homeserver, None).await?;
         let (client, crypto) = build_client(homeserver, &store_dir, &passphrase, sessions, holder).await?;
         let (redirect_uri, redirect) = match app_redirect {
@@ -428,7 +534,12 @@ impl Account {
         );
         metadata.client_name = Some(Localized::new(identity.name.clone(), []));
         let metadata = Raw::new(&metadata).map_err(|e| Error::Storage(e.into()))?;
-        let data = client.oauth().login(redirect_uri, device, Some(metadata.into()), None).build().await?;
+        let mut login = client.oauth().login(redirect_uri, device, Some(metadata.into()), None);
+        if create {
+            use matrix_sdk::ruma::api::client::discovery::get_authorization_server_metadata::v1::Prompt;
+            login = login.prompt(vec![Prompt::Create]);
+        }
+        let data = login.build().await?;
         Ok(PendingOAuth { url: data.url, client, crypto, holder, redirect, store_dir, passphrase })
     }
 
@@ -441,10 +552,10 @@ impl Account {
             build_client(&stored.homeserver, &stored.store_dir, &secrets.passphrase, sessions, holder).await?;
         let changes = client.subscribe_to_session_changes();
         client.restore_session(secrets.auth.into_session()).await?;
-        Self::ready(AccountId::new(&stored.id), client, crypto, holder, changes).await
+        Self::ready(AccountId::new(&stored.id), client, crypto, holder, changes, sessions).await
     }
 
-    async fn signed_in(
+    pub(crate) async fn signed_in(
         client: Client,
         crypto: Crypto,
         sessions: &Sessions,
@@ -458,7 +569,7 @@ impl Account {
         let homeserver = client.homeserver().to_string();
         let stored = StoredAccount { id: id.to_string(), homeserver, store_dir, signed_out: false };
         blocking(sessions, move |s| s.save(stored, &StoredSecrets { auth, passphrase })).await?;
-        Self::ready(id, client, crypto, holder, changes).await
+        Self::ready(id, client, crypto, holder, changes, sessions).await
     }
 
     /// Turns on what every signed-in account runs: the event cache, which keeps room history on
@@ -470,6 +581,7 @@ impl Account {
         crypto: Crypto,
         holder: Holder,
         changes: broadcast::Receiver<SessionChange>,
+        sessions: &Sessions,
     ) -> Result<Self, Error> {
         // A push handled without the engine may write the crypto store (ADR 0010): with the
         // lock, each sync waits for a push to finish and reloads what it changed (`sync_once_locked`).
@@ -492,10 +604,20 @@ impl Account {
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
+            safety_changes: Arc::default(),
+            safety_queue: crate::drafts::DraftQueue::default(),
+            drafts: crate::drafts::DraftQueue::default(),
+            room_list: Arc::default(),
+            followed: Arc::default(),
+            subscribing: Arc::default(),
+            sticky: crate::calls::StickyMembers::default(),
+            organising: crate::drafts::DraftQueue::default(),
+            offline_device: Arc::new(tokio::sync::watch::Sender::new(crate::OfflineDevice::Unknown)),
+            offline_changes: Arc::default(),
+            sessions: Some(sessions.clone()),
             scheduling: Arc::default(),
             listing_scheduled: Arc::default(),
             scheduled_here: Arc::default(),
-            drafts: crate::drafts::DraftQueue::default(),
             crypto: Some(Box::new(crypto)),
         })
     }
@@ -518,6 +640,58 @@ impl Account {
     ) -> Result<matrix_sdk::sync::SyncResponse, matrix_sdk::Error> {
         let _store = self.client.encryption().spin_lock_store(None).await?;
         self.client.sync_once(settings).await
+    }
+
+    /// Names the room list's sliding sync while it runs, `None` once it stopped. A new one asks
+    /// at once for the rooms open timelines follow.
+    pub(crate) async fn set_room_list(&self, service: Option<Arc<matrix_sdk_ui::RoomListService>>) {
+        if let Ok(mut room_list) = self.room_list.lock() {
+            room_list.clone_from(&service);
+        }
+        if service.is_some() {
+            self.subscribe_followed().await;
+        }
+    }
+
+    /// Asks the room list's sliding sync for a room's recent events and full state while it is
+    /// open, so its timeline gets every event rather than the list's last few.
+    /// Nothing more to do over the long-poll sync, which brings every room whole.
+    pub(crate) async fn follow_room(&self, room_id: &str) {
+        if let Ok(mut followed) = self.followed.lock() {
+            followed.insert(room_id.to_owned());
+        }
+        self.subscribe_followed().await;
+    }
+
+    /// Stops following a room at once (its last timeline closed), then lets the room list's
+    /// sliding sync know.
+    pub(crate) fn unfollow_room(&self, room_id: &str) {
+        if let Ok(mut followed) = self.followed.lock() {
+            followed.remove(room_id);
+        }
+        let account = self.clone();
+        tokio::spawn(async move { account.subscribe_followed().await });
+    }
+
+    /// The rooms open timelines show.
+    pub(crate) fn followed_rooms(&self) -> Vec<String> {
+        self.followed.lock().map(|followed| followed.iter().cloned().collect()).unwrap_or_default()
+    }
+
+    /// Subscribes the room list's sliding sync to the rooms followed now, and only those: the
+    /// SDK replaces its whole set of subscriptions at once. One update at a time, each reading
+    /// the set when its turn comes, so the newest set is the one applied last.
+    async fn subscribe_followed(&self) {
+        let _turn = self.subscribing.lock().await;
+        let service = self.room_list.lock().ok().and_then(|room_list| room_list.clone());
+        let Some(service) = service else { return };
+        let followed: Vec<matrix_sdk::ruma::OwnedRoomId> = self
+            .followed
+            .lock()
+            .map(|followed| followed.iter().filter_map(|id| matrix_sdk::ruma::RoomId::parse(id).ok()).collect())
+            .unwrap_or_default();
+        let rooms: Vec<&matrix_sdk::ruma::RoomId> = followed.iter().map(AsRef::as_ref).collect();
+        service.set_room_subscriptions(&rooms).await;
     }
 
     /// Registers (or updates) this device's pusher: the homeserver sends the account's pushes
@@ -688,7 +862,8 @@ impl Account {
                     settings = Some(self.client.notification_settings().await);
                 }
                 if let Some(settings) = &settings {
-                    let summary = convert::room_summary(room, settings, self.rtc_service().is_some()).await;
+                    let summary =
+                        convert::room_summary(room, settings, self.rtc_service().is_some(), &self.sticky).await;
                     moved |= self::changed(&mut cache.rooms, id, summary);
                 }
             }
@@ -697,12 +872,22 @@ impl Account {
         let held = cache.invitations.len();
         cache.invitations.retain(|id, _| invited.iter().any(|room| room.room_id().as_str() == id));
         moved |= cache.invitations.len() != held;
+        let joined: std::collections::BTreeSet<String> =
+            self.client.joined_rooms().iter().map(|room| room.room_id().to_string()).collect();
+        let rejudge = joined != cache.joined;
+        cache.joined = joined;
         for room in invited {
             let id = room.room_id().to_string();
-            if changed.is_some_and(|changed| !changed.contains(&id)) && cache.invitations.contains_key(&id) {
+            if !rejudge && changed.is_some_and(|changed| !changed.contains(&id)) && cache.invitations.contains_key(&id)
+            {
                 continue;
             }
-            let inviter = room.invite_details().await.ok().map(|invite| crate::Person {
+            let details = room.invite_details().await.ok();
+            let stranger = match details.as_ref() {
+                Some(invite) => !crate::safety::shares_room(&self.client, &invite.inviter_id).await,
+                None => true,
+            };
+            let inviter = details.map(|invite| crate::Person {
                 id: invite.inviter_id.to_string(),
                 name: invite
                     .inviter
@@ -729,6 +914,7 @@ impl Account {
                 } else {
                     crate::RoomKind::Group
                 },
+                stranger,
             };
             moved |= self::changed(&mut cache.invitations, id, invitation);
         }
@@ -865,6 +1051,123 @@ impl Account {
         Ok(())
     }
 
+    /// The words that notify the user wherever they are written (push rules matching message
+    /// content), as this device last synced them, sorted.
+    pub async fn keywords(&self) -> Vec<String> {
+        let rules = self.client.account().push_rules().await.unwrap_or_default();
+        keywords_in(&rules)
+    }
+
+    /// The keywords as the server has them now.
+    pub async fn server_keywords(&self) -> Result<Vec<String>, Error> {
+        use matrix_sdk::ruma::api::client::push::get_pushrules_global_scope;
+        let rules = self.client.send(get_pushrules_global_scope::v3::Request::new()).await?.global;
+        Ok(keywords_in(&rules))
+    }
+
+    /// Adds a notification keyword (trimmed), or removes one as listed (a rule another client made
+    /// may keep spaces around its word), and returns the keywords as they are then. Both work from
+    /// the server's rules as they are now rather than this device's copy, which a sync begun
+    /// before an earlier change may have left behind. Blank keywords are left alone.
+    pub async fn set_keyword(&self, keyword: &str, enabled: bool) -> Result<Vec<String>, Error> {
+        use matrix_sdk::ruma::api::client::push::{
+            delete_pushrule, get_pushrules_global_scope, set_pushrule, set_pushrule_enabled,
+        };
+        use matrix_sdk::ruma::push::{
+            Action, HighlightTweakValue, NewPatternedPushRule, NewPushRule, RuleKind, SoundTweakValue, Tweak,
+        };
+        let mut rules = self.client.send(get_pushrules_global_scope::v3::Request::new()).await?.global;
+        let keyword = if enabled { keyword.trim() } else { keyword };
+        if keyword.trim().is_empty() {
+            return Ok(keywords_in(&rules));
+        }
+        let matching: Vec<(String, bool)> = rules
+            .content
+            .iter()
+            .filter(|rule| notifies(rule) && rule.pattern == keyword)
+            .map(|rule| (rule.rule_id.clone(), rule.enabled))
+            .collect();
+        if !enabled {
+            for (rule_id, _) in &matching {
+                self.client.send(delete_pushrule::v3::Request::new(RuleKind::Content, rule_id.clone())).await?;
+            }
+            rules.content.retain(|rule| !(notifies(rule) && rule.pattern == keyword));
+            return Ok(keywords_in(&rules));
+        }
+        if matching.iter().any(|(_, on)| *on) {
+            // There already.
+        } else if let Some((rule_id, _)) = matching.first() {
+            self.client.send(set_pushrule_enabled::v3::Request::enable(RuleKind::Content, rule_id.clone())).await?;
+        } else {
+            // Notifying with the default sound, as the SDK makes them, and highlighted, so a match
+            // counts like a mention (also where only mentions draw attention); named after the
+            // word when that is a plain, unused name, else under a name of the app's own.
+            let actions = vec![
+                Action::Notify,
+                Action::SetTweak(Tweak::Sound(SoundTweakValue::Default)),
+                Action::SetTweak(Tweak::Highlight(HighlightTweakValue::Yes)),
+            ];
+            let taken = |id: &str| rules.content.iter().any(|rule| rule.rule_id == id);
+            let plain = keyword.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
+            let rule_id = if plain && !taken(keyword) {
+                keyword.to_owned()
+            } else {
+                // Random, so two sessions adding words at once don't pick the same name.
+                format!("chat.bettermatrix.keyword.{}", crate::random_hex(8)?)
+            };
+            let rule = NewPushRule::Content(NewPatternedPushRule::new(rule_id, keyword.to_owned(), actions));
+            self.client.send(set_pushrule::v3::Request::new(rule)).await?;
+        }
+        Ok(with_keyword(keywords_in(&rules), keyword))
+    }
+
+    /// Puts a room among the favourites or the low priority rooms, or takes it out of both
+    /// (room tags). Each tag is set or removed whatever this device last synced, so a change
+    /// right after another one still reaches the server.
+    pub async fn set_room_priority(&self, room_id: &str, priority: RoomPriority) -> Result<(), Error> {
+        use matrix_sdk::ruma::events::tag::{TagInfo, TagName};
+        let room = self.joined_room(room_id)?;
+        let (set, remove): (Option<TagName>, &[TagName]) = match priority {
+            RoomPriority::Favourite => (Some(TagName::Favorite), &[TagName::LowPriority]),
+            RoomPriority::Low => (Some(TagName::LowPriority), &[TagName::Favorite]),
+            RoomPriority::Normal => (None, &[TagName::Favorite, TagName::LowPriority]),
+        };
+        if let Some(tag) = set {
+            room.set_tag(tag, TagInfo::new()).await?;
+        }
+        for tag in remove {
+            room.remove_tag(tag.clone()).await?;
+        }
+        Ok(())
+    }
+
+    /// Marks a room unread (MSC2867's flag), or takes the mark away, whatever this device last
+    /// synced. Reads nothing: [`Account::mark_room_read`] does.
+    pub async fn set_unread(&self, room_id: &str, unread: bool) -> Result<(), Error> {
+        use matrix_sdk::ruma::events::marked_unread::MarkedUnreadEventContent;
+        self.joined_room(room_id)?.set_account_data(MarkedUnreadEventContent::new(unread)).await?;
+        Ok(())
+    }
+
+    /// Reads a room without opening it: its read receipt and fully-read marker moved to the latest
+    /// message the SDK knows, when there are unread ones, and the unread mark taken away. Fails when there are unread
+    /// messages but no message to mark read yet.
+    pub async fn mark_room_read(&self, room_id: &str) -> Result<(), Error> {
+        use matrix_sdk::ruma::events::marked_unread::MarkedUnreadEventContent;
+        let room = self.joined_room(room_id)?;
+        if room.num_unread_messages() > 0 || room.num_unread_mentions() > 0 {
+            let matrix_sdk_base::latest_event::LatestEventValue::Remote(event) = room.latest_event() else {
+                return Err(Error::NothingToRead);
+            };
+            let event_id = event.event_id().ok_or(Error::NothingToRead)?.to_owned();
+            let receipts =
+                matrix_sdk::room::Receipts::new().fully_read_marker(event_id.clone()).public_read_receipt(event_id);
+            room.send_multiple_receipts(receipts).await?;
+        }
+        room.set_account_data(MarkedUnreadEventContent::new(false)).await?;
+        Ok(())
+    }
+
     /// Leaves a room. With `forget`, also asks the server to forget it, so it disappears from
     /// every client's history list (deleting a direct chat).
     pub async fn leave_room(&self, room_id: &str, forget: bool) -> Result<(), Error> {
@@ -892,12 +1195,34 @@ impl Account {
         Ok(self.joined_room(room_id)?.typing_notice(typing).await?)
     }
 
-    fn joined_room(&self, room_id: &str) -> Result<Room, Error> {
+    pub(crate) fn joined_room(&self, room_id: &str) -> Result<Room, Error> {
         let parsed = RoomId::parse(room_id)?;
         self.client
             .get_room(&parsed)
             .ok_or_else(|| Error::UnknownRoom { account: self.id.clone(), room_id: room_id.to_owned() })
     }
+}
+
+/// The keywords a ruleset holds: its enabled content rules the user made, by their word, sorted.
+fn keywords_in(rules: &matrix_sdk::ruma::push::Ruleset) -> Vec<String> {
+    let enabled = rules.content.iter().filter(|rule| notifies(rule) && rule.enabled);
+    with_keyword(enabled.map(|rule| rule.pattern.clone()).collect(), "")
+}
+
+/// Whether a content rule is one of the user's keywords: one they made that notifies. One that
+/// silences a word is not.
+fn notifies(rule: &matrix_sdk::ruma::push::PatternedPushRule) -> bool {
+    !rule.default && rule.actions.iter().any(|action| matches!(action, matrix_sdk::ruma::push::Action::Notify))
+}
+
+/// `keywords` with `keyword` too (a blank one adds nothing), once each, sorted.
+fn with_keyword(mut keywords: Vec<String>, keyword: &str) -> Vec<String> {
+    if !keyword.is_empty() {
+        keywords.push(keyword.to_owned());
+    }
+    keywords.sort_by_cached_key(|keyword| (keyword.to_lowercase(), keyword.clone()));
+    keywords.dedup();
+    keywords
 }
 
 impl PendingOAuth {
@@ -1010,7 +1335,7 @@ pub(crate) async fn set_signed_out(sessions: &Sessions, id: &AccountId) -> Resul
 }
 
 /// Runs a session-store call on the blocking pool: secret stores may wait on a keychain or D-Bus.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     sessions: &Sessions,
     f: impl FnOnce(&Sessions) -> Result<T, Error> + Send + 'static,
 ) -> Result<T, Error> {
@@ -1082,10 +1407,20 @@ mod tests {
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
+            safety_changes: Arc::default(),
+            safety_queue: crate::drafts::DraftQueue::default(),
+            drafts: crate::drafts::DraftQueue::default(),
+            room_list: Arc::default(),
+            followed: Arc::default(),
+            subscribing: Arc::default(),
+            sticky: crate::calls::StickyMembers::default(),
+            organising: crate::drafts::DraftQueue::default(),
+            offline_device: Arc::new(tokio::sync::watch::Sender::new(crate::OfflineDevice::Unknown)),
+            offline_changes: Arc::default(),
+            sessions: Some(sessions),
             scheduling: Arc::default(),
             listing_scheduled: Arc::default(),
             scheduled_here: Arc::default(),
-            drafts: crate::drafts::DraftQueue::default(),
             crypto: None,
         }
     }
@@ -1183,3 +1518,7 @@ mod tests {
         assert!(!same_server("https://matrix.example.org/", "https://matrix.other.org/"));
     }
 }
+
+#[cfg(test)]
+#[path = "organise_tests.rs"]
+mod organise_tests;

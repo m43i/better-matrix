@@ -2,7 +2,7 @@
 // Worked out once at the root (`PaletteProvider`) and handed down: views ask for it everywhere
 // (every row, avatar and pill), and one subscription serves them all.
 
-import { createContext, type ReactNode, useContext } from 'react';
+import { createContext, type ReactNode, useContext, useMemo } from 'react';
 import { Platform, useColorScheme } from 'react-native';
 
 import { dark, light, type Palette } from '../theme/palette';
@@ -27,6 +27,17 @@ export function usePalette(): Palette {
   if (!palette) throw new Error('usePalette needs a PaletteProvider');
 
   return palette;
+}
+
+/**
+ * Inside a chat bubble: muted words (a quote, a notice) take the shade that stays clear on the
+ * bubble.
+ */
+export function InBubble({ children }: { children: ReactNode }) {
+  const palette = usePalette();
+  const inside = useMemo(() => ({ ...palette, textMuted: palette.bubbleMeta }), [palette]);
+
+  return <PaletteContext.Provider value={inside}>{children}</PaletteContext.Provider>;
 }
 
 /**

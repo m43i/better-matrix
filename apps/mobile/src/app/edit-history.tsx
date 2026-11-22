@@ -61,6 +61,8 @@ export default function EditHistoryScreen() {
       account,
       timelineKey: roomKey(roomId),
       thread: null,
+      // No bubbles here: every version is the same sender's.
+      unnamed: new Set<string>(),
       scrollTo: () => undefined,
       openActions: () => undefined,
       shown: () => shown.current,
