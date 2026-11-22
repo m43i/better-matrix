@@ -322,4 +322,15 @@ describe('an Ignore and a Stop ignoring both on their way', () => {
 
     expect([whileBoth, hidden()]).toEqual([true, false]);
   });
+
+  it('should keep their message out of the room list’s previews while both are on their way', () => {
+    const { store, engine } = setup();
+    engine.emit({
+      type: 'LatestMessage',
+      data: { account: ADA, room_id: '!room:x', message: message('$hi') },
+    });
+    void setIgnored(store, ADA, GRACE, true);
+    void setIgnored(store, ADA, GRACE, false);
+    expect(lastMessage(roomListOf(store.getState(), ADA)!, '!room:x')).toBeUndefined();
+  });
 });

@@ -749,7 +749,8 @@ fn message_parts(
         inside.push(quote_block(quote, said));
     }
     // A GIF link shows as the GIF, below the rest of the message (if any) like an attachment.
-    match item.gif.as_ref().filter(|gif| cx.show_gifs && !cx.gifs.has_failed(&gif.url)) {
+    // Held back, it keeps its Show even when an earlier download failed: Show tries again.
+    match item.gif.as_ref().filter(|gif| cx.show_gifs && (cx.hides(message) || !cx.gifs.has_failed(&gif.url))) {
         Some(gif) => {
             if let Some(rest) = &gif.rest {
                 let caption = text_body(&message.event_id, &rest.plain, rest.rich.as_ref(), said);

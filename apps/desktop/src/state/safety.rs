@@ -210,6 +210,17 @@ impl State {
     /// Shows a message's held-back media, until the app restarts, and fetches it.
     pub fn reveal_media(&mut self, account: &AccountId, event_id: &str) {
         self.revealed_media.insert((account.clone(), event_id.to_owned()));
+        // Its linked GIF is tried again at once, even after a failed download.
+        let gifs: Vec<String> = self
+            .accounts
+            .get(account)
+            .into_iter()
+            .flat_map(|data| data.timelines_holding(event_id))
+            .filter_map(|entry| entry.gif_link().map(str::to_owned))
+            .collect();
+        for url in gifs {
+            self.gifs.try_again(&url);
+        }
         self.request_timeline_media();
         self.fetch_linked(std::time::Instant::now());
     }

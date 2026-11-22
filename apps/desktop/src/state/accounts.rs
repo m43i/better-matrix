@@ -942,6 +942,13 @@ impl AccountData {
         hasher.finish()
     }
 
+    /// The entries carrying the message `event_id`, in the timelines kept.
+    pub fn timelines_holding<'a>(&'a self, event_id: &'a str) -> impl Iterator<Item = &'a Entry> + 'a {
+        self.timelines.values().flat_map(move |timeline| {
+            timeline.entries.iter().filter(move |e| e.message().is_some_and(|m| m.event_id == event_id))
+        })
+    }
+
     /// The invitations the sidebar and Home list: all but strangers' when the user hides them.
     pub fn shown_invitations(&self) -> impl Iterator<Item = &matrix_core::Invitation> {
         self.invitations.iter().filter(|invite| self.safety.shows_invitation(invite))

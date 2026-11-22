@@ -108,9 +108,13 @@ export function hides(data: AccountData, userId: string): boolean {
   return shownIgnored(data)?.includes(userId) ?? false;
 }
 
-/** The people shown as ignored whose ignore the engine hasn't confirmed yet. */
+/**
+ * The people hidden (`shownIgnored`) whom the engine hasn't confirmed as ignored: shown as
+ * ignored, or named by an Ignore on its way, a later Stop ignoring on its way too included. What
+ * they sent is hidden as it is read; what confirmed ignores' people sent left the state already.
+ */
 export function pendingIgnored(data: AccountData): string[] {
-  return data.safety.ignored.filter((id) => !data.savedSafety.ignored.includes(id));
+  return (shownIgnored(data) ?? []).filter((id) => !data.savedSafety.ignored.includes(id));
 }
 
 /** `messages` without those `senders` sent; the same object when there are none. */

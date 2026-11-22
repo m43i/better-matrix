@@ -2836,3 +2836,34 @@ fn a_held_back_link_card_image_that_failed_should_still_offer_show_and_try_again
     assert!(rt.state.revealed_media.contains(&(AccountId::new(demo::ADA), "$link".to_owned())));
     assert!(!rt.state.media.has_failed(&page), "tried again");
 }
+
+#[test]
+fn a_held_back_gif_that_failed_should_still_offer_show_and_try_again() {
+    let url = "https://x.org/party.gif";
+    let mut rt = runtime(move |s| {
+        demo::hidden_media(s);
+        let message = Message {
+            event_id: "$gif".into(),
+            sender_id: "@grace:example.org".into(),
+            sender_name: "Grace Hopper".into(),
+            timestamp_ms: 1,
+            content: MessageContent::Text { body: url.into(), html: None },
+            ..Message::default()
+        };
+        let entry = TimelineEntry { id: "gif".into(), kind: EntryKind::Message(Box::new(message)) };
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::Reset(vec![entry])],
+            },
+            &mut rune::Tx::default(),
+        );
+        s.gifs.failed(url, std::time::Instant::now());
+    });
+    assert!(rt.state.gifs.has_failed(url));
+    assert!(rt.find("hidden-media-$gif").is_some(), "Show stays");
+    press(&mut rt, "show-media-$gif");
+    assert!(rt.state.revealed_media.contains(&(AccountId::new(demo::ADA), "$gif".to_owned())));
+    assert!(!rt.state.gifs.has_failed(url), "tried again");
+}
