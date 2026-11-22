@@ -457,10 +457,15 @@ impl State {
         };
         self.popover = None;
         let request = self.dispatch(Command::ChangeRoom { account, room_id, setting }, Purpose::RoomText);
-        if let Some(dialog) = self.settings_dialog() {
-            // Only the latest save of a field is followed: an earlier one's answer is ignored.
-            dialog.saving.retain(|(_, saving, _)| *saving != field);
-            dialog.saving.push((request, field, typed));
+        let Some(dialog) = self.settings_dialog() else { return };
+        // Only the latest save of a field is followed: an earlier one's answer is ignored, and
+        // its failure tells nothing (the newer save says how it went).
+        let superseded: Vec<RequestId> =
+            dialog.saving.iter().filter(|(_, saving, _)| *saving == field).map(|(sent, _, _)| *sent).collect();
+        dialog.saving.retain(|(_, saving, _)| *saving != field);
+        dialog.saving.push((request, field, typed));
+        for sent in superseded {
+            self.pending.remove(&sent);
         }
     }
 

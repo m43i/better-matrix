@@ -6233,6 +6233,18 @@ fn a_draft_should_survive_a_refresh_after_the_latest_save_failed() {
 }
 
 #[test]
+fn a_save_replaced_by_a_newer_one_should_not_report_its_failure() {
+    let (mut s, mut commands, _) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    s.save_room_topic();
+    let (first, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("C");
+    s.save_room_topic();
+    apply(&mut s, Event::Finished { request: first, result: Err("forbidden".into()) });
+    assert!(s.notice.is_none());
+}
+
+#[test]
 fn a_failed_save_should_keep_the_draft() {
     let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
     *s.room_settings_field(SettingsField::Name) = TextEdit::new("Renamed");
