@@ -56,7 +56,9 @@ export default function ScheduleScreen() {
       return;
     }
 
-    if (scheduleComposer(store, account, keyOf(roomId, thread), delay)) router.back();
+    // Refused, the draft stays and a notice in the conversation says why.
+    scheduleComposer(store, account, keyOf(roomId, thread), delay);
+    router.back();
   };
 
   const startCustom = () => setCustom(presetTime('inHour', Date.now()));

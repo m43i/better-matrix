@@ -32,6 +32,7 @@ import {
   cancelReply,
   completeDraft,
   removeAttachment,
+  scheduleProblemText,
   sendComposer,
   sendTyping,
   sendVoiceMemo,
@@ -51,8 +52,8 @@ import {
   hasText,
   type Selection,
 } from '../../state/format';
-import { canSchedule, excerpt, formatDuration } from '../../state/outgoing';
-import { completeAt, type Pill, placePills, triggerAt } from '../../state/pills';
+import { excerpt, formatDuration, scheduleProblem } from '../../state/outgoing';
+import { completeAt, type DraftPill, pillAt, placePills, triggerAt } from '../../state/pills';
 import { addNotice } from '../../state/reducer';
 import { useAppStore, useStore } from '../../state/react';
 import { scheduledIn } from '../../state/schedule';
@@ -176,7 +177,7 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
   );
 
   /** Takes a new draft from the user, the toolbar or a suggestion (`pill`, when it is one). */
-  const write = (draft: string, caretAt?: Selection, pill?: Pill | null) => {
+  const write = (draft: string, caretAt?: Selection, pill?: DraftPill | null) => {
     written.current = draft;
     setText(draft);
 
@@ -187,7 +188,8 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
 
     if (pill !== undefined)
       completeDraft(store, account, timelineKey, draft, caretAt ?? selection.current, pill);
-    else setDraft(store, account, timelineKey, draft);
+    // Where the caret was tells apart an edit in repeated text, for the pills after it.
+    else setDraft(store, account, timelineKey, draft, undefined, selection.current.start);
     const step = draftChanged(typing.current, draft, Date.now());
     typing.current = step.next;
     notify(step.notice);
@@ -280,7 +282,13 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
           : suggestion.pill.label;
 
     const done = completeAt(written.current, trigger, insert);
-    const pill = suggestion.type === 'pill' || suggestion.type === 'emote' ? suggestion.pill : null;
+
+    // The pill stands for the words the suggestion replaced, not any like them elsewhere.
+    const pill =
+      suggestion.type === 'pill' || suggestion.type === 'emote'
+        ? pillAt(suggestion.pill, trigger.start)
+        : null;
+
     write(done.text, done.selection, pill);
   };
 
@@ -304,8 +312,13 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
   }, [text, pills]);
 
   const schedule = () => {
-    if (!canSchedule(state)) {
-      Alert.alert(t('mobile.composer.schedule'), t('mobile.composer.schedule_attachments'));
+    // A draft that can't wait on the server (attachments, a command that acts) says why here.
+    const problem = scheduleProblem(state, account, timelineKey);
+
+    if (problem) {
+      const text = scheduleProblemText(problem);
+
+      if (text) Alert.alert(t('mobile.composer.schedule'), text);
 
       return;
     }

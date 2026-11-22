@@ -7,7 +7,7 @@ import {
   editDraft,
   outgoingText,
 } from '../format';
-import { emotePill, EVERYONE, userPill } from '../pills';
+import { emotePill, EVERYONE, pillAt, userPill } from '../pills';
 
 const caret = (at: number) => ({ start: at, end: at });
 
@@ -288,7 +288,7 @@ describe('outgoingText with pills', () => {
   const grace = userPill('@grace:x.org', 'Grace Hopper');
 
   it('should send a mention as a matrix.to link, its name in the body', () => {
-    expect(outgoingText('hi @Grace Hopper', [grace])).toEqual({
+    expect(outgoingText('hi @Grace Hopper', [pillAt(grace, 3)])).toEqual({
       body: 'hi Grace Hopper',
       html: '<p>hi <a href="https://matrix.to/#/@grace:x.org">Grace Hopper</a></p>',
       mentions: { user_ids: ['@grace:x.org'], room: false },
@@ -296,18 +296,18 @@ describe('outgoingText with pills', () => {
   });
 
   it('should format a mention inside markers', () => {
-    expect(outgoingText('**@Grace Hopper**', [grace]).html).toBe(
+    expect(outgoingText('**@Grace Hopper**', [pillAt(grace, 2)]).html).toBe(
       '<p><strong><a href="https://matrix.to/#/@grace:x.org">Grace Hopper</a></strong></p>',
     );
   });
 
   it('should not read markers inside a mention’s name', () => {
     const snake = userPill('@s:x.org', 'snake_case_');
-    expect(outgoingText('@snake_case_ hi', [snake]).body).toBe('snake_case_ hi');
+    expect(outgoingText('@snake_case_ hi', [pillAt(snake, 0)]).body).toBe('snake_case_ hi');
   });
 
   it('should send @room as plain text that mentions the room', () => {
-    expect(outgoingText('@room lunch', [EVERYONE])).toEqual({
+    expect(outgoingText('@room lunch', [pillAt(EVERYONE, 0)])).toEqual({
       body: '@room lunch',
       html: null,
       mentions: { user_ids: [], room: true },
@@ -315,15 +315,26 @@ describe('outgoingText with pills', () => {
   });
 
   it('should send a custom emoji as an image, its short code in the body', () => {
-    expect(outgoingText('yay :cat:', [emotePill('mxc://x.org/c', 'cat')])).toEqual({
+    expect(outgoingText('yay :cat:', [pillAt(emotePill('mxc://x.org/c', 'cat'), 4)])).toEqual({
       body: 'yay :cat:',
       html: '<p>yay <img data-mx-emoticon src="mxc://x.org/c" alt=":cat:" title=":cat:" height="32" /></p>',
       mentions: { user_ids: [], room: false },
     });
   });
 
+  it('should send only the place a pill was picked as a mention, not the same words elsewhere', () => {
+    expect(
+      outgoingText('@Grace Hopper said hi to @Grace Hopper', [pillAt(grace, 25)]),
+    ).toMatchObject({
+      body: '@Grace Hopper said hi to Grace Hopper',
+      html: '<p>@Grace Hopper said hi to <a href="https://matrix.to/#/@grace:x.org">Grace Hopper</a></p>',
+    });
+  });
+
   it('should send a pill in code as its label', () => {
-    expect(outgoingText('`@Grace Hopper`', [grace]).html).toBe('<p><code>@Grace Hopper</code></p>');
+    expect(outgoingText('`@Grace Hopper`', [pillAt(grace, 1)]).html).toBe(
+      '<p><code>@Grace Hopper</code></p>',
+    );
   });
 });
 
@@ -357,19 +368,19 @@ describe('editDraft', () => {
   it('should bring a mention back as a pill', () => {
     expect(
       editDraft('Grace: hi', '<a href="https://matrix.to/#/@grace:x.org">Grace</a>: hi'),
-    ).toEqual({ draft: '@Grace: hi', pills: [userPill('@grace:x.org', 'Grace')] });
+    ).toEqual({ draft: '@Grace: hi', pills: [pillAt(userPill('@grace:x.org', 'Grace'), 0)] });
   });
 
   it('should bring a custom emoji back as a pill', () => {
     expect(
       editDraft(':cat:', '<img data-mx-emoticon src="mxc://x.org/c" alt=":cat:" height="32">'),
-    ).toEqual({ draft: ':cat:', pills: [emotePill('mxc://x.org/c', 'cat')] });
+    ).toEqual({ draft: ':cat:', pills: [pillAt(emotePill('mxc://x.org/c', 'cat'), 0)] });
   });
 
   it('should bring a custom emoji the sanitiser left unmarked back as a pill', () => {
     expect(editDraft(':cat:', '<img src="mxc://x.org/c" alt=":cat:" height="32">')).toEqual({
       draft: ':cat:',
-      pills: [emotePill('mxc://x.org/c', 'cat')],
+      pills: [pillAt(emotePill('mxc://x.org/c', 'cat'), 0)],
     });
   });
 
@@ -383,9 +394,15 @@ describe('editDraft', () => {
     ).toBe('so $$a < b$$!');
   });
 
+  it('should bring a mention back where it stood, after the same words as text', () => {
+    expect(
+      editDraft('', '@Grace and <a href="https://matrix.to/#/@grace:x.org">Grace</a>').pills,
+    ).toEqual([pillAt(userPill('@grace:x.org', 'Grace'), 11)]);
+  });
+
   it('should send a mention again as it was sent', () => {
     const grace = userPill('@grace:x.org', 'Grace Hopper');
-    const first = outgoingText('hi @Grace Hopper ||x||', [grace]);
+    const first = outgoingText('hi @Grace Hopper ||x||', [pillAt(grace, 3)]);
     const back = editDraft(first.body, first.html);
     expect(outgoingText(back.draft, back.pills)).toEqual(first);
   });

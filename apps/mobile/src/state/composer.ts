@@ -3,7 +3,7 @@
 
 import type { AccountId, Message, TimelineKey } from '@better-matrix/matrix-native/types';
 
-import type { Pill } from './pills';
+import type { DraftPill } from './pills';
 import type { Store } from './store';
 import { timelineId } from './timeline';
 import type { State } from './types';
@@ -15,8 +15,8 @@ export interface ComposerState {
   editing: Message | null;
   /** The unsent text. */
   draft: string;
-  /** The mentions and custom emoji in the draft, by their labels there (`state/pills.ts`). */
-  pills?: Pill[];
+  /** The mentions and custom emoji in the draft, by where they stand there (`state/pills.ts`). */
+  pills?: DraftPill[];
   /** Files waiting to go with the next send, in the order they were picked. */
   attachments?: PendingAttachment[];
   /** While editing: the draft, reply and attachments set aside, and the message's text as it read. */
@@ -41,11 +41,11 @@ export interface KeptEdit {
   /** The text the user sent. */
   text: string;
   /** The pills in it. */
-  pills?: Pill[];
+  pills?: DraftPill[];
   /** The message's text as the edit first showed it. */
   original: string;
   /** The pills the message's text first had. */
-  originalPills?: Pill[];
+  originalPills?: DraftPill[];
 }
 
 /** A file picked for the next send. */
@@ -63,13 +63,13 @@ export interface PendingAttachment {
 /** What a composer held before an edit took the field (the desktop's `Draft`). */
 export interface SetAside {
   draft: string;
-  pills?: Pill[];
+  pills?: DraftPill[];
   replyTo: Message | null;
   attachments: PendingAttachment[];
   /** The edited message's text as the field first showed it: an unchanged edit isn't sent. */
   original: string;
   /** The pills the edited message's text first had. */
-  originalPills?: Pill[];
+  originalPills?: DraftPill[];
 }
 
 export const EMPTY_COMPOSER: ComposerState = { replyTo: null, editing: null, draft: '' };
@@ -187,7 +187,7 @@ export function startEdit(
   key: TimelineKey,
   message: Message,
   text: string,
-  pills: Pill[] = [],
+  pills: DraftPill[] = [],
 ): void {
   updateComposer(store, account, key, (c) => {
     // A kept edit of the same message comes back in its place; other kept edits wait.

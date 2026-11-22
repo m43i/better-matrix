@@ -17,12 +17,14 @@ import {
   insertAt,
   planSchedule,
   planSend,
+  type ScheduleProblem,
+  scheduleProblem,
   type SendPlan,
   type SendProblem,
   voiceMessage,
   withAttachments,
 } from '../outgoing';
-import { livePills, type Pill } from '../pills';
+import { type DraftPill, editPills, livePills, type Pill, pillAt, trackPills } from '../pills';
 import { type PollForm, pollOutgoing } from '../pollForm';
 import { addNotice } from '../reducer';
 import { CommandFailed } from '../requests';
@@ -57,19 +59,25 @@ function sendTold(
   );
 }
 
-/** The draft changed (and where the caret is). */
+/**
+ * The draft changed (and where the caret is). Its pills move with the edit; one whose label was
+ * edited away is gone. `caret`, where the field's caret was, tells apart edits in repeated text.
+ */
 export function setDraft(
   store: Store,
   account: AccountId,
   key: TimelineKey,
   draft: string,
   selection?: { start: number; end: number },
+  caret?: number,
 ): void {
   updateComposer(store, account, key, (c) => ({
     ...c,
     draft,
-    // A pill whose label was edited away is gone.
-    pills: c.pills && c.pills.length > 0 ? livePills(draft, c.pills) : c.pills,
+    pills:
+      c.pills && c.pills.length > 0
+        ? trackPills(c.draft, draft, c.pills, caret ?? selection?.start)
+        : c.pills,
     selection: selection ?? c.selection,
     // Typing in an edit changes the sent message, not the draft set aside under it.
     touched: c.touched || !c.editing,
@@ -78,7 +86,8 @@ export function setDraft(
 
 /**
  * The draft with a suggestion picked: `draft` (the trigger's text replaced) and the pill it
- * inserted, if it was one (a mention, a custom emoji).
+ * inserted, if it was one (a mention, a custom emoji), where it was put: the pill stands for
+ * that place, whatever the same words say elsewhere.
  */
 export function completeDraft(
   store: Store,
@@ -86,10 +95,11 @@ export function completeDraft(
   key: TimelineKey,
   draft: string,
   selection: { start: number; end: number },
-  pill: Pill | null,
+  pill: DraftPill | null,
 ): void {
   updateComposer(store, account, key, (c) => {
-    const pills = pill ? [...(c.pills ?? []), pill] : (c.pills ?? []);
+    const moved = trackPills(c.draft, draft, c.pills ?? [], pill?.start);
+    const pills = pill ? [...moved, pill] : moved;
 
     return {
       ...c,
@@ -124,12 +134,15 @@ export function insertIntoDraft(
 ): void {
   updateComposer(store, account, key, (c) => {
     const inserted = insertAt(c.draft, c.selection, text);
-    const pills = pill ? [...(c.pills ?? []), pill] : c.pills;
+    const start = inserted.selection.start - text.length;
+    const end = start + c.draft.length - (inserted.text.length - text.length);
+    const moved = editPills(c.pills ?? [], start, end, text.length);
+    const pills = pill ? [...moved, pillAt(pill, start)] : moved;
 
     return {
       ...c,
       draft: inserted.text,
-      pills: pills && livePills(inserted.text, pills),
+      pills: livePills(inserted.text, pills),
       selection: inserted.selection,
       touched: c.touched || !c.editing,
     };
@@ -224,7 +237,9 @@ export function sendComposer(
   const edit = current.editing && {
     message: current.editing,
     text: current.draft,
+    pills: current.pills ?? [],
     original: current.setAside?.original ?? '',
+    originalPills: current.setAside?.originalPills ?? [],
   };
 
   const newest = newestEdits.get(store) ?? new Map<string, number>();
@@ -293,9 +308,24 @@ function failedKey(command: Command): Key {
   }
 }
 
+/** What stops a message from being scheduled, as the user is told; `null` when nothing need be. */
+export function scheduleProblemText(problem: ScheduleProblem): string | null {
+  switch (problem.type) {
+    case 'attachments':
+      return t('mobile.composer.schedule_attachments');
+    case 'command':
+      return t('mobile.composer.schedule_command');
+    case 'nothing':
+      return null;
+    default:
+      return problemText(problem);
+  }
+}
+
 /**
- * Asks the server to send what the composer holds in `delayMs` (MSC4140) and empties it; text
- * only. Returns whether it was scheduled.
+ * Asks the server to send what the composer holds in `delayMs` (MSC4140) and empties it: text,
+ * or a command that makes a message. Anything else (a command that acts, attachments) isn't
+ * done: the draft stays and a notice says why. Returns whether it was scheduled.
  */
 export function scheduleComposer(
   store: Store,
@@ -304,16 +334,27 @@ export function scheduleComposer(
   delayMs: number,
 ): boolean {
   const current = composer(store.getState(), account, key);
-  const plan = planSchedule(current, account, key, delayMs);
+  const problem = scheduleProblem(current, account, key);
+  const plan = problem ? null : planSchedule(current, account, key, delayMs);
 
-  if (!plan) return false;
+  if (!plan) {
+    const text = problem && scheduleProblemText(problem);
+
+    if (text) store.update((s) => addNotice(s, text, account));
+
+    return false;
+  }
+
   updateComposer(store, account, key, () => ({ ...plan.composer, touched: current.touched }));
 
   for (const command of plan.commands)
     void sendTold(store, command, 'notice.not_sent', () =>
-      // A refused schedule gives the text back, unless something was typed since.
+      // A refused schedule gives the composer back as it was (its text, pills and the message
+      // it answered), unless something was written or answered since.
       updateComposer(store, account, key, (c) =>
-        c.draft === '' && !c.editing ? { ...c, draft: current.draft, pills: current.pills } : c,
+        c.draft === '' && !c.editing && c.replyTo === null
+          ? { ...c, draft: current.draft, pills: current.pills, replyTo: current.replyTo }
+          : c,
       ),
     );
 

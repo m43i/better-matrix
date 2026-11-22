@@ -130,9 +130,43 @@ export function planSend(composer: ComposerState, account: AccountId, key: Timel
 export const MAX_SCHEDULE_MS = 30 * 86_400_000;
 
 /**
+ * Why what a composer holds can't be scheduled: attachments (uploads go at once), a command
+ * that acts rather than sends a message (`/leave` can't wait on the server), a command that
+ * can't be done, or nothing to send (an edit, an empty draft).
+ */
+export type ScheduleProblem =
+  | SendProblem
+  | { type: 'attachments' }
+  | { type: 'command' }
+  | { type: 'nothing' };
+
+/**
+ * What stops a composer's message from being scheduled, or `null` when it may be: text alone,
+ * or a command that makes a message (`/me`, `/plain`, `/spoiler`, `/shrug`, …).
+ */
+export function scheduleProblem(
+  composer: ComposerState,
+  account: AccountId,
+  key: TimelineKey,
+): ScheduleProblem | null {
+  if (composer.editing || !hasText(composer)) return { type: 'nothing' };
+
+  if ((composer.attachments?.length ?? 0) > 0) return { type: 'attachments' };
+  const drafted = draftMessage(composer, account, key);
+
+  switch (drafted.type) {
+    case 'problem':
+      return drafted.problem;
+    case 'command':
+      return { type: 'command' };
+    case 'message':
+      return drafted.message ? null : { type: 'nothing' };
+  }
+}
+
+/**
  * The `Schedule` command for what a composer holds, sent in `delayMs`; `null` when it can't be
- * scheduled: attachments (uploads go at once), an edit, a command that isn't a message, or
- * nothing to send. The composer is emptied as a send empties it.
+ * scheduled (`scheduleProblem`). The composer is emptied as a send empties it.
  */
 export function planSchedule(
   composer: ComposerState,
@@ -140,7 +174,7 @@ export function planSchedule(
   key: TimelineKey,
   delayMs: number,
 ): SendPlan | null {
-  if (!canSchedule(composer)) return null;
+  if (scheduleProblem(composer, account, key)) return null;
   const drafted = draftMessage(composer, account, key);
 
   if (drafted.type !== 'message' || !drafted.message) return null;
@@ -159,13 +193,8 @@ export function planSchedule(
   return { commands: [command], composer: { ...EMPTY_COMPOSER, kept: composer.kept } };
 }
 
-/** Whether what a composer holds may be scheduled: text alone, not an edit. */
-export function canSchedule(composer: ComposerState): boolean {
-  return (
-    !composer.editing &&
-    (composer.attachments?.length ?? 0) === 0 &&
-    outgoingText(composer.draft).body !== ''
-  );
+function hasText(composer: ComposerState): boolean {
+  return outgoingText(composer.draft).body !== '';
 }
 
 /** Whether a composer has anything to send (or an edit to save). */

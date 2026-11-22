@@ -64,6 +64,7 @@
   "mobile.composer.schedule_time": "Time",
   "mobile.composer.schedule_confirm": "Schedule",
   "mobile.composer.schedule_attachments": "Messages with attachments can’t be scheduled.",
+  "mobile.composer.schedule_command": "Only messages can be scheduled. Commands like this one run when sent.",
   "mobile.composer.schedule_range": "Pick a time within the next 30 days.",
   "mobile.composer.scheduled.one": "{{count}} scheduled message",
   "mobile.composer.scheduled.other": "{{count}} scheduled messages",

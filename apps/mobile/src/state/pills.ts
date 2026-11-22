@@ -1,9 +1,12 @@
 // Pills in the composer: what a picked suggestion inserts that isn't just text, as the engine's
 // `html.rs` names them. The phone's text field holds plain text, so a pill is its label in the
 // draft (`@Ada Lovelace`, `#design`, `@room`, `:blobcat:`) plus an entry in the composer's
-// `pills`, which says what the label stands for. On send each label still in the draft (whole,
-// not inside a longer word) goes as Matrix HTML (`format.ts`) and its people as `m.mentions`; a
-// label the user broke by editing it is plain text again. Pill ids:
+// `pills`, which says what the label stands for and where it stands (`DraftPill`). A pill is
+// bound to its place, not its label: the same words typed elsewhere stay text, and two people
+// with one name keep their own IDs. Each edit of the draft moves the pills after it
+// (`trackPills`); a pill whose label the user broke by editing it, or that now sits inside a
+// longer word, is plain text again. On send each pill still standing goes as Matrix HTML
+// (`format.ts`) and its people as `m.mentions`. Pill ids:
 //
 // - `user:@ada:example.org`, `room:!id:example.org` (or `room:#alias:example.org`): a mention.
 // - `everyone`: `@room`, which goes as plain text and mentions the room.
@@ -15,6 +18,11 @@ export interface Pill {
   id: string;
   /** What the draft shows for it. */
   label: string;
+}
+
+/** A pill in a draft: its label stands from `start` (UTF-16 offsets, as the field counts). */
+export interface DraftPill extends Pill {
+  start: number;
 }
 
 export const EVERYONE: Pill = { id: 'everyone', label: '@room' };
@@ -34,9 +42,14 @@ export function emotePill(url: string, shortcode: string): Pill {
   return { id: `emote:${url}`, label: `:${shortcode}:` };
 }
 
+/** `pill` standing at `start` in a draft. */
+export function pillAt(pill: Pill, start: number): DraftPill {
+  return { id: pill.id, label: pill.label, start };
+}
+
 /** A pill found in a draft: where it stands. */
 export interface Placed {
-  pill: Pill;
+  pill: DraftPill;
   start: number;
   end: number;
 }
@@ -44,60 +57,110 @@ export interface Placed {
 const WORD = /[\p{L}\p{N}_]/u;
 
 /**
- * Where `pills` stand in `draft`, in order: each pill names one place where its label stands
- * whole (not inside a longer word), the earliest not taken by another; longer labels first where
- * two start at the same place.
+ * The pills standing in `draft`, in order: each whose label is still whole at its place, not
+ * inside a longer word, and not overlapping one before it.
  */
-export function placePills(draft: string, pills: readonly Pill[]): Placed[] {
-  if (pills.length === 0) return [];
-  const left = new Map<string, Pill[]>();
-
-  for (const pill of pills) left.set(pill.label, [...(left.get(pill.label) ?? []), pill]);
-
-  const labels = [...left.keys()]
-    .filter((label) => label !== '')
-    .sort((a, b) => b.length - a.length);
-
+export function placePills(draft: string, pills: readonly DraftPill[]): Placed[] {
   const placed: Placed[] = [];
-  let at = 0;
+  let taken = 0;
 
-  while (at < draft.length) {
-    const before = draft[at - 1];
+  for (const pill of [...pills].sort((a, b) => a.start - b.start)) {
+    const start = pill.start;
+    const end = start + pill.label.length;
 
-    const label =
-      before !== undefined && WORD.test(before) && WORD.test(draft[at] ?? '')
-        ? undefined
-        : labels.find((candidate) => {
-            if (!draft.startsWith(candidate, at) || (left.get(candidate)?.length ?? 0) === 0)
-              return false;
-            const after = draft[at + candidate.length];
+    if (pill.label === '' || start < taken || !draft.startsWith(pill.label, start)) continue;
+    const before = draft[start - 1];
+    const after = draft[end];
 
-            return after === undefined || !WORD.test(after) || !WORD.test(candidate.slice(-1));
-          });
+    const joined =
+      (before !== undefined && WORD.test(before) && WORD.test(pill.label[0] ?? '')) ||
+      (after !== undefined && WORD.test(after) && WORD.test(pill.label.slice(-1)));
 
-    if (label === undefined) {
-      at += 1;
-      continue;
-    }
-
-    const pill = left.get(label)?.shift();
-
-    if (pill) placed.push({ pill, start: at, end: at + label.length });
-    at += label.length;
+    if (joined) continue;
+    placed.push({ pill, start, end });
+    taken = end;
   }
 
   return placed;
 }
 
-/** The pills still standing in `draft`, in their order there; `pills` itself when all stand. */
-export function livePills(draft: string, pills: readonly Pill[]): Pill[] {
-  const placed = placePills(draft, pills);
+/** The pills still standing in `draft`, in their order there. */
+export function livePills(draft: string, pills: readonly DraftPill[]): DraftPill[] {
+  return placePills(draft, pills).map((p) => p.pill);
+}
 
-  return placed.length === pills.length ? [...pills] : placed.map((p) => p.pill);
+/**
+ * `pills` after the draft's `[start, end)` was replaced by `length` characters: those before
+ * it stay, those after it move, and those it touched inside are gone.
+ */
+export function editPills(
+  pills: readonly DraftPill[],
+  start: number,
+  end: number,
+  length: number,
+): DraftPill[] {
+  const shift = length - (end - start);
+
+  return pills.flatMap((pill) => {
+    if (pill.start + pill.label.length <= start) return [pill];
+
+    if (pill.start >= end) return [{ ...pill, start: pill.start + shift }];
+
+    return [];
+  });
+}
+
+/**
+ * The pills of `before` carried into `after`, the same draft edited by the user: the edit is
+ * what lies between their common start and end. Where it could lie in more than one place (a
+ * character typed or deleted in repeated text: `@Ada @Ada` to `@Ada`), `caret` (where the
+ * field's caret is) says which. The pills still standing in `after`.
+ */
+export function trackPills(
+  before: string,
+  after: string,
+  pills: readonly DraftPill[],
+  caret?: number,
+): DraftPill[] {
+  if (pills.length === 0 || before === after) return livePills(after, pills);
+  const shortest = Math.min(before.length, after.length);
+  let prefix = 0;
+
+  while (prefix < shortest && before[prefix] === after[prefix]) prefix += 1;
+  let suffix = 0;
+
+  while (
+    suffix < shortest &&
+    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+  )
+    suffix += 1;
+  // How far the edit could slide in repeated text; the caret picks where it was.
+  const slide = Math.max(0, prefix + suffix - shortest);
+
+  if (slide > 0 && caret !== undefined) prefix = Math.min(prefix, Math.max(prefix - slide, caret));
+  suffix = Math.min(suffix, shortest - prefix);
+
+  const moved = editPills(pills, prefix, before.length - suffix, after.length - suffix - prefix);
+
+  return livePills(after, moved);
+}
+
+/** The pills within `[from, to)` of a draft, placed in that slice of it, moved by `offset`. */
+export function slicePills(
+  pills: readonly DraftPill[],
+  from: number,
+  to: number,
+  offset = 0,
+): DraftPill[] {
+  return pills.flatMap((pill) =>
+    pill.start >= from && pill.start + pill.label.length <= to
+      ? [{ ...pill, start: pill.start - from + offset }]
+      : [],
+  );
 }
 
 /** Who the pills standing in a draft mention. */
-export function mentionsOf(draft: string, pills: readonly Pill[]): Mentions {
+export function mentionsOf(draft: string, pills: readonly DraftPill[]): Mentions {
   const users: string[] = [];
   let room = false;
 
@@ -124,7 +187,8 @@ export function pillFormats(pill: Pill): boolean {
   return pill.id !== EVERYONE.id;
 }
 
-function escapeHtml(text: string): string {
+/** `text` with HTML's special characters escaped, as text inside an element or attribute. */
+export function escapeHtml(text: string): string {
   return text.replace(/[&<>"]/g, (c) =>
     c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;',
   );

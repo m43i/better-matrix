@@ -2,7 +2,7 @@
 // written as markers in it (`**bold**`, `_italic_`, `~~strike~~`, `` `code` ``, `[text](url)`,
 // `- ` and `1. ` lists, `> ` quotes, ``` fences), which the toolbar inserts and removes; two
 // more the toolbar doesn't offer are Matrix's own, `||spoiler||` and `$$maths$$`. Mentions and
-// custom emoji are pills (`pills.ts`): labels in the text the composer knows. On send,
+// custom emoji are pills (`pills.ts`): labels at places in the text the composer knows. On send,
 // `outgoingText` turns the text into what the desktop's rich field sends: the plain body, and
 // Matrix HTML serialised as Rune's `TextEdit::to_html` does (apps/desktop/src/state/composer.rs),
 // only when the text carries formatting. `draftOf` goes the other way, for editing a message.
@@ -11,10 +11,12 @@ import type { Mentions } from '@better-matrix/matrix-native/types';
 
 import { mentionOf } from './html';
 import {
+  type DraftPill,
   emotePill,
   livePills,
   mentionsOf,
   type Pill,
+  pillAt,
   pillFormats,
   pillHtml,
   pillText,
@@ -384,8 +386,18 @@ const PILL_BASE = 0xe000;
 const PILL_CHAR = /[\ue000-\uf8ff]/g;
 
 /** The body and HTML the desktop sends for the same text, formatting and pills. */
-export function outgoingText(draft: string, pills: readonly Pill[] = []): OutgoingText {
+export function outgoingText(draft: string, given: readonly DraftPill[] = []): OutgoingText {
   const text = draft.replace(/\r\n?/g, '\n');
+
+  // Line ends written as one character move the pills after them.
+  const pills =
+    text === draft
+      ? given
+      : given.map((pill) => ({
+          ...pill,
+          start: draft.slice(0, pill.start).replace(/\r\n?/g, '\n').length,
+        }));
+
   const placed = placePills(text, pills).slice(0, 0x1900);
   let source = '';
   let at = 0;
@@ -880,13 +892,22 @@ export function draftOf(body: string, html: string | null): string {
 /** A message as the composer edits it: its draft, and the pills in it. */
 export interface EditDraft {
   draft: string;
-  pills: Pill[];
+  pills: DraftPill[];
 }
 
 /** A message's draft for editing, with the pills its mentions and custom emoji come back as. */
 export function editDraft(body: string, html: string | null): EditDraft {
   if (!html) return { draft: body, pills: [] };
+  // Each pill is written as one private-use character while lines are joined and trimmed, then
+  // as its label, so its place is known (as `outgoingText` marks them).
   const pills: Pill[] = [];
+
+  const mark = (pill: Pill) => {
+    pills.push(pill);
+
+    return String.fromCharCode(PILL_BASE + ((pills.length - 1) % 0x1900));
+  };
+
   /** A mention being read: what it stands for, and its words so far. */
   let mention: { kind: 'user' | 'room'; id: string; text: string } | null = null;
   /** What each open `<span>` (or `<div>`) is, so its end closes the right thing. */
@@ -959,8 +980,7 @@ export function editDraft(body: string, html: string | null): EditDraft {
         const pill =
           mention.kind === 'user' ? userPill(mention.id, words) : roomPill(mention.id, words);
 
-        pills.push(pill);
-        line += pill.label;
+        line += mark(pill);
         mention = null;
       }
 
@@ -1017,9 +1037,7 @@ export function editDraft(body: string, html: string | null): EditDraft {
         // A homeserver image is a custom emoji, marked or not (see `html.ts`).
         if (src.startsWith('mxc://')) {
           const code = attribute(attrs ?? '', 'alt') ?? attribute(attrs ?? '', 'title') ?? '';
-          const pill = emotePill(src, code.replace(/^:|:$/g, '') || 'emoji');
-          pills.push(pill);
-          line += pill.label;
+          line += mark(emotePill(src, code.replace(/^:|:$/g, '') || 'emoji'));
         } else {
           line += attribute(attrs ?? '', 'alt') ?? '';
         }
@@ -1115,7 +1133,29 @@ export function editDraft(body: string, html: string | null): EditDraft {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  return draft === '' ? { draft: body, pills: [] } : { draft, pills: livePills(draft, pills) };
+  return draft === '' ? { draft: body, pills: [] } : withPills(draft, pills);
+}
+
+/**
+ * `marked` with its pills' characters (the `next`th pill's, in order) written as their labels,
+ * and the pills where they stand. A private-use character the message itself held stays.
+ */
+function withPills(marked: string, pills: readonly Pill[]): EditDraft {
+  const placed: DraftPill[] = [];
+  let draft = '';
+
+  for (const c of marked) {
+    const pill = pills[placed.length];
+
+    if (pill && c === String.fromCharCode(PILL_BASE + (placed.length % 0x1900))) {
+      placed.push(pillAt(pill, draft.length));
+      draft += pill.label;
+    } else {
+      draft += c;
+    }
+  }
+
+  return { draft, pills: livePills(draft, placed) };
 }
 
 /** Where the `tag` element whose opening tag ends at `from` ends, nested ones included. */

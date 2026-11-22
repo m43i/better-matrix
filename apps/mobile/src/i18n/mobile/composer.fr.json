@@ -64,6 +64,7 @@
   "mobile.composer.schedule_time": "Heure",
   "mobile.composer.schedule_confirm": "Programmer",
   "mobile.composer.schedule_attachments": "Les messages avec pièces jointes ne peuvent pas être programmés.",
+  "mobile.composer.schedule_command": "Seuls les messages peuvent être programmés. Les commandes comme celle-ci s’exécutent à l’envoi.",
   "mobile.composer.schedule_range": "Choisissez une heure dans les 30 prochains jours.",
   "mobile.composer.scheduled.one": "{{count}} message programmé",
   "mobile.composer.scheduled.other": "{{count}} messages programmés",
