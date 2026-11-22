@@ -4,6 +4,17 @@
 //! `ℝ`. What has no Unicode form (`x^{q}`) keeps a readable fallback (`x^(q)`), and unknown
 //! commands keep their name, so nothing the sender wrote disappears. Every app reads a formula
 //! the same: the TypeScript port runs the same vectors (`math.json`).
+//!
+//! Formulas come from anyone in a room, so reading one is bounded: past [`MOST_INPUT`] bytes,
+//! [`MOST_DEPTH`] nested groups or commands, or [`MOST_OUTPUT`] bytes of output (accents double
+//! what they cover, and nest), the formula shows as its LaTeX, unread.
+
+/// The longest formula read; a longer one shows as its LaTeX.
+pub const MOST_INPUT: usize = 2000;
+/// The deepest groups and commands nest in a formula read.
+pub const MOST_DEPTH: usize = 32;
+/// The most output a formula may make before it shows as its LaTeX instead.
+pub const MOST_OUTPUT: usize = 4 * MOST_INPUT;
 
 /// A LaTeX formula as one line of Unicode text.
 ///
@@ -13,9 +24,15 @@
 /// assert_eq!(to_unicode(r"\frac{a+b}{2}"), "(a+b)/2");
 /// ```
 pub fn to_unicode(latex: &str) -> String {
+    if latex.len() > MOST_INPUT {
+        return latex.trim().to_owned();
+    }
     let chars: Vec<char> = latex.chars().collect();
-    let mut parser = Parser { chars: &chars, at: 0 };
+    let mut parser = Parser { chars: &chars, at: 0, depth: 0, overflow: false };
     let out = parser.sequence(None);
+    if parser.overflow {
+        return latex.trim().to_owned();
+    }
     // Runs of spaces from `\,`, `\quad` and the source's own collapse to one.
     let mut collapsed = String::with_capacity(out.len());
     for c in out.trim().chars() {
@@ -29,6 +46,10 @@ pub fn to_unicode(latex: &str) -> String {
 struct Parser<'a> {
     chars: &'a [char],
     at: usize,
+    /// How deep in groups and commands the parser is.
+    depth: usize,
+    /// A bound was passed: the formula shows as its LaTeX.
+    overflow: bool,
 }
 
 impl Parser<'_> {
@@ -40,6 +61,10 @@ impl Parser<'_> {
     fn sequence(&mut self, end: Option<char>) -> String {
         let mut out = String::new();
         while let Some(c) = self.peek() {
+            if self.overflow || out.len() > MOST_OUTPUT {
+                self.overflow = true;
+                return out;
+            }
             if Some(c) == end {
                 self.at += 1;
                 return out;
@@ -58,6 +83,21 @@ impl Parser<'_> {
 
     /// One thing: a group, a command with its arguments, or a character.
     fn atom(&mut self) -> String {
+        if self.depth >= MOST_DEPTH {
+            self.overflow = true;
+            self.at = self.chars.len();
+            return String::new();
+        }
+        self.depth += 1;
+        let atom = self.atom_within();
+        self.depth -= 1;
+        if atom.len() > MOST_OUTPUT {
+            self.overflow = true;
+        }
+        atom
+    }
+
+    fn atom_within(&mut self) -> String {
         let Some(c) = self.peek() else { return String::new() };
         self.at += 1;
         match c {
@@ -129,11 +169,11 @@ impl Parser<'_> {
                 self.argument();
                 String::new()
             }
-            "overline" | "bar" => self.argument().chars().flat_map(|c| [c, '\u{305}']).collect(),
-            "hat" => self.argument().chars().flat_map(|c| [c, '\u{302}']).collect(),
-            "vec" => self.argument().chars().flat_map(|c| [c, '\u{20d7}']).collect(),
-            "dot" => self.argument().chars().flat_map(|c| [c, '\u{307}']).collect(),
-            "tilde" => self.argument().chars().flat_map(|c| [c, '\u{303}']).collect(),
+            "overline" | "bar" => accented(&self.argument(), '\u{305}'),
+            "hat" => accented(&self.argument(), '\u{302}'),
+            "vec" => accented(&self.argument(), '\u{20d7}'),
+            "dot" => accented(&self.argument(), '\u{307}'),
+            "tilde" => accented(&self.argument(), '\u{303}'),
             function if FUNCTIONS.contains(&function) => function.to_owned(),
             other => match symbol(other) {
                 Some(symbol) => symbol.to_owned(),
@@ -142,6 +182,27 @@ impl Parser<'_> {
             },
         }
     }
+}
+
+/// `text` with `mark` (a combining accent) on each of its letters, not on the marks already
+/// there: nested accents stack on the letter rather than doubling the text.
+fn accented(text: &str, mark: char) -> String {
+    let combining = |c: char| matches!(c, '\u{300}'..='\u{36f}' | '\u{20d0}'..='\u{20ff}');
+    let mut out = String::with_capacity(text.len() * 2);
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        out.push(c);
+        if combining(c) || c.is_whitespace() {
+            continue;
+        }
+        // The letter's own marks first, then the new one.
+        while let Some(&next) = chars.peek().filter(|next| combining(**next)) {
+            out.push(next);
+            chars.next();
+        }
+        out.push(mark);
+    }
+    out
 }
 
 /// `text` in parentheses when it is more than one thing, so `a+b` over `c` reads `(a+b)/c`.

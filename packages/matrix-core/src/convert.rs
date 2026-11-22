@@ -382,6 +382,41 @@ mod tests {
 
     use super::*;
 
+    /// A message as the timeline gives it: its HTML sanitised as matrix-sdk-ui does.
+    fn as_the_timeline_reads(content: serde_json::Value) -> MessageContent {
+        use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
+        use matrix_sdk::ruma::html::{HtmlSanitizerMode, RemoveReplyFallback};
+        let mut message: RoomMessageEventContent = serde_json::from_value(content).expect("a message");
+        message.msgtype.sanitize(HtmlSanitizerMode::Compat, RemoveReplyFallback::Yes);
+        super::content(&message.msgtype)
+    }
+
+    #[test]
+    fn a_received_custom_emoji_should_reach_the_app_as_a_pill() {
+        let content = as_the_timeline_reads(serde_json::json!({
+            "msgtype": "m.text",
+            "body": "Shipped :party:",
+            "format": "org.matrix.custom.html",
+            "formatted_body": "Shipped <img data-mx-emoticon src=\"mxc://x.org/party\" alt=\":party:\" height=\"32\">"
+        }));
+        let MessageContent::Text { html: Some(html), .. } = content else { panic!("formatted text") };
+        let pills = crate::html::to_pills(&html, crate::html::Pills::Display);
+        assert!(pills.contains("<span data-pill=\"emote:mxc://x.org/party\">:party:</span>"), "{pills}");
+    }
+
+    #[test]
+    fn a_received_spoiler_and_formula_should_reach_the_app_as_pills() {
+        let content = as_the_timeline_reads(serde_json::json!({
+            "msgtype": "m.text",
+            "body": "x",
+            "format": "org.matrix.custom.html",
+            "formatted_body": "<span data-mx-spoiler>hidden</span> <span data-mx-maths=\"x^2\"><code>x^2</code></span>"
+        }));
+        let MessageContent::Text { html: Some(html), .. } = content else { panic!("formatted text") };
+        let pills = crate::html::to_pills(&html, crate::html::Pills::Display);
+        assert!(pills.contains("data-pill=\"spoiler\"") && pills.contains("data-pill=\"math:x^2\""), "{pills}");
+    }
+
     #[test]
     fn a_sticker_should_show_as_an_image_named_by_its_description() {
         let mut info = ImageInfo::new();

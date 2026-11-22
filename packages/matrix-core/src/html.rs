@@ -106,8 +106,11 @@ pub fn to_pills(html: &str, purpose: Pills) -> String {
                     }
                 }
             }
-            "img" => match (attribute(tag, "data-mx-emoticon").is_some(), attribute(tag, "src")) {
-                (true, Some(src)) if src.starts_with("mxc://") => {
+            // Matrix HTML's only images are the homeserver's: custom emoji. The SDK's sanitiser
+            // drops `data-mx-emoticon` (not in the spec's attribute list), so an `mxc://` source
+            // is what marks one.
+            "img" => match attribute(tag, "src") {
+                Some(src) if src.starts_with("mxc://") => {
                     let label =
                         attribute(tag, "alt").or_else(|| attribute(tag, "title")).unwrap_or_else(|| ":emoji:".into());
                     out.push_str(&pill_open(&format!("emote:{src}")));
@@ -453,8 +456,16 @@ mod tests {
     }
 
     #[test]
-    fn another_image_should_show_its_description() {
-        assert_eq!(to_pills("<img src=\"mxc://x.org/a\" alt=\"a cat\">", Pills::Display), "a cat");
+    fn a_custom_emoji_the_sanitiser_left_unmarked_should_still_become_a_pill() {
+        assert_eq!(
+            to_pills("<img src=\"mxc://x.org/cat\" alt=\":blobcat:\" height=\"32\">", Pills::Display),
+            "<span data-pill=\"emote:mxc://x.org/cat\">:blobcat:</span>"
+        );
+    }
+
+    #[test]
+    fn an_image_from_the_web_should_show_its_description() {
+        assert_eq!(to_pills("<img src=\"https://x.org/a.png\" alt=\"a cat\">", Pills::Display), "a cat");
     }
 
     #[test]

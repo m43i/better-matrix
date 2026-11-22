@@ -86,5 +86,21 @@
   {
     "latex": "\\Delta x \\approx 0.5",
     "unicode": "Δ x ≈ 0.5"
+  },
+  {
+    "latex": "\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{x}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}",
+    "unicode": "\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{\\vec{x}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}"
+  },
+  {
+    "latex": "{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{x}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}",
+    "unicode": "{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{x}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}"
+  },
+  {
+    "latex": "\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat x",
+    "unicode": "\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat\\hat x"
+  },
+  {
+    "latex": "\\vec{\\vec{x}}",
+    "unicode": "x⃗⃗"
   }
 ]
