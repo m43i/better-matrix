@@ -55,7 +55,14 @@ import {
   type Selection,
 } from '../../state/format';
 import { excerpt, formatDuration, scheduleProblem } from '../../state/outgoing';
-import { completeAt, type DraftPill, pillAt, placePills, triggerAt } from '../../state/pills';
+import {
+  completeAt,
+  type DraftPill,
+  isSpoiler,
+  pillAt,
+  placePills,
+  triggerAt,
+} from '../../state/pills';
 import { addNotice } from '../../state/reducer';
 import { useAppStore, useStore } from '../../state/react';
 import { scheduledIn } from '../../state/schedule';
@@ -307,21 +314,24 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
     write(done.text, done.selection, pill);
   };
 
-  // The field's text, its pills in the accent, as tokens.
+  // The field's text as tokens: its pills in the accent, a spoiler's words on the muted colour.
   const pills = state.pills;
 
   const segments = useMemo(() => {
     const placed = placePills(text, pills ?? []);
-    const parts: Array<{ text: string; pill: boolean }> = [];
+    const parts: Array<{ text: string; pill: 'pill' | 'spoiler' | null }> = [];
     let at = 0;
 
     for (const p of placed) {
-      if (p.start > at) parts.push({ text: text.slice(at, p.start), pill: false });
-      parts.push({ text: text.slice(p.start, p.end), pill: true });
+      if (p.start > at) parts.push({ text: text.slice(at, p.start), pill: null });
+      parts.push({
+        text: text.slice(p.start, p.end),
+        pill: isSpoiler(p.pill) ? 'spoiler' : 'pill',
+      });
       at = p.end;
     }
 
-    if (at < text.length || parts.length === 0) parts.push({ text: text.slice(at), pill: false });
+    if (at < text.length || parts.length === 0) parts.push({ text: text.slice(at), pill: null });
 
     return parts;
   }, [text, pills]);
@@ -635,7 +645,11 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
               style={[font.body, styles.input, { color: palette.text }]}
             >
               {segments.map((part, index) =>
-                part.pill ? (
+                part.pill === 'spoiler' ? (
+                  <Text key={index} style={{ backgroundColor: `${palette.textMuted}40` }}>
+                    {part.text}
+                  </Text>
+                ) : part.pill === 'pill' ? (
                   <Text
                     key={index}
                     style={{ color: palette.accent, backgroundColor: `${palette.accent}1f` }}

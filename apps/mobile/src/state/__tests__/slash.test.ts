@@ -1,4 +1,4 @@
-import { type DraftPill, pillAt, userPill } from '../pills';
+import { type DraftPill, pillAt, spoilerPill, userPill } from '../pills';
 import { commandSuggestions, slashOf } from '../slash';
 
 const CONTEXT = { account: '@ada:x.org', roomId: '!r:x.org' };
@@ -50,6 +50,18 @@ describe('slashOf', () => {
   it('should send /plain without formatting', () => {
     expect(slash('/plain **not bold**')).toMatchObject({
       message: { type: 'Text', data: { body: '**not bold**', html: null } },
+    });
+  });
+
+  it('should send a spoiler’s words in /plain as [Spoiler]', () => {
+    expect(slash('/plain he dies', [pillAt(spoilerPill('dies'), 10)])).toMatchObject({
+      message: { data: { body: 'he [Spoiler]', html: null } },
+    });
+  });
+
+  it('should send a spoiler inside /spoiler as its words, one spoiler', () => {
+    expect(slash('/spoiler he dies', [pillAt(spoilerPill('dies'), 12)])).toMatchObject({
+      message: { data: { html: '<p><span data-mx-spoiler>he dies</span></p>' } },
     });
   });
 

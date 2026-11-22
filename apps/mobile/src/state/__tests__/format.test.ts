@@ -7,7 +7,7 @@ import {
   editDraft,
   outgoingText,
 } from '../format';
-import { emotePill, EVERYONE, pillAt, userPill } from '../pills';
+import { emotePill, EVERYONE, pillAt, spoilerPill, trackPills, userPill } from '../pills';
 
 const caret = (at: number) => ({ start: at, end: at });
 
@@ -421,14 +421,49 @@ describe('editDraft', () => {
     });
   });
 
-  it('should bring a spoiler with line breaks back as one pair of markers around its lines', () => {
-    expect(editDraft('', '<span data-mx-spoiler>he<br />dies</span> sadly').draft).toBe(
-      '||he\ndies|| sadly',
+  it('should bring a spoiler with line breaks back as one pill of its lines', () => {
+    expect(editDraft('', '<span data-mx-spoiler>he<br />dies</span> sadly')).toEqual({
+      draft: 'he\ndies sadly',
+      pills: [pillAt(spoilerPill('he\ndies'), 0)],
+    });
+  });
+
+  it('should leave the spaces and breaks around a spoiler’s words outside its pill', () => {
+    expect(editDraft('', 'a<span data-mx-spoiler><br /> b </span>c')).toEqual({
+      draft: 'a\n b c',
+      pills: [pillAt(spoilerPill('b'), 3)],
+    });
+  });
+
+  it('should bring a spoiler back as its words alone, as the engine does', () => {
+    expect(
+      editDraft(
+        '',
+        '<span data-mx-spoiler><strong>he</strong> <img src="mxc://x/c" alt=":c:"></span>',
+      ),
+    ).toEqual({ draft: 'he :c:', pills: [pillAt(spoilerPill('he :c:'), 0)] });
+  });
+
+  it('should bring a span marked both spoiler and formula back as a spoiler', () => {
+    expect(editDraft('', '<span data-mx-spoiler data-mx-maths="x^2">x^2</span>')).toEqual({
+      draft: 'x^2',
+      pills: [pillAt(spoilerPill('x^2'), 0)],
+    });
+  });
+
+  it('should keep a spoiler in a code block a spoiler, its lines as written', () => {
+    const back = editDraft('', '<pre><code>a <span data-mx-spoiler>b\nc</span></code></pre>');
+
+    expect(back).toEqual({ draft: '```\na b\nc\n```', pills: [pillAt(spoilerPill('b\nc'), 6)] });
+    expect(outgoingText(back.draft, back.pills).html).toBe(
+      '<pre><code>a <span data-mx-spoiler>b<br />c</span></code></pre>',
     );
   });
 
-  it('should put a spoiler’s markers against its words, its spaces and breaks outside', () => {
-    expect(editDraft('', 'a<span data-mx-spoiler><br /> b </span>c').draft).toBe('a\n ||b|| c');
+  it('should keep a spoiler inside a word a spoiler', () => {
+    expect(editDraft('', 'he<span data-mx-spoiler>llo</span>').pills).toEqual([
+      pillAt(spoilerPill('llo'), 2),
+    ]);
   });
 
   it('should bring a link around a spoiler back as its content, not a mention', () => {
@@ -437,11 +472,14 @@ describe('editDraft', () => {
         '',
         '<a href="https://matrix.to/#/@x:y.org"><span data-mx-spoiler>secret</span></a>',
       ),
-    ).toEqual({ draft: '||secret||', pills: [] });
+    ).toEqual({ draft: 'secret', pills: [pillAt(spoilerPill('secret'), 0)] });
   });
 
-  it('should bring a spoiler back as markers', () => {
-    expect(editDraft('', 'he <span data-mx-spoiler>dies</span>').draft).toBe('he ||dies||');
+  it('should bring a spoiler back as a pill of its words', () => {
+    expect(editDraft('', 'he <span data-mx-spoiler>dies</span>')).toEqual({
+      draft: 'he dies',
+      pills: [pillAt(spoilerPill('dies'), 3)],
+    });
   });
 
   it('should bring a formula back as its LaTeX', () => {
@@ -461,5 +499,76 @@ describe('editDraft', () => {
     const first = outgoingText('hi @Grace Hopper ||x||', [pillAt(grace, 3)]);
     const back = editDraft(first.body, first.html);
     expect(outgoingText(back.draft, back.pills)).toEqual(first);
+  });
+});
+
+describe('a spoiler edited and saved', () => {
+  /** A message with `hidden` (as HTML) in a spoiler, edited before it and saved: what it sends. */
+  function editedAround(hidden: string) {
+    const back = editDraft('', `<p>before <span data-mx-spoiler>${hidden}</span> after</p>`);
+    const draft = `so ${back.draft}`;
+
+    return outgoingText(draft, trackPills(back.draft, draft, back.pills, 3));
+  }
+
+  it.each([
+    ['two bars', 'first||second'],
+    ['other formatting’s markers', 'a **b** _c_ ~~d~~ [e](https://x.y)'],
+    ['backticks and formula markers', '`b` and $$x$$'],
+    ['a fenced code block', 'x<br />```<br />code<br />```<br />y'],
+    ['line breaks and a blank line', 'a<br /><br />b<br />- c'],
+  ])('should keep %s hidden, everything inside the spoiler', (_, hidden) => {
+    expect(editedAround(hidden)).toEqual({
+      body: 'so before [Spoiler] after',
+      html: `<p>so before <span data-mx-spoiler>${hidden}</span> after</p>`,
+      mentions: { user_ids: [], room: false },
+    });
+  });
+
+  /** A message's edit draft with `insertions` typed one after another: what it sends. */
+  function typed(html: string, ...insertions: Array<[number, string]>) {
+    let { draft, pills } = editDraft('', html);
+
+    for (const [at, text] of insertions) {
+      const next = draft.slice(0, at) + text + draft.slice(at);
+      pills = trackPills(draft, next, pills, at + text.length);
+      draft = next;
+    }
+
+    return outgoingText(draft, pills);
+  }
+
+  it('should keep the words typed inside it hidden', () => {
+    expect(typed('<p>he <span data-mx-spoiler>dies</span></p>', [5, '||x'])).toEqual({
+      body: 'he [Spoiler]',
+      html: '<p>he <span data-mx-spoiler>di||xes</span></p>',
+      mentions: { user_ids: [], room: false },
+    });
+  });
+
+  it('should keep it a spoiler of its own when markers around it make code', () => {
+    expect(typed('<p>a <span data-mx-spoiler>b</span> c</p>', [0, '`'], [6, '`']).html).toBe(
+      '<p><code>a </code><span data-mx-spoiler>b</span><code> c</code></p>',
+    );
+  });
+
+  it('should keep it a spoiler of its own when markers around it make a formula', () => {
+    expect(typed('<p>x <span data-mx-spoiler>y</span></p>', [0, '$$'], [5, '$$'])).toEqual({
+      body: 'x [Spoiler]',
+      html: '<p><span data-mx-maths="x "><code>x </code></span><span data-mx-spoiler>y</span></p>',
+      mentions: { user_ids: [], room: false },
+    });
+  });
+
+  it('should keep it a spoiler inside a code block', () => {
+    expect(typed('<p>a <span data-mx-spoiler>b</span></p>', [0, '```\n'], [7, '\n```']).html).toBe(
+      '<pre><code>a <span data-mx-spoiler>b</span></code></pre>',
+    );
+  });
+
+  it('should not nest it inside a spoiler written around it', () => {
+    expect(typed('<p>a <span data-mx-spoiler>b</span></p>', [0, '||'], [5, '||']).html).toBe(
+      '<p><span data-mx-spoiler>a b</span></p>',
+    );
   });
 });

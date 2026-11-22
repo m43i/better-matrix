@@ -14,6 +14,7 @@ import {
   applySplices,
   type DraftPill,
   emotePill,
+  isSpoiler,
   livePills,
   mentionsOf,
   type Pill,
@@ -24,6 +25,9 @@ import {
   placePills,
   roomPill,
   type Splice,
+  SPOILER_FALLBACK,
+  spoilerHtml,
+  spoilerPill,
   userPill,
 } from './pills';
 
@@ -420,6 +424,7 @@ export function outgoingText(draft: string, given: readonly DraftPill[] = []): O
       ? given
       : given.map((pill) => ({
           ...pill,
+          label: pill.label.replace(/\r\n?/g, '\n'),
           start: draft.slice(0, pill.start).replace(/\r\n?/g, '\n').length,
         }));
 
@@ -469,7 +474,7 @@ function plainRuns(runs: Run[], continued: boolean): string {
 
   for (const run of runs) {
     if (run.marks.spoiler) {
-      if (!hidden) out += '[Spoiler]';
+      if (!hidden) out += SPOILER_FALLBACK;
       hidden = true;
       continue;
     }
@@ -867,53 +872,97 @@ function serializeRuns(runs: Run[], pills: readonly Pill[]): string {
   let out = '';
   let spoiler = false;
 
-  for (const { text, marks } of runs) {
-    if (marks.spoiler !== spoiler) {
-      out += marks.spoiler ? '<span data-mx-spoiler>' : '</span>';
-      spoiler = marks.spoiler;
-    }
+  for (const run of runs) {
+    for (const part of spoilerParts(run.text, pills)) {
+      // A spoiler pill is never code's or a formula's text, which would show it: those end
+      // around it, and it goes as its own spoiler in the other marks.
+      const marks = part.spoiler ? { ...run.marks, code: false, math: false } : run.marks;
 
-    if (marks.math) {
-      // A formula's LaTeX is its fallback, as the engine's `from_pills` writes it.
-      const latex = escapeHtml(expandPills(text, pills, (pill) => pill.label));
-      out += `<span data-mx-maths="${latex}"><code>${latex}</code></span>`;
-      continue;
-    }
-
-    // Rune's canonical nesting: link, bold, italic, strike, code.
-    const open: string[] = [];
-    const close: string[] = [];
-
-    if (marks.link !== null) {
-      open.push(`<a href="${escapeHtml(marks.link)}">`);
-      close.unshift('</a>');
-    }
-
-    for (const [mark, tag] of [
-      ['bold', 'strong'],
-      ['italic', 'em'],
-      ['strike', 's'],
-      ['code', 'code'],
-    ] as const) {
-      if (marks[mark]) {
-        open.push(`<${tag}>`);
-        close.unshift(`</${tag}>`);
+      if (marks.spoiler !== spoiler) {
+        out += marks.spoiler ? '<span data-mx-spoiler>' : '</span>';
+        spoiler = marks.spoiler;
       }
+
+      out += serializeRun(part.text, marks, pills);
     }
-
-    // Inside code a pill is its label; elsewhere its HTML.
-    const inner = escapeHtml(text);
-
-    const written = marks.code
-      ? expandPills(inner, pills, (pill) => escapeHtml(pill.label))
-      : expandPills(inner, pills, pillHtml);
-
-    out += open.join('') + written + close.join('');
   }
 
   if (spoiler) out += '</span>';
 
   return out;
+}
+
+/** `text` cut so that each spoiler pill in it is a part of its own. */
+function spoilerParts(text: string, pills: readonly Pill[]) {
+  const parts: Array<{ text: string; spoiler: boolean }> = [];
+  let plain = '';
+
+  for (const c of text) {
+    const pill = pillOf(c, pills);
+
+    if (pill && isSpoiler(pill)) {
+      if (plain) parts.push({ text: plain, spoiler: false });
+      parts.push({ text: c, spoiler: true });
+      plain = '';
+    } else {
+      plain += c;
+    }
+  }
+
+  if (plain) parts.push({ text: plain, spoiler: false });
+
+  return parts;
+}
+
+/** The pill a private-use character stands for while a draft is parsed. */
+function pillOf(c: string, pills: readonly Pill[]): Pill | undefined {
+  const code = c.charCodeAt(0);
+
+  return c.length === 1 && code >= PILL_BASE && code <= 0xf8ff
+    ? pills[code - PILL_BASE]
+    : undefined;
+}
+
+function serializeRun(text: string, marks: Marks, pills: readonly Pill[]): string {
+  if (marks.math) {
+    // A formula's LaTeX is its fallback, as the engine's `from_pills` writes it.
+    const latex = escapeHtml(expandPills(text, pills, (pill) => pill.label));
+
+    return `<span data-mx-maths="${latex}"><code>${latex}</code></span>`;
+  }
+
+  // Rune's canonical nesting: link, bold, italic, strike, code.
+  const open: string[] = [];
+  const close: string[] = [];
+
+  if (marks.link !== null) {
+    open.push(`<a href="${escapeHtml(marks.link)}">`);
+    close.unshift('</a>');
+  }
+
+  for (const [mark, tag] of [
+    ['bold', 'strong'],
+    ['italic', 'em'],
+    ['strike', 's'],
+    ['code', 'code'],
+  ] as const) {
+    if (marks[mark]) {
+      open.push(`<${tag}>`);
+      close.unshift(`</${tag}>`);
+    }
+  }
+
+  // Inside code a pill is its label; elsewhere its HTML, a spoiler pill inside a spoiler its
+  // words alone.
+  const inner = escapeHtml(text);
+
+  const written = marks.code
+    ? expandPills(inner, pills, (pill) => escapeHtml(pill.label))
+    : expandPills(inner, pills, (pill) =>
+        marks.spoiler && isSpoiler(pill) ? spoilerHtml(pill.label) : pillHtml(pill),
+      );
+
+  return open.join('') + written + close.join('');
 }
 
 type Direction = 'ltr' | 'rtl';
@@ -970,7 +1019,12 @@ function serialize(blocks: Block[], pills: readonly Pill[]): string {
 
         while (i < blocks.length && blocks[i]!.kind.type === 'code') {
           const line = escapeHtml(blocks[i]!.runs.map((run) => run.text).join(''));
-          lines.push(expandPills(line, pills, (pill) => escapeHtml(pill.label)));
+          // A spoiler pill stays a spoiler: readers draw a code block holding one as text.
+          lines.push(
+            expandPills(line, pills, (pill) =>
+              isSpoiler(pill) ? pillHtml(pill) : escapeHtml(pill.label),
+            ),
+          );
           i++;
         }
 
@@ -1080,8 +1134,6 @@ export function editDraft(body: string, html: string | null): EditDraft {
 
   /** A mention being read: what it stands for, and its words so far. */
   let mention: { kind: 'user' | 'room'; id: string; text: string } | null = null;
-  /** What each open `<span>` (or `<div>`) is, so its end closes the right thing. */
-  const spans: Array<'spoiler' | 'other'> = [];
   const lines: string[] = [];
   let line = '';
   /** What starts each new line inside the current block (a quote's `> `, an item's indent). */
@@ -1096,6 +1148,14 @@ export function editDraft(body: string, html: string | null): EditDraft {
   const breakLine = () => {
     lines.push(line);
     line = continuation;
+  };
+
+  /** Text as it reads, its line breaks breaking the line. */
+  const writeOutside = (text: string) => {
+    text.split('\n').forEach((part, index) => {
+      if (index > 0) breakLine();
+      line += part;
+    });
   };
 
   const endBlock = () => {
@@ -1120,7 +1180,7 @@ export function editDraft(body: string, html: string | null): EditDraft {
       }
 
       if (pre) {
-        const parts = plainOf(text).split('\n');
+        const parts = decodeEntities(text).split('\n');
         parts.forEach((part, index) => {
           if (index > 0) breakLine();
           line += part;
@@ -1130,7 +1190,7 @@ export function editDraft(body: string, html: string | null): EditDraft {
 
       // Whitespace between blocks (`</p>\n<p>`) is layout, not text.
       if (/^\s*$/.test(text) && text.includes('\n')) continue;
-      line += plainOf(text.replace(/\s*\n\s*/g, ' '));
+      line += decodeEntities(text.replace(/\s*\n\s*/g, ' '));
       continue;
     }
 
@@ -1159,6 +1219,26 @@ export function editDraft(body: string, html: string | null): EditDraft {
     }
 
     if ((tag === 'span' || tag === 'div') && !end) {
+      // A spoiler first: one also marked a formula would show its words as the formula.
+      if (attribute(attrs ?? '', 'data-mx-spoiler') !== null) {
+        // A spoiler is a pill of its words, as the engine's `to_pills` makes it: whatever they
+        // say, nothing in them can end it or show it (`pills.ts`).
+        const after = elementEnd(html, tag, tokens.lastIndex);
+        const raw = spoilerWords(html.slice(tokens.lastIndex, after), pre);
+        const words = raw.trim();
+
+        if (tag === 'div') endBlock();
+        // Space and breaks around its words stay outside, where they are seen.
+        writeOutside(raw.slice(0, raw.length - raw.trimStart().length));
+
+        if (words !== '') line += mark(spoilerPill(words));
+        writeOutside(raw.slice(raw.trimEnd().length));
+        tokens.lastIndex = after;
+
+        if (tag === 'div') endBlock();
+        continue;
+      }
+
       const latex = attribute(attrs ?? '', 'data-mx-maths');
 
       if (latex !== null) {
@@ -1168,19 +1248,6 @@ export function editDraft(body: string, html: string | null): EditDraft {
         tokens.lastIndex = elementEnd(html, tag, tokens.lastIndex);
 
         if (tag === 'div') endBlock();
-        continue;
-      }
-
-      const spoiler = attribute(attrs ?? '', 'data-mx-spoiler') !== null;
-      spans.push(spoiler ? 'spoiler' : 'other');
-
-      if (spoiler) {
-        line += SPOILER_OPEN;
-        continue;
-      }
-    } else if ((tag === 'span' || tag === 'div') && end) {
-      if (spans.pop() === 'spoiler') {
-        line += SPOILER_CLOSE;
         continue;
       }
     }
@@ -1308,7 +1375,8 @@ export function editDraft(body: string, html: string | null): EditDraft {
 
   if (line !== '' && line !== continuation) lines.push(line);
 
-  const draft = spoilerMarkers(lines.join('\n'))
+  const draft = lines
+    .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
@@ -1316,58 +1384,32 @@ export function editDraft(body: string, html: string | null): EditDraft {
 }
 
 /**
- * Where a spoiler starts and ends while a message is written back as markers: control characters
- * no message text keeps (`plainOf`), turned into `||` once the whole draft is known.
+ * A spoiler's words from the HTML inside it (`pre` in a code block): its text, line breaks as
+ * written (`<br>`), custom emoji and images as their descriptions, nothing else of its markup.
  */
-const SPOILER_OPEN = '\u0002';
+function spoilerWords(inner: string, pre: boolean): string {
+  let words = '';
+  const tokens = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)([^>]*)>|([^<]+)/g;
 
-const SPOILER_CLOSE = '\u0003';
+  for (let match = tokens.exec(inner); match; match = tokens.exec(inner)) {
+    const [, closing, rawTag, attrs, text] = match;
 
-/** Text from a message's HTML, without the characters that mark spoilers here. */
-function plainOf(text: string): string {
-  return decodeEntities(text).replaceAll(SPOILER_OPEN, '').replaceAll(SPOILER_CLOSE, '');
-}
-
-/**
- * `marked` with each spoiler's marks written as `||` pairs, each pair tight around the
- * spoiler's words (`||` opens before a word and closes after one, so space or a line break at
- * either end of the spoiler stays outside it, where it can't stop the markers reading as a
- * spoiler). A spoiler over several lines keeps one pair, which `outgoingText` reads across the
- * lines; nested spoilers are one; an empty one is gone.
- */
-function spoilerMarkers(marked: string): string {
-  let out = '';
-  let depth = 0;
-  let inner = '';
-
-  const close = () => {
-    const words = inner.trim();
-    const start = inner.length - inner.trimStart().length;
-    out +=
-      words === ''
-        ? inner
-        : `${inner.slice(0, start)}||${words}||${inner.slice(start + words.length)}`;
-    inner = '';
-  };
-
-  for (const c of marked) {
-    if (c === SPOILER_OPEN) {
-      depth += 1;
-    } else if (c === SPOILER_CLOSE) {
-      if (depth === 0) continue;
-      depth -= 1;
-
-      if (depth === 0) close();
-    } else if (depth > 0) {
-      inner += c;
-    } else {
-      out += c;
+    if (text !== undefined) {
+      // In a code block its text is as written; elsewhere line ends are the markup's layout.
+      if (pre) words += decodeEntities(text);
+      else if (!(/^\s*$/.test(text) && text.includes('\n')))
+        words += decodeEntities(text.replace(/\s*\n\s*/g, ' '));
+      continue;
     }
+
+    const tag = (rawTag ?? '').toLowerCase();
+
+    if (tag === 'br') words += '\n';
+    else if (tag === 'img' && closing !== '/')
+      words += attribute(attrs ?? '', 'alt') ?? attribute(attrs ?? '', 'title') ?? '';
   }
 
-  if (depth > 0) close();
-
-  return out;
+  return words;
 }
 
 /**

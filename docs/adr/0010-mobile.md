@@ -154,11 +154,14 @@ Date: 2026-11-16
   (`data-mx-maths`, its LaTeX the fallback). On send, `state/format.ts` turns the text into the
   body and the Matrix HTML the desktop's rich field sends (as Rune's `to_html` writes it), HTML
   only when formatted; `editDraft` writes a message's HTML back as markers and pills for an
-  edit. Markers are read a line at a time, except a spoiler: a `||` pair over several lines
-  (as `editDraft` writes a spoiler with line breaks, its markers tight against its words) is
+  edit. Markers are read a line at a time, except a spoiler: a `||` pair over several lines is
   closed and opened again on each line it covers, after the line's prefix, blank lines
   included, never into a code block, and only when a later line closes it; the body gives the
-  whole a single `[Spoiler]`. A link or mention around a spoiler comes back as its content.
+  whole a single `[Spoiler]`. An edited message's spoilers don't come back as markers, which
+  can't carry any words (a `||`, a fence or a backtick inside would end or break the spoiler and
+  show the rest): each is a spoiler pill (below), its words only, as the engine's `to_pills`
+  makes it for the desktop. A link or mention around a spoiler comes back as its content; a
+  span marked both spoiler and formula is a spoiler.
 - **Mentions and custom emoji are pills beside the text** (`state/pills.ts`, the engine's
   `html.rs` pill ids: `user:@…`, `room:!…`/`room:#…`, `everyone`, `emote:mxc://…`). A picked
   suggestion inserts its label into the draft (`@Grace Hopper`, `#design`, `@room`,
@@ -173,7 +176,13 @@ Date: 2026-11-16
   pill as one change across it. A pill whose label was edited, or that now sits inside a
   longer word (letters and digits; `_`, italic's marker, doesn't join), is dropped (Slack's
   behaviour: a broken mention is text). A refused
-  edit comes back with its pills and the message's own.
+  edit comes back with its pills and the message's own. A spoiler pill (`spoiler`, made only by
+  `editDraft`) is a range instead: words typed or deleted inside it stay hidden, words typed at
+  either end stay outside, a cut across one end keeps the rest, and only deleting all of it
+  ends it; it stands even inside a longer word. The field draws it on the muted colour. It goes
+  as `<span data-mx-spoiler>` (line breaks as `<br />`) and `[Spoiler]` in the body; inside code
+  or a formula, which would show its words, those end around it and it goes as its own spoiler
+  (in a code block it stays in the block, which readers then draw as text, below).
   On send each placed label becomes one private-use character while the markers are parsed, so
   markers around it format it and nothing in a name reads as a marker; it then goes as the
   engine's HTML (`<a href="https://matrix.to/#/@…">Name</a>`, `<img data-mx-emoticon …>`,
@@ -378,7 +387,9 @@ Date: 2026-11-16
   until tapped (a spoiler is only its plain words, custom emoji as their descriptions, hidden
   or shown: nothing inside shows its colour or picture or takes a tap; a link or mention
   around a spoiler is neither, its content drawn as it is, so its label or look can't give the
-  spoiler away; the engine reads them the same), formulas as Unicode (`state/math.ts`, a
+  spoiler away; the engine reads them the same; a span marked both spoiler and formula is a
+  spoiler; a code block holding a spoiler is drawn as its lines of text without its code, the
+  spoiler hidden in it, as the engine reads it), formulas as Unicode (`state/math.ts`, a
   line-for-line port of `math.rs` run against its `math.json` vectors, bounded as it is: past
   2000 bytes, 32 nested groups or commands, or 8000 bytes of output, a formula shows as its
   LaTeX; a `<div>` formula gets its own line) and custom emoji as pictures in the line.
