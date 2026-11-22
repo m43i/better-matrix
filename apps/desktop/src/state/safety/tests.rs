@@ -797,3 +797,74 @@ fn someone_ignored_and_unignored_with_both_still_saving_should_stay_left_out() {
     finish(&mut s, requests[1], Ok(()));
     assert!(!s.accounts.get(&ada()).unwrap().ignores(troll));
 }
+
+/// Grace's message `body` as the only entry of #general's timeline.
+fn grace_says(s: &mut State, event_id: &str, body: &str) {
+    let message = Message {
+        event_id: event_id.into(),
+        sender_id: "@grace:example.org".into(),
+        sender_name: "Grace Hopper".into(),
+        timestamp_ms: 1,
+        content: matrix_core::MessageContent::Text { body: body.into(), html: None },
+        ..Message::default()
+    };
+    let entry =
+        matrix_core::TimelineEntry { id: "said".into(), kind: matrix_core::EntryKind::Message(Box::new(message)) };
+    s.apply(
+        Event::TimelineChanged {
+            account: ada(),
+            key: TimelineKey::room(DEMO_THREAD.0),
+            diffs: vec![matrix_core::TimelineDiff::Reset(vec![entry])],
+        },
+        &mut Tx::default(),
+    );
+}
+
+#[test]
+fn showing_a_held_back_gif_that_failed_should_fetch_it_again() {
+    let (mut s, mut commands) = state();
+    crate::demo::hidden_media(&mut s);
+    let url = "https://x.org/party.gif";
+    grace_says(&mut s, "$gif", url);
+    s.gifs.failed(url, std::time::Instant::now());
+    drain(&mut commands);
+    s.reveal_media(&ada(), "$gif");
+    assert!(
+        drain(&mut commands)
+            .iter()
+            .any(|(_, command)| matches!(command, Command::FetchGif { url: asked } if asked == url))
+    );
+}
+
+#[test]
+fn an_open_preview_should_close_once_its_sender_is_ignored() {
+    let (mut s, mut commands) = state();
+    crate::demo::attachment_preview(&mut s);
+    assert!(s.preview.is_some());
+    let safety = Safety { ignored: vec!["@grace:example.org".into()], ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+    assert!(s.preview.is_none());
+    // Nor does it open again, nor do its file actions run.
+    drain(&mut commands);
+    let file = crate::demo::demo_attachment();
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$attachment", &file);
+    assert!(s.preview.is_none());
+    for action in [AttachmentAction::CopyImage, AttachmentAction::Open, AttachmentAction::Download] {
+        s.act_on_message_attachment(&ada(), DEMO_THREAD.0, "$attachment", &file, action);
+    }
+    assert!(drain(&mut commands).is_empty());
+}
+
+#[test]
+fn a_batch_should_leave_out_items_of_someone_ignored() {
+    let (mut s, _) = state();
+    crate::demo::batch_messages(&mut s);
+    let data = s.accounts.get(&ada()).unwrap();
+    assert!(!data.ignores_sender_of(DEMO_THREAD.0, "$batch-0"));
+    let safety = Safety { ignored: vec!["@grace:example.org".into()], ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+    assert!(s.accounts.get(&ada()).unwrap().ignores_sender_of(DEMO_THREAD.0, "$batch-0"));
+    let files = crate::demo::batch_attachments();
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$batch-2", &files[2]);
+    assert!(s.preview.is_none());
+}

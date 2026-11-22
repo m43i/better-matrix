@@ -89,10 +89,10 @@ impl State {
         file: &Attachment,
         action: AttachmentAction,
     ) {
-        let held = self
-            .accounts
-            .get(account)
-            .is_some_and(|data| data.hides_listed_media(room_id, event_id, file, &self.revealed_media));
+        let held = self.accounts.get(account).is_some_and(|data| {
+            data.hides_listed_media(room_id, event_id, file, &self.revealed_media)
+                || data.ignores_sender_of(room_id, event_id)
+        });
         if held {
             self.popover = None;
             return;
@@ -103,7 +103,10 @@ impl State {
     pub fn act_on_attachment(&mut self, account: AccountId, file: &Attachment, action: AttachmentAction) {
         self.popover = None;
         // What the preview holds back can't be saved, copied or opened either (ADR 0011).
-        if self.preview_held() && self.preview.as_ref().is_some_and(|preview| preview.attachment == *file) {
+        // Nor what someone the user ignores sent.
+        if (self.preview_held() || self.preview_item_ignored())
+            && self.preview.as_ref().is_some_and(|preview| preview.attachment == *file)
+        {
             return;
         }
         let Some(media) = file.media.clone() else { return };

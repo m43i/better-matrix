@@ -917,6 +917,26 @@ impl AccountData {
         }
     }
 
+    /// Whether the message `event_id` in a room was sent by someone the user ignores ([`ignores`]),
+    /// as a kept timeline or the Files panel's list knows its sender.
+    ///
+    /// [`ignores`]: AccountData::ignores
+    pub fn ignores_sender_of(&self, room_id: &str, event_id: &str) -> bool {
+        let loaded = self
+            .timelines
+            .iter()
+            .filter(|(key, _)| key.room_id == room_id)
+            .find_map(|(_, timeline)| timeline.messages().find(|m| m.event_id == event_id))
+            .map(|message| message.sender_id.as_str());
+        let listed = || {
+            self.files
+                .get(room_id)
+                .and_then(|files| files.iter().find(|file| file.event_id == event_id))
+                .map(|file| file.sender_id.as_str())
+        };
+        loaded.or_else(listed).is_some_and(|sender| self.ignores(sender))
+    }
+
     /// Whether the user ignores someone, or is saving an ignore of them (even with a Stop ignoring
     /// queued after it): what lists of their things (the Files panel) leave out.
     pub fn ignores(&self, user_id: &str) -> bool {

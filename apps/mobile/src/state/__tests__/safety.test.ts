@@ -21,6 +21,7 @@ import {
   shownIgnored,
   shownThreads,
   previewHidden,
+  previewIgnored,
   pinnedPreviews,
   previewItems,
   previewMessage,
@@ -765,4 +766,58 @@ it('a pending Stop ignoring should keep their pinned and saved messages hidden u
     [0, 0],
     [1, 1],
   ]);
+});
+
+describe('an open preview of an ignored person’s media', () => {
+  const photo: Attachment = {
+    kind: 'Image',
+    name: 'photo.png',
+    size: 1000,
+    media: 'mxc://example.org/photo',
+    thumbnail: null,
+    dimensions: null,
+    audio: null,
+  };
+
+  /** Two pictures Grace sent together; with `ignoredNow`, the user is ignoring her. */
+  function withGrace(ignoredNow: boolean) {
+    const content = { type: 'Attachment' as const, data: photo };
+
+    const state = apply(signedIn(), {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: roomKey(PRIVATE),
+        diffs: [
+          {
+            type: 'Reset',
+            data: [
+              messageEntry('$one', { content, timestamp_ms: 1 }),
+              messageEntry('$two', { content, timestamp_ms: 2 }),
+            ],
+          },
+        ],
+      },
+    });
+
+    // Ignoring still on its way: the timeline keeps the messages, the preview must not show them.
+    return ignoredNow
+      ? updateAccount(state, ADA, (a) => ({ ...a, safety: { ...a.safety, ignored: [GRACE] } }))
+      : state;
+  }
+
+  it('should leave their items out of the batch and its file actions', () => {
+    const state = withGrace(true);
+    expect([
+      previewItems(state, ADA, roomKey(PRIVATE), '$one', '$one'),
+      previewMessage(state, ADA, roomKey(PRIVATE), '$one'),
+    ]).toEqual([[], undefined]);
+  });
+
+  it('should show nothing for the item on screen once its sender is ignored', () => {
+    expect([
+      previewIgnored(withGrace(false), ADA, roomKey(PRIVATE), '$two'),
+      previewIgnored(withGrace(true), ADA, roomKey(PRIVATE), '$two'),
+    ]).toEqual([false, true]);
+  });
 });

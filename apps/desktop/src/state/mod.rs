@@ -3314,6 +3314,10 @@ impl State {
     /// full size, with the rest of its batch to step through; any other file saves.
     pub fn open_attachment(&mut self, key: &TimelineKey, event_id: &str, attachment: &matrix_core::Attachment) {
         let (Some(account), Some(media)) = (self.nav.account.clone(), attachment.media.clone()) else { return };
+        // Nothing opens of what someone the user ignores sent.
+        if self.accounts.get(&account).is_some_and(|data| data.ignores_sender_of(&key.room_id, event_id)) {
+            return;
+        }
         // Held-back media shows in its place first; it opens from there. Opened from outside the
         // loaded timeline (the Files panel), its sender may be unknown: it counts as someone else.
         let held = self
@@ -3332,6 +3336,10 @@ impl State {
         // choice holds back wait for a press when stepped onto (`show_preview_item`).
         let entries = self.accounts.get(&account).and_then(|data| data.timeline(key)).map(|t| t.entries.as_slice());
         let mut batch = preview::batch(entries.unwrap_or_default(), event_id);
+        // Nothing of people the user ignores.
+        if let Some(data) = self.accounts.get(&account) {
+            batch.retain(|item| !data.ignores_sender_of(&key.room_id, &item.event_id));
+        }
         let index = match batch.iter().position(|item| item.event_id == event_id) {
             Some(index) => index,
             None => {
@@ -3422,6 +3430,17 @@ impl State {
 
     /// Whether a batch item of the open preview is a picture or video the media choice holds
     /// back: it waits for a press, its thumbnail unfetched.
+    /// Whether the item the preview shows was sent by someone the user ignores.
+    pub fn preview_item_ignored(&self) -> bool {
+        self.preview.as_ref().is_some_and(|preview| {
+            preview.batch.get(preview.index).is_some_and(|item| {
+                self.accounts
+                    .get(&preview.account)
+                    .is_some_and(|data| data.ignores_sender_of(&preview.room_id, &item.event_id))
+            })
+        })
+    }
+
     pub fn preview_holds(&self, item: &PreviewItem) -> bool {
         self.preview.as_ref().is_some_and(|preview| {
             self.accounts.get(&preview.account).is_some_and(|data| {
@@ -3433,7 +3452,12 @@ impl State {
     /// The media choice or a room changed: an item the preview shows that it now holds back (and
     /// the user didn't reveal) gives way to Show, letting go of what showed as stepping does; one
     /// it held back that may now show loads, as stepping onto it would.
+    /// The item's sender now ignored, the preview closes.
     pub(super) fn reconcile_preview(&mut self) {
+        if self.preview_item_ignored() {
+            self.close_preview();
+            return;
+        }
         let Some(preview) = &self.preview else { return };
         let held = matches!(preview.content, PreviewContent::Held);
         let Some(item) = preview.batch.get(preview.index).cloned() else { return };

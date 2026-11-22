@@ -327,8 +327,30 @@ export function previewItems(
   }
 
   // Held items stay in the batch: their thumbnails fetch nothing (`galleryThumbnail`), and the
-  // preview shows Show in place of one selected (`previewHidden`).
-  return found;
+  // preview shows Show in place of one selected (`previewHidden`). What ignored people sent
+  // leaves it, an ignore still on its way included (`hides`).
+  return data && found.some((m) => hides(data, m.sender_id))
+    ? found.filter((m) => !hides(data, m.sender_id))
+    : found;
+}
+
+/**
+ * Whether the preview's item `eventId` was sent by someone the user now ignores (`hides`): the
+ * preview then shows nothing for it, rather than stepping to another item.
+ */
+export function previewIgnored(
+  state: State,
+  id: AccountId,
+  key: TimelineKey,
+  eventId: string,
+): boolean {
+  const data = account(state, id);
+
+  const shown = galleryAround(timeline(state, id, key).entries, eventId, eventId, key.thread).find(
+    (m) => m.event_id === eventId,
+  );
+
+  return data !== undefined && shown !== undefined && hides(data, shown.sender_id);
 }
 
 /**

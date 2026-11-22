@@ -37,7 +37,7 @@ import { revealMedia } from '../state/actions/safety';
 import { showsStrip, stepGallery } from '../state/gallery';
 import { attachmentPreview } from '../state/messages';
 import { shallow, useAppStore, useStore } from '../state/react';
-import { previewHidden, previewItems } from '../state/selectors';
+import { previewHidden, previewIgnored, previewItems } from '../state/selectors';
 import { roomKey, threadKey } from '../state/timeline';
 import { sentAt } from '../state/timelineText';
 import { font } from '../theme/palette';
@@ -85,7 +85,9 @@ export default function PreviewScreen() {
 
   const found = gallery.findIndex((m) => m.event_id === current);
   const index = found < 0 ? gallery.findIndex((m) => m.event_id === eventId) : found;
-  const shown = gallery[index] ?? null;
+  // An item whose sender the user now ignores shows nothing, not another item (ADR 0011).
+  const ignored = useStore((s) => previewIgnored(s, account, key, current));
+  const shown = ignored ? null : (gallery[index] ?? null);
   const hidden = useStore((s) => shown !== null && previewHidden(s, account, roomId, shown));
   const message = hidden ? null : shown;
   const attachment = message?.content.type === 'Attachment' ? message.content.data : null;
