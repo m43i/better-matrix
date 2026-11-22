@@ -1,4 +1,4 @@
-//! This device's settings: language, appearance and interface size. Account-wide settings (notification defaults)
+//! This device's settings: language, appearance, message layout and interface size. Account-wide settings (notification defaults)
 //! live on the homeserver and arrive through the engine instead.
 
 use crate::i18n::{Language, t};
@@ -33,6 +33,46 @@ impl Appearance {
 
     pub fn from_id(id: &str) -> Self {
         Self::ALL.into_iter().find(|a| a.id() == id).unwrap_or_default()
+    }
+}
+
+/// How conversations lay out their messages: classic rows, every message under its sender's
+/// name as in Slack, or chat bubbles, other people's at the left by their picture and the
+/// user's own at the right.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MessageLayout {
+    #[default]
+    Rows,
+    Bubbles,
+}
+
+impl MessageLayout {
+    pub const ALL: [MessageLayout; 2] = [MessageLayout::Rows, MessageLayout::Bubbles];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rows => t!("message_layout.rows"),
+            Self::Bubbles => t!("message_layout.bubbles"),
+        }
+    }
+
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::Rows => t!("message_layout.rows_hint"),
+            Self::Bubbles => t!("message_layout.bubbles_hint"),
+        }
+    }
+
+    /// A stable name for keys and the prefs file, the same in every language.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Rows => "rows",
+            Self::Bubbles => "bubbles",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Self {
+        Self::ALL.into_iter().find(|layout| layout.id() == id).unwrap_or_default()
     }
 }
 
@@ -83,6 +123,7 @@ pub struct Settings {
     pub last_account: Option<matrix_core::AccountId>,
     pub language: Language,
     pub appearance: Appearance,
+    pub message_layout: MessageLayout,
     pub zoom: Zoom,
     /// Play GIFs linked from Giphy, Tenor and Imgur. Loading them contacts those sites.
     pub show_link_gifs: bool,
@@ -145,6 +186,7 @@ impl Default for Settings {
             last_account: None,
             language: Language::default(),
             appearance: Appearance::default(),
+            message_layout: MessageLayout::default(),
             zoom: Zoom::default(),
             show_link_gifs: true,
             show_link_previews: true,
@@ -168,6 +210,8 @@ impl Settings {
 pub enum SettingsSection {
     #[default]
     General,
+    /// The theme, the interface size and how messages lay out.
+    Appearance,
     /// The active account's name, picture and contact details.
     Profile,
     Notifications,
@@ -182,8 +226,9 @@ pub enum SettingsSection {
 }
 
 impl SettingsSection {
-    pub const ALL: [SettingsSection; 7] = [
+    pub const ALL: [SettingsSection; 8] = [
         SettingsSection::General,
+        SettingsSection::Appearance,
         SettingsSection::Profile,
         SettingsSection::Notifications,
         SettingsSection::Account,
@@ -195,6 +240,7 @@ impl SettingsSection {
     pub fn label(self) -> &'static str {
         match self {
             Self::General => t!("settings.general"),
+            Self::Appearance => t!("settings.appearance"),
             Self::Profile => t!("settings.profile"),
             Self::Notifications => t!("settings.notifications"),
             Self::Account => t!("settings.account"),
@@ -208,6 +254,7 @@ impl SettingsSection {
     pub fn id(self) -> &'static str {
         match self {
             Self::General => "general",
+            Self::Appearance => "appearance",
             Self::Profile => "profile",
             Self::Notifications => "notifications",
             Self::Account => "account",
@@ -219,42 +266,4 @@ impl SettingsSection {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn zooming_in_should_step_to_the_next_level() {
-        assert_eq!(Zoom::DEFAULT.larger().percent(), 110);
-    }
-
-    #[test]
-    fn zooming_out_should_step_to_the_previous_level() {
-        assert_eq!(Zoom::DEFAULT.smaller().percent(), 90);
-    }
-
-    #[test]
-    fn one_hundred_percent_should_draw_at_the_design_size() {
-        assert!((Zoom::DEFAULT.factor() - 1.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn zoom_should_stop_at_its_smallest_and_largest_levels() {
-        assert_eq!(Zoom::from_percent(67).smaller().percent(), 67);
-        assert_eq!(Zoom::from_percent(175).larger().percent(), 175);
-    }
-
-    #[test]
-    fn a_saved_zoom_should_snap_to_the_nearest_level() {
-        assert_eq!(Zoom::from_percent(93).percent(), 90);
-    }
-
-    #[test]
-    fn an_appearance_should_read_back_from_its_id() {
-        assert_eq!(Appearance::from_id(Appearance::Dark.id()), Appearance::Dark);
-    }
-
-    #[test]
-    fn an_unknown_appearance_should_follow_the_system() {
-        assert_eq!(Appearance::from_id("sepia"), Appearance::System);
-    }
-}
+mod tests;

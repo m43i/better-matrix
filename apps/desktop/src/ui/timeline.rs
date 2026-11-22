@@ -21,8 +21,8 @@ use super::room::{display_name, inline_name};
 use super::theme::{Palette, font};
 use crate::i18n::{I18N, t, tf, tp};
 use crate::state::{
-    AccountData, AudioClip, ComposerTarget, EmojiFor, EntryView, GifCache, LinkPreviews, MediaCache, PlaybackSpeed,
-    Popover, RoomTimeline, Scrub, State, TimelineItem, audio_supported,
+    AccountData, AudioClip, ComposerTarget, EmojiFor, EntryView, GifCache, LinkPreviews, MediaCache, MessageLayout,
+    PlaybackSpeed, Popover, RoomTimeline, Scrub, State, TimelineItem, audio_supported,
 };
 use matrix_core::links::LinkPreview;
 
@@ -67,6 +67,8 @@ pub struct Context<'a> {
     pub content_width: f32,
     /// Hidden events get a line (developer tools).
     pub show_hidden: bool,
+    /// Classic rows or chat bubbles.
+    pub layout: MessageLayout,
 }
 
 impl<'a> Context<'a> {
@@ -91,11 +93,17 @@ impl<'a> Context<'a> {
             readers_column: key.thread.is_none(),
             content_width: f32::INFINITY,
             show_hidden: s.settings.show_hidden_events,
+            layout: s.settings.message_layout,
         }
     }
 
     fn in_thread(&self) -> bool {
         self.key.thread.is_some()
+    }
+
+    /// Whether `message` sits at the timeline's right: the user's own, in chat bubbles.
+    fn on_right(&self, message: &Message) -> bool {
+        self.layout == MessageLayout::Bubbles && message.sender_id == self.account.as_str()
     }
 
     /// A key unique to this timeline, so the room and a thread can show the same message.
@@ -675,11 +683,167 @@ fn status_emoji(event_id: &str, message: Option<&str>) -> Option<El> {
     Some(text(emoji.to_owned()).key(format!("status-emoji-{event_id}")).font(font::BODY).help(message.to_owned()))
 }
 
-/// One message: avatar and name (unless it continues the sender's run), the quoted message it
-/// answers, its content, a linked GIF, reactions and thread; the toolbar shows on hover.
-/// Clicking a room message opens its thread; clicking the sender's name or picture, their
-/// person panel.
+/// One message, laid out as the settings ask: a classic row or a chat bubble.
 fn message_row(
+    cx: &Context<'_>,
+    key: &str,
+    item: &TimelineItem,
+    continues: bool,
+    latest_call: bool,
+    p: &Palette,
+) -> El {
+    match cx.layout {
+        MessageLayout::Rows => classic_row(cx, key, item, continues, latest_call, p),
+        MessageLayout::Bubbles => bubble_row(cx, key, item, continues, latest_call, p),
+    }
+}
+
+/// What a message shows, whatever its layout: `inside`, what it says (the quoted message it
+/// answers, its content, a linked GIF, a link's card), and `below`, what hangs off it (reactions,
+/// its thread, and in a timeline too narrow for the readers' column, its read indicator).
+struct Parts {
+    inside: Vec<El>,
+    below: Vec<El>,
+}
+
+/// `said` paints what the message says (a bubble's shades, in a bubble), `p` what hangs off it.
+fn message_parts(
+    cx: &Context<'_>,
+    item: &TimelineItem,
+    latest_call: bool,
+    card_width: f32,
+    said: &Palette,
+    p: &Palette,
+) -> Parts {
+    let message = &item.message;
+    let interactive = !matches!(message.content, MessageContent::Call(_));
+    let mut inside = Vec::new();
+    if let Some(quote) = &message.reply_to {
+        inside.push(quote_block(quote, said));
+    }
+    // A GIF link shows as the GIF, below the rest of the message (if any) like an attachment.
+    match item.gif.as_ref().filter(|gif| cx.show_gifs && !cx.gifs.has_failed(&gif.url)) {
+        Some(gif) => {
+            if let Some(rest) = &gif.rest {
+                let caption = text_body(&message.event_id, &rest.plain, rest.rich.as_ref(), said);
+                // At the right, the caption hugs its words, so they end where the GIF does.
+                inside.push(if cx.on_right(message) {
+                    col().self_end().max_w(cx.content_width).child(caption)
+                } else {
+                    caption
+                });
+            }
+            inside.push(linked_gif(&gif.url, cx.content_width, cx.gifs, said));
+        }
+        None => inside.push(message_body(item, cx, latest_call, said)),
+    }
+    // A link's card, below the text, once the homeserver described the page.
+    if let Some((url, card)) =
+        item.card_link(cx.show_gifs).and_then(|url| Some((url, cx.link_previews?.get(cx.account, url)?)))
+    {
+        inside.push(link_card(&cx.key(&format!("link-{}", message.event_id)), url, card, card_width, cx.media, said));
+    }
+    let mut below = Vec::new();
+    if interactive && !message.reactions.is_empty() {
+        below.push(reactions(cx, message, p));
+    }
+    if let (true, Some(thread), false) = (interactive, &message.thread, cx.in_thread()) {
+        below.push(thread_link(&message.event_id, thread, cx.media, p));
+    }
+    // Too narrow a timeline for the readers' column: the indicator takes a line of its own.
+    if !cx.in_thread() && !cx.readers_column && is_read(message) {
+        let indicator = super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, p);
+        below.push(row().w_full().justify_end().child(indicator));
+    }
+    Parts { inside, below }
+}
+
+/// Whether anyone's read indicator stands at the message.
+fn is_read(message: &Message) -> bool {
+    !message.pending && !message.read_receipts.is_empty()
+}
+
+/// "Edited" and "Sending…", when either applies.
+fn status_words(message: &Message) -> Option<String> {
+    let mut status = Vec::new();
+    if message.edited {
+        status.push(t!("message.edited"));
+    }
+    if message.pending {
+        status.push(t!("message.sending"));
+    }
+    (!status.is_empty()).then(|| status.join(" · "))
+}
+
+/// "Pinned", above a pinned message.
+fn pinned_label(p: &Palette) -> El {
+    row()
+        .gap(5.0)
+        .center_y()
+        .child(icon(&icons::PIN, 12.0).color(p.accent))
+        .child(text(t!("message.pinned")).font(font::META).color(p.accent))
+}
+
+/// The sender's picture with their presence dot, and on hover what they show in words; pressing
+/// it opens their person panel.
+fn sender_face(cx: &Context<'_>, key: &str, message: &Message, p: &Palette) -> El {
+    let shown = cx.data.presence.get(&message.sender_id);
+    let face = media_avatar(&message.sender_id, &message.sender_name, message.sender_avatar.as_ref(), cx.media, AVATAR);
+    // Pressable out to the dot's overhang, which the layout doesn't count.
+    let reach = AVATAR + PRESENCE_OVERHANG;
+    let face = el()
+        .key(format!("{key}-sender-face"))
+        .size(reach, reach)
+        .mr(-PRESENCE_OVERHANG)
+        .mb(-PRESENCE_OVERHANG)
+        .child(with_presence(face, AVATAR, shown, p.bg, p));
+    let face = match shown.and_then(presence_text) {
+        Some(words) => face.help(words),
+        None => face,
+    };
+    opens_person(face, message)
+}
+
+/// The column at a room message's right for who has read it, filled or not and as tall as the
+/// indicator, so a receipt arriving never rewraps or grows the message (threads track no
+/// receipts).
+fn readers_cell(cx: &Context<'_>, message: &Message, p: &Palette) -> Option<El> {
+    if !cx.readers_column {
+        return None;
+    }
+    let mut readers = row_el()
+        .w(super::readers::column_width(cx.reader_faces))
+        .min_h(super::readers::HEIGHT)
+        .self_end()
+        .justify_end();
+    if is_read(message) {
+        readers = readers.child(super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, p));
+    }
+    Some(readers)
+}
+
+/// What every message row does, whatever its layout: the hover toolbar, the menu on a right
+/// click, and in a room, opening the message's thread on a press.
+fn message_actions(row: El, cx: &Context<'_>, message: &Message, p: &Palette) -> El {
+    let (menu_key, id) = (cx.key.clone(), message.event_id.clone());
+    let mut row = row.child(toolbar(cx, message, p)).on_secondary_press(move |s: &mut State, point, _| {
+        s.popover = Some(Popover::MessageMenu {
+            key: menu_key.clone(),
+            event_id: id.clone(),
+            at: Some((point.x as i32, point.y as i32)),
+        });
+    });
+    if !cx.in_thread() {
+        let root = message.event_id.clone();
+        row = row.cursor(rune::Cursor::Pointer).on_press(move |s: &mut State| s.open_thread(&root));
+    }
+    row
+}
+
+/// A classic row: avatar and name (unless it continues the sender's run), then the message's
+/// parts; the toolbar shows on hover. Clicking a room message opens its thread; clicking the
+/// sender's name or picture, their person panel.
+fn classic_row(
     cx: &Context<'_>,
     key: &str,
     item: &TimelineItem,
@@ -689,54 +853,9 @@ fn message_row(
 ) -> El {
     let message = &item.message;
     let interactive = !matches!(message.content, MessageContent::Call(_));
-    let mut body = col().w_full().gap(4.0);
-    if let Some(quote) = &message.reply_to {
-        body = body.child(quote_block(quote, p));
-    }
-    // A GIF link shows as the GIF, below the rest of the message (if any) like an attachment.
-    match item.gif.as_ref().filter(|gif| cx.show_gifs && !cx.gifs.has_failed(&gif.url)) {
-        Some(gif) => {
-            if let Some(rest) = &gif.rest {
-                body = body.child(text_body(&message.event_id, &rest.plain, rest.rich.as_ref(), p));
-            }
-            body = body.child(linked_gif(&gif.url, cx.content_width, cx.gifs, p));
-        }
-        None => body = body.child(message_body(item, cx, latest_call, p)),
-    }
-    // A link's card, below the text, once the homeserver described the page.
-    if let Some((url, card)) =
-        item.card_link(cx.show_gifs).and_then(|url| Some((url, cx.link_previews?.get(cx.account, url)?)))
-    {
-        body = body.child(link_card(
-            &cx.key(&format!("link-{}", message.event_id)),
-            url,
-            card,
-            cx.content_width,
-            cx.media,
-            p,
-        ));
-    }
-    if interactive && !message.reactions.is_empty() {
-        body = body.child(reactions(cx, message, p));
-    }
-    if let (true, Some(thread), false) = (interactive, &message.thread, cx.in_thread()) {
-        body = body.child(thread_link(&message.event_id, thread, cx.media, p));
-    }
-    // Too narrow a timeline for the readers' column: the indicator takes a line of its own.
-    let read = !message.pending && !message.read_receipts.is_empty();
-    if !cx.in_thread() && !cx.readers_column && read {
-        let indicator = super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, p);
-        body = body.child(row().w_full().justify_end().child(indicator));
-    }
-
-    let mut status = Vec::new();
-    if message.edited {
-        status.push(t!("message.edited"));
-    }
-    if message.pending {
-        status.push(t!("message.sending"));
-    }
-    let status = (!status.is_empty()).then(|| text(status.join(" · ")).font(font::META).color(p.text_muted));
+    let parts = message_parts(cx, item, latest_call, cx.content_width, p, p);
+    let body = col().w_full().gap(4.0).children(parts.inside).children(parts.below);
+    let status = status_words(message).map(|words| text(words).font(font::META).color(p.text_muted));
     let content = if continues {
         let mut content = col().grow(1.0).min_w(0.0).child(body);
         if let Some(status) = status {
@@ -764,43 +883,9 @@ fn message_row(
         col().grow(1.0).min_w(0.0).gap(2.0).child(meta).child(body)
     };
     let pinned = cx.room.pinned.contains(&message.event_id);
-    let content = if pinned {
-        col()
-            .grow(1.0)
-            .min_w(0.0)
-            .gap(3.0)
-            .child(
-                row()
-                    .gap(5.0)
-                    .center_y()
-                    .child(icon(&icons::PIN, 12.0).color(p.accent))
-                    .child(text(t!("message.pinned")).font(font::META).color(p.accent)),
-            )
-            .child(content)
-    } else {
-        content
-    };
-    let gutter = if continues {
-        el().w(AVATAR)
-    } else {
-        // The sender's dot, and on hover what they show in words.
-        let shown = cx.data.presence.get(&message.sender_id);
-        let face =
-            media_avatar(&message.sender_id, &message.sender_name, message.sender_avatar.as_ref(), cx.media, AVATAR);
-        // Pressable out to the dot's overhang, which the layout doesn't count.
-        let reach = AVATAR + PRESENCE_OVERHANG;
-        let face = el()
-            .key(format!("{key}-sender-face"))
-            .size(reach, reach)
-            .mr(-PRESENCE_OVERHANG)
-            .mb(-PRESENCE_OVERHANG)
-            .child(with_presence(face, AVATAR, shown, p.bg, p));
-        let face = match shown.and_then(presence_text) {
-            Some(words) => face.help(words),
-            None => face,
-        };
-        opens_person(face, message)
-    };
+    let content =
+        if pinned { col().grow(1.0).min_w(0.0).gap(3.0).child(pinned_label(p)).child(content) } else { content };
+    let gutter = if continues { el().w(AVATAR) } else { sender_face(cx, key, message, p) };
     let mut row = row()
         .key(key.to_owned())
         .w_full()
@@ -811,42 +896,133 @@ fn message_row(
         .items_start()
         .opacity(if message.pending { 0.6 } else { 1.0 })
         .child(gutter)
-        .child(content);
-    // Room messages keep a column at the right for who has read them, filled or not and as tall
-    // as the indicator, so a receipt arriving never rewraps or grows the message (threads track
-    // no receipts).
-    if cx.readers_column {
-        let mut readers = row_el()
-            .w(super::readers::column_width(cx.reader_faces))
-            .min_h(super::readers::HEIGHT)
-            .self_end()
-            .justify_end();
-        if read {
-            readers = readers.child(super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, p));
-        }
-        row = row.child(readers);
-    }
+        .child(content)
+        .children(readers_cell(cx, message, p));
     if pinned {
         row = row.fill(p.accent.alpha(0.06)).border_sides([0.0, 0.0, 0.0, 3.0], p.accent);
     }
     if interactive {
         row = row.hover(p.hover);
     }
-    if interactive && !message.pending {
-        let (menu_key, id) = (cx.key.clone(), message.event_id.clone());
-        row = row.child(toolbar(cx, message, p)).on_secondary_press(move |s: &mut State, point, _| {
-            s.popover = Some(Popover::MessageMenu {
-                key: menu_key.clone(),
-                event_id: id.clone(),
-                at: Some((point.x as i32, point.y as i32)),
-            });
-        });
-        if !cx.in_thread() {
-            let root = message.event_id.clone();
-            row = row.cursor(rune::Cursor::Pointer).on_press(move |s: &mut State| s.open_thread(&root));
-        }
+    if interactive && !message.pending { message_actions(row, cx, message, p) } else { row }
+}
+
+/// The most of the timeline's width a bubble takes, and the most it takes at all.
+const BUBBLE_SHARE: f32 = 0.8;
+const BUBBLE_MAX: f32 = 600.0;
+/// A bubble's padding around what it says.
+const BUBBLE_PAD_X: f32 = 12.0;
+/// Narrower content than this is a compact timeline: bubbles take all of it, with less padding.
+const BUBBLE_COMPACT: f32 = 320.0;
+const BUBBLE_PAD_X_COMPACT: f32 = 8.0;
+const BUBBLE_PAD_Y: f32 = 7.0;
+
+/// Whether a bubble names `sender` in `room`: everyone but the other person of a one-to-one
+/// direct chat, where who wrote what is plain. Once someone else is there, or for anyone who was
+/// and left, names show.
+pub(super) fn names_sender(room: &RoomSummary, sender: &str) -> bool {
+    let one_to_one = room.kind == matrix_core::RoomKind::Direct && room.member_count <= 2;
+    !(one_to_one && room.dm_users.iter().any(|partner| partner == sender))
+}
+
+/// Whether a message's content reads as words, which a bubble holds; pictures, files, clips,
+/// polls, call cards and GIFs bring their own frames and stand without one.
+fn in_bubble(item: &TimelineItem, cx: &Context<'_>) -> bool {
+    let gif = item.gif.as_ref().is_some_and(|gif| cx.show_gifs && !cx.gifs.has_failed(&gif.url));
+    !gif && matches!(
+        item.message.content,
+        MessageContent::Text { .. } | MessageContent::Redacted | MessageContent::Undecryptable
+    )
+}
+
+/// A chat bubble: other people's messages at the left beside their picture (on the first of a
+/// run), the user's own at the right without one. A bubble holds the sender's name (others', on
+/// the first of a run, outside direct chats), what the message says, and its time; reactions and
+/// the thread hang below it. Pressing it does what a classic row's press does.
+fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool, latest_call: bool, p: &Palette) -> El {
+    let message = &item.message;
+    let own = cx.on_right(message);
+    let interactive = !matches!(message.content, MessageContent::Call(_));
+    let compact = cx.content_width < BUBBLE_COMPACT;
+    let (share, pad_x) = if compact { (1.0, BUBBLE_PAD_X_COMPACT) } else { (BUBBLE_SHARE, BUBBLE_PAD_X) };
+    let width = (cx.content_width * share).min(BUBBLE_MAX);
+    let bubbled = in_bubble(item, cx);
+    // Muted words inside a bubble (a quote, a notice) take the shade that stays clear on it.
+    let inside = if bubbled { Palette { text_muted: p.bubble_meta, ..*p } } else { *p };
+    // A card in a bubble fits the bubble; one standing alone, the classic row's width.
+    let card_width = if bubbled { width - 2.0 * pad_x } else { cx.content_width };
+    let mut parts = message_parts(cx, item, latest_call, card_width, &inside, p);
+    if own && !bubbled {
+        // A GIF's caption keeps to its side, as the GIF does.
+        parts.inside = parts.inside.into_iter().map(El::self_end).collect();
     }
-    row
+
+    let named = !own && !continues && names_sender(cx.room, &message.sender_id);
+    let name = named.then(|| {
+        let name = text(message.sender_name.clone())
+            .key(format!("{key}-sender-name"))
+            .font(font::SECTION)
+            .color(super::theme::identity_color(&message.sender_id))
+            .shrink()
+            .truncate();
+        row()
+            .gap(6.0)
+            .center_y()
+            .min_w(0.0)
+            .child(opens_person(name, message).focusable(true))
+            .children(status_emoji(&message.event_id, cx.data.status_message_of(&message.sender_id)))
+    });
+    let mut time = clock_time(local_ms(message.timestamp_ms));
+    if let Some(status) = status_words(message) {
+        time = format!("{status} · {time}");
+    }
+    let time = text(time).key(format!("{key}-time")).font(font::META);
+
+    let said = col().key(format!("{key}-bubble")).gap(4.0);
+    let said = if bubbled {
+        // At least as wide as its time, which never wraps, in the narrowest timeline.
+        said.max_w(width)
+            .px(pad_x)
+            .py(BUBBLE_PAD_Y)
+            .radius(16.0)
+            .fill(if own { p.bubble_own } else { p.bubble })
+            .children(name)
+            .children(parts.inside)
+            .child(time.color(p.bubble_meta).self_end())
+    } else {
+        // Cards and media take the width a classic row gives them, which they are sized for: a
+        // poll fills it, a picture keeps its size on the message's side, the time under it.
+        // No wider than a classic row's content, though the user's own leave out the picture.
+        let said = said.w_full().max_w(cx.content_width);
+        let said = if own { said.items_end() } else { said.items_start() };
+        said.children(name).children(parts.inside).child(time.color(p.text_muted))
+    };
+
+    let mut column = col().grow(1.0).min_w(0.0).gap(4.0);
+    column = if own { column.items_end() } else { column.items_start() };
+    if cx.room.pinned.contains(&message.event_id) {
+        column = column.child(pinned_label(p));
+    }
+    // What hangs below keeps within the message's width, as a classic row's body holds it, so a
+    // thread link's last-reply text is cut short rather than run past the row.
+    let below = parts.below.into_iter().map(|part| part.max_w(cx.content_width));
+    let column = column.child(said).children(below);
+
+    let mut row = row()
+        .key(key.to_owned())
+        .w_full()
+        .px(MESSAGE_PAD_X)
+        .pt(if continues { 2.0 } else { 10.0 })
+        .pb(2.0)
+        .gap(MESSAGE_GAP)
+        .items_start()
+        .opacity(if message.pending { 0.6 } else { 1.0 });
+    if !own {
+        // Without the name, the picture is the keyboard's way to the person.
+        row = row.child(if continues { el().w(AVATAR) } else { sender_face(cx, key, message, p).focusable(!named) });
+    }
+    let row = row.child(column).children(readers_cell(cx, message, p));
+    if interactive && !message.pending { message_actions(row.hover_group(), cx, message, p) } else { row }
 }
 
 /// The sender's name or picture on a message, opening their person panel rather than the thread.
@@ -874,6 +1050,10 @@ fn toolbar_right(cx: &Context<'_>) -> f32 {
 /// a one-line message's read indicator.
 fn toolbar(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
     let event_id = message.event_id.clone();
+    // The user's own bubble sits at the right, under where the toolbar would be: it takes the
+    // empty left instead.
+    let (left, right) =
+        if cx.on_right(message) { (Some(MESSAGE_PAD_X), None) } else { (None, Some(toolbar_right(cx))) };
     let open = cx.picking == Some(event_id.as_str());
     let target = if cx.in_thread() { ComposerTarget::Thread } else { ComposerTarget::Room };
     let button = |glyph: &'static rune::Icon, label: &str, name: &str| {
@@ -891,7 +1071,7 @@ fn toolbar(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
     let (key, quoted) = (cx.key.clone(), message.clone());
     let mut bar = row()
         .key(cx.key(&format!("actions-{event_id}")))
-        .pin(None, Some(-14.0), Some(toolbar_right(cx)), None)
+        .pin(left, Some(-14.0), right, None)
         .px(2.0)
         .py(2.0)
         .gap(2.0)
@@ -957,6 +1137,10 @@ fn quote_text(quote: &Quote) -> String {
 /// Reaction chips: emoji and count, outlined when the user's own; each toggles the user's.
 fn reactions(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
     let mut chips = row().gap(6.0).flex_wrap().pt(2.0);
+    // Each wrapped line of chips keeps to the message's side.
+    if cx.on_right(message) {
+        chips = chips.justify_end();
+    }
     for reaction in &message.reactions {
         let (key, event_id, emoji) = (cx.key.clone(), message.event_id.clone(), reaction.key.clone());
         chips = chips.child(
@@ -1047,7 +1231,7 @@ fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Pa
         (MessageContent::Attachment(attachment), _)
             if attachment.kind == AttachmentKind::Audio && audio_supported() =>
         {
-            audio_card(&item.message.event_id, attachment, cx, p)
+            audio_card(&item.message, attachment, cx, p)
         }
         (MessageContent::Attachment(attachment), _) => match attachment.preview() {
             Some((preview, _)) if !media.has_failed(&preview) => {
@@ -1401,13 +1585,15 @@ fn wave_width(bars: usize) -> f32 {
 /// or the arrow keys) to jump, and the time under them. While a clip is the current one, a
 /// button beside the time steps its speed. A voice memo shows no file name; another audio file
 /// keeps its name above the bars.
-fn audio_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, p: &Palette) -> El {
+fn audio_card(message: &Message, attachment: &Attachment, cx: &Context<'_>, p: &Palette) -> El {
+    let event_id = message.event_id.as_str();
     let clips = Clips { audio: cx.audio, decoded: cx.decoded_audio, speed: cx.playback_speed };
     // Beside play, the bars and the speed, a press opens the clip in the preview.
     let (opened, key, id) = (attachment.clone(), cx.key.clone(), event_id.to_owned());
-    audio_player(event_id, attachment, &clips, cx.content_width, p)
-        .cursor(rune::Cursor::Pointer)
-        .on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened))
+    let card = audio_player(event_id, attachment, &clips, cx.content_width, p);
+    // A voice card keeps to its message's side: the right for the user's own bubbles.
+    let card = if cx.on_right(message) { card.self_end() } else { card };
+    card.cursor(rune::Cursor::Pointer).on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened))
 }
 
 /// What an audio card needs to know of the clips playing and played.

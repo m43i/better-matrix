@@ -2,6 +2,7 @@
 // so a receipt never rewraps or grows its message, or, on a screen too narrow to spare that
 // column, on a line under the message (as the desktop does in a cramped timeline).
 
+import { createContext, useContext } from 'react';
 import { useWindowDimensions } from 'react-native';
 
 import { READER_FACES } from '../../state/readers';
@@ -54,9 +55,14 @@ export function useReadersColumn(): boolean {
   return thread === null && keepsReadersColumn(width);
 }
 
-/** The widest a message's content can be in this timeline. */
+/** A narrower width for what lies inside it: a chat bubble's, for what the bubble holds. */
+export const ContentWidthContext = createContext<number | null>(null);
+
+/** The widest a message's content can be in this timeline, or inside its bubble. */
 export function useContentWidth(): number {
   const { width } = useWindowDimensions();
+  const inside = useContext(ContentWidthContext);
+  const row = width - ROW_INSET - (useReadersColumn() ? READERS_INSET : 0);
 
-  return width - ROW_INSET - (useReadersColumn() ? READERS_INSET : 0);
+  return inside ?? row;
 }

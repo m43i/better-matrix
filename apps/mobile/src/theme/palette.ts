@@ -16,6 +16,12 @@ export interface Palette {
   textMuted: string;
   divider: string;
   hover: string;
+  /** Behind other people's messages in chat bubbles. */
+  bubble: string;
+  /** Behind the user's own messages in chat bubbles. */
+  bubbleOwn: string;
+  /** The time and status inside a bubble: muted, yet clear on either bubble. */
+  bubbleMeta: string;
   accent: string;
   onAccent: string;
   mention: string;
@@ -51,6 +57,9 @@ export const dark: Palette = {
   textMuted: '#a3a3a3',
   divider: '#404040',
   hover: '#ffffff0d',
+  bubble: '#2b2b2b',
+  bubbleOwn: '#1e2638',
+  bubbleMeta: '#a3a3a3',
   scrim: '#000000b3',
   dark: true,
   ...common,
@@ -71,6 +80,9 @@ export const light: Palette = {
   textMuted: '#6b7280',
   divider: '#e5e7eb',
   hover: '#0000000a',
+  bubble: '#eef0f3',
+  bubbleOwn: '#dfe9fb',
+  bubbleMeta: '#4b5563',
   scrim: '#00000080',
   dark: false,
   ...common,

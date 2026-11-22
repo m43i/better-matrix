@@ -8,9 +8,16 @@ import type { PlaybackSpeed } from './voiceCard';
 
 export type Appearance = 'system' | 'light' | 'dark';
 
+/**
+ * How conversations lay out their messages: classic rows under each sender's name, or chat
+ * bubbles, other people's at the left by their picture and the user's own at the right.
+ */
+export type MessageLayout = 'rows' | 'bubbles';
+
 export interface Settings {
   language: Language;
   appearance: Appearance;
+  messageLayout: MessageLayout;
   /** Play GIFs behind Giphy, Tenor and Imgur links inline. */
   showLinkGifs: boolean;
   /** Show a card for the first link in a message. */
@@ -32,6 +39,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   language: 'system',
   appearance: 'system',
+  messageLayout: 'rows',
   showLinkGifs: true,
   showLinkPreviews: true,
   ringSound: true,
@@ -45,6 +53,7 @@ export const DEFAULT_SETTINGS: Settings = {
 const savedSettings = z.object({
   language: z.enum(['system', 'en', 'de', 'fr']).catch(DEFAULT_SETTINGS.language),
   appearance: z.enum(['system', 'light', 'dark']).catch(DEFAULT_SETTINGS.appearance),
+  messageLayout: z.enum(['rows', 'bubbles']).catch(DEFAULT_SETTINGS.messageLayout),
   showLinkGifs: z.boolean().catch(DEFAULT_SETTINGS.showLinkGifs),
   showLinkPreviews: z.boolean().catch(DEFAULT_SETTINGS.showLinkPreviews),
   ringSound: z.boolean().catch(DEFAULT_SETTINGS.ringSound),

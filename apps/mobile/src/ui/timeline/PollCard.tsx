@@ -127,6 +127,8 @@ export function PollCard({ message, poll }: { message: Message; poll: Poll }) {
 const styles = StyleSheet.create({
   card: {
     marginTop: 4,
+    // As wide as the message's column allows, whether it stretches its children or not.
+    width: '100%',
     maxWidth: 460,
     padding: 14,
     gap: 10,

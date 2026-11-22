@@ -183,7 +183,11 @@ Date: 2026-11-22
   - Choices with more than a couple of options (language, each account's notifications,
     the ring, devices) are selects: the current choice in a button that opens its list
     (`select_button`, `select_option`, `select_menu`; `Popover::Select(SelectFor)`). The list
-    draws above the settings modal. Appearance and GIFs stay as radio rows.
+    draws above the settings modal. The theme, the message layout, link previews and GIFs stay
+    as radio rows.
+  - General holds the language, link previews and GIFs; Appearance, the theme, the message
+    layout ([0006](0006-timelines.md)) and the interface size. Phones list the theme and the
+    message layout under Preferences.
   - Voice & video picks the microphone, speaker and camera by name, for calls and voice
     messages alike (`Settings::devices`, `State::choose_device`); the system's default when
     none is picked or the picked one is gone. The devices list when the section opens
@@ -191,6 +195,7 @@ Date: 2026-11-22
   - Notifications starts with the ring: aloud (a soft chime on the picked speaker until
     answered, declined or lapsed) or silent (`Settings::ring_sound`), above each account's
     defaults.
+  - The section list scrolls when a short window at a large interface size can't show it all.
 - **Info:** the last settings section, set apart at the bottom of the list, shows the app's version
   and the third-party list: every crate the desktop app ships (normal and build dependencies on
   every platform, ours left out) and bundled files such as the Inter font, each with version and
@@ -202,7 +207,7 @@ Date: 2026-11-22
   - The list stays behind a button and is virtualized when shown: it runs to hundreds of rows.
 - **Interface size:** `Cx::zoom(settings.zoom.factor())`, Rune's page zoom, on every run.
   - `Zoom` steps through 67, 75, 80, 90, 100, 110, 125, 150, 175%; 100% is the default.
-  - Settings, General has − / + and Reset; no shortcuts.
+  - Settings, Appearance has − / + and Reset; no shortcuts.
 - **Dev runs:** `turbo.json` passes the desktop session through (`globalPassThroughEnv`:
   display, `XDG_*`, D-Bus, locale, cursor), so the app runs as a native Wayland client rather
   than being scaled twice under XWayland.

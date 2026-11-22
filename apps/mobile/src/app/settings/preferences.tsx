@@ -1,5 +1,5 @@
-// Preferences on this device: language, appearance, link previews and GIFs from links, and hidden
-// events (developer tools), as the desktop's General settings.
+// Preferences on this device: language, theme, how messages lay out, link previews and GIFs from
+// links, and hidden events (developer tools), as the desktop's General and Appearance settings.
 
 import { Fragment } from 'react';
 
@@ -7,7 +7,7 @@ import { t } from '../../i18n';
 import { updateSettings } from '../../state/actions/core';
 import { useAppStore, useStore } from '../../state/react';
 import { Divider, ListRow, ListSection } from '../../ui/components';
-import { APPEARANCES, languageChoices } from '../../ui/settings/choices';
+import { APPEARANCES, languageChoices, MESSAGE_LAYOUTS } from '../../ui/settings/choices';
 import { SettingsPage } from '../../ui/settings/common';
 
 export default function PreferencesScreen() {
@@ -30,7 +30,7 @@ export default function PreferencesScreen() {
           </Fragment>
         ))}
       </ListSection>
-      <ListSection title={t('settings.appearance')} footer={t('settings.appearance_hint')}>
+      <ListSection title={t('settings.theme')} footer={t('settings.theme_hint')}>
         {APPEARANCES.map((choice, index) => (
           <Fragment key={choice.id}>
             {index > 0 ? <Divider inset={16} /> : null}
@@ -39,6 +39,21 @@ export default function PreferencesScreen() {
               title={t(choice.label)}
               selected={settings.appearance === choice.id}
               onPress={() => updateSettings(store, { appearance: choice.id })}
+              chevron={false}
+            />
+          </Fragment>
+        ))}
+      </ListSection>
+      <ListSection title={t('settings.messages')} footer={t('settings.messages_hint')}>
+        {MESSAGE_LAYOUTS.map((choice, index) => (
+          <Fragment key={choice.id}>
+            {index > 0 ? <Divider inset={16} /> : null}
+            <ListRow
+              testID={`message-layout-${choice.id}`}
+              title={t(choice.label)}
+              subtitle={t(choice.hint)}
+              selected={settings.messageLayout === choice.id}
+              onPress={() => updateSettings(store, { messageLayout: choice.id })}
               chevron={false}
             />
           </Fragment>
