@@ -93,8 +93,10 @@ pub fn to_pills(html: &str, purpose: Pills) -> String {
             continue;
         }
         match name.as_str() {
-            // A link around a spoiler isn't one: its words would show as the link's.
-            "a" if inner_html(rest, &name).contains("data-mx-spoiler") => open.push((name, Some(""))),
+            // A link around a spoiler isn't one: its words would show as the link's. Nor is a code
+            // block around one a code block: a field keeps no pills in code blocks, so its words
+            // would show as code.
+            "a" | "pre" if inner_html(rest, &name).contains("data-mx-spoiler") => open.push((name, Some(""))),
             "a" => {
                 let pill = attribute(tag, "href").and_then(|href| link_pill(&href));
                 match pill {
@@ -123,7 +125,9 @@ pub fn to_pills(html: &str, purpose: Pills) -> String {
                 _ => out.push_str(&escape(&attribute(tag, "alt").unwrap_or_default())),
             },
             "span" | "div" => {
-                if let Some(latex) = attribute(tag, "data-mx-maths") {
+                // A spoiler comes first: whatever else the element says, its words stay hidden.
+                let spoiler = attribute(tag, "data-mx-spoiler").is_some();
+                if let Some(latex) = attribute(tag, "data-mx-maths").filter(|_| !spoiler) {
                     let block = name == "div";
                     rest = element_text(rest, &name).1;
                     let (id, label) = match purpose {
@@ -142,7 +146,7 @@ pub fn to_pills(html: &str, purpose: Pills) -> String {
                     if block {
                         out.push_str("</p>");
                     }
-                } else if attribute(tag, "data-mx-spoiler").is_some() {
+                } else if spoiler {
                     // Hidden words are words only: nothing inside (a mention, a custom emoji, a
                     // link) may show or act through them.
                     let (words, after) = element_text(rest, &name);
@@ -441,6 +445,22 @@ mod tests {
         let html = "<span data-mx-spoiler><img src=\"mxc://x.org/cat\" alt=\":cat:\"> and \
                     <a href=\"https://matrix.to/#/@ada:x.org\">Ada</a> did it</span>";
         assert_eq!(to_pills(html, Pills::Display), "<span data-pill=\"spoiler\">:cat: and Ada did it</span>");
+    }
+
+    #[test]
+    fn a_spoiler_that_is_also_maths_should_stay_hidden() {
+        assert_eq!(
+            to_pills("<span data-mx-spoiler data-mx-maths=\"x\">secret</span>", Pills::Display),
+            "<span data-pill=\"spoiler\">secret</span>"
+        );
+    }
+
+    #[test]
+    fn a_spoiler_in_a_code_block_should_stay_hidden() {
+        assert_eq!(
+            to_pills("<pre><code>let <span data-mx-spoiler>secret</span></code></pre>", Pills::Display),
+            "<code>let <span data-pill=\"spoiler\">secret</span></code>"
+        );
     }
 
     #[test]

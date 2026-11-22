@@ -84,7 +84,13 @@ impl Account {
         );
         match self.client().send(request).await {
             Ok(response) => Ok(response.delay_id),
+            // `/send` with a delay only where the server says, asked again now, that it holds
+            // delayed events: a cached answer may be from before it stopped.
             Err(error) if unrecognized(&error) => {
+                self.client().reset_supported_versions().await?;
+                if !self.can_schedule().await? {
+                    return Err(Error::Unsupported("scheduled messages"));
+                }
                 let request = delayed_message_event::unstable::Request::new_raw(
                     room.room_id().to_owned(),
                     txn_id,
@@ -354,6 +360,8 @@ mod tests {
         Older,
         /// None: `/versions` doesn't name MSC4140, and `/send` would post at once.
         None,
+        /// None any more: `/versions` named MSC4140 the first time it was asked, not since.
+        Stopped,
     }
 
     type Sent = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
@@ -364,6 +372,7 @@ mod tests {
         let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured = sent.clone();
         let unknown = || json!({ "errcode": "M_NOT_FOUND", "error": "Unrecognized request" });
+        let versions_asked = std::sync::atomic::AtomicUsize::new(0);
         let server = Server::new(move |request| {
             captured.lock().expect("requests").push(request.to_owned());
             let first = request.lines().next().unwrap_or_default();
@@ -376,12 +385,12 @@ mod tests {
                         json!({ "delay_id": "d1" })
                     }
                     Endpoints::Current => json!({ "errcode": "M_BAD_JSON", "error": "no delay_ms" }),
-                    Endpoints::Older | Endpoints::None => unknown(),
+                    Endpoints::Older | Endpoints::None | Endpoints::Stopped => unknown(),
                 };
             }
             if first.contains("org.matrix.msc4140.delay=") {
                 return match endpoints {
-                    Endpoints::None => json!({ "event_id": "$posted-at-once" }),
+                    Endpoints::None | Endpoints::Stopped => json!({ "event_id": "$posted-at-once" }),
                     Endpoints::Current | Endpoints::Older => json!({ "delay_id": "d1" }),
                 };
             }
@@ -406,7 +415,13 @@ mod tests {
                 return json!({ "delayed_events": [delayed("waiting", false), delayed("sent", true)] });
             }
             if first.contains("/versions") {
-                let features = json!({ "org.matrix.msc4140": endpoints != Endpoints::None });
+                let first_time = versions_asked.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0;
+                let held = match endpoints {
+                    Endpoints::Current | Endpoints::Older => true,
+                    Endpoints::None => false,
+                    Endpoints::Stopped => first_time,
+                };
+                let features = json!({ "org.matrix.msc4140": held });
                 return json!({ "versions": ["v1.12"], "unstable_features": features });
             }
             if !encrypted && first.contains("/state/m.room.encryption") {
@@ -488,6 +503,20 @@ mod tests {
         assert!(matches!(id, Err(Error::Unsupported(_))), "{id:?}");
         let sent = sent.lock().expect("requests");
         assert!(sent.iter().all(|request| !request.starts_with("PUT")), "nothing may be posted");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_server_that_stopped_holding_delayed_events_should_be_sent_nothing() {
+        let (server, sent) = server(false, Endpoints::Stopped);
+        let account = account(&server, "stopped").await;
+        // The account learned the server held them, and keeps that answer.
+        assert!(account.can_schedule().await.expect("asked"));
+        let id = account
+            .schedule(&TimelineKey::room("!room:example.org"), None, &text("later"), Duration::from_secs(90))
+            .await;
+        assert!(matches!(id, Err(Error::Unsupported(_))), "{id:?}");
+        let sent = sent.lock().expect("requests");
+        assert!(sent.iter().all(|request| !request.starts_with("PUT /_matrix/client/v3/")), "nothing may be posted");
     }
 
     #[tokio::test(flavor = "multi_thread")]

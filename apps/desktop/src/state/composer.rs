@@ -317,6 +317,10 @@ impl Composer {
 
     pub fn format(&mut self, format: Format) {
         if let Some(pill) = format.pill() {
+            // A code block keeps no pills: a spoiler there would go out as plain code.
+            if self.edit.active_block() == Block::Code {
+                return;
+            }
             // The selection becomes the pill; nothing selected, nothing to hide or typeset.
             let (start, end) = (self.edit.anchor.min(self.edit.focus), self.edit.anchor.max(self.edit.focus));
             let label = self.edit.text[start..end].trim().to_owned();
@@ -858,6 +862,15 @@ mod tests {
         assert_eq!(c.edit.text, "helo!");
         c.cancel_edit();
         assert_eq!(c.edit.text, "draft");
+    }
+
+    #[test]
+    fn a_spoiler_should_not_be_made_in_a_code_block() {
+        let mut c = composer("let secret");
+        c.format(Format::CodeBlock);
+        c.edit.set_selection(4, 10);
+        c.format(Format::Spoiler);
+        assert_eq!(c.edit.pills().count(), 0);
     }
 
     #[test]

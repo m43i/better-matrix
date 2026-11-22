@@ -227,7 +227,8 @@ see who is typing there.
   quote, a pin, a saved message or a search hit goes to the message. One the timeline on screen
   holds is scrolled to; else the engine first finds where it shows
   (`Command::LocateMessage`: the room's timeline, or the thread its relation names), then the
-  shared jump opens it there and loads history until it shows (`State::open_message`). The
+  shared jump opens it there and loads history until it shows (`State::open_message`), unless
+  the user has gone to another room meanwhile. The
   message then flashes in the accent colour for 2.4 s (`State::flash`, `FLASH`). Opening at the
   message without the history before it (an event-focused timeline) is not done: the timeline
   model is the room's or a thread's, and paging back keeps one history per timeline.

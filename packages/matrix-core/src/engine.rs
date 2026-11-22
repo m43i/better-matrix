@@ -2087,6 +2087,7 @@ impl State {
                     let delay = std::time::Duration::from_millis(delay_ms);
                     account.schedule(&key, reply_to.as_deref(), &message, delay).await?;
                     // A server that sends nothing back for the list still scheduled it.
+                    let _order = account.listing_scheduled.lock().await;
                     if let Ok(messages) = account.scheduled_messages().await {
                         sink.emit(Event::ScheduledMessages { account: id, messages });
                     }
@@ -2096,7 +2097,10 @@ impl State {
             Command::ListScheduled { account: id } => {
                 let account = self.account(&id);
                 Box::pin(async move {
-                    let messages = account?.scheduled_messages().await?;
+                    let account = account?;
+                    // In the order asked: an older list never covers a newer.
+                    let _order = account.listing_scheduled.lock().await;
+                    let messages = account.scheduled_messages().await?;
                     sink.emit(Event::ScheduledMessages { account: id, messages });
                     Ok(Outcome::Done)
                 })
@@ -2106,6 +2110,7 @@ impl State {
                 Box::pin(async move {
                     let account = account?;
                     account.update_scheduled(&delay_id, action).await?;
+                    let _order = account.listing_scheduled.lock().await;
                     if let Ok(messages) = account.scheduled_messages().await {
                         sink.emit(Event::ScheduledMessages { account: id, messages });
                     }

@@ -5959,3 +5959,17 @@ fn a_link_to_a_message_in_a_room_found_by_its_preview_should_go_to_the_message()
             .any(|command| matches!(command, Command::LocateMessage { event_id, .. } if event_id == "$far"))
     );
 }
+
+#[test]
+fn a_message_found_after_leaving_its_room_should_not_pull_the_user_back() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x", "!two:x"], Vec::new());
+    s.select_room("!one:x");
+    drain(&mut commands);
+    s.select_room("!two:x");
+    let key = TimelineKey::room("!one:x");
+    apply(&mut s, Event::MessageLocated { request: RequestId(1), account: id, key, event_id: "$m".into() });
+    assert_eq!(s.active_room_id(), Some("!two:x"));
+    assert!(s.message_jump.is_none());
+}
