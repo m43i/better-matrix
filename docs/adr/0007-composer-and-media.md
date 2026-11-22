@@ -166,7 +166,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   before and two after its time that the server made of it (`unsigned`'s
   `org.matrix.msc4140.delay_id`, Synapse 1.150 on) or that says the same: there, it went;
   absent once two minutes have passed, it counts as failed (`NOT_POSTED`, a code the apps put
-  in words); a failed one stays
+  in words; an event naming another delay never stands for it, and a few events past the
+  window, their clocks being their servers', don't end the search). One sent early from another
+  device ("send now" there) or delivered long after its time falls outside the window and reads
+  as failed: rare, and the message is in the room to see; a failed one stays
   (`ScheduledMessage::failed`, its error), with a notice once, shown first in the bar and in the
   list with why, until dismissed (cancelling it asks nothing of the server). Unanswered ones go
   after eight days (servers keep finalised ones for about a week), failed ones after 30.

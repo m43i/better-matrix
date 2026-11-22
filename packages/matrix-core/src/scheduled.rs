@@ -49,6 +49,9 @@ const UNSETTLED_KEPT: u64 = 8 * 24 * 3_600_000;
 /// the room, before its absence there means it wasn't sent.
 const POSTING_GRACE: u64 = 2 * 60_000;
 
+/// How many events in a row past a message's window end the search for it.
+const PAST_WINDOW: usize = 20;
+
 /// [`ScheduledMessage::failed`] for one the server no longer knows and the room lacks: a code,
 /// not words, which the apps put in their own.
 pub const NOT_POSTED: &str = "chat.bettermatrix.not_posted";
@@ -310,19 +313,33 @@ impl Account {
         let (since, until) =
             (message.send_at_ms.saturating_sub(60_000), message.send_at_ms.saturating_add(POSTING_GRACE));
         let me = self.id().as_str();
+        // An event naming a delay is that delay's, and only that; one naming none counts when
+        // it says the same.
         let is_it = |event: &Value| {
             event["sender"].as_str() == Some(me)
-                && (delay_id_of(event) == Some(message.delay_id.as_str())
-                    || message.body.as_deref().is_some_and(|body| body_of(&event["content"]).as_deref() == Some(body)))
+                && match delay_id_of(event) {
+                    Some(delay_id) => delay_id == message.delay_id,
+                    None => {
+                        message.body.as_deref().is_some_and(|body| body_of(&event["content"]).as_deref() == Some(body))
+                    }
+                }
         };
         let at = |event: &Value| event["origin_server_ts"].as_u64().unwrap_or_default();
         match self.read_forward(&room, since).await {
             Some(Ok(mut pages)) => {
+                // Events come in the room's order, their times as each sender's server tells
+                // them: a few past the window (a fast clock elsewhere) don't end the search.
+                let mut past = 0;
                 for _ in 0..10 {
                     for event in &pages.0 {
                         if at(event) > until {
-                            return Some(false);
+                            past += 1;
+                            if past >= PAST_WINDOW {
+                                return Some(false);
+                            }
+                            continue;
                         }
+                        past = 0;
                         if at(event) >= since && is_it(event) {
                             return Some(true);
                         }
@@ -1078,6 +1095,17 @@ mod tests {
         kept_due_saying(&account, "sent-late", "a hidden twist", 60_000).await;
         account.scheduled_messages().await.expect("listed");
         assert!(account.keep_scheduled(|_| {}).await.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn another_delays_event_saying_the_same_should_not_stand_for_it() {
+        let (server, _) = server(false, Endpoints::ByTime);
+        let account = account(&server, "other-delay").await;
+        // The event there is delay `sent-late`'s, saying "[Spoiler]" too.
+        kept_due_saying(&account, "second-spoiler", "[Spoiler]", 10 * 60_000).await;
+        let listed = account.scheduled_messages().await.expect("listed");
+        let second = listed.iter().find(|message| message.delay_id == "second-spoiler").expect("listed");
+        assert_eq!(second.failed.as_deref(), Some(NOT_POSTED));
     }
 
     #[tokio::test(flavor = "multi_thread")]
