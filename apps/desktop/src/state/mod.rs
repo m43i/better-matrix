@@ -2160,6 +2160,8 @@ impl State {
         changed |= self.position_message(tx);
         changed |= self.expire_flash(now, tx);
         self.resume_refused();
+        // Whatever stripped a pill into a code block since the last frame is taken back.
+        changed |= self.composer.keep_pills() | self.thread_composer.keep_pills();
         self.load_for_suggestions();
         if self.screen() == Screen::Chat
             && let Some(account) = self.nav.account.clone()
@@ -4642,6 +4644,8 @@ impl State {
     /// it is one; `None` when a command did all there was to do or stopped with a notice (the
     /// reply then stays).
     fn take_messages(&mut self, target: ComposerTarget) -> Option<(Option<ReplyTarget>, Vec<matrix_core::Outgoing>)> {
+        // A pill stripped into a code block since the last frame comes back before anything goes.
+        self.composer_mut(target).keep_pills();
         match self.run_command(target) {
             None => Some(self.composer_mut(target).take_outgoing()),
             Some(messages) if messages.is_empty() => None,

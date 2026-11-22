@@ -139,6 +139,8 @@ pub struct Composer {
     pub owner: Option<(AccountId, TimelineKey)>,
     /// The suggestions offered for what is being typed (`@`, `#`, `:`, `/`).
     pub suggest: super::suggest::Suggest,
+    /// The field's pills as `keep_pills` last saw them, by id and words.
+    pills_seen: Vec<(String, String)>,
     /// [`Composer::stored_draft`], and a fingerprint of the field it was read from: drafts are
     /// checked every frame, and read again only once the field changed.
     stored: Option<(u64, Option<matrix_core::Draft>)>,
@@ -158,6 +160,7 @@ impl Default for Composer {
             revealed_caret: None,
             owner: None,
             suggest: super::suggest::Suggest::default(),
+            pills_seen: Vec::new(),
             stored: None,
         }
     }
@@ -342,6 +345,31 @@ impl Composer {
             _ if self.edit.active_link().is_some() => self.edit.set_link(None),
             _ => self.link = Some(TextEdit::new("https://")),
         }
+    }
+
+    /// Takes back the last change if it turned a pill into code: code blocks keep no pills, so
+    /// a spoiler's words would go as plain code. However it happened (a key the field handles
+    /// itself, an input method, a paste), a pill whose words now stand in a code block, no
+    /// longer a pill, is one the change stripped. Called from `poll`; true when it undid.
+    pub fn keep_pills(&mut self) -> bool {
+        let seen = |edit: &TextEdit| -> Vec<(String, String)> {
+            edit.pills().map(|(range, id)| (id.to_owned(), edit.text[range].to_owned())).collect()
+        };
+        let now = seen(&self.edit);
+        let code: String = self
+            .edit
+            .paragraphs()
+            .into_iter()
+            .filter(|paragraph| paragraph.block == Block::Code)
+            .map(|paragraph| &self.edit.text[paragraph.range])
+            .collect::<Vec<_>>()
+            .join("\n");
+        let stripped = self.pills_seen.iter().any(|pill| !now.contains(pill) && code.contains(pill.1.as_str()));
+        if stripped {
+            self.edit.undo();
+        }
+        self.pills_seen = seen(&self.edit);
+        stripped
     }
 
     /// Whether `key` would join a paragraph holding a pill onto a code block, whose lines keep no
@@ -940,6 +968,34 @@ mod tests {
             assert!(c.would_strip_pills(&rune::KeyEvent { key, mods: rune::Mods::default() }));
         }
         assert!(c.replacing_selection_strips_pills());
+    }
+
+    #[test]
+    fn a_spoiler_joined_onto_a_code_block_should_be_taken_back() {
+        let mut c = composer("let x");
+        c.format(Format::CodeBlock);
+        c.edit.set_selection(5, 5);
+        c.edit.insert("\n");
+        c.edit.toggle_block(Block::Code);
+        c.edit.insert_pill("spoiler", "secret");
+        c.keep_pills();
+        // However the field joins the lines (here: deleting the break directly).
+        c.edit.set_selection(5, 6);
+        c.edit.insert("");
+        assert!(c.keep_pills());
+        assert_eq!(c.edit.pills().map(|(_, id)| id.to_owned()).collect::<Vec<_>>(), ["spoiler"]);
+    }
+
+    #[test]
+    fn deleting_a_pill_should_not_be_taken_back() {
+        let mut c = composer("hi ");
+        c.edit.insert_pill("spoiler", "secret");
+        c.keep_pills();
+        let end = c.edit.text.len();
+        c.edit.set_selection(3, end);
+        c.edit.insert("");
+        assert!(!c.keep_pills());
+        assert_eq!(c.edit.text, "hi ");
     }
 
     #[test]

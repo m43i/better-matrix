@@ -70,6 +70,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   composer makes no spoiler or formula inside a code block, nor a code block over a pill, and a
   key or paste that would join a paragraph holding a pill onto a code block (Backspace or Delete
   at the join, or typing, Enter, cutting or pasting over a selection across it) does nothing.
+  Any other change that strips a pill into a code block (the field's own cut, word deletion,
+  Tab, input methods) is taken back after its frame, and again before a message is sent or
+  scheduled (`Composer::keep_pills`), so a spoiler never leaves as plain words.
   `/spoiler` writes its spoiler itself (`html::spoiler`), line breaks and all, whatever the field
   held its words as. Formulas
   (`data-mx-maths`) show as one line of Unicode on a chip, in italics (`matrix_core::math`:
