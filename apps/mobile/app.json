@@ -89,6 +89,18 @@
           "microphonePermission": "Better Matrix uses the microphone for calls and voice messages."
         }
       ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Better Matrix shares your location when you send it to a conversation.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "motionUsagePermission": false,
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
+        }
+      ],
       "expo-notifications",
       "expo-asset",
       [

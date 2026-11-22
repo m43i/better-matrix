@@ -1,6 +1,6 @@
 // What + opens below the composer, in the keyboard's place, as Slack's does: every option the
-// minimal composer row leaves out. The photo library, the camera, files, a poll, the formatting
-// toolbar and the emoji picker.
+// minimal composer row leaves out. The photo library, the camera, files, a poll, a place, a
+// sticker, the formatting toolbar and the emoji picker.
 
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -9,13 +9,23 @@ import { font } from '../../theme/palette';
 import { Icon, type IconName } from '../icons';
 import { usePalette } from '../theme';
 
-export type TrayChoice = 'library' | 'camera' | 'files' | 'poll' | 'format' | 'emoji';
+export type TrayChoice =
+  | 'library'
+  | 'camera'
+  | 'files'
+  | 'poll'
+  | 'location'
+  | 'sticker'
+  | 'format'
+  | 'emoji';
 
 const CHOICES: ReadonlyArray<{ id: TrayChoice; icon: IconName; label: Key }> = [
   { id: 'library', icon: 'library', label: 'mobile.composer.library' },
   { id: 'camera', icon: 'camera', label: 'mobile.composer.camera' },
   { id: 'files', icon: 'folder', label: 'mobile.composer.files' },
   { id: 'poll', icon: 'poll', label: 'mobile.composer.poll' },
+  { id: 'location', icon: 'location', label: 'mobile.composer.location' },
+  { id: 'sticker', icon: 'sticker', label: 'mobile.composer.sticker' },
   { id: 'format', icon: 'textFormat', label: 'composer.formatting' },
   { id: 'emoji', icon: 'smile', label: 'composer.emoji' },
 ];
@@ -53,7 +63,7 @@ export function AttachTray({ onChoose }: { onChoose: (choice: TrayChoice) => voi
 }
 
 const styles = StyleSheet.create({
-  // Three to a row: two rows of three, whatever the phone's width.
+  // Four to a row: two rows of four, whatever the phone's width.
   tray: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -61,7 +71,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 16,
   },
-  choice: { width: '33.33%', alignItems: 'center', gap: 6 },
+  choice: { width: '25%', alignItems: 'center', gap: 6 },
   circle: {
     width: 56,
     height: 56,
