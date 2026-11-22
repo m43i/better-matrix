@@ -251,7 +251,7 @@ impl Account {
     /// Changes run one at a time, each on the server's latest copy, so two made before a sync
     /// brings the first both hold.
     pub async fn change_safety(&self, change: &SafetyChange) -> Result<Safety, Error> {
-        let _one_at_a_time = self.safety_changes.lock().await;
+        let mut confirmed = self.safety_changes.lock().await;
         match change {
             SafetyChange::Ignore { user_id, ignored } => {
                 let user_id = UserId::parse(user_id)?;
@@ -268,15 +268,21 @@ impl Account {
                 self.save_account_data(INVITES, &content).await?;
             }
         }
-        // The change is saved: a failure to read the rest back only falls back on this
-        // device's copy with the change applied.
-        match self.server_safety().await {
-            Ok(safety) => Ok(safety),
+        // The change is saved: a failure to read the rest back falls back on the choices the
+        // server last confirmed (this device's copy before any), with the change applied.
+        let safety = match self.server_safety().await {
+            Ok(safety) => safety,
             Err(error) => {
                 eprintln!("matrix-engine: could not read the safety choices back: {error}");
-                Ok(self.safety().await?.with(change))
+                let known = match confirmed.take() {
+                    Some(known) => known,
+                    None => self.safety().await?,
+                };
+                known.with(change)
             }
-        }
+        };
+        *confirmed = Some(safety.clone());
+        Ok(safety)
     }
 
     /// The choices as the server has them now.
@@ -320,14 +326,11 @@ impl Account {
 
     /// Sets MSC4278's fields as the SDK and Element do, under the unstable name, and under the
     /// spec's name only where a client already wrote it, so this app never makes a copy that
-    /// shadows the other. Each copy keeps its own other fields; both get the choice that held
-    /// (the spec's copy wins, as everywhere it is read) with this change applied.
+    /// shadows the other. Only the field that changes is written; each copy keeps every other
+    /// field as it was, values this app doesn't know included.
     async fn save_media_config(&self, media: Option<ShowMedia>, invite_pictures: Option<bool>) -> Result<(), Error> {
         let stable = self.server_account_data(MEDIA).await?;
         let unstable = self.server_account_data(MEDIA_UNSTABLE).await?;
-        let held = read(&Value::Null, if stable.is_null() { &unstable } else { &stable }, &Value::Null);
-        let media = Some(media.unwrap_or(held.media));
-        let invite_pictures = Some(invite_pictures.unwrap_or(held.invite_pictures));
         let stable_existed = !stable.is_null();
         self.save_account_data(MEDIA_UNSTABLE, &with_media(unstable, media, invite_pictures)).await?;
         if stable_existed {
@@ -370,13 +373,18 @@ pub(crate) async fn hides_invite_from(client: &matrix_sdk::Client, inviter: &Use
     hides_stranger_invites(client).await && !shares_room(client, inviter).await
 }
 
+/// How long a push waits for the server's copy of the choice before deciding on this device's:
+/// a push has seconds to show.
+const PUSH_CHOICE_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Whether the user hides strangers' invitations, as the server says; this device's copy stands in
-/// when the server can't be asked.
+/// when the server can't be asked in time.
 async fn hides_stranger_invites(client: &matrix_sdk::Client) -> bool {
     let event_type = GlobalAccountDataEventType::from(INVITES);
-    let raw = match client.account().fetch_account_data(event_type.clone()).await {
-        Ok(raw) => raw,
-        Err(_) => client.account().account_data_raw(event_type).await.ok().flatten(),
+    let fetched = tokio::time::timeout(PUSH_CHOICE_WAIT, client.account().fetch_account_data(event_type.clone())).await;
+    let raw = match fetched {
+        Ok(Ok(raw)) => raw,
+        _ => client.account().account_data_raw(event_type).await.ok().flatten(),
     };
     raw.and_then(|raw| serde_json::from_str::<Value>(raw.json().get()).ok())
         .is_some_and(|content| content["hide_strangers"].as_bool() == Some(true))

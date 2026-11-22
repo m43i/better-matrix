@@ -83,8 +83,8 @@ pub struct Account {
     /// Held while a room's saved messages change: one change at a time (`crate::saved`).
     pub(crate) saved_changes: Arc<tokio::sync::Mutex<()>>,
     /// Held while a safety choice changes: one change at a time, each on the server's latest
-    /// copy (`crate::safety`).
-    pub(crate) safety_changes: Arc<tokio::sync::Mutex<()>>,
+    /// copy; it holds the choices the server last confirmed (`crate::safety`).
+    pub(crate) safety_changes: Arc<tokio::sync::Mutex<Option<crate::Safety>>>,
     /// Draft reads and writes, in the order they were asked for (`crate::drafts`).
     pub(crate) drafts: crate::drafts::DraftQueue,
 }

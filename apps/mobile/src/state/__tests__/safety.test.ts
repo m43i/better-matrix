@@ -16,6 +16,7 @@ import {
   activeRoomList,
   galleryThumbnail,
   mediaHidden,
+  roomPreviewPicture,
   previewHidden,
   previewItems,
 } from '../selectors';
@@ -299,5 +300,74 @@ describe('the preview’s thumbnails and listed files', () => {
     const state = listed({ ...picture('clip'), kind: 'Audio' });
     const [clip] = previewItems(state, ADA, roomKey(PRIVATE), '$file', '$file');
     expect(previewHidden(state, ADA, PRIVATE, clip!)).toBe(false);
+  });
+});
+
+describe('a listed file whose message a timeline holds', () => {
+  const photo: Attachment = {
+    kind: 'Image',
+    name: 'photo.png',
+    size: 1000,
+    media: 'mxc://example.org/photo',
+    thumbnail: null,
+    dimensions: null,
+    audio: null,
+  };
+
+  /** Room Info listed Grace's photo `$file`; the room's timeline holds `$file` as `entries`. */
+  function heldAs(state: ReturnType<typeof signedIn>, entries: ReturnType<typeof messageEntry>[]) {
+    const file = { event_id: '$file', sender_name: 'Grace', timestamp: 1, attachment: photo };
+
+    const listed = apply(state, {
+      type: 'Files',
+      data: { account: ADA, room_id: PRIVATE, files: [file] },
+    });
+
+    return apply(listed, {
+      type: 'TimelineChanged',
+      data: { account: ADA, key: roomKey(PRIVATE), diffs: [{ type: 'Reset', data: entries }] },
+    });
+  }
+
+  it('a deleted message should not come back from the file list', () => {
+    const state = heldAs(signedIn(), [messageEntry('$file', { content: { type: 'Redacted' } })]);
+    expect(previewItems(state, ADA, roomKey(PRIVATE), '$file', '$file')).toEqual([]);
+  });
+
+  it('a message hidden as its sender is ignored should not come back from the file list', () => {
+    const state = heldAs(signedIn({ ...DEFAULT_SAFETY, ignored: [GRACE] }), [
+      messageEntry('$file', { content: { type: 'Attachment', data: photo } }),
+    ]);
+
+    expect(previewItems(state, ADA, roomKey(PRIVATE), '$file', '$file')).toEqual([]);
+  });
+});
+
+describe('a previewed room the account is invited to', () => {
+  const preview = {
+    room_id: '!spam:x',
+    alias: null,
+    name: 'Free crypto',
+    topic: null,
+    avatar: 'mxc://spam.example/logo',
+    member_count: 3,
+    join_rule: 'Invite' as const,
+    space: false,
+    joined: false,
+    invited: true,
+  };
+
+  it('should show initials while pictures in invitations are hidden', () => {
+    const state = signedIn({ ...DEFAULT_SAFETY, invite_pictures: false });
+    expect(roomPreviewPicture(state, ADA, preview)).toBeNull();
+  });
+
+  it('should show its picture while pictures in invitations show', () => {
+    expect(roomPreviewPicture(signedIn(), ADA, preview)).toBe(preview.avatar);
+  });
+
+  it('should show a room’s picture the account isn’t invited to', () => {
+    const state = signedIn({ ...DEFAULT_SAFETY, invite_pictures: false });
+    expect(roomPreviewPicture(state, ADA, { ...preview, invited: false })).toBe(preview.avatar);
   });
 });

@@ -1,7 +1,9 @@
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 import type { Invitation } from '@better-matrix/matrix-native/types';
 
-import { ADA, GRACE, message, summary } from '../../../test/fixtures';
+import { ADA, GRACE, message, messageEntry, summary } from '../../../test/fixtures';
+import { activeRoomList, shownTimeline } from '../../selectors';
+import { roomKey } from '../../timeline';
 import { DEFAULT_SAFETY, revealKey } from '../../safety';
 import { Store } from '../../store';
 import {
@@ -184,12 +186,61 @@ describe('ignoring someone, whichever answer comes first', () => {
 
   it('a message from someone ignored that syncs afterwards should not show in the list', () => {
     const { store, engine } = withGracesMessage();
-    void setIgnored(store, ADA, GRACE, true);
+    engine.emit({
+      type: 'Safety',
+      data: { account: ADA, safety: { ...DEFAULT_SAFETY, ignored: [GRACE] } },
+    });
     engine.emit({
       type: 'LatestMessage',
       data: { account: ADA, room_id: '!room:x', message: message('$again') },
     });
     expect(latest(store)).toBeUndefined();
+  });
+
+  it('an ignore still on its way should hide their preview from the list without removing it', () => {
+    const { store } = withGracesMessage();
+    void setIgnored(store, ADA, GRACE, true);
+    const state = store.getState();
+    expect([activeRoomList(state)!.latest['!room:x'], latest(store)?.event_id]).toEqual([
+      undefined,
+      '$hi',
+    ]);
+  });
+
+  it('an ignore that fails should give their preview and messages back', async () => {
+    const { store, engine, sent, finish } = withGracesMessage();
+    engine.emit({
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: roomKey('!room:x'),
+        diffs: [{ type: 'Reset', data: [messageEntry('$hi')] }],
+      },
+    });
+    const ignored = setIgnored(store, ADA, GRACE, true);
+    finish(sent.at(-1)!.request, { Err: 'offline' });
+    await expect(ignored).rejects.toThrow();
+    const state = store.getState();
+    expect([
+      activeRoomList(state)!.latest['!room:x']?.event_id,
+      shownTimeline(state, ADA, roomKey('!room:x')).entries[0]?.kind.type,
+    ]).toEqual(['$hi', 'Message']);
+  });
+
+  it('an ignore still on its way should draw their messages as nothing', () => {
+    const { store, engine } = withGracesMessage();
+    engine.emit({
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: roomKey('!room:x'),
+        diffs: [{ type: 'Reset', data: [messageEntry('$hi')] }],
+      },
+    });
+    void setIgnored(store, ADA, GRACE, true);
+    expect(shownTimeline(store.getState(), ADA, roomKey('!room:x')).entries[0]?.kind.type).toBe(
+      'Other',
+    );
   });
 });
 

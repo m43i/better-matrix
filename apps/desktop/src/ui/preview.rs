@@ -109,6 +109,18 @@ pub fn preview(s: &State, preview: &Preview, window: [f32; 2], p: &Palette) -> E
         PreviewContent::Video { thumbnail, status: state } => {
             video_view(&preview.attachment, thumbnail.as_ref(), state, (width, height - CONTROLS), p)
         }
+        // Held back by the media choice: nothing loaded until Show (ADR 0011).
+        PreviewContent::Held => col()
+            .key("preview-held")
+            .items_center()
+            .gap(14.0)
+            .child(icon(&icons::EYE_OFF, 44.0).color(Color::WHITE.alpha(0.7)))
+            .child(text(t!("safety.hidden_media")).font(font::BODY).color(Color::WHITE.alpha(0.7)))
+            .child(
+                super::components::button(t!("safety.show_media"), super::components::ButtonKind::Primary, true, p)
+                    .key("preview-show-media")
+                    .on_press(State::reveal_preview_item),
+            ),
         PreviewContent::Audio => {
             let clips = Clips { audio: s.audio.as_ref(), decoded: &s.decoded_audio, speed: s.settings.playback_speed };
             col()
@@ -193,7 +205,8 @@ fn strip(s: &State, preview: &Preview, window_width: f32, p: &Palette) -> El {
     let thumbs = preview.batch.iter().enumerate().map(|(index, item)| {
         let current = index == preview.index;
         let attachment = &item.attachment;
-        let image = attachment.preview().and_then(|(media, _)| s.media.image(&media));
+        let held = s.preview_holds(item);
+        let image = attachment.preview().and_then(|(media, _)| s.media.image(&media)).filter(|_| !held);
         let mut thumb = el()
             .key(format!("preview-thumb-{index}"))
             .size(THUMB, THUMB)
@@ -207,7 +220,9 @@ fn strip(s: &State, preview: &Preview, window_width: f32, p: &Palette) -> El {
             .on_press(move |s: &mut State| s.show_preview_item(index));
         thumb = match image {
             Some(image) => thumb.pixels_fit(image.pixels(), SurfaceFit::Fill),
-            None => thumb.fill(Color::WHITE.alpha(0.12)).child(icon(kind_icon(attachment), 22.0).color(Color::WHITE)),
+            None => thumb
+                .fill(Color::WHITE.alpha(0.12))
+                .child(icon(if held { &icons::EYE_OFF } else { kind_icon(attachment) }, 22.0).color(Color::WHITE)),
         };
         if attachment.kind == AttachmentKind::Video && image.is_some() {
             thumb = thumb.child(

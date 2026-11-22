@@ -25,7 +25,8 @@ Date: 2026-11-22
   brings any of its account data events, and after `Command::SetSafety(SafetyChange)`, whose
   answer is read back from the server (the store's copy changes only with the next sync).
   Changes run one at a time per account (`Account::safety_changes`), each read-modify-writing the
-  server's latest copy, so two made before a sync both hold. Reports go
+  server's latest copy, so two made before a sync both hold. Should reading the answer back fail
+  after a save, the choices the server last confirmed stand in, with the change applied. Reports go
   through `Command::Report { target: ReportTarget::{Message, Room, Person}, reason }`; the reason
   may be empty and is trimmed. The apps decide with `Safety::shows_media`,
   `Safety::shows_invitation` and `Safety::ignores` (mirrored in the phones' selectors).
@@ -37,8 +38,8 @@ Date: 2026-11-22
   - media and invitation pictures in MSC4278's event, keeping fields other clients set: read
     under the spec's name first, then the unstable one (as the SDK does); written under the
     unstable name, as the SDK and Element write it, and under the spec's name only where one
-    exists, so this app never makes a copy that shadows Element's later choices; each copy keeps
-    its own other fields. Where both exist, the spec's copy wins. An absent field shows; any other
+    exists, so this app never makes a copy that shadows Element's later choices; only the changed
+    field is written, so each copy keeps its other fields, values this app doesn't know included. Where both exist, the spec's copy wins. An absent field shows; any other
     value this app doesn't know, `null` included, hides, as MSC4278 asks. Room-level overrides
     (the same event in a room's account data) aren't read;
   - hiding strangers' invitations in `chat.bettermatrix.invites` (`hide_strangers`), which no
@@ -56,7 +57,8 @@ Date: 2026-11-22
   rule errs towards calling someone a stranger, which only hides. An unknown inviter is a
   stranger. Every invitation is judged again whenever the account's joined rooms change. With `hide_stranger_invites`, such invitations leave the Invitations section, Home's
   cards and counters, and pushes (`fetch` answers `PushContent::Nothing`, reading the choice
-  from the server, as the device's copy may be old, and judging an invitation whose event can't
+  from the server, as the device's copy may be old (for at most 3 s, then the device's copy),
+  and judging an invitation whose event can't
   be fetched by its room, an unknown inviter as a stranger); they are not declined
   and Settings → Safety (for the account on screen) lists them, each opening the usual
   invitation preview. Every invitation preview also offers Report (the room) and, when the

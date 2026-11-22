@@ -184,8 +184,18 @@ async fn a_media_choice_should_also_update_the_specs_copy_when_one_exists() {
     let stable = server.sent(&format!("/account_data/{MEDIA}"));
     assert_eq!(stable.last(), Some(&json!({ "invite_avatars": "off", "media_previews": "private" })));
     let unstable = server.sent(&format!("/account_data/{MEDIA_UNSTABLE}"));
-    let both = json!({ "legacy": true, "invite_avatars": "off", "media_previews": "private" });
-    assert_eq!(unstable.last(), Some(&both));
+    assert_eq!(unstable.last(), Some(&json!({ "legacy": true, "media_previews": "private" })));
+}
+
+#[tokio::test]
+async fn changing_one_media_field_should_keep_a_value_another_client_wrote_in_the_other() {
+    let server = Homeserver::new(json!([]));
+    let account = server.synced_account().await;
+    account.save_account_data(MEDIA_UNSTABLE, &json!({ "media_previews": "org.example.later" })).await.unwrap();
+    account.change_safety(&SafetyChange::InvitePictures(false)).await.unwrap();
+    let unstable = server.sent(&format!("/account_data/{MEDIA_UNSTABLE}"));
+    let kept = json!({ "media_previews": "org.example.later", "invite_avatars": "off" });
+    assert_eq!(unstable.last(), Some(&kept));
 }
 
 #[tokio::test]

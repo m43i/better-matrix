@@ -35,18 +35,23 @@ impl State {
         }
         // Shown but not saved yet, with an invitation to decline: saved again, so the decline
         // waits for a save of its own.
-        self.accounts.set_safety(account, changed);
+        let command = Command::SetSafety { account: account.clone(), change: change.clone() };
+        let request = self.dispatch(command, Purpose::Safety { account: account.clone(), decline });
+        self.accounts.safety_pending(account, request, change);
         self.safety_changed();
-        let command = Command::SetSafety { account: account.clone(), change };
-        self.dispatch(command, Purpose::Safety { account: account.clone(), decline });
     }
 
-    /// A change failed: the account shows the choices last saved again.
-    pub(super) fn safety_failed(&mut self, account: &AccountId, error: &str) {
+    /// A change finished saving (its answer, `Event::Safety`, came first): the account shows the
+    /// saved choices with the changes still being saved.
+    pub(super) fn safety_finished(&mut self, account: &AccountId, request: RequestId) {
+        self.accounts.safety_settled(account, request);
+    }
+
+    /// A change failed: the account shows the saved choices again, with the changes still
+    /// being saved.
+    pub(super) fn safety_failed(&mut self, account: &AccountId, request: RequestId, error: &str) {
         self.notice = Some(tf!("notice.safety", error = error));
-        if let Some(saved) = self.accounts.get(account).map(|data| data.saved_safety.clone()) {
-            self.accounts.set_safety(account, saved);
-        }
+        self.accounts.safety_settled(account, request);
     }
 
     /// What shows may have changed: media no longer held back loads, and invitations' pictures.

@@ -1728,9 +1728,12 @@ impl State {
                     self.report_sent(request, ignore);
                 }
                 // The inviter is ignored for good: now their invitation goes.
-                Purpose::Safety { account, decline: Some(room_id) } => {
-                    let (account, room_id) = (account.clone(), room_id.clone());
-                    self.respond_to_invitation(&account, &room_id, false);
+                Purpose::Safety { account, decline } => {
+                    let (account, decline) = (account.clone(), decline.clone());
+                    self.safety_finished(&account, request);
+                    if let Some(room_id) = decline {
+                        self.respond_to_invitation(&account, &room_id, false);
+                    }
                 }
                 Purpose::Membership { account, room_id, action, scope } => {
                     self.membership_finished(account, room_id, *action, scope)
@@ -1883,7 +1886,7 @@ impl State {
                     match &mut preview.content {
                         PreviewContent::Document { status, .. } => *status = DocumentStatus::Failed(error),
                         PreviewContent::Image { status, .. } => *status = ImageStatus::Failed(error),
-                        PreviewContent::Video { .. } | PreviewContent::Audio => {}
+                        PreviewContent::Video { .. } | PreviewContent::Audio | PreviewContent::Held => {}
                     }
                 }
             }
@@ -1927,7 +1930,7 @@ impl State {
             }
             Purpose::Invite => self.notice = Some(tf!("notice.invite", error = error)),
             Purpose::Moderate => self.notice = Some(tf!("notice.moderate", error = error)),
-            Purpose::Safety { account, .. } => self.safety_failed(&account, &error),
+            Purpose::Safety { account, .. } => self.safety_failed(&account, request, &error),
             Purpose::Report { .. } => self.report_failed(request, &error),
             // The panel stops loading, and says why.
             Purpose::SidePanel(account, room_id, panel) => {
@@ -2456,7 +2459,8 @@ impl State {
         }
         // The preview's strip shows its batch's previews, rows on screen or not.
         if let Some(preview) = self.preview.as_ref().filter(|preview| preview.batch.len() > 1) {
-            for attachment in preview.batch.iter().map(|item| &item.attachment) {
+            for item in preview.batch.iter().filter(|item| !self.preview_holds(item)) {
+                let attachment = &item.attachment;
                 if let Some((media, size)) = attachment.preview() {
                     let dimensions = media::preview_size(size, attachment.dimensions);
                     wanted.push((preview.account.clone(), media, size, dimensions));
@@ -3233,20 +3237,10 @@ impl State {
             self.download(account, media, &attachment.name);
             return;
         }
+        // The whole batch, audio and documents included: its pictures and videos the media
+        // choice holds back wait for a press when stepped onto (`show_preview_item`).
         let entries = self.accounts.get(&account).and_then(|data| data.timeline(key)).map(|t| t.entries.as_slice());
         let mut batch = preview::batch(entries.unwrap_or_default(), event_id);
-        // The batch steps only through media that shows.
-        if let Some(data) = self.accounts.get(&account) {
-            let entries = entries.unwrap_or_default();
-            batch.retain(|item| {
-                item.event_id == event_id
-                    || entries
-                        .iter()
-                        .filter_map(|e| e.message())
-                        .find(|m| m.event_id == item.event_id)
-                        .is_none_or(|m| !data.hides_media(&key.room_id, m, &self.revealed_media))
-            });
-        }
         let index = match batch.iter().position(|item| item.event_id == event_id) {
             Some(index) => index,
             None => {
@@ -3260,7 +3254,8 @@ impl State {
         self.preview_visits += 1;
         self.reveal_thumbnail = true;
         let visit = self.preview_visits;
-        self.preview = Some(Preview { account, attachment, media, content, batch, index, visit });
+        let room_id = key.room_id.clone();
+        self.preview = Some(Preview { account, room_id, attachment, media, content, batch, index, visit });
         self.load_preview_item(&item);
         self.request_timeline_media();
     }
@@ -3285,7 +3280,8 @@ impl State {
         let Some(media) = item.attachment.media.clone() else { return };
         self.leave_preview_item();
         self.popover = None;
-        let content = self.preview_content(&item.attachment);
+        let content =
+            if self.preview_holds(&item) { PreviewContent::Held } else { self.preview_content(&item.attachment) };
         self.preview_visits += 1;
         self.reveal_thumbnail = true;
         let Some(preview) = self.preview.as_mut() else { return };
@@ -3329,8 +3325,34 @@ impl State {
                     self.dispatch(command, Purpose::Video { media, path });
                 }
             },
-            PreviewContent::Audio => {}
+            PreviewContent::Audio | PreviewContent::Held => {}
         }
+    }
+
+    /// Whether a batch item of the open preview is a picture or video the media choice holds
+    /// back: it waits for a press, its thumbnail unfetched.
+    pub fn preview_holds(&self, item: &PreviewItem) -> bool {
+        self.preview.as_ref().is_some_and(|preview| {
+            self.accounts.get(&preview.account).is_some_and(|data| {
+                data.hides_listed_media(&preview.room_id, &item.event_id, &item.attachment, &self.revealed_media)
+            })
+        })
+    }
+
+    /// Shows the held-back item the preview is on, and loads it.
+    pub fn reveal_preview_item(&mut self) {
+        let Some(preview) = &self.preview else { return };
+        let Some(item) = preview.batch.get(preview.index).cloned() else { return };
+        let account = preview.account.clone();
+        self.reveal_media(&account, &item.event_id);
+        let content = self.preview_content(&item.attachment);
+        self.preview_visits += 1;
+        let visit = self.preview_visits;
+        if let Some(preview) = self.preview.as_mut() {
+            preview.content = content;
+            preview.visit = visit;
+        }
+        self.load_preview_item(&item.attachment);
     }
 
     /// Lets go of the preview's current attachment: stops its PDF render, drops its video and

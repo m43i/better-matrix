@@ -5,8 +5,10 @@ import type {
   MediaRef,
   Message,
   MediaSize,
+  RoomPreview,
   SavedMessage,
   SharedFile,
+  TimelineEntry,
   TimelineKey,
 } from '@better-matrix/matrix-native/types';
 
@@ -62,10 +64,59 @@ export function activeRoomList(state: State): RoomListData | undefined {
     roomsLoaded: data.roomsLoaded,
     scope: data.scope,
     sidebar: data.sidebar,
-    newest: newestMessages(data),
-    latest: data.latest,
+    // An ignore still on its way hides its person's previews here, so a failed one gives them
+    // back; a confirmed one removed them from the state (`reducer.withSafety`).
+    newest: withoutSenders(newestMessages(data), pendingIgnored(data)),
+    latest: withoutSenders(data.latest, pendingIgnored(data)),
     heardAt: data.heardAt,
   };
+}
+
+/** The people shown as ignored whose ignore the engine hasn't confirmed yet. */
+export function pendingIgnored(data: AccountData): string[] {
+  return data.safety.ignored.filter((id) => !data.savedSafety.ignored.includes(id));
+}
+
+/** `messages` without those `senders` sent; the same object when there are none. */
+function withoutSenders(
+  messages: Record<string, Message>,
+  senders: readonly string[],
+): Record<string, Message> {
+  if (senders.length === 0) return messages;
+
+  return Object.fromEntries(
+    Object.entries(messages).filter(([, message]) => !senders.includes(message.sender_id)),
+  );
+}
+
+/** Each timeline as `shownTimeline` last gave it, with the pending ignores it hid. */
+const shownTimelines = new WeakMap<Timeline, { hidden: string; shown: Timeline }>();
+
+/**
+ * A timeline as its rows draw it: what people whose ignore is still on its way said draws as
+ * nothing, so a failed ignore gives it back. The same object while nothing changes.
+ */
+export function shownTimeline(state: State, id: AccountId, key: TimelineKey): Timeline {
+  const kept = timeline(state, id, key);
+  const data = account(state, id);
+  const pending = data ? pendingIgnored(data) : [];
+
+  if (pending.length === 0) return kept;
+  const hidden = pending.join(',');
+  const cached = shownTimelines.get(kept);
+
+  if (cached?.hidden === hidden) return cached.shown;
+
+  const entries = kept.entries.map((entry): TimelineEntry =>
+    entry.kind.type === 'Message' && pending.includes(entry.kind.data.sender_id)
+      ? { id: entry.id, kind: { type: 'Other' } }
+      : entry,
+  );
+
+  const shown = { ...kept, entries };
+  shownTimelines.set(kept, { hidden, shown });
+
+  return shown;
 }
 
 export function timeline(state: State, id: AccountId, key: TimelineKey): Timeline {
@@ -190,12 +241,42 @@ export function previewItems(
   const gallery = galleryAround(timeline(state, id, key).entries, current, opened, key.thread);
 
   if (gallery.length === 0) {
-    const file = account(state, id)?.files[key.room_id]?.find((f) => f.event_id === opened);
+    // Only an event no timeline holds in any form (deleted, or hidden as its sender is
+    // ignored) is rebuilt from the file Room Info listed.
+    const data = account(state, id);
+    const file = data?.files[key.room_id]?.find((f) => f.event_id === opened);
 
-    return file ? [listedMessage(file)] : [];
+    return file && data && !heldAnywhere(data, key.room_id, opened) ? [listedMessage(file)] : [];
   }
 
   return gallery.filter((m) => m.event_id === opened || !previewHidden(state, id, key.room_id, m));
+}
+
+/** Whether any of a room's kept timelines holds `eventId`, or held it from an ignored sender. */
+function heldAnywhere(data: AccountData, roomId: string, eventId: string): boolean {
+  if (data.hiddenEvents[eventId]) return true;
+
+  return Object.entries(data.timelines).some(
+    ([id, kept]) =>
+      (id === roomId || id.startsWith(`${roomId}|`)) &&
+      kept.entries.some((e) => e.kind.type === 'Message' && e.kind.data.event_id === eventId),
+  );
+}
+
+/**
+ * A previewed room's picture: none for a room the account is invited to while it hides
+ * pictures in invitations, so the preview shows initials and fetches nothing (ADR 0011).
+ */
+export function roomPreviewPicture(
+  state: State,
+  id: AccountId,
+  preview: RoomPreview | null,
+): MediaRef | null {
+  if (!preview?.avatar) return null;
+
+  return preview.invited && !(account(state, id)?.safety.invite_pictures ?? true)
+    ? null
+    : preview.avatar;
 }
 
 /**

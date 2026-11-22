@@ -260,12 +260,21 @@ impl State {
         }
     }
 
+    /// Whether the link dialog's room preview shows initials rather than the room's picture: the
+    /// account is invited there and hides invitations' pictures (ADR 0011).
+    pub fn link_hides_picture(&self, dialog: &LinkDialog, preview: &RoomPreview) -> bool {
+        preview.invited && self.accounts.get(&dialog.account).is_some_and(|data| !data.safety.invite_pictures)
+    }
+
     /// The pictures the link dialog shows: the room's or the person's, from its account.
     pub(super) fn link_pictures(&self) -> Option<(AccountId, matrix_core::MediaRef)> {
         let Some(Modal::Link(dialog)) = &self.modal else { return None };
         let picture = match &dialog.step {
             LinkStep::Person { person, .. } => person.avatar.clone(),
-            _ => dialog.preview().and_then(|preview| preview.avatar.clone()),
+            _ => dialog
+                .preview()
+                .filter(|preview| !self.link_hides_picture(dialog, preview))
+                .and_then(|preview| preview.avatar.clone()),
         }?;
         Some((dialog.account.clone(), picture))
     }

@@ -101,6 +101,7 @@ function newAccount(summary: AccountSummary): AccountData {
     safety: DEFAULT_SAFETY,
     savedSafety: DEFAULT_SAFETY,
     pendingSafety: [],
+    hiddenEvents: {},
   };
 }
 
@@ -241,8 +242,8 @@ export function applyLatestMessages(
 
 /**
  * `account` with the reported choices `saved` and the changes still on their way, shown as
- * `safety`. Whenever the people shown as ignored gain anyone, confirmed or not yet, what anyone
- * on the whole list said goes (`withoutIgnored`), so the order the answers come in can't keep it.
+ * `safety`. Whenever the confirmed ignore list gains anyone, what anyone on it said goes
+ * (`withoutIgnored`), so the order the answers come in can't keep it.
  */
 export function withSafety(
   account: AccountData,
@@ -251,9 +252,11 @@ export function withSafety(
 ): AccountData {
   const safety = pending.reduce((shown, p) => withChange(shown, p.change), saved);
   const next = { ...account, safety, savedSafety: saved, pendingSafety: pending };
-  const gained = safety.ignored.some((id) => !account.safety.ignored.includes(id));
+  // Only a confirmed ignore removes anything: one still on its way hides at read time
+  // (`selectors.pendingIgnored`), so one that fails gives everything back.
+  const gained = saved.ignored.some((id) => !account.savedSafety.ignored.includes(id));
 
-  return gained ? withoutIgnored(next, new Set(safety.ignored)) : next;
+  return gained ? withoutIgnored(next, new Set(saved.ignored)) : next;
 }
 
 /** `state` with a change to `account`'s choices shown at once, until the engine answers. */
@@ -278,22 +281,47 @@ export function settlePendingSafety(state: State, account: AccountId, id: number
   );
 }
 
-/** Whether `message` was sent by someone `account` ignores. */
+/** Whether `message` was sent by someone `account` ignores, as the engine confirmed. */
 function fromIgnored(account: AccountData, message: { sender_id: string }): boolean {
-  return account.safety.ignored.includes(message.sender_id);
+  return account.savedSafety.ignored.includes(message.sender_id);
 }
 
-/** `entry` drawn as nothing when someone the user ignores sent it, keeping its place. */
-function hiddenIfIgnored(ignored: ReadonlySet<string>, entry: TimelineEntry): TimelineEntry {
-  return entry.kind.type === 'Message' && ignored.has(entry.kind.data.sender_id)
-    ? { id: entry.id, kind: { type: 'Other' } }
-    : entry;
+/**
+ * `entry` drawn as nothing when someone the user ignores sent it, keeping its place; its event
+ * ID goes into `hidden`, so nothing shows it again in another form (`AccountData.hiddenEvents`).
+ */
+function hiddenIfIgnored(
+  ignored: ReadonlySet<string>,
+  entry: TimelineEntry,
+  hidden: string[],
+): TimelineEntry {
+  if (entry.kind.type !== 'Message' || !ignored.has(entry.kind.data.sender_id)) return entry;
+  hidden.push(entry.kind.data.event_id);
+
+  return { id: entry.id, kind: { type: 'Other' } };
+}
+
+/** `hiddenEvents` with `ids` added; the same object when there are none. */
+function withHidden(
+  hiddenEvents: AccountData['hiddenEvents'],
+  ids: string[],
+): AccountData['hiddenEvents'] {
+  if (ids.length === 0) return hiddenEvents;
+  const next = { ...hiddenEvents };
+
+  for (const id of ids) next[id] = true;
+
+  return next;
 }
 
 /** `diffs` with what ignored people sent drawn as nothing, the positions kept. */
-function diffsWithoutIgnored(diffs: TimelineDiff[], ignored: ReadonlySet<string>): TimelineDiff[] {
+function diffsWithoutIgnored(
+  diffs: TimelineDiff[],
+  ignored: ReadonlySet<string>,
+  hidden: string[],
+): TimelineDiff[] {
   if (ignored.size === 0) return diffs;
-  const hide = (entry: TimelineEntry) => hiddenIfIgnored(ignored, entry);
+  const hide = (entry: TimelineEntry) => hiddenIfIgnored(ignored, entry, hidden);
 
   return diffs.map((diff): TimelineDiff => {
     switch (diff.type) {
@@ -328,6 +356,7 @@ function withoutIgnored(account: AccountData, ignored: ReadonlySet<string>): Acc
   );
 
   const timelines: Record<string, Timeline> = {};
+  const hidden: string[] = [];
 
   for (const [id, timeline] of Object.entries(account.timelines)) {
     const hit = timeline.entries.some(
@@ -335,11 +364,11 @@ function withoutIgnored(account: AccountData, ignored: ReadonlySet<string>): Acc
     );
 
     timelines[id] = hit
-      ? { ...timeline, entries: timeline.entries.map((e) => hiddenIfIgnored(ignored, e)) }
+      ? { ...timeline, entries: timeline.entries.map((e) => hiddenIfIgnored(ignored, e, hidden)) }
       : timeline;
   }
 
-  return { ...account, latest, timelines };
+  return { ...account, latest, timelines, hiddenEvents: withHidden(account.hiddenEvents, hidden) };
 }
 
 /** Folds one event into the state. `now` is when it arrived, in ms since the epoch. */
@@ -420,13 +449,21 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
       return applyLatestMessages(state, [event], now);
     case 'TimelineChanged': {
       const owner = state.accounts.find((a) => a.summary.id === event.data.account);
-      const ignored = new Set(owner?.safety.ignored);
-      const diffs = diffsWithoutIgnored(event.data.diffs, ignored);
+      const ignored = new Set(owner?.savedSafety.ignored);
+      const hidden: string[] = [];
+      const diffs = diffsWithoutIgnored(event.data.diffs, ignored, hidden);
 
-      return updateTimeline(state, event.data.account, event.data.key, (t) => ({
+      const next = updateTimeline(state, event.data.account, event.data.key, (t) => ({
         ...t,
         entries: applyDiffs(t.entries, diffs),
       }));
+
+      return hidden.length === 0
+        ? next
+        : updateAccount(next, event.data.account, (a) => ({
+            ...a,
+            hiddenEvents: withHidden(a.hiddenEvents, hidden),
+          }));
     }
 
     case 'HistoryLoaded':

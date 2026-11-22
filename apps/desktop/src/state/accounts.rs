@@ -12,6 +12,12 @@ use rune::{TextEdit, Tx};
 /// Seconds reserved for the "New" divider's fade before its row closes.
 pub const READ_MARKER_FADE: f32 = 2.5;
 
+/// Whether an attachment is visual media the user's media choice may hold back: a picture
+/// (stickers included) or a video, poster or not. Audio and other files never wait.
+pub fn visual(attachment: &Attachment) -> bool {
+    matches!(attachment.kind, matrix_core::AttachmentKind::Image | matrix_core::AttachmentKind::Video)
+}
+
 /// Whether a room should draw attention: any unread message, or only mentions when the room
 /// notifies for mentions only or is muted.
 pub fn wants_attention(room: &RoomSummary) -> bool {
@@ -674,6 +680,9 @@ pub struct AccountData {
     pub safety: matrix_core::Safety,
     /// The choices as last reported: what a change that fails to save falls back to.
     pub saved_safety: matrix_core::Safety,
+    /// Changes still being saved, by request, oldest first: `safety` is `saved_safety` with
+    /// them applied, whichever finishes first.
+    pending_safety: Vec<(matrix_core::RequestId, matrix_core::SafetyChange)>,
 }
 
 impl AccountData {
@@ -725,6 +734,7 @@ impl AccountData {
             saving_status_message: None,
             safety: matrix_core::Safety::default(),
             saved_safety: matrix_core::Safety::default(),
+            pending_safety: Vec::new(),
         }
     }
 
@@ -829,16 +839,24 @@ impl AccountData {
         listed.iter().filter_map(|at| Some((*at, self.rooms.get(*at)?))).filter(move |(_, room)| room.kind == kind)
     }
 
-    /// Drops the cached newest messages of people the user now ignores, so no preview shows
-    /// them: the room's next message from sync takes their place.
+    /// Drops the cached newest messages of people the user is now confirmed to ignore, so no
+    /// preview shows them: the room's next message from sync takes their place. (While an
+    /// ignore is still saving, previews skip them as they read instead, so a failure brings
+    /// them back.)
     fn forget_ignored_latest(&mut self) {
-        let safety = &self.safety;
+        let safety = &self.saved_safety;
         self.latest.retain(|_, message| !safety.ignores(&message.sender_id));
+    }
+
+    /// The choices shown: the saved ones with every change still being saved applied.
+    fn replay_safety(&mut self) {
+        self.safety =
+            self.pending_safety.iter().fold(self.saved_safety.clone(), |safety, (_, change)| safety.with(change));
     }
 
     /// Whether listed media (a file in the Files panel, or one opened from anywhere) waits for a
     /// press: as its message in the room's timeline when loaded there; otherwise its sender is
-    /// unknown and counts as someone else. Only pictures and videos with a preview count.
+    /// unknown and counts as someone else. Only visual media counts ([`visual`]).
     pub fn hides_listed_media(
         &self,
         room_id: &str,
@@ -846,7 +864,7 @@ impl AccountData {
         attachment: &Attachment,
         revealed: &HashSet<(AccountId, String)>,
     ) -> bool {
-        if attachment.preview().is_none() {
+        if !visual(attachment) {
             return false;
         }
         let loaded = self
@@ -1171,22 +1189,38 @@ impl Accounts {
         self.revision += 1;
     }
 
-    /// The safety choices the engine reported: shown, and kept as the ones to fall back to.
+    /// The safety choices the engine reported: kept as the confirmed ones, and shown with the
+    /// changes still being saved applied.
     pub fn safety_saved(&mut self, id: &AccountId, safety: matrix_core::Safety) {
         if let Some(account) = self.get_mut(id) {
-            account.safety = safety.clone();
             account.saved_safety = safety;
+            account.replay_safety();
             account.forget_ignored_latest();
             // The lists (invitations, their pictures) may change with them.
             self.revision += 1;
         }
     }
 
-    /// Shows safety choices at once, before the engine confirms them.
-    pub fn set_safety(&mut self, id: &AccountId, safety: matrix_core::Safety) {
+    /// Shows a safety change at once, while `request` saves it.
+    pub fn safety_pending(
+        &mut self,
+        id: &AccountId,
+        request: matrix_core::RequestId,
+        change: matrix_core::SafetyChange,
+    ) {
         if let Some(account) = self.get_mut(id) {
-            account.safety = safety;
-            account.forget_ignored_latest();
+            account.pending_safety.push((request, change));
+            account.replay_safety();
+            self.revision += 1;
+        }
+    }
+
+    /// `request` finished saving a change, or failed to: the choices shown are the saved ones
+    /// with the changes still being saved applied.
+    pub fn safety_settled(&mut self, id: &AccountId, request: matrix_core::RequestId) {
+        if let Some(account) = self.get_mut(id) {
+            account.pending_safety.retain(|(pending, _)| *pending != request);
+            account.replay_safety();
             self.revision += 1;
         }
     }
@@ -1449,7 +1483,7 @@ impl Accounts {
     /// Records a room's newest message, for previews: never one from someone the user ignores.
     pub fn set_latest(&mut self, id: &AccountId, room_id: &str, message: Message) {
         if let Some(account) = self.get_mut(id)
-            && !account.safety.ignores(&message.sender_id)
+            && !account.saved_safety.ignores(&message.sender_id)
         {
             account.latest.insert(room_id.to_owned(), message);
             account.heard_at.insert(room_id.to_owned(), now_ms());

@@ -1338,6 +1338,7 @@ fn escape_should_close_an_attachment_preview_before_the_dialog_beneath_it() {
             s.show_settings_section(SettingsSection::General);
             s.preview = Some(Preview {
                 account: AccountId::new(demo::ADA),
+                room_id: demo::DEMO_THREAD.0.into(),
                 attachment: Attachment {
                     kind: if document { AttachmentKind::File } else { AttachmentKind::Image },
                     name: if document { "notes.pdf" } else { "photo.png" }.into(),

@@ -338,3 +338,153 @@ fn the_users_own_media_should_always_show() {
     assert!(!s.hides_media(&ada(), DEMO_THREAD.0, &own));
     assert!(s.hides_media(&ada(), DEMO_THREAD.0, &theirs));
 }
+
+/// Ada's account with pictures and videos shown nowhere.
+fn media_never(s: &mut State) {
+    let safety = Safety { media: ShowMedia::Never, ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+}
+
+#[test]
+fn a_change_still_saving_should_keep_showing_when_an_earlier_one_finishes() {
+    let (mut s, mut commands) = state();
+    crate::demo::seed(&mut s);
+    drain(&mut commands);
+    s.set_safety(&ada(), SafetyChange::Media(ShowMedia::Never));
+    s.set_safety(&ada(), SafetyChange::HideStrangerInvites(true));
+    let requests: Vec<_> = drain(&mut commands)
+        .into_iter()
+        .filter_map(|(request, command)| matches!(command, Command::SetSafety { .. }).then_some(request))
+        .collect();
+    // The first is saved: the engine answers with the server's choices, then finishes.
+    let saved = Safety { media: ShowMedia::Never, ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety: saved }, &mut Tx::default());
+    finish(&mut s, requests[0], Ok(()));
+    let shown = &s.accounts.get(&ada()).unwrap().safety;
+    assert_eq!(shown.media, ShowMedia::Never);
+    assert!(shown.hide_stranger_invites, "the second change, still saving, must still show");
+}
+
+#[test]
+fn a_change_still_saving_should_keep_showing_when_an_earlier_one_fails() {
+    let (mut s, mut commands) = state();
+    crate::demo::seed(&mut s);
+    drain(&mut commands);
+    s.set_safety(&ada(), SafetyChange::Media(ShowMedia::Never));
+    s.set_safety(&ada(), SafetyChange::HideStrangerInvites(true));
+    let first = drain(&mut commands)
+        .into_iter()
+        .find_map(|(request, command)| matches!(command, Command::SetSafety { .. }).then_some(request))
+        .unwrap();
+    finish(&mut s, first, Err("offline".into()));
+    let shown = &s.accounts.get(&ada()).unwrap().safety;
+    assert_eq!(shown.media, ShowMedia::Always);
+    assert!(shown.hide_stranger_invites);
+}
+
+#[test]
+fn a_failed_ignore_should_bring_the_rooms_preview_back() {
+    let (mut s, mut commands) = state();
+    crate::demo::seed(&mut s);
+    let troll = "@troll:spam.example";
+    let message = Message {
+        event_id: "$spam".into(),
+        sender_id: troll.into(),
+        sender_name: "Troll".into(),
+        timestamp_ms: u64::MAX / 2,
+        ..Message::default()
+    };
+    let room = "!lab:example.org";
+    s.apply(
+        Event::LatestMessage { account: ada(), room_id: room.into(), message: Box::new(message) },
+        &mut Tx::default(),
+    );
+    drain(&mut commands);
+    s.set_safety(&ada(), SafetyChange::Ignore { user_id: troll.into(), ignored: true });
+    let newest = |s: &State| s.accounts.get(&ada()).unwrap().last_message(room).map(|m| m.event_id.clone());
+    assert_ne!(newest(&s).as_deref(), Some("$spam"), "hidden while the ignore saves");
+    let request = drain(&mut commands)
+        .into_iter()
+        .find_map(|(request, command)| matches!(command, Command::SetSafety { .. }).then_some(request))
+        .unwrap();
+    finish(&mut s, request, Err("offline".into()));
+    assert_eq!(newest(&s).as_deref(), Some("$spam"));
+}
+
+#[test]
+fn a_held_back_video_without_a_poster_should_not_open_directly() {
+    let (mut s, mut commands) = state();
+    let video = matrix_core::Attachment {
+        kind: matrix_core::AttachmentKind::Video,
+        name: "clip.mp4".into(),
+        size: None,
+        media: Some(matrix_core::MediaRef::opaque("clip")),
+        thumbnail: None,
+        dimensions: None,
+        audio: None,
+    };
+    crate::demo::image_message(&mut s, video.clone());
+    media_never(&mut s);
+    drain(&mut commands);
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$attachment", &video);
+    assert!(s.preview.is_none());
+    assert!(!drain(&mut commands).iter().any(|(_, command)| matches!(command, Command::SaveMedia { .. })));
+    assert!(s.revealed_media.contains(&(ada(), "$attachment".to_owned())));
+}
+
+#[test]
+fn a_batch_should_keep_its_audio_and_documents_and_hold_back_its_pictures_until_shown() {
+    let (mut s, mut commands) = state();
+    crate::demo::batch_messages(&mut s);
+    media_never(&mut s);
+    let files = crate::demo::batch_attachments();
+    let key = TimelineKey::room(DEMO_THREAD.0);
+    // The recording opens, never held back, with the whole batch to step through.
+    s.open_attachment(&key, "$batch-2", &files[2]);
+    assert_eq!(s.preview.as_ref().map(|preview| preview.batch.len()), Some(4));
+    drain(&mut commands);
+    // Onto the video: held back, nothing fetched.
+    s.show_preview_item(1);
+    assert!(matches!(s.preview.as_ref().map(|p| &p.content), Some(crate::state::PreviewContent::Held)));
+    assert!(!drain(&mut commands).iter().any(|(_, command)| matches!(
+        command,
+        Command::SaveMedia { .. } | Command::FetchMedia { size: MediaSize::Original, .. }
+    )));
+    // The PDF shows as ever.
+    s.show_preview_item(3);
+    assert!(matches!(s.preview.as_ref().map(|p| &p.content), Some(crate::state::PreviewContent::Document { .. })));
+    // Back on the video, Show loads it.
+    s.show_preview_item(1);
+    s.reveal_preview_item();
+    assert!(matches!(s.preview.as_ref().map(|p| &p.content), Some(crate::state::PreviewContent::Video { .. })));
+    assert!(drain(&mut commands).iter().any(|(_, command)| matches!(command, Command::SaveMedia { .. })));
+}
+
+#[test]
+fn a_link_to_a_room_the_account_is_invited_to_should_hide_its_picture_when_invitations_do() {
+    let (mut s, _) = state();
+    crate::demo::seed(&mut s);
+    let preview = matrix_core::RoomPreview {
+        room_id: "!club:example.org".into(),
+        alias: None,
+        name: Some("Club".into()),
+        topic: None,
+        avatar: Some(matrix_core::MediaRef::opaque("club-picture")),
+        member_count: 3,
+        join_rule: Some(matrix_core::JoinRule::Invite),
+        space: false,
+        joined: false,
+        invited: true,
+    };
+    let Some(link) = matrix_core::Permalink::parse("https://matrix.to/#/!club:example.org") else { panic!("a link") };
+    s.modal = Some(Modal::Link(crate::state::LinkDialog {
+        link,
+        account: ada(),
+        chosen: false,
+        step: crate::state::LinkStep::Preview(Box::new(preview)),
+    }));
+    assert!(s.link_pictures().is_some());
+    let safety = Safety { invite_pictures: false, ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+    assert!(s.link_pictures().is_none());
+}

@@ -4,7 +4,7 @@
 use matrix_core::{JoinRule, LinkTarget, RoomPreview};
 use rune::{El, col, row, text};
 
-use super::components::{ButtonKind, account_avatar, button, dialog, media_avatar, status_line};
+use super::components::{ButtonKind, account_avatar, avatar, button, dialog, media_avatar, status_line};
 use super::icons;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tp};
@@ -25,7 +25,9 @@ pub fn link_dialog(s: &State, link: &LinkDialog, p: &Palette) -> El {
         LinkStep::Previewing(_) => {
             (t!("link.loading").to_owned(), text(room.to_owned()).font(font::BODY).color(p.text_muted).wrap(), None)
         }
-        LinkStep::Preview(preview) => (title_of(preview), preview_body(s, preview, p), Some(join_action(preview, p))),
+        LinkStep::Preview(preview) => {
+            (title_of(preview), preview_body(s, link, preview, p), Some(join_action(preview, p)))
+        }
         LinkStep::NoPreview => (
             room.to_owned(),
             text(t!("link.no_preview")).font(font::BODY).color(p.text_muted).wrap(),
@@ -38,7 +40,7 @@ pub fn link_dialog(s: &State, link: &LinkDialog, p: &Palette) -> El {
         LinkStep::Joining { preview, .. } => (
             preview.as_deref().map_or_else(|| room.to_owned(), title_of),
             match preview {
-                Some(preview) => preview_body(s, preview, p),
+                Some(preview) => preview_body(s, link, preview, p),
                 None => text(t!("link.no_preview")).font(font::BODY).color(p.text_muted).wrap(),
             },
             Some(button(t!("link.joining"), ButtonKind::Primary, false, p).key("link-join")),
@@ -102,13 +104,17 @@ fn title_of(preview: &RoomPreview) -> String {
 }
 
 /// The room's picture, address and size, its topic, and why it can't be joined when it can't.
-fn preview_body(s: &State, preview: &RoomPreview, p: &Palette) -> El {
+fn preview_body(s: &State, link: &LinkDialog, preview: &RoomPreview, p: &Palette) -> El {
     let address = preview.alias.clone().unwrap_or_else(|| preview.room_id.clone());
     let head = row()
         .w_full()
         .gap(14.0)
         .center_y()
-        .child(media_avatar(&preview.room_id, &title_of(preview), preview.avatar.as_ref(), &s.media, 56.0))
+        .child(if s.link_hides_picture(link, preview) {
+            avatar(&preview.room_id, &title_of(preview), 56.0)
+        } else {
+            media_avatar(&preview.room_id, &title_of(preview), preview.avatar.as_ref(), &s.media, 56.0)
+        })
         .child(
             col()
                 .grow(1.0)

@@ -49,7 +49,7 @@ import {
   shouldMarkRead,
 } from '../../state/plan';
 import { shallow, useAppStore, useStore } from '../../state/react';
-import { room as roomOf, timeline as timelineOf } from '../../state/selectors';
+import { room as roomOf, shownTimeline, timeline as timelineOf } from '../../state/selectors';
 import { routes } from '../../routes';
 import { font } from '../../theme/palette';
 import { Icon } from '../icons';
@@ -127,7 +127,8 @@ export function Timeline({
   const palette = usePalette();
   const store = useAppStore();
   const thread = timelineKey.thread;
-  const timeline = useStore((s) => timelineOf(s, account, timelineKey));
+  // What people whose ignore is still on its way said draws as nothing (ADR 0011).
+  const timeline = useStore((s) => shownTimeline(s, account, timelineKey));
 
   // The room's pins, once for every row (each row asking would search the rooms per change).
   const pinnedIds = useStore(
