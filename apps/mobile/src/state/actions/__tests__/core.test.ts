@@ -202,6 +202,8 @@ describe('closed timelines', () => {
     can_kick: false,
     can_ban: false,
     can_set_roles: false,
+    knocking: [],
+    banned: [],
   };
 
   /** Room `i` as screens over it fetched it: its members, threads, files and pins. */

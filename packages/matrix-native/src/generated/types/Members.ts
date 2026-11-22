@@ -33,4 +33,12 @@ can_ban: boolean,
 /**
  * Whether the user may change members' roles.
  */
-can_set_roles: boolean, };
+can_set_roles: boolean, 
+/**
+ * Those asking to join (when the room lets people ask), by name.
+ */
+knocking: Array<RoomMember>, 
+/**
+ * Those banned, by name.
+ */
+banned: Array<RoomMember>, };

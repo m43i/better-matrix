@@ -365,6 +365,9 @@ mod tests {
                 saved: Vec::new(),
                 priority: matrix_core::RoomPriority::Normal,
                 marked_unread: false,
+                can_change_settings: false,
+                knocks: 0,
+                successor: None,
             })
             .collect();
         apply(
@@ -387,6 +390,7 @@ mod tests {
                 avatar: None,
                 can_add_rooms: false,
                 can_rename: false,
+                can_change_settings: false,
                 children: Vec::new(),
                 members: Vec::new(),
             })

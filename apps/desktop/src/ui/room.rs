@@ -34,7 +34,10 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
             .min_h(0.0)
             .min_w(0.0)
             .child(timeline(&cx, account.timeline(&key), "timeline", &s.near_top, Some(&s.at_bottom), p))
-            .child(composer(s, ComposerTarget::Room, &tf!("composer.placeholder", room = inline_name(room)), p, ui))
+            // A room that was replaced takes no more messages: the way to the new one shows instead.
+            .child(super::admin::successor_banner(s, room, p).unwrap_or_else(|| {
+                composer(s, ComposerTarget::Room, &tf!("composer.placeholder", room = inline_name(room)), p, ui)
+            }))
     };
     let body = match s.call_here() {
         Some(call) if call.chat && call.chat_beside() => row()

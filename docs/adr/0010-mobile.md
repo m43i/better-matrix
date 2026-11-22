@@ -62,6 +62,14 @@ Date: 2026-11-16
     compact as the desktop's sidebar (`#` for rooms, a small avatar for direct chats); the DMs
     tab adds the latest message. Every avatar is the desktop's rounded square. Dragging rooms
     between sections becomes the room's long-press sheet, which edits the same `SidebarLayout`.
+  - _Administration_ (ADR 0008): room info offers Settings when `can_change_settings`; a long
+    press on a space in the space picker opens its sheet (settings, Manage rooms, Leave space).
+    The settings page shows only the parts `RoomRights` allows (`state/admin.ts`'s
+    `settingsParts`) and keeps each change's value on screen until the engine's fresh
+    `RoomSettings` confirms it (`withPending`); permissions are their own page. A space's rooms
+    move with up and down buttons, each move sending the whole order. Join requests and bans
+    sit under their headings in room info's member list. An upgraded room shows a banner with
+    Go to the new room in the composer's place.
 - **The engine is `matrix-core`, unchanged in shape.** `packages/matrix-ffi` wraps it in one
   UniFFI object, `Bridge`; `uniffi-bindgen-react-native` (ubrn) builds it for Android
   (`cargo ndk`, arm64 and x86_64) and iOS and generates a JSI turbo module
@@ -211,7 +219,7 @@ Date: 2026-11-16
   nothing in it can end the spoiler early; `[Spoiler]` the whole body), `/invite`, `/join`
   (opens the room once joined; the argument is a picked pill or read as a typed link,
   `parseTyped`, so a room ID without a server, as room version 12 writes them, or a pasted
-  matrix.to link with its `via` servers works), `/leave` (back to Home), `/topic` (`SetTopic`), `/nick`
+  matrix.to link with its `via` servers works), `/leave` (back to Home), `/topic` (`ChangeRoom` with `RoomSetting::Topic`), `/nick`
   (`SetDisplayName`). A command acts in the draft's place; the reply and attachments wait for
   the next send. An unknown command or one missing its argument keeps the draft and says so;
   `//text` sends `/text`. Each failure says what failed (`notice.invite`, `notice.join`, …).

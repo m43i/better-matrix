@@ -221,18 +221,28 @@ fn scope_slot(
 pub fn space_menu(account: &AccountData, space_id: &str, p: &Palette) -> El {
     use super::components::{Tone, menu_action, popover_panel};
     let mut panel = popover_panel(p).key("space-menu").w(220.0);
-    if account.space(space_id).is_some_and(|space| space.can_rename) {
+    let space = account.space(space_id);
+    if space.is_some_and(|space| space.can_change_settings) {
         let id = space_id.to_owned();
-        panel =
-            panel.child(menu_action(&icons::PENCIL, t!("space.rename"), Tone::Normal, p).key("space-rename").on_press(
-                move |s: &mut State| s.open_room_form(crate::state::RoomForm::Rename { room_id: id.clone() }),
-            ));
+        panel = panel.child(
+            menu_action(&icons::SETTINGS, t!("room_settings.title"), Tone::Normal, p)
+                .key("space-settings")
+                .on_press(move |s: &mut State| s.open_room_settings(&id)),
+        );
+    }
+    if space.is_some_and(|space| space.can_add_rooms) {
+        let id = space_id.to_owned();
+        panel = panel.child(
+            menu_action(&icons::LAYOUT, t!("space.rooms"), Tone::Normal, p)
+                .key("space-rooms")
+                .on_press(move |s: &mut State| s.open_space_rooms(&id)),
+        );
     }
     let id = space_id.to_owned();
     panel = panel.child(
         menu_action(&icons::LEAVE, t!("space.leave"), Tone::Danger, p)
             .key("space-leave")
-            .on_press(move |s: &mut State| s.confirm_leave_space(&id)),
+            .on_press(move |s: &mut State| s.ask_to_leave_space(&id)),
     );
     col().child(panel).anchored(format!("scope-{space_id}"), rune::Side::Right, rune::Align::Start, 8.0)
 }

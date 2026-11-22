@@ -1,8 +1,10 @@
 // A room's details (pushed from its header), as Slack's channel details: its picture, name,
-// topic and facts; quick actions (notifications, invite, rename, leave); and its people, threads
-// and files, one at a time under a segmented control.
+// topic and facts; quick actions (notifications, invite, settings or rename, leave); and its
+// people (with requests to join and those banned, for those who may act on them), threads and
+// files, one at a time under a segmented control.
 
 import type {
+  Moderation,
   NotificationMode,
   RoomMember,
   SharedFile,
@@ -13,7 +15,7 @@ import * as Sharing from 'expo-sharing';
 import { useEffect, useState } from 'react';
 import { Alert, FlatList, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { t } from '../../../i18n';
+import { t, tp } from '../../../i18n';
 import { routes } from '../../../routes';
 import {
   fileForSharing,
@@ -21,9 +23,10 @@ import {
   listAllMembers,
   listFiles,
   listThreads,
+  moderate,
   setNotificationMode,
 } from '../../../state/actions/people';
-import { filterMembers, fileOpens, mayRename } from '../../../state/people';
+import { filterMembers, fileOpens, may } from '../../../state/people';
 import { useAppStore, useStore } from '../../../state/react';
 import {
   account as accountOf,
@@ -34,6 +37,7 @@ import {
 import { font } from '../../../theme/palette';
 import { Avatar } from '../../../ui/Avatar';
 import { Divider, ListRow, ListSection } from '../../../ui/components';
+import { RequestRow } from '../../../ui/admin/RequestRow';
 import { Icon } from '../../../ui/icons';
 import { FileRow, ThreadRow } from '../../../ui/people/details';
 import { historyLabel, notificationHint, notificationLabel } from '../../../ui/people/labels';
@@ -47,6 +51,9 @@ type Segment = 'members' | 'threads' | 'files';
 /** One row of whichever list the segment shows. */
 type Row =
   | { kind: 'member'; key: string; member: RoomMember }
+  | { kind: 'heading'; key: string; title: string }
+  | { kind: 'knock'; key: string; member: RoomMember }
+  | { kind: 'banned'; key: string; member: RoomMember }
   | { kind: 'thread'; key: string; thread: ThreadInfo }
   | { kind: 'file'; key: string; file: SharedFile };
 
@@ -73,7 +80,12 @@ export default function RoomInfoScreen() {
   const [modes, setModes] = useState(false);
   const [sharing, setSharing] = useState<string | null>(null);
 
-  useEffect(() => listAllMembers(store, account, roomId), [store, account, roomId]);
+  // Sync changing who is in the room drops the list (a request approved, someone unbanned): it is
+  // asked for again while the screen shows.
+  const membersGone = members === undefined;
+  useEffect(() => {
+    if (membersGone) listAllMembers(store, account, roomId);
+  }, [store, account, roomId, membersGone]);
   // Each time a list is shown, it is fresh.
   useEffect(() => {
     if (segment === 'threads') listThreads(store, account, roomId);
@@ -129,13 +141,77 @@ export default function RoomInfoScreen() {
       .finally(() => setSharing(null));
   };
 
+  const act = (member: RoomMember, action: Moderation) => {
+    const run = () => moderate(store, account, roomId, member.person.id, action).catch(() => {});
+
+    if (action.type !== 'Deny') {
+      run();
+
+      return;
+    }
+
+    Alert.alert(
+      t('mobile.admin.deny_title', { name: member.person.name }),
+      t('mobile.admin.deny_body'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('mobile.admin.deny'), style: 'destructive', onPress: run },
+      ],
+    );
+  };
+
+  /** Those apart from the members, under their heading, when the user may act on any of them. */
+  const apart = (
+    kind: 'knock' | 'banned',
+    people: RoomMember[],
+    title: string,
+    actions: Moderation[],
+  ): Row[] => {
+    if (!members) return [];
+
+    const shown = filterMembers(people, search).filter((m) =>
+      actions.some((action) => may(members, action, m)),
+    );
+
+    if (shown.length === 0) return [];
+
+    return [
+      { kind: 'heading', key: kind, title },
+      ...shown.map((member): Row => ({ kind, key: member.person.id, member })),
+    ];
+  };
+
+  const memberRows = (): Row[] => {
+    const people = filterMembers(members?.people ?? [], search).map((member): Row => ({
+      kind: 'member',
+      key: member.person.id,
+      member,
+    }));
+
+    const requests = apart('knock', members?.knocking ?? [], t('mobile.admin.requests'), [
+      { type: 'Admit' },
+      { type: 'Deny' },
+    ]);
+
+    const banned = apart('banned', members?.banned ?? [], t('mobile.admin.banned'), [
+      { type: 'Unban' },
+    ]);
+
+    if (requests.length === 0 && banned.length === 0) return people;
+
+    return [
+      ...requests,
+      ...(people.length > 0
+        ? [{ kind: 'heading', key: 'members', title: t('members.title') } as const]
+        : []),
+      ...people,
+      ...banned,
+    ];
+  };
+
   const rows: Row[] =
     segment === 'members'
-      ? filterMembers(members?.people ?? [], search).map((member) => ({
-          kind: 'member',
-          key: member.person.id,
-          member,
-        }))
+      ? memberRows()
       : segment === 'threads'
         ? (threads ?? []).map((thread) => ({ kind: 'thread', key: thread.root, thread }))
         : (files ?? []).map((file) => ({ kind: 'file', key: file.event_id, file }));
@@ -188,12 +264,12 @@ export default function RoomInfoScreen() {
             onPress={() => router.push(routes.invite(account, roomId))}
           />
         ) : null}
-        {mayRename(room, members) ? (
+        {room.can_change_settings ? (
           <QuickAction
-            testID="info-rename"
-            icon="pencil"
-            label={t('create.rename_title')}
-            onPress={() => router.push(routes.renameRoom(account, roomId))}
+            testID="info-settings"
+            icon="settings"
+            label={t('mobile.admin.settings')}
+            onPress={() => router.push(routes.roomSettings(account, roomId))}
           />
         ) : null}
         <QuickAction
@@ -258,7 +334,12 @@ export default function RoomInfoScreen() {
           onPress={() => router.push(routes.widgets(account, roomId))}
         />
         <Divider inset={52} />
-        <ListRow icon="users" title={t('members.count', { count: room.member_count })} />
+        <ListRow
+          testID="info-members"
+          icon="users"
+          title={t('members.count', { count: room.member_count })}
+          subtitle={room.knocks > 0 ? tp('mobile.admin.requests_count', room.knocks) : undefined}
+        />
         <Divider inset={52} />
         <ListRow icon="eye" title={historyLabel(room.history)} />
       </ListSection>
@@ -311,13 +392,73 @@ export default function RoomInfoScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         ListHeaderComponent={header}
-        ItemSeparatorComponent={() => <Divider inset={segment === 'threads' ? 16 : 68} />}
+        ItemSeparatorComponent={({ leadingItem }: { leadingItem?: Row }) =>
+          leadingItem?.kind === 'heading' ? null : (
+            <Divider inset={segment === 'threads' ? 16 : 68} />
+          )
+        }
         ListEmptyComponent={
           <Text style={[font.body, styles.empty, { color: palette.textMuted }]}>{empty}</Text>
         }
         contentContainerStyle={styles.list}
         renderItem={({ item }) => {
           switch (item.kind) {
+            case 'heading':
+              return (
+                <Text
+                  style={[
+                    font.section,
+                    styles.heading,
+                    { color: Platform.OS === 'android' ? palette.accent : palette.textMuted },
+                  ]}
+                >
+                  {Platform.OS === 'android' ? item.title : item.title.toUpperCase()}
+                </Text>
+              );
+            case 'knock':
+              return (
+                <RequestRow
+                  account={account}
+                  member={item.member}
+                  actions={[
+                    ...(members && may(members, { type: 'Deny' }, item.member)
+                      ? [
+                          {
+                            title: t('mobile.admin.deny'),
+                            kind: 'secondary' as const,
+                            testID: `deny-${item.member.person.id}`,
+                            onPress: () => act(item.member, { type: 'Deny' }),
+                          },
+                        ]
+                      : []),
+                    ...(members && may(members, { type: 'Admit' }, item.member)
+                      ? [
+                          {
+                            title: t('mobile.admin.approve'),
+                            kind: 'primary' as const,
+                            testID: `approve-${item.member.person.id}`,
+                            onPress: () => act(item.member, { type: 'Admit' }),
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
+              );
+            case 'banned':
+              return (
+                <RequestRow
+                  account={account}
+                  member={item.member}
+                  actions={[
+                    {
+                      title: t('mobile.admin.unban'),
+                      kind: 'secondary',
+                      testID: `unban-${item.member.person.id}`,
+                      onPress: () => act(item.member, { type: 'Unban' }),
+                    },
+                  ]}
+                />
+              );
             case 'member':
               return (
                 <MemberRow
@@ -373,4 +514,5 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, paddingVertical: Platform.OS === 'ios' ? 10 : 6 },
   empty: { padding: 24, textAlign: 'center' },
+  heading: { marginTop: 14, marginBottom: 4, marginHorizontal: 18 },
 });

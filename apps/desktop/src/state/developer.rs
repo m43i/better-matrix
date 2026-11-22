@@ -4,7 +4,7 @@
 use matrix_core::{AccountId, Command, EventSource, RequestId};
 use rune::{TextEdit, Tx};
 
-use super::{Confirm, Modal, Purpose, RoomForm, State, focused};
+use super::{Confirm, Modal, Purpose, State, focused};
 use crate::i18n::tf;
 
 /// The source dialog: waiting for the event's JSON, then showing it.
@@ -54,21 +54,33 @@ impl State {
     /// Asks for a web page to pin to the room shown.
     pub fn start_add_widget(&mut self, room_id: &str) {
         self.popover = None;
-        self.modal = Some(Modal::RoomForm {
-            form: RoomForm::AddWidget { room_id: room_id.to_owned() },
+        self.modal = Some(Modal::AddWidget {
+            room_id: room_id.to_owned(),
             name: Box::new(focused(TextEdit::new(""))),
-            topic: Box::new(TextEdit::new("")),
+            url: Box::new(TextEdit::new("")),
         });
     }
 
-    /// Pins the page in the add-widget form. A blank address keeps the form open.
-    pub(super) fn add_widget(&mut self, account: AccountId, room_id: String, name: Box<TextEdit>, url: Box<TextEdit>) {
+    /// A field of the add-widget form: its name, or with `url` its address.
+    pub fn widget_field(&mut self, url: bool) -> &mut TextEdit {
+        match &mut self.modal {
+            Some(Modal::AddWidget { url: field, .. }) if url => field.as_mut(),
+            Some(Modal::AddWidget { name, .. }) => name.as_mut(),
+            _ => &mut self.scratch,
+        }
+    }
+
+    /// Pins the page in the add-widget form. A blank address keeps the form open; a widget may
+    /// go without a name (its host stands in).
+    pub fn submit_widget(&mut self) {
+        let Some(account) = self.nav.account.clone() else { return };
+        let Some(Modal::AddWidget { room_id, name, url }) = &self.modal else { return };
         let address = url.text.trim().to_owned();
         if address.is_empty() {
-            self.modal = Some(Modal::RoomForm { form: RoomForm::AddWidget { room_id }, name, topic: url });
             return;
         }
-        let name = name.text.trim().to_owned();
+        let (room_id, name) = (room_id.clone(), name.text.trim().to_owned());
+        self.modal = None;
         self.dispatch(Command::AddWidget { account, room_id, name, url: address }, Purpose::Widget);
     }
 

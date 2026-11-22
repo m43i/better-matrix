@@ -12,12 +12,15 @@ import {
   GENERAL,
   GRACE,
   KAI,
+  LAB,
+  LAB_V2,
   RELEASES,
   SCREENSHOT,
   SIGN_OFF,
   STRANGER_INVITE,
   TEST_PLAN,
   THREAD_REPLY,
+  WORK_SPACE,
 } from '../fixtures';
 import { demoScene } from '../link';
 import { scenes, isScene } from '../scenes';
@@ -342,4 +345,167 @@ it('should answer a safety change with the choices after it', async () => {
 it('should hide the stranger’s invitation in the safety scenes', () => {
   const state = bootDemo('settings-safety', noMedia).getState();
   expect(activeRoomList(state)?.invitations.map((i) => i.room_id)).not.toContain(STRANGER_INVITE);
+});
+
+describe('the demo engine as a homeserver for administration', () => {
+  it('should load a room settings and change one', async () => {
+    const store = bootDemo('room-info', noMedia);
+    await store.run({ type: 'LoadRoomSettings', data: { account: ADA, room_id: GENERAL } });
+    await store.run({
+      type: 'ChangeRoom',
+      data: { account: ADA, room_id: GENERAL, setting: { type: 'Name', data: 'lobby' } },
+    });
+    const account = store.getState().accounts[0];
+    expect([
+      account?.roomSettings[GENERAL]?.name,
+      account?.rooms.find((r) => r.room_id === GENERAL)?.name,
+    ]).toEqual(['lobby', 'lobby']);
+  });
+
+  it('should order a space rooms', async () => {
+    const store = bootDemo('home', noMedia);
+    const order = [DESIGN, GENERAL, '!releases:example.org'];
+    await store.run({
+      type: 'ChangeSpace',
+      data: { account: ADA, space: WORK_SPACE, change: { type: 'Order', data: order } },
+    });
+    expect(
+      store.getState().accounts[0]?.spaces.find((s) => s.room_id === WORK_SPACE)?.children,
+    ).toEqual(order);
+  });
+
+  it('should leave a space with the rooms chosen', async () => {
+    const store = bootDemo('home', noMedia);
+    await store.run({
+      type: 'LeaveSpace',
+      data: { account: ADA, space: WORK_SPACE, rooms: [DESIGN] },
+    });
+    const account = store.getState().accounts[0];
+    expect([
+      account?.spaces.some((s) => s.room_id === WORK_SPACE),
+      account?.rooms.some((r) => r.room_id === DESIGN),
+      account?.rooms.some((r) => r.room_id === GENERAL),
+    ]).toEqual([false, false, true]);
+  });
+
+  it('should approve a request to join #design', async () => {
+    const store = bootDemo('member-requests', noMedia);
+    await store.run({
+      type: 'ModerateMember',
+      data: {
+        account: ADA,
+        room_id: DESIGN,
+        user_id: '@lin:example.org',
+        action: { type: 'Admit' },
+      },
+    });
+    await store.run({ type: 'ListMembers', data: { account: ADA, room_id: DESIGN, all: true } });
+    const members = store.getState().accounts[0]?.members[DESIGN];
+    expect([
+      members?.knocking.map((m) => m.person.id),
+      members?.people.some((m) => m.person.id === '@lin:example.org'),
+    ]).toEqual([['@sam:hobby.chat'], true]);
+  });
+
+  it('should point an upgraded room to its successor', async () => {
+    const store = bootDemo('room-settings-upgrade', noMedia);
+    await store.run({ type: 'UpgradeRoom', data: { account: ADA, room_id: LAB, version: '12' } });
+    const lab = store.getState().accounts[0]?.rooms.find((r) => r.room_id === LAB);
+    expect(lab?.successor?.room_id).toBe('!lab-v12:example.org');
+  });
+
+  it('should close a replaced room to upgrades and new levels', async () => {
+    const store = bootDemo('home', noMedia);
+    await store.run({ type: 'UpgradeRoom', data: { account: ADA, room_id: LAB, version: '12' } });
+    await store.run({ type: 'LoadRoomSettings', data: { account: ADA, room_id: LAB } });
+    const settings = store.getState().accounts[0]?.roomSettings[LAB];
+    expect([settings?.upgrade_to, settings?.permissions.some((p) => p.editable)]).toEqual([
+      null,
+      false,
+    ]);
+    await expect(
+      store.run({
+        type: 'ChangeRoom',
+        data: {
+          account: ADA,
+          room_id: LAB,
+          setting: { type: 'Permission', data: { permission: 'SendMessages', level: 0 } },
+        },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('should make a room created public a public one', async () => {
+    const store = bootDemo('home', noMedia);
+    await store.run({
+      type: 'CreateRoom',
+      data: {
+        account: ADA,
+        room: {
+          name: 'Open',
+          topic: null,
+          space: false,
+          parent: null,
+          join_rule: 'Public',
+          address: null,
+          published: false,
+          encrypted: false,
+        },
+      },
+    });
+    const open = store.getState().accounts[0]?.rooms.find((r) => r.name === 'Open');
+    expect(open?.public).toBe(true);
+    await store.run({
+      type: 'LoadRoomSettings',
+      data: { account: ADA, room_id: open?.room_id ?? '' },
+    });
+    const settings = store.getState().accounts[0]?.roomSettings[open?.room_id ?? ''];
+    expect([settings?.join_rule, settings?.encrypted]).toEqual(['Public', false]);
+  });
+
+  it('should make a space created public a public one in its settings', async () => {
+    const store = bootDemo('home', noMedia);
+    await store.run({
+      type: 'CreateRoom',
+      data: {
+        account: ADA,
+        room: {
+          name: 'Commons',
+          topic: null,
+          space: true,
+          parent: null,
+          join_rule: 'Public',
+          address: null,
+          published: false,
+          encrypted: false,
+        },
+      },
+    });
+    const made = store.getState().accounts[0]?.spaces.find((s) => s.name === 'Commons');
+    await store.run({
+      type: 'LoadRoomSettings',
+      data: { account: ADA, room_id: made?.room_id ?? '' },
+    });
+    expect(store.getState().accounts[0]?.roomSettings[made?.room_id ?? '']?.join_rule).toBe(
+      'Public',
+    );
+  });
+
+  it('should keep a replaced room closed after another change to it', async () => {
+    const store = bootDemo('home', noMedia);
+    await store.run({ type: 'UpgradeRoom', data: { account: ADA, room_id: LAB, version: '12' } });
+    await store.run({
+      type: 'ChangeRoom',
+      data: { account: ADA, room_id: LAB, setting: { type: 'Topic', data: 'Moved' } },
+    });
+    expect(store.getState().accounts[0]?.roomSettings[LAB]?.upgrade_to).toBeNull();
+  });
+
+  it('should show the tombstone scene room as replaced', () => {
+    const lab = bootDemo('tombstone', noMedia)
+      .getState()
+      .accounts[0]?.rooms.find((r) => r.room_id === LAB);
+
+    expect(lab?.successor?.room_id).toBe(LAB_V2);
+  });
 });

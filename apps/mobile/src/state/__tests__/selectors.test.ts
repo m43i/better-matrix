@@ -6,13 +6,25 @@ import {
   activeRoomList,
   identityOf,
   knownPerson,
+  rightsKey,
+  roomSettings as settingsOf,
   savedMessages,
   savedSignature,
+  space,
   unnamedSenders,
 } from '../selectors';
 import type { TimelineDiff } from '@better-matrix/matrix-native/types';
 
-import { ADA, GRACE, messageEntry, person, roomSummary, summary } from '../../test/fixtures';
+import {
+  ADA,
+  GRACE,
+  messageEntry,
+  person,
+  roomSettings,
+  roomSummary,
+  spaceSummary,
+  summary,
+} from '../../test/fixtures';
 
 function saved(room_id: string, event_id: string): SavedMessage {
   return {
@@ -154,6 +166,8 @@ describe('people', () => {
           can_kick: false,
           can_ban: false,
           can_set_roles: false,
+          knocking: [],
+          banned: [],
         },
       },
     });
@@ -178,5 +192,60 @@ describe('people', () => {
     });
 
     expect(identityOf(state, ADA, GRACE)).toEqual({ verified: false, changed: true });
+  });
+});
+
+describe('rightsKey', () => {
+  it('should change once the room has a successor, so open settings read it again', () => {
+    const state = apply(initialState(), { type: 'AccountAdded', data: summary(ADA) });
+
+    const listed = (successor: boolean) =>
+      apply(state, {
+        type: 'RoomsUpdated',
+        data: {
+          account: ADA,
+          list: {
+            rooms: [
+              {
+                ...roomSummary('!r:x'),
+                successor: successor ? { room_id: '!n:x', reason: null, via: [] } : null,
+              },
+            ],
+            spaces: [],
+            invitations: [],
+          },
+        },
+      });
+
+    expect(rightsKey(listed(false), ADA, '!r:x')).not.toBe(rightsKey(listed(true), ADA, '!r:x'));
+  });
+});
+
+describe('administration', () => {
+  function withSpace() {
+    const state = apply(initialState(), { type: 'AccountAdded', data: summary(ADA) });
+
+    return apply(state, {
+      type: 'RoomsUpdated',
+      data: {
+        account: ADA,
+        list: { rooms: [], spaces: [spaceSummary('!s:x', ['!r:x'])], invitations: [] },
+      },
+    });
+  }
+
+  it('should find a space of an account', () => {
+    expect(space(withSpace(), ADA, '!s:x')?.children).toEqual(['!r:x']);
+  });
+
+  it('should have no settings for a room until they are loaded', () => {
+    expect(settingsOf(withSpace(), ADA, '!s:x')).toBeUndefined();
+  });
+
+  it('should find a room loaded settings', () => {
+    const settings = roomSettings('!s:x', { space: true });
+    const state = apply(withSpace(), { type: 'RoomSettings', data: { account: ADA, settings } });
+
+    expect(settingsOf(state, ADA, '!s:x')).toBe(settings);
   });
 });

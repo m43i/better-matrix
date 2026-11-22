@@ -87,6 +87,10 @@ pub struct Account {
     /// Safety changes, run in the order they were asked for: two quick choices of one setting
     /// end on the later one (`crate::safety`).
     pub(crate) safety_queue: crate::drafts::DraftQueue,
+    /// Changes to rooms' and spaces' settings, power levels and rooms, run in the order the
+    /// engine got them: each reads the state the one before left, so two edits of the same event
+    /// can't undo each other (`crate::admin`).
+    pub(crate) admin_changes: crate::drafts::DraftQueue,
     /// Draft reads and writes, in the order they were asked for (`crate::drafts`).
     pub(crate) drafts: crate::drafts::DraftQueue,
     /// The room list's sliding sync, while it runs (servers with MSC4186; ADR 0002).
@@ -430,6 +434,7 @@ impl Account {
             saved_changes: Arc::default(),
             safety_changes: Arc::default(),
             safety_queue: crate::drafts::DraftQueue::default(),
+            admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
             followed: Arc::default(),
@@ -470,6 +475,7 @@ impl Account {
             saved_changes: Arc::default(),
             safety_changes: Arc::default(),
             safety_queue: crate::drafts::DraftQueue::default(),
+            admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
             followed: Arc::default(),
@@ -606,6 +612,7 @@ impl Account {
             saved_changes: Arc::default(),
             safety_changes: Arc::default(),
             safety_queue: crate::drafts::DraftQueue::default(),
+            admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
             followed: Arc::default(),
@@ -1409,6 +1416,7 @@ mod tests {
             saved_changes: Arc::default(),
             safety_changes: Arc::default(),
             safety_queue: crate::drafts::DraftQueue::default(),
+            admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
             followed: Arc::default(),

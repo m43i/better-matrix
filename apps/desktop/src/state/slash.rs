@@ -272,7 +272,8 @@ impl State {
                 Some(Vec::new())
             }
             SlashCommand::Topic => {
-                self.dispatch(Command::SetTopic { account, room_id, topic: arguments }, Purpose::Command);
+                let setting = matrix_core::RoomSetting::Topic(arguments);
+                self.dispatch(Command::ChangeRoom { account, room_id, setting }, Purpose::Command);
                 self.composer_mut(target).clear();
                 Some(Vec::new())
             }

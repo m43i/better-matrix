@@ -10,7 +10,6 @@ use matrix_sdk::ruma::events::room::message::{
     AudioMessageEventContent, FormattedBody, MessageFormat, MessageType, SyncRoomMessageEvent,
 };
 use matrix_sdk::ruma::events::room::power_levels::RoomPowerLevels;
-use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, StateEventType};
 use matrix_sdk::{Room, RoomMemberships};
 
@@ -101,7 +100,40 @@ pub(crate) async fn room_summary(
             RoomPriority::Normal
         },
         marked_unread: room.is_marked_unread(),
+        can_change_settings: power.as_ref().is_some_and(|power| {
+            crate::RoomRights::of(power, room.own_user_id(), room.encryption_state().is_encrypted(), false).any()
+        }),
+        knocks: knocks(room, power.as_ref()).await,
+        successor: successor(room).await,
     }
+}
+
+/// How many people ask to join, when the room lets people ask and the user may let them in.
+async fn knocks(room: &Room, power: Option<&RoomPowerLevels>) -> u64 {
+    use matrix_sdk::ruma::room::JoinRule;
+    let asks = matches!(room.join_rule(), Some(JoinRule::Knock | JoinRule::KnockRestricted(_)));
+    if !asks || !power.is_some_and(|power| power.user_can_invite(room.own_user_id())) {
+        return 0;
+    }
+    room.members_no_sync(RoomMemberships::KNOCK).await.map_or(0, |knocking| knocking.len() as u64)
+}
+
+/// The room that replaced `room`, with servers to join it through: the upgrader's, the old
+/// room's and the account's own.
+async fn successor(room: &Room) -> Option<crate::Successor> {
+    use matrix_sdk::ruma::events::room::tombstone::RoomTombstoneEventContent;
+    let successor = room.successor_room()?;
+    let mut via: Vec<String> = Vec::new();
+    if let Ok(Some(raw)) = room.get_state_event_static::<RoomTombstoneEventContent>().await
+        && let Ok(SyncOrStrippedState::Sync(event)) = raw.deserialize()
+    {
+        via.push(event.sender().server_name().to_string());
+    }
+    via.extend(room.room_id().server_name().map(ToString::to_string));
+    via.push(room.own_user_id().server_name().to_string());
+    let mut seen = std::collections::HashSet::new();
+    via.retain(|server| seen.insert(server.clone()));
+    Some(crate::Successor { room_id: successor.room_id.to_string(), reason: successor.reason, via })
 }
 
 /// How a call would start in the room, and who is in its call now.
@@ -137,19 +169,9 @@ fn call_in(
 }
 
 pub(crate) async fn space_summary(room: &Room) -> SpaceSummary {
-    // A child event with an empty `via` is a removed child.
-    let children = room
-        .get_state_events_static::<SpaceChildEventContent>()
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|raw| match raw.deserialize().ok()? {
-            SyncOrStrippedState::Sync(event) => {
-                event.as_original().filter(|e| !e.content.via.is_empty()).map(|e| e.state_key.to_string())
-            }
-            SyncOrStrippedState::Stripped(_) => None,
-        })
-        .collect();
+    let mut children = crate::admin::children(room).await;
+    crate::admin::sort_children(&mut children);
+    let children = children.into_iter().map(|child| child.room_id).collect();
     // Only what the store holds: the sync loop loads a space's full member list beside it.
     let members = room
         .members_no_sync(RoomMemberships::JOIN)
@@ -169,6 +191,7 @@ pub(crate) async fn space_summary(room: &Room) -> SpaceSummary {
         avatar: room.avatar_url().and_then(avatar),
         can_add_rooms: may(matrix_sdk::ruma::events::StateEventType::SpaceChild),
         can_rename: may(matrix_sdk::ruma::events::StateEventType::RoomName),
+        can_change_settings: power.as_ref().is_some_and(|power| crate::RoomRights::of(power, me, false, true).any()),
         children,
         members,
     }

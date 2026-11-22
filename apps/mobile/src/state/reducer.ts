@@ -97,6 +97,7 @@ function newAccount(summary: AccountSummary): AccountData {
     sessions: null,
     contacts: null,
     members: {},
+    roomSettings: {},
     threads: {},
     files: {},
     widgets: {},
@@ -569,6 +570,11 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
       return updateAccount(state, event.data.account, (a) => ({
         ...a,
         members: { ...a.members, [event.data.room_id]: event.data.members },
+      }));
+    case 'RoomSettings':
+      return updateAccount(state, event.data.account, (a) => ({
+        ...a,
+        roomSettings: { ...a.roomSettings, [event.data.settings.room_id]: event.data.settings },
       }));
     case 'MembersInvalidated':
       // Sync changed who is in the room or their rights: the next look lists them again.

@@ -181,7 +181,10 @@ describe('slashOf', () => {
 
   it('should set the topic', () => {
     expect(slash('/topic Release day')).toMatchObject({
-      command: { type: 'SetTopic', data: { ...ACCOUNT_ROOM, topic: 'Release day' } },
+      command: {
+        type: 'ChangeRoom',
+        data: { ...ACCOUNT_ROOM, setting: { type: 'Topic', data: 'Release day' } },
+      },
     });
   });
 

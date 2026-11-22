@@ -13,6 +13,7 @@ import type { MediaSize } from "./MediaSize";
 import type { MediaToggle } from "./MediaToggle";
 import type { Mentions } from "./Mentions";
 import type { Moderation } from "./Moderation";
+import type { NewRoom } from "./NewRoom";
 import type { NotificationMode } from "./NotificationMode";
 import type { Outgoing } from "./Outgoing";
 import type { Password } from "./Password";
@@ -23,9 +24,11 @@ import type { RegisterRequest } from "./RegisterRequest";
 import type { ReportTarget } from "./ReportTarget";
 import type { RequestId } from "./RequestId";
 import type { RoomPriority } from "./RoomPriority";
+import type { RoomSetting } from "./RoomSetting";
 import type { SafetyChange } from "./SafetyChange";
 import type { ScheduledAction } from "./ScheduledAction";
 import type { SidebarLayout } from "./SidebarLayout";
+import type { SpaceChange } from "./SpaceChange";
 import type { Status } from "./Status";
 import type { TimelineKey } from "./TimelineKey";
 import type { VideoId } from "./VideoId";
@@ -210,19 +213,7 @@ query: string,
 /**
  * The app's language (a BCP 47 tag), for the places' names.
  */
-language: string | null, } } | { "type": "SetTopic", "data": { 
-/**
- * The account changing it.
- */
-account: AccountId, 
-/**
- * The room.
- */
-room_id: string, 
-/**
- * The new topic.
- */
-topic: string, } } | { "type": "Redact", "data": { 
+language: string | null, } } | { "type": "Redact", "data": { 
 /**
  * The account that sent it.
  */
@@ -835,25 +826,17 @@ via: Array<string>, } } | { "type": "CreateRoom", "data": {
  */
 account: AccountId, 
 /**
- * Its name.
+ * What to make.
  */
-name: string, 
-/**
- * Its topic, if any.
- */
-topic: string | null, 
-/**
- * The space it belongs in, if any.
- */
-space: string | null, } } | { "type": "CreateSpace", "data": { 
+room: NewRoom, } } | { "type": "LoadRoomSettings", "data": { 
 /**
  * Whose.
  */
 account: AccountId, 
 /**
- * Its name.
+ * The room or space.
  */
-name: string, } } | { "type": "RenameRoom", "data": { 
+room_id: string, } } | { "type": "ChangeRoom", "data": { 
 /**
  * Whose.
  */
@@ -863,9 +846,45 @@ account: AccountId,
  */
 room_id: string, 
 /**
- * The new name.
+ * What to change.
  */
-name: string, } } | { "type": "SetSidebarLayout", "data": { 
+setting: RoomSetting, } } | { "type": "UpgradeRoom", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, 
+/**
+ * The version, from [`RoomSettings::upgrade_to`](crate::RoomSettings::upgrade_to).
+ */
+version: string, } } | { "type": "ChangeSpace", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The space.
+ */
+space: string, 
+/**
+ * What to change.
+ */
+change: SpaceChange, } } | { "type": "LeaveSpace", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The space.
+ */
+space: string, 
+/**
+ * Its rooms (and subspaces) to leave too.
+ */
+rooms: Array<string>, } } | { "type": "SetSidebarLayout", "data": { 
 /**
  * Whose.
  */

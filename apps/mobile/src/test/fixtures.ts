@@ -6,6 +6,8 @@ import type {
   MessageContent,
   Person,
   RoomChange,
+  RoomRights,
+  RoomSettings,
   RoomSummary,
   SpaceSummary,
   TimelineEntry,
@@ -57,6 +59,9 @@ export function roomSummary(
     can_rename: true,
     priority: 'Normal',
     marked_unread: false,
+    can_change_settings: true,
+    knocks: 0,
+    successor: null,
   };
 }
 
@@ -135,6 +140,54 @@ export function timelineOf(entries: TimelineEntry[], change: Partial<Timeline> =
   };
 }
 
+/** Every right to a room's settings, or none with `false`. */
+export function rights(all = true): RoomRights {
+  return {
+    name: all,
+    topic: all,
+    avatar: all,
+    join_rule: all,
+    history: all,
+    guest_access: all,
+    addresses: all,
+    encryption: all,
+    permissions: all,
+    upgrade: all,
+    space_rooms: all,
+  };
+}
+
+/** A private, unencrypted room's settings as an admin (level 100) sees them. */
+export function roomSettings(room_id: string, change: Partial<RoomSettings> = {}): RoomSettings {
+  return {
+    room_id,
+    space: false,
+    name: 'Lab',
+    topic: null,
+    avatar: null,
+    join_rule: 'Invite',
+    can_restrict: false,
+    can_knock: true,
+    history: 'Shared',
+    guest_access: false,
+    encrypted: false,
+    main_address: null,
+    addresses: [],
+    published: false,
+    server: 'example.org',
+    version: '11',
+    upgrade_to: null,
+    permissions: [
+      { permission: 'Invite', level: 0, editable: true },
+      { permission: 'Ban', level: 50, editable: true },
+      { permission: 'Upgrade', level: 150, editable: false },
+    ],
+    own_level: 100,
+    rights: rights(),
+    ...change,
+  };
+}
+
 /** A space holding `children` (rooms or subspaces), with `members` joined. */
 export function spaceSummary(
   room_id: string,
@@ -142,7 +195,16 @@ export function spaceSummary(
   members: string[] = [],
   name = room_id,
 ): SpaceSummary {
-  return { room_id, name, avatar: null, can_add_rooms: true, can_rename: true, children, members };
+  return {
+    room_id,
+    name,
+    avatar: null,
+    can_add_rooms: true,
+    can_rename: true,
+    can_change_settings: true,
+    children,
+    members,
+  };
 }
 
 /** Every character from `first` to `last`, in order. */

@@ -231,7 +231,10 @@ export function slashOf(
       return rest
         ? {
             type: 'command',
-            command: { type: 'SetTopic', data: { ...room(context), topic: rest } },
+            command: {
+              type: 'ChangeRoom',
+              data: { ...room(context), setting: { type: 'Topic', data: rest } },
+            },
             after: 'stay',
           }
         : usage();

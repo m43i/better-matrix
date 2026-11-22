@@ -13,6 +13,7 @@
 #![recursion_limit = "256"]
 
 pub mod account;
+pub mod admin;
 pub mod calls;
 pub mod discovery;
 pub mod engine;
@@ -59,6 +60,7 @@ pub mod widgets;
 pub mod links;
 
 pub use account::{Account, ClientIdentity, LoginRequest, OAuthRedirect};
+pub use admin::{NewRoom, Permission, PermissionLevel, RoomRights, RoomSetting, RoomSettings, SpaceChange};
 pub use calls::{
     CallDevices, CallEnd, CallInfo, CallParticipant, CallPhase, CallVia, DeviceChoice, DeviceKind, IncomingCall,
     MediaDevice, MediaToggle, RoomCall, VideoId, VideoSink,
@@ -73,8 +75,8 @@ pub use model::{
     HistoryVisibility, ImagePack, Invitation, Location, LoginMethods, MediaRef, MediaSize, Mentions, Message,
     MessageContent, Notification, NotificationMode, Outgoing, PackImage, Password, Person, Place, Poll, PollAnswer,
     PublicRoom, PushContent, PushTarget, Pusher, Quote, Reaction, ReadReceipt, RoomChange, RoomEvent, RoomKind,
-    RoomList, RoomPriority, RoomSummary, ScheduledAction, ScheduledMessage, SignInMethod, SpaceSummary, ThreadSummary,
-    TimelineDiff, TimelineEntry, TimelineKey, Upload,
+    RoomList, RoomPriority, RoomSummary, ScheduledAction, ScheduledMessage, SignInMethod, SpaceSummary, Successor,
+    ThreadSummary, TimelineDiff, TimelineEntry, TimelineKey, Upload,
 };
 
 /// How many messages a timeline page holds: what a room shows when it opens, and what each
@@ -244,6 +246,25 @@ pub enum Error {
     /// A push couldn't be registered or read.
     #[error("push notifications: {0}")]
     Push(String),
+    /// Only a room in a space can let the space's members join.
+    #[error("only a room in a space can let the space's members join")]
+    NoParentSpace,
+    /// The user's power level in the room doesn't allow it.
+    #[error("you aren't allowed to change that in this room")]
+    NotAllowed,
+    /// Someone's request to join or ban changed (another moderator answered it) before the
+    /// user's answer went out.
+    #[error("that changed meanwhile; the list shows how it is now")]
+    Outdated,
+    /// The room was upgraded already: its successor is where it goes on.
+    #[error("this room was replaced already")]
+    AlreadyReplaced,
+    /// A space's rooms changed while a new order for them was on its way.
+    #[error("the space's rooms changed meanwhile; try again")]
+    SpaceChanged,
+    /// Another room has that address.
+    #[error("{0} belongs to another room")]
+    AddressTaken(String),
     /// The server accepted a login but the client reports no user.
     #[error("the server accepted the login but reported no user ID")]
     NoUserId,

@@ -14,6 +14,7 @@ import {
   GRACE,
   entry,
   message,
+  roomSettings,
   roomSummary,
   spaceSummary,
   summary,
@@ -297,6 +298,60 @@ describe('apply', () => {
     expect(state.accounts[0]!.timelines['!a:x']!.readBoundary).toEqual({ kind: 'absent' });
   });
 
+  it('should keep a room settings by its room ID', () => {
+    const settings = roomSettings('!a:x');
+    const state = apply(signedIn(ADA), { type: 'RoomSettings', data: { account: ADA, settings } });
+
+    expect(state.accounts[0]!.roomSettings['!a:x']).toBe(settings);
+  });
+
+  it('should replace a room settings with fresher ones', () => {
+    let state = apply(signedIn(ADA), {
+      type: 'RoomSettings',
+      data: { account: ADA, settings: roomSettings('!a:x') },
+    });
+
+    state = apply(state, {
+      type: 'RoomSettings',
+      data: { account: ADA, settings: roomSettings('!a:x', { join_rule: 'Public' }) },
+    });
+
+    expect(state.accounts[0]!.roomSettings['!a:x']?.join_rule).toBe('Public');
+  });
+
+  it('should keep those asking to join and those banned with a room members', () => {
+    const asking = {
+      person: { id: GRACE, name: 'Grace', avatar: null },
+      role: 'Member' as const,
+      presence: 'Unknown' as const,
+      status_message: null,
+      verified: false,
+      level: 0,
+    };
+
+    const state = apply(signedIn(ADA), {
+      type: 'Members',
+      data: {
+        request: null,
+        account: ADA,
+        room_id: '!a:x',
+        members: {
+          people: [],
+          complete: true,
+          can_invite: true,
+          own_level: 100,
+          can_kick: true,
+          can_ban: true,
+          can_set_roles: true,
+          knocking: [asking],
+          banned: [],
+        },
+      },
+    });
+
+    expect(state.accounts[0]!.members['!a:x']?.knocking).toEqual([asking]);
+  });
+
   it('should forget a room members once sync says they changed', () => {
     const members = {
       people: [],
@@ -306,6 +361,8 @@ describe('apply', () => {
       can_kick: false,
       can_ban: false,
       can_set_roles: false,
+      knocking: [],
+      banned: [],
     };
 
     let state = apply(signedIn(ADA), {

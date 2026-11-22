@@ -121,6 +121,24 @@ pub struct RoomSummary {
     pub priority: RoomPriority,
     /// Whether the user marked the room unread (MSC2867); reading it clears the mark.
     pub marked_unread: bool,
+    /// Whether the user may change any of the room's settings: whether they are offered.
+    pub can_change_settings: bool,
+    /// How many people are asking to join, when the user may let them in.
+    pub knocks: u64,
+    /// The room that replaced this one, once it was upgraded.
+    pub successor: Option<Successor>,
+}
+
+/// The room that replaced an upgraded one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct Successor {
+    /// Its ID.
+    pub room_id: String,
+    /// Why the room was replaced, if the upgrade said.
+    pub reason: Option<String>,
+    /// Servers to join it through.
+    pub via: Vec<String>,
 }
 
 /// Where the user put a room: among their favourites, their low priority rooms, or neither.
@@ -387,6 +405,8 @@ pub struct SpaceSummary {
     pub can_add_rooms: bool,
     /// Whether the user may rename it.
     pub can_rename: bool,
+    /// Whether the user may change any of its settings: whether they are offered.
+    pub can_change_settings: bool,
     /// IDs of the rooms and subspaces it contains, in the space's order.
     pub children: Vec<String>,
     /// User IDs of its joined members, for showing direct chats with people in the space.

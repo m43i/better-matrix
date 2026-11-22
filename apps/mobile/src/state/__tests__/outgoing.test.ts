@@ -279,7 +279,7 @@ describe('planSend with pills and commands', () => {
       plan.composer.draft,
       plan.composer.replyTo,
       plan.after,
-    ]).toEqual([['SetTopic'], '', message('$q'), 'stay']);
+    ]).toEqual([['ChangeRoom'], '', message('$q'), 'stay']);
     expect(plan.composer.attachments).toEqual([file('/a.png')]);
   });
 

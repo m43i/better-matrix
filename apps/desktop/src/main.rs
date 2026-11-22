@@ -691,6 +691,57 @@ fn spec() -> AppSpec<State> {
                 s.select_scope(Scope::Space(demo::WORK_SPACE.into()));
                 s.open_room_form(state::RoomForm::NewRoom { space: Some(demo::WORK_SPACE.into()) });
             }),
+            ("demo-new-room-public", |s| {
+                demo::seed(s);
+                s.select_scope(Scope::Space(demo::WORK_SPACE.into()));
+                s.open_room_form(state::RoomForm::NewRoom { space: Some(demo::WORK_SPACE.into()) });
+                s.room_form_field(state::RoomFormField::Name).insert("release-notes");
+                s.set_room_form_rule(matrix_core::JoinRule::Public);
+                s.room_form_field(state::RoomFormField::Address).insert("release-notes");
+                s.toggle_room_form_published();
+            }),
+            ("demo-new-space", |s| {
+                demo::seed(s);
+                s.open_room_form(state::RoomForm::NewSpace);
+                s.room_form_field(state::RoomFormField::Name).insert("Difference Engines");
+                s.set_room_form_rule(matrix_core::JoinRule::Knock);
+            }),
+            ("demo-room-settings", |s| demo::room_settings(s, state::RoomSettingsSection::General)),
+            ("demo-room-settings-access", |s| demo::room_settings(s, state::RoomSettingsSection::Access)),
+            ("demo-room-settings-addresses", |s| demo::room_settings(s, state::RoomSettingsSection::Addresses)),
+            ("demo-room-settings-permissions", |s| {
+                demo::room_settings(s, state::RoomSettingsSection::Permissions);
+                s.edit_custom_level(matrix_core::Permission::Pins);
+            }),
+            ("demo-room-settings-advanced", |s| demo::room_settings(s, state::RoomSettingsSection::Advanced)),
+            ("demo-room-settings-encrypt", |s| {
+                demo::room_settings(s, state::RoomSettingsSection::Security);
+                s.ask_room_settings(state::SettingsConfirm::Encrypt);
+            }),
+            ("demo-join-requests", |s| {
+                demo::join_requests(s);
+                s.toggle_members();
+            }),
+            ("demo-join-requests-info", |s| {
+                demo::join_requests(s);
+                s.toggle_side(state::SidePanel::Info);
+            }),
+            ("demo-member-level", |s| {
+                demo::seed(s);
+                s.select_room(demo::DEMO_THREAD.0);
+                s.toggle_members();
+                s.open_member_level("@kai:example.org");
+            }),
+            ("demo-tombstone", demo::tombstone),
+            ("demo-space-rooms", |s| {
+                demo::seed(s);
+                s.open_space_rooms(demo::WORK_SPACE);
+            }),
+            ("demo-leave-space", |s| {
+                demo::seed(s);
+                s.ask_to_leave_space(demo::WORK_SPACE);
+                s.toggle_leave_with("!design:example.org");
+            }),
             ("demo-stress", demo::stress),
             ("demo-toast", |s| {
                 demo::seed(s);

@@ -61,6 +61,8 @@ function state(kind: 'Group' | 'Direct' = 'Group'): State {
           can_kick: false,
           can_ban: false,
           can_set_roles: false,
+          knocking: [],
+          banned: [],
         },
       },
     },

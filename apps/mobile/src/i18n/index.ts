@@ -34,6 +34,9 @@ import linksFr from './mobile/links.fr.json';
 import safetyEn from './mobile/safety.en.json';
 import safetyDe from './mobile/safety.de.json';
 import safetyFr from './mobile/safety.fr.json';
+import adminEn from './mobile/admin.en.json';
+import adminDe from './mobile/admin.de.json';
+import adminFr from './mobile/admin.fr.json';
 
 export type Locale = 'en' | 'de' | 'fr';
 
@@ -61,6 +64,7 @@ const mobileEn = {
   ...linksEn,
   ...pushEn,
   ...safetyEn,
+  ...adminEn,
 };
 
 const mobileDe = {
@@ -73,6 +77,7 @@ const mobileDe = {
   ...linksDe,
   ...pushDe,
   ...safetyDe,
+  ...adminDe,
 };
 
 const mobileFr = {
@@ -85,6 +90,7 @@ const mobileFr = {
   ...linksFr,
   ...pushFr,
   ...safetyFr,
+  ...adminFr,
 };
 
 export const catalogs: Record<Locale, Catalog> = {

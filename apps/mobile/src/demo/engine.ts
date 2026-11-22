@@ -9,20 +9,26 @@ import type {
   Answer,
   Command,
   Draft,
+  JoinRule,
   Message,
   MessageContent,
   MessageHit,
   Outgoing,
+  Members,
   RoomList,
   RequestId,
   RoomPreview,
   ScheduledMessage,
   Safety,
+  RoomSettings,
+  RoomSummary,
 } from '@better-matrix/matrix-native/types';
 
+import { withPending } from '../state/admin';
 import { mapOf } from '../state/geo';
 import { messageText } from '../state/messages';
 import { DEFAULT_SAFETY, withChange } from '../state/safety';
+import { roleLevel } from '../state/people';
 import { fuzzyMatch } from '../state/search';
 import {
   DEMO_DAY_MS,
@@ -33,6 +39,7 @@ import {
   demoQr,
   demoFiles,
   demoMembers,
+  demoRoomSettings,
   demoSessions,
   demoSource,
   demoThreads,
@@ -47,6 +54,7 @@ import {
   SIGN_OFF,
   signOffVersions,
   verificationEmojis,
+  LAB_V2,
 } from './fixtures';
 
 /** Resolves a demo media ref to a plain file path, or `null` when the demo has no such media. */
@@ -92,7 +100,7 @@ export function answer(
             request: null,
             account: command.data.account,
             room_id: command.data.room_id,
-            members: demoMembers(),
+            members: demoMembers(command.data.room_id),
           },
         },
       ];
@@ -515,8 +523,26 @@ const POLICIES = [
 
 const ACCOUNT_PAGE = 'https://account.hobby.chat/link';
 
-/** A room as a link shows it: #general (joined) by its alias or ID, else a public room nobody joined. */
+/**
+ * A room as a link shows it: #general (joined) by its alias or ID, #lab's successor, else a public
+ * room nobody joined.
+ */
 function demoPreview(room: string): RoomPreview {
+  if (room === LAB_V2) {
+    return {
+      room_id: LAB_V2,
+      alias: null,
+      name: 'lab',
+      topic: 'My own scratch room',
+      avatar: null,
+      member_count: 1,
+      join_rule: 'Invite',
+      space: false,
+      joined: false,
+      invited: false,
+    };
+  }
+
   if (room === GENERAL || room === '#general:example.org') {
     return {
       room_id: GENERAL,
@@ -643,6 +669,9 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
   const scheduled = new Map<string, ScheduledMessage[]>();
   /** Each account's safety choices, as its account data holds them. */
   const safeties = new Map<string, Safety>();
+  /** Rooms' settings and member lists as changes left them, by account and room. */
+  const settings = new Map<string, RoomSettings>();
+  const members = new Map<string, Members>();
   engine.subscribe((event) => {
     if (event.type === 'RoomsUpdated') lists.set(event.data.account, event.data.list);
 
@@ -656,6 +685,361 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
       type: 'ScheduledMessages',
       data: { account, messages: scheduled.get(account) ?? [] },
     });
+
+  const roomKeyOf = (account: string, roomId: string) => `${account}|${roomId}`;
+
+  /** The account's room list after `change`, reported as the engine reports it. */
+  const updateList = (account: string, change: (list: RoomList) => RoomList) => {
+    const list = lists.get(account);
+
+    if (list) engine.emit({ type: 'RoomsUpdated', data: { account, list: change(list) } });
+  };
+
+  /** Starts a room's settings with what it was made or joined with. */
+  const seed = (account: string, roomId: string, start: Partial<RoomSettings>): void => {
+    const made = settingsOf(account, roomId);
+
+    if (made) settings.set(roomKeyOf(account, roomId), { ...made, ...start });
+  };
+
+  const joinRuleOf = (account: string, roomId: string, rule: JoinRule): void =>
+    seed(account, roomId, { join_rule: rule });
+
+  /** A room's or space's settings as last changed, from the fixtures at first. */
+  const settingsOf = (account: string, roomId: string): RoomSettings | null => {
+    const known = settings.get(roomKeyOf(account, roomId));
+
+    if (known) return known;
+    const list = lists.get(account);
+    const room = list?.rooms.find((r) => r.room_id === roomId);
+    const space = list?.spaces.find((sp) => sp.room_id === roomId);
+
+    const made = room
+      ? demoRoomSettings(room, false)
+      : space
+        ? demoRoomSettings(space, true)
+        : null;
+
+    if (made) settings.set(roomKeyOf(account, roomId), made);
+
+    return made;
+  };
+
+  const membersOf = (account: string, roomId: string): Members =>
+    members.get(roomKeyOf(account, roomId)) ?? demoMembers(roomId);
+
+  /** A new group room, as the room list shows it. */
+  const newRoom = (roomId: string, name: string, topic: string | null): RoomSummary => ({
+    room_id: roomId,
+    name,
+    topic,
+    kind: 'Group',
+    unread: 0,
+    mentions: 0,
+    dm_users: [],
+    avatar: null,
+    member_count: 1,
+    active_member_count: 1,
+    history: 'Shared',
+    notifications: 'AllMessages',
+    custom_notifications: false,
+    call: { via: 'Rtc', participants: [] },
+    activity_ms: null,
+    encrypted: true,
+    pinned: [],
+    can_pin: true,
+    saved: [],
+    can_rename: true,
+    can_change_settings: true,
+    knocks: 0,
+    successor: null,
+    priority: 'Normal',
+    marked_unread: false,
+    public: false,
+  });
+
+  /** Whether a room was replaced by an upgrade: its levels are closed, it isn't upgraded again. */
+  const replaced = (account: string, roomId: string): boolean =>
+    lists.get(account)?.rooms.find((r) => r.room_id === roomId)?.successor != null;
+
+  /** A replaced room's settings as the engine reads them: nothing to upgrade or re-level. */
+  const sealed = (found: RoomSettings): RoomSettings => ({
+    ...found,
+    upgrade_to: null,
+    rights: { ...found.rights, upgrade: false },
+    permissions: found.permissions.map((p) => ({ ...p, editable: false })),
+  });
+
+  /**
+   * Answers the administration commands, as a homeserver would: `true` when done, the error when
+   * refused, `false` for any other command.
+   */
+  function administer(command: Command, request: RequestId): boolean | string {
+    switch (command.type) {
+      case 'ListMembers': {
+        const { account, room_id: roomId } = command.data;
+        engine.emit({
+          type: 'Members',
+          data: { request: null, account, room_id: roomId, members: membersOf(account, roomId) },
+        });
+
+        return true;
+      }
+
+      case 'ModerateMember': {
+        const { account, room_id: roomId, user_id: userId, action } = command.data;
+        const before = membersOf(account, roomId);
+        const asking = before.knocking.find((m) => m.person.id === userId);
+
+        const level =
+          action.type === 'Level'
+            ? action.data
+            : action.type === 'Role'
+              ? roleLevel(action.data)
+              : null;
+
+        const after: Members = {
+          ...before,
+          people:
+            action.type === 'Admit' && asking
+              ? [...before.people, asking]
+              : action.type === 'Kick' || action.type === 'Ban'
+                ? before.people.filter((m) => m.person.id !== userId)
+                : level === null
+                  ? before.people
+                  : before.people.map((m) =>
+                      m.person.id === userId
+                        ? {
+                            ...m,
+                            level,
+                            role: level >= 100 ? 'Admin' : level >= 50 ? 'Moderator' : 'Member',
+                          }
+                        : m,
+                    ),
+          knocking:
+            action.type === 'Admit' || action.type === 'Deny'
+              ? before.knocking.filter((m) => m.person.id !== userId)
+              : before.knocking,
+          banned:
+            action.type === 'Unban'
+              ? before.banned.filter((m) => m.person.id !== userId)
+              : action.type === 'Ban'
+                ? [...before.banned, ...before.people.filter((m) => m.person.id === userId)]
+                : before.banned,
+        };
+
+        members.set(roomKeyOf(account, roomId), after);
+        engine.emit({ type: 'MembersInvalidated', data: { account, room_id: roomId } });
+        updateList(account, (list) => ({
+          ...list,
+          rooms: list.rooms.map((r) =>
+            r.room_id === roomId ? { ...r, knocks: after.knocking.length } : r,
+          ),
+        }));
+
+        return true;
+      }
+
+      case 'LoadRoomSettings': {
+        const { account, room_id: roomId } = command.data;
+        const found = settingsOf(account, roomId);
+
+        if (!found) return false;
+        const shown = replaced(account, roomId) ? sealed(found) : found;
+        engine.emit({ type: 'RoomSettings', data: { account, settings: shown } });
+
+        return true;
+      }
+
+      case 'ChangeRoom': {
+        const { account, room_id: roomId, setting } = command.data;
+        const before = settingsOf(account, roomId);
+
+        if (!before) return false;
+
+        if (setting.type === 'Permission' && replaced(account, roomId)) {
+          return 'this room was replaced already';
+        }
+
+        const after = withPending(
+          setting.type === 'Avatar' && setting.data === null ? { ...before, avatar: null } : before,
+          [setting],
+        );
+
+        settings.set(roomKeyOf(account, roomId), after);
+        const shown = replaced(account, roomId) ? sealed(after) : after;
+        engine.emit({ type: 'RoomSettings', data: { account, settings: shown } });
+        updateList(account, (list) => ({
+          ...list,
+          rooms: list.rooms.map((r) =>
+            r.room_id === roomId
+              ? {
+                  ...r,
+                  name: after.name ?? r.name,
+                  topic: after.topic,
+                  avatar: after.avatar,
+                  history: after.history,
+                  encrypted: after.encrypted,
+                  public: after.join_rule === 'Public',
+                }
+              : r,
+          ),
+          spaces: list.spaces.map((sp) =>
+            sp.room_id === roomId
+              ? { ...sp, name: after.name ?? sp.name, avatar: after.avatar }
+              : sp,
+          ),
+        }));
+
+        return true;
+      }
+
+      case 'UpgradeRoom': {
+        const { account, room_id: roomId, version } = command.data;
+        const next = `${roomId.split(':')[0]}-v${version}:example.org`;
+        const old = lists.get(account)?.rooms.find((r) => r.room_id === roomId);
+
+        if (!old) return false;
+
+        if (old.successor) return 'this room was replaced already';
+        // The new room keeps the old one's rule, as the server copies it.
+        const rule = settingsOf(account, roomId)?.join_rule ?? (old.public ? 'Public' : 'Invite');
+        engine.emit({ type: 'RoomCreated', data: { request, room_id: next } });
+        updateList(account, (list) => ({
+          ...list,
+          rooms: [
+            ...list.rooms.map((r) =>
+              r.room_id === roomId
+                ? { ...r, successor: { room_id: next, reason: null, via: ['example.org'] } }
+                : r,
+            ),
+            { ...newRoom(next, old.name, old.topic), public: old.public },
+          ],
+          spaces: list.spaces.map((sp) => ({
+            ...sp,
+            children: sp.children.map((id) => (id === roomId ? next : id)),
+          })),
+        }));
+        settings.delete(roomKeyOf(account, roomId));
+        joinRuleOf(account, next, rule);
+
+        return true;
+      }
+
+      case 'ChangeSpace': {
+        const { account, space, change } = command.data;
+        updateList(account, (list) => ({
+          ...list,
+          spaces: list.spaces.map((sp) => {
+            if (sp.room_id !== space) return sp;
+
+            switch (change.type) {
+              case 'Add':
+                return { ...sp, children: [...sp.children, change.data] };
+              case 'Remove':
+                return { ...sp, children: sp.children.filter((id) => id !== change.data) };
+              case 'Order':
+                return { ...sp, children: change.data };
+            }
+          }),
+        }));
+
+        return true;
+      }
+
+      case 'LeaveSpace': {
+        const { account, space, rooms } = command.data;
+        updateList(account, (list) => ({
+          ...list,
+          rooms: list.rooms.filter((r) => !rooms.includes(r.room_id)),
+          spaces: list.spaces.filter((sp) => sp.room_id !== space && !rooms.includes(sp.room_id)),
+        }));
+
+        return true;
+      }
+
+      case 'CreateRoom': {
+        const { account, room } = command.data;
+        const roomId = `!${room.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${request}:example.org`;
+        engine.emit({ type: 'RoomCreated', data: { request, room_id: roomId } });
+        updateList(account, (list) =>
+          room.space
+            ? {
+                ...list,
+                spaces: [
+                  ...list.spaces,
+                  {
+                    room_id: roomId,
+                    name: room.name,
+                    avatar: null,
+                    can_add_rooms: true,
+                    can_rename: true,
+                    can_change_settings: true,
+                    children: [],
+                    members: [account],
+                  },
+                ],
+              }
+            : {
+                ...list,
+                rooms: [
+                  ...list.rooms,
+                  {
+                    ...newRoom(roomId, room.name, room.topic),
+                    encrypted: room.encrypted,
+                    public: room.join_rule === 'Public',
+                  },
+                ],
+                spaces: list.spaces.map((sp) =>
+                  sp.room_id === room.parent ? { ...sp, children: [...sp.children, roomId] } : sp,
+                ),
+              },
+        );
+
+        // Its settings start as it was asked for.
+        const address =
+          room.join_rule === 'Public' && room.address ? `#${room.address}:example.org` : null;
+
+        seed(account, roomId, {
+          join_rule: room.join_rule,
+          topic: room.topic,
+          encrypted: !room.space && room.encrypted,
+          main_address: address,
+          addresses: [],
+          published: room.join_rule === 'Public' && room.published,
+        });
+
+        return true;
+      }
+
+      case 'JoinRoom': {
+        const { account, room_id: roomId } = command.data;
+        const preview = demoPreview(roomId);
+        engine.emit({ type: 'RoomJoined', data: { request, room_id: preview.room_id } });
+
+        // A room already joined keeps its settings; a new one starts with the preview's rule.
+        if (!lists.get(account)?.rooms.some((r) => r.room_id === preview.room_id)) {
+          updateList(account, (list) => ({
+            ...list,
+            rooms: [
+              ...list.rooms,
+              {
+                ...newRoom(preview.room_id, preview.name ?? preview.room_id, preview.topic),
+                public: preview.join_rule === 'Public',
+              },
+            ],
+          }));
+
+          if (preview.join_rule) joinRuleOf(account, preview.room_id, preview.join_rule);
+        }
+
+        return true;
+      }
+
+      default:
+        return false;
+    }
+  }
 
   const finish = (request: RequestId, error?: string) =>
     engine.emit({
@@ -938,6 +1322,14 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
     if (first.length > 0) {
       for (const event of first) engine.emit(event);
       waiting.add(request);
+
+      return;
+    }
+
+    const administered = administer(command, request);
+
+    if (administered !== false) {
+      finish(request, administered === true ? undefined : administered);
 
       return;
     }

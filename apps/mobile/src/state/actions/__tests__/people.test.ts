@@ -1,5 +1,5 @@
 import { detachedEngine, type DetachedEngine } from '@better-matrix/matrix-native/client';
-import type { Command, Members } from '@better-matrix/matrix-native/types';
+import type { Command, Members, NewRoom } from '@better-matrix/matrix-native/types';
 
 import { t } from '../../../i18n';
 import { ADA, GRACE, roomSummary, summary } from '../../../test/fixtures';
@@ -47,6 +47,20 @@ function finish(engine: DetachedEngine['engine'], request: number, error?: strin
   });
 }
 
+/** What the form makes of a bare name: private, encrypted unless a space. */
+function newRoom(name: string, space: boolean): NewRoom {
+  return {
+    name,
+    topic: null,
+    space,
+    parent: null,
+    join_rule: 'Invite',
+    address: null,
+    published: false,
+    encrypted: !space,
+  };
+}
+
 const members: Members = {
   people: [],
   complete: true,
@@ -55,6 +69,8 @@ const members: Members = {
   can_kick: true,
   can_ban: true,
   can_set_roles: true,
+  knocking: [],
+  banned: [],
 };
 
 describe('people actions', () => {
@@ -128,7 +144,7 @@ describe('people actions', () => {
 
     const made = create(app.store, {
       type: 'CreateRoom',
-      data: { account: ADA, name: 'Lab', topic: null, space: null },
+      data: { account: ADA, room: newRoom('Lab', false) },
     });
 
     const { request } = last(app);
@@ -141,8 +157,8 @@ describe('people actions', () => {
     const app = setUp();
 
     const made = createSpace(app.store, {
-      type: 'CreateSpace',
-      data: { account: ADA, name: 'Club' },
+      type: 'CreateRoom',
+      data: { account: ADA, room: newRoom('Club', true) },
     });
 
     const { request } = last(app);

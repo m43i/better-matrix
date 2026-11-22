@@ -26,6 +26,10 @@ can_add_rooms: boolean,
  */
 can_rename: boolean, 
 /**
+ * Whether the user may change any of its settings: whether they are offered.
+ */
+can_change_settings: boolean, 
+/**
  * IDs of the rooms and subspaces it contains, in the space's order.
  */
 children: Array<string>, 

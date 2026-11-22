@@ -51,6 +51,9 @@ fn room(room_id: &str) -> RoomSummary {
         pinned: Vec::new(),
         can_pin: true,
         saved: Vec::new(),
+        can_change_settings: true,
+        knocks: 0,
+        successor: None,
         priority: matrix_core::RoomPriority::Normal,
         marked_unread: false,
     }
@@ -311,6 +314,7 @@ fn selecting_a_space_should_show_its_overview() {
         avatar: None,
         can_add_rooms: true,
         can_rename: true,
+        can_change_settings: true,
         children: vec!["!two:x".into()],
         members: Vec::new(),
     };
@@ -3130,6 +3134,7 @@ fn opening_a_room_in_another_joined_space_should_select_a_sidebar_that_lists_it(
         avatar: None,
         can_add_rooms: false,
         can_rename: false,
+        can_change_settings: false,
         children: vec!["!one:x".into()],
         members: Vec::new(),
     };
@@ -5827,7 +5832,7 @@ fn topic_should_set_the_rooms_topic() {
     s.composer.edit.insert("/topic Release week");
     s.send_message(ComposerTarget::Room, &mut Tx::default());
     assert!(all_commands(&mut commands).iter().any(
-        |command| matches!(command, Command::SetTopic { room_id, topic, .. } if room_id == "!one:x" && topic == "Release week")
+        |command| matches!(command, Command::ChangeRoom { room_id, setting: matrix_core::RoomSetting::Topic(topic), .. } if room_id == "!one:x" && topic == "Release week")
     ));
     assert!(s.composer.is_empty());
 }
@@ -5839,7 +5844,7 @@ fn a_command_hidden_in_a_spoiler_should_be_sent_as_a_spoiler() {
     s.composer.edit.insert_pill("spoiler", "/topic confidential");
     s.send_message(ComposerTarget::Room, &mut Tx::default());
     let all = all_commands(&mut commands);
-    assert!(!all.iter().any(|command| matches!(command, Command::SetTopic { .. })));
+    assert!(!all.iter().any(|command| matches!(command, Command::ChangeRoom { .. })));
     assert!(all.iter().any(|command| matches!(command, Command::Send { message: Outgoing::Text { body, .. }, .. } if !body.contains("confidential"))));
 }
 
@@ -5850,7 +5855,7 @@ fn a_topic_holding_a_spoiler_should_not_be_set() {
     s.composer.edit.insert("/topic ");
     s.composer.edit.insert_pill("spoiler", "confidential");
     s.send_message(ComposerTarget::Room, &mut Tx::default());
-    assert!(!all_commands(&mut commands).iter().any(|command| matches!(command, Command::SetTopic { .. })));
+    assert!(!all_commands(&mut commands).iter().any(|command| matches!(command, Command::ChangeRoom { .. })));
     assert!(s.notice.is_some());
     assert!(!s.composer.is_empty());
 }
@@ -6027,7 +6032,7 @@ fn a_command_that_sends_nothing_should_not_be_scheduled() {
     s.composer.edit.insert("/topic Release week");
     s.schedule_message(ComposerTarget::Room, When::Hour);
     let sent = all_commands(&mut commands);
-    assert!(sent.iter().all(|command| !matches!(command, Command::SetTopic { .. } | Command::Schedule { .. })));
+    assert!(sent.iter().all(|command| !matches!(command, Command::ChangeRoom { .. } | Command::Schedule { .. })));
     assert_eq!(s.composer.edit.text, "/topic Release week");
     assert!(s.notice.is_some());
 }
@@ -6347,10 +6352,10 @@ fn adding_a_widget_should_send_its_name_and_address() {
     let (mut s, mut commands) = state();
     signed_in_with(&mut s, matrix_core::SignInMethod::Password);
     s.start_add_widget("!one:x");
-    s.room_form_field(false).text = "Board".into();
-    s.room_form_field(true).text = " https://board.example ".into();
+    s.widget_field(false).text = "Board".into();
+    s.widget_field(true).text = " https://board.example ".into();
     drain(&mut commands);
-    s.submit_room_form();
+    s.submit_widget();
     assert_eq!(s.modal, None);
     assert!(all_commands(&mut commands).iter().any(|c| matches!(
         c,
@@ -6363,10 +6368,10 @@ fn a_widget_without_an_address_should_keep_its_form_open() {
     let (mut s, mut commands) = state();
     signed_in_with(&mut s, matrix_core::SignInMethod::Password);
     s.start_add_widget("!one:x");
-    s.room_form_field(false).text = "Board".into();
+    s.widget_field(false).text = "Board".into();
     drain(&mut commands);
-    s.submit_room_form();
-    assert!(matches!(s.modal, Some(Modal::RoomForm { form: RoomForm::AddWidget { .. }, .. })));
+    s.submit_widget();
+    assert!(matches!(s.modal, Some(Modal::AddWidget { .. })));
     assert!(all_commands(&mut commands).is_empty());
 }
 
@@ -6635,4 +6640,686 @@ fn removing_a_keyword_should_hide_it_at_once_and_tell_the_server() {
         all_commands(&mut commands),
         [Command::SetKeyword { account: id, keyword: "rust".into(), enabled: false }]
     );
+}
+
+// ----- administering rooms and spaces ------------------------------------------------------------
+
+/// A room's settings as an admin of level 50 reads them: Ban asks for more than that.
+fn admin_settings(room_id: &str) -> matrix_core::RoomSettings {
+    use matrix_core::{Permission, PermissionLevel};
+    matrix_core::RoomSettings {
+        room_id: room_id.into(),
+        name: Some("One".into()),
+        topic: Some("About one".into()),
+        join_rule: Some(matrix_core::JoinRule::Invite),
+        server: "example.org".into(),
+        version: "10".into(),
+        upgrade_to: Some("11".into()),
+        permissions: vec![
+            PermissionLevel { permission: Permission::Invite, level: 0, editable: true },
+            PermissionLevel { permission: Permission::Ban, level: 100, editable: false },
+        ],
+        own_level: 50,
+        rights: matrix_core::RoomRights {
+            name: true,
+            topic: true,
+            join_rule: true,
+            permissions: true,
+            upgrade: true,
+            encryption: true,
+            ..matrix_core::RoomRights::default()
+        },
+        ..matrix_core::RoomSettings::default()
+    }
+}
+
+/// Signed in with `!one:x`, its settings open and read.
+fn settings_open(settings: matrix_core::RoomSettings) -> (State, DetachedCommands, AccountId) {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.open_room_settings("!one:x");
+    apply(&mut s, Event::RoomSettings { account: id.clone(), settings: Box::new(settings) });
+    drain(&mut commands);
+    (s, commands, id)
+}
+
+#[test]
+fn a_successor_appearing_should_read_the_open_settings_again() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    let mut replaced = room("!one:x");
+    replaced.successor = Some(matrix_core::Successor { room_id: "!new:x".into(), reason: None, via: Vec::new() });
+    let list = RoomList { rooms: vec![replaced], ..RoomList::default() };
+    apply(&mut s, Event::RoomsUpdated { account: id, list });
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|command| matches!(command, Command::LoadRoomSettings { room_id, .. } if room_id == "!one:x"))
+    );
+}
+
+fn settings_dialog(s: &State) -> &RoomSettingsDialog {
+    match &s.modal {
+        Some(Modal::RoomSettings(dialog)) => dialog,
+        other => panic!("no room settings open: {other:?}"),
+    }
+}
+
+#[test]
+fn opening_room_settings_should_read_them() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    s.open_room_settings("!one:x");
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|command| matches!(command, Command::LoadRoomSettings { room_id, .. } if room_id == "!one:x"))
+    );
+}
+
+#[test]
+fn read_room_settings_should_be_kept_and_fill_the_fields() {
+    let (s, _, id) = settings_open(admin_settings("!one:x"));
+    assert!(s.accounts.get(&id).unwrap().room_settings.contains_key("!one:x"));
+    let dialog = settings_dialog(&s);
+    assert_eq!((dialog.name.text.as_str(), dialog.topic.text.as_str()), ("One", "About one"));
+}
+
+#[test]
+fn room_settings_should_open_on_a_section_the_user_may_change() {
+    let rights = matrix_core::RoomRights { permissions: true, ..matrix_core::RoomRights::default() };
+    let (s, _, _) = settings_open(matrix_core::RoomSettings { rights, ..admin_settings("!one:x") });
+    assert_eq!(settings_dialog(&s).section, RoomSettingsSection::Permissions);
+}
+
+#[test]
+fn sections_should_show_only_with_their_rights() {
+    let rights = matrix_core::RoomRights { name: true, upgrade: true, ..matrix_core::RoomRights::default() };
+    let settings = matrix_core::RoomSettings { rights, ..admin_settings("!one:x") };
+    assert_eq!(
+        RoomSettingsSection::all_shown(&settings),
+        vec![RoomSettingsSection::General, RoomSettingsSection::Advanced]
+    );
+}
+
+#[test]
+fn saving_a_new_name_should_change_the_rooms_name() {
+    let (mut s, mut commands, _) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Name) = TextEdit::new("Renamed ");
+    s.save_room_name();
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::ChangeRoom { room_id, setting: matrix_core::RoomSetting::Name(name), .. }
+            if room_id == "!one:x" && name == "Renamed"
+    )));
+}
+
+#[test]
+fn an_unchanged_name_should_not_be_saved() {
+    let (mut s, mut commands, _) = settings_open(admin_settings("!one:x"));
+    s.save_room_name();
+    assert!(all_commands(&mut commands).is_empty());
+}
+
+#[test]
+fn choosing_back_the_rule_shown_while_another_is_on_its_way_should_still_be_sent() {
+    let (mut s, mut commands, _) = settings_open(admin_settings("!one:x"));
+    s.change_room(matrix_core::RoomSetting::JoinRule(matrix_core::JoinRule::Public));
+    s.change_room(matrix_core::RoomSetting::JoinRule(matrix_core::JoinRule::Invite));
+    let sent: Vec<_> = all_commands(&mut commands)
+        .into_iter()
+        .filter_map(|command| match command {
+            Command::ChangeRoom { setting: matrix_core::RoomSetting::JoinRule(rule), .. } => Some(rule),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent, [matrix_core::JoinRule::Public, matrix_core::JoinRule::Invite]);
+}
+
+#[test]
+fn text_typed_back_while_a_save_is_on_its_way_should_stay() {
+    let (mut s, _, id) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("Replacement");
+    s.save_room_topic();
+    // Typed back to the old topic before the room confirms the new one.
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("About one");
+    let saved = matrix_core::RoomSettings { topic: Some("Replacement".into()), ..admin_settings("!one:x") };
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(saved) });
+    assert_eq!(settings_dialog(&s).topic.text, "About one");
+}
+
+#[test]
+fn saving_the_name_should_leave_an_unsaved_topic_alone() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("Draft topic");
+    *s.room_settings_field(SettingsField::Name) = TextEdit::new("Renamed");
+    s.save_room_name();
+    let (request, _) = drain(&mut commands).pop().unwrap();
+    let renamed = matrix_core::RoomSettings { name: Some("Renamed".into()), ..admin_settings("!one:x") };
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(renamed) });
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    assert_eq!(
+        (settings_dialog(&s).name.text.as_str(), settings_dialog(&s).topic.text.as_str()),
+        ("Renamed", "Draft topic")
+    );
+}
+
+#[test]
+fn an_earlier_save_answering_should_leave_a_field_to_the_later_one() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    s.save_room_topic();
+    let (first, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("C");
+    s.save_room_topic();
+    // Typed back to B while both are on their way; C arrives first, then the first save answers.
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    let latest = matrix_core::RoomSettings { topic: Some("C".into()), ..admin_settings("!one:x") };
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(latest) });
+    apply(&mut s, Event::Finished { request: first, result: Ok(()) });
+    assert_eq!(settings_dialog(&s).topic.text, "B");
+}
+
+#[test]
+fn an_older_save_answering_last_should_leave_the_field_alone() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    s.save_room_topic();
+    let (first, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("C");
+    s.save_room_topic();
+    let (second, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    let latest = matrix_core::RoomSettings { topic: Some("C".into()), ..admin_settings("!one:x") };
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(latest) });
+    apply(&mut s, Event::Finished { request: second, result: Ok(()) });
+    apply(&mut s, Event::Finished { request: first, result: Ok(()) });
+    assert_eq!(settings_dialog(&s).topic.text, "B");
+}
+
+#[test]
+fn a_draft_should_survive_a_refresh_after_the_latest_save_failed() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    s.save_room_topic();
+    let (first, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("C");
+    s.save_room_topic();
+    let (second, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("A");
+    let saved_b = matrix_core::RoomSettings { topic: Some("B".into()), ..admin_settings("!one:x") };
+    apply(&mut s, Event::RoomSettings { account: id.clone(), settings: Box::new(saved_b.clone()) });
+    apply(&mut s, Event::Finished { request: first, result: Ok(()) });
+    apply(&mut s, Event::Finished { request: second, result: Err("forbidden".into()) });
+    // A later refresh (a name saved, say) still finds the draft the user's.
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(saved_b) });
+    assert_eq!(settings_dialog(&s).topic.text, "A");
+}
+
+#[test]
+fn a_save_replaced_by_a_newer_one_should_not_report_its_failure() {
+    let (mut s, mut commands, _) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    s.save_room_topic();
+    let (first, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("C");
+    s.save_room_topic();
+    apply(&mut s, Event::Finished { request: first, result: Err("forbidden".into()) });
+    assert!(s.notice.is_none());
+}
+
+#[test]
+fn a_failed_save_should_keep_the_draft() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Name) = TextEdit::new("Renamed");
+    s.save_room_name();
+    let (request, _) = drain(&mut commands).pop().unwrap();
+    // The engine reports the settings as they stayed, then the failure.
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(admin_settings("!one:x")) });
+    apply(&mut s, Event::Finished { request, result: Err("forbidden".into()) });
+    assert_eq!(settings_dialog(&s).name.text, "Renamed");
+}
+
+#[test]
+fn a_name_changed_elsewhere_should_replace_an_untouched_field_but_not_an_edited_one() {
+    let (mut s, _, id) = settings_open(admin_settings("!one:x"));
+    let renamed = |name: &str| matrix_core::RoomSettings { name: Some(name.into()), ..admin_settings("!one:x") };
+    apply(&mut s, Event::RoomSettings { account: id.clone(), settings: Box::new(renamed("Renamed")) });
+    assert_eq!(settings_dialog(&s).name.text, "Renamed");
+    *s.room_settings_field(SettingsField::Name) = TextEdit::new("Mine");
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(renamed("Again")) });
+    assert_eq!(settings_dialog(&s).name.text, "Mine");
+}
+
+#[test]
+fn choosing_who_may_join_should_change_the_join_rule() {
+    let (mut s, mut commands, _) = settings_open(admin_settings("!one:x"));
+    s.change_room(matrix_core::RoomSetting::JoinRule(matrix_core::JoinRule::Knock));
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::ChangeRoom { setting: matrix_core::RoomSetting::JoinRule(matrix_core::JoinRule::Knock), .. }
+    )));
+}
+
+#[test]
+fn adding_an_address_should_send_its_local_part() {
+    let (mut s, mut commands, _) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Address) = TextEdit::new("#rust:example.org");
+    s.add_room_address();
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::ChangeRoom { setting: matrix_core::RoomSetting::AddAddress(local), .. } if local == "rust"
+    )));
+    assert!(settings_dialog(&s).address.text.is_empty());
+}
+
+#[test]
+fn a_permission_level_should_go_no_higher_than_the_users_own() {
+    let (mut s, mut commands, _) = settings_open(admin_settings("!one:x"));
+    s.set_permission_level(matrix_core::Permission::Invite, 100);
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::ChangeRoom {
+            setting: matrix_core::RoomSetting::Permission { permission: matrix_core::Permission::Invite, level: 50 },
+            ..
+        }
+    )));
+}
+
+#[test]
+fn a_picture_should_go_to_the_room_it_was_picked_for() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    s.pick_room_avatar();
+    // Meanwhile another room's settings open.
+    s.open_room_settings("!two:x");
+    drain(&mut commands);
+    let target = PickFor::RoomAvatar { account: id, room_id: "!one:x".into() };
+    s.files_picked(target, &[PathBuf::from("/tmp/room.png")]);
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::ChangeRoom { room_id, setting: matrix_core::RoomSetting::Avatar(Some(_)), .. } if room_id == "!one:x"
+    )));
+}
+
+#[test]
+fn a_permission_that_stops_being_changeable_should_stop_being_edited() {
+    let (mut s, _, id) = settings_open(admin_settings("!one:x"));
+    s.edit_custom_level(matrix_core::Permission::Invite);
+    s.open_select(SelectFor::Permission(matrix_core::Permission::Invite));
+    let mut sealed = admin_settings("!one:x");
+    sealed.permissions.iter_mut().for_each(|shown| shown.editable = false);
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(sealed) });
+    assert_eq!((settings_dialog(&s).custom.is_none(), s.popover.is_none()), (true, true));
+}
+
+#[test]
+fn sending_messages_at_its_shown_level_should_still_be_sent() {
+    let mut settings = admin_settings("!one:x");
+    settings.permissions.push(matrix_core::PermissionLevel {
+        permission: matrix_core::Permission::SendMessages,
+        level: 50,
+        editable: true,
+    });
+    let (mut s, mut commands, _) = settings_open(settings);
+    s.set_permission_level(matrix_core::Permission::SendMessages, 50);
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::ChangeRoom {
+            setting: matrix_core::RoomSetting::Permission {
+                permission: matrix_core::Permission::SendMessages,
+                level: 50
+            },
+            ..
+        }
+    )));
+}
+
+#[test]
+fn a_permission_asking_for_more_than_the_users_level_should_not_change() {
+    let (mut s, mut commands, _) = settings_open(admin_settings("!one:x"));
+    s.set_permission_level(matrix_core::Permission::Ban, 0);
+    assert!(all_commands(&mut commands).is_empty());
+}
+
+#[test]
+fn a_custom_level_should_be_sent_as_typed() {
+    let (mut s, mut commands, _) = settings_open(admin_settings("!one:x"));
+    s.edit_custom_level(matrix_core::Permission::Invite);
+    *s.room_settings_field(SettingsField::CustomLevel) = TextEdit::new("25");
+    s.save_custom_level();
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::ChangeRoom { setting: matrix_core::RoomSetting::Permission { level: 25, .. }, .. }
+    )));
+    assert!(settings_dialog(&s).custom.is_none());
+}
+
+#[test]
+fn turning_on_encryption_should_wait_for_the_users_word() {
+    let (mut s, mut commands, _) = settings_open(admin_settings("!one:x"));
+    s.ask_room_settings(SettingsConfirm::Encrypt);
+    assert!(all_commands(&mut commands).is_empty());
+    s.confirm_room_settings();
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|command| matches!(command, Command::ChangeRoom { setting: matrix_core::RoomSetting::Encrypt, .. }))
+    );
+}
+
+#[test]
+fn cancelling_a_question_should_go_back_to_the_settings() {
+    let (mut s, _, _) = settings_open(admin_settings("!one:x"));
+    s.ask_room_settings(SettingsConfirm::Encrypt);
+    s.cancel_room_settings_question();
+    assert_eq!(settings_dialog(&s).confirm, None);
+}
+
+#[test]
+fn an_upgrade_should_open_the_new_room_once_made() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    s.ask_room_settings(SettingsConfirm::Upgrade);
+    s.confirm_room_settings();
+    let (request, command) = drain(&mut commands).into_iter().next().unwrap();
+    assert!(matches!(command, Command::UpgradeRoom { room_id, version, .. } if room_id == "!one:x" && version == "11"));
+    let list = RoomList { rooms: vec![room("!one:x"), room("!new:x")], ..RoomList::default() };
+    apply(&mut s, Event::RoomsUpdated { account: id, list });
+    apply(&mut s, Event::RoomCreated { request, room_id: "!new:x".into() });
+    assert_eq!((s.active_room_id(), s.modal.is_none()), (Some("!new:x"), true));
+}
+
+#[test]
+fn an_upgrade_finishing_after_the_user_went_elsewhere_should_leave_them_there() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    s.ask_room_settings(SettingsConfirm::Upgrade);
+    s.confirm_room_settings();
+    let (request, _) = drain(&mut commands).into_iter().next().unwrap();
+    s.close_modal();
+    let list = RoomList { rooms: vec![room("!one:x"), room("!two:x"), room("!new:x")], ..RoomList::default() };
+    apply(&mut s, Event::RoomsUpdated { account: id, list });
+    s.select_room("!two:x");
+    apply(&mut s, Event::RoomCreated { request, room_id: "!new:x".into() });
+    assert_eq!(s.active_room_id(), Some("!two:x"));
+}
+
+/// The command the room form sends, after `fill` fills it in.
+fn created(form: RoomForm, fill: impl FnOnce(&mut State)) -> matrix_core::NewRoom {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    s.open_room_form(form);
+    *s.room_form_field(RoomFormField::Name) = TextEdit::new("Rust");
+    fill(&mut s);
+    s.submit_room_form();
+    match all_commands(&mut commands).into_iter().next() {
+        Some(Command::CreateRoom { room, .. }) => room,
+        other => panic!("no room made: {other:?}"),
+    }
+}
+
+#[test]
+fn a_new_room_should_be_private_and_encrypted() {
+    let room = created(RoomForm::NewRoom { space: None }, |_| {});
+    assert_eq!(room, matrix_core::NewRoom::private("Rust", false));
+}
+
+#[test]
+fn a_new_public_room_should_carry_its_address_and_listing_unencrypted() {
+    let room = created(RoomForm::NewRoom { space: None }, |s| {
+        s.set_room_form_rule(matrix_core::JoinRule::Public);
+        *s.room_form_field(RoomFormField::Address) = TextEdit::new("#rust");
+        s.toggle_room_form_published();
+    });
+    assert_eq!(
+        (room.join_rule, room.address.as_deref(), room.published, room.encrypted),
+        (matrix_core::JoinRule::Public, Some("rust"), true, false)
+    );
+}
+
+#[test]
+fn encryption_the_user_turned_on_should_stay_on_when_choosing_public() {
+    let room = created(RoomForm::NewRoom { space: None }, |s| {
+        s.toggle_room_form_encryption();
+        s.toggle_room_form_encryption();
+        s.set_room_form_rule(matrix_core::JoinRule::Public);
+    });
+    assert!(room.encrypted);
+}
+
+#[test]
+fn a_new_room_in_a_space_may_let_the_space_members_join() {
+    let room = created(RoomForm::NewRoom { space: Some("!space:x".into()) }, |s| {
+        s.set_room_form_rule(matrix_core::JoinRule::Restricted);
+    });
+    assert_eq!((room.join_rule, room.parent.as_deref()), (matrix_core::JoinRule::Restricted, Some("!space:x")));
+}
+
+#[test]
+fn a_new_space_should_never_be_encrypted() {
+    let room = created(RoomForm::NewSpace, |s| s.set_room_form_rule(matrix_core::JoinRule::Knock));
+    assert_eq!((room.space, room.encrypted, room.join_rule), (true, false, matrix_core::JoinRule::Knock));
+}
+
+/// Signed in with rooms `!one:x`, `!two:x` and `!three:x`, and the space `!space:x` listing
+/// `!one:x`, `!two:x` and a room not joined.
+fn in_a_space() -> (State, DetachedCommands, AccountId) {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    let space = SpaceSummary {
+        room_id: "!space:x".into(),
+        name: "Space".into(),
+        can_add_rooms: true,
+        children: vec!["!one:x".into(), "!two:x".into(), "!gone:x".into()],
+        ..SpaceSummary::default()
+    };
+    with_rooms(&mut s, &id, &["!one:x", "!two:x", "!three:x"], vec![space]);
+    drain(&mut commands);
+    (s, commands, id)
+}
+
+#[test]
+fn leaving_a_space_should_leave_only_the_chosen_rooms() {
+    let (mut s, mut commands, _) = in_a_space();
+    s.ask_to_leave_space("!space:x");
+    s.toggle_leave_with("!two:x");
+    s.leave_space();
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::LeaveSpace { space, rooms, .. } if space == "!space:x" && rooms == &["!two:x".to_owned()]
+    )));
+}
+
+#[test]
+fn choosing_all_should_choose_every_joined_room_of_the_space() {
+    let (mut s, _, _) = in_a_space();
+    s.ask_to_leave_space("!space:x");
+    s.toggle_leave_all();
+    assert!(
+        matches!(&s.modal, Some(Modal::LeaveSpace { chosen, .. }) if *chosen == ["!one:x".to_owned(), "!two:x".to_owned()])
+    );
+}
+
+#[test]
+fn moving_a_room_up_should_send_the_whole_new_order() {
+    let (mut s, mut commands, id) = in_a_space();
+    s.open_space_rooms("!space:x");
+    s.move_space_room("!two:x", -1);
+    let order = ["!two:x", "!one:x", "!gone:x"].map(String::from).to_vec();
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::ChangeSpace { change: matrix_core::SpaceChange::Order(sent), .. } if *sent == order
+    )));
+    assert_eq!(s.accounts.get(&id).unwrap().space("!space:x").unwrap().children, order);
+}
+
+#[test]
+fn a_refused_order_should_go_back_to_the_one_shown_before() {
+    let (mut s, mut commands, id) = in_a_space();
+    s.open_space_rooms("!space:x");
+    s.move_space_room("!two:x", -1);
+    let (request, _) = drain(&mut commands).pop().unwrap();
+    apply(&mut s, Event::Finished { request, result: Err("forbidden".into()) });
+    let shown = &s.accounts.get(&id).unwrap().space("!space:x").unwrap().children;
+    assert_eq!(*shown, ["!one:x", "!two:x", "!gone:x"].map(String::from).to_vec());
+}
+
+#[test]
+fn a_refused_order_should_not_undo_a_later_one() {
+    let (mut s, mut commands, id) = in_a_space();
+    s.open_space_rooms("!space:x");
+    s.move_space_room("!two:x", -1);
+    let (first, _) = drain(&mut commands).pop().unwrap();
+    s.move_space_room("!gone:x", -1);
+    apply(&mut s, Event::Finished { request: first, result: Err("forbidden".into()) });
+    let shown = &s.accounts.get(&id).unwrap().space("!space:x").unwrap().children;
+    assert_eq!(*shown, ["!two:x", "!gone:x", "!one:x"].map(String::from).to_vec());
+}
+
+#[test]
+fn losing_the_right_to_arrange_a_space_should_close_its_rooms() {
+    let (mut s, _, id) = in_a_space();
+    s.open_space_rooms("!space:x");
+    let space = SpaceSummary {
+        room_id: "!space:x".into(),
+        name: "Space".into(),
+        can_add_rooms: false,
+        children: vec!["!one:x".into()],
+        ..SpaceSummary::default()
+    };
+    let list = RoomList { rooms: vec![room("!one:x")], spaces: vec![space], invitations: Vec::new() };
+    apply(&mut s, Event::RoomsUpdated { account: id, list });
+    assert!(s.modal.is_none());
+}
+
+#[test]
+fn adding_a_room_to_a_space_should_send_it() {
+    let (mut s, mut commands, _) = in_a_space();
+    s.open_space_rooms("!space:x");
+    s.add_space_room("!three:x");
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::ChangeSpace { change: matrix_core::SpaceChange::Add(room), .. } if room == "!three:x"
+    )));
+}
+
+/// Signed in with `!old:x` replaced by `!new:x`, which the account may have joined; `!old:x` open.
+fn replaced(joined: bool) -> (State, DetachedCommands, AccountId) {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    let successor = matrix_core::Successor { room_id: "!new:x".into(), reason: None, via: vec!["x".into()] };
+    let mut rooms = vec![RoomSummary { successor: Some(successor), ..room("!old:x") }];
+    if joined {
+        rooms.push(room("!new:x"));
+    }
+    apply(&mut s, Event::RoomsUpdated { account: id.clone(), list: RoomList { rooms, ..RoomList::default() } });
+    s.select_room("!old:x");
+    drain(&mut commands);
+    (s, commands, id)
+}
+
+#[test]
+fn going_to_a_joined_successor_should_open_it() {
+    let (mut s, _, _) = replaced(true);
+    s.follow_successor();
+    assert_eq!(s.active_room_id(), Some("!new:x"));
+}
+
+#[test]
+fn going_to_a_successor_not_joined_should_join_it_and_then_open_it() {
+    let (mut s, mut commands, id) = replaced(false);
+    s.follow_successor();
+    let (request, command) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::JoinRoom { .. }))
+        .expect("a join");
+    assert!(matches!(command, Command::JoinRoom { room_id, via, .. } if room_id == "!new:x" && via == ["x"]));
+    assert!(s.following_successor(&id, "!old:x"));
+    let successor = matrix_core::Successor { room_id: "!new:x".into(), reason: None, via: Vec::new() };
+    let rooms = vec![RoomSummary { successor: Some(successor), ..room("!old:x") }, room("!new:x")];
+    apply(&mut s, Event::RoomsUpdated { account: id, list: RoomList { rooms, ..RoomList::default() } });
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    assert_eq!(s.active_room_id(), Some("!new:x"));
+}
+
+/// Signed in with `!one:x` open, where the user (level 50) may answer join requests and set roles.
+fn moderating(knocking: Vec<matrix_core::RoomMember>) -> (State, DetachedCommands) {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    s.select_room("!one:x");
+    let member = |user_id: &str| matrix_core::RoomMember {
+        person: matrix_core::Person { id: user_id.into(), name: user_id.into(), avatar: None },
+        role: matrix_core::MemberRole::Member,
+        presence: matrix_core::Presence::Unknown,
+        status_message: None,
+        verified: false,
+        level: 0,
+    };
+    let members = matrix_core::Members {
+        people: vec![member("@b:x")],
+        knocking,
+        complete: true,
+        own_level: 50,
+        can_invite: true,
+        can_kick: true,
+        can_set_roles: true,
+        ..matrix_core::Members::default()
+    };
+    apply(&mut s, Event::Members { request: None, account: id, room_id: "!one:x".into(), members });
+    drain(&mut commands);
+    (s, commands)
+}
+
+#[test]
+fn approving_a_join_request_should_let_them_in_at_once() {
+    let asking = matrix_core::RoomMember {
+        person: matrix_core::Person { id: "@k:x".into(), name: "Kim".into(), avatar: None },
+        role: matrix_core::MemberRole::Member,
+        presence: matrix_core::Presence::Unknown,
+        status_message: None,
+        verified: false,
+        level: 0,
+    };
+    let (mut s, mut commands) = moderating(vec![asking]);
+    s.moderate("@k:x", matrix_core::Moderation::Admit);
+    assert!(s.modal.is_none());
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::ModerateMember { user_id, action: matrix_core::Moderation::Admit, .. } if user_id == "@k:x"
+    )));
+}
+
+#[test]
+fn a_custom_member_level_should_go_no_higher_than_the_users_own() {
+    let (mut s, _) = moderating(Vec::new());
+    s.open_member_level("@b:x");
+    *s.modal_field() = TextEdit::new("51");
+    assert_eq!(s.member_level(), None);
+    *s.modal_field() = TextEdit::new("25");
+    assert_eq!(s.member_level(), Some(25));
+}
+
+#[test]
+fn a_custom_member_level_should_be_given_at_once_below_the_users_own() {
+    let (mut s, mut commands) = moderating(Vec::new());
+    s.open_member_level("@b:x");
+    *s.modal_field() = TextEdit::new("25");
+    s.submit_member_level();
+    assert!(
+        all_commands(&mut commands).iter().any(|command| matches!(
+            command,
+            Command::ModerateMember { action: matrix_core::Moderation::Level(25), .. }
+        ))
+    );
+}
+
+#[test]
+fn raising_a_member_to_the_users_own_level_should_ask_first() {
+    let (mut s, mut commands) = moderating(Vec::new());
+    s.open_member_level("@b:x");
+    *s.modal_field() = TextEdit::new("50");
+    s.submit_member_level();
+    assert!(matches!(s.modal, Some(Modal::Confirm(Confirm::Moderate { .. }))));
+    assert!(all_commands(&mut commands).is_empty());
 }

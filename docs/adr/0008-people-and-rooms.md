@@ -1,7 +1,7 @@
 # 0008. People and rooms
 
 Status: Accepted
-Date: 2026-11-14
+Date: 2026-11-22
 
 ## Context
 
@@ -272,19 +272,116 @@ Date: 2026-11-14
   falling back to the space's server, the room's server, or this account's server if neither ID
   names one. A repeated pagination token is reported as a server pagination error.
 - **Direct chats:** `Command::OpenDirectChat` opens the existing chat or starts one.
-- **Making rooms** (`Command::CreateRoom`, `CreateSpace`, `RenameRoom`):
-  - Rooms are private and encrypted. One made in a space is linked both ways.
+- **Making rooms** (`Command::CreateRoom` with a `NewRoom`):
+  - One command makes rooms and spaces (`NewRoom::space`). The form chooses who may join
+    (`JoinRule`): Private (invite only, the default), Space members (restricted to the parent
+    space, offered only for a room made in a space), Ask to join (knock, rooms only: nothing
+    answers requests to join a space) and Public. A public one
+    may take an address (a local part on the account's server) and be listed in the server's
+    directory. Rooms are encrypted by default; the form lets a room go without (a public room's
+    default), and spaces never are. One made in a space is linked both ways.
   - The sidebar header's "+" offers a new section, a room in a space where
     `SpaceSummary::can_add_rooms`, or a room from Home.
   - On desktop, the rail's "+" after the last space opens the new-space form from any scope,
     including when the account has no spaces yet. It requires an active signed-in account.
     Creating a top-level space has no existing space's power-level requirement, and Matrix's
     [capabilities API](https://spec.matrix.org/latest/client-server-api/#capabilities-negotiation)
-    exposes no creation permission. Homeserver restrictions are enforced by `CreateSpace` and
+    exposes no creation permission. Homeserver restrictions are enforced by `CreateRoom` and
     reported through the usual failure notice; `can_add_rooms` only governs linking rooms to
-    an existing space.
-  - Right-clicking a space on the rail offers rename (`can_rename`) and leave. Matrix can't
-    delete a space for everyone.
+    an existing space. A space is Private or Public (with an address and directory listing).
+  - Right-clicking a space on the rail offers settings, its rooms (`can_add_rooms`) and leave.
+    Matrix can't delete a space for everyone.
+- **Room settings** (`admin.rs`: `Command::LoadRoomSettings` → `Event::RoomSettings`,
+  `Command::ChangeRoom` with one `RoomSetting`):
+  - One snapshot (`RoomSettings`) carries everything the settings show, with the user's
+    `RoomRights` read from the power levels. Settings are offered only when
+    `RoomSummary::can_change_settings` / `SpaceSummary::can_change_settings` (any right), and
+    each part shows only with its right; read-only parts aren't shown.
+  - On desktop the settings are a modal (`Modal::RoomSettings`, `state/admin.rs`) opened from
+    the room info panel, the sidebar's room menu and the rail's space menu. Its sections
+    (General, Access, Addresses, Security, Permissions, Advanced) show only when they hold a
+    part the user may change; the settings read are kept per account by room ID and refreshed
+    by every `Event::RoomSettings`. Turning on encryption and upgrading ask inside the modal
+    first; an upgrade's `Event::RoomCreated` opens the new room.
+  - A change is one `RoomSetting` variant: name, topic, picture, join rule, history, guest
+    access, directory listing, addresses (add, remove, make main), turning on encryption (one
+    way: confirmed first), and one permission's level. Renaming is `RoomSetting::Name`; there is
+    no separate rename command. The engine waits (up to 10 s) for sync to bring the change, then
+    reports fresh settings (read in the same queued job, as are plain loads, so reports come in
+    the order of the changes) and the room list, also after a failure.
+  - Space members (restricted) lets in the members of the spaces linked with the room both
+    ways: joined spaces that list it as a child and that it names as its parent. Neither link
+    alone is trusted: a room's `m.space.parent` may name any space, and any space may list any
+    room. It is offered only when there is such a space and the room version allows the rule;
+    Ask to join likewise needs a version that allows knocking. The engine skips a rule already in
+    force when the change runs (the apps always send the user's latest choice, as an earlier one
+    may still be on its way), so the allow list isn't rebuilt by accident.
+  - Changes to one account's rooms and spaces run one at a time, queued in the order the engine
+    got the commands (`Account::admin_changes`, shared with role and level changes and space
+    changes): each reads the state the one before left once sync brought it (up to 10 s; a permission
+    counts as brought once every level it wrote shows), so two
+    edits of the same state event (power levels, addresses, a space's order) can't undo each
+    other. A sync stalled longer than that is left to the server's own checks. The engine also
+    ignores a join rule already in force, whatever an open screen shows.
+  - An address is made only with the right to list it, and deleted again if listing it fails.
+    Removing one unlists it; only one on the account's server, still leading to this room, is
+    deleted (another server's isn't looked up, so its outage can't block the removal).
+  - Rights lost while the settings are open (a power-level change from elsewhere) refresh them
+    when the room list's rights change; otherwise the server refuses the change, and the fresh
+    settings the engine sends after every change, failed or not, take the control away.
+  - Open settings and Manage rooms follow the rights: when the room list's rights change, the
+    settings are read again, and a dialog the user may no longer use closes.
+  - Addresses typed without a server are on the account's server. Adding publishes the alias
+    and lists it in `m.room.canonical_alias` (the first becomes the main one); removing unlists
+    it and deletes it when it is on the account's server. Directory listing reads the server's
+    visibility; when the server won't say, it isn't offered.
+  - **Permissions:** the editor lists `Permission::listed` (rooms and spaces differ) with each
+    one's level, chosen as Admin (100), Moderator (50), Member (0) or a custom number, never above
+    the user's own level. Access covers join rules, history and guest access together, and shows
+    the highest of their levels: what one must reach to change all three. Send messages is what a message
+    needs: the higher of `m.room.message`'s and `m.room.encrypted`'s levels, each its own where
+    the room sets one, else the default for events; setting it sets the default for events (messages, polls and
+    reactions alike, as Element has it) and any message level the room set of its own, making
+    up none (an upgrade would carry it past the server's raised default). It is sent even at the level shown (one of them
+    may differ), as is Access. Each permission says whether the user may change it
+    (`PermissionLevel::editable`): every level its change writes is within their own, and the
+    room wasn't replaced (an upgrade raised its levels to close it; the engine refuses too).
+- **Room upgrades** (`Command::UpgradeRoom`): offered for rooms (not spaces, whose successor
+  nothing follows yet, nor a room replaced already: `Error::AlreadyReplaced`) when the user may send the tombstone and the server's default version is
+  a higher number than the room's. The server makes the new room; spaces the user may arrange
+  list it in the old room's place (same order and suggestion; when the old room had no order
+  key of its own, the space gets keys that keep everyone where they were), and drop the old
+  room only once the new one is in. The new room opens only if the user is still on the old
+  room or its settings. A replaced room's thread composers show the same banner: the upgrade raised its send
+  level. Unless anyone may join, the old room's joined members are invited to the new one (best
+  effort), so they can follow it: also from a Space members room, where one invited directly
+  or no longer in the space wouldn't be let in. The invitations run after the upgrade, outside
+  the admin queue, as rate limits can make them slow. The new room names those of its spaces the old room named (the server
+  doesn't carry `m.space.parent` over), so Space members stays possible there. Leaving a room leaves its predecessors too, as the SDK does. A tombstoned
+  room keeps its place in the list and shows a banner instead of the composer, with Go to the
+  new room (`RoomSummary::successor`, joined through the upgrader's, the old room's and the
+  account's servers when not joined yet).
+- **Join requests:** `Members::knocking` and `Members::banned` list those asking to join and
+  those banned beside the joined members. Approve invites (`Moderation::Admit`, the invite right
+  alone), Deny kicks (`Moderation::Deny`), Unban (`Moderation::Unban`) needs the ban and kick
+  rights, as Matrix's authorization rules do. Each acts only while the request or ban still stands (another
+  moderator may have answered it), as the homeserver has the membership now (the store may have
+  missed a change in a sync gap): otherwise it fails with `Error::Outdated`, the member list is
+  read afresh from the server and shows how it is now, so a stale Deny never removes someone who joined. `RoomSummary::knocks`
+  counts requests only when the room's rule is knock and the user may invite, so a store read
+  happens only for such rooms.
+- **Power levels per member:** besides the three roles, `Moderation::Level` sets any level up to
+  the user's own.
+- **Space rooms** (`Command::ChangeSpace` with a `SpaceChange`): add a joined room (it names the
+  space as parent where the user may), remove one (and its parent link where the user may), or
+  order them. Removing a room changes only the space's arrangement, as in Element: who may join
+  the room stays its own setting (a Space members rule keeps its allow list until changed in
+  the room's Access settings). Children sort as the spec says: by `order`, then by when they were added. A new
+  order writes fixed-width `order` keys only to children out of place, shows at once, and goes
+  back if refused (unless a later order followed). An order naming other rooms than the space
+  has by the time it runs (one replaced or removed meanwhile) is refused (`Error::SpaceChanged`). The sidebar keeps its own order (activity
+  and sections); the space's order is what Manage rooms and other clients show. Leaving a space
+  (`Command::LeaveSpace`) asks which of its joined rooms to leave too; none by default.
 - **Permalinks** (`matrix_core::Permalink`, `permalinks.rs`) read matrix.to links (encoded or
   not, `#/@user`, `#/#alias`, `#/!room`, `#/!room/$event`, `?via=`) and `matrix:` URIs
   (`u/`, `r/`, `roomid/`, `/e/`, `?via=`, `?action=join|chat`). IDs are checked loosely (a sigil,
@@ -307,7 +404,7 @@ Date: 2026-11-14
   picture, name, alias, members, topic, and Join when `RoomPreview::joinable` (invited, public,
   or restricted, which only the server can check). A preview that names a room some account
   joined opens it instead, unless the user picked the account. A room no server describes
-  still offers Join. Knocking isn't offered (the preview says so), and `?action=join|chat` never
+  still offers Join. Knocking from a preview isn't offered (the preview says so), and `?action=join|chat` never
   acts by itself: a link can't make the user join or start a chat without a press.
 - **Joining** (`Command::JoinRoom`, by the previewed room ID or the link's alias, through the
   link's `via` servers) waits for the account's room feed to list the room before

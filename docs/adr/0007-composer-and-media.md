@@ -55,7 +55,7 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
 - **Slash commands** (`state::slash`): `/me`, `/shrug`, `/tableflip`, `/unflip`, `/lenny`,
   `/plain`, `/spoiler`, `/invite`, `/join`, `/leave`, `/topic`, `/nick`. Each becomes something
   that exists: an emote or text through the usual send (with the draft's reply), an invite, the
-  link dialog for a join (`open_typed_link`), the leave confirmation, `Command::SetTopic`, the
+  link dialog for a join (`open_typed_link`), the leave confirmation, `Command::ChangeRoom` (`RoomSetting::Topic`, the room settings' own path), the
   global display name. A name the app doesn't know stops the send with a notice and keeps the
   text: a typo never goes out. `//` sends a leading slash; `/usr/bin` is a message.
 - **Spoilers and formulas:** received spoilers draw as a block of their own colour, carrying an

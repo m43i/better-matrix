@@ -55,6 +55,8 @@ function withMembers(state: State): State {
     can_kick: false,
     can_ban: false,
     can_set_roles: false,
+    knocking: [],
+    banned: [],
   };
 
   return apply(state, {

@@ -1,7 +1,7 @@
 // People and rooms, as plain data: finding members, what the user may do to them, searching the
-// user directory as it is typed, and the forms that make or rename rooms. The desktop's rules
-// (apps/desktop/src/state/search.rs, matrix-core's `Members::may`), shared by the screens in
-// ui/people and tested in __tests__/people.test.ts.
+// user directory as it is typed, and renaming rooms (making them is state/admin.ts). The
+// desktop's rules (apps/desktop/src/state/search.rs, matrix-core's `Members::may`), shared by the
+// screens in ui/people and tested in __tests__/people.test.ts.
 
 import type {
   AccountId,
@@ -71,7 +71,8 @@ export const ROLES: readonly MemberRole[] = ['Admin', 'Moderator', 'Member'];
 
 /**
  * Whether the user may do `action` to `member`, as the engine's `Members::may` decides: with
- * the right, and only to members below the user's own level; a role no higher than their own.
+ * the right, and only to members below the user's own level; a role or level no higher than
+ * their own. Approving or denying a join request and unbanning act on people outside the room.
  */
 export function may(members: Members, action: Moderation, member: RoomMember): boolean {
   let allowed: boolean;
@@ -87,7 +88,21 @@ export function may(members: Members, action: Moderation, member: RoomMember): b
       allowed =
         members.can_set_roles &&
         roleLevel(action.data) <= members.own_level &&
-        action.data !== member.role;
+        roleLevel(action.data) !== member.level;
+      break;
+    case 'Level':
+      allowed =
+        members.can_set_roles && action.data <= members.own_level && action.data !== member.level;
+      break;
+    case 'Admit':
+      // An invitation needs no rank above the one invited.
+      return members.can_invite;
+    case 'Deny':
+      allowed = members.can_kick;
+      break;
+    case 'Unban':
+      // Lifting a ban is a kick from it: both rights (Matrix's authorization rules).
+      allowed = members.can_ban && members.can_kick;
       break;
   }
 
@@ -99,27 +114,35 @@ export function rolesOffered(members: Members, member: RoomMember): MemberRole[]
   return ROLES.filter((role) => may(members, { type: 'Role', data: role }, member));
 }
 
+/** Whether the user may give `member` a level of their own choosing (any up to their own). */
+export function mayChooseLevel(members: Members, member: RoomMember): boolean {
+  return members.can_set_roles && member.level < members.own_level;
+}
+
 /**
- * Whether `action` waits for the user's confirmation: kicking and banning always, a role only
- * when it reaches the user's own level (equals can't demote each other, so it can't be undone).
+ * Whether `action` waits for the user's confirmation: kicking, banning and denying a request
+ * always, a role or level only when it reaches the user's own (equals can't demote each other, so
+ * it can't be undone); approving a request and unbanning never.
  */
 export function asksFirst(action: Moderation, ownLevel: number): boolean {
-  return action.type === 'Role' ? roleLevel(action.data) >= ownLevel : true;
+  switch (action.type) {
+    case 'Role':
+      return roleLevel(action.data) >= ownLevel;
+    case 'Level':
+      return action.data >= ownLevel;
+    case 'Admit':
+    case 'Unban':
+      return false;
+    case 'Kick':
+    case 'Ban':
+    case 'Deny':
+      return true;
+  }
 }
 
 /** A member of a room, by user ID. */
 export function memberOf(members: Members | undefined, userId: string): RoomMember | undefined {
   return members?.people.find((m) => m.person.id === userId);
-}
-
-/**
- * Whether the user may rename a group room. The room list doesn't say, so this reads it the way
- * Matrix rooms are set up by default: changing a room's state takes a moderator.
- */
-export function mayRename(room: RoomSummary, members: Members | undefined): boolean {
-  return (
-    room.kind === 'Group' && members !== undefined && members.own_level >= roleLevel('Moderator')
-  );
 }
 
 // ----- rooms ---------------------------------------------------------------------------------
@@ -135,53 +158,6 @@ export function inviteTargets(rooms: RoomSummary[], current: string): RoomSummar
 /** The spaces a new room may go in: those the user may add rooms to. */
 export function spacesForNewRoom(spaces: SpaceSummary[]): SpaceSummary[] {
   return spaces.filter((s) => s.can_add_rooms);
-}
-
-/** What the new-room form holds. */
-export interface RoomDraft {
-  name: string;
-  topic: string;
-  space: string | null;
-}
-
-/** The command that makes the room the form describes, or `null` while it has no name. */
-export function createRoomCommand(
-  account: AccountId,
-  draft: RoomDraft,
-): CommandOf<'CreateRoom'> | null {
-  const name = draft.name.trim();
-
-  if (name === '') return null;
-  const topic = draft.topic.trim();
-
-  return {
-    type: 'CreateRoom',
-    data: { account, name, topic: topic === '' ? null : topic, space: draft.space },
-  };
-}
-
-/** The command that makes a space, or `null` while it has no name. */
-export function createSpaceCommand(
-  account: AccountId,
-  name: string,
-): CommandOf<'CreateSpace'> | null {
-  const trimmed = name.trim();
-
-  return trimmed === '' ? null : { type: 'CreateSpace', data: { account, name: trimmed } };
-}
-
-/** The command that renames a room, or `null` while there is no name or it is unchanged. */
-export function renameCommand(
-  account: AccountId,
-  roomId: string,
-  current: string,
-  name: string,
-): CommandOf<'RenameRoom'> | null {
-  const trimmed = name.trim();
-
-  if (trimmed === '' || trimmed === current) return null;
-
-  return { type: 'RenameRoom', data: { account, room_id: roomId, name: trimmed } };
 }
 
 /** `room` as its notification mode leaves it: its own, or with `null` the account's default. */

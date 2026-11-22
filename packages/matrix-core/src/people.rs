@@ -89,7 +89,7 @@ impl MemberRole {
     }
 }
 
-/// What a moderator does to a member.
+/// What a moderator does to a member, or to someone asking to join.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 #[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
@@ -100,6 +100,14 @@ pub enum Moderation {
     Ban,
     /// Give them a role.
     Role(MemberRole),
+    /// Give them a power level of the user's choosing.
+    Level(i64),
+    /// Let someone banned join again (after an invitation, or as the room's rule allows).
+    Unban,
+    /// Let someone asking to join in: they are invited.
+    Admit,
+    /// Turn down someone asking to join.
+    Deny,
 }
 
 /// A room's joined members, as the member list shows them.
@@ -121,6 +129,10 @@ pub struct Members {
     pub can_ban: bool,
     /// Whether the user may change members' roles.
     pub can_set_roles: bool,
+    /// Those asking to join (when the room lets people ask), by name.
+    pub knocking: Vec<RoomMember>,
+    /// Those banned, by name.
+    pub banned: Vec<RoomMember>,
 }
 
 impl Members {
@@ -129,9 +141,39 @@ impl Members {
         let allowed = match action {
             Moderation::Kick => self.can_kick,
             Moderation::Ban => self.can_ban,
-            Moderation::Role(role) => self.can_set_roles && role.level() <= self.own_level && role != member.role,
+            // By the exact level: someone at a custom 25 may be set back to Member (0).
+            Moderation::Role(role) => {
+                self.can_set_roles && role.level() <= self.own_level && role.level() != member.level
+            }
+            Moderation::Level(level) => self.can_set_roles && level <= self.own_level && level != member.level,
+            // Lifting a ban is a kick from it: both rights (Matrix's authorization rules).
+            Moderation::Unban => self.can_ban && self.can_kick,
+            // An invitation needs no rank above the one invited.
+            Moderation::Admit => return self.can_invite,
+            Moderation::Deny => self.can_kick,
         };
         allowed && member.level < self.own_level
+    }
+}
+
+/// Someone asking to join or banned, as the member list shows them: no presence or verification.
+fn outsider(member: &matrix_sdk::room::RoomMember) -> RoomMember {
+    use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
+    let level = match member.power_level() {
+        UserPowerLevel::Int(level) => i64::from(level),
+        _ => i64::MAX,
+    };
+    RoomMember {
+        person: Person {
+            id: member.user_id().to_string(),
+            name: member.name().to_owned(),
+            avatar: member.avatar_url().map(ToOwned::to_owned).and_then(convert::avatar),
+        },
+        role: MemberRole::Member,
+        presence: Presence::Unknown,
+        status_message: None,
+        verified: false,
+        level,
     }
 }
 
@@ -142,8 +184,14 @@ fn shows(member: &matrix_sdk::room::RoomMember, action: Moderation) -> bool {
     match action {
         Moderation::Kick => *member.membership() != MembershipState::Join,
         Moderation::Ban => *member.membership() == MembershipState::Ban,
+        Moderation::Unban => *member.membership() != MembershipState::Ban,
+        Moderation::Admit => *member.membership() == MembershipState::Invite,
+        Moderation::Deny => *member.membership() != MembershipState::Knock,
         Moderation::Role(role) => {
             matches!(member.power_level(), UserPowerLevel::Int(level) if i64::from(level) == role.level())
+        }
+        Moderation::Level(wanted) => {
+            matches!(member.power_level(), UserPowerLevel::Int(level) if i64::from(level) == wanted)
         }
     }
 }
@@ -235,9 +283,23 @@ impl Account {
         let may = |check: &dyn Fn(&matrix_sdk::ruma::events::room::power_levels::RoomPowerLevels) -> bool| {
             power.as_ref().is_some_and(check)
         };
+        // Those asking to join and those banned: few, so as the store has them, by name.
+        let outside = |membership: RoomMemberships| {
+            let room = room.clone();
+            async move {
+                let mut people: Vec<RoomMember> =
+                    room.members_no_sync(membership).await.unwrap_or_default().iter().map(outsider).collect();
+                people.sort_by_cached_key(|member| member.person.name.to_lowercase());
+                people
+            }
+        };
+        let knocking = outside(RoomMemberships::KNOCK).await;
+        let banned = outside(RoomMemberships::BAN).await;
         Ok(Members {
             people,
             complete,
+            knocking,
+            banned,
             can_invite,
             own_level,
             can_kick: may(&|p| p.user_can_kick(&me)),
@@ -248,19 +310,40 @@ impl Account {
         })
     }
 
-    /// Kicks, bans or changes the role of a member of a room.
+    /// Kicks, bans, unbans or changes the power level of a member of a room, or answers someone
+    /// asking to join.
     pub async fn moderate(&self, room_id: &str, user_id: &str, action: Moderation) -> Result<(), Error> {
         let room = self
             .client()
             .get_room(&RoomId::parse(room_id)?)
             .ok_or_else(|| Error::UnknownRoom { account: self.id().clone(), room_id: room_id.to_owned() })?;
         let user = UserId::parse(user_id)?;
+        // An answer to a request to join, or an unban, only while it still stands: denying
+        // someone another moderator let in meanwhile would remove a member.
+        use matrix_sdk::ruma::events::room::member::MembershipState;
+        let needs = match action {
+            Moderation::Admit | Moderation::Deny => Some(MembershipState::Knock),
+            Moderation::Unban => Some(MembershipState::Ban),
+            _ => None,
+        };
+        if let Some(needs) = needs
+            && self.membership(&room, &user).await?.as_ref() != Some(&needs)
+        {
+            // The store missed the change: the member list after this reads them afresh.
+            room.mark_members_missing();
+            return Err(Error::Outdated);
+        }
         match action {
-            Moderation::Kick => room.kick_user(&user, None).await?,
+            Moderation::Kick | Moderation::Deny => room.kick_user(&user, None).await?,
             Moderation::Ban => room.ban_user(&user, None).await?,
+            Moderation::Unban => room.unban_user(&user, None).await?,
+            Moderation::Admit => room.invite_user_by_id(&user).await?,
             Moderation::Role(role) => {
                 let level = matrix_sdk::ruma::Int::new(role.level()).unwrap_or_default();
                 room.update_power_levels(vec![(&user, level)]).await?;
+            }
+            Moderation::Level(level) => {
+                room.update_power_levels(vec![(&user, matrix_sdk::ruma::Int::new_saturating(level))]).await?;
             }
         }
         // The member list reads the store, which the change reaches with the next sync: wait
@@ -278,6 +361,29 @@ impl Account {
         };
         let _ = tokio::time::timeout(SETTLE, settled).await;
         Ok(())
+    }
+
+    /// Someone's membership of a room as the homeserver has it now (the store may have missed a
+    /// change in a gap); `None` when they never had one.
+    async fn membership(
+        &self,
+        room: &matrix_sdk::Room,
+        user: &UserId,
+    ) -> Result<Option<matrix_sdk::ruma::events::room::member::MembershipState>, Error> {
+        use matrix_sdk::ruma::api::client::state::get_state_event_for_key::v3::Request;
+        use matrix_sdk::ruma::api::error::ErrorKind;
+        use matrix_sdk::ruma::events::StateEventType;
+        use matrix_sdk::ruma::events::room::member::RoomMemberEventContent;
+        let request = Request::new(room.room_id().to_owned(), StateEventType::RoomMember, user.to_string());
+        match self.client().send(request).await {
+            Ok(response) => Ok(response
+                .into_content()
+                .deserialize_as_unchecked::<RoomMemberEventContent>()
+                .ok()
+                .map(|content| content.membership)),
+            Err(error) if error.client_api_error_kind() == Some(&ErrorKind::NotFound) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// People matching `term`, by name or ID: the homeserver's user directory, and a typed user
@@ -616,6 +722,81 @@ mod tests {
         assert!(!members.may(Moderation::Kick, &admin) && members.may(Moderation::Kick, &plain));
         assert!(members.may(Moderation::Role(MemberRole::Moderator), &plain));
         assert!(!members.may(Moderation::Role(MemberRole::Admin), &plain));
+    }
+
+    #[test]
+    fn answering_join_requests_should_follow_the_invite_and_kick_rights() {
+        let asking = member("k", Presence::Unknown, MemberRole::Member);
+        let inviter = Members { own_level: 50, can_invite: true, ..Members::default() };
+        assert!(inviter.may(Moderation::Admit, &asking) && !inviter.may(Moderation::Deny, &asking));
+        let kicker = Members { own_level: 50, can_kick: true, ..Members::default() };
+        assert!(kicker.may(Moderation::Deny, &asking) && !kicker.may(Moderation::Admit, &asking));
+    }
+
+    #[tokio::test]
+    async fn denying_someone_who_joined_meanwhile_should_not_remove_them() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let kicked = Arc::new(AtomicBool::new(false));
+        let seen = Arc::clone(&kicked);
+        let server = crate::test_server::Server::new(move |request| {
+            if request.contains("/kick") {
+                seen.store(true, Ordering::Relaxed);
+            }
+            // The homeserver has them joined, whatever the store says.
+            if request.contains("/state/m.room.member/") {
+                return serde_json::json!({"membership": "join"});
+            }
+            let mut response = crate::test_server::thread_response(request);
+            if request.contains("/sync?") {
+                // The store still has them asking (a sync gap hid their join).
+                let joined = serde_json::json!({"type":"m.room.member","state_key":"@b:example.org","sender":"@b:example.org","event_id":"$b","origin_server_ts":1,"content":{"membership":"knock"}});
+                if let Some(events) =
+                    response.pointer_mut("/rooms/join/!room:example.org/state/events").and_then(|e| e.as_array_mut())
+                {
+                    events.push(joined);
+                }
+            }
+            response
+        });
+        let account = Account::for_test(&server.url()).await;
+        let settings = matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::ZERO);
+        account.client().sync_once(settings).await.unwrap();
+        let denied = account.moderate("!room:example.org", "@b:example.org", Moderation::Deny).await;
+        assert!(matches!(denied, Err(Error::Outdated)));
+        assert!(!kicked.load(Ordering::Relaxed));
+        // The member list after it reads them afresh, not the store that missed the join.
+        assert!(!account.room("!room:example.org").unwrap().are_members_synced());
+    }
+
+    #[test]
+    fn someone_at_a_custom_level_should_be_settable_back_to_member() {
+        let members = Members { own_level: 100, can_set_roles: true, ..Members::default() };
+        let custom = RoomMember { level: 25, ..member("c", Presence::Online, MemberRole::Member) };
+        assert!(members.may(Moderation::Role(MemberRole::Member), &custom));
+    }
+
+    #[test]
+    fn approving_should_not_need_a_rank_above_the_one_asking() {
+        let asking = Members { own_level: 0, can_invite: true, ..Members::default() };
+        assert!(asking.may(Moderation::Admit, &member("k", Presence::Unknown, MemberRole::Member)));
+    }
+
+    #[test]
+    fn unbanning_should_need_the_ban_and_kick_rights() {
+        let banned = member("b", Presence::Unknown, MemberRole::Member);
+        let both = Members { own_level: 50, can_ban: true, can_kick: true, ..Members::default() };
+        assert!(both.may(Moderation::Unban, &banned));
+        assert!(!Members { own_level: 50, can_ban: true, ..Members::default() }.may(Moderation::Unban, &banned));
+        assert!(!Members { own_level: 50, can_kick: true, ..Members::default() }.may(Moderation::Unban, &banned));
+    }
+
+    #[test]
+    fn a_custom_level_should_go_no_higher_than_the_users_own() {
+        let members = Members { own_level: 50, can_set_roles: true, ..Members::default() };
+        let plain = member("p", Presence::Online, MemberRole::Member);
+        assert!(members.may(Moderation::Level(25), &plain) && members.may(Moderation::Level(50), &plain));
+        assert!(!members.may(Moderation::Level(51), &plain) && !members.may(Moderation::Level(0), &plain));
     }
 
     #[test]

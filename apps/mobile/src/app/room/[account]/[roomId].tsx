@@ -14,6 +14,7 @@ import { roomKey } from '../../../state/timeline';
 import { inlineName } from '../../../state/timelineText';
 import { routes } from '../../../routes';
 import { font } from '../../../theme/palette';
+import { SuccessorBanner } from '../../../ui/admin/SuccessorBanner';
 import { Avatar } from '../../../ui/Avatar';
 import { CallButtons } from '../../../ui/call/CallButtons';
 import { CompactCall } from '../../../ui/call/CompactCall';
@@ -82,7 +83,13 @@ export default function RoomScreen() {
         }}
       />
       <Conversation
-        composer={<Composer account={account} timelineKey={key} roomName={inlineName(room)} />}
+        composer={
+          room.successor ? (
+            <SuccessorBanner account={account} successor={room.successor} />
+          ) : (
+            <Composer account={account} timelineKey={key} roomName={inlineName(room)} />
+          )
+        }
       >
         <CompactCall account={account} roomId={roomId} />
         <Timeline

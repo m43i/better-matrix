@@ -16,6 +16,7 @@ import { inlineName } from '../../../../state/timelineText';
 import { font } from '../../../../theme/palette';
 import { EmptyState } from '../../../../ui/components';
 import { Composer } from '../../../../ui/composer/Composer';
+import { SuccessorBanner } from '../../../../ui/admin/SuccessorBanner';
 import { usePalette } from '../../../../ui/theme';
 import { Conversation } from '../../../../ui/timeline/Conversation';
 import { Timeline } from '../../../../ui/timeline/Timeline';
@@ -63,7 +64,14 @@ export default function ThreadScreen() {
         }}
       />
       <Conversation
-        composer={<Composer account={account} timelineKey={key} roomName={inlineName(room)} />}
+        composer={
+          // A replaced room takes no more replies either: the way to the new one shows instead.
+          room.successor ? (
+            <SuccessorBanner account={account} successor={room.successor} />
+          ) : (
+            <Composer account={account} timelineKey={key} roomName={inlineName(room)} />
+          )
+        }
       >
         <Timeline
           targetReach={reachParam(reach)}

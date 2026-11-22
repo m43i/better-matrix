@@ -1,5 +1,6 @@
 // The space picker, opened from Home's title: Home and the spaces of the account on screen in
-// the user's order (the desktop's rail), a dot on each with something new.
+// the user's order (the desktop's rail), a dot on each with something new. A long press on a
+// space opens its sheet (settings, its rooms, leaving).
 
 import type { MediaRef } from '@better-matrix/matrix-native/types';
 import { router } from 'expo-router';
@@ -101,6 +102,17 @@ export default function SpacesScreen() {
                 setScope(store, active, entry.space ? { space: entry.space } : 'home');
                 router.back();
               }}
+              onLongPress={
+                entry.space
+                  ? () => {
+                      const space = entry.space;
+
+                      if (space === null) return;
+                      router.back();
+                      router.push(routes.spaceMenu(active, space));
+                    }
+                  : undefined
+              }
             />
           </View>
         ))}
