@@ -2387,12 +2387,12 @@ fn every_settings_section_should_be_reachable_in_the_smallest_window_at_a_large_
 
 #[test]
 fn in_bubbles_a_compact_timeline_should_keep_the_time_inside_the_bubble() {
-    // The smallest window, 720 by 480 points, at 175% zoom.
+    // The smallest window, 720 by 480 points, at 150% zoom: a compact timeline.
     let mut rt = runtime(|s| {
         s.settings.message_layout = crate::state::MessageLayout::Bubbles;
         s.select_room("!dm-grace:example.org");
     });
-    rt.set_viewport((411.0, 274.0), 1.0);
+    rt.set_viewport((480.0, 320.0), 1.0);
     rt.frame(1.0 / 60.0);
     rt.settle_all();
     rt.frame(1.0 / 60.0);

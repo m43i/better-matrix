@@ -980,7 +980,6 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
 
     let said = col().key(format!("{key}-bubble")).gap(4.0);
     let said = if bubbled {
-        // At least as wide as its time, which never wraps, in the narrowest timeline.
         said.max_w(width)
             .px(pad_x)
             .py(BUBBLE_PAD_Y)

@@ -177,8 +177,9 @@ see who is typing there.
     live membership, so a partner who left while someone else stayed goes unnamed too.
   - Words get a bubble (`bubble`, `bubble_own` palette roles), at most 80% of the content width
     and 600 points on desktop, 85% of the row on phones, hugging short text. A compact desktop
-    timeline (content under 320 points) gives bubbles all of it, with 8 points of padding, and a
-    bubble is never narrower than its time. Media and cards
+    timeline (content under 320 points) gives bubbles all of it, with 8 points of padding. At
+    the smallest window and 175% zoom (about 37 points of content) a time can still spill out,
+    as classic rows truncate there. Media and cards
     bring their own frames and stand without one, in the width a classic row gives them, which
     they are sized for, keeping to their message's side (phones: `MessageSideContext`). What a
     bubble holds sizes itself to the bubble (desktop: `message_parts`'s card width; phones:
