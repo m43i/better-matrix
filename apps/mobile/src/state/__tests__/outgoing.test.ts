@@ -1,10 +1,14 @@
 import { type ComposerState, EMPTY_COMPOSER, type PendingAttachment } from '../composer';
+import { userPill } from '../pills';
 import {
+  canSchedule,
   canSend,
   excerpt,
   formatDuration,
   insertAt,
+  MAX_SCHEDULE_MS,
   pathFromUri,
+  planSchedule,
   planSend,
   uploadName,
   voiceMessage,
@@ -12,6 +16,9 @@ import {
 } from '../outgoing';
 import { roomKey } from '../timeline';
 import { ADA, message } from '../../test/fixtures';
+
+/** `m.mentions` for a message that mentions nobody. */
+const NOBODY = { user_ids: [], room: false };
 
 const KEY = roomKey('!r:x');
 
@@ -38,7 +45,7 @@ describe('planSend', () => {
           account: ADA,
           key: KEY,
           reply_to: null,
-          message: { type: 'Text', data: { body: 'hello', html: null } },
+          message: { type: 'Text', data: { body: 'hello', html: null, mentions: NOBODY } },
         },
       },
     ]);
@@ -48,7 +55,7 @@ describe('planSend', () => {
     const [command] = planSend({ ...EMPTY_COMPOSER, draft: '**hi**' }, ADA, KEY).commands;
     expect(command?.type === 'Send' && command.data.message).toEqual({
       type: 'Text',
-      data: { body: 'hi', html: '<p><strong>hi</strong></p>' },
+      data: { body: 'hi', html: '<p><strong>hi</strong></p>', mentions: NOBODY },
     });
   });
 
@@ -95,7 +102,14 @@ describe('planSend', () => {
     expect(planSend(editing('helo!', 'helo'), ADA, KEY).commands).toEqual([
       {
         type: 'Edit',
-        data: { account: ADA, key: KEY, event_id: '$mine', body: 'helo!', html: null },
+        data: {
+          account: ADA,
+          key: KEY,
+          event_id: '$mine',
+          body: 'helo!',
+          html: null,
+          mentions: NOBODY,
+        },
       },
     ]);
   });
@@ -210,5 +224,127 @@ describe('insertAt', () => {
 describe('formatDuration', () => {
   it('should show minutes and seconds', () => {
     expect(formatDuration(65_400)).toBe('1:05');
+  });
+});
+
+describe('planSend with pills and commands', () => {
+  const grace = userPill('@grace:x', 'Grace');
+
+  it('should send whom the pills mention', () => {
+    const plan = planSend({ ...EMPTY_COMPOSER, draft: 'hi @Grace', pills: [grace] }, ADA, KEY);
+    expect(plan.commands[0]).toMatchObject({
+      data: { message: { data: { mentions: { user_ids: ['@grace:x'], room: false } } } },
+    });
+  });
+
+  it('should send an edit with whom it mentions', () => {
+    const composer = { ...editing('hi @Grace', 'hi'), pills: [grace] };
+    expect(planSend(composer, ADA, KEY).commands[0]).toMatchObject({
+      type: 'Edit',
+      data: { mentions: { user_ids: ['@grace:x'] } },
+    });
+  });
+
+  it('should send an emote for /me with the reply', () => {
+    const composer = { ...EMPTY_COMPOSER, draft: '/me waves', replyTo: message('$q') };
+    expect(planSend(composer, ADA, KEY).commands).toEqual([
+      {
+        type: 'Send',
+        data: {
+          account: ADA,
+          key: KEY,
+          reply_to: '$q',
+          message: { type: 'Emote', data: { body: 'waves', html: null, mentions: NOBODY } },
+        },
+      },
+    ]);
+  });
+
+  it('should send a command in the draft’s place, keeping the reply and attachments', () => {
+    const composer = {
+      ...EMPTY_COMPOSER,
+      draft: '/topic Release',
+      replyTo: message('$q'),
+      attachments: [file('/a.png')],
+    };
+
+    const plan = planSend(composer, ADA, KEY);
+    expect([
+      plan.commands.map((c) => c.type),
+      plan.composer.draft,
+      plan.composer.replyTo,
+      plan.after,
+    ]).toEqual([['SetTopic'], '', message('$q'), 'stay']);
+    expect(plan.composer.attachments).toEqual([file('/a.png')]);
+  });
+
+  it('should send nothing for an unknown command and say so', () => {
+    const plan = planSend({ ...EMPTY_COMPOSER, draft: '/frob' }, ADA, KEY);
+    expect([plan.commands, plan.problem, plan.composer.draft]).toEqual([
+      [],
+      { type: 'unknown', name: 'frob' },
+      '/frob',
+    ]);
+  });
+});
+
+describe('planSchedule', () => {
+  it('should ask the server to send the text later, with its reply', () => {
+    const composer = { ...EMPTY_COMPOSER, draft: 'later', replyTo: message('$q') };
+    expect(planSchedule(composer, ADA, KEY, 60_000)?.commands).toEqual([
+      {
+        type: 'Schedule',
+        data: {
+          account: ADA,
+          key: KEY,
+          reply_to: '$q',
+          message: { type: 'Text', data: { body: 'later', html: null, mentions: NOBODY } },
+          delay_ms: 60_000,
+        },
+      },
+    ]);
+  });
+
+  it('should empty the composer it scheduled', () => {
+    expect(planSchedule({ ...EMPTY_COMPOSER, draft: 'later' }, ADA, KEY, 1)?.composer).toEqual(
+      EMPTY_COMPOSER,
+    );
+  });
+
+  it('should hold a message at most 30 days', () => {
+    const plan = planSchedule({ ...EMPTY_COMPOSER, draft: 'x' }, ADA, KEY, 2 * MAX_SCHEDULE_MS);
+    expect(plan?.commands[0]).toMatchObject({ data: { delay_ms: MAX_SCHEDULE_MS } });
+  });
+
+  it('should not schedule attachments', () => {
+    const composer = { ...EMPTY_COMPOSER, draft: 'x', attachments: [file('/a.png')] };
+    expect([canSchedule(composer), planSchedule(composer, ADA, KEY, 1)]).toEqual([false, null]);
+  });
+
+  it('should not schedule a command that isn’t a message', () => {
+    expect(planSchedule({ ...EMPTY_COMPOSER, draft: '/leave' }, ADA, KEY, 1)).toBeNull();
+  });
+});
+
+describe('excerpt of other kinds', () => {
+  it('should quote an emote with its sender', () => {
+    const emote = {
+      ...message('$e'),
+      content: { type: 'Emote' as const, data: { body: 'waves', html: null } },
+    };
+
+    expect(excerpt(emote)).toBe('* Grace waves');
+  });
+
+  it('should quote a place by its name', () => {
+    const place = {
+      ...message('$p'),
+      content: {
+        type: 'Location' as const,
+        data: { geo_uri: 'geo:1,2', description: 'Home', map: null },
+      },
+    };
+
+    expect(excerpt(place)).toBe('Home');
   });
 });

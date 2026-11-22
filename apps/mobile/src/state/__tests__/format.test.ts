@@ -4,118 +4,126 @@ import {
   applyLink,
   continueBlock,
   draftOf,
+  editDraft,
   outgoingText,
 } from '../format';
+import { emotePill, EVERYONE, userPill } from '../pills';
 
 const caret = (at: number) => ({ start: at, end: at });
 
+/** What a draft sends that mentions nobody: its body and HTML. */
+function sent(draft: string) {
+  const { mentions, ...text } = outgoingText(draft);
+  expect(mentions).toEqual({ user_ids: [], room: false });
+
+  return text;
+}
+
 describe('outgoingText', () => {
   it('should send plain text without html', () => {
-    expect(outgoingText('hello')).toEqual({ body: 'hello', html: null });
+    expect(sent('hello')).toEqual({ body: 'hello', html: null });
   });
 
   it('should trim the body', () => {
-    expect(outgoingText('  hello \n')).toEqual({ body: 'hello', html: null });
+    expect(sent('  hello \n')).toEqual({ body: 'hello', html: null });
   });
 
   it('should send bold text as strong, as the desktop does', () => {
-    expect(outgoingText('one **two**')).toEqual({
+    expect(sent('one **two**')).toEqual({
       body: 'one two',
       html: '<p>one <strong>two</strong></p>',
     });
   });
 
   it('should send italic, strike and code', () => {
-    expect(outgoingText('_a_ ~~b~~ `c`').html).toBe('<p><em>a</em> <s>b</s> <code>c</code></p>');
+    expect(sent('_a_ ~~b~~ `c`').html).toBe('<p><em>a</em> <s>b</s> <code>c</code></p>');
   });
 
   it('should take a single star as italic', () => {
-    expect(outgoingText('*a*').html).toBe('<p><em>a</em></p>');
+    expect(sent('*a*').html).toBe('<p><em>a</em></p>');
   });
 
   it('should nest marks in the canonical order, one window at a time', () => {
-    expect(outgoingText('**bold _both_**').html).toBe(
+    expect(sent('**bold _both_**').html).toBe(
       '<p><strong>bold </strong><strong><em>both</em></strong></p>',
     );
   });
 
   it('should send a link with its address', () => {
-    expect(outgoingText('see [the blog](https://matrix.org/blog)')).toEqual({
+    expect(sent('see [the blog](https://matrix.org/blog)')).toEqual({
       body: 'see the blog',
       html: '<p>see <a href="https://matrix.org/blog">the blog</a></p>',
     });
   });
 
   it('should keep snake_case words plain', () => {
-    expect(outgoingText('a snake_case_name')).toEqual({ body: 'a snake_case_name', html: null });
+    expect(sent('a snake_case_name')).toEqual({ body: 'a snake_case_name', html: null });
   });
 
   it('should keep unmatched markers as typed', () => {
-    expect(outgoingText('2 ** 3 and a * b')).toEqual({ body: '2 ** 3 and a * b', html: null });
+    expect(sent('2 ** 3 and a * b')).toEqual({ body: '2 ** 3 and a * b', html: null });
   });
 
   it('should not format markers around spaces', () => {
-    expect(outgoingText('** loose **').html).toBeNull();
+    expect(sent('** loose **').html).toBeNull();
   });
 
   it('should take escaped markers literally', () => {
-    expect(outgoingText('\\*not italic\\*')).toEqual({ body: '*not italic*', html: null });
+    expect(sent('\\*not italic\\*')).toEqual({ body: '*not italic*', html: null });
   });
 
   it('should escape html in the text', () => {
-    expect(outgoingText('**<b>&"**').html).toBe('<p><strong>&lt;b&gt;&amp;&quot;</strong></p>');
+    expect(sent('**<b>&"**').html).toBe('<p><strong>&lt;b&gt;&amp;&quot;</strong></p>');
   });
 
   it('should give every line its own paragraph once formatted', () => {
-    expect(outgoingText('**a**\nb').html).toBe('<p><strong>a</strong></p><p>b</p>');
+    expect(sent('**a**\nb').html).toBe('<p><strong>a</strong></p><p>b</p>');
   });
 
   it('should send a bulleted list without its markers in the body', () => {
-    expect(outgoingText('- one\n- two')).toEqual({
+    expect(sent('- one\n- two')).toEqual({
       body: 'one\ntwo',
       html: '<ul><li>one</li><li>two</li></ul>',
     });
   });
 
   it('should send a numbered list', () => {
-    expect(outgoingText('1. one\n2. two').html).toBe('<ol><li>one</li><li>two</li></ol>');
+    expect(sent('1. one\n2. two').html).toBe('<ol><li>one</li><li>two</li></ol>');
   });
 
   it('should nest an indented item in the list above', () => {
-    expect(outgoingText('- one\n  - inner\n- two').html).toBe(
+    expect(sent('- one\n  - inner\n- two').html).toBe(
       '<ul><li>one</li><ul><li>inner</li></ul><li>two</li></ul>',
     );
   });
 
   it('should switch lists when the kind changes', () => {
-    expect(outgoingText('- a\n1. b').html).toBe('<ul><li>a</li></ul><ol><li>b</li></ol>');
+    expect(sent('- a\n1. b').html).toBe('<ul><li>a</li></ul><ol><li>b</li></ol>');
   });
 
   it('should send each quoted line as a quote', () => {
-    expect(outgoingText('> a\n> b').html).toBe(
-      '<blockquote>a</blockquote><blockquote>b</blockquote>',
-    );
+    expect(sent('> a\n> b').html).toBe('<blockquote>a</blockquote><blockquote>b</blockquote>');
   });
 
   it('should send a fenced code block as one pre without formatting inside', () => {
-    expect(outgoingText('```\nlet **a** = 1;\nx < y\n```')).toEqual({
+    expect(sent('```\nlet **a** = 1;\nx < y\n```')).toEqual({
       body: 'let **a** = 1;\nx < y',
       html: '<pre><code>let **a** = 1;\nx &lt; y</code></pre>',
     });
   });
 
   it('should send an unclosed fence as code to the end', () => {
-    expect(outgoingText('```\ncode').html).toBe('<pre><code>code</code></pre>');
+    expect(sent('```\ncode').html).toBe('<pre><code>code</code></pre>');
   });
 
   it('should mark directions when a block reads right to left', () => {
-    expect(outgoingText('**שלום**\nhi').html).toBe(
+    expect(sent('**שלום**\nhi').html).toBe(
       '<p dir="rtl"><strong>שלום</strong></p><p dir="ltr">hi</p>',
     );
   });
 
   it('should send nothing for an empty draft', () => {
-    expect(outgoingText(' \n ')).toEqual({ body: '', html: null });
+    expect(sent(' \n ')).toEqual({ body: '', html: null });
   });
 });
 
@@ -273,5 +281,105 @@ describe('draftOf', () => {
     const draft = '**loud** and [link](https://x.y)\n- one\n- two';
     const { body, html } = outgoingText(draft);
     expect(draftOf(body, html)).toBe(draft);
+  });
+});
+
+describe('outgoingText with pills', () => {
+  const grace = userPill('@grace:x.org', 'Grace Hopper');
+
+  it('should send a mention as a matrix.to link, its name in the body', () => {
+    expect(outgoingText('hi @Grace Hopper', [grace])).toEqual({
+      body: 'hi Grace Hopper',
+      html: '<p>hi <a href="https://matrix.to/#/@grace:x.org">Grace Hopper</a></p>',
+      mentions: { user_ids: ['@grace:x.org'], room: false },
+    });
+  });
+
+  it('should format a mention inside markers', () => {
+    expect(outgoingText('**@Grace Hopper**', [grace]).html).toBe(
+      '<p><strong><a href="https://matrix.to/#/@grace:x.org">Grace Hopper</a></strong></p>',
+    );
+  });
+
+  it('should not read markers inside a mention’s name', () => {
+    const snake = userPill('@s:x.org', 'snake_case_');
+    expect(outgoingText('@snake_case_ hi', [snake]).body).toBe('snake_case_ hi');
+  });
+
+  it('should send @room as plain text that mentions the room', () => {
+    expect(outgoingText('@room lunch', [EVERYONE])).toEqual({
+      body: '@room lunch',
+      html: null,
+      mentions: { user_ids: [], room: true },
+    });
+  });
+
+  it('should send a custom emoji as an image, its short code in the body', () => {
+    expect(outgoingText('yay :cat:', [emotePill('mxc://x.org/c', 'cat')])).toEqual({
+      body: 'yay :cat:',
+      html: '<p>yay <img data-mx-emoticon src="mxc://x.org/c" alt=":cat:" title=":cat:" height="32" /></p>',
+      mentions: { user_ids: [], room: false },
+    });
+  });
+
+  it('should send a pill in code as its label', () => {
+    expect(outgoingText('`@Grace Hopper`', [grace]).html).toBe('<p><code>@Grace Hopper</code></p>');
+  });
+});
+
+describe('outgoingText with Matrix markers', () => {
+  it('should send a spoiler hidden in the body', () => {
+    expect(sent('he ||dies|| sadly')).toEqual({
+      body: 'he [Spoiler] sadly',
+      html: '<p>he <span data-mx-spoiler>dies</span> sadly</p>',
+    });
+  });
+
+  it('should keep a formatted spoiler one spoiler', () => {
+    expect(sent('||a **b**||').html).toBe(
+      '<p><span data-mx-spoiler>a <strong>b</strong></span></p>',
+    );
+  });
+
+  it('should send a formula with its LaTeX as the fallback', () => {
+    expect(sent('so $$x^2 < y$$')).toEqual({
+      body: 'so x^2 < y',
+      html: '<p>so <span data-mx-maths="x^2 &lt; y"><code>x^2 &lt; y</code></span></p>',
+    });
+  });
+
+  it('should take an escaped bar literally', () => {
+    expect(sent('a \\|\\| b')).toEqual({ body: 'a || b', html: null });
+  });
+});
+
+describe('editDraft', () => {
+  it('should bring a mention back as a pill', () => {
+    expect(
+      editDraft('Grace: hi', '<a href="https://matrix.to/#/@grace:x.org">Grace</a>: hi'),
+    ).toEqual({ draft: '@Grace: hi', pills: [userPill('@grace:x.org', 'Grace')] });
+  });
+
+  it('should bring a custom emoji back as a pill', () => {
+    expect(
+      editDraft(':cat:', '<img data-mx-emoticon src="mxc://x.org/c" alt=":cat:" height="32">'),
+    ).toEqual({ draft: ':cat:', pills: [emotePill('mxc://x.org/c', 'cat')] });
+  });
+
+  it('should bring a spoiler back as markers', () => {
+    expect(editDraft('', 'he <span data-mx-spoiler>dies</span>').draft).toBe('he ||dies||');
+  });
+
+  it('should bring a formula back as its LaTeX', () => {
+    expect(
+      editDraft('', 'so <span data-mx-maths="a &lt; b"><code>a &lt; b</code></span>!').draft,
+    ).toBe('so $$a < b$$!');
+  });
+
+  it('should send a mention again as it was sent', () => {
+    const grace = userPill('@grace:x.org', 'Grace Hopper');
+    const first = outgoingText('hi @Grace Hopper ||x||', [grace]);
+    const back = editDraft(first.body, first.html);
+    expect(outgoingText(back.draft, back.pills)).toEqual(first);
   });
 });
