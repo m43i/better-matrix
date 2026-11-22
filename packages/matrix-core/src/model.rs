@@ -875,15 +875,19 @@ impl Default for MessageContent {
 }
 
 impl MessageContent {
-    /// Plain text for previews, notifications and accessibility.
-    pub fn plain(&self) -> &str {
+    /// Plain text for previews, notifications, quotes, copying and accessibility: a hidden
+    /// spoiler's words never, whatever the plain body says ([`crate::html::shown_text`]).
+    pub fn plain(&self) -> std::borrow::Cow<'_, str> {
+        use std::borrow::Cow;
         match self {
-            Self::Text { body, .. } => body,
-            Self::Attachment(attachment) => &attachment.name,
-            Self::Poll(poll) => &poll.question,
-            Self::Emote { body, .. } => body,
-            Self::Location(location) => location.description.as_deref().unwrap_or(&location.geo_uri),
-            Self::Redacted | Self::Undecryptable | Self::Call(_) => "",
+            Self::Text { body, html } | Self::Emote { body, html } => match html.as_deref() {
+                Some(html) if crate::html::holds_spoiler(html) => Cow::Owned(crate::html::shown_text(body, Some(html))),
+                _ => Cow::Borrowed(body),
+            },
+            Self::Attachment(attachment) => Cow::Borrowed(&attachment.name),
+            Self::Poll(poll) => Cow::Borrowed(&poll.question),
+            Self::Location(location) => Cow::Borrowed(location.description.as_deref().unwrap_or(&location.geo_uri)),
+            Self::Redacted | Self::Undecryptable | Self::Call(_) => Cow::Borrowed(""),
         }
     }
 }

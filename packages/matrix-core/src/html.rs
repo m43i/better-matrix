@@ -252,6 +252,76 @@ pub fn holds_spoiler(html: &str) -> bool {
     html.contains("data-mx-spoiler")
 }
 
+/// What a spoiler's words read as wherever they can't stay hidden: a message's plain body, and
+/// text taken out of the app (copied, translated, quoted in a search hit).
+pub const SPOILER_FALLBACK: &str = "[Spoiler]";
+
+/// A message's text as people see it before revealing anything: `body`, unless the formatted
+/// text hides a spoiler, whose words `body` may still spell out; then the formatted text as
+/// plain text, each spoiler as [`SPOILER_FALLBACK`] (and a reply's quoted fallback left out).
+///
+/// ```
+/// let html = "The ending: <span data-mx-spoiler>the <b>butler</b> did it</span>.";
+/// assert_eq!(matrix_core::html::shown_text("The ending: the butler did it.", Some(html)), "The ending: [Spoiler].");
+/// assert_eq!(matrix_core::html::shown_text("plain", Some("<b>plain</b>")), "plain");
+/// ```
+pub fn shown_text(body: &str, html: Option<&str>) -> String {
+    let Some(html) = html.filter(|html| holds_spoiler(html)) else { return body.to_owned() };
+    let mut out = String::with_capacity(html.len());
+    // Open elements whose content is left out (a spoiler, a reply's fallback), each with how
+    // many of its own kind opened inside it.
+    let mut hidden: Option<(String, usize)> = None;
+    let mut rest = html;
+    loop {
+        let start = rest.find('<').unwrap_or(rest.len());
+        if hidden.is_none() {
+            out.push_str(&decode(&rest[..start]));
+        }
+        let Some(end) = rest[start..].find('>').map(|end| start + end) else { break };
+        let tag = &rest[start..=end];
+        rest = &rest[end + 1..];
+        let Some((name, closing)) = tag_name(tag) else { continue };
+        if let Some((kind, depth)) = hidden.as_mut() {
+            if *kind == name && !closing && !is_void(&name) {
+                *depth += 1;
+            } else if *kind == name && closing {
+                if *depth == 0 {
+                    hidden = None;
+                } else {
+                    *depth -= 1;
+                }
+            }
+            continue;
+        }
+        if closing {
+            if matches!(
+                name.as_str(),
+                "p" | "div" | "li" | "pre" | "blockquote" | "tr" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+            ) {
+                out.push('\n');
+            }
+            continue;
+        }
+        match name.as_str() {
+            _ if attribute(tag, "data-mx-spoiler").is_some() && !is_void(&name) => {
+                out.push_str(SPOILER_FALLBACK);
+                hidden = Some((name, 0));
+            }
+            // `<mx-reply>`: names are read up to the dash.
+            "mx" => hidden = Some((name, 0)),
+            "br" => out.push('\n'),
+            "img" => out.push_str(&attribute(tag, "alt").unwrap_or_default()),
+            "li" => out.push_str("• "),
+            _ => {}
+        }
+    }
+    let mut text = out.trim().to_owned();
+    while text.contains("\n\n\n") {
+        text = text.replace("\n\n\n", "\n\n");
+    }
+    text
+}
+
 /// The Matrix HTML for a pill that is its label's text alone: custom emoji, `@room`, maths.
 fn atom_html(id: &str, label: &str) -> String {
     if let Some(src) = id.strip_prefix("emote:") {
@@ -434,6 +504,33 @@ fn escape(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_messages_plain_text_should_never_spell_out_its_spoiler() {
+        let content = crate::MessageContent::Text {
+            body: "it was the butler".into(),
+            html: Some("it was <span data-mx-spoiler>the butler</span>".into()),
+        };
+        assert_eq!(content.plain(), "it was [Spoiler]");
+    }
+
+    #[test]
+    fn shown_text_should_hide_a_spoiler_inside_others_of_its_kind() {
+        let html = "a <span data-mx-spoiler><span>x</span> y</span> b";
+        assert_eq!(super::shown_text("a x y b", Some(html)), "a [Spoiler] b");
+    }
+
+    #[test]
+    fn shown_text_should_leave_out_a_replys_quoted_fallback() {
+        let html = "<mx-reply><blockquote>secret quote</blockquote></mx-reply>ok <span data-mx-spoiler>s</span>";
+        assert_eq!(super::shown_text("> secret quote\n\nok s", Some(html)), "ok [Spoiler]");
+    }
+
+    #[test]
+    fn shown_text_should_keep_lines_and_entities() {
+        let html = "<p>1 &lt; 2</p><p><span data-mx-spoiler>no</span></p>";
+        assert_eq!(super::shown_text("1 < 2\n\nno", Some(html)), "1 < 2\n[Spoiler]");
+    }
+
     use super::*;
 
     #[test]

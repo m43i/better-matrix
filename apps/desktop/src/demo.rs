@@ -1299,7 +1299,7 @@ pub fn pinned_messages(s: &mut State) {
             sender_id: message.sender_id.clone(),
             sender_avatar: message.sender_avatar.clone(),
             timestamp_ms: Some(message.timestamp_ms),
-            body: Some(message.content.plain().to_owned()),
+            body: Some(message.content.plain().into_owned()),
             thread: None,
         })
         .collect();
@@ -1338,7 +1338,7 @@ pub fn saved_messages(s: &mut State) {
                     sender_id: message.sender_id.clone(),
                     sender_avatar: message.sender_avatar.clone(),
                     timestamp_ms: Some(message.timestamp_ms),
-                    body: Some(message.content.plain().to_owned()),
+                    body: Some(message.content.plain().into_owned()),
                     thread: None,
                 },
             });

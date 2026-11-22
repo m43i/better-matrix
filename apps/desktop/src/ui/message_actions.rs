@@ -107,7 +107,8 @@ pub fn menu(
         );
     }
     let body = match &message.content {
-        MessageContent::Text { body, .. } if !body.trim().is_empty() => Some(body.clone()),
+        // As it shows: a hidden spoiler's words are neither copied nor sent to be translated.
+        MessageContent::Text { body, .. } if !body.trim().is_empty() => Some(message.content.plain().into_owned()),
         MessageContent::Poll(poll) => Some(poll.question.clone()),
         _ => None,
     };

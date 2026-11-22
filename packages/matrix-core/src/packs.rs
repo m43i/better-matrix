@@ -136,12 +136,21 @@ async fn room_packs_named(room: &Room, name: &str, keys: Option<&[String]>, serv
             RawAnySyncOrStrippedState::Stripped(raw) => raw.deserialize_as_unchecked().ok(),
         })
         .collect();
-    // The server's, for a pack the store doesn't hold: one sync brought since (changed or
-    // emptied) is the newer.
-    let held = |event: &Value| local.iter().any(|known| known["state_key"] == event["state_key"]);
-    let fetched = server.iter().filter(|event| event["type"].as_str() == Some(name) && !held(event)).cloned();
+    // Of the store's and the server's copies of a pack, the newer counts: the store's may be
+    // older (kept from before sliding sync, which brings no pack changes) or newer (a change
+    // in a timeline since the server's state was read).
+    let at = |event: &Value| event["origin_server_ts"].as_u64().unwrap_or_default();
+    let ours = server.iter().filter(|event| event["type"].as_str() == Some(name));
+    let mut newest: Vec<Value> = Vec::new();
+    for event in local.iter().chain(ours) {
+        match newest.iter_mut().find(|known| known["state_key"] == event["state_key"]) {
+            Some(known) if at(event) > at(known) => *known = event.clone(),
+            Some(_) => {}
+            None => newest.push(event.clone()),
+        }
+    }
     let mut packs = Vec::new();
-    for json in local.iter().cloned().chain(fetched) {
+    for json in newest {
         let state_key = json["state_key"].as_str().unwrap_or_default().to_owned();
         if keys.is_some_and(|keys| !keys.contains(&state_key)) {
             continue;
@@ -288,7 +297,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_pack_read_from_the_server_should_count_unless_sync_brought_it() {
+    async fn of_a_packs_two_copies_the_newer_should_count() {
         let pack_event = |key: &str, shortcode: &str| {
             json!({
                 "type": "m.room.image_pack", "state_key": key, "sender": "@a:example.org",
@@ -318,6 +327,11 @@ mod tests {
         let packs = room_packs(&room, None, &from_server).await;
         let found: Vec<_> = packs.iter().map(|pack| (pack.name.as_str(), pack.images[0].shortcode.as_str())).collect();
         assert_eq!(found, [("cats", "blobcat"), ("birds", "bird")]);
+        // A newer copy on the server (changed since the store's) counts instead.
+        let mut changed = pack_event("cats", "newcat");
+        changed["origin_server_ts"] = json!(2);
+        let packs = room_packs(&room, None, &[changed]).await;
+        assert_eq!(packs[0].images[0].shortcode, "newcat");
     }
 
     #[test]

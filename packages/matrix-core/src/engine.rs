@@ -2511,11 +2511,11 @@ impl State {
                     let account = account?;
                     let delay = std::time::Duration::from_millis(delay_ms);
                     account.schedule(&key, reply_to.as_deref(), &message, delay).await?;
-                    // A server that sends nothing back for the list still scheduled it.
+                    // A server that sends nothing back for the list still scheduled it: what this
+                    // device knows goes instead.
                     let _order = account.listing_scheduled.lock().await;
-                    if let Ok(messages) = account.scheduled_messages().await {
-                        sink.emit(Event::ScheduledMessages { account: id, messages });
-                    }
+                    let (Ok(messages) | Err((_, messages))) = account.scheduled_or_known().await;
+                    sink.emit(Event::ScheduledMessages { account: id, messages });
                     Ok(Outcome::Done)
                 })
             }
@@ -2525,9 +2525,17 @@ impl State {
                     let account = account?;
                     // In the order asked: an older list never covers a newer.
                     let _order = account.listing_scheduled.lock().await;
-                    let messages = account.scheduled_messages().await?;
-                    sink.emit(Event::ScheduledMessages { account: id, messages });
-                    Ok(Outcome::Done)
+                    // Unlisted, what this device knows shows, and the failure says why.
+                    match account.scheduled_or_known().await {
+                        Ok(messages) => {
+                            sink.emit(Event::ScheduledMessages { account: id, messages });
+                            Ok(Outcome::Done)
+                        }
+                        Err((error, messages)) => {
+                            sink.emit(Event::ScheduledMessages { account: id, messages });
+                            Err(error)
+                        }
+                    }
                 })
             }
             Command::UpdateScheduled { account: id, delay_id, action } => {
@@ -2536,9 +2544,8 @@ impl State {
                     let account = account?;
                     account.update_scheduled(&delay_id, action).await?;
                     let _order = account.listing_scheduled.lock().await;
-                    if let Ok(messages) = account.scheduled_messages().await {
-                        sink.emit(Event::ScheduledMessages { account: id, messages });
-                    }
+                    let (Ok(messages) | Err((_, messages))) = account.scheduled_or_known().await;
+                    sink.emit(Event::ScheduledMessages { account: id, messages });
                     Ok(Outcome::Done)
                 })
             }
@@ -3377,7 +3384,7 @@ impl State {
                     match timeline {
                         // Through the timeline: replies and thread relations come out right, and
                         // the message shows at once as pending.
-                        Ok(timeline) => send_in(&timeline, reply_to, &message).await?,
+                        Ok(timeline) => send_in(&timeline, key.thread.as_deref(), reply_to, &message).await?,
                         Err(_) if key.thread.is_none() && reply_to.is_none() => {
                             account.send(&key.room_id, &message).await?;
                         }
@@ -4775,10 +4782,29 @@ async fn typing_people(room: &matrix_sdk::Room, users: Vec<matrix_sdk::ruma::Own
     people
 }
 
+/// `content` in `thread` and answering `reply_to`, as the SDK relates the room messages it
+/// sends: it relates no other kind (stickers, polls) itself.
+fn related(
+    content: matrix_sdk::ruma::events::AnyMessageLikeEventContent,
+    thread: Option<&str>,
+    reply_to: Option<&str>,
+) -> Result<matrix_sdk::ruma::events::AnyMessageLikeEventContent, Error> {
+    use matrix_sdk::ruma::events::{AnyMessageLikeEventContent, EventContentFromType, MessageLikeEventContent};
+    if thread.is_none() && reply_to.is_none() {
+        return Ok(content);
+    }
+    let event_type = content.event_type().to_string();
+    let mut json = serde_json::to_value(&content).map_err(|e| Error::Storage(e.into()))?;
+    crate::scheduled::relate(&mut json, thread, reply_to);
+    let raw = serde_json::value::to_raw_value(&json).map_err(|e| Error::Storage(e.into()))?;
+    AnyMessageLikeEventContent::from_parts(&event_type, &raw).map_err(|e| Error::Storage(e.into()))
+}
+
 /// Sends through an open timeline: as a reply when `reply_to` is set, into the thread when the
-/// timeline is one.
+/// timeline is `thread`'s.
 async fn send_in(
     timeline: &matrix_sdk_ui::timeline::Timeline,
+    thread: Option<&str>,
     reply_to: Option<String>,
     message: &Outgoing,
 ) -> Result<(), Error> {
@@ -4797,7 +4823,7 @@ async fn send_in(
     match message {
         Outgoing::Poll { .. } | Outgoing::Sticker(_) => {
             if let Some(content) = crate::outgoing::event(message)? {
-                timeline.send(content).await?;
+                timeline.send(related(content, thread, reply_to.as_deref())?).await?;
             }
         }
         Outgoing::Text { .. } | Outgoing::Emote { .. } | Outgoing::Location { .. } => {}
@@ -4906,6 +4932,35 @@ mod tests {
             ..Default::default()
         };
         assert!(summary_may_change(&update));
+    }
+
+    fn sticker_json(thread: Option<&str>, reply_to: Option<&str>) -> serde_json::Value {
+        let image = crate::PackImage {
+            shortcode: "wave".into(),
+            body: "wave".into(),
+            url: "mxc://x.org/wave".into(),
+            media: crate::MediaRef::opaque("mxc://x.org/wave"),
+            emoticon: false,
+            sticker: true,
+            dimensions: Some((256, 256)),
+            mimetype: Some("image/png".into()),
+        };
+        let content = crate::outgoing::event(&Outgoing::Sticker(image)).expect("content").expect("a sticker");
+        serde_json::to_value(related(content, thread, reply_to).expect("related")).expect("json")
+    }
+
+    #[test]
+    fn a_sticker_sent_as_a_reply_should_answer_its_message() {
+        let json = sticker_json(None, Some("$q"));
+        assert_eq!(json["m.relates_to"]["m.in_reply_to"]["event_id"], "$q");
+        assert_eq!(json["url"], "mxc://x.org/wave");
+    }
+
+    #[test]
+    fn a_sticker_sent_in_a_thread_should_join_it() {
+        let json = sticker_json(Some("$root"), None);
+        assert_eq!(json["m.relates_to"]["rel_type"], "m.thread");
+        assert_eq!(json["m.relates_to"]["event_id"], "$root");
     }
 
     fn mirror(items: &[u32]) -> BoundaryMirror<u32, impl Fn(&u32) -> bool> {

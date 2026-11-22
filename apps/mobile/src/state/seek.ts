@@ -72,14 +72,16 @@ export function seekEnded(seek: Seek, eventId: string): Seek {
 }
 
 /**
- * The engine said the quote `eventId` shows in this timeline, after its search ran out of pages
- * (and ended): it looks again, paging on until it finds it or history starts. Only while no other
- * quote is being looked for; the caller asks only while the quote's jump is still the latest.
+ * The engine said the quote `eventId` shows in this timeline as `located` (the message an edit
+ * edits; else `eventId` itself), after its search ran out of pages (and ended): it looks for
+ * `located`, scrolling to it once loaded and paging on until it finds it or history starts. Only
+ * while no other quote is being looked for; the caller asks only while the quote's jump is still
+ * the latest.
  */
-export function quoteHere(seek: Seek, eventId: string): Seek {
-  if (seek.quote !== null && seek.quote !== eventId) return seek;
+export function quoteHere(seek: Seek, eventId: string, located: string = eventId): Seek {
+  if (seek.quote !== null && seek.quote !== eventId && seek.quote !== located) return seek;
 
-  return { ...seek, positioned: true, quote: eventId, quoteHere: true };
+  return { ...seek, positioned: true, quote: located, quoteHere: true };
 }
 
 /** What a search for a message does next. */

@@ -80,6 +80,12 @@ describe('quoteHere', () => {
     expect(quoteHere(other, '$b')).toBe(other);
   });
 
+  it('a quote the engine located as another message should look for that message', () => {
+    const gaveUp = seekEnded(quoteTapped(openSeek(null), '$edit'), '$edit');
+    const seek = quoteHere(gaveUp, '$edit', '$original');
+    expect([sought(seek), seek.quoteHere]).toEqual(['$original', true]);
+  });
+
   it('a quote tapped since should look within the budget again', () => {
     const here = quoteHere(openSeek(null), '$b');
     expect(quoteTapped(here, '$c').quoteHere).toBe(false);

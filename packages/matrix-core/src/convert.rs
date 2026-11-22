@@ -274,7 +274,7 @@ pub(crate) async fn notification(
         room_name: display_name(room).await,
         event_id: event.event_id.to_string(),
         sender_name: sender_name(room, &event.sender).await,
-        body: content(&event.content.msgtype).plain().to_owned(),
+        body: content(&event.content.msgtype).plain().into_owned(),
     })
 }
 

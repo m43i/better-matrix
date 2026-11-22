@@ -212,6 +212,20 @@ impl Account {
         Ok(messages)
     }
 
+    /// The messages the server holds for the account, as [`Account::scheduled_messages`]; when
+    /// the server can't list them now, those this device scheduled, as its store keeps them, so
+    /// one just scheduled never drops out of sight.
+    pub async fn scheduled_or_known(&self) -> Result<Vec<ScheduledMessage>, (Error, Vec<ScheduledMessage>)> {
+        match self.scheduled_messages().await {
+            Ok(messages) => Ok(messages),
+            Err(error) => {
+                let mut known = self.keep_scheduled(|_| {}).await;
+                known.sort_by_key(|message| (message.failed.is_some(), message.send_at_ms));
+                Err((error, known))
+            }
+        }
+    }
+
     /// Asks what became of this device's messages whose time came, where the list didn't
     /// say: one the server failed to send stays, marked; one it sent, or no longer knows,
     /// goes. One the server can't be asked about now is asked about next time. Returns what
@@ -365,7 +379,7 @@ fn body_of(content: &Value) -> Option<String> {
 
 /// Adds the relations a message sent now would get: into the thread `thread` (answering its
 /// root, with the reply fallback clients without threads read), or as a reply to `reply_to`.
-fn relate(content: &mut Value, thread: Option<&str>, reply_to: Option<&str>) {
+pub(crate) fn relate(content: &mut Value, thread: Option<&str>, reply_to: Option<&str>) {
     let relation = match (thread, reply_to) {
         (Some(root), reply) => serde_json::json!({
             "rel_type": "m.thread",
@@ -514,6 +528,8 @@ mod tests {
         None,
         /// The proposal's own, but no list of them all.
         NoList,
+        /// The proposal's own, its list failing for now.
+        BrokenList,
     }
 
     type Sent = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
@@ -532,12 +548,12 @@ mod tests {
                     serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap_or_default()).unwrap_or_default();
                 return match endpoints {
                     // As the proposal and Synapse have it: `delay_ms`, the content apart.
-                    Endpoints::Current | Endpoints::NoList
+                    Endpoints::Current | Endpoints::NoList | Endpoints::BrokenList
                         if body["delay_ms"].is_u64() && body["content"].is_object() =>
                     {
                         json!({ "delay_id": "d1" })
                     }
-                    Endpoints::Current | Endpoints::NoList => {
+                    Endpoints::Current | Endpoints::NoList | Endpoints::BrokenList => {
                         json!({ "errcode": "M_BAD_JSON", "error": "no delay_ms" })
                     }
                     Endpoints::Older | Endpoints::None => unknown(),
@@ -546,15 +562,24 @@ mod tests {
             if first.contains("org.matrix.msc4140.delay=") {
                 return match endpoints {
                     Endpoints::None => json!({ "event_id": "$posted-at-once" }),
-                    Endpoints::Current | Endpoints::Older | Endpoints::NoList => json!({ "delay_id": "d1" }),
+                    Endpoints::Current | Endpoints::Older | Endpoints::NoList | Endpoints::BrokenList => {
+                        json!({ "delay_id": "d1" })
+                    }
                 };
             }
             if first.starts_with("POST") && first.contains("/delayed_events/") {
                 let in_path = first.contains("/d1/cancel") || first.contains("/d1/send");
                 return match (endpoints, in_path) {
-                    (Endpoints::Current | Endpoints::NoList, true) | (Endpoints::Older, false) => json!({}),
+                    (Endpoints::Current | Endpoints::NoList | Endpoints::BrokenList, true)
+                    | (Endpoints::Older, false) => {
+                        json!({})
+                    }
                     _ => unknown(),
                 };
+            }
+            // Not a list: an answer that reads as none, as a failing proxy might give.
+            if first.starts_with("GET") && first.contains("/delayed_events ") && endpoints == Endpoints::BrokenList {
+                return json!({ "unexpected": true });
             }
             if first.starts_with("GET") && first.contains("/delayed_events") && endpoints == Endpoints::NoList {
                 return unknown();
@@ -810,6 +835,18 @@ mod tests {
         let flaky = listed.iter().find(|message| message.delay_id == "flaky").expect("still listed");
         assert!(flaky.failed.is_none() && flaky.send_at_ms <= now_ms());
         assert_eq!(kept_ids(&account.keep_scheduled(|_| {}).await), ["flaky"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_just_scheduled_should_stay_known_when_the_list_fails() {
+        let (server, _) = server(false, Endpoints::BrokenList);
+        let account = account(&server, "broken-list").await;
+        account
+            .schedule(&TimelineKey::room("!room:example.org"), None, &text("later"), Duration::from_secs(90))
+            .await
+            .expect("scheduled");
+        let Err((_, known)) = account.scheduled_or_known().await else { panic!("the list should fail") };
+        assert_eq!(kept_ids(&known), ["d1"]);
     }
 
     #[tokio::test(flavor = "multi_thread")]

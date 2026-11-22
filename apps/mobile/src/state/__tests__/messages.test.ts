@@ -115,6 +115,12 @@ describe('messageText', () => {
     ).toBe('the end: [Spoiler]');
   });
 
+  it('should copy a spoiler as [Spoiler] when the plain body holds its words', () => {
+    expect(
+      messageText(text('the end: he dies', 'the end: <span data-mx-spoiler>he dies</span>')),
+    ).toBe('the end: [Spoiler]');
+  });
+
   it('should translate a spoiler as [Spoiler], never its words', () => {
     const spoiled = text('[Spoiler]', '<span data-mx-spoiler>the butler did it</span>');
     const url = translationUrl(messageText(spoiled) ?? '', 'en');

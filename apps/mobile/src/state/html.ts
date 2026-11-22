@@ -106,6 +106,15 @@ export function inlinesText(inlines: Inline[], spoilers: SpoilerText = 'words'):
     .join('');
 }
 
+/**
+ * A message's words as plain text that may leave it (a list's preview, a reply's excerpt): its
+ * plain body, unless its HTML holds a spoiler, whose words a sender may have left in the body
+ * while hiding them in the HTML. Then the text the timeline shows, each spoiler `[Spoiler]`.
+ */
+export function spoilerSafeText(body: string, html: string | null): string {
+  return html !== null && hasSpoiler(html) ? blocksText(htmlBlocks(html), 'hidden') : body;
+}
+
 /** The text a tree shows, for copying and accessibility; spoilers as `spoilers` says. */
 export function blocksText(blocks: Block[], spoilers: SpoilerText = 'words'): string {
   return blocks

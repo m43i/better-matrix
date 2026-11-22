@@ -36,6 +36,16 @@ fn an_edit_should_replace_the_original_searchable_text() {
 }
 
 #[test]
+fn a_hidden_spoilers_words_should_neither_find_nor_show_in_a_hit() {
+    let mut spoiler = message("$spoiler", "it was the butler");
+    spoiler["content"]["format"] = json!("org.matrix.custom.html");
+    spoiler["content"]["formatted_body"] = json!("it was <span data-mx-spoiler>the butler</span>");
+    let events = [event(spoiler)];
+    assert!(search_events("!room:example.org", &events, "butler").is_empty());
+    assert_eq!(search_events("!room:example.org", &events, "was")[0].1.body, "it was [Spoiler]");
+}
+
+#[test]
 fn a_redacted_message_should_not_be_searchable() {
     let redaction = json!({"type":"m.room.redaction", "event_id":"$redaction", "content":{"redacts":"$original"}});
     let events = [event(message("$original", "secret")), event(redaction)];

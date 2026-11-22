@@ -13,6 +13,7 @@ import type { Key } from '../i18n';
 import { type ComposerState, emptied, endEdit, type PendingAttachment } from './composer';
 import { hasText as draftHasText, outgoingText } from './format';
 import { coordinatesText } from './geo';
+import { spoilerSafeText } from './html';
 import { slashOf } from './slash';
 
 /** The commands a send makes, and the composer after it. */
@@ -233,15 +234,22 @@ export function voiceMessage(path: string, durationMs: number, waveform: number[
 /** How long an excerpt of the answered message shows above the field, as on the desktop. */
 const EXCERPT = 140;
 
-/** The words of a message a reply quotes: its text, its file's name, its poll's question. */
+/**
+ * The words of a message a reply quotes: its text (each spoiler `[Spoiler]`, never its words),
+ * its file's name, its poll's question.
+ */
 export function excerpt(message: Message): string {
   const content = message.content;
 
   switch (content.type) {
     case 'Text':
-      return [...content.data.body].slice(0, EXCERPT).join('');
-    case 'Emote':
-      return [...`* ${message.sender_name} ${content.data.body}`].slice(0, EXCERPT).join('');
+      return [...spoilerSafeText(content.data.body, content.data.html)].slice(0, EXCERPT).join('');
+    case 'Emote': {
+      const words = spoilerSafeText(content.data.body, content.data.html);
+
+      return [...`* ${message.sender_name} ${words}`].slice(0, EXCERPT).join('');
+    }
+
     case 'Location':
       return content.data.description ?? coordinatesText(content.data.geo_uri) ?? '';
     case 'Attachment':

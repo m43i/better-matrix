@@ -11,21 +11,29 @@ import type {
 } from '@better-matrix/matrix-native/types';
 
 import { locale, t } from '../i18n';
+import { spoilerSafeText } from './html';
 import { fuzzyMatch } from './search';
 import { byRecency } from './sections';
 import { hides } from './selectors';
 import { type Permalink, parseTyped } from './permalinks';
 import type { AccountData } from './types';
 
-/** A message as one line of plain text, as the desktop's overview shows it. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * A message as one line of plain text, as the desktop's overview shows it: a spoiler as
+ * `[Spoiler]`, never its words.
+ */
 export function messageText(message: Message): string {
   const content = message.content;
 
   switch (content.type) {
     case 'Text':
-      return content.data.body.replace(/\s+/g, ' ').trim();
+      return oneLine(spoilerSafeText(content.data.body, content.data.html));
     case 'Emote':
-      return `* ${message.sender_name} ${content.data.body.replace(/\s+/g, ' ').trim()}`;
+      return `* ${message.sender_name} ${oneLine(spoilerSafeText(content.data.body, content.data.html))}`;
     case 'Location':
       return content.data.description ?? t('mobile.conversation.location');
     case 'Attachment':

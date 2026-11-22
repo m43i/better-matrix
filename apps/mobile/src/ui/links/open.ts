@@ -106,10 +106,17 @@ export function openJoined(
 
 /**
  * What became of a jump to a message elsewhere: it opened, it shows in the timeline that asked
- * after all (further back than it paged: look on), the engine can't find it, or the answer came
- * once the jump was no longer wanted.
+ * after all (further back than it paged: look on for `eventId`, the message the engine located,
+ * which for an edit is the message it edits), the engine can't find it, or the answer came once
+ * the jump was no longer wanted.
  */
-export type Elsewhere = 'opened' | 'here' | 'missing' | 'stale';
+export type Elsewhere =
+  | { type: 'opened' }
+  | { type: 'here'; eventId: string }
+  | { type: 'missing' }
+  | { type: 'stale' };
+
+const STALE: Elsewhere = { type: 'stale' };
 
 /**
  * Opens a message the timeline `current` didn't find by paging back (a quote of a reply in a
@@ -126,23 +133,23 @@ export async function openElsewhere(
   wanted: Jump,
   navigation: Pick<typeof ExpoRouter, 'push'> = appRouter(),
 ): Promise<Elsewhere> {
-  if (!wanted()) return 'stale';
+  if (!wanted()) return STALE;
   let located: Located;
 
   try {
     located = await locateMessage(store, account, current.room_id, eventId);
   } catch {
-    return wanted() ? 'missing' : 'stale';
+    return wanted() ? { type: 'missing' } : STALE;
   }
 
-  if (!wanted()) return 'stale';
+  if (!wanted()) return STALE;
   const { key, eventId: message } = located;
   const thread = key.thread !== null && key.thread !== message ? key.thread : null;
 
-  if (thread === current.thread) return 'here';
+  if (thread === current.thread) return { type: 'here', eventId: message };
   navigation.push(messageRoute(account, current.room_id, message, thread));
 
-  return 'opened';
+  return { type: 'opened' };
 }
 
 /**

@@ -216,7 +216,7 @@ fn body_of(event: &AnySyncTimelineEvent) -> Option<String> {
     let AnySyncTimelineEvent::MessageLike(event) = event else { return None };
     match event {
         AnySyncMessageLikeEvent::RoomMessage(SyncRoomMessageEvent::Original(message)) => {
-            Some(crate::convert::content(&message.content.msgtype).plain().to_owned())
+            Some(crate::convert::content(&message.content.msgtype).plain().into_owned())
         }
         AnySyncMessageLikeEvent::Sticker(SyncStickerEvent::Original(sticker)) => Some(sticker.content.body.clone()),
         _ => None,

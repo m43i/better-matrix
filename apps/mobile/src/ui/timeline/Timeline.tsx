@@ -415,10 +415,13 @@ export function Timeline({
 
         if (quote !== null && jump !== null)
           void openElsewhere(store, account, timelineKey, wanted, jump, router).then((outcome) => {
-            if (outcome === 'here') {
+            if (outcome.type === 'here') {
+              // Looked for as the engine located it: a quoted edit is its original message,
+              // scrolled to at once when loaded, else paged for.
               targetDone.current = null;
-              setSeek((now) => quoteHere(now, wanted));
-            } else if (outcome === 'missing') {
+              targetPages.current = 0;
+              setSeek((now) => quoteHere(now, wanted, outcome.eventId));
+            } else if (outcome.type === 'missing') {
               store.update((s) => addNotice(s, t('mobile.conversation.message_missing'), account));
             }
           });

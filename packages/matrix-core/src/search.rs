@@ -192,6 +192,8 @@ fn search_events(room: &str, events: &[TimelineEvent], term: &str) -> Vec<(usize
             })
             .unwrap_or(&e["content"]);
         let Some(body) = message_body(kind, content) else { continue };
+        // Matched and quoted as it shows: a hidden spoiler's words neither find it nor show.
+        let body = crate::html::shown_text(body, content["formatted_body"].as_str());
         let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
         let Some(matched) = fuzzy_match(&body, term) else { continue };
         let (body, highlights) = excerpt(&body, &matched.positions);

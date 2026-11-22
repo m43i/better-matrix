@@ -15,7 +15,7 @@ import {
   withAttachments,
 } from '../outgoing';
 import { roomKey } from '../timeline';
-import { ADA, EVERY_PRIVATE_USE, message } from '../../test/fixtures';
+import { ADA, EVERY_PRIVATE_USE, message, withContent } from '../../test/fixtures';
 
 /** `m.mentions` for a message that mentions nobody. */
 const NOBODY = { user_ids: [], room: false };
@@ -165,6 +165,30 @@ describe('voiceMessage', () => {
 describe('excerpt', () => {
   it('should quote a text message up to 140 characters', () => {
     expect(excerpt(message('$1', 'x'.repeat(200)))).toHaveLength(140);
+  });
+
+  it('should quote a spoiler as [Spoiler] when the plain body holds its words', () => {
+    const spoiled = withContent('$1', {
+      type: 'Text',
+      data: { body: 'the end: he dies', html: 'the end: <span data-mx-spoiler>he dies</span>' },
+    });
+
+    expect(excerpt(spoiled)).toBe('the end: [Spoiler]');
+  });
+
+  it('should quote a spoiler in an emote as [Spoiler]', () => {
+    const spoiled = withContent('$1', {
+      type: 'Emote',
+      data: { body: 'hides the ring', html: 'hides <span data-mx-spoiler>the ring</span>' },
+    });
+
+    expect(excerpt(spoiled)).toBe('* Grace hides [Spoiler]');
+  });
+
+  it('should quote formatted text without a spoiler by its plain body', () => {
+    const bold = withContent('$1', { type: 'Text', data: { body: '**hi**', html: '<b>hi</b>' } });
+
+    expect(excerpt(bold)).toBe('**hi**');
   });
 
   it('should quote a file by its name', () => {

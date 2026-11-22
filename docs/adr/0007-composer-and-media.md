@@ -73,6 +73,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   Any other change that strips a pill into a code block (the field's own cut, word deletion,
   Tab, input methods) is taken back after its frame, and again before a message is sent or
   scheduled (`Composer::keep_pills`), so a spoiler never leaves as plain words.
+  A message's plain body may spell out what its spoiler hides, so text taken from a message
+  (previews, notifications, quotes, search hits, copying, translating) is what it shows:
+  `MessageContent::plain` and `html::shown_text`, each spoiler as `[Spoiler]`.
   `/spoiler` writes its spoiler itself (`html::spoiler`), line breaks and all, whatever the field
   held its words as. Formulas
   (`data-mx-maths`) show as one line of Unicode on a chip, in italics (`matrix_core::math`:
@@ -90,7 +93,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   room, what sync brought since winning for the same pack), listed per room once a run
   (`Command::ListImagePacks`; the sticker picker lists again as it opens). The emoji picker
   leads with the room's custom emoji; a sticker button opens a grid of the packs' stickers, a
-  press sends `Outgoing::Sticker` (`m.sticker`). A received image from `mxc://` is a custom
+  press sends `Outgoing::Sticker` (`m.sticker`), as a reply and into a thread like any message
+  (the SDK relates only room messages itself, so the engine writes the relation for stickers
+  and polls). A received image from `mxc://` is a custom
   emoji, `data-mx-emoticon` or not: the SDK's sanitiser drops that attribute, which the spec's
   list of allowed attributes lacks. Received custom emoji draw as their picture
   inline (`El::inline_icon`), their short code kept as unseen text so copying gives `:code:`;
@@ -160,7 +165,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   list with why, until dismissed (cancelling it asks nothing of the server). Unanswered ones go
   after eight days (servers keep finalised ones for about a week), failed ones after 30.
   Failures of messages scheduled from another device aren't followed: nothing on this device
-  could dismiss them.
+  could dismiss them. When the server can't list them at all for now, the messages this device
+  scheduled stand in (`Account::scheduled_or_known`), so one just scheduled never drops out of
+  sight.
 - **Composer layout:**
   - Room and thread editors grow up to eight lines, then scroll inside their own viewport,
     keeping the caret visible while typing or pasting. Vertical padding and the bottom bar stay outside

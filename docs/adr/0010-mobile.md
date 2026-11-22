@@ -437,8 +437,9 @@ Date: 2026-11-16
   loaded pages back as a link's target does (`Timeline`'s `jump`); still not found, the engine
   says where it lives (`LocateMessage`, `openElsewhere`) and it opens there when that is another
   timeline (a reply in a thread, a room message quoted in one); when it is this timeline, the
-  search pages on past its budget until it finds it or history starts (`seekStep`, `quoteHere`
-  in `state/seek.ts`), stopping quietly once a later jump began or its screen left; the app
+  search looks for the message the engine located (a quoted edit's original, `MessageLocated`'s
+  `event_id`), scrolling there at once when loaded, else paging on past its budget until it
+  finds it or history starts (`seekStep`, `quoteHere` in `state/seek.ts`), stopping quietly once a later jump began or its screen left; the app
   says it isn't found when history starts without it or the engine can't find it; the message
   flashes highlighted. How far a search pages is its `Reach`: `near` (a few pages), `local` (a
   search hit in local history: to the start, then it ends quietly) or `located` (the engine
@@ -455,7 +456,9 @@ Date: 2026-11-16
   begins at the tap: a quote's (`beginJump`) before it pages back, so a link tapped meanwhile
   is the newer one, and its paging stops quietly once a later jump began or its screen left; a
   link or room pill tapped in a message carries its timeline's screen guard
-  (`TimelineContext.shown`). Read marking waits for the opening only (`state/seek.ts`): a
+  (`TimelineContext.shown`); a link opened from a tab's search carries the guard of the screen
+  hosting the search (`openSearchLink`), not the results list's, which goes as the pick empties
+  the search. Read marking waits for the opening only (`state/seek.ts`): a
   timeline opened at a link's message is positioned once it got there, gave up looking, or the
   reader tapped a quote; a quote's own search never holds it back.
 - **QR codes** (ADR 0004): one scanner (`ui/qr/QrScanner.tsx`, `expo-camera`) serves
@@ -509,7 +512,10 @@ Date: 2026-11-16
   Copy Text and Translate take the message's plain text with each spoiler as `[Spoiler]`
   (`messageText`, `blocksText(…, 'hidden')`), the same literal in every language as the body a
   sender writes for one, so what a spoiler hides never leaves the message (nor reaches the
-  translation service) before, or after, it is tapped.
+  translation service) before, or after, it is tapped. Other plain text taken from a message
+  (a room list's preview line, a reply's excerpt above the composer) is its plain body unless
+  its HTML holds a spoiler, whose words a sender may leave in the body: then the HTML's text
+  with each spoiler `[Spoiler]` (`spoilerSafeText`).
   Attachment surfaces forward long presses to the message sheet, including image/video
   previews and audio controls. The full-screen preview opens a file-only fitted sheet from
   More or a long press on an image or audio clip (`attachment-actions`), preserving the

@@ -130,7 +130,7 @@ fn room_card(
     );
     if let Some(message) = last {
         let body = match &message.content {
-            matrix_core::MessageContent::Call(card) => crate::state::call_title(card),
+            matrix_core::MessageContent::Call(card) => std::borrow::Cow::Borrowed(crate::state::call_title(card)),
             content => content.plain(),
         };
         let preview = tf!("overview.preview", sender = message.sender_name, body = body);

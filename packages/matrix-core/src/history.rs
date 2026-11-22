@@ -164,7 +164,7 @@ impl Account {
                     preview.sender_avatar = message.sender_avatar;
                     preview.timestamp_ms = Some(message.timestamp_ms);
                     if !matches!(message.content, MessageContent::Redacted | MessageContent::Undecryptable) {
-                        preview.body = Some(message.content.plain().to_owned());
+                        preview.body = Some(message.content.plain().into_owned());
                     }
                 }
                 if let Some(raw) = item.original_json()
@@ -194,7 +194,10 @@ impl Account {
                 root: event["event_id"].as_str().unwrap_or_default().to_owned(),
                 sender_name: sender_name(&room, &event).await,
                 sender_id: event["sender"].as_str().unwrap_or_default().to_owned(),
-                body: event["content"]["body"].as_str().unwrap_or_default().to_owned(),
+                body: crate::html::shown_text(
+                    event["content"]["body"].as_str().unwrap_or_default(),
+                    event["content"]["formatted_body"].as_str(),
+                ),
                 replies: thread["count"].as_u64().unwrap_or_default(),
                 latest_at: thread["latest_event"]["origin_server_ts"].as_u64(),
             });

@@ -1,6 +1,15 @@
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 
 import { routes } from '../../routes';
+import {
+  openSeek,
+  quoteHere,
+  quoteTapped,
+  seekEnded,
+  seekStep,
+  sought,
+  soughtReach,
+} from '../../state/seek';
 import { Store } from '../../state/store';
 import { ADA, roomSummary, summary } from '../../test/fixtures';
 import { beginJump, openElsewhere, openJoined, openPermalink } from '../links/open';
@@ -168,7 +177,7 @@ describe('openElsewhere', () => {
 
   it('a quoted reply in a thread should open in its thread', async () => {
     expect(await located({ thread: '$root' }, null)).toEqual([
-      'opened',
+      { type: 'opened' },
       [[routes.thread(ADA, '!r:x', '$root', '$q', 'located')]],
     ]);
   });
@@ -180,13 +189,16 @@ describe('openElsewhere', () => {
 
   it('a room message quoted in a thread should open in the room', async () => {
     expect(await located({ thread: null }, '$root')).toEqual([
-      'opened',
+      { type: 'opened' },
       [[routes.room(ADA, '!r:x', '$q', 'located')]],
     ]);
   });
 
   it('a quoted message that shows in this timeline should open nothing, but be looked for here', async () => {
-    expect(await located({ thread: '$root' }, '$root')).toEqual(['here', []]);
+    expect(await located({ thread: '$root' }, '$root')).toEqual([
+      { type: 'here', eventId: '$q' },
+      [],
+    ]);
   });
 
   it('a quoted thread root, from the room, should be looked for in the room', async () => {
@@ -210,15 +222,69 @@ describe('openElsewhere', () => {
     });
     engine.emit({ type: 'Finished', data: { request, result: { Ok: null } } });
 
-    expect([await outcome, navigation.push.mock.calls]).toEqual(['here', []]);
+    expect([await outcome, navigation.push.mock.calls]).toEqual([
+      { type: 'here', eventId: '$q' },
+      [],
+    ]);
+  });
+
+  it('a quoted edit in this timeline should be looked for as the message it edits', async () => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    // The quote's search paged back without finding `$edit`, and asked the engine.
+    const gaveUp = seekEnded(quoteTapped(openSeek(null), '$edit'), '$edit');
+
+    const outcome = openElsewhere(
+      store,
+      ADA,
+      { room_id: '!r:x', thread: null },
+      '$edit',
+      beginJump(),
+      navigation,
+    );
+
+    const request = sent[0]!.request;
+    engine.emit({
+      type: 'MessageLocated',
+      data: {
+        request,
+        account: ADA,
+        key: { room_id: '!r:x', thread: null },
+        event_id: '$original',
+      },
+    });
+    engine.emit({ type: 'Finished', data: { request, result: { Ok: null } } });
+    const answer = await outcome;
+    const seek = answer.type === 'here' ? quoteHere(gaveUp, '$edit', answer.eventId) : gaveUp;
+
+    const step = (loaded: boolean) =>
+      seekStep({
+        quote: true,
+        wanted: true,
+        loaded,
+        busy: false,
+        atStart: false,
+        pages: 0,
+        budget: 3,
+        reach: soughtReach(seek),
+      });
+
+    // With `$original` loaded it scrolls there at once, else it pages back for it.
+    expect([sought(seek), step(true), step(false), navigation.push.mock.calls]).toEqual([
+      '$original',
+      'scroll',
+      'page',
+      [],
+    ]);
   });
 
   it('a quoted message the engine can’t find should open nothing', async () => {
-    expect(await located('unknown', null)).toEqual(['missing', []]);
+    expect(await located('unknown', null)).toEqual([{ type: 'missing' }, []]);
   });
 
   it('a quoted message found once its timeline left the screen should open nothing', async () => {
-    expect(await located({ thread: '$root' }, null, true)).toEqual(['stale', []]);
+    expect(await located({ thread: '$root' }, null, true)).toEqual([{ type: 'stale' }, []]);
   });
 });
 
@@ -240,7 +306,7 @@ describe('jumps begun at the tap', () => {
     );
 
     expect([outcome, sent.length, navigation.push.mock.calls]).toEqual([
-      'stale',
+      { type: 'stale' },
       0,
       [[routes.room(ADA, '!r:x', undefined)]],
     ]);

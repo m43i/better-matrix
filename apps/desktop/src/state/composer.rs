@@ -178,7 +178,7 @@ fn html_of(edit: &TextEdit) -> Option<String> {
 
 /// What a spoiler's words become in a message's plain body: the same in every language, as
 /// it goes to everyone.
-pub(super) const SPOILER_FALLBACK: &str = "[Spoiler]";
+pub(super) const SPOILER_FALLBACK: &str = matrix_core::html::SPOILER_FALLBACK;
 
 /// A field's plain body: its text, with each spoiler's words kept out of it, as clients that
 /// show only the body would show them to everyone.

@@ -5,12 +5,12 @@ import type { AccountId } from '@better-matrix/matrix-native/types';
 import { type ReactNode, useRef, useState } from 'react';
 
 import { t } from '../../i18n';
-import { parseTyped, permalinkUri } from '../../state/permalinks';
+import { type Permalink, parseTyped } from '../../state/permalinks';
 import { useAppStore, useStore } from '../../state/react';
 import { account as accountOf } from '../../state/selectors';
-import { openPermalink } from '../links/open';
 import { useShown } from '../useShown';
 import { SearchResults } from './SearchResults';
+import { openSearchLink } from './searchLink';
 import { ShellSearch, type ShellSearchHandle } from './ShellSearch';
 
 export interface ShellSearchView {
@@ -25,14 +25,18 @@ function AccountSearchResults({
   id,
   term,
   onPicked,
+  onLink,
 }: {
   id: AccountId;
   term: string;
   onPicked: () => void;
+  onLink: (link: Permalink) => void;
 }) {
   const account = useStore((s) => accountOf(s, id));
 
-  return account ? <SearchResults account={account} term={term} onPicked={onPicked} /> : null;
+  return account ? (
+    <SearchResults account={account} term={term} onPicked={onPicked} onLink={onLink} />
+  ) : null;
 }
 
 export function useShellSearch(account: AccountId | undefined): ShellSearchView {
@@ -40,14 +44,16 @@ export function useShellSearch(account: AccountId | undefined): ShellSearchView 
   const handle = useRef<ShellSearchHandle>(null);
   const [term, setTerm] = useState('');
   const clear = () => handle.current?.clear();
+  // This screen's, not the results list's: the list goes away as the search empties.
   const shown = useShown();
+
+  const openLink = (link: Permalink) =>
+    openSearchLink(store, link, account ?? null, () => shown.current, clear);
 
   const submit = (text: string) => {
     const link = parseTyped(text);
 
-    if (link === null) return;
-    clear();
-    openPermalink(store, permalinkUri(link), account ?? null, () => shown.current);
+    if (link !== null) openLink(link);
   };
 
   const bar = (
@@ -64,7 +70,13 @@ export function useShellSearch(account: AccountId | undefined): ShellSearchView 
     results:
       account !== undefined && term.trim() !== '' ? (
         // One search per account: switching accounts starts its directory search afresh.
-        <AccountSearchResults key={account} id={account} term={term} onPicked={clear} />
+        <AccountSearchResults
+          key={account}
+          id={account}
+          term={term}
+          onPicked={clear}
+          onLink={openLink}
+        />
       ) : null,
   };
 }

@@ -57,6 +57,24 @@ describe('messageText', () => {
     expect(messageText(withContent('$m', content))).toBe('plan.pdf');
   });
 
+  it('a spoiler should read as [Spoiler] when the plain body holds its words', () => {
+    const spoiled = withContent('$m', {
+      type: 'Text',
+      data: { body: 'the end: he dies', html: 'the end: <span data-mx-spoiler>he dies</span>' },
+    });
+
+    expect(messageText(spoiled)).toBe('the end: [Spoiler]');
+  });
+
+  it('a spoiler in an emote should read as [Spoiler]', () => {
+    const spoiled = withContent('$m', {
+      type: 'Emote',
+      data: { body: 'hides the ring', html: 'hides <span data-mx-spoiler>the ring</span>' },
+    });
+
+    expect(messageText(spoiled)).toBe('* Grace hides [Spoiler]');
+  });
+
   it('a deleted message should say it was deleted', () => {
     expect(messageText(withContent('$m', { type: 'Redacted' }))).toBe('This message was deleted.');
   });
