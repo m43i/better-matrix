@@ -25,6 +25,9 @@ import { RichText } from './RichText';
 
 export const AVATAR = 36;
 
+/** What a screen reader can do with a message: open its actions, by activating or long-pressing. */
+const ROW_ACTIONS = [{ name: 'activate' }, { name: 'longpress' }];
+
 export interface MessageRowProps {
   message: Message;
   /** Continues the sender's run: no face or name. */
@@ -61,11 +64,13 @@ export const MessageRow = memo(function MessageRow({
     .join(' · ');
 
   return (
+    // The row is no control of its own for screen readers, so the links, Show and other controls
+    // in it stay reachable; its sender's column (below) opens the message's actions instead.
     <Pressable
       onLongPress={() => openActions(message)}
       delayLongPress={350}
       android_ripple={{ color: palette.hover }}
-      accessibilityHint={t('actions.more')}
+      accessible={false}
       style={[
         styles.row,
         { paddingTop: continues ? 2 : 10, opacity: message.pending ? 0.6 : 1 },
@@ -80,7 +85,16 @@ export const MessageRow = memo(function MessageRow({
         highlighted ? { backgroundColor: `${palette.accent}26` } : null,
       ]}
     >
-      <View style={styles.gutter}>
+      <View
+        style={styles.gutter}
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={`${message.sender_name}, ${clockTime(message.timestamp_ms)}`}
+        accessibilityHint={t('actions.more')}
+        accessibilityActions={ROW_ACTIONS}
+        onAccessibilityAction={() => openActions(message)}
+        onAccessibilityTap={() => openActions(message)}
+      >
         {continues ? null : (
           <Avatar
             account={account}

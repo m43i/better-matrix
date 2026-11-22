@@ -409,10 +409,12 @@ async fn hides_stranger_invites(client: &matrix_sdk::Client) -> bool {
         .is_some_and(|content| content["hide_strangers"].as_bool() == Some(true))
 }
 
-/// Whether `room_id` is an invitation this device knows that stays out of sight
-/// ([`hides_invite_from`]): for a push whose event couldn't be fetched.
-pub(crate) async fn hides_invitation(client: &matrix_sdk::Client, room_id: &RoomId) -> bool {
-    let Some(room) = client.get_room(room_id) else { return false };
+/// Whether `room` is an invitation that stays out of sight ([`hides_invite_from`]): for a push
+/// whose event couldn't be fetched. The room comes from whichever client knows it (the push's
+/// own sliding sync may have just learned of it); `client` answers for the choice and the rooms
+/// the user shares.
+pub(crate) async fn hides_invitation(client: &matrix_sdk::Client, room: Option<matrix_sdk::Room>) -> bool {
+    let Some(room) = room else { return false };
     if room.state() != matrix_sdk::RoomState::Invited {
         return false;
     }

@@ -104,6 +104,8 @@ export interface AccountData {
   status: Status;
   /** The status as last saved: what a choice that fails to save falls back to. */
   savedStatus: Status;
+  /** The words that notify the user wherever they are written, once the engine reports them. */
+  keywords: string[] | null;
   /**
    * What the user keeps away (ignored people, media, invitations), as shown: the last reported
    * choices with the changes still on their way applied (`savedSafety`, `pendingSafety`).

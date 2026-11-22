@@ -328,7 +328,15 @@ account: AccountId,
 /**
  * The choices.
  */
-safety: Safety, } } | { "type": "Status", "data": { 
+safety: Safety, } } | { "type": "Keywords", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The words.
+ */
+keywords: Array<string>, } } | { "type": "Status", "data": { 
 /**
  * Whose.
  */

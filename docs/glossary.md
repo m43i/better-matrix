@@ -154,8 +154,17 @@ keeping its current content and formatting and removing its reply, thread and ed
 : React, reply and reply-in-thread buttons at a message's top right, shown while it is hovered.
 
 **Section**
-: A group in the sidebar: the built-in Rooms and Direct messages, or one of the user's own,
-per Home or space. See [ADR 0005](adr/0005-navigation-and-settings.md).
+: A group in the sidebar: the built-in Rooms, Direct messages, Favourites and Low priority, or one
+of the user's own, per Home or space. See [ADR 0005](adr/0005-navigation-and-settings.md).
+
+**Room priority**
+: Whether the user put a room among their **Favourites** or their **Low priority** rooms, or
+neither (`RoomPriority`): the room tags `m.favourite` and `m.lowpriority`, shared with every
+client. Each has its built-in section.
+
+**Marked unread**
+: A room the user marked unread by hand (MSC2867, `RoomSummary::marked_unread`). It wants
+attention until it is opened or marked read, on every client.
 
 **Voice memo**
 : A recording sent as a Matrix voice message (`Outgoing::Voice`), with its waveform. It shows as
@@ -283,6 +292,10 @@ thumbnail), or a video's poster (only the sender's thumbnail).
 **Notification mode**
 : When a room notifies: all messages, mentions only, or mute. Stored as push rules on the server.
 
+**Keyword**
+: A word that notifies the user like a mention wherever it is written: a content push rule on
+the server, edited under each account in Settings, Notifications (`Event::Keywords`).
+
 **Default notification mode**
 : An account's notification mode for every room that doesn't set its own. A room set back to
 "Use the default" follows it again.
@@ -300,7 +313,7 @@ size. See [ADR 0005](adr/0005-navigation-and-settings.md).
 
 **Wants attention**
 : A room drawing the eye (bold name, rail and account dots): unread messages, or only mentions
-when it notifies for mentions only or is muted.
+when it notifies for mentions only or is muted; and any room marked unread.
 
 **Popover**
 : A floating panel over the window (account menu, room menu). One at a time.

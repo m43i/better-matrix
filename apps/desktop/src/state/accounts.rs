@@ -21,10 +21,23 @@ pub fn visual(attachment: &Attachment) -> bool {
 /// Whether a room should draw attention: any unread message, or only mentions when the room
 /// notifies for mentions only or is muted.
 pub fn wants_attention(room: &RoomSummary) -> bool {
-    match room.notifications {
-        NotificationMode::AllMessages => room.unread > 0 || room.mentions > 0,
-        NotificationMode::MentionsOnly | NotificationMode::Mute => room.mentions > 0,
-    }
+    // Marked unread by the user, whatever the room's notifications.
+    room.marked_unread
+        || match room.notifications {
+            NotificationMode::AllMessages => room.unread > 0 || room.mentions > 0,
+            NotificationMode::MentionsOnly | NotificationMode::Mute => room.mentions > 0,
+        }
+}
+
+/// What a room showed before a change sent to the server, to show again if it is refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoomUndo {
+    /// Where it was among the favourites and low priority rooms.
+    Priority(matrix_core::RoomPriority),
+    /// Whether it was marked unread.
+    Mark(bool),
+    /// Its unread mark and counts before it was read.
+    Read { marked: bool, unread: u64, mentions: u64 },
 }
 
 /// Which slice of an account's rooms the sidebar shows.
@@ -675,6 +688,8 @@ pub struct AccountData {
     pub presence: HashMap<String, matrix_core::PersonPresence>,
     /// The user's status message as the engine last reported it.
     pub saved_status_message: Option<String>,
+    /// The words that notify the user wherever they are written, once the engine reports them.
+    pub keywords: Option<Vec<String>>,
     /// The latest status message chosen while it is saved: until that request finishes, it shows
     /// over what the engine reports.
     pub saving_status_message: Option<matrix_core::RequestId>,
@@ -739,6 +754,7 @@ impl AccountData {
             safety: matrix_core::Safety::default(),
             saved_safety: matrix_core::Safety::default(),
             pending_safety: Vec::new(),
+            keywords: None,
         }
     }
 
@@ -1635,6 +1651,44 @@ impl Accounts {
         if let Some(room) = self.room_mut(id, room_id) {
             room.unread = 0;
             room.mentions = 0;
+            room.marked_unread = false;
+        }
+    }
+
+    /// Marks a room unread or takes the mark away locally, ahead of the server's confirmation.
+    pub fn set_marked(&mut self, id: &AccountId, room_id: &str, marked: bool) {
+        if let Some(room) = self.room_mut(id, room_id) {
+            room.marked_unread = marked;
+        }
+    }
+
+    /// Puts a room among the favourites or the low priority rooms locally, ahead of the server's
+    /// confirmation.
+    pub fn set_priority(&mut self, id: &AccountId, room_id: &str, priority: matrix_core::RoomPriority) {
+        if let Some(room) = self.room_mut(id, room_id) {
+            room.priority = priority;
+        }
+    }
+
+    /// Takes back the one change to a room the server refused, keeping whatever else changed
+    /// about the room since.
+    pub fn undo(&mut self, id: &AccountId, room_id: &str, undo: &RoomUndo) {
+        let Some(room) = self.room_mut(id, room_id) else { return };
+        match *undo {
+            RoomUndo::Priority(priority) => room.priority = priority,
+            RoomUndo::Mark(marked) => room.marked_unread = marked,
+            RoomUndo::Read { marked, unread, mentions } => {
+                room.marked_unread = marked;
+                room.unread = room.unread.max(unread);
+                room.mentions = room.mentions.max(mentions);
+            }
+        }
+    }
+
+    /// The account's notification keywords, as the engine reports them.
+    pub fn set_keywords(&mut self, id: &AccountId, keywords: Vec<String>) {
+        if let Some(account) = self.get_mut(id) {
+            account.keywords = Some(keywords);
         }
     }
 }
@@ -1740,6 +1794,8 @@ mod tests {
             pinned: Vec::new(),
             can_pin: true,
             saved: Vec::new(),
+            priority: matrix_core::RoomPriority::Normal,
+            marked_unread: false,
         }
     }
 
@@ -1833,6 +1889,12 @@ mod tests {
     fn a_muted_room_should_draw_attention_only_for_mentions() {
         let muted = RoomSummary { unread: 5, notifications: NotificationMode::Mute, ..room("!m") };
         assert!(!wants_attention(&muted));
+    }
+
+    #[test]
+    fn a_room_marked_unread_should_draw_attention_even_when_muted() {
+        let room = RoomSummary { unread: 0, marked_unread: true, notifications: NotificationMode::Mute, ..room("!m") };
+        assert!(wants_attention(&room));
     }
 
     #[test]

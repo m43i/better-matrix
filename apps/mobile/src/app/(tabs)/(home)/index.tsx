@@ -15,9 +15,11 @@ import { routes } from '../../../routes';
 import { toggleSection } from '../../../state/actions/shell';
 import { shallow, useAppStore, useStore } from '../../../state/react';
 import {
+  FAVOURITES,
   hasUnread,
   isBuiltin,
   lastMessage,
+  LOW_PRIORITY,
   ROOMS,
   sameScope,
   scopeKey,
@@ -66,6 +68,20 @@ function isInvitation(item: RoomSummary | Invitation): item is Invitation {
   return 'inviter' in item;
 }
 
+/** A built-in section's name. */
+function builtinTitle(id: string): string {
+  switch (id) {
+    case ROOMS:
+      return t('sidebar.rooms');
+    case FAVOURITES:
+      return t('sidebar.favourites');
+    case LOW_PRIORITY:
+      return t('sidebar.low_priority');
+    default:
+      return t('sidebar.direct');
+  }
+}
+
 function listSections(account: RoomListData, now: number): ListSection[] {
   const scope = account.scope;
   const collapsed = new Set(account.sidebar.scopes[scopeKey(scope)]?.collapsed ?? []);
@@ -105,7 +121,7 @@ function listSections(account: RoomListData, now: number): ListSection[] {
     out.push({
       id: view.id,
       key: view.id,
-      title: view.name ?? (view.id === ROOMS ? t('sidebar.rooms') : t('sidebar.direct')),
+      title: view.name ?? builtinTitle(view.id),
       collapsed: view.collapsed,
       own: !isBuiltin(view.id),
       attention: view.rooms.filter(wantsAttention).length,

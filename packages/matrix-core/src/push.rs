@@ -172,7 +172,8 @@ pub(crate) async fn fetch(
         }
     };
     // An invitation whose event couldn't be read is still known by its room.
-    if matches!(content, PushContent::Hidden { .. }) && crate::safety::hides_invitation(client, &room).await {
+    let invited = || notifications.get_room(&room).or_else(|| client.get_room(&room));
+    if matches!(content, PushContent::Hidden { .. }) && crate::safety::hides_invitation(client, invited()).await {
         return Ok(PushContent::Nothing);
     }
     Ok(content)

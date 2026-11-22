@@ -198,6 +198,8 @@ function room(
     can_pin: true,
     saved: id === GENERAL ? [TEST_PLAN] : [],
     can_rename: true,
+    priority: 'Normal',
+    marked_unread: false,
   };
 }
 
@@ -537,9 +539,11 @@ function work(): Fixture {
         },
         [],
       ],
-      [room('!lab:example.org', 'lab', 'My own scratch room', 0, 0), []],
+      // Organised as the desktop's demo: lab among the low priority rooms, Grace's chat a
+      // favourite, Alan's muted chat marked unread.
+      [{ ...room('!lab:example.org', 'lab', 'My own scratch room', 0, 0), priority: 'Low' }, []],
       [
-        dm(DM_GRACE, GRACE, 'Grace Hopper', 2),
+        { ...dm(DM_GRACE, GRACE, 'Grace Hopper', 2), priority: 'Favourite' },
         messages([
           [ADA, 'Ada Lovelace', callCard(true), 0],
           [GRACE, 'Grace Hopper', text('Do you have a minute to look at the sync loop?'), 1],
@@ -547,7 +551,14 @@ function work(): Fixture {
           [GRACE, 'Grace Hopper', voiceMemo(), 1],
         ]),
       ],
-      [{ ...dm('!dm-alan:example.org', ALAN, 'Alan Turing', 0), notifications: 'Mute' }, []],
+      [
+        {
+          ...dm('!dm-alan:example.org', ALAN, 'Alan Turing', 0),
+          notifications: 'Mute',
+          marked_unread: true,
+        },
+        [],
+      ],
       // Kai is calling: the card shows the call under way, with the way in.
       [
         { ...dm(DM_KAI, KAI, 'Kai', 1), call: { via: 'Rtc', participants: [KAI] } },
@@ -681,6 +692,7 @@ function accountEvents(
       },
     },
     { type: 'SidebarLayout', data: { account: id, layout: { scopes: {}, changed_at: 0 } } },
+    { type: 'Keywords', data: { account: id, keywords: ['deploy', 'release'] } },
   ];
 
   for (const [summary, list] of fixture.rooms) {

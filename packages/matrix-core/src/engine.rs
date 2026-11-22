@@ -252,6 +252,45 @@ pub enum Command {
         /// The new default.
         mode: NotificationMode,
     },
+    /// Add a word that notifies the user wherever it is written, or remove one; an
+    /// [`Event::Keywords`] follows.
+    SetKeyword {
+        /// Which account.
+        account: AccountId,
+        /// The word.
+        keyword: String,
+        /// Add when true, remove when false.
+        enabled: bool,
+    },
+    /// Put a room among the favourites or the low priority rooms, or neither (room tags); an
+    /// updated [`Event::RoomsUpdated`] follows.
+    SetRoomPriority {
+        /// Whose room.
+        account: AccountId,
+        /// The room's ID.
+        room_id: String,
+        /// Where it goes.
+        priority: crate::RoomPriority,
+    },
+    /// Mark a room unread (MSC2867's flag), or take the mark away; nothing is read. An updated
+    /// [`Event::RoomsUpdated`] follows.
+    SetUnread {
+        /// Whose room.
+        account: AccountId,
+        /// The room's ID.
+        room_id: String,
+        /// Mark unread when true, take the mark away when false.
+        unread: bool,
+    },
+    /// Read a room without opening it: a read receipt for its latest message when it has unread
+    /// ones, and its unread mark taken away. Fails when it has unread messages but none to mark
+    /// read yet. An updated [`Event::RoomsUpdated`] follows.
+    MarkRoomRead {
+        /// Whose room.
+        account: AccountId,
+        /// The room's ID.
+        room_id: String,
+    },
     /// Set what others see of the user (online, away or hidden) on every session of this app;
     /// an [`Event::Status`] follows.
     SetStatus {
@@ -998,6 +1037,14 @@ pub enum Event {
         account: AccountId,
         /// The choices.
         safety: crate::Safety,
+    },
+    /// The account's notification keywords, sorted: sent once an account is ready and whenever
+    /// they change, here or on another session.
+    Keywords {
+        /// Whose.
+        account: AccountId,
+        /// The words.
+        keywords: Vec<String>,
     },
     /// The status the user set for an account, as saved: sent once an account is ready and
     /// whenever it changes, here or on another session.
@@ -2744,6 +2791,69 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            // Queued now, in the order the commands came, like the room changes below.
+            Command::SetKeyword { account: id, keyword, enabled } => {
+                let (sink, id) = (Arc::clone(&sink), id);
+                let changed = self.account(&id).map(|account| {
+                    let queue = account.organising.clone();
+                    // Reported in the queue too, so a slower report never lands after a later one.
+                    queue.run(async move {
+                        let result = account.set_keyword(&keyword, enabled).await;
+                        // As the change left them; after a failure, as the server has them (or,
+                        // unreachable, as last synced).
+                        let keywords = match &result {
+                            Ok(keywords) => keywords.clone(),
+                            Err(_) => match account.server_keywords().await {
+                                Ok(keywords) => keywords,
+                                Err(_) => account.keywords().await,
+                            },
+                        };
+                        sink.emit(Event::Keywords { account: id, keywords });
+                        result.map(drop)
+                    })
+                });
+                Box::pin(async move {
+                    changed?.await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            // Queued now, in the order the commands came: a quick change back lands last.
+            Command::SetRoomPriority { account: id, room_id, priority } => {
+                let feed = self.feed(&id);
+                let changed = self.account(&id).map(|account| {
+                    let (queue, room_id) = (account.organising.clone(), room_id.clone());
+                    queue.run(async move { account.set_room_priority(&room_id, priority).await })
+                });
+                Box::pin(async move {
+                    changed?.await?;
+                    feed?.refresh(Some(&HashSet::from([room_id]))).await;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::SetUnread { account: id, room_id, unread } => {
+                let feed = self.feed(&id);
+                let changed = self.account(&id).map(|account| {
+                    let (queue, room_id) = (account.organising.clone(), room_id.clone());
+                    queue.run(async move { account.set_unread(&room_id, unread).await })
+                });
+                Box::pin(async move {
+                    changed?.await?;
+                    feed?.refresh(Some(&HashSet::from([room_id]))).await;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::MarkRoomRead { account: id, room_id } => {
+                let feed = self.feed(&id);
+                let changed = self.account(&id).map(|account| {
+                    let (queue, room_id) = (account.organising.clone(), room_id.clone());
+                    queue.run(async move { account.mark_room_read(&room_id).await })
+                });
+                Box::pin(async move {
+                    changed?.await?;
+                    feed?.refresh(Some(&HashSet::from([room_id]))).await;
+                    Ok(Outcome::Done)
+                })
+            }
             Command::RegisterPusher { account, pusher } => {
                 let account = self.account(&account);
                 Box::pin(async move {
@@ -2836,6 +2946,12 @@ impl State {
                                 sink.emit(Event::Safety { account: account.id().clone(), safety });
                             }
                         };
+                        let keywords = async {
+                            sink.emit(Event::Keywords {
+                                account: account.id().clone(),
+                                keywords: account.keywords().await,
+                            });
+                        };
                         let status = account
                             .report_status(|status| sink.emit(Event::Status { account: account.id().clone(), status }));
                         // Once the homeserver names a call service, rooms offer MatrixRTC calls.
@@ -2868,6 +2984,7 @@ impl State {
                             profile,
                             layout,
                             safety,
+                            keywords,
                             status,
                             own,
                             calls,
@@ -3211,6 +3328,14 @@ async fn sync_until_error(
             let all = response.account_data.iter().any(|event| {
                 matches!(event.get_field::<String>("type").ok().flatten().as_deref(), Some("m.direct" | "m.push_rules"))
             });
+            // Keywords are push rules too, changed here or on another session.
+            if response
+                .account_data
+                .iter()
+                .any(|event| event.get_field::<String>("type").ok().flatten().as_deref() == Some("m.push_rules"))
+            {
+                sink.emit(Event::Keywords { account: account.id().clone(), keywords: account.keywords().await });
+            }
             if crate::sidebar::changed_in(&response.account_data)
                 && let Ok(layout) = account.sidebar_layout().await
             {

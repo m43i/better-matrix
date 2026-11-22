@@ -17,13 +17,16 @@ import {
   DIRECT,
   deleteSection,
   directChats,
+  FAVOURITES,
   hasUnread,
   lastMessage,
+  LOW_PRIORITY,
   moveRoom,
   moveSection,
   moveSpace,
   newestMessages,
   orderedSpaces,
+  priorityIn,
   ROOMS,
   roomsInScope,
   sectionOf,
@@ -76,6 +79,10 @@ describe('wantsAttention', () => {
     expect(wantsAttention(room('!a', { unread: 2, mentions: 1, notifications: 'Mute' }))).toBe(
       true,
     );
+  });
+
+  it('a room the user marked unread should want attention even when muted', () => {
+    expect(wantsAttention(room('!a', { marked_unread: true, notifications: 'Mute' }))).toBe(true);
   });
 });
 
@@ -307,9 +314,11 @@ describe('sections', () => {
 
     const shown = sections(account, 'home', NOW);
     expect(shown.map((s) => [s.id, ids(s.rooms)])).toEqual([
+      [FAVOURITES, []],
       [id, ['!a']],
       [ROOMS, ['!b']],
       [DIRECT, []],
+      [LOW_PRIORITY, []],
     ]);
   });
 
@@ -317,14 +326,23 @@ describe('sections', () => {
     let { layout, id } = addSection(EMPTY, 'home', 'Team');
     layout = moveRoom(moveRoom(layout, 'home', '!b', id), 'home', '!a', id);
     const account = accountWith([room('!a'), room('!b')], [], { sidebar: layout });
-    expect(ids(sections(account, 'home', NOW)[0]!.rooms)).toEqual(['!b', '!a']);
+    expect(ids(sections(account, 'home', NOW).find((s) => s.id === id)!.rooms)).toEqual([
+      '!b',
+      '!a',
+    ]);
   });
 
   it('sections should follow the saved order', () => {
     const { layout } = addSection(EMPTY, 'home', 'Team');
     const ordered = moveSection(layout, 'home', ['section-1', ROOMS, DIRECT], DIRECT, 0);
     const account = accountWith([], [], { sidebar: ordered });
-    expect(sections(account, 'home', NOW).map((s) => s.id)).toEqual([DIRECT, 'section-1', ROOMS]);
+    expect(sections(account, 'home', NOW).map((s) => s.id)).toEqual([
+      FAVOURITES,
+      DIRECT,
+      'section-1',
+      ROOMS,
+      LOW_PRIORITY,
+    ]);
   });
 
   it('a collapsed section should say so', () => {
@@ -339,7 +357,55 @@ describe('sections', () => {
       sidebar: moveRoom(layout, 'home', '!in-space', id),
     });
 
-    expect(sections(account, 'home', NOW)[0]!.rooms).toEqual([]);
+    expect(sections(account, 'home', NOW).find((s) => s.id === id)!.rooms).toEqual([]);
+  });
+
+  it('favourites should come first and low priority rooms last', () => {
+    const account = accountWith([
+      room('!low', { priority: 'Low' }),
+      room('!plain'),
+      dm('!fav', '@g:x', { priority: 'Favourite' }),
+    ]);
+
+    expect(sections(account, 'home', NOW).map((s) => [s.id, ids(s.rooms)])).toEqual([
+      [FAVOURITES, ['!fav']],
+      [ROOMS, ['!plain']],
+      [DIRECT, []],
+      [LOW_PRIORITY, ['!low']],
+    ]);
+  });
+
+  it('a favourite should leave the user section holding it', () => {
+    const { layout, id } = addSection(EMPTY, 'home', 'Team');
+
+    const account = accountWith([room('!a', { priority: 'Favourite' })], [], {
+      sidebar: moveRoom(layout, 'home', '!a', id),
+    });
+
+    const shown = sections(account, 'home', NOW);
+    expect(ids(shown.find((s) => s.id === FAVOURITES)!.rooms)).toEqual(['!a']);
+    expect(shown.find((s) => s.id === id)!.rooms).toEqual([]);
+  });
+
+  it('favourites should stay first under an order saved before them', () => {
+    const ordered = moveSection(EMPTY, 'home', [ROOMS, DIRECT], DIRECT, 0);
+    const account = accountWith([], [], { sidebar: ordered });
+    expect(sections(account, 'home', NOW).map((s) => s.id)).toEqual([
+      FAVOURITES,
+      DIRECT,
+      ROOMS,
+      LOW_PRIORITY,
+    ]);
+  });
+});
+
+describe('priorityIn', () => {
+  it('a room moved into favourites or low priority should take that tag', () => {
+    expect([priorityIn(FAVOURITES), priorityIn(LOW_PRIORITY)]).toEqual(['Favourite', 'Low']);
+  });
+
+  it('a room moved anywhere else should lose its tag', () => {
+    expect([ROOMS, DIRECT, 'section-1'].map(priorityIn)).toEqual(['Normal', 'Normal', 'Normal']);
   });
 });
 

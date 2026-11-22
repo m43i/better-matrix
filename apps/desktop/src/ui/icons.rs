@@ -19,6 +19,11 @@ macro_rules! icons {
 icons! {
     UNPIN = "unpin": r#"<path d="M16 3H8l1 6-4 4v2h6v7M13 15h6v-2l-4-4M3 3l18 18"/>"#;
     PIN = "pin": r#"<path d="M16 3H8l1 6-4 4v2h6v7h2v-7h6v-2l-4-4z"/>"#;
+    STAR = "star": r#"<path d="m12 2.5 2.9 5.9 6.6 1-4.8 4.6 1.1 6.5L12 17.4l-5.8 3.1 1.1-6.5-4.8-4.6 6.6-1z"/>"#;
+    STAR_OFF = "star-off": r#"<path d="M8.6 8.6 2.5 9.4l4.8 4.6-1.1 6.5 5.8-3.1 5.8 3.1-.4-2.4M10.3 5.9 12 2.5l2.9 5.9 6.6 1-3.4 3.3M3 3l18 18"/>"#;
+    ARROW_DOWN = "arrow-down": r#"<path d="M12 5v14M19 12l-7 7-7-7"/>"#;
+    ARROW_UP = "arrow-up": r#"<path d="M12 19V5M5 12l7-7 7 7"/>"#;
+    UNREAD = "unread": r#"<path d="M21 12a9 9 0 0 1-13.2 8L3 21l1.1-4.6A9 9 0 0 1 13.5 3.1"/><circle cx="19" cy="5" r="2.5"/>"#;
     BOOKMARK = "bookmark": r#"<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>"#;
     UNBOOKMARK = "unbookmark": r#"<path d="M19 13.5V5a2 2 0 0 0-2-2H8.5M5 5v16l7-5 7 5v-2M3 3l18 18"/>"#;
     COPY = "copy": r#"<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>"#;

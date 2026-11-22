@@ -343,6 +343,8 @@ mod tests {
                 pinned: Vec::new(),
                 can_pin: true,
                 saved: Vec::new(),
+                priority: matrix_core::RoomPriority::Normal,
+                marked_unread: false,
             })
             .collect();
         apply(

@@ -8,7 +8,8 @@ use super::components::{NavEmphasis, badge, media_avatar, nav_row, with_presence
 use super::icons;
 use super::theme::{Palette, font};
 use crate::state::{
-    AccountData, Dragged, DropTarget, Popover, ROOMS, Scope, SectionView, State, is_builtin, sections, wants_attention,
+    AccountData, Dragged, DropTarget, FAVOURITES, LOW_PRIORITY, Popover, ROOMS, Scope, SectionView, State, is_builtin,
+    sections, wants_attention,
 };
 
 /// The new-chat button's key, which its search anchors to.
@@ -147,11 +148,7 @@ pub fn sidebar(s: &State, account: &AccountData, p: &Palette) -> El {
 /// own sections the room would land.
 fn section_block(s: &State, view: &SectionView<'_>, open: Option<&str>, drop_at: Option<usize>, p: &Palette) -> El {
     let id = view.id.clone();
-    let title = match (view.id.as_str(), &view.name) {
-        (_, Some(name)) => name.clone(),
-        (ROOMS, None) => t!("sidebar.rooms").to_owned(),
-        _ => t!("sidebar.direct").to_owned(),
-    };
+    let title = section_title(view);
     let toggle = id.clone();
     let news = view.rooms.iter().any(|room| wants_attention(room));
     let mentions: u64 = view.rooms.iter().map(|room| room.mentions).sum();
@@ -225,6 +222,17 @@ fn section_block(s: &State, view: &SectionView<'_>, open: Option<&str>, drop_at:
     })
 }
 
+/// A section's name: the user's for their own, the catalog's for a built-in one.
+fn section_title(view: &SectionView<'_>) -> String {
+    match (view.id.as_str(), &view.name) {
+        (_, Some(name)) => name.clone(),
+        (ROOMS, None) => t!("sidebar.rooms").to_owned(),
+        (FAVOURITES, None) => t!("sidebar.favourites").to_owned(),
+        (LOW_PRIORITY, None) => t!("sidebar.low_priority").to_owned(),
+        _ => t!("sidebar.direct").to_owned(),
+    }
+}
+
 /// A room's row, built again only when something it shows changed: the sidebar of hundreds of
 /// rooms then costs nearly nothing per commit.
 fn room_row(
@@ -237,7 +245,8 @@ fn room_row(
 ) -> El {
     let picture_ready = room.avatar.as_ref().is_some_and(|picture| media.image(picture).is_some());
     let version = (
-        (&room.name, room.unread, room.mentions, room.notifications, room.kind, &room.dm_users, partner),
+        (&room.name, room.unread, room.mentions, room.marked_unread, room.notifications, room.kind, &room.dm_users),
+        partner,
         (&room.avatar, picture_ready, selected, dragged, colour_bits(p.sidebar_bg)),
     );
     rune::memo(format!("room-{}", room.room_id), version, || build_room_row(room, partner, selected, dragged, media, p))
@@ -361,6 +370,8 @@ pub fn drag_ghost(drag: &crate::state::SidebarDrag, account: &AccountData, p: &P
         Dragged::Section(id) => match id.as_str() {
             ROOMS => t!("sidebar.rooms").to_owned(),
             crate::state::DIRECT => t!("sidebar.direct").to_owned(),
+            FAVOURITES => t!("sidebar.favourites").to_owned(),
+            LOW_PRIORITY => t!("sidebar.low_priority").to_owned(),
             _ => account
                 .sidebar
                 .scopes

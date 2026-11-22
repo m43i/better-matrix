@@ -18,6 +18,7 @@ import {
   mediaHidden,
   roomPreviewPicture,
   shownFiles,
+  shownIgnored,
   shownThreads,
   previewHidden,
   pinnedPreviews,
@@ -704,4 +705,15 @@ it('Room Info should leave out threads people the user ignores started', () => {
   });
 
   expect(shownThreads(state, ADA, PRIVATE)?.map((t) => t.root)).toEqual(['$b']);
+});
+
+it('someone whose ignore is being undone should stay left out until that is saved', () => {
+  const state = signedIn({ ...DEFAULT_SAFETY, ignored: [GRACE] });
+
+  const undoing = {
+    ...state.accounts[0]!,
+    safety: DEFAULT_SAFETY,
+  };
+
+  expect([shownIgnored(state.accounts[0]), shownIgnored(undoing)]).toEqual([[GRACE], [GRACE]]);
 });

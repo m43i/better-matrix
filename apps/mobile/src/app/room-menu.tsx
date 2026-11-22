@@ -1,6 +1,7 @@
 // The sheet behind a long press in the room list (the desktop's room menu and section menu).
-// For a room: its notifications, its place among the user's sections (the phone's form of the
-// desktop's drag and drop), marking it read, and leaving it or deleting the chat. For a section:
+// For a room: marking it read or unread, its notifications, its place among the favourites, the
+// low priority rooms and the user's sections (the phone's form of the desktop's drag and drop),
+// and leaving it or deleting the chat. For a section:
 // collapsing it, and renaming or deleting the user's own. Without either, naming a new section.
 // Its pages are an explicit state machine (`Page`); edits apply to the account's current scope.
 
@@ -19,10 +20,21 @@ import {
   moveRoomToSection,
   renameSection,
   setNotificationMode,
+  setRoomPriority,
+  setUnread,
   toggleSection,
 } from '../state/actions/shell';
 import { useAppStore, useStore } from '../state/react';
-import { DIRECT, isBuiltin, ROOMS, roomsInScope, scopeKey, sectionOf } from '../state/sections';
+import {
+  DIRECT,
+  FAVOURITES,
+  isBuiltin,
+  LOW_PRIORITY,
+  ROOMS,
+  roomsInScope,
+  scopeKey,
+  sectionOf,
+} from '../state/sections';
 import { account as accountOf } from '../state/selectors';
 import type { AccountData, Scope } from '../state/types';
 import { font } from '../theme/palette';
@@ -128,8 +140,14 @@ function RoomPages({
   const id = account.summary.id;
   const scope = account.scope;
   const direct = room.kind === 'Direct';
+  const favourite = room.priority === 'Favourite';
+  const low = room.priority === 'Low';
   const inScope = roomsInScope(account, scope).some((r) => r.room_id === room.room_id);
-  const current = sectionOf(account.sidebar, scope, room.room_id);
+
+  // A tag shows the room under Favourites or Low priority, whichever section of the user's holds it.
+  const current =
+    room.priority === 'Normal' ? sectionOf(account.sidebar, scope, room.room_id) : null;
+
   const own = account.sidebar.scopes[scopeKey(scope)]?.sections ?? [];
   const done = () => router.back();
 
@@ -258,21 +276,56 @@ function RoomPages({
           value={room.custom_notifications ? modeLabel(room.notifications) : t('notify.default')}
           onPress={() => setPage({ kind: 'notifications' })}
         />
-        {room.unread > 0 || room.mentions > 0 ? (
-          <>
-            <Divider inset={52} />
-            <ListRow
-              testID="room-menu-read"
-              icon="markRead"
-              title={t('mobile.shell.mark_read')}
-              chevron={false}
-              onPress={() => {
-                void markRoomRead(store, id, room.room_id);
-                done();
-              }}
-            />
-          </>
-        ) : null}
+        <Divider inset={52} />
+        {room.marked_unread || room.unread > 0 || room.mentions > 0 ? (
+          <ListRow
+            testID="room-menu-read"
+            icon="markRead"
+            title={t('room_menu.mark_read')}
+            chevron={false}
+            onPress={() => {
+              // With unread messages, read through the timeline (as opening it would);
+              // a room only marked unread just loses the mark.
+              if (room.unread > 0 || room.mentions > 0) void markRoomRead(store, id, room.room_id);
+              else setUnread(store, id, room.room_id, false);
+              done();
+            }}
+          />
+        ) : (
+          <ListRow
+            testID="room-menu-unread"
+            icon="markUnread"
+            title={t('room_menu.mark_unread')}
+            chevron={false}
+            onPress={() => {
+              setUnread(store, id, room.room_id, true);
+              done();
+            }}
+          />
+        )}
+      </ListSection>
+      <ListSection>
+        <ListRow
+          testID="room-menu-favourite"
+          icon={favourite ? 'starOff' : 'star'}
+          title={favourite ? t('room_menu.unfavourite') : t('room_menu.favourite')}
+          chevron={false}
+          onPress={() => {
+            setRoomPriority(store, id, room.room_id, favourite ? 'Normal' : 'Favourite');
+            done();
+          }}
+        />
+        <Divider inset={52} />
+        <ListRow
+          testID="room-menu-low-priority"
+          icon={low ? 'notLowPriority' : 'lowPriority'}
+          title={low ? t('room_menu.not_low_priority') : t('room_menu.low_priority')}
+          chevron={false}
+          onPress={() => {
+            setRoomPriority(store, id, room.room_id, low ? 'Normal' : 'Low');
+            done();
+          }}
+        />
       </ListSection>
       {inScope ? (
         <ListSection>
@@ -332,6 +385,10 @@ function sectionTitle(account: AccountData, scope: Scope, id: string): string {
   if (id === ROOMS) return t('sidebar.rooms');
 
   if (id === DIRECT) return t('sidebar.direct');
+
+  if (id === FAVOURITES) return t('sidebar.favourites');
+
+  if (id === LOW_PRIORITY) return t('sidebar.low_priority');
 
   if (id === 'unread') return t('overview.unread');
 

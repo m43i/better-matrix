@@ -148,15 +148,11 @@ export default function PreviewScreen() {
           />
         )
       ) : hidden && shown ? (
-        <Pressable
-          testID="preview-show"
-          onPress={() => revealMedia(store, account, shown.event_id)}
-          accessibilityRole="button"
-          style={styles.hidden}
-        >
-          <Icon name="eyeOff" size={32} color="#ffffff" />
-          <Text style={[font.bodyStrong, styles.white]}>{t('safety.show_media')}</Text>
-        </Pressable>
+        <HeldContent
+          key={shown.event_id}
+          onShow={() => revealMedia(store, account, shown.event_id)}
+          onSwipe={onSwipe}
+        />
       ) : (
         <Text style={[font.body, styles.status]}>{t('mobile.conversation.message_missing')}</Text>
       )}
@@ -279,6 +275,25 @@ function ImageContent({
     <View style={area}>
       <Zoomable uri={uri} label={attachment.name} onSwipe={onSwipe} onLongPress={onLongPress} />
     </View>
+  );
+}
+
+/** A held item: Show, which reveals it; a swipe steps on through the gallery, held items too. */
+function HeldContent({ onShow, onSwipe }: { onShow: () => void; onSwipe: Swipe }) {
+  const swipe = useSwipe(onSwipe);
+
+  return (
+    <GestureDetector gesture={swipe}>
+      <Pressable
+        testID="preview-show"
+        onPress={onShow}
+        accessibilityRole="button"
+        style={styles.hidden}
+      >
+        <Icon name="eyeOff" size={32} color="#ffffff" />
+        <Text style={[font.bodyStrong, styles.white]}>{t('safety.show_media')}</Text>
+      </Pressable>
+    </GestureDetector>
   );
 }
 

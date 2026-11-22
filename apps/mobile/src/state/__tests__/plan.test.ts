@@ -1,6 +1,7 @@
 import type { TimelineEntry } from '@better-matrix/matrix-native/types';
 
 import { atStart, GROUP_WINDOW_MS, newestSent, planTimeline, rowOf, shouldMarkRead } from '../plan';
+import { hiddenEntry as hiddenStandIn } from '../safety';
 import {
   ADA,
   entry,
@@ -186,6 +187,13 @@ describe('planTimeline', () => {
     );
 
     expect(rows.map((r) => r.kind)).toEqual(['events']);
+  });
+
+  it('should never draw a stand-in for an ignored person’s message, even once they aren’t', () => {
+    const standIn = hiddenStandIn('s', message('$spam'));
+    const rows = planTimeline(timelineOf([standIn]), { ...room, showHidden: true, ignored: [] });
+
+    expect(rows).toEqual([]);
   });
 
   it('should not merge joins across a hidden event that shows', () => {

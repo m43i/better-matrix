@@ -49,7 +49,7 @@ pub fn account_menu(s: &State, window: [f32; 2], p: &Palette) -> El {
             p,
         );
         panel = panel
-            .child(row.key(format!("switch-{id}")).on_press_tx(crate::state::navigate(move |s| s.select_account(&id))));
+            .child(row.key(format!("switch-{id}")).on_press_tx(crate::state::navigate(move |s| s.switch_account(&id))));
     }
     // Accounts signed out softly: their data waits here; pressing one signs in again.
     for id in &s.suspended {

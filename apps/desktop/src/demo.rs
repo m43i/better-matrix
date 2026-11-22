@@ -335,6 +335,17 @@ pub fn discovery(s: &mut State) {
 const RELEASE_NOTES: &str = "https://bettermatrix.example.org/blog/0.2";
 const KAI: &str = "@kai:example.org";
 
+/// The demo, organised: Grace's chat among the favourites, lab moved to low priority, Alan's muted
+/// chat marked unread, and two notification keywords.
+pub fn organised(s: &mut State) {
+    seed(s);
+    let ada = AccountId::new(ADA);
+    s.accounts.set_priority(&ada, "!dm-grace:example.org", matrix_core::RoomPriority::Favourite);
+    s.accounts.set_priority(&ada, "!lab:example.org", matrix_core::RoomPriority::Low);
+    s.accounts.set_marked(&ada, "!dm-alan:example.org", true);
+    s.accounts.set_keywords(&ada, vec!["deploy".into(), "release".into()]);
+}
+
 pub fn seed(s: &mut State) {
     add_account(s, ADA, "Ada Lovelace", "example.org", SignInMethod::Password, work());
     // The release notes' card, as the homeserver would describe the page.
@@ -791,6 +802,8 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
         pinned: Vec::new(),
         can_pin: true,
         saved: Vec::new(),
+        priority: matrix_core::RoomPriority::Normal,
+        marked_unread: false,
     }
 }
 

@@ -158,6 +158,19 @@ describe('apply', () => {
     expect(state.accounts[0]!.sidebar.changed_at).toBe(10);
   });
 
+  it('should know no keywords for an account until the engine reports them', () => {
+    expect(signedIn(ADA).accounts[0]!.keywords).toBeNull();
+  });
+
+  it('should show the keywords the engine reports for an account', () => {
+    const state = apply(signedIn(ADA), {
+      type: 'Keywords',
+      data: { account: ADA, keywords: ['deploy'] },
+    });
+
+    expect(state.accounts[0]!.keywords).toEqual(['deploy']);
+  });
+
   it('should show the status the engine reports for an account', () => {
     const state = apply(signedIn(ADA), { type: 'Status', data: { account: ADA, status: 'Away' } });
 

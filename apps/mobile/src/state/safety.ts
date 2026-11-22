@@ -94,12 +94,18 @@ export function revealKey(account: AccountId, eventId: string): string {
 }
 
 /**
+ * The hidden events made in place of ignored people's messages (`hiddenEntry`): stand-ins, never
+ * events to draw, the developer setting for hidden events included, even once an ignore is being
+ * undone. Kept by the entry itself, which the state shares as it is until the timeline replaces it.
+ */
+const standIns = new WeakSet<TimelineEntry>();
+
+/**
  * A message from someone the user ignores, in its timeline's place (`id`): a hidden event, so
- * the engine's diffs still count positions right, which the timeline never draws, the developer
- * setting for hidden events included (`PlanOptions.ignored`).
+ * the engine's diffs still count positions right, which the timeline never draws (`isStandIn`).
  */
 export function hiddenEntry(id: string, message: Message): TimelineEntry {
-  return {
+  const entry: TimelineEntry = {
     id,
     kind: {
       type: 'Hidden',
@@ -111,4 +117,13 @@ export function hiddenEntry(id: string, message: Message): TimelineEntry {
       },
     },
   };
+
+  standIns.add(entry);
+
+  return entry;
+}
+
+/** Whether `entry` stands in for an ignored person's message (`hiddenEntry`). */
+export function isStandIn(entry: TimelineEntry): boolean {
+  return standIns.has(entry);
 }

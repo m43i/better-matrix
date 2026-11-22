@@ -1,7 +1,7 @@
 # 0005. Navigation and settings
 
 Status: Accepted
-Date: 2026-11-14
+Date: 2026-11-22
 
 ## Context
 
@@ -65,6 +65,18 @@ Date: 2026-11-14
     was first registered, and never opened, sorts by name at the end until either happens. The
     engine hears the SDK's room updates before reading the list at start, so one worked out
     meanwhile isn't missed; rooms left are dropped from the SDK's tracking.
+  - Favourites and Low priority are built in too: the rooms tagged `m.favourite` and
+    `m.lowpriority` (`RoomSummary::priority`, `RoomPriority`), latest first, shown once they hold
+    something. Tags are room account data every client shares, so these two are what other
+    clients see of the arrangement; the user's own sections stay ours. Favourites comes first
+    and Low priority last unless the user moved them (an order saved before they existed keeps
+    Favourites first). A tagged room shows there even when one of the user's sections holds
+    it: the tag may come from another client, and is the newer choice. Dropping a room into
+    either sets its tag (`Command::SetRoomPriority`, the SDK takes the other tag away);
+    dropping it anywhere else takes the tag away, so it shows where it was dropped. Dropping into
+    Favourites or Low priority leaves the user's sections as they are, so a room one of them held
+    goes back there when its tag goes. A room
+    tagged both counts as a favourite. Tag order is not used.
   - The user's own hold the rooms dropped into them, in drop order. Rename and delete are in
     the section's right-click menu; deleting returns its rooms to the built-in ones.
   - Drag and drop uses `on_drag`; rows report rects via `on_layout_tx` with `live_only`. A press
@@ -106,8 +118,39 @@ Date: 2026-11-14
   - Each account's default (Settings, Notifications) updates the server's defaults for every
     kind of room.
   - A room sets its own or follows the default (`RoomSummary::custom_notifications`).
-- **Room menu:** the Notifications submenu (default last), then Leave room, or Delete chat for a
-  direct chat. Both ask for confirmation.
+  - Keywords: words that notify like a mention wherever they are written (content push rules,
+    the SDK's keyword rules), listed under each account's default with add and remove. The
+    engine reports them (`Event::Keywords`) at start, when a sync carries `m.push_rules`, and
+    after each `Command::SetKeyword` (as the change left them; after a failure, as last synced).
+    Each change reads the server's rules first (`GET /pushrules/global/`) and works from them, not
+    this device's copy, which a sync begun before an earlier change may have left behind: adding
+    creates the rule (named after the word when that is a plain, unused name, else
+    `chat.bettermatrix.keyword.<random>`) or enables a disabled one; removing
+    deletes every rule of the user's matching the word exactly. Additions are trimmed; removal
+    takes the word as listed, since another client may keep spaces around it. New keywords
+    notify with the default sound and highlight, so a match counts like a mention (the room's
+    mention count, and attention in mentions-only rooms); being content rules, they also notify
+    in rooms set to mentions only (in encrypted ones the server can't match them, so phones
+    notify only while the app runs, and the hint says so). Words are Matrix glob patterns, as in
+    other clients: `*` and `?` match too.
+- **Room menu:** Mark as unread (or Mark as read when it is marked or has anything unread, muted
+  or not), Add to or
+  Remove from favourites, Move to or Remove from low priority; then the Notifications submenu
+  (default last), then Leave room, or Delete chat for a direct chat. Both ask for confirmation.
+- **Marked unread:** MSC2867's flag (`m.marked_unread` room account data, the SDK's unread
+  flag; `RoomSummary::marked_unread`), so every client shows it. `Command::SetUnread` only sets
+  or clears the flag; opening a marked room clears it at once, and its read receipt follows as
+  the timeline shows messages (so a permalink to older history reads nothing it doesn't show).
+  `Command::MarkRoomRead` reads a room from the menu without opening it: a read receipt for the
+  latest event the SDK shows (it skips messages it can't decrypt, which are read once the room
+  is opened), with the fully-read marker, then the flag cleared; it fails (`Error::NothingToRead`) when the
+  room has unread messages but no such event yet. Phones read through their timeline as before.
+  The SDK also clears the flag whenever it sends an unthreaded read receipt.
+- **Organising writes:** tags, unread flags and keywords go through one ordered queue per
+  account (`Account::organising`), queued as commands arrive, and each write sets or removes
+  what it asks for whatever this device last synced, so a quick change back lands last. The apps
+  show a change at once and, if the server refuses it, take back only that change (desktop
+  `RoomUndo`) with a notice.
 - **Desktop notifications:**
   - `Event::Notification` only when push rules say so, never for the first sync after start.
   - Skipped when the window is focused on that room.
@@ -120,7 +163,8 @@ Date: 2026-11-14
     listener) and the next notification opens a new one; the listener skips messages it can't
     read and ends only with its connection. The action's label is a catalog key.
 - **Wants attention:** one rule (`wants_attention`) for sidebar, rail and account menu.
-  - Unread messages or mentions, or only mentions for mentions-only and muted rooms.
+  - Unread messages or mentions, or only mentions for mentions-only and muted rooms; and any
+    room marked unread, whatever its mode.
   - The engine re-reads rooms on the SDK's room-info updates, so badges follow its counts.
   - In the sidebar a room that wants attention gets a tinted background (`sidebar_unread`) and
     a bold name; rows carry no counts. A section's header turns bold when any of its rooms

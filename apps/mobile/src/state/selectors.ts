@@ -74,6 +74,18 @@ export function activeRoomList(state: State): RoomListData | undefined {
   };
 }
 
+/**
+ * Everyone whose messages and hidden events the timeline leaves out: those shown as ignored
+ * (confirmed or on the way) and those the engine still has as ignored, whose ignore is being
+ * undone, until that is saved.
+ */
+export function shownIgnored(data: AccountData | undefined): string[] | undefined {
+  if (!data) return undefined;
+  const undoing = data.savedSafety.ignored.filter((id) => !data.safety.ignored.includes(id));
+
+  return undoing.length === 0 ? data.safety.ignored : [...data.safety.ignored, ...undoing];
+}
+
 /** The people shown as ignored whose ignore the engine hasn't confirmed yet. */
 export function pendingIgnored(data: AccountData): string[] {
   return data.safety.ignored.filter((id) => !data.savedSafety.ignored.includes(id));
