@@ -15,11 +15,13 @@ import type {
   Message,
   MessageContent,
   Identity,
+  Permission,
   Person,
   Presence,
   QrImage,
   RoomMember,
   RoomPreview,
+  RoomSettings,
   RoomSummary,
   Safety,
   SasEmoji,
@@ -53,6 +55,12 @@ export const DESIGN = '!design:example.org';
 export const DESIGN_INVITE = '!design-community:example.org';
 
 export const DM_GRACE = '!dm-grace:example.org';
+
+/** Ada's scratch room: the room the upgrade scenes replace. */
+export const LAB = '!lab:example.org';
+
+/** The room an upgrade of #lab made, which Ada hasn't joined yet. */
+export const LAB_V2 = '!lab-v12:example.org';
 
 export const DM_KAI = '!dm-kai:example.org';
 
@@ -202,6 +210,9 @@ function room(
     can_rename: true,
     priority: 'Normal',
     marked_unread: false,
+    can_change_settings: true,
+    knocks: 0,
+    successor: null,
   };
 }
 
@@ -216,6 +227,7 @@ function space(id: string, name: string, children: string[], members: string[]):
     avatar: null,
     can_add_rooms: true,
     can_rename: true,
+    can_change_settings: true,
     children,
     members,
   };
@@ -507,10 +519,11 @@ function work(): Fixture {
       [room(GENERAL, 'general', 'Company-wide announcements and chatter', 0, 0), room0],
       [
         // Public: anyone may join and post, so the account's media choice may hold its
-        // pictures back (ADR 0011).
+        // pictures back (ADR 0011). People ask to join it: its member list shows them to Ada.
         {
           ...room(DESIGN, 'design', 'Mockups, reviews and the component library', 3, 0),
           public: true,
+          knocks: 2,
         },
         messages([
           [GRACE, 'Grace Hopper', text('New sidebar spacing is ready for review.'), 0],
@@ -543,7 +556,7 @@ function work(): Fixture {
       ],
       // Organised as the desktop's demo: lab among the low priority rooms, Grace's chat a
       // favourite, Alan's muted chat marked unread.
-      [{ ...room('!lab:example.org', 'lab', 'My own scratch room', 0, 0), priority: 'Low' }, []],
+      [{ ...room(LAB, 'lab', 'My own scratch room', 0, 0), priority: 'Low' }, []],
       [
         { ...dm(DM_GRACE, GRACE, 'Grace Hopper', 2), priority: 'Favourite' },
         messages([
@@ -750,8 +763,13 @@ function member(
   return { person: person(id, name), role, presence, status_message: null, verified, level };
 }
 
-/** Who is in #general (the member list fills every room the demo engine is asked about). */
-export function demoMembers(): Members {
+/**
+ * Who is in a room (the same people fill every room the demo engine is asked about); #design
+ * also lists two people asking to join and one banned.
+ */
+export function demoMembers(roomId?: string): Members {
+  const design = roomId === DESIGN;
+
   return {
     people: [
       member(ADA, 'Ada Lovelace', 'Admin', 'Online', true),
@@ -765,7 +783,148 @@ export function demoMembers(): Members {
     can_kick: true,
     can_ban: true,
     can_set_roles: true,
+    knocking: design
+      ? [
+          member('@lin:example.org', 'Lin Chen', 'Member', 'Online', false),
+          member('@sam:hobby.chat', 'Sam Okafor', 'Member', 'Offline', false),
+        ]
+      : [],
+    banned: design
+      ? [member('@spam:example.net', 'Totally Real Offers', 'Member', 'Offline', false)]
+      : [],
   };
+}
+
+/**
+ * A room's or space's settings as Ada (an admin) sees them: #general is public with two
+ * addresses, the others private; #lab can be upgraded.
+ */
+export function demoRoomSettings(
+  summary: RoomSummary | SpaceSummary,
+  space: boolean,
+): RoomSettings {
+  const general = summary.room_id === GENERAL;
+
+  const listed: Permission[] = space
+    ? [
+        'DefaultLevel',
+        'Invite',
+        'Kick',
+        'Ban',
+        'ChangeSettings',
+        'Name',
+        'Topic',
+        'Avatar',
+        'Addresses',
+        'Access',
+        'SpaceRooms',
+        'Permissions',
+        'Upgrade',
+      ]
+    : [
+        'DefaultLevel',
+        'SendMessages',
+        'Invite',
+        'Kick',
+        'Ban',
+        'RemoveMessages',
+        'MentionRoom',
+        'Pins',
+        'ChangeSettings',
+        'Name',
+        'Topic',
+        'Avatar',
+        'Addresses',
+        'Access',
+        'Encryption',
+        'Permissions',
+        'Upgrade',
+      ];
+
+  const levels: Partial<Record<Permission, number>> = {
+    DefaultLevel: 0,
+    SendMessages: 0,
+    Invite: 0,
+    RemoveMessages: 50,
+    // The server's admins keep upgrades to themselves.
+    Upgrade: 150,
+  };
+
+  return {
+    room_id: summary.room_id,
+    space,
+    name: summary.name,
+    topic: 'topic' in summary ? summary.topic : null,
+    avatar: summary.avatar,
+    join_rule: general
+      ? 'Public'
+      : summary.room_id === DESIGN
+        ? 'Knock'
+        : space
+          ? 'Restricted'
+          : 'Invite',
+    can_restrict: !space && summary.room_id !== LAB,
+    can_knock: !space,
+    history: 'Shared',
+    guest_access: false,
+    encrypted: !space && !general,
+    main_address: general ? '#general:example.org' : null,
+    addresses: general ? ['#announcements:example.org'] : [],
+    published: general ? true : space ? null : false,
+    server: 'example.org',
+    version: summary.room_id === LAB ? '10' : '12',
+    upgrade_to: summary.room_id === LAB ? '12' : null,
+    permissions: listed.map((permission) => ({
+      permission,
+      level: levels[permission] ?? 50,
+      editable: (levels[permission] ?? 50) <= 100,
+    })),
+    own_level: 100,
+    rights: {
+      name: true,
+      topic: true,
+      avatar: true,
+      join_rule: true,
+      history: true,
+      guest_access: true,
+      addresses: true,
+      encryption: !space,
+      permissions: true,
+      upgrade: !space,
+      space_rooms: space,
+    },
+  };
+}
+
+/** Ada's room list with #lab upgraded: it points to its successor, which she hasn't joined. */
+export function upgradedLab(): EngineEvent[] {
+  return seedEvents().flatMap((event): EngineEvent[] =>
+    event.type === 'RoomsUpdated' && event.data.account === ADA
+      ? [
+          {
+            ...event,
+            data: {
+              ...event.data,
+              list: {
+                ...event.data.list,
+                rooms: event.data.list.rooms.map((r) =>
+                  r.room_id === LAB
+                    ? {
+                        ...r,
+                        successor: {
+                          room_id: LAB_V2,
+                          reason: 'This room has moved to room version 12.',
+                          via: ['example.org'],
+                        },
+                      }
+                    : r,
+                ),
+              },
+            },
+          },
+        ]
+      : [],
+  );
 }
 
 /** Ada's sessions: this phone, her desktop, and an old laptop nobody verified. */

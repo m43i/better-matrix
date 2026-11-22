@@ -19,6 +19,7 @@ import type {
   Person,
   MessagePreview,
   SavedMessage,
+  RoomSettings,
   RoomSummary,
   Safety,
   SafetyChange,
@@ -96,6 +97,8 @@ export interface AccountData {
   sessions: Session[] | null;
   contacts: Contacts | null;
   members: Record<string, Members>;
+  /** Rooms' and spaces' settings, by room ID, once a settings screen loaded them. */
+  roomSettings: Record<string, RoomSettings>;
   threads: Record<string, ThreadInfo[]>;
   files: Record<string, SharedFile[]>;
   /** Rooms' widgets, by room ID, once listed. */

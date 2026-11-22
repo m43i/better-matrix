@@ -580,7 +580,8 @@ pub enum Command {
         /// Why, in the user's words; may be empty.
         reason: String,
     },
-    /// Kick, ban or change the role of a room member; [`Event::Members`] follows.
+    /// Kick, ban, unban or change the power level of a room member, or answer someone asking
+    /// to join; [`Event::Members`] follows.
     ModerateMember {
         /// Whose room.
         account: AccountId,
@@ -664,33 +665,59 @@ pub enum Command {
         /// Servers to ask, from the link; ones that aren't server names are left out.
         via: Vec<String>,
     },
-    /// Create a private, encrypted room, in a space when given; answered by
-    /// [`Event::RoomCreated`].
+    /// Make a room or space as `room` describes; answered by [`Event::RoomCreated`].
     CreateRoom {
         /// Whose.
         account: AccountId,
-        /// Its name.
-        name: String,
-        /// Its topic, if any.
-        topic: Option<String>,
-        /// The space it belongs in, if any.
-        space: Option<String>,
+        /// What to make.
+        room: crate::NewRoom,
     },
-    /// Create a space; answered by [`Event::RoomCreated`].
-    CreateSpace {
-        /// Whose.
-        account: AccountId,
-        /// Its name.
-        name: String,
-    },
-    /// Rename a room or space.
-    RenameRoom {
+    /// Read a room's or space's settings; answered by [`Event::RoomSettings`].
+    LoadRoomSettings {
         /// Whose.
         account: AccountId,
         /// The room or space.
         room_id: String,
-        /// The new name.
-        name: String,
+    },
+    /// Change one of a room's or space's settings (its name, say). Once sync brings the change,
+    /// [`Event::RoomSettings`] and an updated [`Event::RoomsUpdated`] follow.
+    ChangeRoom {
+        /// Whose.
+        account: AccountId,
+        /// The room or space.
+        room_id: String,
+        /// What to change.
+        setting: crate::RoomSetting,
+    },
+    /// Upgrade a room to a newer room version: the server makes a new room and closes the old
+    /// one, pointing to it. Spaces the user may arrange list the new room instead. Answered by
+    /// [`Event::RoomCreated`] with the new room.
+    UpgradeRoom {
+        /// Whose.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+        /// The version, from [`RoomSettings::upgrade_to`](crate::RoomSettings::upgrade_to).
+        version: String,
+    },
+    /// Add, remove or order a space's rooms; an updated [`Event::RoomsUpdated`] follows.
+    ChangeSpace {
+        /// Whose.
+        account: AccountId,
+        /// The space.
+        space: String,
+        /// What to change.
+        change: crate::SpaceChange,
+    },
+    /// Leave a space and, first, those of its rooms named; an updated [`Event::RoomsUpdated`]
+    /// follows without them.
+    LeaveSpace {
+        /// Whose.
+        account: AccountId,
+        /// The space.
+        space: String,
+        /// Its rooms (and subspaces) to leave too.
+        rooms: Vec<String>,
     },
     /// Save how the user arranged the sidebar; it syncs to their other sessions.
     SetSidebarLayout {
@@ -1159,12 +1186,21 @@ pub enum Event {
         /// Its ID, also when it was joined by an alias.
         room_id: String,
     },
-    /// A room or space made by [`Command::CreateRoom`] or [`Command::CreateSpace`].
+    /// A room or space made by [`Command::CreateRoom`], or the new room of
+    /// [`Command::UpgradeRoom`].
     RoomCreated {
         /// The command it answers.
         request: RequestId,
         /// Its ID.
         room_id: String,
+    },
+    /// A room's or space's settings, for [`Command::LoadRoomSettings`] and after
+    /// [`Command::ChangeRoom`].
+    RoomSettings {
+        /// Whose.
+        account: AccountId,
+        /// The settings.
+        settings: Box<crate::RoomSettings>,
     },
     /// How the user arranged the sidebar, as saved: sent once an account is ready.
     SidebarLayout {
@@ -1542,7 +1578,7 @@ enum Outcome {
     Done,
     /// Signed in, with what this device knows about the account: it shows before the command
     /// that signed in is answered.
-    LoggedIn(Account, Box<AccountSummary>),
+    LoggedIn(Box<Account>, Box<AccountSummary>),
     LoggedOut(AccountId),
     TimelineOpened(Box<OpenTimeline>),
 }
@@ -1712,7 +1748,7 @@ impl Running {
 /// A signed-in account and its summary from this device's store (no requests).
 async fn signed_in(account: Account) -> Outcome {
     let cached = account.cached_summary().await;
-    Outcome::LoggedIn(account, Box::new(cached))
+    Outcome::LoggedIn(Box::new(account), Box::new(cached))
 }
 
 /// Stops a task when the work that started it ends.
@@ -2627,13 +2663,26 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            // Queued now, in the order the commands came: a role change rewrites the power levels
+            // as room settings do.
             Command::ModerateMember { account: id, room_id, user_id, action } => {
                 let account = self.account(&id);
+                let moderated = account.as_ref().ok().map(|account| {
+                    let (account, room_id, queue) = (account.clone(), room_id.clone(), account.admin_changes.clone());
+                    queue.run(async move { account.moderate(&room_id, &user_id, action).await })
+                });
                 Box::pin(async move {
                     let account = account?;
-                    account.moderate(&room_id, &user_id, action).await?;
-                    let members = account.members(&room_id, true).await?;
-                    sink.emit(Event::Members { request: Some(request), account: id, room_id, members });
+                    let done = match moderated {
+                        Some(moderated) => moderated.await,
+                        None => Ok(()),
+                    };
+                    // Also after a failure: a request answered elsewhere shows as it is now.
+                    if done.is_ok() || matches!(done, Err(Error::Outdated)) {
+                        let members = account.members(&room_id, true).await?;
+                        sink.emit(Event::Members { request: Some(request), account: id, room_id, members });
+                    }
+                    done?;
                     Ok(Outcome::Done)
                 })
             }
@@ -2724,27 +2773,116 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
-            Command::CreateRoom { account, name, topic, space } => {
+            Command::CreateRoom { account, room } => {
                 let account = self.account(&account);
                 Box::pin(async move {
-                    let room_id = account?.create_room(&name, topic.as_deref(), space.as_deref()).await?;
+                    let room_id = account?.create_room(&room).await?;
                     sink.emit(Event::RoomCreated { request, room_id });
                     Ok(Outcome::Done)
                 })
             }
-            Command::CreateSpace { account, name } => {
-                let account = self.account(&account);
+            // Queued with the changes: a read started before a change can't report after it.
+            Command::LoadRoomSettings { account: id, room_id } => {
+                let account = self.account(&id);
+                let loading = account.as_ref().ok().map(|account| {
+                    let (account, queue, sink) = (account.clone(), account.admin_changes.clone(), Arc::clone(&sink));
+                    queue.run(async move {
+                        let settings = account.room_settings(&room_id).await?;
+                        sink.emit(Event::RoomSettings { account: id, settings: Box::new(settings) });
+                        Ok(())
+                    })
+                });
                 Box::pin(async move {
-                    let room_id = account?.create_space(&name).await?;
-                    sink.emit(Event::RoomCreated { request, room_id });
+                    account?;
+                    if let Some(loading) = loading {
+                        loading.await?;
+                    }
                     Ok(Outcome::Done)
                 })
             }
-            Command::RenameRoom { account: id, room_id, name } => {
+            // Queued now, in the order the commands came: each change reads what the last left.
+            Command::ChangeRoom { account: id, room_id, setting } => {
                 let (account, feed) = (self.account(&id), self.feed(&id));
+                let changing = account.as_ref().ok().map(|account| {
+                    let (account, room_id, queue) = (account.clone(), room_id.clone(), account.admin_changes.clone());
+                    let (sink, id) = (Arc::clone(&sink), id.clone());
+                    queue.run(async move {
+                        let changed = account.change_room(&room_id, setting).await;
+                        // Read and reported in the queue too, also after a failure (what the
+                        // server kept shows as it is): an earlier change's report can't arrive
+                        // after a later one's.
+                        if let Ok(settings) = account.room_settings(&room_id).await {
+                            sink.emit(Event::RoomSettings { account: id, settings: Box::new(settings) });
+                        }
+                        Ok(changed)
+                    })
+                });
                 Box::pin(async move {
-                    account?.rename_room(&room_id, &name).await?;
-                    feed?.refresh(Some(&HashSet::from([room_id]))).await;
+                    account?;
+                    let changed = match changing {
+                        Some(changing) => changing.await?,
+                        None => Ok(()),
+                    };
+                    feed?.refresh(Some(&HashSet::from([room_id.clone()]))).await;
+                    changed?;
+                    Ok(Outcome::Done)
+                })
+            }
+            // Queued with the other admin changes: it rewrites spaces' children as a reorder does.
+            Command::UpgradeRoom { account: id, room_id, version } => {
+                let (account, feed) = (self.account(&id), self.feed(&id));
+                let upgrading = account.as_ref().ok().map(|account| {
+                    let (account, queue) = (account.clone(), account.admin_changes.clone());
+                    let old = room_id.clone();
+                    let upgraded = queue.run(async move { account.upgrade_room(&room_id, &version).await });
+                    (upgraded, old)
+                });
+                Box::pin(async move {
+                    let account = account?;
+                    let Some((upgrading, old)) = upgrading else { return Ok(Outcome::Done) };
+                    let new = upgrading.await?;
+                    // The members follow by invitation, outside the queue: rate limits may make it
+                    // slow, and nothing else should wait for it.
+                    let (inviting, successor) = (account.clone(), new.clone());
+                    tokio::spawn(async move { inviting.invite_to_successor(&old, &successor).await });
+                    feed?.refresh(None).await;
+                    sink.emit(Event::RoomCreated { request, room_id: new });
+                    Ok(Outcome::Done)
+                })
+            }
+            // Queued now, in the order the commands came: two quick moves keep their order.
+            Command::ChangeSpace { account: id, space, change } => {
+                let (account, feed) = (self.account(&id), self.feed(&id));
+                let changing = account.as_ref().ok().map(|account| {
+                    let (account, space, change, queue) =
+                        (account.clone(), space.clone(), change.clone(), account.admin_changes.clone());
+                    queue.run(async move { account.change_space(&space, &change).await })
+                });
+                Box::pin(async move {
+                    account?;
+                    let result = match changing {
+                        Some(changing) => changing.await,
+                        None => Ok(()),
+                    };
+                    // Also after a failure: what the server kept shows as it is.
+                    let mut changed = HashSet::from([space]);
+                    if let crate::SpaceChange::Add(room) | crate::SpaceChange::Remove(room) = change {
+                        changed.insert(room);
+                    }
+                    feed?.refresh(Some(&changed)).await;
+                    result?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::LeaveSpace { account: id, space, rooms } => {
+                let (account, feed) = (self.account(&id), self.feed(&id));
+                for room_id in &rooms {
+                    self.leave_calls_in(&id, room_id);
+                }
+                Box::pin(async move {
+                    let left = account?.leave_space(&space, &rooms).await;
+                    feed?.refresh(None).await;
+                    left?;
                     Ok(Outcome::Done)
                 })
             }
@@ -3252,6 +3390,7 @@ impl State {
         let result = match result {
             Ok(Outcome::Done) => Ok(()),
             Ok(Outcome::LoggedIn(account, cached)) => {
+                let account = *account;
                 // Shown now, before the sign-in's `Finished`: the app selects an account it is
                 // adding when it arrives.
                 self.sink.emit(Event::AccountAdded((*cached).clone()));

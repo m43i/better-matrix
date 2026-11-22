@@ -539,6 +539,7 @@ fn select_key(of: &SelectFor) -> String {
         SelectFor::Notifications(account) => format!("select-default-{account}"),
         SelectFor::Ring => "select-ring".into(),
         SelectFor::Device(kind) => format!("select-device-{kind:?}"),
+        SelectFor::Permission(permission) => super::admin::permission_key(*permission),
     }
 }
 
@@ -589,6 +590,8 @@ pub fn select_options(s: &State, of: &SelectFor, p: &Palette) -> El {
             })
             .collect(),
         SelectFor::Device(kind) => device_options(s, *kind, p),
+        // The room settings' permission selects are the room settings' to list.
+        SelectFor::Permission(permission) => return super::admin::permission_options(s, *permission, p),
     };
     select_menu(select_key(of), options, p)
 }

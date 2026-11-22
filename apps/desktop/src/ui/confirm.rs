@@ -23,9 +23,15 @@ fn wording(confirm: &Confirm) -> (String, String, &'static str) {
         Confirm::Moderate { name, action: Moderation::Ban, .. } => {
             (tf!("confirm.ban_title", name = name), t!("confirm.ban_body").to_owned(), t!("confirm.ban"))
         }
-        Confirm::Moderate { name, action: Moderation::Role(_), .. } => {
+        Confirm::Moderate { name, action: Moderation::Role(_) | Moderation::Level(_), .. } => {
             (tf!("confirm.promote_title", name = name), t!("confirm.promote_body").to_owned(), t!("confirm.promote"))
         }
+        // These happen at once, unasked; worded by what they do should one ever ask.
+        Confirm::Moderate { name, action: Moderation::Unban, .. } => (name.clone(), String::new(), t!("members.unban")),
+        Confirm::Moderate { name, action: Moderation::Admit, .. } => {
+            (name.clone(), String::new(), t!("members.approve"))
+        }
+        Confirm::Moderate { name, action: Moderation::Deny, .. } => (name.clone(), String::new(), t!("members.deny")),
         Confirm::DeleteMessage { .. } => (
             t!("confirm.delete_message_title").to_owned(),
             t!("confirm.delete_message_body").to_owned(),

@@ -1,7 +1,7 @@
 // A member of a room (sheet, from the member list): who they are, whether the user verified them,
 // their role, and what the user can do with them: message them, verify them, invite them to
-// another room, and with the rights change their role, remove or ban them; and, for anyone,
-// ignore or report them (ADR 0011). Destructive acts ask first, in the desktop's words.
+// another room, and with the rights change their role or power level, remove or ban them; and,
+// for anyone, ignore or report them (ADR 0011). Destructive acts ask first, in the desktop's words.
 
 import type { MemberRole, Moderation } from '@better-matrix/matrix-native/types';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -13,13 +13,24 @@ import { routes } from '../routes';
 import { invite, listAllMembers, moderate, openDirectChat } from '../state/actions/people';
 import { setIgnored } from '../state/actions/safety';
 import { loadIdentity } from '../state/actions/security';
-import { asksFirst, inviteTargets, may, memberOf, rolesOffered, ROLES } from '../state/people';
+import { levelChoice, parseLevel } from '../state/admin';
+import {
+  asksFirst,
+  inviteTargets,
+  may,
+  mayChooseLevel,
+  memberOf,
+  rolesOffered,
+  ROLES,
+} from '../state/people';
 import { shallow, useAppStore, useStore } from '../state/react';
 import { ignores } from '../state/safety';
 import { account as accountOf, identityOf } from '../state/selectors';
 import { font } from '../theme/palette';
 import { Avatar } from '../ui/Avatar';
 import { Divider, ListRow, ListSection } from '../ui/components';
+import { usePrompt } from '../ui/accounts/Prompt';
+import { levelLabel } from '../ui/admin/labels';
 import { Icon } from '../ui/icons';
 import { roleLabel } from '../ui/people/labels';
 import { usePalette } from '../ui/theme';
@@ -47,7 +58,8 @@ export default function MemberScreen() {
 
   const rooms = useStore((s) => inviteTargets(accountOf(s, account)?.rooms ?? [], roomId), shallow);
   const [open, setOpen] = useState<Open>('none');
-  const [busy, setBusy] = useState<'chat' | MemberRole | null>(null);
+  const [busy, setBusy] = useState<'chat' | MemberRole | 'level' | null>(null);
+  const prompt = usePrompt();
   // A mention opens this sheet straight from the timeline, before anything listed the members.
   useEffect(() => listAllMembers(store, account, roomId), [store, account, roomId]);
   const identity = useStore((s) => identityOf(s, account, userId));
@@ -71,6 +83,8 @@ export default function MemberScreen() {
     router.push(routes.verifyUser(account, person.id));
   };
 
+  const mayLevel = mayChooseLevel(members, member);
+
   const message = () => {
     if (busy !== null) return;
     setBusy('chat');
@@ -93,8 +107,8 @@ export default function MemberScreen() {
 
   const act = (action: Moderation) => {
     const run = () => {
-      if (action.type === 'Role') {
-        setBusy(action.data);
+      if (action.type === 'Role' || action.type === 'Level') {
+        setBusy(action.type === 'Role' ? action.data : 'level');
         moderate(store, account, roomId, person.id, action).then(
           () => setBusy(null),
           () => setBusy(null),
@@ -154,6 +168,31 @@ export default function MemberScreen() {
     router.push(
       routes.report(account, { type: 'Person', data: { user_id: person.id } }, person.name),
     );
+  };
+
+  const askLevel = async () => {
+    let error: string | null = null;
+
+    for (;;) {
+      const typed = await prompt.ask({
+        title: t('mobile.admin.level.prompt_title'),
+        message: t('mobile.admin.level.prompt_body', { level: members.own_level }),
+        error,
+        confirm: t('mobile.admin.level.set'),
+        defaultValue: String(member.level),
+      });
+
+      if (typed === null) return;
+      const level = parseLevel(typed, members.own_level);
+
+      if (level !== null) {
+        if (level !== member.level) act({ type: 'Level', data: level });
+
+        return;
+      }
+
+      error = t('mobile.admin.level.invalid');
+    }
   };
 
   const toggle = (which: Open) => setOpen((current) => (current === which ? 'none' : which));
@@ -260,14 +299,14 @@ export default function MemberScreen() {
               />
             ) : null}
           </ListSection>
-          {roles.length > 0 || mayKick || mayBan ? (
+          {roles.length > 0 || mayLevel || mayKick || mayBan ? (
             <ListSection>
-              {roles.length > 0 ? (
+              {roles.length > 0 || mayLevel ? (
                 <ListRow
                   testID="member-role"
                   icon="shield"
                   title={t('members.role')}
-                  value={roleLabel(member.role)}
+                  value={levelLabel(member.level)}
                   onPress={() => toggle('role')}
                   chevron={false}
                 />
@@ -295,9 +334,26 @@ export default function MemberScreen() {
                     ),
                   )
                 : null}
+              {open === 'role' && mayLevel ? (
+                <ListRow
+                  testID="member-role-custom"
+                  title={t('mobile.admin.level.choose_custom')}
+                  value={levelChoice(member.level) === 'Custom' ? String(member.level) : undefined}
+                  selected={levelChoice(member.level) === 'Custom'}
+                  leading={
+                    busy === 'level' ? (
+                      <ActivityIndicator color={palette.textMuted} />
+                    ) : (
+                      <View style={styles.indent} />
+                    )
+                  }
+                  onPress={() => void askLevel()}
+                  chevron={false}
+                />
+              ) : null}
               {mayKick ? (
                 <>
-                  {roles.length > 0 ? <Divider inset={52} /> : null}
+                  {roles.length > 0 || mayLevel ? <Divider inset={52} /> : null}
                   <ListRow
                     testID="member-kick"
                     icon="leave"
@@ -310,7 +366,7 @@ export default function MemberScreen() {
               ) : null}
               {mayBan ? (
                 <>
-                  {roles.length > 0 || mayKick ? <Divider inset={52} /> : null}
+                  {roles.length > 0 || mayLevel || mayKick ? <Divider inset={52} /> : null}
                   <ListRow
                     testID="member-ban"
                     icon="alert"
@@ -344,6 +400,7 @@ export default function MemberScreen() {
           </ListSection>
         </>
       )}
+      {prompt.element}
     </View>
   );
 }

@@ -113,8 +113,12 @@ function Routes({ scene }: { scene: SceneName | null }) {
           <Stack.Screen name="new-chat" options={{ presentation: 'modal' }} />
           <Stack.Screen name="new-room" options={{ presentation: 'modal' }} />
           <Stack.Screen name="new-space" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="rename-room" options={{ presentation: 'modal' }} />
           <Stack.Screen name="report" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="room-settings/[account]/[roomId]" />
+          <Stack.Screen name="room-permissions" />
+          <Stack.Screen name="space-menu" options={fittedSheet} />
+          <Stack.Screen name="space-rooms" />
+          <Stack.Screen name="leave-space" options={{ presentation: 'modal' }} />
           <Stack.Screen name="invite" options={{ presentation: 'modal' }} />
           <Stack.Screen name="settings" options={{ headerShown: false }} />
           <Stack.Screen name="verify" options={{ ...sheet, sheetAllowedDetents: [0.75, 1] }} />

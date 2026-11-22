@@ -97,7 +97,12 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .child(head)
         .child(divider(p))
         .children((room.kind == RoomKind::Group || count > 2).then(|| {
-            link_row(&icons::USER, t!("members.title"), Some(count.to_string()), "info-members", p)
+            // Requests to join wait in the member list: their count shows beside the members'.
+            let detail = match room.knocks {
+                0 => count.to_string(),
+                knocks => format!("{count} · {}", tp!("info.requests", knocks)),
+            };
+            link_row(&icons::USER, t!("members.title"), Some(detail), "info-members", p)
                 .on_press(|s: &mut State| s.show_side(SidePanel::Members))
         }))
         .child(
@@ -115,7 +120,12 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .child(
             link_row(&icons::LAYOUT, t!("widgets.title"), None, "info-widgets", p)
                 .on_press(|s: &mut State| s.show_side(SidePanel::Widgets)),
-        );
+        )
+        .children(room.can_change_settings.then(|| {
+            let id = room.room_id.clone();
+            link_row(&icons::SETTINGS, t!("room_settings.title"), None, "info-settings", p)
+                .on_press(move |s: &mut State| s.open_room_settings(&id))
+        }));
     let reported = room.room_id.clone();
     let report = row()
         .key("info-report")

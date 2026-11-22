@@ -51,6 +51,10 @@ pub fn thread_panel(
         .border_sides([0.0, 0.0, 0.0, 1.0], p.divider)
         .child(header)
         .child(timeline(&cx, account.timeline(&key), "thread-timeline", &s.thread_near_top, None, p))
-        .child(composer(s, ComposerTarget::Thread, t!("thread.placeholder"), p, ui))
+        // A replaced room takes no more replies either: the way to the new one shows instead.
+        .child(
+            super::admin::successor_banner(s, room, p)
+                .unwrap_or_else(|| composer(s, ComposerTarget::Thread, t!("thread.placeholder"), p, ui)),
+        )
         .on_drop_files(|s: &mut State, files, _| s.attach_files_to(ComposerTarget::Thread, files))
 }

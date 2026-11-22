@@ -666,6 +666,8 @@ pub struct AccountData {
     pub files: HashMap<String, Vec<matrix_core::SharedFile>>,
     /// Rooms' widgets, by room ID, once listed for the info panel.
     pub widgets: HashMap<String, matrix_core::Widgets>,
+    /// Rooms' and spaces' settings, by room ID, as last read for the room settings.
+    pub room_settings: HashMap<String, matrix_core::RoomSettings>,
     /// Shared pinned-message previews by room, including unavailable placeholders.
     pub pins: HashMap<String, Vec<matrix_core::MessagePreview>>,
     /// Pin-list failures shown inline, alongside cached previews and a retry.
@@ -742,6 +744,7 @@ impl AccountData {
             threads: HashMap::new(),
             files: HashMap::new(),
             widgets: HashMap::new(),
+            room_settings: HashMap::new(),
             pins: HashMap::new(),
             pin_errors: HashMap::new(),
             saved: None,
@@ -1363,6 +1366,24 @@ impl Accounts {
         }
     }
 
+    /// Keeps a room's or space's settings, as the engine read them.
+    pub fn set_room_settings(&mut self, id: &AccountId, settings: matrix_core::RoomSettings) {
+        if let Some(account) = self.get_mut(id) {
+            account.room_settings.insert(settings.room_id.clone(), settings);
+        }
+    }
+
+    /// Shows a space's rooms in a new order at once, before sync brings it.
+    pub fn order_space(&mut self, id: &AccountId, space: &str, children: Vec<String>) {
+        if let Some(account) = self.get_mut(id)
+            && let Some(shown) = account.spaces.iter_mut().find(|known| known.room_id == space)
+        {
+            shown.children = children;
+            account.index = std::sync::OnceLock::new();
+            self.revision += 1;
+        }
+    }
+
     pub fn set_security(&mut self, id: &AccountId, security: matrix_core::Security) {
         if let Some(account) = self.get_mut(id) {
             account.security = Some(security);
@@ -1872,6 +1893,9 @@ mod tests {
             saved: Vec::new(),
             priority: matrix_core::RoomPriority::Normal,
             marked_unread: false,
+            can_change_settings: false,
+            knocks: 0,
+            successor: None,
         }
     }
 
@@ -1887,6 +1911,7 @@ mod tests {
             avatar: None,
             can_add_rooms: true,
             can_rename: true,
+            can_change_settings: true,
             children: strings(children),
             members: strings(members),
         }

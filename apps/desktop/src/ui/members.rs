@@ -1,8 +1,10 @@
 //! The member list beside the open room, from the members button in its header: a search, the
 //! count, and everyone (those around first, then by role, then by name) with their presence,
 //! whether the user verified them, and their role. Pressing someone opens what can be done with
-//! them: start a chat, call, invite to another room, and with the rights, change their role,
-//! kick or ban. Someone's name or picture on a message opens their person panel in its place.
+//! them: start a chat, call, invite to another room, and with the rights, change their role or
+//! level, kick or ban. With the rights, those asking to join (Approve, Deny) and those banned
+//! (Unban) show apart, above. Someone's name or picture on a message opens their person panel in
+//! its place.
 
 use matrix_core::{
     Identity, MemberRole, Members, Moderation, Person, PersonPresence, RoomKind, RoomMember, RoomSummary,
@@ -186,9 +188,98 @@ pub fn panel(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
         .border_sides([0.0, 0.0, 0.0, 1.0], p.divider)
         .child(header)
         .child(search)
+        .children(members.and_then(|members| outsiders(members, &s.media, p)))
         .child(count)
         .child(divider(p))
         .child(col().w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list))
+}
+
+/// Those asking to join and those banned, with what the user may do about them: above the
+/// members, in a list of its own that scrolls when long. `None` when there is nothing to show.
+fn outsiders(members: &Members, media: &crate::state::MediaCache, p: &Palette) -> Option<El> {
+    let may = |action, member: &RoomMember| members.may(action, member);
+    let answering = members.knocking.iter().filter(|m| may(Moderation::Admit, m) || may(Moderation::Deny, m));
+    let unbanning = members.banned.iter().filter(|m| may(Moderation::Unban, m));
+    let (answering, unbanning): (Vec<_>, Vec<_>) = (answering.collect(), unbanning.collect());
+    if answering.is_empty() && unbanning.is_empty() {
+        return None;
+    }
+    let heading = |label: String, key: &str| {
+        text(label).key(key.to_owned()).font(font::SECTION).color(p.text_muted).px(16.0).pt(14.0).pb(4.0)
+    };
+    let mut list = col().w_full();
+    if !answering.is_empty() {
+        list = list.child(heading(tf!("members.requests", count = answering.len()), "member-requests"));
+        for member in answering {
+            let mut actions = Vec::new();
+            for (action, label, kind, key) in [
+                (Moderation::Admit, t!("members.approve"), ButtonKind::Primary, "knock-admit"),
+                (Moderation::Deny, t!("members.deny"), ButtonKind::Secondary, "knock-deny"),
+            ] {
+                if may(action, member) {
+                    let id = member.person.id.clone();
+                    actions.push(
+                        button(label, kind, true, p)
+                            .h(30.0)
+                            .px(12.0)
+                            .key(format!("{key}-{}", member.person.id))
+                            .on_press(move |s: &mut State| s.moderate(&id, action)),
+                    );
+                }
+            }
+            list = list.child(outsider_row(member, "knock", actions, media, p));
+        }
+    }
+    if !unbanning.is_empty() {
+        list = list.child(heading(tf!("members.banned", count = unbanning.len()), "member-banned"));
+        for member in unbanning {
+            let id = member.person.id.clone();
+            let unban = button(t!("members.unban"), ButtonKind::Secondary, true, p)
+                .h(30.0)
+                .px(12.0)
+                .key(format!("unban-{}", member.person.id))
+                .on_press(move |s: &mut State| s.moderate(&id, Moderation::Unban));
+            list = list.child(outsider_row(member, "banned", vec![unban], media, p));
+        }
+    }
+    Some(
+        col()
+            .key("member-outsiders")
+            .w_full()
+            .max_h(240.0)
+            .border_sides([0.0, 0.0, 1.0, 0.0], p.divider)
+            .scroll(ScrollSpec { stick_bottom: false })
+            .child(list.pb(8.0)),
+    )
+}
+
+/// Someone asking to join or banned: their picture, name and ID, and the buttons for them.
+fn outsider_row(
+    member: &RoomMember,
+    kind: &str,
+    actions: Vec<El>,
+    media: &crate::state::MediaCache,
+    p: &Palette,
+) -> El {
+    let person = &member.person;
+    let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, 32.0).radius(16.0);
+    row()
+        .key(format!("{kind}-{}", person.id))
+        .w_full()
+        .min_h(48.0)
+        .px(16.0)
+        .py(6.0)
+        .gap(10.0)
+        .center_y()
+        .child(face)
+        .child(
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .child(text(person.name.clone()).font(font::BODY).color(p.text).truncate())
+                .child(text(person.id.clone()).font(font::META).color(p.text_muted).truncate()),
+        )
+        .children(actions)
 }
 
 /// What the member list says of someone's presence, until the engine reports newer. The user's
@@ -471,10 +562,14 @@ pub fn menu(
         })
         .collect();
     let may = |action| member.is_some_and(|member| members.is_some_and(|members| members.may(action, member)));
-    if !roles.is_empty() || may(Moderation::Kick) || may(Moderation::Ban) {
+    // Any level from nothing up to the user's own, as a number.
+    let custom = member.zip(members).is_some_and(|(member, members)| {
+        members.can_set_roles && member.level < members.own_level && members.own_level > 0
+    });
+    if !roles.is_empty() || custom || may(Moderation::Kick) || may(Moderation::Ban) {
         panel = panel.child(divider(p));
     }
-    if !roles.is_empty() {
+    if !roles.is_empty() || custom {
         panel = panel.child(
             submenu_row(&icons::SHIELD, t!("members.role"), submenu == Some(MemberSubmenu::Role), p)
                 .key(ROLE_ROW)
@@ -524,7 +619,7 @@ pub fn menu(
         Some(MemberSubmenu::Invite) => panels.push(invite_menu(account, &room.room_id, user_id, p)),
         Some(MemberSubmenu::Role) => {
             if let Some(member) = member {
-                panels.push(role_menu(member, &roles, p));
+                panels.push(role_menu(member, &roles, custom, p));
             }
         }
         None => {}
@@ -550,8 +645,8 @@ fn invite_menu(account: &AccountData, current: &str, user_id: &str, p: &Palette)
     col().child(panel).anchored(INVITE_ROW, Side::Left, Align::Start, 6.0)
 }
 
-/// The roles the user may give, the member's own checked.
-fn role_menu(member: &RoomMember, roles: &[MemberRole], p: &Palette) -> El {
+/// The roles the user may give, the member's own checked, and a level of the user's choosing.
+fn role_menu(member: &RoomMember, roles: &[MemberRole], custom: bool, p: &Palette) -> El {
     let mut panel = popover_panel(p).key("member-role-menu").w(220.0);
     let check =
         |on: bool| el().size(28.0, 28.0).center().children(on.then(|| icon(&icons::CHECK, 16.0).color(p.accent)));
@@ -564,6 +659,21 @@ fn role_menu(member: &RoomMember, roles: &[MemberRole], p: &Palette) -> El {
             entry = entry.on_press(move |s: &mut State| s.moderate(&id, Moderation::Role(role)));
         }
         panel = panel.child(entry);
+    }
+    if custom {
+        let id = member.person.id.clone();
+        // A level no role has shows beside it, checked.
+        let own = !matches!(member.level, 0 | 50 | 100);
+        let label = if own {
+            tf!("members.custom_level_is", level = member.level)
+        } else {
+            t!("members.custom_level").to_owned()
+        };
+        panel = panel.child(divider(p)).child(
+            menu_row(check(own), &label, None, None, p)
+                .key("member-role-custom")
+                .on_press(move |s: &mut State| s.open_member_level(&id)),
+        );
     }
     col().child(panel).anchored(ROLE_ROW, Side::Left, Align::Start, 6.0)
 }

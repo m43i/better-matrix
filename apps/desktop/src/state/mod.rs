@@ -9,6 +9,7 @@
 
 mod account_actions;
 mod accounts;
+mod admin;
 mod attachments;
 pub mod backdrop;
 pub mod breath;
@@ -60,6 +61,10 @@ pub use accounts::READ_MARKER_FADE;
 pub use accounts::{
     AccountData, Accounts, EntryView, Landing, RoomTimeline, Scope, TimelineItem, continues_group, now_ms, visual,
     wants_attention,
+};
+pub use admin::{
+    PRESET_LEVELS, RoomFields, RoomFormField, RoomSettingsDialog, RoomSettingsSection, SettingsConfirm, SettingsField,
+    SpaceOrder, addable_rooms, joined_children, local_part, server_of,
 };
 pub use attachments::{AttachmentAction, can_open_attachment};
 pub use call::Call;
@@ -163,6 +168,8 @@ pub enum SelectFor {
     Ring,
     /// A microphone, speaker or camera.
     Device(matrix_core::DeviceKind),
+    /// The level a permission asks for, in the open room settings.
+    Permission(matrix_core::Permission),
 }
 
 /// What the panel beside the open room shows (the thread shows there when none is open).
@@ -190,7 +197,7 @@ pub enum MemberSubmenu {
     Role,
 }
 
-/// What the room form makes or changes.
+/// What the room form makes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RoomForm {
     /// A new room, inside `space` when given.
@@ -198,14 +205,6 @@ pub enum RoomForm {
         space: Option<String>,
     },
     NewSpace,
-    /// A new name for a room or space.
-    Rename {
-        room_id: String,
-    },
-    /// A web page to pin to a room as a widget: its name, and its address in the second field.
-    AddWidget {
-        room_id: String,
-    },
 }
 
 /// Where a voice memo goes once its file is written: the room or thread it was recorded for,
@@ -234,7 +233,7 @@ const AVATAR_PIXELS: (u32, u32) = (128, 128);
 const AVATAR_SIZE: MediaSize = MediaSize::Thumbnail { width: AVATAR_PIXELS.0, height: AVATAR_PIXELS.1 };
 
 /// What the system file dialog was opened for; its answer goes back there.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PickFor {
     /// Files to attach to a composer.
     Attachments(ComposerTarget),
@@ -242,6 +241,9 @@ pub enum PickFor {
     Avatar,
     /// A file of exported message keys to import.
     KeyFile,
+    /// A new picture for a room or space: the one whose settings it was asked from, whatever
+    /// shows by the time the dialog answers.
+    RoomAvatar { account: AccountId, room_id: String },
 }
 
 /// Something dragged in the sidebar or on the rail: a room, a whole section, or a space.
@@ -463,11 +465,37 @@ pub enum Modal {
         account: AccountId,
         kept: bool,
     },
-    /// Naming a room or space: a new one, or a new name.
+    /// Making a room or space: its name, topic and who may join.
     RoomForm {
         form: RoomForm,
+        fields: Box<RoomFields>,
+    },
+    /// A web page to pin to a room as a widget: its name, and its address.
+    AddWidget {
+        room_id: String,
         name: Box<TextEdit>,
-        topic: Box<TextEdit>,
+        url: Box<TextEdit>,
+    },
+    /// A room's or space's settings.
+    RoomSettings(Box<RoomSettingsDialog>),
+    /// A space's rooms, to add, remove and order.
+    SpaceRooms {
+        account: AccountId,
+        space: String,
+    },
+    /// Leaving a space, and the joined rooms of it `chosen` to leave too.
+    LeaveSpace {
+        account: AccountId,
+        space: String,
+        chosen: Vec<String>,
+    },
+    /// Giving a member of a room a power level of the user's choosing.
+    MemberLevel {
+        account: AccountId,
+        room_id: String,
+        user_id: String,
+        name: String,
+        edit: TextEdit,
     },
     /// Naming a sidebar section: a new one, or renaming `section`.
     SectionName {
@@ -722,7 +750,7 @@ enum Purpose {
     /// Opening a direct chat, from search or a member list; it opens if the account is still
     /// the one shown.
     DirectChat(AccountId),
-    /// Kicking, banning or changing a member's role.
+    /// Kicking, banning or changing a member's role, or answering a join request.
     Moderate,
     /// Changing an account's safety choices; failing, the account shows the saved ones again.
     Safety {
@@ -754,12 +782,31 @@ enum Purpose {
         account: AccountId,
         space: bool,
     },
-    /// Renaming a room or space.
-    Rename,
     /// Adding or removing a room's widget.
     Widget,
     /// An event's source, for the source dialog showing that request.
     Source,
+    /// Reading a room's or space's settings.
+    ReadRoomSettings,
+    /// Changing one of a room's or space's settings.
+    RoomSettings,
+    /// Upgrading the room `from`, whose new room opens once made if the user is still on it:
+    /// its settings, or the room itself.
+    Upgrade {
+        account: AccountId,
+        from: String,
+    },
+    /// Adding, removing or ordering a space's rooms; for an order, the one shown before it and
+    /// the one shown for it, so a refused order goes back unless another followed.
+    SpaceRooms {
+        order: Option<SpaceOrder>,
+    },
+    /// Joining the room that replaced `from`, which opens once joined if `from` still shows.
+    Successor {
+        account: AccountId,
+        from: String,
+        to: String,
+    },
     /// Downloading audio to play from `path`.
     Audio {
         media: MediaRef,
@@ -1270,11 +1317,16 @@ impl State {
                         let new = list.rooms.iter().find(|room| room.room_id == id);
                         old.map(|r| &r.pinned) != new.map(|r| &r.pinned)
                     });
+                let rights_before = self.admin_rights(&account);
                 self.accounts.set_room_list(&account, list);
+                self.cancel_memos_in_replaced_rooms(&account);
                 // A room turning public (or private) may hold back (or show) its media: the
                 // preview's, and what its rows on screen load.
                 self.safety_changed();
                 self.saved_changed(&account);
+                if self.admin_rights(&account) != rights_before {
+                    self.admin_rights_changed(&account);
+                }
                 if pins_changed && self.side == Some(SidePanel::Pins) {
                     self.side_loaded = None;
                     self.sync_side();
@@ -1484,10 +1536,30 @@ impl State {
                 }
                 _ => {}
             },
+            Event::RoomSettings { account, settings } => {
+                self.accounts.set_room_settings(&account, *settings);
+                self.fill_room_settings();
+            }
             Event::RoomPreview { request, preview } => self.link_previewed(request, *preview),
             Event::RoomJoined { request, room_id } => self.link_joined(request, &room_id),
             Event::RoomCreated { request, room_id } => {
-                let Some(Purpose::Create { account, space }) = self.pending.get(&request).cloned() else { return };
+                let (account, space) = match self.pending.get(&request).cloned() {
+                    Some(Purpose::Create { account, space }) => (account, space),
+                    // The upgraded room's settings close on the new room, unless the user went
+                    // elsewhere meanwhile.
+                    Some(Purpose::Upgrade { account, from }) => {
+                        let settings_open =
+                            matches!(&self.modal, Some(Modal::RoomSettings(dialog)) if dialog.room_id == from);
+                        if !settings_open && self.active_room_id() != Some(from.as_str()) {
+                            return;
+                        }
+                        if settings_open {
+                            self.modal = None;
+                        }
+                        (account, false)
+                    }
+                    _ => return,
+                };
                 if self.nav.account.as_ref() != Some(&account) {
                     return;
                 }
@@ -1850,6 +1922,7 @@ impl State {
                 Purpose::Membership { account, room_id, action, scope } => {
                     self.membership_finished(account, room_id, *action, scope)
                 }
+                Purpose::Successor { account, from, to } => self.successor_joined(account, from, to),
                 Purpose::Recover if matches!(self.modal, Some(Modal::RecoveryKeyEntry { .. })) => self.modal = None,
                 Purpose::KeyFile => self.key_file_done(request),
                 Purpose::Guarded { action: Guarded::ChangePassword { .. }, .. } => self.password_changed(),
@@ -2052,9 +2125,18 @@ impl State {
                 self.save_layout_again(account);
             }
             Purpose::Create { .. } => self.notice = Some(tf!("notice.create", error = error)),
-            Purpose::Rename => self.notice = Some(tf!("notice.rename", error = error)),
             Purpose::Widget => self.notice = Some(tf!("notice.widget", error = error)),
             Purpose::Source => self.source_failed(request, &error),
+            Purpose::ReadRoomSettings => self.notice = Some(tf!("notice.room_settings_read", error = error)),
+            Purpose::RoomSettings => self.notice = Some(tf!("notice.room_settings", error = error)),
+            Purpose::Upgrade { .. } => self.notice = Some(tf!("notice.upgrade", error = error)),
+            Purpose::SpaceRooms { order } => {
+                if let Some(order) = order {
+                    self.unorder_space(order);
+                }
+                self.notice = Some(tf!("notice.space_rooms", error = error));
+            }
+            Purpose::Successor { .. } => self.notice = Some(tf!("notice.join", error = error)),
             Purpose::Audio { media, .. } => {
                 self.scratch_files.remove(&media);
                 self.video_failed(&media, &error);
@@ -2801,74 +2883,6 @@ impl State {
             let request = self.dispatch(Command::SuggestPeople(account), Purpose::People);
             self.chat_search.request = Some(request);
         }
-    }
-
-    /// Opens the room form.
-    pub fn open_room_form(&mut self, form: RoomForm) {
-        let name = match &form {
-            RoomForm::Rename { room_id } => self.active_account().and_then(|account| {
-                account
-                    .room(room_id)
-                    .map(|room| room.name.clone())
-                    .or_else(|| account.space(room_id).map(|s| s.name.clone()))
-            }),
-            _ => None,
-        };
-        self.popover = None;
-        let name = Box::new(focused(TextEdit::new(name.unwrap_or_default())));
-        self.modal = Some(Modal::RoomForm { form, name, topic: Box::new(TextEdit::new("")) });
-    }
-
-    /// A field of the room form: its name, or with `topic` its topic.
-    pub fn room_form_field(&mut self, topic: bool) -> &mut TextEdit {
-        match &mut self.modal {
-            Some(Modal::RoomForm { name, topic: field, .. }) => {
-                if topic {
-                    field.as_mut()
-                } else {
-                    name.as_mut()
-                }
-            }
-            _ => &mut self.scratch,
-        }
-    }
-
-    pub fn submit_room_form(&mut self) {
-        let Some(account) = self.nav.account.clone() else { return };
-        let Some(Modal::RoomForm { form, name, topic }) = self.modal.take() else { return };
-        // A widget may go without a name (its host stands in); everything else needs one.
-        let name_text = name.text.trim().to_owned();
-        if name_text.is_empty() && !matches!(form, RoomForm::AddWidget { .. }) {
-            self.modal = Some(Modal::RoomForm { form, name: Box::new(TextEdit::new("")), topic });
-            return;
-        }
-        match form {
-            RoomForm::NewRoom { space } => {
-                let topic = Some(topic.text.trim().to_owned()).filter(|t| !t.is_empty());
-                let purpose = Purpose::Create { account: account.clone(), space: false };
-                self.dispatch(Command::CreateRoom { account, name: name_text, topic, space }, purpose);
-            }
-            RoomForm::NewSpace => {
-                let purpose = Purpose::Create { account: account.clone(), space: true };
-                self.dispatch(Command::CreateSpace { account, name: name_text }, purpose);
-            }
-            RoomForm::Rename { room_id } => {
-                self.dispatch(Command::RenameRoom { account, room_id, name: name_text }, Purpose::Rename);
-            }
-            RoomForm::AddWidget { room_id } => self.add_widget(account, room_id, name, topic),
-        }
-    }
-
-    /// Asks before leaving a space (leaving it removes it from the rail).
-    pub fn confirm_leave_space(&mut self, space_id: &str) {
-        let (Some(account), Some(name)) = (
-            self.nav.account.clone(),
-            self.active_account().and_then(|a| a.space(space_id)).map(|space| space.name.clone()),
-        ) else {
-            return;
-        };
-        self.popover = None;
-        self.modal = Some(Modal::Confirm(Confirm::LeaveRoom { account, room_id: space_id.to_owned(), name }));
     }
 
     // ----- sidebar sections --------------------------------------------------------------------
@@ -4008,7 +4022,9 @@ impl State {
         }
     }
 
-    /// Kicks or bans a member of the open room after the user confirms; gives a role at once.
+    /// Kicks or bans a member of the open room after the user confirms; gives a role or level,
+    /// unbans and answers join requests at once. Raising someone to the user's own level asks
+    /// first.
     pub fn moderate(&mut self, user_id: &str, action: matrix_core::Moderation) {
         let (Some(account), Some(room_id)) = (self.nav.account.clone(), self.active_room_id().map(str::to_owned))
         else {
@@ -4017,13 +4033,18 @@ impl State {
         self.popover = None;
         let members = self.accounts.get(&account).and_then(|data| data.members.get(&room_id));
         let name = members
-            .and_then(|members| members.people.iter().find(|m| m.person.id == user_id))
+            .and_then(|members| {
+                members.people.iter().chain(&members.knocking).chain(&members.banned).find(|m| m.person.id == user_id)
+            })
             .map_or_else(|| user_id.to_owned(), |m| m.person.name.clone());
         let own_level = members.map_or(0, |members| members.own_level);
         let user_id = user_id.to_owned();
+        use matrix_core::Moderation;
         let asks = match action {
-            matrix_core::Moderation::Kick | matrix_core::Moderation::Ban => true,
-            matrix_core::Moderation::Role(role) => role.level() >= own_level,
+            Moderation::Kick | Moderation::Ban => true,
+            Moderation::Role(role) => role.level() >= own_level,
+            Moderation::Level(level) => level >= own_level,
+            Moderation::Unban | Moderation::Admit | Moderation::Deny => false,
         };
         if asks {
             self.modal = Some(Modal::Confirm(Confirm::Moderate { account, room_id, user_id, name, action }));
@@ -4389,6 +4410,7 @@ impl State {
                 | Modal::RecoveryKeyEntry { edit, .. }
                 | Modal::Password { edit, .. }
                 | Modal::RenameSession { edit, .. }
+                | Modal::MemberLevel { edit, .. }
                 | Modal::SectionName { edit, .. },
             ) => edit,
             Some(Modal::Report(form)) => &mut form.reason,
@@ -5227,6 +5249,12 @@ impl State {
             PickFor::KeyFile => {
                 if let Some(path) = paths.first() {
                     self.key_file_chosen(KeyTransfer::Import, path.clone());
+                }
+            }
+            PickFor::RoomAvatar { account, room_id } => {
+                if let Some(path) = paths.first() {
+                    let setting = matrix_core::RoomSetting::Avatar(Some(path.clone()));
+                    self.dispatch(Command::ChangeRoom { account, room_id, setting }, Purpose::RoomSettings);
                 }
             }
         }

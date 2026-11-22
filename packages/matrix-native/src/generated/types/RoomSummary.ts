@@ -5,6 +5,7 @@ import type { NotificationMode } from "./NotificationMode";
 import type { RoomCall } from "./RoomCall";
 import type { RoomKind } from "./RoomKind";
 import type { RoomPriority } from "./RoomPriority";
+import type { Successor } from "./Successor";
 
 /**
  * A joined room as the room list shows it.
@@ -105,4 +106,16 @@ priority: RoomPriority,
 /**
  * Whether the user marked the room unread (MSC2867); reading it clears the mark.
  */
-marked_unread: boolean, };
+marked_unread: boolean, 
+/**
+ * Whether the user may change any of the room's settings: whether they are offered.
+ */
+can_change_settings: boolean, 
+/**
+ * How many people are asking to join, when the user may let them in.
+ */
+knocks: number, 
+/**
+ * The room that replaced this one, once it was upgraded.
+ */
+successor: Successor | null, };

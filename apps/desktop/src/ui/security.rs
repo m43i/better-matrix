@@ -29,8 +29,13 @@ pub fn dialog_for(modal: &Modal, p: &Palette) -> Option<El> {
         Modal::SessionEnded { account, kept } => session_ended(account.as_str(), *kept, p),
         Modal::RenameSession { edit, .. } => rename_session(edit, p),
         Modal::SectionName { section, edit } => section_name(section.is_some(), edit, p),
-        Modal::RoomForm { form, name, topic } => room_form(form, name, topic, p),
+        Modal::AddWidget { name, url, .. } => add_widget(name, url, p),
         Modal::Forward { .. }
+        | Modal::RoomForm { .. }
+        | Modal::RoomSettings(_)
+        | Modal::SpaceRooms { .. }
+        | Modal::LeaveSpace { .. }
+        | Modal::MemberLevel { .. }
         | Modal::Saved(_)
         | Modal::Translate(_)
         | Modal::Settings(_)
@@ -388,45 +393,34 @@ fn session_ended(account: &str, kept: bool, p: &Palette) -> El {
 }
 
 /// Naming a new room or space, or renaming one; a new room also takes a topic.
-fn room_form(form: &crate::state::RoomForm, name: &rune::TextEdit, topic: &rune::TextEdit, p: &Palette) -> El {
-    use crate::state::RoomForm;
-    let (title, confirm) = match form {
-        RoomForm::NewRoom { .. } => (t!("create.room_title"), t!("create.create")),
-        RoomForm::NewSpace => (t!("create.space_title"), t!("create.create")),
-        RoomForm::Rename { .. } => (t!("create.rename_title"), t!("common.save")),
-        RoomForm::AddWidget { .. } => (t!("widgets.add_title"), t!("widgets.add_confirm")),
-    };
-    let widget = matches!(form, RoomForm::AddWidget { .. });
-    let mut content = col().w_full().gap(10.0).child(
-        field_input(name, if widget { t!("widgets.name") } else { t!("create.name") }, p)
-            .key("room-form-name")
-            .on_edit(|s: &mut State| s.room_form_field(false))
-            .on_submit(|s: &mut State, _| s.submit_room_form()),
-    );
-    if matches!(form, RoomForm::NewRoom { .. } | RoomForm::AddWidget { .. }) {
-        content = content.child(
-            field_input(topic, if widget { t!("widgets.url") } else { t!("create.topic") }, p)
-                .key("room-form-topic")
-                .on_edit(|s: &mut State| s.room_form_field(true))
-                .on_submit(|s: &mut State, _| s.submit_room_form()),
+/// Pinning a web page to a room as a widget: its name, and its address.
+fn add_widget(name: &rune::TextEdit, url: &rune::TextEdit, p: &Palette) -> El {
+    let content = col()
+        .w_full()
+        .gap(10.0)
+        .child(
+            field_input(name, t!("widgets.name"), p)
+                .key("widget-form-name")
+                .on_edit(|s: &mut State| s.widget_field(false))
+                .on_submit(|s: &mut State, _| s.submit_widget()),
+        )
+        .child(
+            field_input(url, t!("widgets.url"), p)
+                .key("widget-form-url")
+                .on_edit(|s: &mut State| s.widget_field(true))
+                .on_submit(|s: &mut State, _| s.submit_widget()),
         );
-    }
     dialog(
-        "room-form",
-        title,
+        "widget-form",
+        t!("widgets.add_title"),
         content,
         vec![
             button(t!("common.cancel"), ButtonKind::Secondary, true, p)
-                .key("room-form-cancel")
+                .key("widget-form-cancel")
                 .on_press(State::close_modal),
-            button(
-                confirm,
-                ButtonKind::Primary,
-                if widget { !topic.text.trim().is_empty() } else { !name.text.trim().is_empty() },
-                p,
-            )
-            .key("room-form-submit")
-            .on_press(State::submit_room_form),
+            button(t!("widgets.add_confirm"), ButtonKind::Primary, !url.text.trim().is_empty(), p)
+                .key("widget-form-submit")
+                .on_press(State::submit_widget),
         ],
         p,
     )

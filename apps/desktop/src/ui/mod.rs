@@ -3,6 +3,7 @@
 
 mod account_dialogs;
 mod account_menu;
+mod admin;
 mod attachments;
 mod backdrop;
 mod call;
@@ -176,6 +177,16 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         }
         Some(Modal::Invitation { account, room_id }) => room_discovery::invitation(s, account, room_id, &p),
         Some(Modal::PublicRooms { account, space }) => Some(room_discovery::public_rooms(s, account, space, &p)),
+        Some(
+            other @ (Modal::RoomForm { .. }
+            | Modal::RoomSettings(_)
+            | Modal::SpaceRooms { .. }
+            | Modal::LeaveSpace { .. }
+            | Modal::MemberLevel { .. }),
+        ) => {
+            let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
+            admin::dialog_for(s, other, window, &p)
+        }
         Some(other) => security::dialog_for(other, &p),
         None => None,
     };
@@ -195,7 +206,9 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
                 .center()
                 .modal(false, State::close_modal)
                 .child(settings::backdrop())
-                .child(dialog.max_h((window[1] - 48.0).max(200.0))),
+                // A press inside the dialog that nothing in it takes stays there, rather than
+                // reaching the backdrop behind and closing it.
+                .child(dialog.max_h((window[1] - 48.0).max(200.0)).on_press(|_: &mut State| {})),
         );
     }
     if let Some(select) = select {

@@ -2,6 +2,6 @@
 import type { MemberRole } from "./MemberRole";
 
 /**
- * What a moderator does to a member.
+ * What a moderator does to a member, or to someone asking to join.
  */
-export type Moderation = { "type": "Kick" } | { "type": "Ban" } | { "type": "Role", "data": MemberRole };
+export type Moderation = { "type": "Kick" } | { "type": "Ban" } | { "type": "Role", "data": MemberRole } | { "type": "Level", "data": number } | { "type": "Unban" } | { "type": "Admit" } | { "type": "Deny" };

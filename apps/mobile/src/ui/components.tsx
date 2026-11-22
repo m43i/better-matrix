@@ -55,6 +55,7 @@ export function Button({
   busy = false,
   disabled = false,
   icon,
+  small = false,
   testID,
 }: {
   title: string;
@@ -63,6 +64,8 @@ export function Button({
   busy?: boolean;
   disabled?: boolean;
   icon?: IconName;
+  /** A compact button, for inside a list row. */
+  small?: boolean;
   testID?: string;
 }) {
   const palette = usePalette();
@@ -95,6 +98,7 @@ export function Button({
       android_ripple={{ color: '#ffffff33' }}
       style={({ pressed }) => [
         styles.button,
+        small ? styles.buttonSmall : null,
         {
           backgroundColor: bg,
           borderColor: kind === 'secondary' ? palette.divider : 'transparent',
@@ -218,7 +222,8 @@ export function ListSection({
  * One row of a list: an icon or avatar, a title and subtitle, and a value, switch or chevron. The
  * chevron is iOS's disclosure indicator; Material lists have none, so Android never draws it. A
  * row of a single choice (`selected` given) shows iOS's checkmark when chosen, or Material's
- * radio button on Android.
+ * radio button on Android; a row of a multiple choice (`checked` given) the checkmark, or
+ * Material's checkbox.
  */
 export function ListRow({
   title,
@@ -229,10 +234,12 @@ export function ListRow({
   leading,
   value,
   onPress,
+  onLongPress,
   chevron = onPress !== undefined && Platform.OS === 'ios',
   toggle,
   danger = false,
   selected,
+  checked,
   testID,
 }: {
   title: string;
@@ -243,10 +250,12 @@ export function ListRow({
   leading?: ReactNode;
   value?: string;
   onPress?: () => void;
+  onLongPress?: () => void;
   chevron?: boolean;
   toggle?: { value: boolean; onChange: (value: boolean) => void };
   danger?: boolean;
   selected?: boolean;
+  checked?: boolean;
   testID?: string;
 }) {
   const palette = usePalette();
@@ -278,6 +287,15 @@ export function ListRow({
       ) : selected ? (
         <Icon name="check" size={20} color={palette.accent} />
       ) : null}
+      {ANDROID && checked !== undefined ? (
+        <Icon
+          name={checked ? 'checkboxOn' : 'checkbox'}
+          size={22}
+          color={checked ? palette.accent : palette.textMuted}
+        />
+      ) : checked ? (
+        <Icon name="check" size={20} color={palette.accent} />
+      ) : null}
       {toggle ? <Toggle value={toggle.value} onChange={toggle.onChange} label={title} /> : null}
       {chevron && !toggle && Platform.OS === 'ios' ? (
         <Icon name="chevronRight" size={16} color={palette.textMuted} />
@@ -291,8 +309,11 @@ export function ListRow({
     <Touchable
       testID={testID}
       onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={selected === undefined ? undefined : { selected }}
+      onLongPress={onLongPress}
+      accessibilityRole={checked === undefined ? 'button' : 'checkbox'}
+      accessibilityState={
+        checked !== undefined ? { checked } : selected === undefined ? undefined : { selected }
+      }
     >
       {body}
     </Touchable>
@@ -395,6 +416,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
+  buttonSmall: { minHeight: 34, paddingHorizontal: 12, borderRadius: 8 },
   buttonContent: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   field: { gap: 6 },
   input: {

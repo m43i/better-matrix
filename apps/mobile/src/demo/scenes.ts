@@ -35,6 +35,7 @@ import {
   hiddenEvents,
   KAI,
   PASSWORD_SERVER,
+  LAB,
   READ_BY_SIX,
   ring,
   safetyEvents,
@@ -43,6 +44,7 @@ import {
   seedEvents,
   TEST_PLAN,
   typingPeople,
+  upgradedLab,
   verificationEmojis,
   WORK_SPACE,
 } from './fixtures';
@@ -267,6 +269,52 @@ export const scenes = {
   'new-chat': { about: 'Starting a direct chat', routes: [routes.newChat()] },
   'new-room': { about: 'Making a room', routes: [routes.newRoom(WORK_SPACE)] },
   'new-space': { about: 'Making a space', routes: [routes.newSpace()] },
+  'new-room-public': {
+    about: 'Making a public room in a space: its address, directory listing and encryption',
+    routes: [routes.newRoom(WORK_SPACE, 'Public')],
+  },
+  'new-space-public': {
+    about: 'Making a public space with an address',
+    routes: [routes.newSpace('Public')],
+  },
+  'room-settings': {
+    about: 'A public room’s settings, every part an admin may change',
+    routes: [routes.roomInfo(ADA, GENERAL), routes.roomSettings(ADA, GENERAL)],
+  },
+  'room-settings-upgrade': {
+    about: 'A private room’s settings, with encryption on and an upgrade offered',
+    routes: [routes.roomSettings(ADA, LAB)],
+  },
+  'room-permissions': {
+    about: 'A room’s permission levels, one above Ada’s own',
+    routes: [routes.roomSettings(ADA, GENERAL), routes.roomPermissions(ADA, GENERAL)],
+  },
+  'space-settings': {
+    about: 'A space’s settings',
+    routes: [routes.roomSettings(ADA, WORK_SPACE)],
+  },
+  'member-requests': {
+    about: 'Requests to join and someone banned, in #design’s member list',
+    routes: [routes.room(ADA, DESIGN), routes.roomInfo(ADA, DESIGN)],
+  },
+  tombstone: {
+    about: 'An upgraded room: the banner to its successor instead of the composer',
+    events: upgradedLab(),
+    routes: [routes.room(ADA, LAB)],
+  },
+  'space-menu': {
+    about: 'A space’s sheet, from a long press in the space picker',
+    routes: [routes.spaceMenu(ADA, WORK_SPACE)],
+  },
+  'space-rooms': {
+    about: 'Arranging a space’s rooms',
+    setup: general,
+    routes: [routes.spaceRooms(ADA, WORK_SPACE)],
+  },
+  'leave-space': {
+    about: 'Leaving a space, choosing which of its rooms to leave too',
+    routes: [routes.leaveSpace(ADA, WORK_SPACE)],
+  },
   settings: { about: 'Settings', routes: [routes.settings()] },
   'settings-preferences': {
     about: 'Language and appearance',

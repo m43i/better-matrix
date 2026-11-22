@@ -91,6 +91,8 @@ export const icons = {
   /** A single choice in a list on Android: Material's radio button. */
   choice: { ios: 'circle', android: 'radio_button_unchecked' },
   choiceOn: { ios: 'checkmark.circle.fill', android: 'radio_button_checked' },
+  checkbox: { ios: 'square', android: 'check_box_outline_blank' },
+  checkboxOn: { ios: 'checkmark.square.fill', android: 'check_box' },
   compose: { ios: 'square.and.pencil', android: 'edit_square' },
   markRead: { ios: 'checkmark.message', android: 'mark_chat_read' },
   markUnread: { ios: 'message.badge', android: 'mark_chat_unread' },
@@ -112,6 +114,9 @@ export const icons = {
   upload: { ios: 'square.and.arrow.up', android: 'upload' },
   cloud: { ios: 'icloud', android: 'cloud' },
   arrowDown: { ios: 'arrow.down', android: 'arrow_downward' },
+  arrowUp: { ios: 'arrow.up', android: 'arrow_upward' },
+  upgrade: { ios: 'arrow.up.circle', android: 'upgrade' },
+  block: { ios: 'nosign', android: 'block' },
   eyeOff: { ios: 'eye.slash', android: 'visibility_off' },
   addReaction: { ios: 'face.smiling', android: 'add_reaction' },
   save: { ios: 'square.and.arrow.down', android: 'save' },
@@ -131,7 +136,6 @@ export const icons = {
   fullVideo: { ios: 'arrow.up.left.and.arrow.down.right', android: 'fit_screen' },
   cropVideo: { ios: 'crop', android: 'crop' },
   expand: { ios: 'arrow.up.left.and.arrow.down.right', android: 'open_in_full' },
-  block: { ios: 'nosign', android: 'block' },
   safety: { ios: 'hand.raised', android: 'back_hand' },
 } as const satisfies Record<string, { ios: SFSymbol; android: AndroidSymbol }>;
 

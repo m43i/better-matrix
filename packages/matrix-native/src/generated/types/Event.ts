@@ -31,6 +31,7 @@ import type { RegistrationStep } from "./RegistrationStep";
 import type { RequestId } from "./RequestId";
 import type { RoomList } from "./RoomList";
 import type { RoomPreview } from "./RoomPreview";
+import type { RoomSettings } from "./RoomSettings";
 import type { Safety } from "./Safety";
 import type { SavedMessage } from "./SavedMessage";
 import type { SearchUsage } from "./SearchUsage";
@@ -324,7 +325,15 @@ request: RequestId,
 /**
  * Its ID.
  */
-room_id: string, } } | { "type": "SidebarLayout", "data": { 
+room_id: string, } } | { "type": "RoomSettings", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The settings.
+ */
+settings: RoomSettings, } } | { "type": "SidebarLayout", "data": { 
 /**
  * Whose.
  */

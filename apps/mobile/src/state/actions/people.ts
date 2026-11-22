@@ -163,18 +163,15 @@ export function leaveRoom(
   );
 }
 
-/** Renames a room or space. */
-export function renameRoom(store: Store, command: CommandOf<'RenameRoom'>): Promise<void> {
-  return attempt(store, command, 'notice.rename');
+/** Makes a room or space and answers with its ID once the engine made it. */
+export async function create(store: Store, command: CommandOf<'CreateRoom'>): Promise<string> {
+  return madeRoom(store, command, 'notice.create');
 }
 
-/** Makes a room or space and answers with its ID once the engine made it. */
-export async function create(
-  store: Store,
-  command: CommandOf<'CreateRoom' | 'CreateSpace'>,
-): Promise<string> {
+/** Runs a command the engine answers with a new room (`RoomCreated`); resolves to its ID. */
+export async function madeRoom(store: Store, command: Command, notice: Key): Promise<string> {
   let roomId: string | null = null;
-  await attempt(store, command, 'notice.create', (event) => {
+  await attempt(store, command, notice, (event) => {
     if (event.type === 'RoomCreated') roomId = event.data.room_id;
   });
 
@@ -184,10 +181,7 @@ export async function create(
 }
 
 /** Makes a space and shows it in the account's room list. */
-export async function createSpace(
-  store: Store,
-  command: CommandOf<'CreateSpace'>,
-): Promise<string> {
+export async function createSpace(store: Store, command: CommandOf<'CreateRoom'>): Promise<string> {
   const spaceId = await create(store, command);
   setScope(store, command.data.account, { space: spaceId });
 
@@ -196,7 +190,10 @@ export async function createSpace(
 
 // ----- people --------------------------------------------------------------------------------
 
-/** Kicks or bans a member, or gives them a role. Confirming first is the screen's part. */
+/**
+ * Kicks or bans a member, gives them a role or level, unbans someone, or approves or denies a
+ * request to join. Confirming first is the screen's part.
+ */
 export function moderate(
   store: Store,
   account: AccountId,

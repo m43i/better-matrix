@@ -2383,6 +2383,13 @@ fn the_message_menu_should_offer_the_messages_source() {
 }
 
 #[test]
+fn adding_a_widget_should_ask_for_its_name_and_address() {
+    let mut rt = runtime(demo::widgets);
+    press(&mut rt, "widget-add");
+    assert!(rt.find("widget-form-name").is_some() && rt.find("widget-form-url").is_some());
+}
+
+#[test]
 fn the_widgets_panel_should_list_widgets_and_ask_before_removing_one() {
     let mut rt = runtime(demo::widgets);
     assert!(rt.find("widget-open-board").is_some());
@@ -3083,4 +3090,143 @@ fn agreeing_to_the_policies_should_answer_the_registration() {
         rt.state.sign_in.step,
         crate::state::SignInStep::Register { asked: Some(crate::state::Asked { answered: true, .. }), .. }
     ));
+}
+
+// ----- administering rooms and spaces ------------------------------------------------------------
+
+/// Changes Ada's room `room_id` and space `space_id` before the view is built.
+fn without_settings_rights(s: &mut State) {
+    let account = s.active_account().unwrap();
+    let id = account.summary.id.clone();
+    let mut rooms = account.rooms.clone();
+    let mut spaces = account.spaces.clone();
+    rooms.iter_mut().for_each(|room| room.can_change_settings = false);
+    spaces.iter_mut().for_each(|space| space.can_change_settings = false);
+    s.accounts.set_room_list(&id, matrix_core::RoomList { rooms, spaces, ..Default::default() });
+}
+
+#[test]
+fn room_settings_should_be_offered_in_the_room_info_with_the_right() {
+    let rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.toggle_side(SidePanel::Info);
+    });
+    assert!(rt.find("info-settings").is_some());
+}
+
+#[test]
+fn room_settings_should_not_be_offered_without_the_right() {
+    let rt = runtime(|s| {
+        without_settings_rights(s);
+        s.select_room(demo::DEMO_THREAD.0);
+        s.toggle_side(SidePanel::Info);
+    });
+    assert!(rt.find("info-panel").is_some() && rt.find("info-settings").is_none());
+}
+
+#[test]
+fn the_room_menu_should_offer_settings_only_with_the_right() {
+    let rt = runtime(|s| s.toggle_room_menu(demo::DEMO_THREAD.0));
+    assert!(rt.find("room-menu-settings").is_some());
+    let rt = runtime(|s| {
+        without_settings_rights(s);
+        s.toggle_room_menu(demo::DEMO_THREAD.0);
+    });
+    assert!(rt.find("room-menu").is_some() && rt.find("room-menu-settings").is_none());
+}
+
+#[test]
+fn the_space_menu_should_offer_settings_only_with_the_right() {
+    let rt = runtime(|s| s.toggle_popover(crate::state::Popover::SpaceMenu(demo::WORK_SPACE.into())));
+    assert!(rt.find("space-settings").is_some() && rt.find("space-rooms").is_some());
+    let rt = runtime(|s| {
+        without_settings_rights(s);
+        s.toggle_popover(crate::state::Popover::SpaceMenu(demo::WORK_SPACE.into()));
+    });
+    assert!(rt.find("space-leave").is_some() && rt.find("space-settings").is_none());
+}
+
+#[test]
+fn room_settings_should_show_only_the_parts_the_user_may_change() {
+    let rt = runtime(|s| {
+        demo::room_settings(s, crate::state::RoomSettingsSection::General);
+        let settings = matrix_core::RoomSettings {
+            rights: matrix_core::RoomRights { name: true, ..Default::default() },
+            ..demo::general_settings()
+        };
+        let account = matrix_core::AccountId::new(demo::ADA);
+        s.apply(Event::RoomSettings { account, settings: Box::new(settings) }, &mut rune::Tx::default());
+    });
+    assert!(rt.find("room-settings-name").is_some());
+    for hidden in [
+        "room-settings-topic",
+        "room-settings-picture",
+        "room-settings-access",
+        "room-settings-addresses",
+        "room-settings-security",
+        "room-settings-permissions",
+        "room-settings-advanced",
+    ] {
+        assert!(rt.find(hidden).is_none(), "{hidden} must not show without its right");
+    }
+}
+
+#[test]
+fn a_permission_above_the_users_level_should_not_open() {
+    let mut rt = runtime(|s| {
+        demo::room_settings(s, crate::state::RoomSettingsSection::Permissions);
+        let mut settings = matrix_core::RoomSettings { own_level: 25, ..demo::general_settings() };
+        // As the engine reads it at level 25: only what asks for no more is changeable.
+        for shown in &mut settings.permissions {
+            shown.editable = shown.level <= 25;
+        }
+        let account = matrix_core::AccountId::new(demo::ADA);
+        s.apply(Event::RoomSettings { account, settings: Box::new(settings) }, &mut rune::Tx::default());
+    });
+    // Locked, it takes no press: pressed where it is drawn, nothing opens.
+    let locked = rt.presented("permission-Kick").expect("the locked select").0;
+    let (x, y) = (locked[0] + locked[2] / 2.0, locked[1] + locked[3] / 2.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.popover.is_none());
+    press(&mut rt, "permission-Invite");
+    assert!(rt.find("permission-level-0").is_some() && rt.find("permission-level-50").is_none());
+}
+
+#[test]
+fn join_requests_should_show_with_their_answers() {
+    let rt = runtime(|s| {
+        demo::join_requests(s);
+        s.toggle_members();
+    });
+    assert!(rt.find("knock-admit-@lin:example.org").is_some());
+    assert!(rt.find("knock-deny-@lin:example.org").is_some());
+    assert!(rt.find("unban-@spam:junk.example").is_some());
+}
+
+#[test]
+fn a_replaced_room_should_show_the_way_to_the_new_one_instead_of_the_composer() {
+    let rt = runtime(demo::tombstone);
+    assert!(rt.find("tombstone-follow").is_some());
+    assert!(rt.find("tombstone-reason").is_some());
+}
+
+#[test]
+fn the_new_room_form_should_offer_an_address_only_for_a_public_room() {
+    let mut rt = runtime(|s| s.open_room_form(crate::state::RoomForm::NewRoom { space: None }));
+    assert!(rt.find("room-form-address").is_none() && rt.find("room-form-rule-space-members").is_none());
+    press(&mut rt, "room-form-rule-public");
+    assert!(rt.find("room-form-address").is_some() && rt.find("room-form-publish").is_some());
+}
+
+#[test]
+fn a_press_on_a_dialogs_empty_space_should_keep_it_open() {
+    let mut rt = runtime(|s| s.open_settings());
+    let r = rt.presented("settings-body").unwrap().0;
+    let (x, y) = (r[0] + r[2] - 10.0, r[1] + r[3] - 10.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.modal.is_some());
 }

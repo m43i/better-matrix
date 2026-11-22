@@ -396,6 +396,7 @@ pub fn seed(s: &mut State) {
         can_kick: true,
         can_ban: true,
         can_set_roles: true,
+        ..Default::default()
     };
     apply(s, Event::Members { request: None, account: AccountId::new(ADA), room_id: DEMO_THREAD.0.into(), members });
     // What people show, as the engine reports it at start: Kai is away on vacation.
@@ -913,6 +914,9 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
         saved: Vec::new(),
         priority: matrix_core::RoomPriority::Normal,
         marked_unread: false,
+        can_change_settings: true,
+        knocks: 0,
+        successor: None,
     }
 }
 
@@ -938,6 +942,7 @@ fn space(id: &str, name: &str, children: &[&str], members: &[&str]) -> SpaceSumm
         avatar: None,
         can_add_rooms: true,
         can_rename: true,
+        can_change_settings: true,
         children: strings(children),
         members: strings(members),
     }
@@ -1497,4 +1502,116 @@ pub fn event_source(s: &mut State) {
         )),
     };
     s.modal = Some(crate::state::Modal::Source(crate::state::SourceView::Shown(Box::new(source))));
+}
+
+/// Changes one of Ada's rooms as the next room list would bring it.
+fn change_room(s: &mut State, room_id: &str, change: impl FnOnce(&mut RoomSummary)) {
+    let Some(account) = s.accounts.get(&AccountId::new(ADA)) else { return };
+    let mut list = RoomList {
+        rooms: account.rooms.clone(),
+        spaces: account.spaces.clone(),
+        invitations: account.invitations.clone(),
+    };
+    if let Some(room) = list.rooms.iter_mut().find(|room| room.room_id == room_id) {
+        change(room);
+    }
+    apply(s, Event::RoomsUpdated { account: AccountId::new(ADA), list });
+}
+
+/// The settings of #general as Ada, its admin, reads them: everything hers to change.
+pub fn general_settings() -> matrix_core::RoomSettings {
+    use matrix_core::{Permission, PermissionLevel, RoomRights};
+    let level = |permission, level| PermissionLevel { permission, level, editable: true };
+    matrix_core::RoomSettings {
+        room_id: DEMO_THREAD.0.into(),
+        space: false,
+        name: Some("general".into()),
+        topic: Some("Company-wide announcements and chatter".into()),
+        avatar: None,
+        join_rule: Some(matrix_core::JoinRule::Restricted),
+        can_restrict: true,
+        can_knock: true,
+        history: HistoryVisibility::Shared,
+        guest_access: false,
+        encrypted: false,
+        main_address: Some("#general:example.org".into()),
+        addresses: vec!["#engines-general:example.org".into()],
+        published: Some(false),
+        server: "example.org".into(),
+        version: "10".into(),
+        upgrade_to: Some("11".into()),
+        permissions: vec![
+            level(Permission::DefaultLevel, 0),
+            level(Permission::SendMessages, 0),
+            level(Permission::Invite, 0),
+            level(Permission::Kick, 50),
+            level(Permission::Ban, 50),
+            level(Permission::RemoveMessages, 50),
+            level(Permission::MentionRoom, 50),
+            level(Permission::Pins, 25),
+            level(Permission::ChangeSettings, 50),
+            level(Permission::Permissions, 100),
+            level(Permission::Upgrade, 100),
+        ],
+        own_level: 100,
+        rights: RoomRights {
+            name: true,
+            topic: true,
+            avatar: true,
+            join_rule: true,
+            history: true,
+            guest_access: true,
+            addresses: true,
+            encryption: true,
+            permissions: true,
+            upgrade: true,
+            space_rooms: false,
+        },
+    }
+}
+
+/// #general's settings open at `section`.
+pub fn room_settings(s: &mut State, section: crate::state::RoomSettingsSection) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    s.open_room_settings(DEMO_THREAD.0);
+    apply(s, Event::RoomSettings { account: AccountId::new(ADA), settings: Box::new(general_settings()) });
+    s.show_room_settings_section(section);
+}
+
+/// #general's member list with two people asking to join and one banned.
+pub fn join_requests(s: &mut State) {
+    use matrix_core::{MemberRole, Presence, RoomMember};
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    let outsider = |id: &str, name: &str| RoomMember {
+        person: Person { id: id.into(), name: name.into(), avatar: None },
+        role: MemberRole::Member,
+        presence: Presence::Unknown,
+        status_message: None,
+        verified: false,
+        level: 0,
+    };
+    let Some(mut members) =
+        s.accounts.get(&AccountId::new(ADA)).and_then(|account| account.members.get(DEMO_THREAD.0)).cloned()
+    else {
+        return;
+    };
+    members.knocking = vec![outsider("@lin:example.org", "Lin Okafor"), outsider("@sam:other.net", "Sam")];
+    members.banned = vec![outsider("@spam:junk.example", "Totally Real Prizes")];
+    apply(s, Event::Members { request: None, account: AccountId::new(ADA), room_id: DEMO_THREAD.0.into(), members });
+    change_room(s, DEMO_THREAD.0, |room| room.knocks = 2);
+}
+
+/// #lab, upgraded: its banner leads to the room that replaced it.
+pub fn tombstone(s: &mut State) {
+    seed(s);
+    change_room(s, "!lab:example.org", |room| {
+        room.successor = Some(matrix_core::Successor {
+            room_id: "!lab-v11:example.org".into(),
+            reason: Some("This room moved to room version 11.".into()),
+            via: vec!["example.org".into()],
+        });
+    });
+    s.select_room("!lab:example.org");
 }

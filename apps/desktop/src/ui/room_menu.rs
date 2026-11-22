@@ -95,6 +95,12 @@ pub fn room_menu(account: &AccountData, room_id: &str, notifications_open: bool,
                     }
                 }),
         )
+        .children(room.can_change_settings.then(|| {
+            let id = room.room_id.clone();
+            menu_action(&icons::SETTINGS, t!("room_settings.title"), Tone::Normal, p)
+                .key("room-menu-settings")
+                .on_press(move |s: &mut State| s.open_room_settings(&id))
+        }))
         .child(divider(p))
         .child({
             let reported = room.room_id.clone();

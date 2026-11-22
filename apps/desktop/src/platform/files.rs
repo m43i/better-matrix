@@ -1,7 +1,7 @@
-//! The system file dialog: several files to attach, one picture for the profile, or a key file
-//! to import. Rune's file dialog picks one file, so this uses rfd's async dialog, driven from a
-//! worker thread: that is safe on every platform (on macOS rfd hops to the main thread itself)
-//! and never blocks the window.
+//! The system file dialog: several files to attach, one picture for the profile or a room, or a
+//! key file to import. Rune's file dialog picks one file, so this uses rfd's async dialog, driven
+//! from a worker thread: that is safe on every platform (on macOS rfd hops to the main thread
+//! itself) and never blocks the window.
 
 use rune::AppHandle;
 
@@ -18,7 +18,7 @@ pub fn pick(app: AppHandle<State>, picked_for: PickFor) {
                 let picked = pollster::block_on(dialog.pick_files()).unwrap_or_default();
                 picked.iter().map(|file| file.path().to_owned()).collect()
             }
-            PickFor::Avatar => {
+            PickFor::Avatar | PickFor::RoomAvatar { .. } => {
                 let dialog = rfd::AsyncFileDialog::new()
                     .set_title(crate::i18n::t!("dialog.avatar_title"))
                     .add_filter(crate::i18n::t!("dialog.images"), &IMAGE_EXTENSIONS);

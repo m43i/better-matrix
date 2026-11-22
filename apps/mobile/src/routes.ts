@@ -1,7 +1,7 @@
 // Every screen's address, built in one place so params are always encoded the same way.
 // Account and room IDs contain `@`, `!`, `:` and `$`; expo-router encodes object params.
 
-import type { AccountId, ReportTarget } from '@better-matrix/matrix-native/types';
+import type { AccountId, JoinRule, ReportTarget } from '@better-matrix/matrix-native/types';
 import type { Href } from 'expo-router';
 
 export const routes = {
@@ -137,11 +137,41 @@ export const routes = {
     return { pathname: '/report', params };
   },
   newChat: (): Href => '/new-chat',
-  newRoom: (space?: string): Href => ({ pathname: '/new-room', params: space ? { space } : {} }),
-  newSpace: (): Href => '/new-space',
-  renameRoom: (account: AccountId, roomId: string): Href => ({
-    pathname: '/rename-room',
+  /** A new room, in `space` when given, with `join` chosen ahead. */
+  newRoom: (space?: string, join?: JoinRule): Href => {
+    const params: NewRoomParams = {};
+
+    if (space) params.space = space;
+
+    if (join) params.join = join;
+
+    return { pathname: '/new-room', params };
+  },
+  newSpace: (join?: JoinRule): Href => ({ pathname: '/new-space', params: join ? { join } : {} }),
+  /** A room's or space's settings: only the parts the user may change. */
+  roomSettings: (account: AccountId, roomId: string): Href => ({
+    pathname: '/room-settings/[account]/[roomId]',
     params: { account, roomId },
+  }),
+  /** A room's or space's permission levels, from its settings. */
+  roomPermissions: (account: AccountId, roomId: string): Href => ({
+    pathname: '/room-permissions',
+    params: { account, roomId },
+  }),
+  /** A space's sheet, from a long press in the space picker: settings, its rooms, leaving. */
+  spaceMenu: (account: AccountId, space: string): Href => ({
+    pathname: '/space-menu',
+    params: { account, space },
+  }),
+  /** A space's rooms in order: moving, removing and adding them. */
+  spaceRooms: (account: AccountId, space: string): Href => ({
+    pathname: '/space-rooms',
+    params: { account, space },
+  }),
+  /** Leaving a space, choosing which of its rooms to leave too. */
+  leaveSpace: (account: AccountId, space: string): Href => ({
+    pathname: '/leave-space',
+    params: { account, space },
   }),
   settings: (): Href => '/settings',
   settingsNotifications: (): Href => '/settings/notifications',
@@ -211,6 +241,9 @@ export const routes = {
     params: account ? { uri, account } : { uri },
   }),
 };
+
+/** A new room's params: its space and its join rule, chosen ahead. */
+type NewRoomParams = { space?: string; join?: JoinRule };
 
 type MessageParams = {
   account: AccountId;

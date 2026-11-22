@@ -528,7 +528,34 @@ name, user ID, presence and role, with Message, calls and the member menu
 
 **Member menu**
 : What a press on someone in the member list offers: chat, call, invite elsewhere, and with the
-rights, change role, remove or ban (`Moderation`).
+rights, change role or power level, remove or ban; for someone banned, unban (`Moderation`).
+
+**Join request** (knock)
+: Someone asking to join a room whose join rule is "Ask to join". With the right to invite, the
+member list shows them apart with Approve (`Moderation::Admit`) and Deny (`Moderation::Deny`);
+`RoomSummary::knocks` counts them.
+
+**Room settings**
+: A room's or space's name, topic, picture, who may join, history, guest access, addresses,
+directory listing, encryption, permissions and version (`RoomSettings`), changed one
+`RoomSetting` at a time. Offered only to those who may change something (`RoomRights`).
+
+**Join rule**
+: Who may join a room or space: anyone (Public), members of its space (Space members), those
+let in after asking (Ask to join), or the invited (Private). `JoinRule` in code.
+
+**Permission**
+: Something a room's power levels allow from a level on: sending messages, inviting, removing,
+changing the name, and so on (`Permission`, `PermissionLevel`). The permissions editor sets the
+level each needs.
+
+**Upgrade**
+: Replacing a room with a new one on a newer room version. The old room points to its
+**successor** (`Successor`), which its banner offers to join.
+
+**Space rooms**
+: The rooms and subspaces a space lists, in the space's order; with the right, added, removed
+and reordered (`SpaceChange`). Leaving a space may leave chosen ones too (`Command::LeaveSpace`).
 
 **Poll**
 : A question with two to twenty answers that members vote on, its counts shown as they vote or

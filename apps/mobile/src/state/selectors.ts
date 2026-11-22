@@ -170,6 +170,36 @@ export function room(state: State, id: AccountId, roomId: string) {
   return account(state, id)?.rooms.find((r) => r.room_id === roomId);
 }
 
+/** A space of an account. */
+export function space(state: State, id: AccountId, spaceId: string) {
+  return account(state, id)?.spaces.find((s) => s.room_id === spaceId);
+}
+
+/** A room's or space's settings, once loaded. */
+/**
+ * A room's or space's rights as the room list carries them, as one value: when it changes, the
+ * open settings read the room again.
+ */
+export function rightsKey(state: State, id: AccountId, roomId: string): string {
+  const data = account(state, id);
+  const room = data?.rooms.find((r) => r.room_id === roomId);
+
+  // A successor counts too: the room can't be upgraded again once it has one.
+  if (room) {
+    return `room:${room.can_change_settings}:${room.can_rename}:${room.can_pin}:${room.successor !== null}`;
+  }
+
+  const space = data?.spaces.find((s) => s.room_id === roomId);
+
+  return space
+    ? `space:${space.can_change_settings}:${space.can_rename}:${space.can_add_rooms}`
+    : '';
+}
+
+export function roomSettings(state: State, id: AccountId, roomId: string) {
+  return account(state, id)?.roomSettings[roomId];
+}
+
 /** A fetched media file's `file://` URI, once it's there. */
 const NO_ONE: string[] = [];
 

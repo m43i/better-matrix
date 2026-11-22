@@ -6,8 +6,6 @@ import {
   asksFirst,
   busy,
   candidates,
-  createRoomCommand,
-  createSpaceCommand,
   dayOf,
   due,
   fileOpens,
@@ -18,8 +16,7 @@ import {
   isUserId,
   matches,
   may,
-  mayRename,
-  renameCommand,
+  mayChooseLevel,
   rolesOffered,
   searching,
   spacesForNewRoom,
@@ -57,6 +54,8 @@ function members(own_level: number, rights: Partial<Members> = {}): Members {
     can_kick: true,
     can_ban: true,
     can_set_roles: true,
+    knocking: [],
+    banned: [],
     ...rights,
   };
 }
@@ -67,6 +66,7 @@ const space = (room_id: string, can_add_rooms: boolean) => ({
   avatar: null,
   can_add_rooms,
   can_rename: false,
+  can_change_settings: false,
   children: [],
   members: [],
 });
@@ -143,21 +143,69 @@ describe('moderation rights', () => {
   it('should ask before giving the user own role, which cannot be taken back', () => {
     expect(asksFirst({ type: 'Role', data: 'Admin' }, 100)).toBe(true);
   });
+
+  it('should let the user give a level up to their own', () => {
+    expect(may(members(50), { type: 'Level', data: 50 }, member(GRACE, 'Grace'))).toBe(true);
+  });
+
+  it('should not let the user give a level above their own', () => {
+    expect(may(members(50), { type: 'Level', data: 51 }, member(GRACE, 'Grace'))).toBe(false);
+  });
+
+  it('should not offer the level a member already has', () => {
+    expect(may(members(100), { type: 'Level', data: 0 }, member(GRACE, 'Grace'))).toBe(false);
+  });
+
+  it('should offer a custom level only with the right to set roles', () => {
+    expect(mayChooseLevel(members(100, { can_set_roles: false }), member(GRACE, 'Grace'))).toBe(
+      false,
+    );
+  });
+
+  it('should let those who may invite approve a request to join', () => {
+    expect(may(members(50, { can_kick: false }), { type: 'Admit' }, member(GRACE, 'Grace'))).toBe(
+      true,
+    );
+  });
+
+  it('should let only those who may kick deny a request to join', () => {
+    expect(may(members(50, { can_kick: false }), { type: 'Deny' }, member(GRACE, 'Grace'))).toBe(
+      false,
+    );
+  });
+
+  it('should let only those who may ban unban someone', () => {
+    expect(may(members(50, { can_ban: false }), { type: 'Unban' }, member(GRACE, 'Grace'))).toBe(
+      false,
+    );
+  });
+
+  it('should need the kick right too to unban someone', () => {
+    expect(may(members(50, { can_kick: false }), { type: 'Unban' }, member(GRACE, 'Grace'))).toBe(
+      false,
+    );
+  });
+
+  it('should let an inviter approve someone at their own level', () => {
+    expect(may(members(0), { type: 'Admit' }, member(GRACE, 'Grace'))).toBe(true);
+  });
+
+  it('should ask before denying a request but not before approving one', () => {
+    expect([asksFirst({ type: 'Deny' }, 100), asksFirst({ type: 'Admit' }, 100)]).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it('should ask before giving a level that reaches the user own', () => {
+    expect([
+      asksFirst({ type: 'Level', data: 100 }, 100),
+      asksFirst({ type: 'Level', data: 20 }, 100),
+    ]).toEqual([true, false]);
+  });
 });
 
 describe('rooms', () => {
-  it('should let a moderator rename a group room', () => {
-    expect(mayRename(roomSummary('!a'), members(50))).toBe(true);
-  });
-
-  it('should not let a member rename a room', () => {
-    expect(mayRename(roomSummary('!a'), members(0))).toBe(false);
-  });
-
-  it('should not offer renaming a direct chat', () => {
-    expect(mayRename(roomSummary('!a', 'Grace', 'Direct'), members(100))).toBe(false);
-  });
-
   it('should offer the other group rooms to invite a member to', () => {
     const rooms = [
       roomSummary('!here'),
@@ -172,36 +220,6 @@ describe('rooms', () => {
     expect(spacesForNewRoom([space('!a', true), space('!b', false)]).map((s) => s.room_id)).toEqual(
       ['!a'],
     );
-  });
-
-  it('should not make a room without a name', () => {
-    expect(createRoomCommand(ADA, { name: '  ', topic: 'x', space: null })).toBeNull();
-  });
-
-  it('should make a room with its trimmed name, its topic and its space', () => {
-    expect(createRoomCommand(ADA, { name: ' Lab ', topic: ' Notes ', space: '!s' })).toEqual({
-      type: 'CreateRoom',
-      data: { account: ADA, name: 'Lab', topic: 'Notes', space: '!s' },
-    });
-  });
-
-  it('should make a room without a topic when none is typed', () => {
-    expect(createRoomCommand(ADA, { name: 'Lab', topic: ' ', space: null })?.data.topic).toBeNull();
-  });
-
-  it('should not make a space without a name', () => {
-    expect(createSpaceCommand(ADA, '')).toBeNull();
-  });
-
-  it('should not rename a room to the name it has', () => {
-    expect(renameCommand(ADA, '!a', 'Lab', ' Lab ')).toBeNull();
-  });
-
-  it('should rename a room to the trimmed new name', () => {
-    expect(renameCommand(ADA, '!a', 'Lab', ' Studio ')).toEqual({
-      type: 'RenameRoom',
-      data: { account: ADA, room_id: '!a', name: 'Studio' },
-    });
   });
 
   it('should make a room follow the account default when its own mode is cleared', () => {

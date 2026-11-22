@@ -230,6 +230,65 @@ pub fn choice_row(title: &str, hint: Option<&str>, selected: bool, p: &Palette) 
         .child(titles)
 }
 
+/// A setting that is on or off: its title and optional hint, and a switch at the end. The
+/// caller adds `key` and `on_press`.
+pub fn switch_row(title: &str, hint: Option<&str>, on: bool, p: &Palette) -> El {
+    let knob = el().size(16.0, 16.0).radius(8.0).fill(Color::WHITE);
+    let track = row()
+        .w(36.0)
+        .h(20.0)
+        .px(2.0)
+        .radius(10.0)
+        .center_y()
+        .fill(if on { p.accent } else { p.text_muted.alpha(0.45) })
+        .children(on.then(|| el().grow(1.0)))
+        .child(knob);
+    let mut titles =
+        col().grow(1.0).min_w(0.0).gap(2.0).child(text(title.to_owned()).font(font::BODY_STRONG).color(p.text).wrap());
+    if let Some(hint) = hint {
+        titles = titles.child(text(hint.to_owned()).font(font::META).color(p.text_muted).wrap());
+    }
+    row()
+        .w_full()
+        .py(8.0)
+        .gap(12.0)
+        .center_y()
+        .role("switch")
+        .cursor(rune::Cursor::Pointer)
+        .label(title.to_owned())
+        .checked(on)
+        .focusable(true)
+        .child(titles)
+        .child(track)
+}
+
+/// One of several choices that may each be on: a box ticked or not, and its title. The caller
+/// adds `key` and `on_press`.
+pub fn pick_row(leading: Option<El>, title: &str, checked: bool, p: &Palette) -> El {
+    let mut tick =
+        el().size(18.0, 18.0).radius(4.0).center().border(2.0, if checked { p.accent } else { p.text_muted });
+    if checked {
+        tick = tick.fill(p.accent).child(icon(&super::icons::CHECK, 14.0).color(p.on_accent));
+    }
+    row()
+        .w_full()
+        .min_h(40.0)
+        .px(10.0)
+        .py(6.0)
+        .gap(12.0)
+        .center_y()
+        .radius(8.0)
+        .hover(p.hover.alpha(p.hover.a * 2.0))
+        .role("checkbox")
+        .cursor(rune::Cursor::Pointer)
+        .label(title.to_owned())
+        .checked(checked)
+        .focusable(true)
+        .child(tick)
+        .children(leading)
+        .child(text(title.to_owned()).font(font::BODY).color(p.text).grow(1.0).min_w(0.0).truncate())
+}
+
 /// A checkbox with a title and an optional hint. The caller adds `key` and `on_press`.
 pub fn check_row(title: &str, hint: Option<&str>, checked: bool, p: &Palette) -> El {
     let mut tick = el().size(18.0, 18.0).radius(4.0).center();
