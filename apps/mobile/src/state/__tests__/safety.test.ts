@@ -628,3 +628,52 @@ describe('round five', () => {
     ]).toEqual([0, ['$f']]);
   });
 });
+
+describe('round six', () => {
+  const photo: Attachment = {
+    kind: 'Image',
+    name: 'photo.png',
+    size: 1000,
+    media: 'mxc://example.org/photo',
+    thumbnail: null,
+    dimensions: null,
+    audio: null,
+  };
+
+  it('the item on screen should stay in the gallery when its media becomes held', () => {
+    const content = { type: 'Attachment' as const, data: photo };
+
+    let state = apply(signedIn(), {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: roomKey(PRIVATE),
+        diffs: [
+          {
+            type: 'Reset',
+            data: [
+              messageEntry('$one', { content, timestamp_ms: 1 }),
+              messageEntry('$two', { content, timestamp_ms: 2 }),
+            ],
+          },
+        ],
+      },
+    });
+
+    // Viewing $two (opened at $one) when media is switched off elsewhere.
+    state = apply(state, {
+      type: 'Safety',
+      data: { account: ADA, safety: { ...DEFAULT_SAFETY, media: 'Never' } },
+    });
+    const items = previewItems(state, ADA, roomKey(PRIVATE), '$two', '$one');
+    expect([items.map((m) => m.event_id), previewHidden(state, ADA, PRIVATE, items[1]!)]).toEqual([
+      ['$one', '$two'],
+      true,
+    ]);
+  });
+
+  it('a room with no summary should count as public', () => {
+    const state = signedIn({ ...DEFAULT_SAFETY, media: 'Private' });
+    expect(mediaHidden(state, ADA, '!unknown:x', message('$a'))).toBe(true);
+  });
+});

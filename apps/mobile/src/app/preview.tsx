@@ -109,7 +109,8 @@ export default function PreviewScreen() {
   const frame = { top: insets.top + BAR, bottom: insets.bottom + (strip ? STRIP_HEIGHT : 0) };
 
   const run = (action: typeof shareAttachment) => {
-    if (!attachment) return;
+    // Read as it runs, as the attachment sheet does: media held since the render isn't fetched.
+    if (!attachment || !shown || previewHidden(store.getState(), account, roomId, shown)) return;
     setBusy(true);
     void action(store, account, attachment).finally(() => setBusy(false));
   };

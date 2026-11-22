@@ -196,7 +196,8 @@ export function mediaHidden(
   const data = account(state, id);
 
   if (!data || state.revealedMedia[revealKey(id, message.event_id)]) return false;
-  const publicRoom = data.rooms.find((r) => r.room_id === roomId)?.public ?? false;
+  // A room with no summary yet counts as public: held under "private rooms only".
+  const publicRoom = data.rooms.find((r) => r.room_id === roomId)?.public ?? true;
 
   return !showsMedia(data.safety, publicRoom, message.sender_id === id);
 }
@@ -252,8 +253,8 @@ function listedMessage(file: SharedFile): Message {
 
 /**
  * The attachment preview's gallery around `current`: the batch, without media the account keeps
- * back. The opened message stays, so the preview has its item, and shows hidden until the user
- * taps Show (`previewHidden`), whichever screen opened it (ADR 0011). A file Room Info listed
+ * back. The opened message and the one on screen stay, so the preview has its item, shown hidden
+ * until the user taps Show (`previewHidden`), whichever screen opened it (ADR 0011). A file Room Info listed
  * that no timeline holds is its own gallery.
  */
 export function previewItems(
@@ -281,7 +282,11 @@ export function previewItems(
       : [];
   }
 
-  return found.filter((m) => m.event_id === opened || !previewHidden(state, id, key.room_id, m));
+  // The item on screen stays too: one held while viewed shows held, with Show, in its place.
+  return found.filter(
+    (m) =>
+      m.event_id === opened || m.event_id === current || !previewHidden(state, id, key.room_id, m),
+  );
 }
 
 /**

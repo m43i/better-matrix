@@ -890,7 +890,7 @@ impl AccountData {
                     .get(room_id)
                     .and_then(|files| files.iter().find(|file| file.event_id == event_id))
                     .is_some_and(|file| file.sender_id == self.summary.id.as_str());
-                let public = self.room(room_id).is_some_and(|room| room.public);
+                let public = self.room(room_id).is_none_or(|room| room.public);
                 !self.safety.shows_media(public, own)
                     && !revealed.contains(&(self.summary.id.clone(), event_id.to_owned()))
             }
@@ -915,8 +915,9 @@ impl AccountData {
 
     /// Whether a message's pictures, video poster, linked GIF and link card image wait for a
     /// press: the user's media choice keeps them back in its room, and `revealed` doesn't hold it.
+    /// A room with no summary here counts as public.
     pub fn hides_media(&self, room_id: &str, message: &Message, revealed: &HashSet<(AccountId, String)>) -> bool {
-        let public = self.room(room_id).is_some_and(|room| room.public);
+        let public = self.room(room_id).is_none_or(|room| room.public);
         let own = message.sender_id == self.summary.id.as_str();
         !self.safety.shows_media(public, own)
             && !revealed.contains(&(self.summary.id.clone(), message.event_id.clone()))

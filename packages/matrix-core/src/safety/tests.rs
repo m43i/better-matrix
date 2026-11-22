@@ -295,3 +295,23 @@ async fn reporting_a_room_should_send_the_reason_to_the_server() {
     account.report(&ReportTarget::Room { room_id: "!other:example.org".into() }, "scam").await.unwrap();
     assert_eq!(server.sent("/report")[0]["reason"], "scam");
 }
+
+#[test]
+fn a_sync_should_change_only_the_parts_it_carried() {
+    let event = |kind: &str| Raw::new(&json!({ "type": kind, "content": {} })).unwrap().cast_unchecked();
+    let confirmed = Safety { media: ShowMedia::Never, ..Safety::default() };
+    let stale = Safety { hide_stranger_invites: true, ..Safety::default() };
+    let merged = merge_synced(confirmed, stale, &[event(INVITES)]);
+    assert_eq!(merged.media, ShowMedia::Never);
+    assert!(merged.hide_stranger_invites);
+}
+
+#[tokio::test]
+async fn a_sync_during_a_save_should_leave_reporting_to_the_save() {
+    let server = Homeserver::new(json!([]));
+    let account = server.synced_account().await;
+    let _saving = account.safety_changes.lock().await;
+    let event: Raw<AnyGlobalAccountDataEvent> =
+        Raw::new(&json!({ "type": INVITES, "content": {} })).unwrap().cast_unchecked();
+    assert_eq!(account.synced_safety(&[event]).await.unwrap(), None);
+}

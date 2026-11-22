@@ -2217,3 +2217,18 @@ fn a_held_back_pictures_message_menu_should_offer_no_file_actions() {
     });
     assert!(rt.find("attachment-download").is_some());
 }
+
+#[test]
+fn a_kept_timeline_should_draw_no_messages_from_someone_ignored_since() {
+    let mut rt = runtime(demo::attachment_message);
+    assert!(rt.find("msg-attachment").is_some());
+    let safety = matrix_core::Safety { ignored: vec!["@grace:example.org".into()], ..matrix_core::Safety::default() };
+    rt.update(|s, tx| s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, tx));
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("msg-attachment").is_none());
+    // The stored entry stays, for when they are no longer ignored.
+    let key = TimelineKey::room(demo::DEMO_THREAD.0);
+    assert_eq!(rt.state.active_account().unwrap().timeline(&key).map(|t| t.entries.len()), Some(1));
+}

@@ -285,7 +285,21 @@ fn cached_plan(view_key: &str, cx: &Context<'_>, timeline: Option<&RoomTimeline>
     })
 }
 
-/// The rows of a timeline and their keys: one cheap pass over the entries.
+/// What a timeline's plan is made of: its revision, and whom the user ignores. 0 (never cached)
+/// while the timeline has no revision.
+fn plan_version(revision: u64, ignored: &[String]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    if revision == 0 {
+        return 0;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (revision, ignored).hash(&mut hasher);
+    hasher.finish().max(1)
+}
+
+/// The rows of a timeline and their keys: one cheap pass over the entries. Messages from people
+/// the user ignores have no row: a timeline kept from before the ignore still holds them until
+/// the engine reloads it.
 fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)> {
     let mut rows = Vec::new();
     let entries = timeline.map_or(&[][..], |t| t.entries.as_slice());
@@ -327,6 +341,7 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
                 rows.push((cx.key(&entry.id), Row::Events { start: at, end: index }));
                 previous = None;
             }
+            EntryView::Message(item) if cx.data.safety.ignores(&item.message.sender_id) => {}
             EntryView::Message(item) => {
                 let message = &item.message;
                 let continues = previous.is_some_and(|prev| crate::state::continues_group(prev, message));
@@ -440,7 +455,9 @@ pub fn timeline(
     // messages commits as fast as a short one. The plan is one pass, made again only when the
     // timeline changed; each mounted row is built from the state by its plan entry.
     let revision = timeline.map_or(0, |t| t.revision);
-    let plan = cached_plan(view_key, cx, timeline, revision);
+    // The plan leaves out people the user ignores: it is made again when that list changes too.
+    let version = plan_version(revision, &cx.data.safety.ignored);
+    let plan = cached_plan(view_key, cx, timeline, version);
     let (keys, shown) = (Rc::clone(&plan), Rc::clone(&plan));
     let (account, key, palette) = (cx.account.clone(), cx.key.clone(), *p);
     let (seen_account, seen_key) = (account.clone(), key.clone());
@@ -511,7 +528,7 @@ pub fn timeline(
         });
     // The keys change only with the plan, so Rune need not ask for them again until then.
     if revision != 0 {
-        list = list.virtual_rows_version(revision);
+        list = list.virtual_rows_version(version);
     }
     let flag = Arc::clone(near_top);
     let bottom = at_bottom.map(Arc::clone);

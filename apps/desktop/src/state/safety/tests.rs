@@ -677,3 +677,72 @@ fn pinned_messages_of_someone_ignored_should_not_fetch_their_pictures() {
     assert!(fetched.contains(&matrix_core::MediaRef::opaque("grace-face")));
     assert!(!fetched.contains(&matrix_core::MediaRef::opaque("troll-face")));
 }
+
+/// Makes the demo's #general public or not.
+fn general_public(s: &mut State, public: bool) {
+    let data = s.accounts.get(&ada()).unwrap();
+    let mut list = matrix_core::RoomList {
+        rooms: data.rooms.clone(),
+        spaces: data.spaces.clone(),
+        invitations: data.invitations.clone(),
+    };
+    for room in list.rooms.iter_mut().filter(|room| room.room_id == DEMO_THREAD.0) {
+        room.public = public;
+    }
+    s.apply(Event::RoomsUpdated { account: ada(), list }, &mut Tx::default());
+}
+
+fn loads_original(commands: &mut DetachedCommands) -> bool {
+    drain(commands).iter().any(|(_, command)| matches!(command, Command::FetchMedia { size: MediaSize::Original, .. }))
+}
+
+#[test]
+fn an_open_preview_should_hold_back_and_show_again_as_its_room_turns_public_and_private() {
+    let (mut s, mut commands) = state();
+    crate::demo::attachment_preview(&mut s);
+    let safety = Safety { media: ShowMedia::Private, ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+    assert!(!s.preview_held());
+    general_public(&mut s, true);
+    assert!(s.preview_held());
+    drain(&mut commands);
+    general_public(&mut s, false);
+    assert!(matches!(s.preview.as_ref().map(|p| &p.content), Some(crate::state::PreviewContent::Image { .. })));
+    assert!(loads_original(&mut commands));
+}
+
+#[test]
+fn a_held_preview_should_load_once_media_shows_everywhere_again() {
+    let (mut s, mut commands) = state();
+    crate::demo::attachment_preview(&mut s);
+    media_never(&mut s);
+    assert!(s.preview_held());
+    drain(&mut commands);
+    s.apply(Event::Safety { account: ada(), safety: Safety::default() }, &mut Tx::default());
+    assert!(!s.preview_held());
+    assert!(loads_original(&mut commands));
+}
+
+#[test]
+fn media_in_a_room_with_no_summary_should_count_as_public() {
+    let (mut s, _) = state();
+    crate::demo::seed(&mut s);
+    let safety = Safety { media: ShowMedia::Private, ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+    let theirs = Message { sender_id: "@grace:example.org".into(), event_id: "$theirs".into(), ..Message::default() };
+    assert!(s.hides_media(&ada(), "!unknown:example.org", &theirs));
+}
+
+#[test]
+fn a_kept_timeline_should_load_nothing_for_someone_ignored_since() {
+    let (mut s, mut commands) = state();
+    crate::demo::attachment_message(&mut s);
+    s.media = crate::state::MediaCache::default();
+    s.media.attach(std::sync::Arc::new(|| {}));
+    let safety = Safety { ignored: vec!["@grace:example.org".into()], ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+    drain(&mut commands);
+    s.request_timeline_media();
+    assert!(!drain(&mut commands).iter().any(|(_, command)| matches!(command,
+        Command::FetchMedia { media, .. } if *media == matrix_core::MediaRef::opaque("demo-image"))));
+}

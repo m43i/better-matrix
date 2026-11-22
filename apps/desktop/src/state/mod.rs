@@ -1168,6 +1168,8 @@ impl State {
                         old.map(|r| &r.pinned) != new.map(|r| &r.pinned)
                     });
                 self.accounts.set_room_list(&account, list);
+                // A room turning public (or private) may hold back (or show) what the preview shows.
+                self.reconcile_preview();
                 self.saved_changed(&account);
                 if pins_changed && self.side == Some(SidePanel::Pins) {
                     self.side_loaded = None;
@@ -2331,15 +2333,19 @@ impl State {
     }
 
     /// The entries of the open timelines on screen, with their account and timeline.
+    /// The entries of the open timelines on screen, but messages from people the user ignores,
+    /// which have no row and load nothing.
     fn entries_on_screen(&self) -> impl Iterator<Item = ((&AccountId, &TimelineKey), &accounts::Entry)> {
         self.open_timelines.iter().flat_map(move |open| {
             let (account, key) = open;
             let shown = self.on_screen.get(open);
-            self.accounts
-                .get(account)
-                .and_then(|data| data.timeline(key))
-                .into_iter()
-                .flat_map(move |timeline| timeline.on_screen(shown).map(move |entry| ((account, key), entry)))
+            self.accounts.get(account).into_iter().flat_map(move |data| {
+                data.timeline(key)
+                    .into_iter()
+                    .flat_map(move |timeline| timeline.on_screen(shown))
+                    .filter(move |entry| entry.message().is_none_or(|m| !data.safety.ignores(&m.sender_id)))
+                    .map(move |entry| ((account, key), entry))
+            })
         })
     }
 
@@ -3341,15 +3347,26 @@ impl State {
         })
     }
 
-    /// The media choice changed: an item the preview shows that it now holds back (and the user
-    /// didn't reveal) gives way to Show, letting go of what showed as stepping does.
-    pub(super) fn hold_preview(&mut self) {
+    /// The media choice or a room changed: an item the preview shows that it now holds back (and
+    /// the user didn't reveal) gives way to Show, letting go of what showed as stepping does; one
+    /// it held back that may now show loads, as stepping onto it would.
+    pub(super) fn reconcile_preview(&mut self) {
         let Some(preview) = &self.preview else { return };
-        if matches!(preview.content, PreviewContent::Held) {
+        let held = matches!(preview.content, PreviewContent::Held);
+        let Some(item) = preview.batch.get(preview.index).cloned() else { return };
+        let holds = self.preview_holds(&item);
+        if held && !holds {
+            let content = self.preview_content(&item.attachment);
+            self.preview_visits += 1;
+            let visit = self.preview_visits;
+            if let Some(preview) = self.preview.as_mut() {
+                preview.content = content;
+                preview.visit = visit;
+            }
+            self.load_preview_item(&item.attachment);
             return;
         }
-        let Some(item) = preview.batch.get(preview.index).cloned() else { return };
-        if !self.preview_holds(&item) {
+        if held || !holds {
             return;
         }
         self.leave_preview_item();
