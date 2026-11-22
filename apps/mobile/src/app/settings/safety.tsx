@@ -39,7 +39,7 @@ const MEDIA: ReadonlyArray<{ id: ShowMedia; label: Key; hint: Key }> = [
 export default function SafetyScreen() {
   const store = useAppStore();
   const account = useSettingsAccount();
-  const title = t('mobile.safety.title');
+  const title = t('settings.safety');
 
   if (!account) return <NoAccount title={title} />;
   const id = account.summary.id;
@@ -53,7 +53,7 @@ export default function SafetyScreen() {
   return (
     <SettingsPage title={title} testID="safety-settings">
       <AccountHeading account={account} />
-      <ListSection title={t('mobile.safety.media')} footer={t('mobile.safety.media_footer')}>
+      <ListSection title={t('safety.media')} footer={t('mobile.safety.media_footer')}>
         {MEDIA.map((choice, i) => (
           <Fragment key={choice.id}>
             {i > 0 ? <Divider inset={52} /> : null}
@@ -121,9 +121,9 @@ export default function SafetyScreen() {
           ))}
         </ListSection>
       ) : null}
-      <ListSection title={t('mobile.safety.ignored')} footer={t('mobile.safety.ignored_footer')}>
+      <ListSection title={t('safety.ignored')} footer={t('mobile.safety.ignored_footer')}>
         {safety.ignored.length === 0 ? (
-          <ListRow testID="safety-ignored-none" title={t('mobile.safety.ignored_none')} />
+          <ListRow testID="safety-ignored-none" title={t('safety.ignored_none')} />
         ) : (
           safety.ignored.map((userId, i) => (
             <Fragment key={userId}>
@@ -132,7 +132,7 @@ export default function SafetyScreen() {
                 testID={`safety-ignored-${userId}`}
                 leading={<Avatar account={id} id={userId} name={userId} media={null} size={28} />}
                 title={userId}
-                value={t('mobile.safety.unignore')}
+                value={t('safety.stop_ignoring')}
                 chevron={false}
                 onPress={() => void setIgnored(store, id, userId, false).catch(() => {})}
               />

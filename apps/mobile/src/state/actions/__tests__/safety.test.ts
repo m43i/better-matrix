@@ -4,7 +4,14 @@ import type { Invitation } from '@better-matrix/matrix-native/types';
 import { ADA, GRACE, summary } from '../../../test/fixtures';
 import { DEFAULT_SAFETY, revealKey } from '../../safety';
 import { Store } from '../../store';
-import { changeSafety, ignoreInviter, report, revealMedia, setIgnored } from '../safety';
+import {
+  afterReport,
+  changeSafety,
+  ignoreInviter,
+  report,
+  revealMedia,
+  setIgnored,
+} from '../safety';
 
 const SPAM: Invitation = {
   room_id: '!spam:x',
@@ -137,4 +144,14 @@ describe('revealMedia', () => {
     revealMedia(store, ADA, '$photo');
     expect(store.getState().revealedMedia).toEqual({ [revealKey(ADA, '$photo')]: true });
   });
+});
+
+describe('afterReport', () => {
+  it('a report sent should close the sheet', () => expect(afterReport(true, true)).toBe('close'));
+
+  it('a report sent after the user left the sheet should move nothing', () =>
+    expect(afterReport(true, false)).toBe('stay'));
+
+  it('a report that failed should stay to try again', () =>
+    expect(afterReport(false, true)).toBe('stay'));
 });

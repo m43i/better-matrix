@@ -304,7 +304,7 @@ function RoomPages({
         <ListRow
           testID="room-menu-report"
           icon="flag"
-          title={t('mobile.safety.report_room')}
+          title={t('report.room_action')}
           chevron={false}
           onPress={() => {
             done();

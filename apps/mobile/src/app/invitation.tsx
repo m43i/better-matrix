@@ -72,7 +72,7 @@ export default function InvitationScreen() {
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
-          text: t('mobile.safety.ignore'),
+          text: t('safety.ignore'),
           style: 'destructive',
           onPress: () => void answer('ignore'),
         },
@@ -158,7 +158,7 @@ export default function InvitationScreen() {
         <ListRow
           testID="invitation-report"
           icon="flag"
-          title={t('mobile.safety.report_room')}
+          title={t('report.room_action')}
           danger
           chevron={false}
           onPress={busy === null ? reportRoom : undefined}

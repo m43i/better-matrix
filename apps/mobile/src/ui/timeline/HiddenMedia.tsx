@@ -44,7 +44,7 @@ export function HiddenMedia({
       testID="hidden-media"
       onPress={onShow}
       accessibilityRole="button"
-      accessibilityLabel={`${label}. ${t('mobile.safety.show')}`}
+      accessibilityLabel={`${label}. ${t('safety.show_media')}`}
       style={[
         style,
         styles.box,
@@ -55,9 +55,7 @@ export function HiddenMedia({
       {compact ? null : (
         <>
           <Text style={[font.meta, { color: palette.textMuted }]}>{label}</Text>
-          <Text style={[font.bodyStrong, { color: palette.accent }]}>
-            {t('mobile.safety.show')}
-          </Text>
+          <Text style={[font.bodyStrong, { color: palette.accent }]}>{t('safety.show_media')}</Text>
         </>
       )}
     </Pressable>

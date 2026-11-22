@@ -829,6 +829,41 @@ impl AccountData {
         listed.iter().filter_map(|at| Some((*at, self.rooms.get(*at)?))).filter(move |(_, room)| room.kind == kind)
     }
 
+    /// Drops the cached newest messages of people the user now ignores, so no preview shows
+    /// them: the room's next message from sync takes their place.
+    fn forget_ignored_latest(&mut self) {
+        let safety = &self.safety;
+        self.latest.retain(|_, message| !safety.ignores(&message.sender_id));
+    }
+
+    /// Whether listed media (a file in the Files panel, or one opened from anywhere) waits for a
+    /// press: as its message in the room's timeline when loaded there; otherwise its sender is
+    /// unknown and counts as someone else. Only pictures and videos with a preview count.
+    pub fn hides_listed_media(
+        &self,
+        room_id: &str,
+        event_id: &str,
+        attachment: &Attachment,
+        revealed: &HashSet<(AccountId, String)>,
+    ) -> bool {
+        if attachment.preview().is_none() {
+            return false;
+        }
+        let loaded = self
+            .timelines
+            .iter()
+            .filter(|(key, _)| key.room_id == room_id)
+            .find_map(|(_, timeline)| timeline.messages().find(|m| m.event_id == event_id));
+        match loaded {
+            Some(message) => self.hides_media(room_id, message, revealed),
+            None => {
+                let public = self.room(room_id).is_some_and(|room| room.public);
+                !self.safety.shows_media(public, false)
+                    && !revealed.contains(&(self.summary.id.clone(), event_id.to_owned()))
+            }
+        }
+    }
+
     /// The invitations the sidebar and Home list: all but strangers' when the user hides them.
     pub fn shown_invitations(&self) -> impl Iterator<Item = &matrix_core::Invitation> {
         self.invitations.iter().filter(|invite| self.safety.shows_invitation(invite))
@@ -889,16 +924,19 @@ impl AccountData {
         self.stale_members.remove(room_id);
     }
 
-    /// The newest message in a room: from its timeline when open, else from sync.
+    /// The newest message in a room: from its timeline when open, else from sync. Never one
+    /// from someone the user ignores, whose messages a kept timeline may still hold until the
+    /// engine reloads it.
     pub fn last_message(&self, room_id: &str) -> Option<&Message> {
         // Asked for every room the sidebar sorts on every commit: the few timelines kept are
         // looked through rather than a key made for each room.
+        let heard = |message: &&Message| !self.safety.ignores(&message.sender_id);
         let from_timeline = self
             .timelines
             .iter()
             .find(|(key, _)| key.thread.is_none() && key.room_id == room_id)
-            .and_then(|(_, timeline)| timeline.messages().next_back());
-        match (from_timeline, self.latest.get(room_id)) {
+            .and_then(|(_, timeline)| timeline.messages().rev().find(heard));
+        match (from_timeline, self.latest.get(room_id).filter(heard)) {
             (Some(a), Some(b)) => Some(if a.timestamp_ms >= b.timestamp_ms { a } else { b }),
             (a, b) => a.or(b),
         }
@@ -1138,6 +1176,7 @@ impl Accounts {
         if let Some(account) = self.get_mut(id) {
             account.safety = safety.clone();
             account.saved_safety = safety;
+            account.forget_ignored_latest();
             // The lists (invitations, their pictures) may change with them.
             self.revision += 1;
         }
@@ -1147,6 +1186,7 @@ impl Accounts {
     pub fn set_safety(&mut self, id: &AccountId, safety: matrix_core::Safety) {
         if let Some(account) = self.get_mut(id) {
             account.safety = safety;
+            account.forget_ignored_latest();
             self.revision += 1;
         }
     }
@@ -1406,9 +1446,11 @@ impl Accounts {
         }
     }
 
-    /// Records a room's newest message, for previews.
+    /// Records a room's newest message, for previews: never one from someone the user ignores.
     pub fn set_latest(&mut self, id: &AccountId, room_id: &str, message: Message) {
-        if let Some(account) = self.get_mut(id) {
+        if let Some(account) = self.get_mut(id)
+            && !account.safety.ignores(&message.sender_id)
+        {
             account.latest.insert(room_id.to_owned(), message);
             account.heard_at.insert(room_id.to_owned(), now_ms());
         }

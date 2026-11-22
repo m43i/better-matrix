@@ -85,9 +85,7 @@ export async function report(
   } catch (error) {
     if (error instanceof CommandFailed && !error.cancelled) {
       const failed = error;
-      store.update((s) =>
-        addNotice(s, t('mobile.safety.report_failed', { error: failed.message }), account),
-      );
+      store.update((s) => addNotice(s, t('notice.report', { error: failed.message }), account));
     }
 
     throw error;
@@ -96,6 +94,14 @@ export async function report(
   store.update((s) => addNotice(s, t('mobile.safety.reported'), account));
 
   if (ignore !== null) await setIgnored(store, account, ignore, true).catch(() => {});
+}
+
+/**
+ * What the report sheet does once its report ended: a report sent closes it, unless the user
+ * already left it (`shown` false), when nothing moves; a failure stays to try again.
+ */
+export function afterReport(sent: boolean, shown: boolean): 'close' | 'stay' {
+  return sent && shown ? 'close' : 'stay';
 }
 
 /** Declines an invitation and ignores whoever sent it (Ignore on the invitation sheet). */

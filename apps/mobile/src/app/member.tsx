@@ -126,18 +126,14 @@ export default function MemberScreen() {
       return;
     }
 
-    Alert.alert(
-      t('mobile.safety.ignore_title', { name: person.name }),
-      t('mobile.safety.ignore_body'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('mobile.safety.ignore'),
-          style: 'destructive',
-          onPress: () => void setIgnored(store, account, person.id, true).catch(() => {}),
-        },
-      ],
-    );
+    Alert.alert(t('confirm.ignore_title', { name: person.name }), t('mobile.safety.ignore_body'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('safety.ignore'),
+        style: 'destructive',
+        onPress: () => void setIgnored(store, account, person.id, true).catch(() => {}),
+      },
+    ]);
   };
 
   const reportPerson = () => {
@@ -297,7 +293,7 @@ export default function MemberScreen() {
             <ListRow
               testID="member-ignore"
               icon="block"
-              title={ignored ? t('mobile.safety.unignore') : t('mobile.safety.ignore')}
+              title={ignored ? t('safety.stop_ignoring') : t('safety.ignore')}
               danger={!ignored}
               onPress={ignore}
               chevron={false}
@@ -306,7 +302,7 @@ export default function MemberScreen() {
             <ListRow
               testID="member-report"
               icon="flag"
-              title={t('mobile.safety.report')}
+              title={t('report.action')}
               danger
               onPress={reportPerson}
               chevron={false}

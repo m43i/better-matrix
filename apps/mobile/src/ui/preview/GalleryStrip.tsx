@@ -29,11 +29,14 @@ export function GalleryStrip({
   current,
   bottom,
   onPick,
+  withheld = null,
 }: {
   account: AccountId;
   items: readonly Message[];
   /** The event ID on screen. */
   current: string;
+  /** An item whose picture the account keeps back until Show (ADR 0011): its icon, unfetched. */
+  withheld?: string | null;
   /** The safe area below it. */
   bottom: number;
   onPick: (eventId: string) => void;
@@ -71,6 +74,7 @@ export function GalleryStrip({
               count: items.length,
             })}
             current={message.event_id === current}
+            withheld={message.event_id === withheld}
             onPress={() => onPick(message.event_id)}
           />
         ))}
@@ -84,17 +88,19 @@ function Thumb({
   message,
   label,
   current,
+  withheld,
   onPress,
 }: {
   account: AccountId;
   message: Message;
   label: string;
   current: boolean;
+  withheld: boolean;
   onPress: () => void;
 }) {
   const palette = usePalette();
   const attachment = message.content.type === 'Attachment' ? message.content.data : null;
-  const picture = attachment ? thumbnailOf(attachment) : null;
+  const picture = attachment && !withheld ? thumbnailOf(attachment) : null;
   const uri = useMedia(account, picture?.media ?? null, picture?.size ?? PREVIEW_SIZE);
 
   const icon: IconName =

@@ -23,15 +23,22 @@ Date: 2026-11-22
 - **One vocabulary:** `Safety` (per account: `ignored`, `media: ShowMedia`, `invite_pictures`,
   `hide_stranger_invites`) is reported as `Event::Safety` once an account is ready, when a sync
   brings any of its account data events, and after `Command::SetSafety(SafetyChange)`, whose
-  answer already holds the change (the store's copy changes only with the next sync). Reports go
+  answer is read back from the server (the store's copy changes only with the next sync).
+  Changes run one at a time per account (`Account::safety_changes`), each read-modify-writing the
+  server's latest copy, so two made before a sync both hold. Reports go
   through `Command::Report { target: ReportTarget::{Message, Room, Person}, reason }`; the reason
   may be empty and is trimmed. The apps decide with `Safety::shows_media`,
   `Safety::shows_invitation` and `Safety::ignores` (mirrored in the phones' selectors).
 - **Stored in account data**, never on the device:
-  - ignored people through the SDK (`ignore_user`), whose event cache clears every room when the
-    list changes, so earlier messages from them disappear too; nothing in the apps filters them;
-  - media and invitation pictures in MSC4278's event under both names, the spec's read first,
-    keeping fields other clients set, so Element and this app follow one choice;
+  - ignored people in `m.ignored_user_list`; the SDK's event cache clears every room when a sync
+    brings a new list, so earlier messages from them disappear too. Until then, and for the
+    previews the apps keep themselves (a room's latest message), the apps drop what an ignored
+    person sent;
+  - media and invitation pictures in MSC4278's event, keeping fields other clients set: read
+    under the spec's name first, then the unstable one (as the SDK does); written under the
+    unstable name, as the SDK and Element write it, and under the spec's name only where one
+    exists, so this app never makes a copy that shadows Element's later choices. An absent field
+    shows; a value this app doesn't know hides, as MSC4278 asks;
   - hiding strangers' invitations in `chat.bettermatrix.invites` (`hide_strangers`), which no
     other client reads.
 - **Ignoring:** offered from the member menu and the person panel (desktop) and the member sheet
@@ -45,21 +52,30 @@ Date: 2026-11-22
   room with the account as this device knows it: a direct chat with them, or a room where they
   are a joined member in the store. Lazy loading leaves quiet members of large rooms out, so the
   rule errs towards calling someone a stranger, which only hides. An unknown inviter is a
-  stranger. With `hide_stranger_invites`, such invitations leave the Invitations section, Home's
-  cards and counters, and pushes (`fetch` answers `PushContent::Nothing`); they are not declined
+  stranger. Every invitation is judged again whenever the account's joined rooms change. With `hide_stranger_invites`, such invitations leave the Invitations section, Home's
+  cards and counters, and pushes (`fetch` answers `PushContent::Nothing`, reading the choice
+  from the server, as the device's copy may be old, and judging an invitation whose event can't
+  be fetched by its room); they are not declined
   and Settings → Safety (for the account on screen) lists them, each opening the usual
   invitation preview. Every invitation preview also offers Report (the room) and, when the
-  inviter is known, Ignore: it asks, then ignores the inviter and declines.
+  inviter is known, Ignore: it asks, ignores the inviter, and declines once that is saved (a
+  failed save keeps the invitation).
 - **Pictures in invitations:** with `invite_pictures` off, invitations show initials for the
   room and the inviter everywhere they appear, and their pictures are never fetched.
 - **Media:** `ShowMedia::{Always, Private, Never}` (MSC4278's `on`, `private`, `off`). `Private`
-  shows media in rooms that aren't public (`RoomSummary::public`, the public join rule). Images,
+  shows media in private rooms only: invite, knock and restricted join rules, or none (which reads
+  as invite); `RoomSummary::public` is every other rule, unknown ones included. Images, stickers,
   video posters, linked GIFs and link cards' images that may not show draw a placeholder of the
   same size with Show; a press reveals that message's media until the app restarts. Nothing is
-  fetched before. The user's own media, avatars and stickers always show.
+  fetched before; the attachment preview applies the same rule wherever it opens from (a file
+  whose sender isn't known counts as someone else's). The user's own media and avatars always
+  show.
 
 ## Consequences
 
+- iOS can't drop a push without Apple's notification-filtering entitlement: a hidden
+  invitation's push shows the push's own generic text there, as any push that turns out to show
+  nothing does. Android shows nothing.
 - Ignoring takes effect on every session at its next sync and clears each room's cached
   timeline, so an open room reloads its history once.
 - Reports reach the user's own homeserver's admins, not the room's moderators; a server older

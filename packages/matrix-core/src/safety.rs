@@ -6,8 +6,9 @@
 //! other sessions:
 //! - ignored people in `m.ignored_user_list`: the server then sends nothing from them, and the
 //!   SDK clears the rooms' caches so earlier messages go too;
-//! - media and invitation pictures in MSC4278's `m.media_preview_config` (and its unstable name,
-//!   which Element reads), so other clients follow the same choice;
+//! - media and invitation pictures in MSC4278's `m.media_preview_config`, written under its
+//!   unstable name as the SDK and Element do (and under the spec's where a client wrote it), so
+//!   other clients follow the same choice;
 //! - invitations from strangers in `chat.bettermatrix.invites`: no other client knows it, and
 //!   hiding is up to the apps, which never decline for the user.
 
@@ -182,19 +183,43 @@ pub(crate) fn changed_in(account_data: &[Raw<AnyGlobalAccountDataEvent>]) -> boo
     })
 }
 
-/// The choices in the three account data events' contents (absent ones are `Null`). The spec's
-/// MSC4278 name wins over the unstable one; values a client doesn't know are left at the default.
+/// The choices in the three account data events' contents (absent ones are `Null`). An absent
+/// MSC4278 field shows (the default); a value this app doesn't know hides, as MSC4278 asks.
 fn read(ignored: &Value, media: &Value, invites: &Value) -> Safety {
     let mut ignored: Vec<String> =
         ignored["ignored_users"].as_object().map(|users| users.keys().cloned().collect()).unwrap_or_default();
     ignored.sort();
     let defaults = Safety::default();
+    let media_previews = &media["media_previews"];
+    let invite_avatars = &media["invite_avatars"];
     Safety {
         ignored,
-        media: media["media_previews"].as_str().and_then(ShowMedia::parse).unwrap_or(defaults.media),
-        invite_pictures: media["invite_avatars"].as_str().map_or(defaults.invite_pictures, |shown| shown != "off"),
+        media: if media_previews.is_null() {
+            defaults.media
+        } else {
+            media_previews.as_str().and_then(ShowMedia::parse).unwrap_or(ShowMedia::Never)
+        },
+        invite_pictures: invite_avatars.is_null() || invite_avatars.as_str() == Some("on"),
         hide_stranger_invites: invites["hide_strangers"].as_bool().unwrap_or(defaults.hide_stranger_invites),
     }
+}
+
+/// The ignored list's content with `user_id` in it or not, keeping every other field.
+fn with_ignored(mut content: Value, user_id: &str, ignored: bool) -> Value {
+    if !content.is_object() {
+        content = json!({});
+    }
+    if !content["ignored_users"].is_object() {
+        content["ignored_users"] = json!({});
+    }
+    if let Some(users) = content["ignored_users"].as_object_mut() {
+        if ignored {
+            users.entry(user_id).or_insert_with(|| json!({}));
+        } else {
+            users.remove(user_id);
+        }
+    }
+    content
 }
 
 /// MSC4278's content with the user's choice set, keeping every other field.
@@ -224,13 +249,19 @@ impl Account {
         Ok(read(&ignored, &media, &invites))
     }
 
-    /// Makes one change and returns the choices that hold after it.
+    /// Makes one change and returns the choices that hold after it, as the server has them.
+    /// Changes run one at a time, each on the server's latest copy, so two made before a sync
+    /// brings the first both hold.
     pub async fn change_safety(&self, change: &SafetyChange) -> Result<Safety, Error> {
-        let account = self.client().account();
+        let _one_at_a_time = self.safety_changes.lock().await;
         match change {
-            SafetyChange::Ignore { user_id, ignored: true } => account.ignore_user(&UserId::parse(user_id)?).await?,
-            SafetyChange::Ignore { user_id, ignored: false } => {
-                account.unignore_user(&UserId::parse(user_id)?).await?;
+            SafetyChange::Ignore { user_id, ignored } => {
+                let user_id = UserId::parse(user_id)?;
+                if self.client().user_id() == Some(&*user_id) {
+                    return Err(matrix_sdk::Error::CantIgnoreLoggedInUser.into());
+                }
+                let content = with_ignored(self.server_account_data(IGNORED).await?, user_id.as_str(), *ignored);
+                self.save_account_data(IGNORED, &content).await?;
             }
             SafetyChange::Media(media) => self.save_media_config(Some(*media), None).await?,
             SafetyChange::InvitePictures(shown) => self.save_media_config(None, Some(*shown)).await?,
@@ -239,8 +270,13 @@ impl Account {
                 self.save_account_data(INVITES, &content).await?;
             }
         }
-        // This device's copy changes with the next sync; until then, the change applies to it.
-        Ok(self.safety().await?.with(change))
+        let ignored = self.server_account_data(IGNORED).await?;
+        let media = match self.server_account_data(MEDIA).await? {
+            Value::Null => self.server_account_data(MEDIA_UNSTABLE).await?,
+            media => media,
+        };
+        let invites = self.server_account_data(INVITES).await?;
+        Ok(read(&ignored, &media, &invites))
     }
 
     /// Reports a message, a room or a person to the homeserver's admins, with the user's reason
@@ -271,16 +307,21 @@ impl Account {
         Ok(())
     }
 
-    /// Sets MSC4278's fields under both its names: the spec's, which this app reads first, and
-    /// the unstable one other clients still read.
+    /// Sets MSC4278's fields as the SDK and Element do, under the unstable name, and under the
+    /// spec's name only where a client already wrote it there, so neither copy shadows the other
+    /// with an older choice.
     async fn save_media_config(&self, media: Option<ShowMedia>, invite_pictures: Option<bool>) -> Result<(), Error> {
-        let current = match self.server_account_data(MEDIA).await? {
+        let stable = self.server_account_data(MEDIA).await?;
+        let current = match &stable {
             Value::Null => self.server_account_data(MEDIA_UNSTABLE).await?,
-            content => content,
+            stable => stable.clone(),
         };
         let content = with_media(current, media, invite_pictures);
-        self.save_account_data(MEDIA, &content).await?;
-        self.save_account_data(MEDIA_UNSTABLE, &content).await
+        self.save_account_data(MEDIA_UNSTABLE, &content).await?;
+        if !stable.is_null() {
+            self.save_account_data(MEDIA, &content).await?;
+        }
+        Ok(())
     }
 
     async fn local_account_data(&self, event_type: &str) -> Result<Value, Error> {
@@ -311,13 +352,31 @@ fn with_object(mut content: Value, key: &str, value: Value) -> Value {
 }
 
 /// Whether an invitation from `inviter` stays out of sight, push included: the user hides
-/// strangers' invitations and shares no room with them.
+/// strangers' invitations and shares no room with them. The choice is read from the server, as a
+/// push may come while this device's copy is old; this device's copy stands in when it can't be.
 pub(crate) async fn hides_invite_from(client: &matrix_sdk::Client, inviter: &UserId) -> bool {
-    let raw = client.account().account_data_raw(GlobalAccountDataEventType::from(INVITES)).await.ok().flatten();
+    let event_type = GlobalAccountDataEventType::from(INVITES);
+    let raw = match client.account().fetch_account_data(event_type.clone()).await {
+        Ok(raw) => raw,
+        Err(_) => client.account().account_data_raw(event_type).await.ok().flatten(),
+    };
     let hidden = raw
         .and_then(|raw| serde_json::from_str::<Value>(raw.json().get()).ok())
         .is_some_and(|content| content["hide_strangers"].as_bool() == Some(true));
     hidden && !shares_room(client, inviter).await
+}
+
+/// Whether `room_id` is an invitation this device knows that stays out of sight
+/// ([`hides_invite_from`]): for a push whose event couldn't be fetched.
+pub(crate) async fn hides_invitation(client: &matrix_sdk::Client, room_id: &RoomId) -> bool {
+    let Some(room) = client.get_room(room_id) else { return false };
+    if room.state() != matrix_sdk::RoomState::Invited {
+        return false;
+    }
+    match room.invite_details().await {
+        Ok(invite) => hides_invite_from(client, &invite.inviter_id).await,
+        Err(_) => false,
+    }
 }
 
 /// Whether the user shares a joined room with someone, as this device knows its members: a

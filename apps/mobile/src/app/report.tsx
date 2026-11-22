@@ -8,12 +8,13 @@ import { StyleSheet, Text } from 'react-native';
 
 import { t } from '../i18n';
 import { reportTarget } from '../routes';
-import { report, reportedPerson } from '../state/actions/safety';
+import { afterReport, report, reportedPerson } from '../state/actions/safety';
 import { useAppStore } from '../state/react';
 import { font } from '../theme/palette';
 import { ListRow, ListSection, TextField } from '../ui/components';
 import { RoomForm } from '../ui/people/RoomForm';
 import { usePalette } from '../ui/theme';
+import { useShown } from '../ui/useShown';
 
 export default function ReportScreen() {
   const params = useLocalSearchParams<{
@@ -31,6 +32,8 @@ export default function ReportScreen() {
   const [reason, setReason] = useState('');
   const [ignore, setIgnore] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Cancel stays available while it sends: an answer that comes after the user left moves nothing.
+  const shown = useShown();
   const target = reportTarget(params);
 
   if (!target) return null;
@@ -39,16 +42,18 @@ export default function ReportScreen() {
 
   const title =
     target.type === 'Message'
-      ? t('mobile.safety.report_message')
+      ? t('report.message_title')
       : target.type === 'Room'
-        ? t('mobile.safety.report_room')
-        : t('mobile.safety.report_person', { name });
+        ? t('report.room_action')
+        : t('report.person_title', { name });
 
   const submit = () => {
     if (busy) return;
     setBusy(true);
     report(store, account, target, reason, ignore ? person : null).then(
-      () => router.back(),
+      () => {
+        if (afterReport(true, shown.current) === 'close') router.back();
+      },
       () => setBusy(false),
     );
   };
@@ -57,7 +62,7 @@ export default function ReportScreen() {
     <RoomForm
       testID="report"
       title={title}
-      confirm={t('mobile.safety.report')}
+      confirm={t('report.send')}
       valid
       busy={busy}
       onSubmit={submit}
@@ -82,7 +87,7 @@ export default function ReportScreen() {
           <ListRow
             testID="report-ignore"
             icon="block"
-            title={t('mobile.safety.also_ignore', { name })}
+            title={t('report.also_ignore', { name })}
             toggle={{ value: ignore, onChange: setIgnore }}
           />
         </ListSection>

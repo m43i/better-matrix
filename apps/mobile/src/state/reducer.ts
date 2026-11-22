@@ -233,6 +233,44 @@ export function applyLatestMessages(
   return next;
 }
 
+/**
+ * `account` without what people it newly ignores said: their messages leave the room list's
+ * previews (`latest`) and every kept timeline, cold ones included, which no engine reset reaches
+ * (ADR 0011). A timeline keeps its length, as the engine's diffs count by position: their
+ * entries become `Other`, which draws nothing, until the engine sends the timeline again.
+ */
+function withoutIgnored(account: AccountData, before: readonly string[]): AccountData {
+  const ignored = new Set(account.safety.ignored.filter((id) => !before.includes(id)));
+
+  if (ignored.size === 0) return account;
+
+  const said = (message: { sender_id: string } | undefined) =>
+    message !== undefined && ignored.has(message.sender_id);
+
+  const latest = Object.fromEntries(
+    Object.entries(account.latest).filter(([, message]) => !said(message)),
+  );
+
+  const timelines: Record<string, Timeline> = {};
+
+  for (const [id, timeline] of Object.entries(account.timelines)) {
+    const hit = timeline.entries.some((e) => e.kind.type === 'Message' && said(e.kind.data));
+
+    timelines[id] = hit
+      ? {
+          ...timeline,
+          entries: timeline.entries.map((entry) =>
+            entry.kind.type === 'Message' && said(entry.kind.data)
+              ? { id: entry.id, kind: { type: 'Other' } }
+              : entry,
+          ),
+        }
+      : timeline;
+  }
+
+  return { ...account, latest, timelines };
+}
+
 /** Folds one event into the state. `now` is when it arrived, in ms since the epoch. */
 export function apply(state: State, event: EngineEvent, now: number = Date.now()): State {
   switch (event.type) {
@@ -412,7 +450,9 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
         savedStatus: event.data.status,
       }));
     case 'Safety':
-      return updateAccount(state, event.data.account, (a) => ({ ...a, safety: event.data.safety }));
+      return updateAccount(state, event.data.account, (a) =>
+        withoutIgnored({ ...a, safety: event.data.safety }, a.safety.ignored),
+      );
     case 'RecoveryKey':
       return { ...state, recoveryKey: { account: event.data.account, key: event.data.key } };
     case 'Verification': {

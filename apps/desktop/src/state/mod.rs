@@ -644,7 +644,11 @@ enum Purpose {
     /// Kicking, banning or changing a member's role.
     Moderate,
     /// Changing an account's safety choices; failing, the account shows the saved ones again.
-    Safety(AccountId),
+    Safety {
+        account: AccountId,
+        /// An invitation to decline once the change is saved (ignoring its inviter).
+        decline: Option<String>,
+    },
     /// Sending a report from the report dialog, which stays open on failure.
     Report,
     /// Voting in or ending a poll.
@@ -1717,6 +1721,11 @@ impl State {
                     self.modal = None
                 }
                 Purpose::Report => self.report_sent(request),
+                // The inviter is ignored for good: now their invitation goes.
+                Purpose::Safety { account, decline: Some(room_id) } => {
+                    let (account, room_id) = (account.clone(), room_id.clone());
+                    self.respond_to_invitation(&account, &room_id, false);
+                }
                 Purpose::Membership { account, room_id, action, scope } => {
                     self.membership_finished(account, room_id, *action, scope)
                 }
@@ -1912,7 +1921,7 @@ impl State {
             }
             Purpose::Invite => self.notice = Some(tf!("notice.invite", error = error)),
             Purpose::Moderate => self.notice = Some(tf!("notice.moderate", error = error)),
-            Purpose::Safety(account) => self.safety_failed(&account, &error),
+            Purpose::Safety { account, .. } => self.safety_failed(&account, &error),
             Purpose::Report => self.report_failed(request, &error),
             // The panel stops loading, and says why.
             Purpose::SidePanel(account, room_id, panel) => {
@@ -3204,12 +3213,13 @@ impl State {
     /// full size, with the rest of its batch to step through; any other file saves.
     pub fn open_attachment(&mut self, key: &TimelineKey, event_id: &str, attachment: &matrix_core::Attachment) {
         let (Some(account), Some(media)) = (self.nav.account.clone(), attachment.media.clone()) else { return };
-        // Held-back media shows in its place first; it opens from there.
-        let message =
-            self.accounts.get(&account).and_then(|data| data.timeline(key)).and_then(|timeline| {
-                timeline.entries.iter().filter_map(|e| e.message()).find(|m| m.event_id == event_id)
-            });
-        if attachment.preview().is_some() && message.is_some_and(|m| self.hides_media(&account, &key.room_id, m)) {
+        // Held-back media shows in its place first; it opens from there. Opened from outside the
+        // loaded timeline (the Files panel), its sender may be unknown: it counts as someone else.
+        let held = self
+            .accounts
+            .get(&account)
+            .is_some_and(|data| data.hides_listed_media(&key.room_id, event_id, attachment, &self.revealed_media));
+        if held {
             self.reveal_media(&account, event_id);
             return;
         }
@@ -3827,10 +3837,8 @@ impl State {
                 (Command::Redact { account, key, event_id }, Purpose::Delete)
             }
             Confirm::Ignore { account, user_id, decline, .. } => {
-                if let Some(room_id) = decline {
-                    self.respond_to_invitation(&account, &room_id, false);
-                }
-                self.set_safety(&account, matrix_core::SafetyChange::Ignore { user_id, ignored: true });
+                // An invitation is declined only once the ignore is saved: failing, it stays.
+                self.change_safety(&account, matrix_core::SafetyChange::Ignore { user_id, ignored: true }, decline);
                 return;
             }
         };

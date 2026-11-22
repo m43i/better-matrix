@@ -3,11 +3,13 @@
 import type {
   AccountId,
   MediaRef,
+  Message,
   MediaSize,
   SavedMessage,
   TimelineKey,
 } from '@better-matrix/matrix-native/types';
 
+import { galleryAround } from './gallery';
 import { EMPTY_TIMELINE, mediaKey } from './reducer';
 import { revealKey, showsMedia, shownInvitations } from './safety';
 import { newestMessages, type NewestMessages } from './sections';
@@ -120,4 +122,21 @@ export function mediaHidden(
   const publicRoom = data.rooms.find((r) => r.room_id === roomId)?.public ?? false;
 
   return !showsMedia(data.safety, publicRoom, message.sender_id === id);
+}
+
+/**
+ * The attachment preview's gallery around `current`: the batch, without media the account keeps
+ * back. The opened message stays, so the preview has its item; the preview shows it hidden until
+ * the user taps Show (`mediaHidden`), whichever screen opened it (ADR 0011).
+ */
+export function previewItems(
+  state: State,
+  id: AccountId,
+  key: TimelineKey,
+  current: string,
+  opened: string,
+): Message[] {
+  return galleryAround(timeline(state, id, key).entries, current, opened, key.thread).filter(
+    (m) => m.event_id === opened || !mediaHidden(state, id, key.room_id, m),
+  );
 }

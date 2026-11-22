@@ -656,6 +656,7 @@
   "report.them": "them",
   "safety.hidden_invitations": "Hidden invitations ({{count}})",
   "safety.hidden_media": "Hidden media",
+  "safety.hidden_media_press": "Hidden · press to show",
   "safety.ignore": "Ignore",
   "safety.ignored": "Ignored people",
   "safety.ignored_hint": "You don't see their messages or invitations, on any of your sessions. They aren't told.",

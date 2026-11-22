@@ -265,7 +265,7 @@ export default function MessageActionsScreen() {
             <Divider inset={52} />
             <ListRow
               icon="flag"
-              title={t('mobile.safety.report')}
+              title={t('report.action')}
               danger
               chevron={false}
               testID="message-actions-report"

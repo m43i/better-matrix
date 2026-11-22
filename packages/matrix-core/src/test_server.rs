@@ -6,6 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
+/// A key a reply sets to answer 404 Not Found instead of 200 OK.
+pub(crate) const NOT_FOUND_STATUS: &str = "__not_found";
+
 pub(crate) struct Server {
     address: SocketAddr,
     stopped: Arc<AtomicBool>,
@@ -48,9 +51,15 @@ impl Server {
                         }
                     }
                 }
-                let body = reply(&String::from_utf8_lossy(&request)).to_string();
+                let mut reply = reply(&String::from_utf8_lossy(&request));
+                // A reply naming `NOT_FOUND_STATUS` answers 404 with the rest as its error body.
+                let status = match reply.as_object_mut().and_then(|reply| reply.remove(NOT_FOUND_STATUS)) {
+                    Some(_) => "404 Not Found",
+                    None => "200 OK",
+                };
+                let body = reply.to_string();
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 let _ = stream.write_all(response.as_bytes());

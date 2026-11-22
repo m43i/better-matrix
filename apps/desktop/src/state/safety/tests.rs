@@ -88,18 +88,89 @@ fn ignoring_someone_should_ask_first() {
     assert!(s.accounts.get(&ada()).unwrap().safety.ignores("@troll:spam.example"));
 }
 
-#[test]
-fn ignoring_an_inviter_should_decline_their_invitation_too() {
-    let (mut s, mut commands) = state();
-    crate::demo::invitation(&mut s);
-    drain(&mut commands);
+/// Ignores the inviter of the demo invitation from its preview, and the request that saves it.
+fn ignore_inviter(s: &mut State, commands: &mut DetachedCommands) -> RequestId {
+    crate::demo::invitation(s);
+    drain(commands);
     s.ask_to_ignore_inviter(&ada(), "!design:example.org");
     s.confirm();
-    let sent = drain(&mut commands);
-    assert!(sent.iter().any(|(_, command)| matches!(command,
+    let sent = drain(commands);
+    assert!(!sent.iter().any(|(_, command)| matches!(command, Command::LeaveRoom { .. })), "declined before saving");
+    sent.into_iter()
+        .find_map(|(request, command)| match command {
+            Command::SetSafety { change: SafetyChange::Ignore { user_id, ignored: true }, .. }
+                if user_id == "@grace:example.org" =>
+            {
+                Some(request)
+            }
+            _ => None,
+        })
+        .unwrap()
+}
+
+#[test]
+fn ignoring_an_inviter_should_decline_their_invitation_once_saved() {
+    let (mut s, mut commands) = state();
+    let request = ignore_inviter(&mut s, &mut commands);
+    finish(&mut s, request, Ok(()));
+    assert!(drain(&mut commands).iter().any(|(_, command)| matches!(command,
         Command::LeaveRoom { room_id, forget: false, .. } if room_id == "!design:example.org")));
-    assert!(sent.iter().any(|(_, command)| matches!(command,
-        Command::SetSafety { change: SafetyChange::Ignore { user_id, ignored: true }, .. } if user_id == "@grace:example.org")));
+}
+
+#[test]
+fn ignoring_an_inviter_that_fails_should_keep_their_invitation() {
+    let (mut s, mut commands) = state();
+    let request = ignore_inviter(&mut s, &mut commands);
+    finish(&mut s, request, Err("offline".into()));
+    assert!(!drain(&mut commands).iter().any(|(_, command)| matches!(command, Command::LeaveRoom { .. })));
+    let data = s.accounts.get(&ada()).unwrap();
+    assert!(data.invitations.iter().any(|invite| invite.room_id == "!design:example.org"));
+    assert!(!data.safety.ignores("@grace:example.org"));
+    assert!(s.notice.is_some());
+}
+
+#[test]
+fn a_rooms_preview_should_drop_a_message_from_someone_the_user_then_ignores() {
+    let (mut s, _) = state();
+    crate::demo::seed(&mut s);
+    let troll = "@troll:spam.example";
+    let message = Message {
+        event_id: "$spam".into(),
+        sender_id: troll.into(),
+        sender_name: "Troll".into(),
+        timestamp_ms: u64::MAX / 2,
+        ..Message::default()
+    };
+    let room = "!lab:example.org";
+    s.apply(
+        Event::LatestMessage { account: ada(), room_id: room.into(), message: Box::new(message) },
+        &mut Tx::default(),
+    );
+    let newest = |s: &State| s.accounts.get(&ada()).unwrap().last_message(room).map(|m| m.event_id.clone());
+    assert_eq!(newest(&s).as_deref(), Some("$spam"));
+    let safety = Safety { ignored: vec![troll.into()], ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+    assert_ne!(newest(&s).as_deref(), Some("$spam"));
+}
+
+#[test]
+fn media_opened_from_the_files_panel_should_wait_for_a_press_when_its_sender_is_unknown() {
+    let (mut s, mut commands) = state();
+    crate::demo::seed(&mut s);
+    let safety = Safety { media: ShowMedia::Never, ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+    s.select_room(DEMO_THREAD.0);
+    s.media = crate::state::MediaCache::default();
+    s.media.attach(std::sync::Arc::new(|| {}));
+    drain(&mut commands);
+    let file = crate::demo::demo_attachment();
+    let key = TimelineKey::room(DEMO_THREAD.0);
+    s.open_attachment(&key, "$listed-only", &file);
+    assert!(s.preview.is_none());
+    assert!(!drain(&mut commands).iter().any(|(_, command)| matches!(command, Command::FetchMedia { .. })));
+    // Shown now: the next press opens it.
+    s.open_attachment(&key, "$listed-only", &file);
+    assert!(s.preview.is_some());
 }
 
 #[test]

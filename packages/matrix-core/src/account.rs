@@ -82,6 +82,9 @@ pub struct Account {
     pub(crate) status_saves: Arc<tokio::sync::Mutex<()>>,
     /// Held while a room's saved messages change: one change at a time (`crate::saved`).
     pub(crate) saved_changes: Arc<tokio::sync::Mutex<()>>,
+    /// Held while a safety choice changes: one change at a time, each on the server's latest
+    /// copy (`crate::safety`).
+    pub(crate) safety_changes: Arc<tokio::sync::Mutex<()>>,
     /// Draft reads and writes, in the order they were asked for (`crate::drafts`).
     pub(crate) drafts: crate::drafts::DraftQueue,
 }
@@ -149,6 +152,9 @@ pub(crate) struct RoomCache {
     rooms: HashMap<String, crate::RoomSummary>,
     spaces: HashMap<String, crate::SpaceSummary>,
     invitations: HashMap<String, crate::Invitation>,
+    /// The joined rooms when invitations were last read: joining or leaving one can make an
+    /// inviter a stranger or not, so every invitation is read again when they change.
+    joined: std::collections::BTreeSet<String>,
     /// Whether a list was built from it yet: the first is, even when empty.
     listed: bool,
 }
@@ -285,6 +291,7 @@ impl Account {
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
+            safety_changes: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
         }
     }
@@ -398,6 +405,7 @@ impl Account {
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
+            safety_changes: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
         })
     }
@@ -599,9 +607,14 @@ impl Account {
         let held = cache.invitations.len();
         cache.invitations.retain(|id, _| invited.iter().any(|room| room.room_id().as_str() == id));
         moved |= cache.invitations.len() != held;
+        let joined: std::collections::BTreeSet<String> =
+            self.client.joined_rooms().iter().map(|room| room.room_id().to_string()).collect();
+        let rejudge = joined != cache.joined;
+        cache.joined = joined;
         for room in invited {
             let id = room.room_id().to_string();
-            if changed.is_some_and(|changed| !changed.contains(&id)) && cache.invitations.contains_key(&id) {
+            if !rejudge && changed.is_some_and(|changed| !changed.contains(&id)) && cache.invitations.contains_key(&id)
+            {
                 continue;
             }
             let details = room.invite_details().await.ok();
@@ -989,6 +1002,7 @@ mod tests {
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
+            safety_changes: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
         }
     }

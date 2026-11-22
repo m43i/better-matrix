@@ -656,6 +656,7 @@
   "report.them": "cette personne",
   "safety.hidden_invitations": "Invitations masquées ({{count}})",
   "safety.hidden_media": "Média masqué",
+  "safety.hidden_media_press": "Masqué · cliquez pour afficher",
   "safety.ignore": "Ignorer",
   "safety.ignored": "Personnes ignorées",
   "safety.ignored_hint": "Vous ne voyez ni leurs messages ni leurs invitations, sur aucune de vos sessions. Elles n'en sont pas informées.",

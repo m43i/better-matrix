@@ -656,6 +656,7 @@
   "report.them": "diese Person",
   "safety.hidden_invitations": "Ausgeblendete Einladungen ({{count}})",
   "safety.hidden_media": "Ausgeblendete Medien",
+  "safety.hidden_media_press": "Ausgeblendet · zum Anzeigen klicken",
   "safety.ignore": "Ignorieren",
   "safety.ignored": "Ignorierte Personen",
   "safety.ignored_hint": "Du siehst ihre Nachrichten und Einladungen in keiner deiner Sitzungen. Sie erfahren nichts davon.",

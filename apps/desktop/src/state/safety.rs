@@ -17,15 +17,24 @@ impl State {
 
     /// Changes one of an account's safety choices, showing it at once.
     pub fn set_safety(&mut self, account: &AccountId, change: SafetyChange) {
+        self.change_safety(account, change, None);
+    }
+
+    /// Changes a choice, and once it is saved declines the invitation `decline`, if any.
+    pub(super) fn change_safety(&mut self, account: &AccountId, change: SafetyChange, decline: Option<String>) {
         let Some(data) = self.accounts.get(account) else { return };
         let changed = data.safety.clone().with(&change);
         if changed == data.safety {
+            // Saved already: nothing to wait for.
+            if let Some(room_id) = decline {
+                self.respond_to_invitation(account, &room_id, false);
+            }
             return;
         }
         self.accounts.set_safety(account, changed);
         self.safety_changed();
         let command = Command::SetSafety { account: account.clone(), change };
-        self.dispatch(command, Purpose::Safety(account.clone()));
+        self.dispatch(command, Purpose::Safety { account: account.clone(), decline });
     }
 
     /// A change failed: the account shows the choices last saved again.

@@ -39,7 +39,7 @@ export function SettingsRows() {
           <ListRow
             testID="open-safety"
             icon="safety"
-            title={t('mobile.safety.title')}
+            title={t('settings.safety')}
             onPress={() => router.push(routes.settingsSafety(active))}
           />
           <Divider inset={52} />

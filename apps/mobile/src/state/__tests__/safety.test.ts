@@ -1,6 +1,6 @@
-import type { Invitation, Safety } from '@better-matrix/matrix-native/types';
+import type { Attachment, Invitation, Safety } from '@better-matrix/matrix-native/types';
 
-import { ADA, GRACE, message, roomSummary, summary } from '../../test/fixtures';
+import { ADA, GRACE, message, messageEntry, roomSummary, summary } from '../../test/fixtures';
 import { apply, initialState } from '../reducer';
 import {
   DEFAULT_SAFETY,
@@ -11,7 +11,9 @@ import {
   showsMedia,
   withChange,
 } from '../safety';
-import { activeRoomList, mediaHidden } from '../selectors';
+import { lastMessage } from '../sections';
+import { activeRoomList, mediaHidden, previewItems } from '../selectors';
+import { roomKey, timelineId } from '../timeline';
 
 const PUBLIC = '!public:x';
 
@@ -136,5 +138,109 @@ describe('safety in the state', () => {
     const state = signedIn({ ...DEFAULT_SAFETY, media: 'Never' });
     const shown = { ...state, revealedMedia: { [revealKey(ADA, '$a')]: true as const } };
     expect(mediaHidden(shown, ADA, PUBLIC, message('$a'))).toBe(false);
+  });
+});
+
+describe('ignoring someone', () => {
+  const ignoreGrace = (state: ReturnType<typeof signedIn>) =>
+    apply(state, {
+      type: 'Safety',
+      data: { account: ADA, safety: { ...DEFAULT_SAFETY, ignored: [GRACE] } },
+    });
+
+  it('a room whose newest message is from someone the user then ignores should lose its preview', () => {
+    const state = apply(signedIn(), {
+      type: 'LatestMessage',
+      data: { account: ADA, room_id: PRIVATE, message: message('$spam') },
+    });
+
+    expect(lastMessage(ignoreGrace(state).accounts[0]!, PRIVATE)).toBeUndefined();
+  });
+
+  it('their messages in a kept timeline should draw nothing, keeping its length', () => {
+    const state = apply(signedIn(), {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: roomKey(PRIVATE),
+        diffs: [{ type: 'Reset', data: [messageEntry('$spam')] }],
+      },
+    });
+
+    const entries =
+      ignoreGrace(state).accounts[0]!.timelines[timelineId(roomKey(PRIVATE))]!.entries;
+
+    expect(entries).toEqual([{ id: '$spam', kind: { type: 'Other' } }]);
+  });
+
+  it('choices that ignore no one new should leave previews alone', () => {
+    const state = apply(signedIn(), {
+      type: 'LatestMessage',
+      data: { account: ADA, room_id: PRIVATE, message: message('$hi') },
+    });
+
+    const after = apply(state, {
+      type: 'Safety',
+      data: { account: ADA, safety: { ...DEFAULT_SAFETY, media: 'Never' } },
+    });
+
+    expect(after.accounts[0]!.latest).toBe(state.accounts[0]!.latest);
+  });
+});
+
+describe('the attachment preview', () => {
+  const image: Attachment = {
+    kind: 'Image',
+    name: 'photo.png',
+    size: 1000,
+    media: 'mxc://example.org/photo',
+    thumbnail: null,
+    dimensions: null,
+    audio: null,
+  };
+
+  /** Grace posted two pictures together in the public room; media shows in private rooms only. */
+  function batch() {
+    const state = signedIn({ ...DEFAULT_SAFETY, media: 'Private' });
+    const content = { type: 'Attachment' as const, data: image };
+
+    return apply(state, {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: roomKey(PUBLIC),
+        diffs: [
+          {
+            type: 'Reset',
+            data: [
+              messageEntry('$one', { content, timestamp_ms: 1 }),
+              messageEntry('$two', { content, timestamp_ms: 2 }),
+            ],
+          },
+        ],
+      },
+    });
+  }
+
+  it('should leave hidden media of the batch out of the gallery', () => {
+    const items = previewItems(batch(), ADA, roomKey(PUBLIC), '$one', '$one');
+    expect(items.map((m) => m.event_id)).toEqual(['$one']);
+  });
+
+  it('should keep the opened item hidden until the user shows it, from wherever it opened', () => {
+    const state = batch();
+    const [opened] = previewItems(state, ADA, roomKey(PUBLIC), '$one', '$one');
+    expect(mediaHidden(state, ADA, PUBLIC, opened!)).toBe(true);
+  });
+
+  it('should step through the batch once its media is shown', () => {
+    const state = {
+      ...batch(),
+      revealedMedia: { [revealKey(ADA, '$two')]: true as const },
+    };
+
+    expect(
+      previewItems(state, ADA, roomKey(PUBLIC), '$one', '$one').map((m) => m.event_id),
+    ).toEqual(['$one', '$two']);
   });
 });

@@ -33,10 +33,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { t } from '../i18n';
 import { routes } from '../routes';
-import { galleryAround, showsStrip, stepGallery } from '../state/gallery';
+import { revealMedia } from '../state/actions/safety';
+import { showsStrip, stepGallery } from '../state/gallery';
 import { attachmentPreview } from '../state/messages';
 import { shallow, useAppStore, useStore } from '../state/react';
-import { mediaHidden, timeline } from '../state/selectors';
+import { mediaHidden, previewItems } from '../state/selectors';
 import { roomKey, threadKey } from '../state/timeline';
 import { sentAt } from '../state/timelineText';
 import { font } from '../theme/palette';
@@ -78,19 +79,15 @@ export default function PreviewScreen() {
   // The item on screen, which the strip and swipes move; the opened one at first.
   const [current, setCurrent] = useState(eventId);
 
-  // Media the account keeps back stays out of the gallery until shown in the timeline
-  // (ADR 0011); the opened one was shown to be opened.
-  const gallery = useStore(
-    (s) =>
-      galleryAround(timeline(s, account, key).entries, current, eventId, thread ?? null).filter(
-        (m) => m.event_id === eventId || !mediaHidden(s, account, roomId, m),
-      ),
-    shallow,
-  );
+  // Media the account keeps back stays out of the gallery (ADR 0011); the opened one shows as
+  // hidden, with Show, until revealed, from wherever it was opened (Room Info's files too).
+  const gallery = useStore((s) => previewItems(s, account, key, current, eventId), shallow);
 
   const found = gallery.findIndex((m) => m.event_id === current);
   const index = found < 0 ? gallery.findIndex((m) => m.event_id === eventId) : found;
-  const message = gallery[index] ?? null;
+  const shown = gallery[index] ?? null;
+  const hidden = useStore((s) => shown !== null && mediaHidden(s, account, roomId, shown));
+  const message = hidden ? null : shown;
   const attachment = message?.content.type === 'Attachment' ? message.content.data : null;
   const strip = showsStrip(gallery);
   const [busy, setBusy] = useState(false);
@@ -149,6 +146,16 @@ export default function PreviewScreen() {
             onLongPress={showActions}
           />
         )
+      ) : hidden && shown ? (
+        <Pressable
+          testID="preview-show"
+          onPress={() => revealMedia(store, account, shown.event_id)}
+          accessibilityRole="button"
+          style={styles.hidden}
+        >
+          <Icon name="eyeOff" size={32} color="#ffffff" />
+          <Text style={[font.bodyStrong, styles.white]}>{t('safety.show_media')}</Text>
+        </Pressable>
       ) : (
         <Text style={[font.body, styles.status]}>{t('mobile.conversation.message_missing')}</Text>
       )}
@@ -160,13 +167,13 @@ export default function PreviewScreen() {
           testID="preview-close"
         />
         <View style={styles.who}>
-          {message ? (
+          {shown ? (
             <>
               <Text style={[font.bodyStrong, styles.white]} numberOfLines={1}>
-                {message.sender_name}
+                {shown.sender_name}
               </Text>
               <Text style={[font.meta, styles.dim]} numberOfLines={1}>
-                {sentAt(message.timestamp_ms, now)}
+                {sentAt(shown.timestamp_ms, now)}
               </Text>
             </>
           ) : null}
@@ -197,11 +204,12 @@ export default function PreviewScreen() {
           </>
         ) : null}
       </View>
-      {strip && message ? (
+      {strip && shown ? (
         <GalleryStrip
           account={account}
           items={gallery}
-          current={message.event_id}
+          current={shown.event_id}
+          withheld={hidden ? shown.event_id : null}
           bottom={insets.bottom}
           onPick={setCurrent}
         />
@@ -434,6 +442,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000000' },
   loading: { alignItems: 'center', justifyContent: 'center' },
   status: { color: '#ffffffcc', textAlign: 'center', marginTop: 160 },
+  hidden: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   bar: {
     position: 'absolute',
     left: 0,
