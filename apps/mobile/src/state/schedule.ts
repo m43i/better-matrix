@@ -63,6 +63,72 @@ export function scheduledIn(
     .sort((a, b) => a.send_at_ms - b.send_at_ms);
 }
 
+/** When a room's soonest scheduled message sends; `null` when it has none. */
+export function soonestScheduled(
+  scheduled: readonly ScheduledMessage[] | null | undefined,
+  roomId: string,
+): number | null {
+  return scheduledIn(scheduled, roomId)[0]?.send_at_ms ?? null;
+}
+
+/** How long to wait before asking again while the server still lists a message as due. */
+export const RELIST_RETRY_MS = 30_000;
+
+/** The last time the list was asked for because a message was due: which send time, and when. */
+export interface Relisted {
+  due: number;
+  at: number;
+}
+
+/**
+ * When to ask the server for the scheduled messages again, so a conversation left open stops
+ * showing one it has sent: at the soonest one's send time, once; then, while the server still
+ * lists that one, every `RELIST_RETRY_MS`. `null` when nothing is scheduled.
+ */
+export function nextRelist(due: number | null, relisted: Relisted | null): number | null {
+  if (due === null) return null;
+
+  return relisted?.due === due ? relisted.at + RELIST_RETRY_MS : due;
+}
+
+/** What a wake does: whether it asks, and what to remember after. */
+export interface RelistStep {
+  ask: boolean;
+  relisted: Relisted | null;
+}
+
+/**
+ * Whether to ask now (a timer can wake early: see `timerDelay`), and what to remember of it if
+ * so.
+ */
+export function relistStep(due: number | null, relisted: Relisted | null, now: number): RelistStep {
+  const next = nextRelist(due, relisted);
+
+  if (next === null || due === null || now < next) return { ask: false, relisted };
+
+  return { ask: true, relisted: { due, at: now } };
+}
+
+/**
+ * What to remember after asking for the list for another reason (the conversation opened, the
+ * app came back): that answers for a message already due, so its own wake doesn't ask again.
+ */
+export function askedAnyway(
+  due: number | null,
+  relisted: Relisted | null,
+  now: number,
+): Relisted | null {
+  return due !== null && due <= now ? { due, at: now } : relisted;
+}
+
+/** The longest a JavaScript timer waits: a longer delay fires at once. */
+const LONGEST_TIMER = 2 ** 31 - 1;
+
+/** How long a timer waits for `next`: never less than nothing, nor past what a timer can hold. */
+export function timerDelay(next: number, now: number): number {
+  return Math.min(Math.max(0, next - now), LONGEST_TIMER);
+}
+
 /** `date` with its time of day from `time` (a time picker's value), seconds dropped. */
 export function withTimeOf(date: number, time: number): number {
   const at = new Date(date);

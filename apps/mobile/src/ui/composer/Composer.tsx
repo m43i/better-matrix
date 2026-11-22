@@ -41,7 +41,7 @@ import {
   spliceDraft,
 } from '../../state/actions/composer';
 import { flushDraft, followDraft } from '../../state/actions/drafts';
-import { listImagePacks, listScheduled } from '../../state/actions/messages';
+import { listImagePacks } from '../../state/actions/messages';
 import { listAllMembers } from '../../state/actions/people';
 import { composer, type PendingAttachment } from '../../state/composer';
 import {
@@ -72,6 +72,7 @@ import { Banner } from './Banner';
 import { FormatBar } from './FormatBar';
 import { Suggestions } from './Suggestions';
 import { DENIED, pickFiles, pickFromLibrary, takeWithCamera } from './pickers';
+import { useScheduledRefresh } from './useScheduledRefresh';
 import { useVoiceMemo } from './useVoiceMemo';
 import { VoiceGlow } from './VoiceGlow';
 
@@ -280,10 +281,10 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
   }, [wantsPeople, store, account, roomId]);
   useEffect(() => listImagePacks(store, account, roomId), [store, account, roomId]);
 
-  // What the server holds to send here later, listed afresh whenever a conversation opens.
+  // What the server holds to send here later, kept current while the conversation is open.
   const scheduled = useStore((s) => scheduledIn(accountOf(s, account)?.scheduled, roomId).length);
 
-  useEffect(() => listScheduled(store, account), [store, account]);
+  useScheduledRefresh(account, roomId);
 
   const pick = (suggestion: Suggestion) => {
     if (!trigger) return;

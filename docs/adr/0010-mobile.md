@@ -221,8 +221,11 @@ Date: 2026-11-16
   minutes, in an hour, tomorrow at 9:00, next Monday at 9:00 with when each is, or a custom
   date and time through `@expo/ui`'s date-time picker, at most 30 days ahead), which sends
   `Schedule` with the delay worked out in local time (`state/schedule.ts`). The composer shows
-  "N scheduled messages" above itself for its room (`ListScheduled` whenever a conversation
-  opens); the bar opens the list (`app/scheduled.tsx`) to send each now or cancel it
+  "N scheduled messages" above itself for its room, kept current while the conversation is
+  open (`ui/composer/useScheduledRefresh`, timed by `state/schedule.ts`: `ListScheduled` when
+  it opens, when the app returns to the foreground, and when the soonest message's send time
+  passes, once a due time, then every 30 s while the server still lists it, so a sent one
+  leaves the bar; a timer is capped at what JavaScript's can hold); the bar opens the list (`app/scheduled.tsx`) to send each now or cancel it
   (`UpdateScheduled`). A refused schedule gives the composer back: text, pills and the message
   it answered. Sends are planned as
   data (`state/outgoing.ts`): text with the reply first, then each attachment as
