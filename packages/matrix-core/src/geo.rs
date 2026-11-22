@@ -3,9 +3,11 @@
 //! - **Maps** are media like any other: a [`Location`](crate::model::Location) carries a
 //!   [`MediaRef`] naming the place ([`map`]), and [`Command::FetchMedia`] draws it from
 //!   OpenStreetMap's standard tiles (`tile.openstreetmap.org`), composed to the size asked for
-//!   with a pin at the place, so apps fetch, cache and retry maps as they do pictures. Tiles are
-//!   kept in memory (the last [`TILES_KEPT`]) and fetched two at a time, as OpenStreetMap's tile
-//!   policy asks; requests name the app, never the user. Apps credit "© OpenStreetMap
+//!   with a pin at the place, so apps fetch, cache and retry maps as they do pictures. As
+//!   OpenStreetMap's tile policy asks, tiles are kept on disk (the store layout's `map-tiles`)
+//!   for as long as the server's `Cache-Control`/`Expires` say, then asked for again with
+//!   `If-None-Match`/`If-Modified-Since`, the last [`TILES_KEPT`] also kept in memory, and fetched
+//!   two at a time; requests name the app, never the user. Apps credit "© OpenStreetMap
 //!   contributors" beside every map.
 //! - **Search** goes to OpenStreetMap's Nominatim ([`search_places`]), only when the user asks
 //!   (never as they type: its usage policy forbids autocomplete), at most one request a second
@@ -13,6 +15,7 @@
 //!
 //! [`Command::FetchMedia`]: crate::Command::FetchMedia
 
+use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use matrix_sdk::reqwest;
@@ -161,46 +164,143 @@ fn tiles_for(latitude: f64, longitude: f64, zoom: u8, width: u32, height: u32) -
 }
 
 type Tile = Arc<image::RgbaImage>;
-/// Decoded tiles by zoom, column and row, the newest last.
-type Tiles = Mutex<Vec<((u8, u32, u32), Tile)>>;
+/// Decoded tiles by zoom, column and row, with when each stops being fresh (milliseconds since
+/// the epoch), the newest last.
+type Tiles = Mutex<Vec<((u8, u32, u32), Tile, u64)>>;
 
-/// The tiles kept, shared by every map.
+/// The tiles kept in memory, shared by every map.
 fn tile_cache() -> &'static Tiles {
     static CACHE: OnceLock<Tiles> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-async fn tile(http: &reqwest::Client, zoom: u8, column: u32, row: u32) -> Result<Tile, String> {
+/// What is kept on disk beside a tile: when it stops being fresh, and what the server said to
+/// ask again with.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct Kept {
+    fresh_until_ms: u64,
+    etag: Option<String>,
+    last_modified: Option<String>,
+}
+
+/// The least time a tile is kept fresh when the server says nothing: a day.
+const FRESH_AT_LEAST: u64 = 24 * 60 * 60 * 1000;
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |at| u64::try_from(at.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// When a response stops being fresh, by its `Cache-Control: max-age`, else its `Expires`, else
+/// [`FRESH_AT_LEAST`] from now.
+fn fresh_until(headers: &reqwest::header::HeaderMap, now: u64) -> u64 {
+    let header = |name| headers.get(name).and_then(|value| value.to_str().ok());
+    let max_age = header(reqwest::header::CACHE_CONTROL).and_then(|value| {
+        value.split(',').find_map(|part| part.trim().strip_prefix("max-age=")?.trim().parse::<u64>().ok())
+    });
+    if let Some(seconds) = max_age {
+        return now.saturating_add(seconds.saturating_mul(1000));
+    }
+    let expires = header(reqwest::header::EXPIRES)
+        .and_then(|value| httpdate::parse_http_date(value).ok())
+        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|at| u64::try_from(at.as_millis()).ok());
+    expires.unwrap_or(now.saturating_add(FRESH_AT_LEAST))
+}
+
+/// A tile: from memory while fresh, else from `dir` on disk while fresh, else from the server,
+/// asked whether the copy on disk still holds (`If-None-Match`, `If-Modified-Since`) when there
+/// is one, as OpenStreetMap's tile policy asks. A copy past its time still shows when the
+/// server can't be reached.
+async fn tile(http: &reqwest::Client, dir: &Path, zoom: u8, column: u32, row: u32) -> Result<Tile, String> {
     let key = (zoom, column, row);
+    let now = now_ms();
     if let Ok(mut cache) = tile_cache().lock()
-        && let Some(index) = cache.iter().position(|(k, _)| *k == key)
+        && let Some(index) = cache.iter().position(|(k, _, until)| *k == key && *until > now)
     {
         let entry = cache.remove(index);
         let tile = Arc::clone(&entry.1);
         cache.push(entry);
         return Ok(tile);
     }
-    let url = format!("{TILE_SERVER}/{zoom}/{column}/{row}.png");
-    let response = http.get(&url).send().await.map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("the map server answered {}", response.status()));
-    }
-    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    let file = dir.join(zoom.to_string()).join(column.to_string()).join(format!("{row}.png"));
+    let meta = file.with_extension("json");
+    let on_disk = tokio::fs::read(&file).await.ok();
+    let mut kept: Kept = match tokio::fs::read(&meta).await {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        Err(_) => Kept::default(),
+    };
+    let bytes = match on_disk {
+        Some(bytes) if kept.fresh_until_ms > now => bytes,
+        on_disk => {
+            let mut request = http.get(format!("{TILE_SERVER}/{zoom}/{column}/{row}.png"));
+            if on_disk.is_some() {
+                if let Some(etag) = &kept.etag {
+                    request = request.header(reqwest::header::IF_NONE_MATCH, etag);
+                }
+                if let Some(modified) = &kept.last_modified {
+                    request = request.header(reqwest::header::IF_MODIFIED_SINCE, modified);
+                }
+            }
+            match (request.send().await, on_disk) {
+                (Ok(response), Some(bytes)) if response.status() == reqwest::StatusCode::NOT_MODIFIED => {
+                    kept.fresh_until_ms = fresh_until(response.headers(), now);
+                    write_kept(&meta, &kept).await;
+                    bytes
+                }
+                (Ok(response), _) if response.status().is_success() => {
+                    let header =
+                        |name| response.headers().get(name).and_then(|value| value.to_str().ok()).map(str::to_owned);
+                    kept = Kept {
+                        fresh_until_ms: fresh_until(response.headers(), now),
+                        etag: header(reqwest::header::ETAG),
+                        last_modified: header(reqwest::header::LAST_MODIFIED),
+                    };
+                    let bytes = response.bytes().await.map_err(|e| e.to_string())?.to_vec();
+                    if let Some(parent) = file.parent()
+                        && tokio::fs::create_dir_all(parent).await.is_ok()
+                        && tokio::fs::write(&file, &bytes).await.is_ok()
+                    {
+                        write_kept(&meta, &kept).await;
+                    }
+                    bytes
+                }
+                // The server can't be reached, or failed: a copy past its time is better than none.
+                (_, Some(bytes)) => bytes,
+                (Ok(response), None) => return Err(format!("the map server answered {}", response.status())),
+                (Err(error), None) => return Err(error.to_string()),
+            }
+        }
+    };
     let decoded = tokio::task::spawn_blocking(move || image::load_from_memory(&bytes).map(|image| image.into_rgba8()))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
     let tile = Arc::new(decoded);
     if let Ok(mut cache) = tile_cache().lock() {
-        cache.push((key, Arc::clone(&tile)));
+        cache.retain(|(k, _, _)| *k != key);
+        cache.push((key, Arc::clone(&tile), kept.fresh_until_ms.max(now + 60_000)));
         let excess = cache.len().saturating_sub(TILES_KEPT);
         cache.drain(..excess);
     }
     Ok(tile)
 }
 
+/// Writes what is kept beside a tile; a failure only costs asking the server sooner.
+async fn write_kept(meta: &Path, kept: &Kept) {
+    if let Ok(json) = serde_json::to_vec(kept) {
+        let _ = tokio::fs::write(meta, json).await;
+    }
+}
+
 /// Draws the map `media` names as a PNG the size `size` asks for, a pin at its place.
-pub(crate) async fn draw_map(http: &reqwest::Client, media: &MediaRef, size: MediaSize) -> Result<Vec<u8>, Error> {
+pub(crate) async fn draw_map(
+    http: &reqwest::Client,
+    tiles: &Path,
+    media: &MediaRef,
+    size: MediaSize,
+) -> Result<Vec<u8>, Error> {
     let (latitude, longitude, zoom) = map_of(media).ok_or(Error::MessageUnavailable)?;
     let (width, height) = match size {
         MediaSize::Original => ORIGINAL_MAP,
@@ -210,8 +310,9 @@ pub(crate) async fn draw_map(http: &reqwest::Client, media: &MediaRef, size: Med
     let mut fetched = Vec::with_capacity(placed.len());
     // Two at a time, as the tile policy asks.
     for pair in placed.chunks(2) {
-        let tiles =
-            futures_util::future::join_all(pair.iter().map(|((column, row), _)| tile(http, zoom, *column, *row)));
+        let tiles = futures_util::future::join_all(
+            pair.iter().map(|((column, row), _)| tile(http, tiles, zoom, *column, *row)),
+        );
         for (result, (_, at)) in tiles.await.into_iter().zip(pair) {
             fetched.push((result.map_err(|e| Error::Storage(std::io::Error::other(e)))?, *at));
         }
@@ -390,6 +491,25 @@ mod tests {
     }
 
     #[test]
+    fn a_tile_should_stay_fresh_for_the_servers_max_age() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::CACHE_CONTROL, "public, max-age=600".parse().expect("header"));
+        assert_eq!(fresh_until(&headers, 1_000), 601_000);
+    }
+
+    #[test]
+    fn a_tile_should_stay_fresh_until_it_expires() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::EXPIRES, "Thu, 01 Jan 1970 00:10:00 GMT".parse().expect("header"));
+        assert_eq!(fresh_until(&headers, 1_000), 600_000);
+    }
+
+    #[test]
+    fn a_tile_the_server_says_nothing_of_should_stay_fresh_a_day() {
+        assert_eq!(fresh_until(&reqwest::header::HeaderMap::new(), 0), FRESH_AT_LEAST);
+    }
+
+    #[test]
     fn a_composed_map_should_be_the_size_asked_for_with_the_pin_at_its_middle() {
         let tile = Arc::new(image::RgbaImage::from_pixel(256, 256, image::Rgba([200, 220, 200, 255])));
         let png = compose(120, 80, &[(tile, (-60, -60))]).expect("a map");
@@ -406,7 +526,12 @@ mod tests {
     async fn a_map_should_be_drawn_from_openstreetmap() {
         let http = crate::links::http_client().expect("client");
         let media = map("geo:52.5163,13.3777").expect("a map");
-        let png = draw_map(&http, &media, MediaSize::Thumbnail { width: 400, height: 240 }).await.expect("drawn");
+        let tiles = std::env::temp_dir().join(format!("matrix-core-tiles-{}", std::process::id()));
+        let png =
+            draw_map(&http, &tiles, &media, MediaSize::Thumbnail { width: 400, height: 240 }).await.expect("drawn");
+        // Kept on disk, with when to ask again.
+        let kept = std::fs::read_dir(tiles.join(MAP_ZOOM.to_string())).expect("tiles kept").count();
+        assert!(kept > 0);
         // To look at it: `MAP_PNG=/tmp/map.png cargo test -p matrix-core -- --ignored geo::`.
         if let Ok(path) = std::env::var("MAP_PNG") {
             std::fs::write(path, &png).expect("written");

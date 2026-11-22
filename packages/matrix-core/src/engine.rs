@@ -2680,11 +2680,11 @@ impl State {
             }
             Command::FetchMedia { account, media, size } if crate::geo::is_map(&media) => {
                 // Maps come from OpenStreetMap, drawn to the size asked for: no account needed.
-                let http = self.http.clone();
+                let (http, tiles) = (self.http.clone(), self.layout.map_tiles());
                 let _ = account;
                 Box::pin(async move {
                     let http = http.map_err(|reason| Error::Link { url: String::new(), reason })?;
-                    let bytes = crate::geo::draw_map(&http, &media, size).await?;
+                    let bytes = crate::geo::draw_map(&http, &tiles, &media, size).await?;
                     sink.emit(Event::MediaLoaded { request, media, size, bytes: bytes.into() });
                     Ok(Outcome::Done)
                 })

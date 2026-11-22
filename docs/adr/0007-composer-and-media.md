@@ -64,7 +64,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   could show or act through it, and a link around a spoiler is no link, its words being hidden.
   A spoiler wins over everything else an element says (maths too), and a code block holding one
   shows as ordinary text, as fields keep no pills in code blocks; for the same reason the
-  composer makes no spoiler or formula inside a code block. Formulas
+  composer makes no spoiler or formula inside a code block, nor a code block over a pill.
+  `/spoiler` writes its spoiler itself (`html::spoiler`), line breaks and all, whatever the field
+  held its words as. Formulas
   (`data-mx-maths`) show as one line of Unicode on a chip, in italics (`matrix_core::math`:
   Greek and symbols by name, scripts in Unicode's super- and subscripts or `^(…)`, `\frac` as
   `a/b`, unknown commands kept); there is no typesetting engine for Rune, and Unicode keeps
@@ -88,8 +90,12 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   `geo:` URI, a pin asset (MSC3488) and the place's name as its body (else its coordinates).
   Maps come from OpenStreetMap, as asked: a map is a `MediaRef` (`osm:lat,lon,zoom`) that
   `Command::FetchMedia` draws from the standard tiles at the size asked for, with a pin, so maps
-  load, cache and retry as pictures do on both apps. Tiles are fetched two at a time and the last
-  64 kept in memory, with a User-Agent naming the app and its home (OpenStreetMap's tile policy);
+  load, cache and retry as pictures do on both apps. As OpenStreetMap's tile policy asks, tiles
+  are kept on disk (`StoreLayout::map_tiles`) for as long as the server's `Cache-Control` or
+  `Expires` say (a day when it says nothing), then asked for again with `If-None-Match` /
+  `If-Modified-Since`, a copy past its time still showing when the server can't be reached; the
+  last 64 are also kept decoded in memory, and they are fetched two at a time with a User-Agent
+  naming the app and its home;
   every map credits "© OpenStreetMap contributors". Loading a map tells OpenStreetMap the
   device's address and the area shown, for places shared in encrypted rooms too, so Settings →
   General → Maps of shared places turns maps off (on by default, as GIFs from links): cards and

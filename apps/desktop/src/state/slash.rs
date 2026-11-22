@@ -178,12 +178,21 @@ impl State {
             return Some(Vec::new());
         }
         match command {
-            SlashCommand::Me | SlashCommand::Plain | SlashCommand::Spoiler => {
+            SlashCommand::Spoiler => {
+                // Written out here rather than through the field, whose code blocks keep no pills:
+                // the words go hidden whatever the field holds them as.
                 let composer = self.composer_mut(target);
                 composer.cut_front(len);
-                if command == SlashCommand::Spoiler {
-                    composer.hide_all();
-                }
+                let words = composer.edit.text.trim().to_owned();
+                let (reply, _) = composer.take_outgoing();
+                composer.reply_to = reply;
+                let html = matrix_core::html::spoiler(&words);
+                let body = super::composer::SPOILER_FALLBACK.to_owned();
+                Some(vec![Outgoing::Text { body, html: Some(html), mentions: Default::default() }])
+            }
+            SlashCommand::Me | SlashCommand::Plain => {
+                let composer = self.composer_mut(target);
+                composer.cut_front(len);
                 let (reply, messages) = composer.take_outgoing();
                 let mut messages = messages.into_iter();
                 let first = messages.next().map(|message| match message {

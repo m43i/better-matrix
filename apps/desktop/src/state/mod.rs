@@ -735,6 +735,8 @@ pub struct State {
     pub message_jump: Option<search::MessageJump>,
     /// The message just jumped to, lit a moment.
     pub flash: Option<jump::Flash>,
+    /// The latest jump waiting for the engine to find its message: only its answer goes.
+    locating: Option<RequestId>,
     /// Rooms' custom emoji and sticker packs.
     pub packs: packs::Packs,
     /// The location dialog, while [`Modal::Location`] shows.
@@ -889,6 +891,7 @@ impl State {
             search: PeopleSearch::default(),
             message_jump: None,
             flash: None,
+            locating: None,
             packs: packs::Packs::default(),
             location: LocationForm::default(),
             scheduled: scheduled::Scheduled::default(),
@@ -1554,7 +1557,9 @@ impl State {
             // Pushes are for phones: the desktop syncs while it runs and never registers a pusher.
             Event::PushContent { .. } => {}
             Event::EditHistory { event_id, versions, .. } => self.edit_history_listed(&event_id, versions),
-            Event::MessageLocated { account, key, event_id, .. } => self.message_located(&account, &key, &event_id),
+            Event::MessageLocated { request, account, key, event_id } => {
+                self.message_located(request, &account, &key, &event_id);
+            }
             Event::ScheduledMessages { account, messages } => self.scheduled.listed(account, messages),
             Event::ImagePacks { account, room_id, packs } => {
                 if let Some(room_id) = room_id {

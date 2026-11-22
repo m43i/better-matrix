@@ -222,6 +222,15 @@ pub fn from_pills(html: &str) -> String {
     out
 }
 
+/// `words` hidden as one spoiler, line breaks kept: the Matrix HTML `/spoiler` sends.
+///
+/// ```
+/// assert_eq!(matrix_core::html::spoiler("a <b>\nc"), "<span data-mx-spoiler>a &lt;b&gt;<br />c</span>");
+/// ```
+pub fn spoiler(words: &str) -> String {
+    format!("<span data-mx-spoiler>{}</span>", escape(words).replace('\n', "<br />"))
+}
+
 /// The Matrix HTML for a pill that is its label's text alone: custom emoji, `@room`, maths.
 fn atom_html(id: &str, label: &str) -> String {
     if let Some(src) = id.strip_prefix("emote:") {
@@ -287,6 +296,8 @@ fn element_text<'a>(mut rest: &'a str, name: &str) -> (String, &'a str) {
         rest = &rest[end + 1..];
         match tag_name(tag) {
             Some((image, false)) if image == "img" => text.push_str(&attribute(tag, "alt").unwrap_or_default()),
+            // A pill is one line: a break inside one parts its words with a space.
+            Some((line, false)) if line == "br" => text.push(' '),
             Some((tag_name, closing)) if tag_name == name => {
                 if closing {
                     depth -= 1;
@@ -445,6 +456,14 @@ mod tests {
         let html = "<span data-mx-spoiler><img src=\"mxc://x.org/cat\" alt=\":cat:\"> and \
                     <a href=\"https://matrix.to/#/@ada:x.org\">Ada</a> did it</span>";
         assert_eq!(to_pills(html, Pills::Display), "<span data-pill=\"spoiler\">:cat: and Ada did it</span>");
+    }
+
+    #[test]
+    fn a_line_break_in_a_spoiler_should_part_its_words() {
+        assert_eq!(
+            to_pills("<span data-mx-spoiler>first<br />second</span>", Pills::Display),
+            "<span data-pill=\"spoiler\">first second</span>"
+        );
     }
 
     #[test]

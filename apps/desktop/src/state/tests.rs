@@ -5792,11 +5792,13 @@ fn a_link_to_a_message_should_ask_where_it_shows() {
 fn a_message_found_in_a_thread_should_open_its_thread() {
     let (mut s, mut commands) = state();
     let id = writing(&mut s, &mut commands);
+    s.jump_to_message(&id, "!one:x", "$reply");
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::LocateMessage { .. }))
+        .expect("a lookup");
     let key = TimelineKey::thread("!one:x", "$root");
-    apply(
-        &mut s,
-        Event::MessageLocated { request: RequestId(1), account: id, key: key.clone(), event_id: "$reply".into() },
-    );
+    apply(&mut s, Event::MessageLocated { request, account: id, key: key.clone(), event_id: "$reply".into() });
     assert_eq!(s.active_thread(), Some("$root"));
     assert!(s.message_jump.as_ref().is_some_and(|jump| jump.key == key && jump.event_id == "$reply"));
 }
@@ -5967,9 +5969,48 @@ fn a_message_found_after_leaving_its_room_should_not_pull_the_user_back() {
     with_rooms(&mut s, &id, &["!one:x", "!two:x"], Vec::new());
     s.select_room("!one:x");
     drain(&mut commands);
+    s.jump_to_message(&id, "!one:x", "$m");
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::LocateMessage { .. }))
+        .expect("a lookup");
     s.select_room("!two:x");
     let key = TimelineKey::room("!one:x");
-    apply(&mut s, Event::MessageLocated { request: RequestId(1), account: id, key, event_id: "$m".into() });
+    apply(&mut s, Event::MessageLocated { request, account: id, key, event_id: "$m".into() });
     assert_eq!(s.active_room_id(), Some("!two:x"));
     assert!(s.message_jump.is_none());
+}
+
+#[test]
+fn an_earlier_jump_answering_late_should_not_undo_a_later_one() {
+    let (mut s, mut commands) = state();
+    let id = writing(&mut s, &mut commands);
+    s.jump_to_message(&id, "!one:x", "$first");
+    s.jump_to_message(&id, "!one:x", "$second");
+    let lookups: Vec<_> = drain(&mut commands)
+        .into_iter()
+        .filter(|(_, command)| matches!(command, Command::LocateMessage { .. }))
+        .map(|(request, _)| request)
+        .collect();
+    let [first, second] = lookups.as_slice() else { panic!("two lookups") };
+    let thread = |root: &str| TimelineKey::thread("!one:x", root);
+    apply(
+        &mut s,
+        Event::MessageLocated { request: *second, account: id.clone(), key: thread("$b"), event_id: "$second".into() },
+    );
+    apply(&mut s, Event::MessageLocated { request: *first, account: id, key: thread("$a"), event_id: "$first".into() });
+    assert_eq!(s.active_thread(), Some("$b"));
+}
+
+#[test]
+fn spoiler_should_hide_its_words_even_in_a_code_block() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.composer.format(Format::CodeBlock);
+    s.composer.edit.insert("/spoiler secret");
+    s.send_message(ComposerTarget::Room, &mut Tx::default());
+    let messages = sent(&mut commands);
+    let [Outgoing::Text { body, html: Some(html), .. }] = messages.as_slice() else { panic!("{messages:?}") };
+    assert_eq!(body, "[Spoiler]");
+    assert_eq!(html, "<span data-mx-spoiler>secret</span>");
 }

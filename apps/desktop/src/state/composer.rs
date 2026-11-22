@@ -172,7 +172,7 @@ fn html_of(edit: &TextEdit) -> Option<String> {
 
 /// What a spoiler's words become in a message's plain body: the same in every language, as
 /// it goes to everyone.
-const SPOILER_FALLBACK: &str = "[Spoiler]";
+pub(super) const SPOILER_FALLBACK: &str = "[Spoiler]";
 
 /// A field's plain body: its text, with each spoiler's words kept out of it, as clients that
 /// show only the body would show them to everyone.
@@ -335,10 +335,22 @@ impl Composer {
                 self.edit.toggle_mark(mark.clone());
                 self.fresh = (selection.0 < selection.1 && self.edit.has_mark(&mark)).then_some((mark, selection.1));
             }
+            // A code block keeps no pills: one over a spoiler, a mention or a formula would send
+            // their words as plain code, so it isn't made there.
+            (_, Some(Block::Code)) if self.pills_in_selected_paragraphs() => {}
             (_, Some(block)) => self.edit.toggle_block(block),
             _ if self.edit.active_link().is_some() => self.edit.set_link(None),
             _ => self.link = Some(TextEdit::new("https://")),
         }
+    }
+
+    /// Whether a pill lies in the paragraphs the selection touches.
+    fn pills_in_selected_paragraphs(&self) -> bool {
+        let text = &self.edit.text;
+        let (start, end) = (self.edit.anchor.min(self.edit.focus), self.edit.anchor.max(self.edit.focus));
+        let first = text[..start.min(text.len())].rfind('\n').map_or(0, |i| i + 1);
+        let last = text[end.min(text.len())..].find('\n').map_or(text.len(), |i| end + i);
+        self.edit.pills().any(|(range, _)| range.start < last.max(first + 1) && first < range.end.max(range.start + 1))
     }
 
     /// Applies the typed URL to the selection and closes link entry.
@@ -587,13 +599,6 @@ impl Composer {
         } else {
             self.edit.insert(&format!(" {text}"));
         }
-    }
-
-    /// Hides the whole field's text as one spoiler (`/spoiler`).
-    pub fn hide_all(&mut self) {
-        let end = self.edit.text.len();
-        self.edit.set_selection(0, end);
-        self.format(Format::Spoiler);
     }
 
     /// Empties the field and drops its reply, keeping its focus: a command took its text.
@@ -862,6 +867,16 @@ mod tests {
         assert_eq!(c.edit.text, "helo!");
         c.cancel_edit();
         assert_eq!(c.edit.text, "draft");
+    }
+
+    #[test]
+    fn a_code_block_should_not_be_made_over_a_spoiler() {
+        let mut c = composer("the ");
+        c.edit.insert_pill("spoiler", "butler");
+        c.edit.set_selection(0, 0);
+        c.format(Format::CodeBlock);
+        assert_eq!(c.edit.pills().count(), 1);
+        assert_ne!(c.edit.active_block(), Block::Code);
     }
 
     #[test]

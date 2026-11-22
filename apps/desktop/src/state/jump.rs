@@ -31,6 +31,7 @@ impl State {
                 .is_some_and(|timeline| timeline.messages().any(|message| message.event_id == event_id))
         });
         if let (true, Some((_, key))) = (held, shown) {
+            self.locating = None;
             self.open_message(&key, event_id);
             return;
         }
@@ -39,12 +40,23 @@ impl State {
             room_id: room_id.to_owned(),
             event_id: event_id.to_owned(),
         };
-        self.dispatch(command, Purpose::Locate);
+        self.locating = Some(self.dispatch(command, Purpose::Locate));
     }
 
     /// The engine found where a message shows: open it there, if its account and room are
     /// still the ones on screen (the user may have gone elsewhere meanwhile).
-    pub(super) fn message_located(&mut self, account: &AccountId, key: &TimelineKey, event_id: &str) {
+    pub(super) fn message_located(
+        &mut self,
+        request: matrix_core::RequestId,
+        account: &AccountId,
+        key: &TimelineKey,
+        event_id: &str,
+    ) {
+        // Only the latest jump goes: an earlier one answering late would undo it.
+        if self.locating != Some(request) {
+            return;
+        }
+        self.locating = None;
         if self.nav.account.as_ref() != Some(account) || self.active_room_id() != Some(key.room_id.as_str()) {
             return;
         }

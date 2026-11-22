@@ -10,6 +10,8 @@ base64.workspace = true
 eyeball-im.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
+# Reads tiles' `Expires` for the map tile cache (src/geo.rs).
+httpdate = "1"
 # Scales thumbnails a server sends larger than asked for down to their box (src/thumbnail.rs).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 livekit.workspace = true

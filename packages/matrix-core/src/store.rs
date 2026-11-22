@@ -20,6 +20,11 @@ impl StoreLayout {
         &self.root
     }
 
+    /// Where map tiles from OpenStreetMap are kept between runs (`crate::geo`).
+    pub fn map_tiles(&self) -> PathBuf {
+        self.root.join("map-tiles")
+    }
+
     /// A new, empty store directory for one login: `<root>/accounts/<random>`. Every login gets
     /// its own, so accounts never share a state, crypto or media store, and a re-login starts as a
     /// fresh device.
