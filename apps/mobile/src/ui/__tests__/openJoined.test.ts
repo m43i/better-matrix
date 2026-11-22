@@ -3,7 +3,7 @@ import { detachedEngine } from '@better-matrix/matrix-native/client';
 import { routes } from '../../routes';
 import { Store } from '../../state/store';
 import { ADA, summary } from '../../test/fixtures';
-import { openJoined } from '../links/open';
+import { openElsewhere, openJoined } from '../links/open';
 
 const navigation = { navigate: jest.fn(), push: jest.fn() };
 
@@ -77,5 +77,57 @@ describe('openJoined at a message', () => {
     engine.emit({ type: 'Finished', data: { request: sent[0]!.request, result: { Err: 'no' } } });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(navigation.push.mock.calls).toEqual([[routes.room(ADA, '!r:x', '$m')]]);
+  });
+});
+
+describe('openElsewhere', () => {
+  const located = async (where: { thread: string | null } | 'unknown', current: string | null) => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+
+    const opened = openElsewhere(
+      store,
+      ADA,
+      { room_id: '!r:x', thread: current },
+      '$q',
+      navigation,
+    );
+
+    const request = sent[0]!.request;
+
+    if (where !== 'unknown')
+      engine.emit({
+        type: 'MessageLocated',
+        data: { request, account: ADA, key: { room_id: '!r:x', ...where }, event_id: '$q' },
+      });
+    engine.emit({
+      type: 'Finished',
+      data: { request, result: where === 'unknown' ? { Err: 'no' } : { Ok: null } },
+    });
+
+    return [await opened, navigation.push.mock.calls];
+  };
+
+  it('a quoted reply in a thread should open in its thread', async () => {
+    expect(await located({ thread: '$root' }, null)).toEqual([
+      true,
+      [[routes.thread(ADA, '!r:x', '$root', '$q')]],
+    ]);
+  });
+
+  it('a room message quoted in a thread should open in the room', async () => {
+    expect(await located({ thread: null }, '$root')).toEqual([
+      true,
+      [[routes.room(ADA, '!r:x', '$q')]],
+    ]);
+  });
+
+  it('a quoted message that would show in this timeline should open nothing', async () => {
+    expect(await located({ thread: '$root' }, '$root')).toEqual([false, []]);
+  });
+
+  it('a quoted message the engine can’t find should open nothing', async () => {
+    expect(await located('unknown', null)).toEqual([false, []]);
   });
 });
