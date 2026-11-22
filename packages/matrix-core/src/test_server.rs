@@ -48,9 +48,12 @@ impl Server {
                         }
                     }
                 }
-                let body = reply(&String::from_utf8_lossy(&request)).to_string();
+                let reply = reply(&String::from_utf8_lossy(&request));
+                // A Matrix "not found" goes with its status, as servers send it.
+                let status = if reply["errcode"] == "M_NOT_FOUND" { "404 Not Found" } else { "200 OK" };
+                let body = reply.to_string();
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 let _ = stream.write_all(response.as_bytes());

@@ -4672,6 +4672,7 @@ dependencies = [
  "matrix-sdk-ui",
  "mime_guess",
  "nokhwa",
+ "ruma",
  "rustls",
  "serde",
  "serde_json",

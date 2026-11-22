@@ -16,6 +16,7 @@ livekit.workspace = true
 matrix-sdk.workspace = true
 matrix-sdk-ui.workspace = true
 matrix-sdk-base.workspace = true
+ruma.workspace = true
 mime_guess.workspace = true
 nokhwa.workspace = true
 rustls.workspace = true

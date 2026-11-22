@@ -198,6 +198,7 @@ fn base_message(event: &EventTimelineItem, me: &UserId) -> Message {
         read_receipts,
         reply_to: None,
         thread: None,
+        highlighted: event.is_highlighted(),
     }
 }
 

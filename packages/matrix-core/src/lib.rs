@@ -16,6 +16,9 @@ pub mod account;
 pub mod calls;
 pub mod discovery;
 pub mod engine;
+pub mod geo;
+pub mod html;
+pub mod math;
 pub mod model;
 pub mod people;
 pub mod permalinks;
@@ -31,9 +34,13 @@ pub mod store;
 
 mod convert;
 mod drafts;
+mod edits;
 mod history;
+mod outgoing;
+mod packs;
 mod polls;
 mod saved;
+mod scheduled;
 mod session;
 #[cfg(test)]
 mod test_server;
@@ -55,10 +62,11 @@ pub use engine::{
     StoreSharing,
 };
 pub use model::{
-    AccountId, AccountSummary, Attachment, AttachmentKind, AudioDetails, CallCard, EntryKind, HistoryVisibility,
-    Invitation, LoginMethods, MediaRef, MediaSize, Message, MessageContent, Notification, NotificationMode, Outgoing,
-    Password, Person, Poll, PollAnswer, PublicRoom, PushContent, PushTarget, Pusher, Quote, Reaction, ReadReceipt,
-    RoomChange, RoomEvent, RoomKind, RoomList, RoomSummary, SignInMethod, SpaceSummary, ThreadSummary, TimelineDiff,
+    AccountId, AccountSummary, Attachment, AttachmentKind, AudioDetails, CallCard, EditVersion, EntryKind,
+    HistoryVisibility, ImagePack, Invitation, Location, LoginMethods, MediaRef, MediaSize, Mentions, Message,
+    MessageContent, Notification, NotificationMode, Outgoing, PackImage, Password, Person, Place, Poll, PollAnswer,
+    PublicRoom, PushContent, PushTarget, Pusher, Quote, Reaction, ReadReceipt, RoomChange, RoomEvent, RoomKind,
+    RoomList, RoomSummary, ScheduledAction, ScheduledMessage, SignInMethod, SpaceSummary, ThreadSummary, TimelineDiff,
     TimelineEntry, TimelineKey, Upload,
 };
 

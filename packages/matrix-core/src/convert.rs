@@ -300,7 +300,25 @@ pub(crate) fn content(msgtype: &MessageType) -> MessageContent {
     let attachment = match msgtype {
         MessageType::Text(c) => return text(&c.body, &c.formatted),
         MessageType::Notice(c) => return text(&c.body, &c.formatted),
-        MessageType::Emote(c) => return text(&format!("* {}", c.body), &None),
+        MessageType::Emote(c) => {
+            return MessageContent::Emote {
+                body: c.body.clone(),
+                html: c.formatted.as_ref().filter(|f| f.format == MessageFormat::Html).map(|f| f.body.clone()),
+            };
+        }
+        MessageType::Location(c) => {
+            let description = c.body.trim();
+            // A body that only repeats the coordinates says nothing more.
+            let description = (!description.is_empty()
+                && !description.starts_with("geo:")
+                && !description.contains(c.geo_uri.trim_start_matches("geo:").split(';').next().unwrap_or_default()))
+            .then(|| description.to_owned());
+            return MessageContent::Location(crate::model::Location {
+                geo_uri: c.geo_uri.clone(),
+                description,
+                map: crate::geo::map(&c.geo_uri),
+            });
+        }
         MessageType::Image(c) => {
             let info = c.info.as_deref();
             Attachment {

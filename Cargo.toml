@@ -22,6 +22,8 @@ matrix-sdk = { version = "0.19.1", features = [
 ] }
 matrix-sdk-ui = "0.19.1"
 matrix-sdk-base = "0.19.1"
+# The SDK's own ruma, with MSC4140's delayed events for scheduled messages.
+ruma = { version = "0.17.2", default-features = false, features = ["unstable-msc4140"] }
 eyeball-im = "0.9"
 futures-util = "0.3"
 getrandom = "0.4"

@@ -1,0 +1,90 @@
+[
+  {
+    "latex": "x^2 + y^2 = r^2",
+    "unicode": "x² + y² = r²"
+  },
+  {
+    "latex": "a_1 + a_{10}",
+    "unicode": "a₁ + a₁₀"
+  },
+  {
+    "latex": "\\frac{1}{2}",
+    "unicode": "1/2"
+  },
+  {
+    "latex": "\\frac{a+b}{c}",
+    "unicode": "(a+b)/c"
+  },
+  {
+    "latex": "\\sqrt{2}",
+    "unicode": "√2"
+  },
+  {
+    "latex": "\\sqrt{x+1}",
+    "unicode": "√(x+1)"
+  },
+  {
+    "latex": "\\sqrt[3]{8} = 2",
+    "unicode": "∛8 = 2"
+  },
+  {
+    "latex": "\\alpha + \\beta \\to \\gamma",
+    "unicode": "α + β → γ"
+  },
+  {
+    "latex": "E = mc^2",
+    "unicode": "E = mc²"
+  },
+  {
+    "latex": "e^{i\\pi} + 1 = 0",
+    "unicode": "e^(iπ) + 1 = 0"
+  },
+  {
+    "latex": "\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}",
+    "unicode": "∑ᵢ₌₁ⁿ i = (n(n+1))/2"
+  },
+  {
+    "latex": "\\int_0^\\infty e^{-x} dx = 1",
+    "unicode": "∫₀^∞ e⁻ˣ dx = 1"
+  },
+  {
+    "latex": "\\forall x \\in \\mathbb{R}, x^2 \\geq 0",
+    "unicode": "∀ x ∈ ℝ, x² ≥ 0"
+  },
+  {
+    "latex": "\\left( \\frac{1}{n} \\right)",
+    "unicode": "( 1/n )"
+  },
+  {
+    "latex": "\\text{speed} = \\frac{d}{t}",
+    "unicode": "speed = d/t"
+  },
+  {
+    "latex": "a \\neq b \\iff \\neg (a = b)",
+    "unicode": "a ≠ b ⇔ ¬ (a = b)"
+  },
+  {
+    "latex": "\\sin^2\\theta + \\cos^2\\theta = 1",
+    "unicode": "sin²θ + cos²θ = 1"
+  },
+  {
+    "latex": "\\lim_{x \\to 0} f(x)",
+    "unicode": "lim_(x → 0) f(x)"
+  },
+  {
+    "latex": "\\unknowncommand{x}",
+    "unicode": "\\unknowncommand x"
+  },
+  {
+    "latex": "\\{1, 2\\}",
+    "unicode": "{1, 2}"
+  },
+  {
+    "latex": "\\vec{v}",
+    "unicode": "v⃗"
+  },
+  {
+    "latex": "\\Delta x \\approx 0.5",
+    "unicode": "Δ x ≈ 0.5"
+  }
+]

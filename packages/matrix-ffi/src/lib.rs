@@ -194,7 +194,7 @@ mod tests {
             account: AccountId::new("@a:example.org"),
             key: TimelineKey::room("!r:example.org"),
             reply_to: None,
-            message: Outgoing::Text { body: "hi".into(), html: None },
+            message: Outgoing::Text { body: "hi".into(), html: None, mentions: Default::default() },
         };
         assert_eq!(parse_command(json).unwrap(), expected);
     }

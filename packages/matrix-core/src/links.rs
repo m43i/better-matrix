@@ -294,11 +294,12 @@ async fn fetch(http: &reqwest::Client, url: &str, limit: usize) -> Result<Vec<u8
     Ok(body)
 }
 
-/// An HTTP client for linked files: no cookies, a short timeout.
+/// An HTTP client for linked files and maps: no cookies, a short timeout. It names the app
+/// and where to read about it, as OpenStreetMap's tile and search policies ask; never the user.
 pub(crate) fn http_client() -> Result<reqwest::Client, Error> {
     crate::tls::http(reqwest::Client::builder())
         .timeout(Duration::from_secs(20))
-        .user_agent("BetterMatrix")
+        .user_agent(concat!("BetterMatrix/", env!("CARGO_PKG_VERSION"), " (+https://github.com/m43i/better-matrix)"))
         .build()
         .map_err(|e| Error::Link { url: String::new(), reason: e.to_string() })
 }

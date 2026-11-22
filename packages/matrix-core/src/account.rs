@@ -14,7 +14,6 @@ use matrix_sdk::notification_settings::{IsEncrypted, IsOneToOne};
 use matrix_sdk::reqwest::Url;
 use matrix_sdk::ruma::RoomId;
 use matrix_sdk::ruma::events::room::MediaSource;
-use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::utils::local_server::{LocalServerBuilder, LocalServerRedirectHandle};
 use matrix_sdk::{Client, Room, SessionChange};
@@ -84,6 +83,21 @@ pub struct Account {
     pub(crate) saved_changes: Arc<tokio::sync::Mutex<()>>,
     /// Draft reads and writes, in the order they were asked for (`crate::drafts`).
     pub(crate) drafts: crate::drafts::DraftQueue,
+    /// The client's own crypto, for sends the SDK doesn't encrypt itself (`crate::scheduled`);
+    /// `None` in tests.
+    pub(crate) crypto: Option<Crypto>,
+}
+
+/// The base client a [`Client`] was built on, kept to reach its encryption machine: the SDK
+/// encrypts only what it sends itself, and MSC4140's scheduled messages must be encrypted
+/// before they go (`crate::scheduled`).
+#[derive(Clone)]
+pub(crate) struct Crypto(pub(crate) matrix_sdk_base::BaseClient);
+
+impl std::fmt::Debug for Crypto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Crypto")
+    }
 }
 
 /// Where the browser comes back to after an OAuth sign-in.
@@ -111,6 +125,7 @@ pub(crate) enum Redirect {
 pub(crate) struct PendingOAuth {
     pub url: Url,
     client: Client,
+    crypto: Crypto,
     holder: Holder,
     redirect: Redirect,
     store_dir: PathBuf,
@@ -224,15 +239,15 @@ pub(crate) async fn build_client(
     passphrase: &str,
     sessions: &Sessions,
     holder: Holder,
-) -> Result<Client, Error> {
+) -> Result<(Client, Crypto), Error> {
     use matrix_sdk::cross_process_lock::CrossProcessLockConfig;
     let locks = holder.name().map_or(CrossProcessLockConfig::SingleProcess, CrossProcessLockConfig::multi_process);
+    let base = base_client(&store_config(store_dir, holder).passphrase(Some(passphrase)), &locks).await?;
     let client = crate::tls::sdk(Client::builder())
         .homeserver_url(homeserver_url)
-        .sqlite_store_with_config_and_cache_path(
-            store_config(store_dir, holder).passphrase(Some(passphrase)),
-            None::<&Path>,
-        )
+        // The base client the SDK's builder would build from these store settings, built here
+        // so the account keeps a handle to it (`Crypto`).
+        .base_client(base.clone())
         .cross_process_store_config(locks)
         .with_encryption_settings(ENCRYPTION)
         .handle_refresh_tokens()
@@ -259,10 +274,71 @@ pub(crate) async fn build_client(
             }),
         )
         .map_err(Error::Sdk)?;
-    Ok(client)
+    Ok((client, Crypto(base)))
+}
+
+/// A store that failed to open.
+fn store_failed(error: impl std::error::Error + Send + Sync + 'static) -> Error {
+    Error::Storage(std::io::Error::other(error))
+}
+
+/// The base client the SDK's builder makes for a SQLite store: the same four databases (the
+/// event cache and media in the store's own folder), and its defaults for threading, direct
+/// chats, key recipients and decryption trust.
+async fn base_client(
+    config: &matrix_sdk::SqliteStoreConfig,
+    locks: &matrix_sdk::cross_process_lock::CrossProcessLockConfig,
+) -> Result<matrix_sdk_base::BaseClient, Error> {
+    use matrix_sdk::{SqliteCryptoStore, SqliteEventCacheStore, SqliteMediaStore, SqliteStateStore};
+    let (state, events, media, crypto) = tokio::try_join!(
+        async { SqliteStateStore::open_with_config(config).await.map_err(store_failed) },
+        async { SqliteEventCacheStore::open_with_config(config).await.map_err(store_failed) },
+        async { SqliteMediaStore::open_with_config(config).await.map_err(store_failed) },
+        async { SqliteCryptoStore::open_with_config(config).await.map_err(store_failed) },
+    )?;
+    let stores = matrix_sdk_base::store::StoreConfig::new(locks.clone())
+        .state_store(state)
+        .event_cache_store(events)
+        .media_store(media)
+        .crypto_store(crypto);
+    let mut base = matrix_sdk_base::BaseClient::new(
+        stores,
+        matrix_sdk_base::ThreadingSupport::Disabled,
+        matrix_sdk_base::DmRoomDefinition::MatrixSpec,
+    );
+    base.room_key_recipient_strategy = matrix_sdk_base::crypto::CollectStrategy::default();
+    base.decryption_settings = matrix_sdk_base::crypto::DecryptionSettings {
+        sender_device_trust_requirement: matrix_sdk_base::crypto::TrustRequirement::Untrusted,
+    };
+    Ok(base)
 }
 
 impl Account {
+    /// A signed-in test account on a real store in `dir`, its crypto at hand, as the engine's
+    /// accounts are.
+    #[cfg(test)]
+    pub(crate) async fn for_test_with_store(homeserver: &str, dir: &Path) -> Self {
+        let sessions = Sessions::new(dir, Arc::new(crate::secrets::MemorySecrets::default()));
+        let (client, crypto) =
+            build_client(homeserver, &dir.join("store"), "passphrase", &sessions, Holder::Alone).await.expect("client");
+        let session: matrix_sdk::authentication::matrix::MatrixSession = serde_json::from_value(serde_json::json!({
+            "user_id": "@a:example.org", "device_id": "TEST", "access_token": "test-token"
+        }))
+        .expect("test session");
+        client.restore_session(session).await.expect("restore test session");
+        Self {
+            id: AccountId::new("@a:example.org"),
+            client,
+            session_changes: Arc::new(Mutex::new(None)),
+            rtc: Arc::new(Mutex::new(None)),
+            status: Arc::default(),
+            status_saves: Arc::default(),
+            saved_changes: Arc::default(),
+            drafts: crate::drafts::DraftQueue::default(),
+            crypto: Some(crypto),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) async fn for_test(homeserver: &str) -> Self {
         let client = Client::builder()
@@ -286,6 +362,7 @@ impl Account {
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
+            crypto: None,
         }
     }
 
@@ -299,14 +376,14 @@ impl Account {
         let resume = request.resume.as_ref();
         let (store_dir, passphrase, device) =
             store_for(layout, sessions, resume, &request.homeserver, Some(&request.username)).await?;
-        let client = build_client(&request.homeserver, &store_dir, &passphrase, sessions, holder).await?;
+        let (client, crypto) = build_client(&request.homeserver, &store_dir, &passphrase, sessions, holder).await?;
         let mut login = client.matrix_auth().login_username(&request.username, &request.password);
         login = match &device {
             Some(device) => login.device_id(device.as_str()),
             None => login.initial_device_display_name(DEVICE_DISPLAY_NAME),
         };
         login.await?;
-        Self::signed_in(client, sessions, holder, store_dir, passphrase).await
+        Self::signed_in(client, crypto, sessions, holder, store_dir, passphrase).await
     }
 
     /// Starts a browser sign-in on a resolved homeserver URL: registers this app with the
@@ -322,7 +399,7 @@ impl Account {
         app_redirect: Option<(Url, tokio::sync::oneshot::Receiver<String>)>,
     ) -> Result<PendingOAuth, Error> {
         let (store_dir, passphrase, device) = store_for(layout, sessions, resume, homeserver, None).await?;
-        let client = build_client(homeserver, &store_dir, &passphrase, sessions, holder).await?;
+        let (client, crypto) = build_client(homeserver, &store_dir, &passphrase, sessions, holder).await?;
         let (redirect_uri, redirect) = match app_redirect {
             Some((uri, returned)) => (uri, Redirect::App(returned)),
             None => {
@@ -338,7 +415,7 @@ impl Account {
         metadata.client_name = Some(Localized::new(identity.name.clone(), []));
         let metadata = Raw::new(&metadata).map_err(|e| Error::Storage(e.into()))?;
         let data = client.oauth().login(redirect_uri, device, Some(metadata.into()), None).build().await?;
-        Ok(PendingOAuth { url: data.url, client, holder, redirect, store_dir, passphrase })
+        Ok(PendingOAuth { url: data.url, client, crypto, holder, redirect, store_dir, passphrase })
     }
 
     /// Resumes a saved session.
@@ -346,14 +423,16 @@ impl Account {
         let id = stored.id.clone();
         let secrets = blocking(sessions, move |s| s.secrets(&id)).await?;
         let secrets = secrets.ok_or_else(|| Error::UnknownAccount(AccountId::new(&stored.id)))?;
-        let client = build_client(&stored.homeserver, &stored.store_dir, &secrets.passphrase, sessions, holder).await?;
+        let (client, crypto) =
+            build_client(&stored.homeserver, &stored.store_dir, &secrets.passphrase, sessions, holder).await?;
         let changes = client.subscribe_to_session_changes();
         client.restore_session(secrets.auth.into_session()).await?;
-        Self::ready(AccountId::new(&stored.id), client, holder, changes).await
+        Self::ready(AccountId::new(&stored.id), client, crypto, holder, changes).await
     }
 
     async fn signed_in(
         client: Client,
+        crypto: Crypto,
         sessions: &Sessions,
         holder: Holder,
         store_dir: PathBuf,
@@ -365,7 +444,7 @@ impl Account {
         let homeserver = client.homeserver().to_string();
         let stored = StoredAccount { id: id.to_string(), homeserver, store_dir, signed_out: false };
         blocking(sessions, move |s| s.save(stored, &StoredSecrets { auth, passphrase })).await?;
-        Self::ready(id, client, holder, changes).await
+        Self::ready(id, client, crypto, holder, changes).await
     }
 
     /// Turns on what every signed-in account runs: the event cache, which keeps room history on
@@ -374,6 +453,7 @@ impl Account {
     async fn ready(
         id: AccountId,
         client: Client,
+        crypto: Crypto,
         holder: Holder,
         changes: broadcast::Receiver<SessionChange>,
     ) -> Result<Self, Error> {
@@ -399,6 +479,7 @@ impl Account {
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
+            crypto: Some(crypto),
         })
     }
 
@@ -654,14 +735,14 @@ impl Account {
         let room = self.joined_room(room_id)?;
         let queue = room.send_queue();
         match message {
-            Outgoing::Text { body, html: Some(html) } => {
-                queue.send(RoomMessageEventContent::text_html(body, html).into()).await?;
-            }
-            Outgoing::Text { body, html: None } => {
-                queue.send(RoomMessageEventContent::text_plain(body).into()).await?;
-            }
-            Outgoing::Poll { question, answers, disclosed } => {
-                queue.send(crate::polls::start(question, answers, *disclosed)?).await?;
+            Outgoing::Text { .. }
+            | Outgoing::Emote { .. }
+            | Outgoing::Location { .. }
+            | Outgoing::Poll { .. }
+            | Outgoing::Sticker(_) => {
+                if let Some(content) = crate::outgoing::event(message)? {
+                    queue.send(content).await?;
+                }
             }
             Outgoing::File(upload) | Outgoing::Voice { upload, .. } => {
                 let data = match upload {
@@ -819,7 +900,7 @@ impl PendingOAuth {
             }
         };
         self.client.oauth().finish_login(returned).await?;
-        Account::signed_in(self.client, sessions, self.holder, self.store_dir, self.passphrase).await
+        Account::signed_in(self.client, self.crypto, sessions, self.holder, self.store_dir, self.passphrase).await
     }
 }
 
@@ -893,7 +974,7 @@ pub(crate) async fn open_for_push(
     let stored = stored.filter(|stored| !stored.signed_out).ok_or_else(unknown)?;
     let key = stored.id.clone();
     let saved = blocking(&sessions, move |s| s.secrets(&key)).await?.ok_or_else(unknown)?;
-    let client =
+    let (client, _) =
         build_client(&stored.homeserver, &stored.store_dir, &saved.passphrase, &sessions, Holder::Push).await?;
     client.restore_session(saved.auth.into_session()).await?;
     Ok(client)
@@ -965,7 +1046,8 @@ mod tests {
     /// An account on a store shared with another client, as the engine and a push share one.
     async fn sharing(server: &str, dir: &Path, holder: Holder) -> Account {
         let sessions = Sessions::new(dir, Arc::new(crate::secrets::MemorySecrets::default()));
-        let client = build_client(server, &dir.join("store"), "passphrase", &sessions, holder).await.expect("client");
+        let (client, _) =
+            build_client(server, &dir.join("store"), "passphrase", &sessions, holder).await.expect("client");
         let session: matrix_sdk::authentication::matrix::MatrixSession = serde_json::from_value(serde_json::json!({
             "user_id": "@a:example.org", "device_id": "TEST", "access_token": "test-token"
         }))
@@ -984,6 +1066,7 @@ mod tests {
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
+            crypto: None,
         }
     }
 

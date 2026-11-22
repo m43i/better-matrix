@@ -433,6 +433,10 @@ pub struct Message {
     pub reply_to: Option<Quote>,
     /// The thread started from this message, if it has replies.
     pub thread: Option<ThreadSummary>,
+    /// It mentions the account (by name, `@room` or the account's keywords), as the
+    /// account's push rules decide.
+    #[cfg_attr(feature = "ffi", serde(default))]
+    pub highlighted: bool,
 }
 
 /// A reader's latest position in a room timeline, as exposed by the SDK.
@@ -624,6 +628,126 @@ pub enum MessageContent {
     Poll(Poll),
     /// A call started in the room: MatrixRTC's ring, or a one-to-one invite.
     Call(CallCard),
+    /// An emote (`/me waves`): the action, which the app shows after the sender's name.
+    Emote {
+        /// The plain-text action, always present.
+        body: String,
+        /// The sender's formatting as Matrix HTML, if any. Untrusted, as for text.
+        html: Option<String>,
+    },
+    /// A place on a map (`m.location`).
+    Location(Location),
+}
+
+/// A place a message shares.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct Location {
+    /// Where, as an RFC 5870 `geo:` URI (`geo:51.5008,0.1247;u=35`); read it with
+    /// [`geo::coordinates`](crate::geo::coordinates).
+    pub geo_uri: String,
+    /// What the sender said about it, when it says more than the coordinates.
+    pub description: Option<String>,
+    /// A map of it from OpenStreetMap, to fetch like any media; `None` when the URI doesn't
+    /// parse.
+    pub map: Option<MediaRef>,
+}
+
+/// Who a message mentions on purpose (`m.mentions`): notified whatever its text says.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct Mentions {
+    /// The people mentioned, by full user ID.
+    #[cfg_attr(feature = "ffi", serde(default))]
+    pub user_ids: Vec<String>,
+    /// Everyone in the room (`@room`).
+    #[cfg_attr(feature = "ffi", serde(default))]
+    pub room: bool,
+}
+
+/// A custom emoji or sticker pack (MSC2545 image packs): the user's own, or a room's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct ImagePack {
+    /// Stable for the pack: `user`, or the room ID and state key it was read from.
+    pub id: String,
+    /// What the pack calls itself, or the room's name.
+    pub name: String,
+    /// The pack's picture, if it has one.
+    pub avatar: Option<MediaRef>,
+    /// Its images, in the pack's order.
+    pub images: Vec<PackImage>,
+}
+
+/// One image of an [`ImagePack`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct PackImage {
+    /// The short code it is typed as, without colons (`blobcat`).
+    pub shortcode: String,
+    /// What it shows, for a sticker's body; the short code when the pack says nothing.
+    pub body: String,
+    /// The image's `mxc://` URI, which messages carry.
+    pub url: String,
+    /// The image, to fetch like any media.
+    pub media: MediaRef,
+    /// May be used as a custom emoji in text.
+    pub emoticon: bool,
+    /// May be sent as a sticker.
+    pub sticker: bool,
+    /// Width and height in pixels, when the pack says.
+    pub dimensions: Option<(u32, u32)>,
+    /// Its media type, when the pack says.
+    pub mimetype: Option<String>,
+}
+
+/// One version of an edited message, for its edit history.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct EditVersion {
+    /// The version's own event ID (the original's for the first).
+    pub event_id: String,
+    /// What it said.
+    pub body: String,
+    /// Its formatting as Matrix HTML, if any. Untrusted, as for text.
+    pub html: Option<String>,
+    /// When it was sent, in milliseconds since the Unix epoch.
+    pub timestamp_ms: u64,
+}
+
+/// A message the server holds to send later (MSC4140 delayed events).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct ScheduledMessage {
+    /// The server's ID for it, to cancel it or send it now.
+    pub delay_id: String,
+    /// The room it goes to.
+    pub room_id: String,
+    /// When it goes, in milliseconds since the Unix epoch.
+    pub send_at_ms: u64,
+    /// What it says, as far as this device can read it: `None` for content it can't (another
+    /// device's encrypted message), else the plain-text body.
+    pub body: Option<String>,
+}
+
+/// What to do with a [`ScheduledMessage`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub enum ScheduledAction {
+    /// Drop it unsent.
+    Cancel,
+    /// Send it at once.
+    SendNow,
+}
+
+/// A place found by name, for sharing a location.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct Place {
+    /// Its name, as the search service gives it (`Brandenburger Tor, Pariser Platz, Berlin`).
+    pub name: String,
+    /// Where it is, as a `geo:` URI.
+    pub geo_uri: String,
 }
 
 /// A call's card in the timeline. Whether the call is still under way is the room's
@@ -684,6 +808,8 @@ impl MessageContent {
             Self::Text { body, .. } => body,
             Self::Attachment(attachment) => &attachment.name,
             Self::Poll(poll) => &poll.question,
+            Self::Emote { body, .. } => body,
+            Self::Location(location) => location.description.as_deref().unwrap_or(&location.geo_uri),
             Self::Redacted | Self::Undecryptable | Self::Call(_) => "",
         }
     }
@@ -803,6 +929,28 @@ pub enum Outgoing {
         body: String,
         /// The same text as Matrix HTML, when it carries formatting.
         html: Option<String>,
+        /// Who it mentions on purpose; sent as `m.mentions` (empty: nobody).
+        #[cfg_attr(feature = "ffi", serde(default))]
+        mentions: Mentions,
+    },
+    /// An emote (`/me waves`), optionally formatted.
+    Emote {
+        /// The action, without the sender's name.
+        body: String,
+        /// The same as Matrix HTML, when it carries formatting.
+        html: Option<String>,
+        /// Who it mentions on purpose.
+        #[cfg_attr(feature = "ffi", serde(default))]
+        mentions: Mentions,
+    },
+    /// A sticker from an image pack.
+    Sticker(PackImage),
+    /// A place on a map.
+    Location {
+        /// Where, as a `geo:` URI ([`geo::uri`](crate::geo::uri) makes one).
+        geo_uri: String,
+        /// What to call it (a place's name), if anything.
+        description: Option<String>,
     },
     /// A file, uploaded and sent as an image, video, audio clip or file by its type.
     File(Upload),

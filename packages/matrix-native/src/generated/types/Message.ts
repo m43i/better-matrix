@@ -63,4 +63,9 @@ reply_to: Quote | null,
 /**
  * The thread started from this message, if it has replies.
  */
-thread: ThreadSummary | null, };
+thread: ThreadSummary | null, 
+/**
+ * It mentions the account (by name, `@room` or the account's keywords), as the
+ * account's push rules decide.
+ */
+highlighted: boolean, };

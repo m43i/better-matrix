@@ -6,7 +6,9 @@ import type { CallEnd } from "./CallEnd";
 import type { CallInfo } from "./CallInfo";
 import type { Contacts } from "./Contacts";
 import type { Draft } from "./Draft";
+import type { EditVersion } from "./EditVersion";
 import type { Homeserver } from "./Homeserver";
+import type { ImagePack } from "./ImagePack";
 import type { IncomingCall } from "./IncomingCall";
 import type { LinkPreview } from "./LinkPreview";
 import type { MediaRef } from "./MediaRef";
@@ -21,12 +23,14 @@ import type { Password } from "./Password";
 import type { PendingContact } from "./PendingContact";
 import type { Person } from "./Person";
 import type { PersonPresence } from "./PersonPresence";
+import type { Place } from "./Place";
 import type { PublicRoom } from "./PublicRoom";
 import type { PushContent } from "./PushContent";
 import type { RequestId } from "./RequestId";
 import type { RoomList } from "./RoomList";
 import type { RoomPreview } from "./RoomPreview";
 import type { SavedMessage } from "./SavedMessage";
+import type { ScheduledMessage } from "./ScheduledMessage";
 import type { SearchUsage } from "./SearchUsage";
 import type { Security } from "./Security";
 import type { Session } from "./Session";
@@ -465,4 +469,64 @@ request: RequestId,
 /**
  * What to show.
  */
-content: PushContent, } };
+content: PushContent, } } | { "type": "EditHistory", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, 
+/**
+ * The message.
+ */
+event_id: string, 
+/**
+ * Its versions, the original first.
+ */
+versions: Array<EditVersion>, } } | { "type": "MessageLocated", "data": { 
+/**
+ * The command it answers.
+ */
+request: RequestId, 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room's timeline, or the message's thread.
+ */
+key: TimelineKey, 
+/**
+ * The message.
+ */
+event_id: string, } } | { "type": "ScheduledMessages", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * What the server holds.
+ */
+messages: Array<ScheduledMessage>, } } | { "type": "ImagePacks", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The room they were listed for.
+ */
+room_id: string | null, 
+/**
+ * The packs: the user's own first.
+ */
+packs: Array<ImagePack>, } } | { "type": "PlacesFound", "data": { 
+/**
+ * The search it answers.
+ */
+request: RequestId, 
+/**
+ * Best first.
+ */
+places: Array<Place>, } };

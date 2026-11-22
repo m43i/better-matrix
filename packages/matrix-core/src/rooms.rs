@@ -305,6 +305,16 @@ impl Account {
         room.set_name(name.trim().to_owned()).await?;
         Ok(())
     }
+
+    /// Sets a joined room's topic; an empty one clears it.
+    pub async fn set_topic(&self, room_id: &str, topic: &str) -> Result<(), Error> {
+        let room = self
+            .client()
+            .get_room(&RoomId::parse(room_id)?)
+            .ok_or_else(|| Error::UnknownRoom { account: self.id().clone(), room_id: room_id.to_owned() })?;
+        room.set_room_topic(topic.trim()).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
