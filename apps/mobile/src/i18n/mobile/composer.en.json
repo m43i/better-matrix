@@ -35,6 +35,7 @@
   "mobile.composer.command_unknown": "Unknown command /{{name}}. Start the message with // to send it as text.",
   "mobile.composer.command_usage": "Usage: /{{name}} {{args}}",
   "mobile.composer.command_failed": "That didn’t work: {{error}}",
+  "mobile.composer.pills_unkept": "This message holds too many private-use characters to keep its mentions and spoilers apart from them. Remove some and try again.",
   "mobile.composer.mention_everyone": "Notify everyone in this room",
   "mobile.composer.suggestions": "Suggestions",
   "mobile.composer.sticker": "Sticker",

@@ -125,3 +125,19 @@ export function spaceSummary(
 ): SpaceSummary {
   return { room_id, name, avatar: null, can_add_rooms: true, can_rename: true, children, members };
 }
+
+/** Every character from `first` to `last`, in order. */
+function codePoints(first: number, last: number): string {
+  let text = '';
+
+  for (let c = first; c <= last; c++) text += String.fromCodePoint(c);
+
+  return text;
+}
+
+/** The BMP's whole private use area, as a pasted run of icons might hold it. */
+export const BMP_PRIVATE_USE = codePoints(0xe000, 0xf8ff);
+
+/** Every private-use character Unicode has: no placeholder is left for a pill. */
+export const EVERY_PRIVATE_USE =
+  BMP_PRIVATE_USE + codePoints(0xf0000, 0xffffd) + codePoints(0x100000, 0x10fffd);

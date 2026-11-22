@@ -408,15 +408,19 @@ const PLAIN: Marks = {
 };
 
 /**
- * Where pills stand while a draft is parsed: each is one character of Unicode's private use area,
- * so markers around a pill format it and nothing inside its label reads as a marker. Only
- * characters the text doesn't hold are used (`placeholders`): one typed or pasted stays text.
+ * Where pills stand while a draft is parsed: each is one character of Unicode's private use areas
+ * (the BMP's, then planes 15 and 16), so markers around a pill format it and nothing inside its
+ * label reads as a marker. Only characters the text doesn't hold are used (`placeholders`): one
+ * typed or pasted stays text. A character past the BMP is two UTF-16 units, neither a marker nor
+ * a space nor a letter, so the parser reads it as it reads one in the BMP.
  */
-const PILL_FIRST = 0xe000;
+const PILL_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0xe000, 0xf8ff],
+  [0xf0000, 0xffffd],
+  [0x100000, 0x10fffd],
+];
 
-const PILL_LAST = 0xf8ff;
-
-const PILL_CHAR = /[\ue000-\uf8ff]/g;
+const PILL_CHAR = /[-\u{f0000}-\u{ffffd}\u{100000}-\u{10fffd}]/gu;
 
 /** The pills of a text being parsed, by the private-use character that stands for each. */
 type Placeholders = ReadonlyMap<string, Pill>;
@@ -427,17 +431,29 @@ type Placeholders = ReadonlyMap<string, Pill>;
  */
 function placeholders(text: string): () => string | null {
   const used = new Set(text.match(PILL_CHAR));
-  let code = PILL_FIRST;
+  let range = 0;
+  let code = PILL_RANGES[0]?.[0] ?? 0;
 
   return () => {
-    while (code <= PILL_LAST && used.has(String.fromCharCode(code))) code++;
+    for (let r = PILL_RANGES[range]; r; r = PILL_RANGES[range]) {
+      while (code <= r[1] && used.has(String.fromCodePoint(code))) code++;
 
-    return code <= PILL_LAST ? String.fromCharCode(code++) : null;
+      if (code <= r[1]) return String.fromCodePoint(code++);
+      range++;
+      code = PILL_RANGES[range]?.[0] ?? 0;
+    }
+
+    return null;
   };
 }
 
-/** The body and HTML the desktop sends for the same text, formatting and pills. */
-export function outgoingText(draft: string, given: readonly DraftPill[] = []): OutgoingText {
+/**
+ * The body and HTML the desktop sends for the same text, formatting and pills; `null` when the
+ * draft holds so many private-use characters that its pills can't each stand as one it lacks
+ * (over 137,000 of them, past what a Matrix event carries): sent anyway, a spoiler's words would
+ * go out as plain text, so it isn't sent at all.
+ */
+export function outgoingText(draft: string, given: readonly DraftPill[] = []): OutgoingText | null {
   const text = draft.replace(/\r\n?/g, '\n');
 
   // Line ends written as one character move the pills after them.
@@ -458,7 +474,7 @@ export function outgoingText(draft: string, given: readonly DraftPill[] = []): O
   for (const p of placePills(text, pills)) {
     const c = next();
 
-    if (c === null) break;
+    if (c === null) return null;
     source += text.slice(at, p.start) + c;
     found.set(c, p.pill);
     at = p.end;
@@ -549,7 +565,8 @@ function expandPills(text: string, pills: Placeholders, write: (pill: Pill) => s
 
 /** Whether a draft has anything to send as text. */
 export function hasText(draft: string): boolean {
-  return outgoingText(draft).body !== '';
+  // Without pills there is nothing to place, so the draft always reads.
+  return (outgoingText(draft)?.body ?? '') !== '';
 }
 
 function isPlain(marks: Marks): boolean {

@@ -5,9 +5,28 @@ import {
   continueBlock,
   draftOf,
   editDraft,
-  outgoingText,
+  type OutgoingText,
+  outgoingText as outgoingTextOrNull,
 } from '../format';
-import { emotePill, EVERYONE, pillAt, spoilerPill, trackPills, userPill } from '../pills';
+import {
+  type DraftPill,
+  emotePill,
+  EVERYONE,
+  pillAt,
+  spoilerPill,
+  trackPills,
+  userPill,
+} from '../pills';
+import { BMP_PRIVATE_USE, EVERY_PRIVATE_USE } from '../../test/fixtures';
+
+/** What a draft sends, for drafts whose pills are always kept. */
+function outgoingText(draft: string, pills?: readonly DraftPill[]): OutgoingText {
+  const text = outgoingTextOrNull(draft, pills);
+
+  if (!text) throw new Error('the pills were not kept');
+
+  return text;
+}
 
 const caret = (at: number) => ({ start: at, end: at });
 
@@ -386,6 +405,33 @@ describe('outgoingText with pills', () => {
     });
   });
 
+  it('should keep a spoiler hidden in a draft holding the BMP’s whole private use area', () => {
+    const draft = `${BMP_PRIVATE_USE} ||@Grace|| secret`;
+    const grace = userPill('@grace:x.org', 'Grace');
+
+    expect(
+      outgoingText(draft, [
+        pillAt(grace, BMP_PRIVATE_USE.length + 3),
+        pillAt(spoilerPill('secret'), BMP_PRIVATE_USE.length + 12),
+      ]),
+    ).toEqual({
+      body: `${BMP_PRIVATE_USE} [Spoiler] [Spoiler]`,
+      html:
+        `<p>${BMP_PRIVATE_USE} <span data-mx-spoiler>` +
+        '<a href="https://matrix.to/#/@grace:x.org">Grace</a></span> ' +
+        '<span data-mx-spoiler>secret</span></p>',
+      mentions: { user_ids: ['@grace:x.org'], room: false },
+    });
+  });
+
+  it('should send nothing when the draft leaves its pills no private-use character', () => {
+    const draft = `${EVERY_PRIVATE_USE} secret`;
+
+    expect(
+      outgoingTextOrNull(draft, [pillAt(spoilerPill('secret'), EVERY_PRIVATE_USE.length + 1)]),
+    ).toBeNull();
+  });
+
   it('should send a custom emoji as an image, its short code in the body', () => {
     expect(outgoingText('yay :cat:', [pillAt(emotePill('mxc://x.org/c', 'cat'), 4)])).toEqual({
       body: 'yay :cat:',
@@ -466,6 +512,20 @@ describe('editDraft', () => {
     expect(
       editDraft('Grace: hi', '<a href="https://matrix.to/#/@grace:x.org">Grace</a>: hi'),
     ).toEqual({ draft: '@Grace: hi', pills: [pillAt(userPill('@grace:x.org', 'Grace'), 0)] });
+  });
+
+  it('should bring back a mention in a message holding the BMP’s whole private use area', () => {
+    const grace = userPill('@grace:x.org', 'Grace');
+
+    expect(
+      editDraft(
+        `${BMP_PRIVATE_USE} Grace`,
+        `${BMP_PRIVATE_USE} <a href="https://matrix.to/#/@grace:x.org">Grace</a>`,
+      ),
+    ).toEqual({
+      draft: `${BMP_PRIVATE_USE} @Grace`,
+      pills: [pillAt(grace, BMP_PRIVATE_USE.length + 1)],
+    });
   });
 
   it('should keep a private-use character the message holds as text beside a pill', () => {

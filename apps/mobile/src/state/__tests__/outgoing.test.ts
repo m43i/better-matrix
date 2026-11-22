@@ -1,5 +1,5 @@
 import { type ComposerState, EMPTY_COMPOSER, type PendingAttachment } from '../composer';
-import { pillAt, userPill } from '../pills';
+import { pillAt, spoilerPill, userPill } from '../pills';
 import {
   canSend,
   excerpt,
@@ -15,7 +15,7 @@ import {
   withAttachments,
 } from '../outgoing';
 import { roomKey } from '../timeline';
-import { ADA, message } from '../../test/fixtures';
+import { ADA, EVERY_PRIVATE_USE, message } from '../../test/fixtures';
 
 /** `m.mentions` for a message that mentions nobody. */
 const NOBODY = { user_ids: [], room: false };
@@ -290,6 +290,42 @@ describe('planSend with pills and commands', () => {
       { type: 'unknown', name: 'frob' },
       '/frob',
     ]);
+  });
+});
+
+describe('a draft whose pills can’t be kept', () => {
+  /** Every private-use character, then a spoiler: no character is left to stand for it. */
+  const draft = `${EVERY_PRIVATE_USE} secret`;
+  const pills = [pillAt(spoilerPill('secret'), EVERY_PRIVATE_USE.length + 1)];
+
+  it('should send nothing, keep the draft and say why', () => {
+    const composer = { ...EMPTY_COMPOSER, draft, pills };
+    const plan = planSend(composer, ADA, KEY);
+    expect([plan.commands, plan.problem, plan.composer]).toEqual([[], { type: 'pills' }, composer]);
+  });
+
+  it('should save no edit, keeping the edit under way', () => {
+    const composer = { ...editing(draft, 'hi'), pills };
+    const plan = planSend(composer, ADA, KEY);
+    expect([plan.commands, plan.problem, plan.composer]).toEqual([[], { type: 'pills' }, composer]);
+  });
+
+  it('should not be scheduled', () => {
+    const composer = { ...EMPTY_COMPOSER, draft, pills };
+    expect([scheduleProblem(composer, ADA, KEY), planSchedule(composer, ADA, KEY, 1)]).toEqual([
+      { type: 'pills' },
+      null,
+    ]);
+  });
+
+  it('should send nothing for /me either', () => {
+    const composer = {
+      ...EMPTY_COMPOSER,
+      draft: `/me ${draft}`,
+      pills: [pillAt(spoilerPill('secret'), EVERY_PRIVATE_USE.length + 5)],
+    };
+
+    expect(planSend(composer, ADA, KEY).problem).toEqual({ type: 'pills' });
   });
 });
 

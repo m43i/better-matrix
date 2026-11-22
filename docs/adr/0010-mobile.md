@@ -186,7 +186,10 @@ Date: 2026-11-16
   On send each placed label becomes one private-use character while the markers are parsed, so
   markers around it format it and nothing in a name reads as a marker (only characters the
   draft doesn't hold are used, so one typed or pasted stays text; editing a message's HTML back
-  into a draft does the same); it then goes as the
+  into a draft does the same). They come from the BMP's private use area, then planes 15 and
+  16, over 137,000 in all; a draft holding so many that a pill gets none (more than a Matrix
+  event carries) is not sent, edited or scheduled at all, since its spoilers' words would go out
+  as plain text: the draft stays as it is and a notice says why. A pill then goes as the
   engine's HTML (`<a href="https://matrix.to/#/@…">Name</a>`, the ID one percent-encoded segment
   but for `@`, `#`, `!` and `:` as the engine's `mention_link` writes it, `permalinks.ts`
   `mentionLink`, so a `/` in it can't cut it short; `<img data-mx-emoticon …>`,

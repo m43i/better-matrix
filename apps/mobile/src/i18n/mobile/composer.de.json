@@ -35,6 +35,7 @@
   "mobile.composer.command_unknown": "Unbekannter Befehl /{{name}}. Beginne die Nachricht mit //, um sie als Text zu senden.",
   "mobile.composer.command_usage": "Verwendung: /{{name}} {{args}}",
   "mobile.composer.command_failed": "Das hat nicht geklappt: {{error}}",
+  "mobile.composer.pills_unkept": "Diese Nachricht enthält zu viele Zeichen aus dem privaten Nutzungsbereich, um ihre Erwähnungen und Spoiler davon zu unterscheiden. Entferne einige und versuche es erneut.",
   "mobile.composer.mention_everyone": "Alle in diesem Raum benachrichtigen",
   "mobile.composer.suggestions": "Vorschläge",
   "mobile.composer.sticker": "Sticker",

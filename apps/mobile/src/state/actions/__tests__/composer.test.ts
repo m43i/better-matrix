@@ -1,14 +1,14 @@
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 
 import { t } from '../../../i18n';
-import { ADA, message, summary, withContent } from '../../../test/fixtures';
+import { ADA, EVERY_PRIVATE_USE, message, summary, withContent } from '../../../test/fixtures';
 import { composer, startEdit, startReply } from '../../composer';
 import { applyFormat, continueBlock } from '../../format';
 import { editDraftOf } from '../../messages';
 import { newPollForm } from '../../pollForm';
 import { Store } from '../../store';
 import { roomKey, threadKey } from '../../timeline';
-import { emotePill, pillAt, userPill } from '../../pills';
+import { emotePill, pillAt, spoilerPill, userPill } from '../../pills';
 import {
   addAttachments,
   cancelEdit,
@@ -493,6 +493,20 @@ describe('commands from the composer', () => {
       composer(store.getState(), ADA, KEY).draft,
       store.getState().notices.map((n) => n.message),
     ]).toEqual([[], '/frob', [t('mobile.composer.command_unknown', { name: 'frob' })]]);
+  });
+
+  it('should say a draft whose pills can’t be kept wasn’t sent and keep it', () => {
+    const { store, commands } = setUp();
+    const draft = `${EVERY_PRIVATE_USE} secret`;
+    const pills = [pillAt(spoilerPill('secret'), EVERY_PRIVATE_USE.length + 1)];
+    completeDraft(store, ADA, KEY, draft, { start: draft.length, end: draft.length }, pills[0]!);
+    expect(sendComposer(store, ADA, KEY)).toBe(false);
+    expect([
+      commands(),
+      composer(store.getState(), ADA, KEY).draft === draft,
+      composer(store.getState(), ADA, KEY).pills,
+      store.getState().notices.map((n) => n.message),
+    ]).toEqual([[], true, pills, [t('mobile.composer.pills_unkept')]]);
   });
 
   it('should invite with /invite and empty the draft', () => {

@@ -7,7 +7,7 @@
 import type { AccountId, Command, Outgoing } from '@better-matrix/matrix-native/types';
 
 import type { Key } from '../i18n';
-import { outgoingText } from './format';
+import { type OutgoingText, outgoingText } from './format';
 import { type Permalink, parseTyped } from './permalinks';
 import {
   type DraftPill,
@@ -111,7 +111,16 @@ export type Slash =
   /** No such command. */
   | { type: 'unknown'; name: string }
   /** The command needs something it wasn't given (`/invite` without a person). */
-  | { type: 'usage'; name: string; args: Key };
+  | { type: 'usage'; name: string; args: Key }
+  /** Its pills can't be kept apart from the private-use characters it holds (`outgoingText`). */
+  | { type: 'pills' };
+
+/** A message of `type` with `text`, or the problem when its pills can't be kept. */
+function textSlash(type: 'Text' | 'Emote', text: OutgoingText | null): Slash {
+  if (!text) return { type: 'pills' };
+
+  return { type: 'message', message: { type, data: text } };
+}
 
 /** Where a draft is written, for the commands that act on the room. */
 export interface SlashContext {
@@ -139,13 +148,10 @@ export function slashOf(
   const lead = draft.length - trimmed.length;
 
   if (trimmed.startsWith('//'))
-    return {
-      type: 'message',
-      message: {
-        type: 'Text',
-        data: outgoingText(trimmed.slice(1), slicePills(draftPills, lead + 1, draft.length)),
-      },
-    };
+    return textSlash(
+      'Text',
+      outgoingText(trimmed.slice(1), slicePills(draftPills, lead + 1, draft.length)),
+    );
   const line = trimmed.replace(/\s+$/, '');
   const match = COMMAND.exec(line);
 
@@ -167,14 +173,12 @@ export function slashOf(
     const text = rest ? `${before} ${rest}` : before;
     const moved = slicePills(draftPills, from, from + rest.length, before.length + 1);
 
-    return { type: 'message', message: { type: 'Text', data: outgoingText(text, moved) } };
+    return textSlash('Text', outgoingText(text, moved));
   }
 
   switch (name) {
     case 'me':
-      return rest
-        ? { type: 'message', message: { type: 'Emote', data: outgoingText(rest, pills) } }
-        : usage();
+      return rest ? textSlash('Emote', outgoingText(rest, pills)) : usage();
     case 'plain':
       return rest
         ? {
