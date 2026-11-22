@@ -254,6 +254,7 @@ fn spec() -> AppSpec<State> {
                     play: true,
                     held: false,
                     scrub_from: None,
+                    sender: None,
                 });
             }),
             ("demo-typing", |s| {

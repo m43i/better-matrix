@@ -868,3 +868,40 @@ fn a_batch_should_leave_out_items_of_someone_ignored() {
     s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$batch-2", &files[2]);
     assert!(s.preview.is_none());
 }
+
+#[test]
+fn invitations_from_someone_ignored_should_leave_every_list_without_being_declined() {
+    let (mut s, mut commands) = state();
+    crate::demo::invitation(&mut s);
+    drain(&mut commands);
+    assert_eq!(s.accounts.get(&ada()).unwrap().shown_invitations().count(), 1);
+    // Ignored but not saved yet: gone already.
+    s.set_safety(&ada(), SafetyChange::Ignore { user_id: "@grace:example.org".into(), ignored: true });
+    let data = s.accounts.get(&ada()).unwrap();
+    assert_eq!(data.shown_invitations().count(), 0);
+    assert_eq!(data.hidden_invitations().count(), 0, "ignored, not merely a stranger");
+    assert_eq!(data.invitations.len(), 1, "still there");
+    assert!(!drain(&mut commands).iter().any(|(_, command)| matches!(command, Command::LeaveRoom { .. })));
+}
+
+#[test]
+fn a_clip_should_stop_once_its_sender_is_ignored() {
+    let (mut s, _) = state();
+    let clip = matrix_core::Attachment {
+        kind: matrix_core::AttachmentKind::Audio,
+        name: "hello.ogg".into(),
+        size: None,
+        media: Some(matrix_core::MediaRef::opaque("hello")),
+        thumbnail: None,
+        dimensions: None,
+        audio: None,
+    };
+    crate::demo::image_message(&mut s, clip.clone());
+    s.toggle_audio(&clip);
+    let audio = s.audio.as_ref().unwrap();
+    assert!(audio.play, "queued to play while it downloads");
+    assert_eq!(audio.sender, Some((ada(), "@grace:example.org".to_owned())));
+    let safety = Safety { ignored: vec!["@grace:example.org".into()], ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+    assert!(!s.audio.as_ref().unwrap().play, "no longer queued");
+}

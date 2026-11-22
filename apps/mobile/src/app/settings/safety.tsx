@@ -12,6 +12,7 @@ import { routes } from '../../routes';
 import { changeSafety, setIgnored } from '../../state/actions/safety';
 import { useAppStore } from '../../state/react';
 import { hiddenInvitations } from '../../state/safety';
+import { shownIgnored } from '../../state/selectors';
 import { Avatar } from '../../ui/Avatar';
 import { Divider, ListRow, ListSection } from '../../ui/components';
 import {
@@ -44,7 +45,8 @@ export default function SafetyScreen() {
   if (!account) return <NoAccount title={title} />;
   const id = account.summary.id;
   const { safety } = account;
-  const hidden = hiddenInvitations(account.invitations, safety);
+  // Ignored people's invitations show nowhere, this list included.
+  const hidden = hiddenInvitations(account.invitations, safety, shownIgnored(account));
 
   // A failed save says why in a notice and puts the choice back.
   const change = (...args: Parameters<typeof changeSafety>) =>

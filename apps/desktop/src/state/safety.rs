@@ -59,6 +59,7 @@ impl State {
     /// What shows may have changed: media no longer held back loads (rows on screen, linked
     /// GIFs, link cards, the preview and its strip), and invitations' pictures.
     pub(super) fn safety_changed(&mut self) {
+        self.stop_ignored_audio();
         self.reconcile_preview();
         self.request_timeline_media();
         self.fetch_linked(std::time::Instant::now());

@@ -821,3 +821,27 @@ describe('an open preview of an ignored person’s media', () => {
     ]).toEqual([false, true]);
   });
 });
+
+describe('invitations from someone the user ignores', () => {
+  const from = (room_id: string, stranger: boolean): Invitation => ({
+    ...invitation(room_id, stranger),
+    inviter: { id: GRACE, name: 'Grace', avatar: null },
+  });
+
+  it('should leave Home’s list and its count, an ignore on its way included', () => {
+    const state = updateAccount(signedIn(), ADA, (a) => ({
+      ...a,
+      invitations: [FRIEND, from('!grace:x', false)],
+      safety: { ...a.safety, ignored: [GRACE] },
+    }));
+
+    expect(activeRoomList(state)!.invitations).toEqual([FRIEND]);
+  });
+
+  it('should not be listed among the hidden invitations either', () => {
+    const safety = { ...DEFAULT_SAFETY, hide_stranger_invites: true };
+    expect(hiddenInvitations([STRANGER, from('!grace:x', true)], safety, [GRACE])).toEqual([
+      STRANGER,
+    ]);
+  });
+});

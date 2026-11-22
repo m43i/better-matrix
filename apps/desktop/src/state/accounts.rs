@@ -969,14 +969,34 @@ impl AccountData {
         })
     }
 
-    /// The invitations the sidebar and Home list: all but strangers' when the user hides them.
-    pub fn shown_invitations(&self) -> impl Iterator<Item = &matrix_core::Invitation> {
-        self.invitations.iter().filter(|invite| self.safety.shows_invitation(invite))
+    /// Who sent the attachment `media`, as a kept timeline knows it.
+    pub fn sender_of_media(&self, media: &matrix_core::MediaRef) -> Option<String> {
+        self.timelines.values().flat_map(RoomTimeline::messages).find_map(|message| match &message.content {
+            MessageContent::Attachment(file) if file.media.as_ref() == Some(media) => Some(message.sender_id.clone()),
+            _ => None,
+        })
     }
 
-    /// Strangers' invitations the user hides, which only Settings → Safety lists.
+    /// The invitations listed anywhere: all but those from people the user ignores ([`ignores`]),
+    /// which stay out of sight without being declined.
+    ///
+    /// [`ignores`]: AccountData::ignores
+    pub fn listed_invitations(&self) -> impl Iterator<Item = &matrix_core::Invitation> {
+        self.invitations
+            .iter()
+            .filter(|invite| invite.inviter.as_ref().is_none_or(|inviter| !self.ignores(&inviter.id)))
+    }
+
+    /// The invitations the sidebar and Home list: all but strangers' when the user hides them,
+    /// and never those of people the user ignores.
+    pub fn shown_invitations(&self) -> impl Iterator<Item = &matrix_core::Invitation> {
+        self.listed_invitations().filter(|invite| self.safety.shows_invitation(invite))
+    }
+
+    /// Strangers' invitations the user hides, which only Settings → Safety lists (not those of
+    /// people the user ignores).
     pub fn hidden_invitations(&self) -> impl Iterator<Item = &matrix_core::Invitation> {
-        self.invitations.iter().filter(|invite| !self.safety.shows_invitation(invite))
+        self.listed_invitations().filter(|invite| !self.safety.shows_invitation(invite))
     }
 
     /// Whether a message's pictures, video poster, linked GIF and link card image wait for a

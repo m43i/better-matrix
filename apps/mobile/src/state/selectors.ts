@@ -67,8 +67,9 @@ export function roomListOf(state: State, id: AccountId | null): RoomListData | u
     summary: data.summary,
     rooms: data.rooms,
     spaces: data.spaces,
-    // Strangers' invitations the user hides stay out of the list and its counter.
-    invitations: shownInvitations(data.invitations, data.safety),
+    // Strangers' invitations the user hides, and ignored people's, stay out of the list and its
+    // counter.
+    invitations: shownInvitations(data.invitations, data.safety, shownIgnored(data)),
     roomsLoaded: data.roomsLoaded,
     scope: data.scope,
     sidebar: data.sidebar,

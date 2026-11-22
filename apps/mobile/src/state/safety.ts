@@ -62,30 +62,49 @@ export function withChange(safety: Safety, change: SafetyChange): Safety {
   }
 }
 
-/** What `shownInvitations` answered per list while strangers are hidden: one array per list. */
-const shownCache = new WeakMap<Invitation[], Invitation[]>();
+/** What `shownInvitations` answered per list, with what it left out by. */
+const shownCache = new WeakMap<Invitation[], { by: string; shown: Invitation[] }>();
+
+/** Whether someone in `ignored` sent the invitation: it then shows nowhere (ADR 0011). */
+function fromIgnored(invitation: Invitation, ignored: readonly string[]): boolean {
+  return invitation.inviter !== null && ignored.includes(invitation.inviter.id);
+}
 
 /**
- * The invitations listed: all of them unless strangers' are hidden. The same list and choices
- * give the same array, so views comparing with `shallow` don't redraw.
+ * The invitations listed: all of them but strangers' when they are hidden, and never one from
+ * someone in `ignored` (the effective ignore list, `selectors.shownIgnored`). The same list and
+ * choices give the same array, so views comparing with `shallow` don't redraw.
  */
-export function shownInvitations(invitations: Invitation[], safety: Safety): Invitation[] {
-  if (!safety.hide_stranger_invites || !invitations.some((i) => i.stranger)) return invitations;
+export function shownInvitations(
+  invitations: Invitation[],
+  safety: Safety,
+  ignored: readonly string[] = [],
+): Invitation[] {
+  const drops = (i: Invitation) => !showsInvitation(safety, i) || fromIgnored(i, ignored);
+
+  if (!invitations.some(drops)) return invitations;
+  const by = `${safety.hide_stranger_invites}|${ignored.join(',')}`;
   const cached = shownCache.get(invitations);
 
-  if (cached) return cached;
-  const shown = invitations.filter((invitation) => showsInvitation(safety, invitation));
-  shownCache.set(invitations, shown);
+  if (cached?.by === by) return cached.shown;
+  const shown = invitations.filter((invitation) => !drops(invitation));
+  shownCache.set(invitations, { by, shown });
 
   return shown;
 }
 
-/** The invitations kept out of sight, which Settings → Safety lists. */
+/**
+ * The invitations kept out of sight, which Settings → Safety lists: strangers', but none from
+ * someone in `ignored`, whose invitations show nowhere.
+ */
 export function hiddenInvitations(
   invitations: readonly Invitation[],
   safety: Safety,
+  ignored: readonly string[] = [],
 ): Invitation[] {
-  return invitations.filter((invitation) => !showsInvitation(safety, invitation));
+  return invitations.filter(
+    (invitation) => !showsInvitation(safety, invitation) && !fromIgnored(invitation, ignored),
+  );
 }
 
 /** A message's key in `State.revealedMedia`: media the user tapped Show on, until restart. */

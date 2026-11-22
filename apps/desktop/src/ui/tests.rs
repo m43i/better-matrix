@@ -1157,6 +1157,7 @@ fn a_voice_memo_in_a_cramped_timeline_should_keep_its_controls_inside_it() {
             play: true,
             held: false,
             scrub_from: None,
+            sender: None,
         });
         // The widest speed label.
         s.settings.playback_speed = crate::state::PlaybackSpeed::Faster;

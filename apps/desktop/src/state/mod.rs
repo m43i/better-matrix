@@ -289,6 +289,9 @@ pub struct AudioClip {
     /// Where it was and whether it was to play when the pointer went down on its waveform, to go
     /// back to if the drag is cancelled; `None` when that press picked it.
     pub scrub_from: Option<(f64, bool)>,
+    /// The account and the person who sent it, when a kept timeline names them: it stops once
+    /// the user ignores them.
+    pub sender: Option<(AccountId, String)>,
 }
 
 /// A step of a press or drag along a clip's waveform (`State::scrub_audio`).
@@ -2661,8 +2664,7 @@ impl State {
                 let spaces = account.spaces.iter().filter_map(|space| space.avatar.as_ref());
                 // Invitations' pictures only where the user shows them.
                 let invitations = account
-                    .invitations
-                    .iter()
+                    .listed_invitations()
                     .filter(|_| account.safety.invite_pictures)
                     .filter_map(|invite| invite.avatar.as_ref());
                 rooms.chain(spaces).chain(invitations).map(move |media| (id, media))
@@ -3252,7 +3254,13 @@ impl State {
         // Picked by a press on its waveform, the release decides; else, picked at its very end,
         // it waits there for play.
         let play = held || start_at.is_none_or(|share| share < 1.0);
-        self.audio = Some(AudioClip { id, media: media.clone(), player: None, start_at, play, held, scrub_from: None });
+        let sender = self
+            .accounts
+            .get(&account)
+            .and_then(|data| data.sender_of_media(&media))
+            .map(|sender| (account.clone(), sender));
+        self.audio =
+            Some(AudioClip { id, media: media.clone(), player: None, start_at, play, held, scrub_from: None, sender });
         match self.scratch_files.get(&media).cloned() {
             Some(ScratchFile::Saved(path)) => self.open_audio(path),
             Some(ScratchFile::Downloading) => {}
@@ -3557,6 +3565,18 @@ impl State {
         }) = self.preview.as_mut().filter(|preview| preview.media == *media)
         {
             *status = VideoStatus::Failed(error.to_owned());
+        }
+    }
+
+    /// The clip's sender is now ignored: it stops, and doesn't start once its file comes.
+    pub(super) fn stop_ignored_audio(&mut self) {
+        let ignored = self
+            .audio
+            .as_ref()
+            .and_then(|clip| clip.sender.as_ref())
+            .is_some_and(|(account, sender)| self.accounts.get(account).is_some_and(|data| data.ignores(sender)));
+        if ignored {
+            self.pause_audio();
         }
     }
 

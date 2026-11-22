@@ -2070,6 +2070,7 @@ fn playing_clip(s: &mut State) -> matrix_core::Attachment {
         play: true,
         held: false,
         scrub_from: None,
+        sender: None,
     });
     memo
 }
