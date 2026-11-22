@@ -63,13 +63,19 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   (`data-mx-maths`) show as one line of Unicode on a chip, in italics (`matrix_core::math`:
   Greek and symbols by name, scripts in Unicode's super- and subscripts or `^(…)`, `\frac` as
   `a/b`, unknown commands kept); there is no typesetting engine for Rune, and Unicode keeps
-  selection and copy working. The mobile port runs the same vectors (`math.json`).
+  selection and copy working. Formulas come from anyone in a room, so reading one is bounded:
+  accents stack on letters rather than doubling the text, and past 2000 bytes, 32 nested levels
+  or 8000 bytes of output a formula shows as its LaTeX. The mobile port runs the same vectors
+  (`math.json`).
 - **Custom emoji and stickers** (MSC2545 image packs, `matrix_core::packs`): the user's pack
-  (`im.ponies.user_emotes`), the room's (`im.ponies.room_emotes`, one per state key) and those
-  enabled everywhere (`im.ponies.emote_rooms`), read from the store, listed per room once a run
+  (`m.image_pack`), the room's (`m.room.image_pack`, one per state key) and those enabled
+  everywhere (`m.image_pack.rooms`), each also under the `im.ponies.*` name clients used before
+  (a room's pack under both names once), read from the store, listed per room once a run
   (`Command::ListImagePacks`; the sticker picker lists again as it opens). The emoji picker
   leads with the room's custom emoji; a sticker button opens a grid of the packs' stickers, a
-  press sends `Outgoing::Sticker` (`m.sticker`). Received custom emoji draw as their picture
+  press sends `Outgoing::Sticker` (`m.sticker`). A received image from `mxc://` is a custom
+  emoji, `data-mx-emoticon` or not: the SDK's sanitiser drops that attribute, which the spec's
+  list of allowed attributes lacks. Received custom emoji draw as their picture
   inline (`El::inline_icon`), their short code kept as unseen text so copying gives `:code:`;
   pictures load like other media on screen (`TimelineItem::emotes`, 128 px). Adding to packs
   stays with clients that edit them.
@@ -79,24 +85,35 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   `Command::FetchMedia` draws from the standard tiles at the size asked for, with a pin, so maps
   load, cache and retry as pictures do on both apps. Tiles are fetched two at a time and the last
   64 kept in memory, with a User-Agent naming the app and its home (OpenStreetMap's tile policy);
-  every map credits "© OpenStreetMap contributors". The location dialog (`Modal::Location`) finds
-  places with Nominatim on Enter or Search only (its policy forbids searching as one types), in
-  the app's language, or takes typed coordinates; the timeline's card shows the map, the name,
+  every map credits "© OpenStreetMap contributors". Loading a map tells OpenStreetMap the
+  device's address and the area shown, for places shared in encrypted rooms too, so Settings →
+  General → Maps of shared places turns maps off (on by default, as GIFs from links): cards and
+  the dialog then show the name and coordinates only, and fetch nothing. The location dialog
+  (`Modal::Location`) finds places with Nominatim on Enter or Search only (its policy forbids
+  searching as one types), at most once a second with the last 32 answers kept, in the app's
+  language, or takes typed coordinates; the timeline's card shows the map, the name,
   the coordinates and "Open in OpenStreetMap". The desktop has no position of its own to share.
 - **Scheduled messages** (MSC4140 delayed events, `matrix_core::scheduled`): the button beside
   send (or right-clicking send) offers in 30 minutes, in an hour, tomorrow 09:00 and next Monday
-  09:00, local time; the server sends the message then, whether or not the app runs. Text,
-  emotes, stickers, places and polls can be scheduled, with a reply or into a thread
-  (relations written as the SDK would); uploads can't (they go when sent). In an encrypted room
+  09:00, local time (on that day's clock, summer time and all); the server sends the message
+  then, whether or not the app runs. Text, emotes, stickers, places and polls can be scheduled,
+  with a reply (mentioning whom it answers) or into a thread (relations written as the SDK
+  would); uploads can't (they go when sent), nor commands that do something rather than send
+  (`/topic` waits, with a notice). The composer empties as sending does and, if the server
+  refuses, what it held comes back with its reply (`Purpose::Scheduling`). MSC4140's own
+  endpoints are tried first (`/delayed_event/…`, the action in the path), then Synapse's first
+  ones (`org.matrix.msc4140.delay` on `/send`, the action in the body) when the server doesn't
+  know them. In an encrypted room
   the message is encrypted before the server holds it: the SDK encrypts only what it sends
   itself, so each account's client is built on a base client of the engine's own
   (`account::Crypto`, through the builder's `base_client`, the same SQLite stores and defaults
   the builder would make) whose `OlmMachine` the engine drives as the SDK's send path does:
   members synced, unknown or outdated devices queried, sessions claimed, the room key shared
   (`BaseClient::share_room_key`), then `encrypt_room_event_raw`, under the store's cross-process
-  lock. A bar above the room's composer counts the room's scheduled messages and lists them with
-  send now and cancel (`Command::UpdateScheduled`); each account's list is asked for once a run
-  and comes back after every change. One this device can't decrypt shows as "Encrypted message".
+  lock and one at a time per account; a failed share discards the room key, as the SDK does. A bar above the room's composer counts the room's scheduled messages and lists them with
+  send now and cancel (`Command::UpdateScheduled`); each account's list is asked for once a run,
+  as the list opens and when one of its messages comes due (sent ones aren't listed), and comes
+  back after every change. One this device can't decrypt shows as "Encrypted message".
 - **Composer layout:**
   - Room and thread editors grow up to eight lines, then scroll inside their own viewport,
     keeping the caret visible while typing or pasting. Vertical padding and the bottom bar stay outside
@@ -397,11 +414,17 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
 - Scheduled messages depend on the server enabling MSC4140 (Synapse's
   `max_event_delay_duration`, which also caps how far ahead); a server without it refuses with a
   notice. Their encryption follows the SDK's send path by hand: an SDK upgrade must be checked
-  against `Room::preshare_room_key` and `ensure_room_encryption_ready`. A message scheduled in
+  against `Room::preshare_room_key` and `ensure_room_encryption_ready`. The SDK's own locks
+  around claiming sessions and sharing a room's key are private, so a scheduled message and a
+  message sent at the same moment can claim sessions side by side (the crypto store's
+  cross-process lock still keeps their writes apart). A message scheduled in
   an encrypted room may go out with a room key the room rotated since; members who were given
   that key still decrypt it, a member who joined in between can't.
 - Every map and place search contacts OpenStreetMap's servers from the device (not the
-  homeserver): the app's name, the place, and the device's address.
+  homeserver): the app's name, the place, and the device's address. Maps can be turned off;
+  searches go only when the user asks.
+- `@room` in a draft kept across a restart comes back as text: drafts keep Matrix HTML, where it
+  is plain words.
 - Only what the user looks at is downloaded, and a server hiccup heals without a restart.
 - Two media with the same bytes share one decode in Rune but count twice here; an animation
   whose frame count can't be read counts as one frame.

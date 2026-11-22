@@ -88,6 +88,9 @@ pub struct Settings {
     pub show_link_gifs: bool,
     /// Links show a preview card (through the homeserver).
     pub show_link_previews: bool,
+    /// Shared places show a map, drawn from OpenStreetMap's tiles: loading it contacts
+    /// OpenStreetMap.
+    pub show_maps: bool,
     /// The microphone, speaker and camera for calls and voice messages, by name.
     pub devices: matrix_core::DeviceChoice,
     /// Ring aloud for an incoming call; silent, only the notification and the card show.
@@ -146,6 +149,7 @@ impl Default for Settings {
             zoom: Zoom::default(),
             show_link_gifs: true,
             show_link_previews: true,
+            show_maps: true,
             devices: matrix_core::DeviceChoice::default(),
             ring_sound: true,
             playback_speed: PlaybackSpeed::default(),

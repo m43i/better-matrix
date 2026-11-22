@@ -93,7 +93,8 @@ impl State {
 
     /// Picks the place to send, and fetches its map.
     pub fn choose_place(&mut self, place: Place) {
-        if let (Some(account), Some(map)) = (self.nav.account.clone(), place.map.clone()) {
+        if let (Some(account), Some(map), true) = (self.nav.account.clone(), place.map.clone(), self.settings.show_maps)
+        {
             self.request_media(&account, vec![(map, MAP_SIZE, Some(MAP_PIXELS))]);
         }
         self.location.chosen = Some(place);

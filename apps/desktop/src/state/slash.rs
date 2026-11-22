@@ -90,6 +90,14 @@ impl SlashCommand {
         }
     }
 
+    /// Whether it makes a message (and so can be scheduled), rather than doing something.
+    pub fn sends_message(self) -> bool {
+        matches!(
+            self,
+            Self::Me | Self::Plain | Self::Spoiler | Self::Shrug | Self::TableFlip | Self::Unflip | Self::Lenny
+        )
+    }
+
     /// The text a face command adds to the message.
     fn face(self) -> Option<&'static str> {
         match self {

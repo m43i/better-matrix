@@ -231,7 +231,7 @@ pub struct Editing {
 
 /// A message being written: the field, the message it answers and its attachments. It is set
 /// aside while an edit takes the field, and kept per timeline while another one shows.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Draft {
     edit: TextEdit,
     reply_to: Option<ReplyTarget>,
@@ -473,6 +473,11 @@ impl Composer {
             reply_to: self.reply_to.take(),
             attachments: std::mem::take(&mut self.attachments),
         }
+    }
+
+    /// A copy of what is written here: kept while a scheduled message's server answers.
+    pub fn copy_draft(&self) -> Draft {
+        Draft { edit: self.edit.clone(), reply_to: self.reply_to.clone(), attachments: self.attachments.clone() }
     }
 
     /// Takes back a draft written here before, keeping the field as focused as it is.

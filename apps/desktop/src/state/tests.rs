@@ -5882,3 +5882,80 @@ fn a_sticker_should_be_sent_from_its_composer() {
     s.send_sticker(ComposerTarget::Room, image, &mut Tx::default());
     assert!(matches!(sent(&mut commands).as_slice(), [Outgoing::Sticker(image)] if image.url == "mxc://x/wave"));
 }
+
+#[test]
+fn a_command_that_sends_nothing_should_not_be_scheduled() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.composer.edit.insert("/topic Release week");
+    s.schedule_message(ComposerTarget::Room, When::Hour);
+    let sent = all_commands(&mut commands);
+    assert!(sent.iter().all(|command| !matches!(command, Command::SetTopic { .. } | Command::Schedule { .. })));
+    assert_eq!(s.composer.edit.text, "/topic Release week");
+    assert!(s.notice.is_some());
+}
+
+#[test]
+fn a_refused_scheduled_message_should_come_back_with_its_reply() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    let answered = Message { event_id: "$q".into(), sender_name: "Grace".into(), ..Message::default() };
+    s.start_reply(ComposerTarget::Room, &answered, &mut Tx::default());
+    s.composer.edit.insert("later");
+    s.schedule_message(ComposerTarget::Room, When::Hour);
+    assert!(s.composer.is_empty());
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::Schedule { .. }))
+        .expect("a scheduled message");
+    apply(&mut s, Event::Finished { request, result: Err("delay too long".into()) });
+    assert_eq!(s.composer.edit.text, "later");
+    assert_eq!(s.composer.reply_to.as_ref().map(|reply| reply.event_id.as_str()), Some("$q"));
+}
+
+#[test]
+fn a_scheduled_message_coming_due_should_list_them_again() {
+    let (mut s, mut commands) = state();
+    let id = writing(&mut s, &mut commands);
+    s.poll(&mut Tx::default());
+    let message =
+        matrix_core::ScheduledMessage { delay_id: "d1".into(), room_id: "!one:x".into(), send_at_ms: 1, body: None };
+    apply(&mut s, Event::ScheduledMessages { account: id, messages: vec![message] });
+    drain(&mut commands);
+    s.poll(&mut Tx::default());
+    s.poll(&mut Tx::default());
+    let listed = all_commands(&mut commands)
+        .into_iter()
+        .filter(|command| matches!(command, Command::ListScheduled { .. }))
+        .count();
+    assert_eq!(listed, 1);
+}
+
+#[test]
+fn a_link_to_a_message_in_a_room_found_by_its_preview_should_go_to_the_message() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.open_permalink("https://matrix.to/#/#one:x/$far");
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::PreviewRoom { .. }))
+        .expect("a preview asked for");
+    let preview = matrix_core::RoomPreview {
+        room_id: "!one:x".into(),
+        alias: Some("#one:x".into()),
+        name: Some("One".into()),
+        topic: None,
+        avatar: None,
+        member_count: 2,
+        join_rule: Some(matrix_core::JoinRule::Public),
+        space: false,
+        joined: true,
+        invited: false,
+    };
+    apply(&mut s, Event::RoomPreview { request, preview: Box::new(preview) });
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|command| matches!(command, Command::LocateMessage { event_id, .. } if event_id == "$far"))
+    );
+}

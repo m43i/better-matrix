@@ -699,5 +699,11 @@
   "edits.original": "Original",
   "edits.current": "Aktuell",
   "edits.earlier": "Bearbeitet",
-  "edits.loading": "Frühere Versionen werden geladen…"
+  "edits.loading": "Frühere Versionen werden geladen…",
+  "settings.maps": "Karten geteilter Orte",
+  "settings.maps_hint": "In Unterhaltungen geteilte Orte können eine Karte von OpenStreetMap zeigen.",
+  "settings.maps_on": "Karten zeigen",
+  "settings.maps_on_hint": "Lädt sie von OpenStreetMap, das deine IP-Adresse und den gezeigten Ausschnitt sehen kann.",
+  "settings.maps_off": "Nur Name und Koordinaten des Orts zeigen",
+  "slash.not_scheduled": "/{{command}} tut etwas, statt eine Nachricht zu senden, und kann daher nicht geplant werden."
 }

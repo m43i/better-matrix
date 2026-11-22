@@ -219,6 +219,16 @@ fn general(s: &State, p: &Palette) -> El {
                 .on_press(move |s: &mut State| s.set_show_link_previews(on)),
         )
     });
+    let maps =
+        [(true, t!("settings.maps_on"), Some(t!("settings.maps_on_hint"))), (false, t!("settings.maps_off"), None)]
+            .into_iter()
+            .fold(col().w_full().gap(8.0), |list, (on, title, hint)| {
+                list.child(
+                    choice_row(title, hint, s.settings.show_maps == on, p)
+                        .key(format!("maps-{on}"))
+                        .on_press(move |s: &mut State| s.set_show_maps(on)),
+                )
+            });
     col()
         .w_full()
         .gap(32.0)
@@ -233,6 +243,7 @@ fn general(s: &State, p: &Palette) -> El {
         .child(setting_group(&icons::ZOOM, t!("settings.zoom"), t!("settings.zoom_hint"), zoom(s, p), p))
         .child(setting_group(&icons::LINK, t!("settings.previews"), t!("settings.previews_hint"), previews, p))
         .child(setting_group(&icons::IMAGE, t!("settings.gifs"), t!("settings.gifs_hint"), gifs, p))
+        .child(setting_group(&icons::MAP_PIN, t!("settings.maps"), t!("settings.maps_hint"), maps, p))
 }
 
 /// Smaller, the current size, larger, and back to the default.

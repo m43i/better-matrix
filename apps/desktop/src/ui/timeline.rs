@@ -69,6 +69,8 @@ pub struct Context<'a> {
     pub flash: Option<&'a str>,
     /// Spoilers the user revealed.
     pub revealed: &'a std::collections::HashSet<String>,
+    /// Shared places show their map.
+    pub show_maps: bool,
 }
 
 impl<'a> Context<'a> {
@@ -94,6 +96,7 @@ impl<'a> Context<'a> {
             content_width: f32::INFINITY,
             flash: s.flash.as_ref().map(|flash| flash.event_id.as_str()),
             revealed: &s.revealed,
+            show_maps: s.settings.show_maps,
         }
     }
 
@@ -1181,7 +1184,7 @@ fn location_card(event_id: &str, location: &matrix_core::Location, cx: &Context<
     let (w, h) = (crate::state::MAP_PIXELS.0 as f32, crate::state::MAP_PIXELS.1 as f32);
     let width = w.min(cx.content_width.max(120.0) - 2.0).min(360.0);
     let height = (width * h / w).round();
-    let image = location.map.as_ref().and_then(|map| cx.media.image(map));
+    let image = location.map.as_ref().filter(|_| cx.show_maps).and_then(|map| cx.media.image(map));
     let map = el()
         .key(cx.key(&format!("map-{event_id}")))
         .size(width, height)

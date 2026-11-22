@@ -14,16 +14,17 @@ use crate::state::{ComposerTarget, State, When, local_offset, now_ms};
 /// When to send a composer's message: half an hour, an hour, tomorrow morning, next Monday.
 pub fn menu(target: ComposerTarget, p: &Palette) -> El {
     let now = now_ms();
-    let offset = local_offset(now);
+
     let mut panel = popover_panel(p)
         .key("schedule-menu")
         .w(280.0)
         .preserve_focus_on_press(true)
         .child(text(t!("schedule.title")).font(font::SECTION).color(p.text_muted).px(12.0).pt(2.0).pb(4.0));
-    let tomorrow = When::TomorrowMorning.at(now, offset);
+    let tomorrow = When::TomorrowMorning.at(now, local_offset);
     // On a Sunday, next Monday morning is tomorrow morning: offered once.
-    for choice in
-        When::ALL.into_iter().filter(|choice| *choice != When::MondayMorning || choice.at(now, offset) != tomorrow)
+    for choice in When::ALL
+        .into_iter()
+        .filter(|choice| *choice != When::MondayMorning || choice.at(now, local_offset) != tomorrow)
     {
         let label = match choice {
             When::HalfHour => t!("schedule.half_hour"),
@@ -31,7 +32,7 @@ pub fn menu(target: ComposerTarget, p: &Palette) -> El {
             When::TomorrowMorning => t!("schedule.tomorrow"),
             When::MondayMorning => t!("schedule.monday"),
         };
-        let at = when(choice.at(now, offset));
+        let at = when(choice.at(now, local_offset));
         panel = panel.child(
             menu_action(&icons::CLOCK, &format!("{label} · {at}"), super::components::Tone::Normal, p)
                 .key(format!("schedule-{}", choice.id()))

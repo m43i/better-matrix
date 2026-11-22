@@ -699,5 +699,11 @@
   "edits.original": "Original",
   "edits.current": "Actuel",
   "edits.earlier": "Modifié",
-  "edits.loading": "Chargement des versions précédentes…"
+  "edits.loading": "Chargement des versions précédentes…",
+  "settings.maps": "Cartes des lieux partagés",
+  "settings.maps_hint": "Les lieux partagés dans les conversations peuvent afficher une carte d'OpenStreetMap.",
+  "settings.maps_on": "Afficher les cartes",
+  "settings.maps_on_hint": "Les charge depuis OpenStreetMap, qui peut voir votre adresse IP et la zone affichée.",
+  "settings.maps_off": "Afficher seulement le nom et les coordonnées du lieu",
+  "slash.not_scheduled": "/{{command}} effectue une action au lieu d'envoyer un message : elle ne peut pas être programmée."
 }

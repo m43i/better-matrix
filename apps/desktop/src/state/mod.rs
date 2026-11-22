@@ -576,8 +576,13 @@ enum Purpose {
     Locate,
     /// Listing the account's scheduled messages; a server without them lists none.
     ListScheduled,
-    /// Scheduling a message, or sending or cancelling a scheduled one.
+    /// Sending or cancelling a scheduled message.
     Schedule,
+    /// Scheduling a message; refused, what its composer held comes back.
+    Scheduling {
+        owner: drafts::Owner,
+        draft: Box<composer::Draft>,
+    },
     /// Reading a message's versions for the edit history dialog.
     EditHistory,
     /// Listing the messages an account saved; a failure shows in the list.
@@ -1822,6 +1827,10 @@ impl State {
             Purpose::Places => self.places_failed(request, error),
             Purpose::Locate => self.notice = Some(t!("search.message_unavailable").to_owned()),
             Purpose::Schedule => self.notice = Some(tf!("notice.schedule", error = error)),
+            Purpose::Scheduling { owner, draft } => {
+                self.notice = Some(tf!("notice.schedule", error = error));
+                self.scheduling_failed(owner, *draft);
+            }
             Purpose::EditHistory => self.edit_history_failed(error),
             Purpose::Saved(account) => self.accounts.saved_failed(&account, error),
             Purpose::Draft(owner) => {
@@ -2136,7 +2145,7 @@ impl State {
             && let Some(account) = self.nav.account.clone()
             && self.accounts.get(&account).is_some_and(|data| !data.rooms.is_empty())
         {
-            self.want_scheduled(&account);
+            self.want_scheduled(&account, tx);
         }
         // Searches go out for the active account; with none, nothing waits.
         if let Some(wait) = [&self.search, &self.invite_search, &self.chat_search]
@@ -2465,7 +2474,7 @@ impl State {
             for media in entry.emotes() {
                 wanted.push((account.clone(), media.clone(), PACK_IMAGE_SIZE, Some((128, 128))));
             }
-            if let Some(map) = entry.location_map() {
+            if let Some(map) = entry.location_map().filter(|_| self.settings.show_maps) {
                 wanted.push((account.clone(), map.clone(), MAP_SIZE, Some(MAP_PIXELS)));
             }
             // A link card's image.
@@ -4800,6 +4809,13 @@ impl State {
         self.settings.show_link_previews = show;
         self.shell.save_settings(self.settings.clone());
         self.fetch_link_previews(std::time::Instant::now());
+        self.request_timeline_media();
+    }
+
+    /// Shows shared places' maps, or not.
+    pub fn set_show_maps(&mut self, show: bool) {
+        self.settings.show_maps = show;
+        self.shell.save_settings(self.settings.clone());
         self.request_timeline_media();
     }
 

@@ -699,5 +699,11 @@
   "edits.original": "Original",
   "edits.current": "Current",
   "edits.earlier": "Edited",
-  "edits.loading": "Loading earlier versions…"
+  "edits.loading": "Loading earlier versions…",
+  "settings.maps": "Maps of shared places",
+  "settings.maps_hint": "Places shared in conversations can show a map from OpenStreetMap.",
+  "settings.maps_on": "Show maps",
+  "settings.maps_on_hint": "Loads them from OpenStreetMap, which can see your IP address and the area shown.",
+  "settings.maps_off": "Show only the place's name and coordinates",
+  "slash.not_scheduled": "/{{command}} does something rather than send a message, so it can't be scheduled."
 }

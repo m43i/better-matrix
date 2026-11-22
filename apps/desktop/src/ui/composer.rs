@@ -333,7 +333,7 @@ fn scheduled_bar(s: &State, target: ComposerTarget, p: &Palette) -> Option<El> {
             .hover(p.hover)
             .role("button")
             .cursor(rune::Cursor::Pointer)
-            .on_press(|s: &mut State| s.toggle_popover(Popover::Scheduled))
+            .on_press(State::toggle_scheduled)
             .child(icon(&icons::CLOCK, 14.0).color(p.accent))
             .child(text(crate::i18n::tp!("schedule.count", count)).font(font::META).color(p.accent)),
     )

@@ -1,14 +1,19 @@
 //! Scheduled messages (MSC4140): a composer's message handed to the server to send later,
 //! from the menu beside the send button (`Popover::Schedule`), and the room's list of them
 //! (`Popover::Scheduled`), where one can be sent now or cancelled. The server holds them, so
-//! they go out whether or not the app runs; each account's list is asked for once a run and
-//! comes back after every change.
+//! they go out whether or not the app runs. Each account's list is asked for once a run, as
+//! the list opens, and when one of its messages comes due; it comes back after every change.
+//!
+//! Only messages are scheduled: text, and the commands that make one (`/me`, `/plain`,
+//! `/spoiler`, the faces); another command waits for the user to send it. The composer is
+//! emptied as sending does, and what it held comes back if the server refuses.
 
 use std::collections::{HashMap, HashSet};
 
 use matrix_core::{AccountId, Command, Outgoing, ScheduledAction, ScheduledMessage};
 
 use super::{ComposerTarget, Popover, Purpose, State};
+use crate::i18n::tf;
 
 /// A time a message can be scheduled for, as the menu offers them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,26 +41,24 @@ impl When {
         }
     }
 
-    /// The moment it names, in milliseconds since the epoch, seen from `now_ms` with the local
-    /// clock `offset_ms` ahead of UTC.
-    pub fn at(self, now_ms: u64, offset_ms: i64) -> u64 {
+    /// The moment it names, in milliseconds since the epoch, seen from `now_ms`; `offset` is
+    /// how far the local clock is ahead of UTC at a moment (it changes with summer time, so
+    /// 09:00 is read on the clock of that day, not today's).
+    pub fn at(self, now_ms: u64, offset: impl Fn(u64) -> i64) -> u64 {
         const MINUTE: u64 = 60_000;
         const DAY: u64 = 24 * 60 * MINUTE;
+        let local = now_ms.saturating_add_signed(offset(now_ms));
         let morning = |days_ahead: u64| {
-            let local = now_ms.saturating_add_signed(offset_ms);
-            let midnight = local - local % DAY;
-            (midnight + days_ahead * DAY + 9 * 60 * MINUTE).saturating_add_signed(-offset_ms)
+            let wanted = local - local % DAY + days_ahead * DAY + 9 * 60 * MINUTE;
+            let guess = wanted.saturating_add_signed(-offset(now_ms));
+            wanted.saturating_add_signed(-offset(guess))
         };
         match self {
             When::HalfHour => now_ms + 30 * MINUTE,
             When::Hour => now_ms + 60 * MINUTE,
             When::TomorrowMorning => morning(1),
-            When::MondayMorning => {
-                // The epoch was a Thursday: day 0 is weekday 3, counting from Monday.
-                let local = now_ms.saturating_add_signed(offset_ms);
-                let weekday = (local / DAY + 3) % 7;
-                morning(7 - weekday)
-            }
+            // The epoch was a Thursday: day 0 is weekday 3, counting from Monday.
+            When::MondayMorning => morning(7 - (local / DAY + 3) % 7),
         }
     }
 }
@@ -65,6 +68,8 @@ impl When {
 pub struct Scheduled {
     listed: HashMap<AccountId, Vec<ScheduledMessage>>,
     asked: HashSet<AccountId>,
+    /// Messages whose time came, the list asked for again since: each asks once.
+    due: HashSet<String>,
 }
 
 impl Scheduled {
@@ -96,10 +101,32 @@ impl State {
         self.scheduled.listed.get(account).into_iter().flatten().filter(|message| message.room_id == room_id).collect()
     }
 
-    /// Asks for the account's scheduled messages once a run; called as a room opens.
-    pub(super) fn want_scheduled(&mut self, account: &AccountId) {
-        if self.scheduled.asked.insert(account.clone()) {
+    /// Asks for the account's scheduled messages once a run, and again when one of them comes
+    /// due (the server sent it); wakes when the next one does. Called from `poll`.
+    pub(super) fn want_scheduled(&mut self, account: &AccountId, tx: &mut rune::Tx) {
+        let now = super::now_ms();
+        let messages = self.scheduled.listed.get(account).map(Vec::as_slice).unwrap_or_default();
+        let due: Vec<String> = messages
+            .iter()
+            .filter(|message| message.send_at_ms <= now && !self.scheduled.due.contains(&message.delay_id))
+            .map(|message| message.delay_id.clone())
+            .collect();
+        if let Some(next) = messages.iter().map(|message| message.send_at_ms).filter(|at| *at > now).min() {
+            tx.wake_after(std::time::Duration::from_millis(next - now));
+        }
+        if self.scheduled.asked.insert(account.clone()) || !due.is_empty() {
+            self.scheduled.due.extend(due);
             self.dispatch(Command::ListScheduled { account: account.clone() }, Purpose::ListScheduled);
+        }
+    }
+
+    /// Opens or closes the room's list of scheduled messages, asking for it again as it opens.
+    pub fn toggle_scheduled(&mut self) {
+        self.toggle_popover(Popover::Scheduled);
+        if self.popover == Some(Popover::Scheduled)
+            && let Some(account) = self.nav.account.clone()
+        {
+            self.dispatch(Command::ListScheduled { account }, Purpose::ListScheduled);
         }
     }
 
@@ -110,16 +137,24 @@ impl State {
         composer.editing.is_none() && composer.attachments.is_empty() && !composer.edit.text.trim().is_empty()
     }
 
-    /// Schedules a composer's message for `when` and empties the composer, as sending does.
+    /// Schedules a composer's message for `when` and empties the composer, as sending does; a
+    /// command that doesn't make a message stays, with a notice.
     pub fn schedule_message(&mut self, target: ComposerTarget, when: When) {
         self.popover = None;
         if !self.can_schedule(target) {
             return;
         }
-        let now = super::now_ms();
-        let delay_ms = when.at(now, local_offset(now)).saturating_sub(now);
-        let Some((reply_to, messages)) = self.take_messages(target) else { return };
+        if let super::slash::Parsed::Command { command, .. } = super::slash::parse(&self.composer(target).edit.text)
+            && !command.sends_message()
+        {
+            self.notice = Some(tf!("slash.not_scheduled", command = command.name()));
+            return;
+        }
         let (Some(account), Some(key)) = (self.nav.account.clone(), self.composer_key(target)) else { return };
+        let now = super::now_ms();
+        let delay_ms = when.at(now, local_offset).saturating_sub(now);
+        let kept = Box::new(self.composer(target).copy_draft());
+        let Some((reply_to, messages)) = self.take_messages(target) else { return };
         let mut reply_to = reply_to.map(|reply| reply.event_id);
         for message in messages.into_iter().filter(|message| !matches!(message, Outgoing::File(_))) {
             let command = Command::Schedule {
@@ -129,7 +164,25 @@ impl State {
                 message,
                 delay_ms,
             };
-            self.dispatch(command, Purpose::Schedule);
+            let purpose = Purpose::Scheduling { owner: (account.clone(), key.clone()), draft: kept.clone() };
+            self.dispatch(command, purpose);
+        }
+    }
+
+    /// The server refused a scheduled message: what its composer held comes back, unless the
+    /// user wrote something there since.
+    pub(super) fn scheduling_failed(&mut self, owner: super::drafts::Owner, draft: super::composer::Draft) {
+        let here = [ComposerTarget::Room, ComposerTarget::Thread]
+            .into_iter()
+            .find(|target| self.composer(*target).owner.as_ref() == Some(&owner));
+        match here {
+            Some(target) if self.composer(target).is_empty() && self.composer(target).editing.is_none() => {
+                self.composer_mut(target).put_draft(draft);
+            }
+            Some(_) => {}
+            None => {
+                self.drafts.entry(owner).or_insert(draft);
+            }
         }
     }
 
@@ -153,24 +206,33 @@ mod tests {
 
     #[test]
     fn half_an_hour_should_be_thirty_minutes_on() {
-        assert_eq!(When::HalfHour.at(WEDNESDAY, 0) - WEDNESDAY, 30 * 60_000);
+        assert_eq!(When::HalfHour.at(WEDNESDAY, |_| 0) - WEDNESDAY, 30 * 60_000);
     }
 
     #[test]
     fn tomorrow_morning_should_be_nine_on_the_next_day() {
         // Thursday 2026-11-19, 09:00 UTC.
-        assert_eq!(When::TomorrowMorning.at(WEDNESDAY, 0), 1_795_078_800_000);
+        assert_eq!(When::TomorrowMorning.at(WEDNESDAY, |_| 0), 1_795_078_800_000);
     }
 
     #[test]
     fn tomorrow_morning_should_be_nine_on_the_local_clock() {
         // An hour ahead of UTC: 09:00 there is 08:00 UTC.
-        assert_eq!(When::TomorrowMorning.at(WEDNESDAY, 3_600_000), 1_795_078_800_000 - 3_600_000);
+        assert_eq!(When::TomorrowMorning.at(WEDNESDAY, |_| 3_600_000), 1_795_078_800_000 - 3_600_000);
+    }
+
+    #[test]
+    fn a_morning_after_the_clocks_change_should_be_nine_on_that_days_clock() {
+        // An hour ahead of UTC until Wednesday night, two hours ahead from then on.
+        let change = WEDNESDAY + 12 * 3_600_000;
+        let offset = |at: u64| if at < change { 3_600_000 } else { 7_200_000 };
+        // 09:00 at two hours ahead is 07:00 UTC.
+        assert_eq!(When::TomorrowMorning.at(WEDNESDAY, offset), 1_795_078_800_000 - 7_200_000);
     }
 
     #[test]
     fn monday_morning_should_be_nine_on_the_coming_monday() {
         // Monday 2026-11-23, 09:00 UTC.
-        assert_eq!(When::MondayMorning.at(WEDNESDAY, 0), 1_795_424_400_000);
+        assert_eq!(When::MondayMorning.at(WEDNESDAY, |_| 0), 1_795_424_400_000);
     }
 }

@@ -74,7 +74,7 @@ pub fn dialog_for(s: &State, p: &Palette) -> El {
             .border(1.0, p.divider)
             .role("img")
             .label(t!("location.map"));
-        let map = match place.map.as_ref().and_then(|map| s.media.image(map)) {
+        let map = match place.map.as_ref().filter(|_| s.settings.show_maps).and_then(|map| s.media.image(map)) {
             Some(image) => map.clip_rounded(8.0).pixels_fit(image.pixels(), rune::SurfaceFit::Fill),
             None => map.center().child(icon(&icons::MAP_PIN, 28.0).color(p.text_muted)),
         };

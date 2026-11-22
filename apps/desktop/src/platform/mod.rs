@@ -284,6 +284,7 @@ const LANGUAGE: &str = "language";
 const APPEARANCE: &str = "appearance";
 const LINK_GIFS: &str = "link_gifs";
 const LINK_PREVIEWS: &str = "link_previews";
+const MAPS: &str = "maps";
 const ZOOM: &str = "zoom";
 const RING_SOUND: &str = "ring_sound";
 const PLAYBACK_SPEED: &str = "playback_speed";
@@ -298,6 +299,7 @@ fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::pr
     prefs.set(ZOOM, &settings.zoom.percent())?;
     prefs.set(LINK_GIFS, &settings.show_link_gifs)?;
     prefs.set(LINK_PREVIEWS, &settings.show_link_previews)?;
+    prefs.set(MAPS, &settings.show_maps)?;
     prefs.set(RING_SOUND, &settings.ring_sound)?;
     prefs.set(PLAYBACK_SPEED, &settings.playback_speed.percent())?;
     prefs.set(MICROPHONE, &settings.devices.microphone)?;
@@ -315,6 +317,7 @@ pub fn load_settings(prefs: &Prefs) -> Settings {
         zoom: prefs.get::<u16>(ZOOM).map_or_else(Zoom::default, Zoom::from_percent),
         show_link_gifs: prefs.get::<bool>(LINK_GIFS).unwrap_or(true),
         show_link_previews: prefs.get::<bool>(LINK_PREVIEWS).unwrap_or(true),
+        show_maps: prefs.get::<bool>(MAPS).unwrap_or(true),
         devices: matrix_core::DeviceChoice {
             microphone: prefs.get::<Option<String>>(MICROPHONE).flatten(),
             speaker: prefs.get::<Option<String>>(SPEAKER).flatten(),
