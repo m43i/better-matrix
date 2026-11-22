@@ -3,11 +3,28 @@
 // (`math.json`), so every app reads a formula the same. Greek letters and symbols by name, `x^2`
 // as `x²`, `\frac{a}{b}` as `a/b`, `\sqrt{x}` as `√x`, `\mathbb{R}` as `ℝ`; what has no Unicode
 // form (`x^{q}`) keeps a readable fallback (`x^(q)`), and unknown commands keep their name.
+//
+// Formulas come from anyone in a room, so reading one is bounded: past `MOST_INPUT` bytes,
+// `MOST_DEPTH` nested groups or commands, or `MOST_OUTPUT` bytes of output (accents double what
+// they cover, and nest), the formula shows as its LaTeX, unread. Sizes are UTF-8 bytes, as Rust
+// counts them, so both apps give up on the same formulas.
+
+/** The longest formula read; a longer one shows as its LaTeX. */
+export const MOST_INPUT = 2000;
+
+/** The deepest groups and commands nest in a formula read. */
+export const MOST_DEPTH = 32;
+
+/** The most output a formula may make before it shows as its LaTeX instead. */
+export const MOST_OUTPUT = 4 * MOST_INPUT;
 
 /** A LaTeX formula as one line of Unicode text. */
 export function mathToUnicode(latex: string): string {
+  if (utf8Length(latex) > MOST_INPUT) return latex.trim();
   const parser = new Parser(Array.from(latex));
   const out = parser.sequence(null);
+
+  if (parser.overflow) return latex.trim();
   // Runs of spaces from `\,`, `\quad` and the source's own collapse to one.
   let collapsed = '';
 
@@ -24,8 +41,24 @@ const ALPHANUMERIC = /[\p{L}\p{N}]/u;
 
 const ASCII_LETTER = /[A-Za-z]/;
 
+/** How many bytes `text` takes in UTF-8, as Rust's `str::len` counts. */
+function utf8Length(text: string): number {
+  let bytes = 0;
+
+  for (const c of text) {
+    const code = c.codePointAt(0) ?? 0;
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+
+  return bytes;
+}
+
 class Parser {
   private at = 0;
+  /** How deep in groups and commands the parser is. */
+  private depth = 0;
+  /** A bound was passed: the formula shows as its LaTeX. */
+  overflow = false;
 
   constructor(private readonly chars: string[]) {}
 
@@ -36,8 +69,21 @@ class Parser {
   /** Everything up to `end` (a closing brace or bracket) or the end of the formula. */
   sequence(end: string | null): string {
     let out = '';
+    // `out`'s size in UTF-8 bytes, kept as it grows.
+    let bytes = 0;
+
+    const push = (text: string): void => {
+      out += text;
+      bytes += utf8Length(text);
+    };
 
     for (let c = this.peek(); c !== undefined; c = this.peek()) {
+      if (this.overflow || bytes > MOST_OUTPUT) {
+        this.overflow = true;
+
+        return out;
+      }
+
       if (c === end) {
         this.at += 1;
 
@@ -47,9 +93,9 @@ class Parser {
       if (c === '^' || c === '_') {
         this.at += 1;
         const script = this.argument();
-        out += scripted(script, c === '^');
+        push(scripted(script, c === '^'));
       } else {
-        out += this.atom();
+        push(this.atom());
       }
     }
 
@@ -58,6 +104,23 @@ class Parser {
 
   /** One thing: a group, a command with its arguments, or a character. */
   private atom(): string {
+    if (this.depth >= MOST_DEPTH) {
+      this.overflow = true;
+      this.at = this.chars.length;
+
+      return '';
+    }
+
+    this.depth += 1;
+    const atom = this.atomWithin();
+    this.depth -= 1;
+
+    if (utf8Length(atom) > MOST_OUTPUT) this.overflow = true;
+
+    return atom;
+  }
+
+  private atomWithin(): string {
     const c = this.peek();
 
     if (c === undefined) return '';
@@ -87,11 +150,9 @@ class Parser {
     return this.sequence(']');
   }
 
-  /** Each character of the next argument followed by `mark`. */
+  /** The next argument with `mark` on each of its letters. */
   private marked(mark: string): string {
-    return Array.from(this.argument())
-      .map((c) => c + mark)
-      .join('');
+    return accented(this.argument(), mark);
   }
 
   private command(): string {
@@ -183,6 +244,35 @@ class Parser {
         return SYMBOLS.get(name) ?? `\\${name} `;
     }
   }
+}
+
+/** A combining mark: the diacritics (U+0300–U+036F) and those for symbols (U+20D0–U+20FF). */
+const COMBINING = /[\u0300-\u036f\u20d0-\u20ff]/u;
+
+/**
+ * `text` with `mark` (a combining accent) on each of its letters, not on the marks already
+ * there: nested accents stack on the letter rather than doubling the text.
+ */
+function accented(text: string, mark: string): string {
+  const chars = Array.from(text);
+  let out = '';
+
+  for (let i = 0; i < chars.length; i += 1) {
+    const c = chars[i] ?? '';
+    out += c;
+
+    if (COMBINING.test(c) || WHITESPACE.test(c)) continue;
+
+    // The letter's own marks first, then the new one.
+    while (i + 1 < chars.length && COMBINING.test(chars[i + 1] ?? '')) {
+      out += chars[i + 1];
+      i += 1;
+    }
+
+    out += mark;
+  }
+
+  return out;
 }
 
 /** `text` in parentheses when it is more than one thing, so `a+b` over `c` reads `(a+b)/c`. */
