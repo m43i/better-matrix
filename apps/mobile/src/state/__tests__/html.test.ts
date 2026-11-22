@@ -217,8 +217,20 @@ describe('htmlBlocks with Matrix’s inline objects', () => {
     ).toEqual([{ type: 'emote', url: 'mxc://x.org/cat', label: ':cat:' }]);
   });
 
-  it('should show another image by its description', () => {
-    expect(paragraph(htmlBlocks('<img src="mxc://x.org/a" alt="a cat">'))).toEqual([
+  it('should show a custom emoji the sanitiser left unmarked by its image', () => {
+    expect(
+      paragraph(htmlBlocks('<img src="mxc://x.org/cat" alt=":blobcat:" height="32">')),
+    ).toEqual([{ type: 'emote', url: 'mxc://x.org/cat', label: ':blobcat:' }]);
+  });
+
+  it('should label a custom emoji without a description by its title', () => {
+    expect(paragraph(htmlBlocks('<img src="mxc://x.org/cat" title=":blobcat:">'))).toEqual([
+      { type: 'emote', url: 'mxc://x.org/cat', label: ':blobcat:' },
+    ]);
+  });
+
+  it('should show an image from the web by its description', () => {
+    expect(paragraph(htmlBlocks('<img src="https://x.org/a.png" alt="a cat">'))).toEqual([
       { type: 'text', text: 'a cat', marks: {} },
     ]);
   });

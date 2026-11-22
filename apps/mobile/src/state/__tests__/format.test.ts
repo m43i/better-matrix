@@ -366,6 +366,13 @@ describe('editDraft', () => {
     ).toEqual({ draft: ':cat:', pills: [emotePill('mxc://x.org/c', 'cat')] });
   });
 
+  it('should bring a custom emoji the sanitiser left unmarked back as a pill', () => {
+    expect(editDraft(':cat:', '<img src="mxc://x.org/c" alt=":cat:" height="32">')).toEqual({
+      draft: ':cat:',
+      pills: [emotePill('mxc://x.org/c', 'cat')],
+    });
+  });
+
   it('should bring a spoiler back as markers', () => {
     expect(editDraft('', 'he <span data-mx-spoiler>dies</span>').draft).toBe('he ||dies||');
   });

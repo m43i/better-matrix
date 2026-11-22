@@ -1014,7 +1014,8 @@ export function editDraft(body: string, html: string | null): EditDraft {
       case 'img': {
         const src = attribute(attrs ?? '', 'src') ?? '';
 
-        if (attribute(attrs ?? '', 'data-mx-emoticon') !== null && src.startsWith('mxc://')) {
+        // A homeserver image is a custom emoji, marked or not (see `html.ts`).
+        if (src.startsWith('mxc://')) {
           const code = attribute(attrs ?? '', 'alt') ?? attribute(attrs ?? '', 'title') ?? '';
           const pill = emotePill(src, code.replace(/^:|:$/g, '') || 'emoji');
           pills.push(pill);
