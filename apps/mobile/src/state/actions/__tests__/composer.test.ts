@@ -161,9 +161,7 @@ describe('composer actions', () => {
       type: 'Edit',
       data: {
         body: '[Spoiler]',
-        html:
-          '<p><span data-mx-spoiler>he</span></p><p><span data-mx-spoiler>lives</span></p>' +
-          '<p></p><p><span data-mx-spoiler>sadly</span></p>',
+        html: '<p><span data-mx-spoiler>he<br />lives<br /><br />sadly</span></p>',
       },
     });
   });

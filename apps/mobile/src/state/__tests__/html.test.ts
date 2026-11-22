@@ -289,4 +289,35 @@ describe('htmlBlocks with Matrix’s inline objects', () => {
 
     expect(inlines.map((inline) => inline.type)).toEqual(['spoiler']);
   });
+
+  it('should read a span marked both spoiler and formula as a spoiler', () => {
+    expect(
+      paragraph(htmlBlocks('<span data-mx-spoiler data-mx-maths="x^2"><code>x^2</code></span>')),
+    ).toEqual([{ type: 'spoiler', reason: '', text: 'x^2' }]);
+  });
+
+  it('should read a block marked both spoiler and formula as a spoiler', () => {
+    expect(paragraph(htmlBlocks('<div data-mx-maths="x^2" data-mx-spoiler>x^2</div>'))).toEqual([
+      { type: 'spoiler', reason: '', text: 'x^2' },
+    ]);
+  });
+
+  it('should read a code block holding a spoiler as its lines of text, the spoiler hidden', () => {
+    expect(htmlBlocks('<pre><code>a <span data-mx-spoiler>b</span>\nc\n</code></pre>')).toEqual([
+      {
+        type: 'paragraph',
+        inlines: [
+          { type: 'text', text: 'a ', marks: {} },
+          { type: 'spoiler', reason: '', text: 'b' },
+          { type: 'text', text: '\nc', marks: {} },
+        ],
+      },
+    ]);
+  });
+
+  it('should keep a code block without a spoiler code', () => {
+    expect(htmlBlocks('<pre><code>a <b>b</b>\nc</code></pre>')).toEqual([
+      { type: 'code', text: 'a b\nc' },
+    ]);
+  });
 });

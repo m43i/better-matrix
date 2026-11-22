@@ -11,6 +11,7 @@ import {
   placePills,
   roomPill,
   slicePills,
+  spoilerPill,
   trackPills,
   triggerAt,
   userPill,
@@ -50,6 +51,13 @@ describe('placePills', () => {
   });
 });
 
+describe('placePills with a spoiler', () => {
+  it('should find a spoiler inside a longer word', () => {
+    const llo = pillAt(spoilerPill('llo'), 2);
+    expect(placePills('hello', [llo])).toEqual([{ pill: llo, start: 2, end: 5 }]);
+  });
+});
+
 describe('livePills', () => {
   it('should drop a pill whose label was edited away', () => {
     expect(livePills('hi @Grace Hop', [pillAt(GRACE, 3)])).toEqual([]);
@@ -64,11 +72,42 @@ describe('editPills', () => {
   const pills = [pillAt(GRACE, 0), pillAt(OTHER_GRACE, 20)];
 
   it('should move the pills after an edit by what it added', () => {
-    expect(editPills(pills, 14, 14, 3).map((p) => p.start)).toEqual([0, 23]);
+    expect(editPills(pills, 14, 14, 'and').map((p) => p.start)).toEqual([0, 23]);
   });
 
   it('should drop a pill an edit cut into', () => {
-    expect(editPills(pills, 10, 15, 0)).toEqual([{ ...pillAt(OTHER_GRACE, 15) }]);
+    expect(editPills(pills, 10, 15, '')).toEqual([{ ...pillAt(OTHER_GRACE, 15) }]);
+  });
+});
+
+describe('editPills on a spoiler', () => {
+  // `he dies`: the spoiler `dies` stands from 3 to 7.
+  const dies = [pillAt(spoilerPill('dies'), 3)];
+
+  it('should take in what was typed inside it', () => {
+    expect(editPills(dies, 5, 5, '||')).toEqual([pillAt(spoilerPill('di||es'), 3)]);
+  });
+
+  it('should keep what is left of its words when some are deleted', () => {
+    expect(editPills(dies, 3, 5, '')).toEqual([pillAt(spoilerPill('es'), 3)]);
+  });
+
+  it('should leave what was typed at either of its ends outside it', () => {
+    expect(editPills(dies, 7, 7, '!')).toEqual(dies);
+    expect(editPills(dies, 3, 3, 'x')).toEqual([pillAt(spoilerPill('dies'), 4)]);
+  });
+
+  it('should keep its words after a cut across its start', () => {
+    expect(editPills(dies, 1, 5, 'X')).toEqual([pillAt(spoilerPill('es'), 2)]);
+  });
+
+  it('should keep its words before a cut across its end', () => {
+    expect(editPills(dies, 5, 9, '')).toEqual([pillAt(spoilerPill('di'), 3)]);
+  });
+
+  it('should be gone once all of its words are deleted', () => {
+    expect(editPills(dies, 3, 7, '')).toEqual([]);
+    expect(editPills(dies, 2, 8, 'x')).toEqual([]);
   });
 });
 
@@ -159,11 +198,19 @@ describe('pillHtml', () => {
   it('should write @room as plain text', () => {
     expect(pillHtml(EVERYONE)).toBe('@room');
   });
+
+  it('should write a spoiler’s words escaped in its span, line breaks as breaks', () => {
+    expect(pillHtml(spoilerPill('a<b\nc'))).toBe('<span data-mx-spoiler>a&lt;b<br />c</span>');
+  });
 });
 
 describe('pillText', () => {
   it('should say a person by their name, without the @', () => {
     expect(pillText(GRACE)).toBe('Grace Hopper');
+  });
+
+  it('should say a spoiler only as [Spoiler]', () => {
+    expect(pillText(spoilerPill('he dies'))).toBe('[Spoiler]');
   });
 });
 

@@ -176,7 +176,7 @@ export function insertIntoDraft(
     const inserted = insertAt(c.draft, c.selection, text);
     const start = inserted.selection.start - text.length;
     const end = start + c.draft.length - (inserted.text.length - text.length);
-    const moved = editPills(c.pills ?? [], start, end, text.length);
+    const moved = editPills(c.pills ?? [], start, end, text);
     const pills = pill ? [...moved, pillAt(pill, start)] : moved;
 
     return {

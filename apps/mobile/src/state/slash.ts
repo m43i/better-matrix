@@ -8,7 +8,17 @@ import type { AccountId, Command, Outgoing } from '@better-matrix/matrix-native/
 
 import type { Key } from '../i18n';
 import { outgoingText } from './format';
-import { type DraftPill, escapeHtml, mentionsOf, pillHtml, placePills, slicePills } from './pills';
+import {
+  type DraftPill,
+  escapeHtml,
+  isSpoiler,
+  mentionsOf,
+  pillHtml,
+  pillText,
+  placePills,
+  slicePills,
+  spoilerHtml,
+} from './pills';
 
 /** One command the composer suggests: its name, what it takes, and what it does. */
 export interface SlashCommandInfo {
@@ -168,7 +178,7 @@ export function slashOf(
             type: 'message',
             message: {
               type: 'Text',
-              data: { body: rest, html: null, mentions: mentionsOf(rest, pills) },
+              data: { body: plainBody(rest, pills), html: null, mentions: mentionsOf(rest, pills) },
             },
           }
         : usage();
@@ -241,7 +251,9 @@ export function spoilerText(text: string, pills: readonly DraftPill[]) {
   let at = 0;
 
   for (const placed of placePills(text, pills)) {
-    html += escapeHtml(text.slice(at, placed.start)) + pillHtml(placed.pill);
+    // A spoiler inside is its words: the whole is one spoiler already.
+    const pill = isSpoiler(placed.pill) ? spoilerHtml(placed.pill.label) : pillHtml(placed.pill);
+    html += escapeHtml(text.slice(at, placed.start)) + pill;
     at = placed.end;
   }
 
@@ -252,6 +264,20 @@ export function spoilerText(text: string, pills: readonly DraftPill[]) {
     html: `<p><span data-mx-spoiler>${html.replace(/\r?\n/g, '<br />')}</span></p>`,
     mentions: mentionsOf(text, pills),
   };
+}
+
+/** `text` as a plain body: each spoiler's words `[Spoiler]`, as a formatted message's are. */
+function plainBody(text: string, pills: readonly DraftPill[]): string {
+  let body = '';
+  let at = 0;
+
+  for (const placed of placePills(text, pills)) {
+    if (!isSpoiler(placed.pill)) continue;
+    body += text.slice(at, placed.start) + pillText(placed.pill);
+    at = placed.end;
+  }
+
+  return body + text.slice(at);
 }
 
 function room(context: SlashContext) {

@@ -11,6 +11,11 @@
 // - `user:@ada:example.org`, `room:!id:example.org` (or `room:#alias:example.org`): a mention.
 // - `everyone`: `@room`, which goes as plain text and mentions the room.
 // - `emote:mxc://…`: a custom emoji, its label the short code.
+// - `spoiler`: hidden words, its label the words (line breaks included). Only an edit makes one
+//   (`editDraft`, as the engine's `to_pills` does): the spoiler's words stand in the draft
+//   whatever they say, so nothing in them reads as a marker that could end the spoiler or show
+//   it. Unlike the others it is a range the user may edit: words typed or deleted inside it stay
+//   hidden, and only deleting all of it ends it (`editPills`).
 
 import type { Mentions } from '@better-matrix/matrix-native/types';
 
@@ -40,6 +45,18 @@ export function roomPill(roomId: string, name: string): Pill {
 /** A custom emoji, shown by its short code. */
 export function emotePill(url: string, shortcode: string): Pill {
   return { id: `emote:${url}`, label: `:${shortcode}:` };
+}
+
+/** The id of a spoiler's pill. */
+export const SPOILER = 'spoiler';
+
+/** Words hidden until tapped: `[Spoiler]` in the plain body. */
+export function spoilerPill(words: string): Pill {
+  return { id: SPOILER, label: words };
+}
+
+export function isSpoiler(pill: Pill): boolean {
+  return pill.id === SPOILER;
 }
 
 /** `pill` standing at `start` in a draft. */
@@ -73,9 +90,11 @@ export function placePills(draft: string, pills: readonly DraftPill[]): Placed[]
     const before = draft[start - 1];
     const after = draft[end];
 
+    // A spoiler's words stay hidden whatever stands next to them.
     const joined =
-      (before !== undefined && WORD.test(before) && WORD.test(pill.label[0] ?? '')) ||
-      (after !== undefined && WORD.test(after) && WORD.test(pill.label.slice(-1)));
+      !isSpoiler(pill) &&
+      ((before !== undefined && WORD.test(before) && WORD.test(pill.label[0] ?? '')) ||
+        (after !== undefined && WORD.test(after) && WORD.test(pill.label.slice(-1))));
 
     if (joined) continue;
     placed.push({ pill, start, end });
@@ -91,24 +110,45 @@ export function livePills(draft: string, pills: readonly DraftPill[]): DraftPill
 }
 
 /**
- * `pills` after the draft's `[start, end)` was replaced by `length` characters: those before
- * it stay, those after it move, and those it touched inside are gone.
+ * `pills` after the draft's `[start, end)` was replaced by `inserted`: those before it stay,
+ * those after it move, and those it touched inside are gone, except a spoiler, which keeps what
+ * is left of its words and takes in what was typed inside it (not what was typed at either of
+ * its ends); a spoiler is gone only once the edit took all of its words.
  */
 export function editPills(
   pills: readonly DraftPill[],
   start: number,
   end: number,
-  length: number,
+  inserted: string,
 ): DraftPill[] {
-  const shift = length - (end - start);
+  const shift = inserted.length - (end - start);
 
   return pills.flatMap((pill) => {
     if (pill.start + pill.label.length <= start) return [pill];
 
     if (pill.start >= end) return [{ ...pill, start: pill.start + shift }];
 
-    return [];
+    return isSpoiler(pill) ? editSpoiler(pill, start, end, inserted) : [];
   });
+}
+
+/** A spoiler pill the edit of `[start, end)` into `inserted` overlaps. */
+function editSpoiler(pill: DraftPill, start: number, end: number, inserted: string): DraftPill[] {
+  const pillEnd = pill.start + pill.label.length;
+  const from = Math.max(start, pill.start) - pill.start;
+  const to = Math.min(end, pillEnd) - pill.start;
+  const inside = start >= pill.start && end <= pillEnd;
+
+  const label = inside
+    ? pill.label.slice(0, from) + inserted + pill.label.slice(to)
+    : pill.label.slice(0, from) + pill.label.slice(to);
+
+  if (label === '') return [];
+
+  // Cut at its start, the words left begin after what was put in the cut's place.
+  const at = start < pill.start ? start + inserted.length : pill.start;
+
+  return [{ ...pill, label, start: at }];
 }
 
 /**
@@ -137,7 +177,7 @@ export function applySplices(text: string, splices: readonly Splice[]): string {
  */
 export function splicePills(pills: readonly DraftPill[], splices: readonly Splice[]): DraftPill[] {
   return splices.reduce<DraftPill[]>(
-    (moved, { at, remove, insert }) => editPills(moved, at, at + remove, insert.length),
+    (moved, { at, remove, insert }) => editPills(moved, at, at + remove, insert),
     [...pills],
   );
 }
@@ -172,7 +212,12 @@ export function trackPills(
   if (slide > 0 && caret !== undefined) prefix = Math.min(prefix, Math.max(prefix - slide, caret));
   suffix = Math.min(suffix, shortest - prefix);
 
-  const moved = editPills(pills, prefix, before.length - suffix, after.length - suffix - prefix);
+  const moved = editPills(
+    pills,
+    prefix,
+    before.length - suffix,
+    after.slice(prefix, after.length - suffix),
+  );
 
   return livePills(after, moved);
 }
@@ -209,9 +254,22 @@ export function mentionsOf(draft: string, pills: readonly DraftPill[]): Mentions
   return { user_ids: users, room };
 }
 
-/** The words a pill's link shows and the plain body says: a person's name without the `@`. */
+/**
+ * What the plain body says for a pill: a person's name without the `@` (the words its link
+ * shows), a spoiler `[Spoiler]`.
+ */
 export function pillText(pill: Pill): string {
+  if (isSpoiler(pill)) return SPOILER_FALLBACK;
+
   return pill.id.startsWith('user:') ? pill.label.replace(/^@/, '') : pill.label;
+}
+
+/** What a spoiler's words are in a plain body: the same in every language, as the desktop's. */
+export const SPOILER_FALLBACK = '[Spoiler]';
+
+/** A spoiler's words as the HTML inside its `<span data-mx-spoiler>`: line breaks as `<br />`. */
+export function spoilerHtml(words: string): string {
+  return escapeHtml(words).replace(/\r?\n/g, '<br />');
 }
 
 /** Whether a pill goes as HTML (everything but `@room`, which is plain text). */
@@ -232,6 +290,8 @@ export function pillHtml(pill: Pill): string {
 
   if (mention)
     return `<a href="${escapeHtml(`https://matrix.to/#/${mention[2]}`)}">${escapeHtml(pillText(pill))}</a>`;
+
+  if (isSpoiler(pill)) return `<span data-mx-spoiler>${spoilerHtml(pill.label)}</span>`;
 
   if (pill.id.startsWith('emote:')) {
     const label = escapeHtml(pill.label);

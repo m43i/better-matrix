@@ -69,6 +69,31 @@ describe('openJoined at a message', () => {
     expect(navigation.push.mock.calls).toEqual([[routes.thread(ADA, '!r:x', '$root', '$reply')]]);
   });
 
+  it('should open nothing once the user left the screen that asked', async () => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    let shown = true;
+    const route = { type: 'room' as const, account: ADA, roomId: '!r:x', eventId: '$m' };
+    openJoined(store, route, navigation, () => shown);
+    shown = false;
+    engine.emit({ type: 'Finished', data: { request: sent[0]!.request, result: { Ok: null } } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(navigation.push.mock.calls).toEqual([]);
+  });
+
+  it('should open only the latest of two jumps, whichever answer comes last', async () => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    openJoined(store, { type: 'room', account: ADA, roomId: '!r:x', eventId: '$a' }, navigation);
+    openJoined(store, { type: 'room', account: ADA, roomId: '!r:x', eventId: '$b' }, navigation);
+    engine.emit({ type: 'Finished', data: { request: sent[1]!.request, result: { Err: 'no' } } });
+    engine.emit({ type: 'Finished', data: { request: sent[0]!.request, result: { Err: 'no' } } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(navigation.push.mock.calls).toEqual([[routes.room(ADA, '!r:x', '$b')]]);
+  });
+
   it('should open the room at the message when the engine can’t tell', async () => {
     const { engine, sent } = detachedEngine();
     const store = new Store(engine);
@@ -81,7 +106,11 @@ describe('openJoined at a message', () => {
 });
 
 describe('openElsewhere', () => {
-  const located = async (where: { thread: string | null } | 'unknown', current: string | null) => {
+  const located = async (
+    where: { thread: string | null } | 'unknown',
+    current: string | null,
+    shown = () => true,
+  ) => {
     const { engine, sent } = detachedEngine();
     const store = new Store(engine);
     engine.emit({ type: 'AccountAdded', data: summary(ADA) });
@@ -92,6 +121,7 @@ describe('openElsewhere', () => {
       { room_id: '!r:x', thread: current },
       '$q',
       navigation,
+      shown,
     );
 
     const request = sent[0]!.request;
@@ -111,23 +141,27 @@ describe('openElsewhere', () => {
 
   it('a quoted reply in a thread should open in its thread', async () => {
     expect(await located({ thread: '$root' }, null)).toEqual([
-      true,
+      'opened',
       [[routes.thread(ADA, '!r:x', '$root', '$q')]],
     ]);
   });
 
   it('a room message quoted in a thread should open in the room', async () => {
     expect(await located({ thread: null }, '$root')).toEqual([
-      true,
+      'opened',
       [[routes.room(ADA, '!r:x', '$q')]],
     ]);
   });
 
   it('a quoted message that would show in this timeline should open nothing', async () => {
-    expect(await located({ thread: '$root' }, '$root')).toEqual([false, []]);
+    expect(await located({ thread: '$root' }, '$root')).toEqual(['missing', []]);
   });
 
   it('a quoted message the engine can’t find should open nothing', async () => {
-    expect(await located('unknown', null)).toEqual([false, []]);
+    expect(await located('unknown', null)).toEqual(['missing', []]);
+  });
+
+  it('a quoted message found once its timeline left the screen should open nothing', async () => {
+    expect(await located({ thread: '$root' }, null, () => false)).toEqual(['stale', []]);
   });
 });

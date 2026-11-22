@@ -5,7 +5,7 @@
 // the same things (ADR 0008).
 
 import type { AccountId, Person, RoomPreview } from '@better-matrix/matrix-native/types';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
@@ -68,8 +68,26 @@ export default function LinkScreen() {
   const openRoom = useCallback(
     (owner: AccountId, roomId: string, space: boolean) => {
       if (!shown.current) return;
-      router.dismiss();
-      openJoined(store, joinedRoute(store.getState(), owner, roomId, space, link?.event ?? null));
+
+      // The sheet stays while the engine finds a linked message, and goes as it opens: once the
+      // user left it, the answer opens nothing.
+      const leaving = {
+        navigate: (href: Href) => {
+          router.dismiss();
+          router.navigate(href);
+        },
+        push: (href: Href) => {
+          router.dismiss();
+          router.push(href);
+        },
+      };
+
+      openJoined(
+        store,
+        joinedRoute(store.getState(), owner, roomId, space, link?.event ?? null),
+        leaving,
+        () => shown.current,
+      );
     },
     [store, router, link, shown],
   );

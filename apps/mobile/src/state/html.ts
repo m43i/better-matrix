@@ -343,6 +343,28 @@ function spoilerText(node: Node): string {
   return isBlock(node.name) ? `${inner}\n` : inner;
 }
 
+/**
+ * A code block's content without its code: `<code>` gone (its content kept) and each line end
+ * of its text a `<br>`, so it reads as text in the lines it was written in.
+ */
+function withoutCode(nodes: Node[]): Node[] {
+  return nodes.flatMap((node): Node[] => {
+    if (node.type === 'text')
+      return node.text
+        .split('\n')
+        .flatMap((part, index): Node[] => [
+          ...(index > 0 ? [{ type: 'element' as const, name: 'br', attrs: {}, children: [] }] : []),
+          ...(part === '' ? [] : [{ type: 'text' as const, text: part }]),
+        ]);
+
+    if (DROPPED.has(node.name)) return [];
+
+    if (node.name === 'code') return withoutCode(node.children);
+
+    return [{ ...node, children: withoutCode(node.children) }];
+  });
+}
+
 /** The text an element holds, as written (for code blocks). */
 function rawText(node: Node): string {
   if (node.type === 'text') return node.text;
@@ -412,11 +434,16 @@ function toBlocks(nodes: Node[], marks: Marks): Block[] {
     flush();
     const level = HEADINGS.get(node.name);
 
-    if (node.name === 'div' && node.attrs['data-mx-maths'] !== undefined) {
-      blocks.push({ type: 'paragraph', inlines: [mathInline(node.attrs['data-mx-maths'], true)] });
-    } else if (node.name === 'div' && node.attrs['data-mx-spoiler'] !== undefined) {
+    // A spoiler before a formula: one marked both stays hidden.
+    if (node.name === 'div' && node.attrs['data-mx-spoiler'] !== undefined) {
       const inlines = toInlines({ ...node, name: 'span' }, marks);
       blocks.push({ type: 'paragraph', inlines });
+    } else if (node.name === 'div' && node.attrs['data-mx-maths'] !== undefined) {
+      blocks.push({ type: 'paragraph', inlines: [mathInline(node.attrs['data-mx-maths'], true)] });
+    } else if (node.name === 'pre' && node.children.some(holdsSpoiler)) {
+      // A code block would show a spoiler's words as code: one holding a spoiler is its text,
+      // line for line, the spoiler hidden in it, as the engine reads it.
+      blocks.push(...toBlocks(withoutCode(node.children), marks));
     } else if (level !== undefined) {
       const inlines = tidy(linkify(node.children.flatMap((child) => toInlines(child, marks))));
 
@@ -522,9 +549,7 @@ function toInlines(node: Node, marks: Marks): Inline[] {
 
     case 'span':
     case 'div': {
-      const latex = node.attrs['data-mx-maths'];
-
-      if (latex !== undefined) return [mathInline(latex, node.name === 'div')];
+      // A spoiler before a formula: one marked both stays hidden.
       const reason = node.attrs['data-mx-spoiler'];
 
       if (reason !== undefined) {
@@ -537,6 +562,10 @@ function toInlines(node: Node, marks: Marks): Inline[] {
 
         return text === '' ? [] : [{ type: 'spoiler', text, reason }];
       }
+
+      const latex = node.attrs['data-mx-maths'];
+
+      if (latex !== undefined) return [mathInline(latex, node.name === 'div')];
 
       const inlines = node.children.flatMap((child) => toInlines(child, marks));
 

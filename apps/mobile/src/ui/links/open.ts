@@ -12,6 +12,10 @@ import { type LinkRoute, routeLink } from '../../state/linkRoute';
 import { parsePermalink } from '../../state/permalinks';
 import { addNotice } from '../../state/reducer';
 import type { Store } from '../../state/store';
+import { jumps } from './jumps';
+
+/** The app's jumps: a new one supersedes any whose answer hasn't come yet. */
+const JUMPS = jumps();
 
 function appRouter(): typeof ExpoRouter {
   // SAFETY: the literal require resolves Expo Router's typed module; tests inject navigation before this boundary.
@@ -20,11 +24,15 @@ function appRouter(): typeof ExpoRouter {
   return router;
 }
 
-/** Opens `link`, for `preferred` (the account it was tapped in) when given. */
+/**
+ * Opens `link`, for `preferred` (the account it was tapped in) when given, from a screen on show
+ * while `shown` says so.
+ */
 export function openPermalink(
   store: Store,
   link: string,
   preferred: AccountId | null = null,
+  shown?: () => boolean,
 ): void {
   const route = routeLink(store.getState(), parsePermalink(link), preferred);
 
@@ -35,10 +43,12 @@ export function openPermalink(
       return;
     case 'room':
     case 'space':
-      openJoined(store, route);
+      openJoined(store, route, appRouter(), shown);
 
       return;
     case 'screen':
+      // Where the user goes now, no earlier jump's answer takes them away.
+      JUMPS.begin();
       appRouter().push(routes.link(link, route.account ?? undefined));
   }
 }
@@ -46,13 +56,17 @@ export function openPermalink(
 /**
  * Opens a room an account has joined, or shows a joined space as the account's scope on Home. A
  * link to a message asks the engine which timeline shows it first, so a reply in a thread opens
- * in its thread; the room's timeline when the engine can't tell.
+ * in its thread; the room's timeline when the engine can't tell. The answer opens it only while
+ * this is the latest jump and the screen that asked is on show (`shown`).
  */
 export function openJoined(
   store: Store,
   route: Extract<LinkRoute, { type: 'room' | 'space' }>,
   navigation: Pick<typeof ExpoRouter, 'navigate' | 'push'> = appRouter(),
+  shown?: () => boolean,
 ): void {
+  const wanted = JUMPS.begin(shown);
+
   if (store.getState().active !== route.account) setActive(store, route.account);
 
   if (route.type === 'space') {
@@ -71,16 +85,27 @@ export function openJoined(
   }
 
   locateMessage(store, account, roomId, eventId).then(
-    (key) => navigation.push(messageRoute(account, roomId, eventId, key.thread)),
-    () => navigation.push(routes.room(account, roomId, eventId)),
+    (key) => {
+      if (wanted()) navigation.push(messageRoute(account, roomId, eventId, key.thread));
+    },
+    () => {
+      if (wanted()) navigation.push(routes.room(account, roomId, eventId));
+    },
   );
 }
 
 /**
+ * What became of a jump to a message elsewhere: it opened, the message is missing (it would
+ * show in the timeline that asked, so it is gone, or the engine can't find it), or the answer
+ * came once the jump was no longer wanted.
+ */
+export type Elsewhere = 'opened' | 'missing' | 'stale';
+
+/**
  * Opens a message the timeline `current` didn't find by paging back (a quote of a reply in a
  * thread, or of a room message from inside a thread): the engine says which timeline shows it,
- * and that one opens at it, as a permalink's message does. Resolves whether it opened: `false`
- * when the message would show in `current` (it is gone) or the engine can't find it.
+ * and that one opens at it, as a permalink's message does, while this is the latest jump and the
+ * timeline's screen is on show (`shown`).
  */
 export async function openElsewhere(
   store: Store,
@@ -88,21 +113,24 @@ export async function openElsewhere(
   current: TimelineKey,
   eventId: string,
   navigation: Pick<typeof ExpoRouter, 'push'> = appRouter(),
-): Promise<boolean> {
+  shown?: () => boolean,
+): Promise<Elsewhere> {
+  const wanted = JUMPS.begin(shown);
   let located: TimelineKey;
 
   try {
     located = await locateMessage(store, account, current.room_id, eventId);
   } catch {
-    return false;
+    return wanted() ? 'missing' : 'stale';
   }
 
+  if (!wanted()) return 'stale';
   const thread = located.thread !== null && located.thread !== eventId ? located.thread : null;
 
-  if (thread === current.thread) return false;
+  if (thread === current.thread) return 'missing';
   navigation.push(messageRoute(account, current.room_id, eventId, thread));
 
-  return true;
+  return 'opened';
 }
 
 /** Where a message shows: its thread (the root itself shows in the room), else the room. */
