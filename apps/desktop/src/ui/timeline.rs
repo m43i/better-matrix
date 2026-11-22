@@ -1407,32 +1407,13 @@ fn link_card(
     if let Some(description) = &card.description {
         words = words.child(text(description.clone()).font(font::META).color(p.text).max_lines(3).wrap_anywhere());
     }
-    let label = card.title.clone().unwrap_or_else(|| url.to_owned());
-    let opened = url.to_owned();
-    let mut entry = row()
-        .key(key.to_owned())
-        .max_w(460.0)
-        .mt(4.0)
-        .padding(12.0)
-        .gap(12.0)
-        .radius(10.0)
-        .fill(p.surface)
-        .border(1.0, p.divider)
-        .hover(p.hover.alpha(p.hover.a * 2.0))
-        .role("link")
-        .label(label)
-        .help(url.to_owned())
-        .cursor(rune::Cursor::Pointer)
-        .focusable(true)
-        .child(el().w(3.0).h_full().min_h(THUMB.min(40.0)).radius(1.5).fill(p.accent))
-        .child(words);
-    // An image that failed to load leaves the words on their own, as does a message too narrow
-    // to keep a readable width for them beside it.
+    // An image that failed to load leaves the words on their own. Beside them while that leaves
+    // the words a readable width; in a narrower message, under them.
     const WORDS_MIN: f32 = 120.0;
     let room = max_width - 2.0 * 12.0 - 3.0 - 2.0 * 12.0 - THUMB;
-    if let Some((image, _)) = card.image.as_ref().filter(|(image, _)| !media.has_failed(image) && room >= WORDS_MIN) {
+    let thumb = card.image.as_ref().filter(|(image, _)| !media.has_failed(image)).map(|(image, _)| {
         let thumb = el().size(THUMB, THUMB).radius(8.0).clip_rounded(8.0);
-        entry = entry.child(match (held, media.image(image)) {
+        match (held, media.image(image)) {
             // Held back: a press on it shows it, rather than opening the link.
             (Some((account, event_id)), _) => thumb
                 .key(format!("{key}-hidden"))
@@ -1453,8 +1434,35 @@ fn link_card(
                 .on_press(move |s: &mut State| s.reveal_media(&account, &event_id)),
             (None, Some(image)) => thumb.pixels_fit(image.pixels(), SurfaceFit::Fill),
             (None, None) => thumb.fill(p.hover).center().child(icon(&icons::IMAGE, 20.0).color(p.text_muted)),
-        });
+        }
+    });
+    let (beside, under) = match thumb {
+        Some(thumb) if room >= WORDS_MIN => (Some(thumb), None),
+        thumb => (None, thumb),
+    };
+    if let Some(thumb) = under {
+        words = words.child(thumb.mt(6.0));
     }
+    let label = card.title.clone().unwrap_or_else(|| url.to_owned());
+    let opened = url.to_owned();
+    let entry = row()
+        .key(key.to_owned())
+        .max_w(460.0)
+        .mt(4.0)
+        .padding(12.0)
+        .gap(12.0)
+        .radius(10.0)
+        .fill(p.surface)
+        .border(1.0, p.divider)
+        .hover(p.hover.alpha(p.hover.a * 2.0))
+        .role("link")
+        .label(label)
+        .help(url.to_owned())
+        .cursor(rune::Cursor::Pointer)
+        .focusable(true)
+        .child(el().w(3.0).h_full().min_h(THUMB.min(40.0)).radius(1.5).fill(p.accent))
+        .child(words)
+        .children(beside);
     entry.on_press_tx(move |s: &mut State, tx| s.open_link(&opened, tx))
 }
 

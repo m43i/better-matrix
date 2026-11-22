@@ -2281,36 +2281,39 @@ fn the_threads_panel_should_leave_out_threads_of_people_the_user_ignores() {
     assert!(rt.find(&thread).is_none());
 }
 
+/// The hidden-media scene with Grace's message linking a page whose card has a picture.
+fn held_link_card(s: &mut State) {
+    demo::hidden_media(s);
+    let account = AccountId::new(demo::ADA);
+    let message = Message {
+        event_id: "$link".into(),
+        sender_id: "@grace:example.org".into(),
+        sender_name: "Grace Hopper".into(),
+        timestamp_ms: 1,
+        content: MessageContent::Text { body: "Look: https://x.org/a".into(), html: None },
+        ..Message::default()
+    };
+    let entry = TimelineEntry { id: "link".into(), kind: EntryKind::Message(Box::new(message)) };
+    s.apply(
+        Event::TimelineChanged {
+            account: account.clone(),
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(vec![entry])],
+        },
+        &mut rune::Tx::default(),
+    );
+    let preview = matrix_core::links::LinkPreview {
+        title: Some("A page".into()),
+        image: Some((matrix_core::MediaRef::opaque("page-image"), None)),
+        ..Default::default()
+    };
+    let event = Event::LinkPreview { account, url: "https://x.org/a".into(), preview: Some(Box::new(preview)) };
+    s.apply(event, &mut rune::Tx::default());
+}
+
 #[test]
 fn a_held_back_link_card_image_should_say_show_and_reveal_without_opening_the_link() {
-    let mut rt = runtime(|s| {
-        demo::hidden_media(s);
-        let account = AccountId::new(demo::ADA);
-        let message = Message {
-            event_id: "$link".into(),
-            sender_id: "@grace:example.org".into(),
-            sender_name: "Grace Hopper".into(),
-            timestamp_ms: 1,
-            content: MessageContent::Text { body: "Look: https://x.org/a".into(), html: None },
-            ..Message::default()
-        };
-        let entry = TimelineEntry { id: "link".into(), kind: EntryKind::Message(Box::new(message)) };
-        s.apply(
-            Event::TimelineChanged {
-                account: account.clone(),
-                key: TimelineKey::room(demo::DEMO_THREAD.0),
-                diffs: vec![TimelineDiff::Reset(vec![entry])],
-            },
-            &mut rune::Tx::default(),
-        );
-        let preview = matrix_core::links::LinkPreview {
-            title: Some("A page".into()),
-            image: Some((matrix_core::MediaRef::opaque("page-image"), None)),
-            ..Default::default()
-        };
-        let event = Event::LinkPreview { account, url: "https://x.org/a".into(), preview: Some(Box::new(preview)) };
-        s.apply(event, &mut rune::Tx::default());
-    });
+    let mut rt = runtime(held_link_card);
     let thumb = rt.presented("link-$link-hidden").expect("the held-back image").0;
     let inside = |rect: [f32; 4]| {
         rect[0] >= thumb[0] && rect[1] >= thumb[1] && rect[0] <= thumb[0] + thumb[2] && rect[1] <= thumb[1] + thumb[3]
@@ -2798,4 +2801,23 @@ fn bubbles_should_draw_no_messages_from_someone_ignored() {
         rt.frame(1.0 / 60.0);
     }
     assert!(rt.find("msg-attachment").is_none());
+}
+
+#[test]
+fn a_narrow_link_card_should_keep_its_held_back_picture_under_the_words() {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    held_link_card(&mut state);
+    state.settings.message_layout = crate::state::MessageLayout::Bubbles;
+    let safety = matrix_core::Safety { media: matrix_core::ShowMedia::Never, ..matrix_core::Safety::default() };
+    state.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, &mut rune::Tx::default());
+    let mut rt = Runtime::new(state, super::view, (620.0, 760.0), Env::new(true, 1.0));
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    let card = rt.presented("link-$link").expect("the card").0;
+    let thumb = rt.presented("link-$link-hidden").expect("Show, even when narrow").0;
+    assert!(thumb[1] > card[1] + 20.0, "under the words, not beside them");
+    press(&mut rt, "link-$link-hidden");
+    assert!(rt.state.revealed_media.contains(&(AccountId::new(demo::ADA), "$link".to_owned())));
 }

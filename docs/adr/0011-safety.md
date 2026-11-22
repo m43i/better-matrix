@@ -54,7 +54,7 @@ Date: 2026-11-22
 - **Ignoring:** offered from the member menu and the person panel (desktop) and the member sheet
   (phones), never for the user themselves; it asks first, as it hides history. Settings → Safety
   lists ignored people with Stop ignoring.
-- **Reporting:** a dialog (a sheet on phones) with an optional reason and "Also ignore them" for a
+- **Reporting:** a dialog (on phones, a modal form like renaming a room) with an optional reason and "Also ignore them" for a
   message or a person. Offered on others' messages (message menu, message actions), on rooms
   (room menu, room info), on people (member menu, person panel, member sheet) and on invitations.
   Success shows a notice; a failure keeps the dialog open with a notice.

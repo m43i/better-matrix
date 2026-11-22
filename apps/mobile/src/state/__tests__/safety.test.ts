@@ -1,7 +1,7 @@
 import type { Attachment, Invitation, Safety } from '@better-matrix/matrix-native/types';
 
 import { ADA, GRACE, message, messageEntry, roomSummary, summary } from '../../test/fixtures';
-import { apply, initialState } from '../reducer';
+import { apply, initialState, updateAccount } from '../reducer';
 import {
   DEFAULT_SAFETY,
   hiddenInvitations,
@@ -716,4 +716,53 @@ it('someone whose ignore is being undone should stay left out until that is save
   };
 
   expect([shownIgnored(state.accounts[0]), shownIgnored(undoing)]).toEqual([[GRACE], [GRACE]]);
+});
+
+it('a pending Stop ignoring should keep their pinned and saved messages hidden until saved', () => {
+  const preview = (event_id: string) => ({
+    event_id,
+    sender_name: 'Grace',
+    sender_id: GRACE,
+    sender_avatar: null,
+    timestamp_ms: 1,
+    body: 'hi',
+    thread: null,
+  });
+
+  let state = signedIn({ ...DEFAULT_SAFETY, ignored: [GRACE] });
+  state = apply(state, {
+    type: 'RoomsUpdated',
+    data: {
+      account: ADA,
+      list: {
+        rooms: [{ ...roomSummary(PRIVATE), pinned: ['$a'], saved: ['$a'] }],
+        spaces: [],
+        invitations: [],
+      },
+    },
+  });
+  state = apply(state, {
+    type: 'PinnedMessages',
+    data: { account: ADA, room_id: PRIVATE, messages: [preview('$a')] },
+  });
+  state = apply(state, {
+    type: 'SavedMessages',
+    data: {
+      account: ADA,
+      messages: [{ room_id: PRIVATE, saved_at_ms: null, preview: preview('$a') }],
+    },
+  });
+
+  const pending = updateAccount(state, ADA, (a) => ({ ...a, safety: DEFAULT_SAFETY }));
+  const saved = apply(pending, { type: 'Safety', data: { account: ADA, safety: DEFAULT_SAFETY } });
+
+  const shown = (s: typeof state) => [
+    pinnedPreviews(s, ADA, PRIVATE)?.length,
+    savedMessages(s, ADA)?.length,
+  ];
+
+  expect([shown(pending), shown(saved)]).toEqual([
+    [0, 0],
+    [1, 1],
+  ]);
 });

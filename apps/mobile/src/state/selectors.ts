@@ -17,7 +17,7 @@ import type {
 
 import { galleryAround, thumbnailOf } from './gallery';
 import { EMPTY_TIMELINE, mediaKey } from './reducer';
-import { hiddenEntry, ignores, revealKey, showsMedia, shownInvitations } from './safety';
+import { hiddenEntry, revealKey, showsMedia, shownInvitations } from './safety';
 import { newestMessages, type NewestMessages } from './sections';
 import { timelineId } from './timeline';
 import type { AccountData, State, Timeline } from './types';
@@ -90,6 +90,14 @@ export function shownIgnored(data: AccountData | undefined): string[] | undefine
   const undoing = data.savedSafety.ignored.filter((id) => !data.safety.ignored.includes(id));
 
   return undoing.length === 0 ? data.safety.ignored : [...data.safety.ignored, ...undoing];
+}
+
+/**
+ * Whether what `userId` sent stays out of sight: ignored as shown, or still as the engine has it
+ * while stopping is on its way (`shownIgnored`), so a pending Stop ignoring shows nothing early.
+ */
+export function hides(data: AccountData, userId: string): boolean {
+  return shownIgnored(data)?.includes(userId) ?? false;
 }
 
 /** The people shown as ignored whose ignore the engine hasn't confirmed yet. */
@@ -180,8 +188,7 @@ export function savedMessages(state: State, id: AccountId): SavedMessage[] | und
 
   // What people the user ignores said stays out of the list; the saved IDs stay as they are.
   return data.saved.filter(
-    (m) =>
-      saved.has(`${m.room_id}|${m.preview.event_id}`) && !ignores(data.safety, m.preview.sender_id),
+    (m) => saved.has(`${m.room_id}|${m.preview.event_id}`) && !hides(data, m.preview.sender_id),
   );
 }
 
@@ -200,9 +207,7 @@ export function pinnedPreviews(
   if (!data || !pins) return undefined;
   const pinned = data.rooms.find((r) => r.room_id === roomId)?.pinned ?? [];
 
-  return pins.filter(
-    (pin) => pinned.includes(pin.event_id) && !ignores(data.safety, pin.sender_id),
-  );
+  return pins.filter((pin) => pinned.includes(pin.event_id) && !hides(data, pin.sender_id));
 }
 
 /** Every saved message's room and event, as one string: it changes when anything is saved. */
@@ -304,10 +309,7 @@ export function previewItems(
     // ignored) is rebuilt from the file Room Info listed, and never one an ignored person sent.
     const file = data?.files[key.room_id]?.find((f) => f.event_id === opened);
 
-    return file &&
-      data &&
-      !ignores(data.safety, file.sender_id) &&
-      !heldAnywhere(data, key.room_id, opened)
+    return file && data && !hides(data, file.sender_id) && !heldAnywhere(data, key.room_id, opened)
       ? [listedMessage(file)]
       : [];
   }
@@ -350,7 +352,7 @@ function inThreads(
 }
 
 /** A list as Room Info last showed it, by the list, with the ignore list it hid. */
-type ShownLists<T> = WeakMap<T[], { ignored: string[]; shown: T[] }>;
+type ShownLists<T> = WeakMap<T[], { ignored: string; shown: T[] }>;
 
 const shownFileLists: ShownLists<SharedFile> = new WeakMap();
 
@@ -366,11 +368,12 @@ function withoutIgnoredSenders<T extends { sender_id: string }>(
   cache: ShownLists<T>,
 ): T[] {
   if (ignored.length === 0) return list;
+  const key = ignored.join(',');
   const cached = cache.get(list);
 
-  if (cached?.ignored === ignored) return cached.shown;
+  if (cached?.ignored === key) return cached.shown;
   const shown = list.filter((item) => !ignored.includes(item.sender_id));
-  cache.set(list, { ignored, shown });
+  cache.set(list, { ignored: key, shown });
 
   return shown;
 }
@@ -380,7 +383,9 @@ export function shownFiles(state: State, id: AccountId, roomId: string): SharedF
   const data = account(state, id);
   const files = data?.files[roomId];
 
-  return data && files ? withoutIgnoredSenders(files, data.safety.ignored, shownFileLists) : files;
+  return data && files
+    ? withoutIgnoredSenders(files, shownIgnored(data) ?? [], shownFileLists)
+    : files;
 }
 
 /** The threads Room Info lists for a room, without those people the user ignores started. */
@@ -393,7 +398,7 @@ export function shownThreads(
   const threads = data?.threads[roomId];
 
   return data && threads
-    ? withoutIgnoredSenders(threads, data.safety.ignored, shownThreadLists)
+    ? withoutIgnoredSenders(threads, shownIgnored(data) ?? [], shownThreadLists)
     : threads;
 }
 
@@ -402,7 +407,7 @@ function heldAnywhere(data: AccountData, roomId: string, eventId: string): boole
   // Hidden as its sender is ignored: only while they still are, so stopping gives it back.
   const hiddenFrom = data.hiddenEvents[eventId];
 
-  if (hiddenFrom !== undefined && ignores(data.safety, hiddenFrom)) return true;
+  if (hiddenFrom !== undefined && hides(data, hiddenFrom)) return true;
 
   return Object.entries(data.timelines).some(
     ([id, kept]) =>
