@@ -99,6 +99,15 @@ impl Scheduled {
 /// How long a message whose time came may still be listed before the list is asked for again.
 const DUE_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Why a scheduled message wasn't sent, in words: the server's own, or ours for a code the
+/// engine gives ([`matrix_core::NOT_POSTED`]).
+pub fn failure_reason(reason: &str) -> String {
+    match reason {
+        matrix_core::NOT_POSTED => crate::i18n::t!("schedule.not_posted").to_owned(),
+        reason => reason.to_owned(),
+    }
+}
+
 /// How far the local clock is ahead of UTC at `now_ms`, in milliseconds.
 pub fn local_offset(now_ms: u64) -> i64 {
     use chrono::{Offset, TimeZone};
@@ -250,6 +259,12 @@ mod tests {
 
     /// Wednesday 2026-11-18, 14:30 UTC.
     const WEDNESDAY: u64 = 1_795_012_200_000;
+
+    #[test]
+    fn the_engines_not_posted_code_should_read_as_words() {
+        assert_eq!(failure_reason(matrix_core::NOT_POSTED), crate::i18n::t!("schedule.not_posted"));
+        assert_eq!(failure_reason("You may not post here"), "You may not post here");
+    }
 
     #[test]
     fn half_an_hour_should_be_thirty_minutes_on() {

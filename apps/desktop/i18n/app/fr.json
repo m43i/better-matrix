@@ -760,6 +760,7 @@
   "schedule.failed": "Envoi impossible : {{reason}}",
   "schedule.failed_notice": "Un message programmé n'a pas pu être envoyé : {{reason}}",
   "schedule.dismiss": "Ignorer",
+  "schedule.not_posted": "Il n'est pas apparu dans le salon à l'heure prévue",
   "schedule.failed_count.one": "{{count}} message programmé n'a pas pu être envoyé",
   "schedule.failed_count.other": "{{count}} messages programmés n'ont pas pu être envoyés",
   "stickers.none": "Pas encore d'autocollants. Les packs que vous ou ce salon ajoutez (MSC2545, comme dans Element ou FluffyChat) apparaissent ici.",

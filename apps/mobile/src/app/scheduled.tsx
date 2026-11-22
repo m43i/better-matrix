@@ -9,7 +9,7 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { t } from '../i18n';
 import { listScheduled, updateScheduled } from '../state/actions/messages';
 import { shallow, useAppStore, useStore } from '../state/react';
-import { scheduledIn, sendTimeText } from '../state/schedule';
+import { failureReason, scheduledIn, sendTimeText } from '../state/schedule';
 import { account as accountOf } from '../state/selectors';
 import { font } from '../theme/palette';
 import { Button, Divider, EmptyState } from '../ui/components';
@@ -56,7 +56,7 @@ export default function ScheduledScreen() {
               style={[font.meta, { color: palette.danger }]}
               testID={`scheduled-failed-${item.delay_id}`}
             >
-              {t('mobile.composer.scheduled_not_sent', { error: item.failed })}
+              {t('mobile.composer.scheduled_not_sent', { error: failureReason(item.failed) })}
             </Text>
           )}
           <Text

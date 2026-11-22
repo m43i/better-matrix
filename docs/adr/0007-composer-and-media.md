@@ -161,9 +161,12 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   it scheduled past its time until the server says what became of it (from the list, else
   `GET …/delayed_events/{delay_id}`, the one read MSC4140 keeps since the bulk list moved to
   MSC4486): a sent one is let go; one the server no longer knows (Synapse forgets them once it
-  sends, or fails to) is looked for in the room, a message from this account saying the same
-  since its time: there, it went; absent two minutes after its time, it counts as failed
-  (`NOT_POSTED`); a failed one stays
+  sends, or fails to) is looked for in the room: from its time on (the event the server finds
+  at that time, then forward), else back from now, an event from this account between a minute
+  before and two after its time that the server made of it (`unsigned`'s
+  `org.matrix.msc4140.delay_id`, Synapse 1.150 on) or that says the same: there, it went;
+  absent once two minutes have passed, it counts as failed (`NOT_POSTED`, a code the apps put
+  in words); a failed one stays
   (`ScheduledMessage::failed`, its error), with a notice once, shown first in the bar and in the
   list with why, until dismissed (cancelling it asks nothing of the server). Unanswered ones go
   after eight days (servers keep finalised ones for about a week), failed ones after 30.

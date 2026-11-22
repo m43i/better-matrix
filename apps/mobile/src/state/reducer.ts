@@ -19,7 +19,7 @@ import { t } from '../i18n';
 import { initialCallView, reconcileView } from './callView';
 import { keepUnchanged } from './json';
 import { DEFAULT_SAFETY, hiddenEntry, withChange } from './safety';
-import { newlyFailed } from './schedule';
+import { failureReason, newlyFailed } from './schedule';
 import { DEFAULT_SETTINGS, type Settings } from './settings';
 import { applyDiffs, timelineId } from './timeline';
 import type { AccountData, PendingSafety, State, Timeline, Verification } from './types';
@@ -772,7 +772,7 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
         ? next
         : addNotice(
             next,
-            t('mobile.composer.scheduled_lost', { error: failed }),
+            t('mobile.composer.scheduled_lost', { error: failureReason(failed) }),
             event.data.account,
           );
     }

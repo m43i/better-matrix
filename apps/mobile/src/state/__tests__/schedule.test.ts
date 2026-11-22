@@ -5,8 +5,10 @@ import {
   askedAnyway,
   delayUntil,
   failedIn,
+  failureReason,
   newlyFailed,
   nextRelist,
+  NOT_POSTED,
   presetTime,
   RELIST_RETRY_MS,
   relistStep,
@@ -113,6 +115,11 @@ describe('asking again for the scheduled messages', () => {
 
   it('should count the room’s messages the server failed to send', () => {
     expect(failedIn([{ ...at('!a', 1), failed: 'No posting' }, at('!a', 2)], '!a')).toBe(1);
+  });
+
+  it('should put the engine’s not-posted code in words, and keep the server’s own', () => {
+    expect(failureReason(NOT_POSTED)).not.toBe(NOT_POSTED);
+    expect(failureReason('No posting')).toBe('No posting');
   });
 
   it('should tell a failure once', () => {

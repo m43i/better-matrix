@@ -76,6 +76,17 @@ export function soonestScheduled(
   );
 }
 
+/**
+ * The engine's `failed` for one the server no longer knows and the room lacks (Rust's
+ * `matrix_core::NOT_POSTED`): a code, put in words here.
+ */
+export const NOT_POSTED = 'chat.bettermatrix.not_posted';
+
+/** Why a scheduled message wasn't sent, in words: the server's own, or ours for the engine's code. */
+export function failureReason(failed: string): string {
+  return failed === NOT_POSTED ? t('schedule.not_posted') : failed;
+}
+
 /** How many of a room's scheduled messages the server failed to send. */
 export function failedIn(
   scheduled: readonly ScheduledMessage[] | null | undefined,

@@ -94,7 +94,7 @@ pub use profile::{ContactStep, ProfileForm};
 pub use qr_login::QrLogin;
 pub use readers::{READER_FACES, ReaderMenu};
 pub use room_discovery::Directory;
-pub use scheduled::{When, local_offset};
+pub use scheduled::{When, failure_reason, local_offset};
 pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches};
 pub use sections::{
     DIRECT, FAVOURITES, INVITATIONS, LOW_PRIORITY, ROOMS, SectionView, is_builtin, ordered_spaces, sections,
@@ -1795,7 +1795,7 @@ impl State {
             }
             Event::ScheduledMessages { account, messages } => {
                 if let Some(reason) = self.scheduled.listed(account, messages) {
-                    self.notice = Some(tf!("schedule.failed_notice", reason = reason));
+                    self.notice = Some(tf!("schedule.failed_notice", reason = scheduled::failure_reason(&reason)));
                 }
             }
             Event::ImagePacks { account, room_id, packs } => {

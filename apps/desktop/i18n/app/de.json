@@ -760,6 +760,7 @@
   "schedule.failed": "Konnte nicht gesendet werden: {{reason}}",
   "schedule.failed_notice": "Eine geplante Nachricht konnte nicht gesendet werden: {{reason}}",
   "schedule.dismiss": "Verwerfen",
+  "schedule.not_posted": "Sie ist nach ihrer Zeit nicht im Raum erschienen",
   "schedule.failed_count.one": "{{count}} geplante Nachricht konnte nicht gesendet werden",
   "schedule.failed_count.other": "{{count}} geplante Nachrichten konnten nicht gesendet werden",
   "stickers.none": "Noch keine Sticker. Sticker-Pakete, die du oder dieser Raum hinzufügen (MSC2545, wie in Element oder FluffyChat), erscheinen hier.",

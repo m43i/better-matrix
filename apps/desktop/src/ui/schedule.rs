@@ -52,7 +52,10 @@ pub fn list(s: &State, p: &Palette) -> El {
         let (send, cancel) = (message.delay_id.clone(), message.delay_id.clone());
         // One the server couldn't send says why; it can only be let go.
         let (status, status_color, cancel_label) = match &message.failed {
-            Some(reason) => (tf!("schedule.failed", reason = reason), p.danger, t!("schedule.dismiss")),
+            Some(reason) => {
+                let reason = crate::state::failure_reason(reason);
+                (tf!("schedule.failed", reason = reason), p.danger, t!("schedule.dismiss"))
+            }
             None => (when(message.send_at_ms), p.accent, t!("schedule.cancel")),
         };
         let send_now = message.failed.is_none().then(|| {

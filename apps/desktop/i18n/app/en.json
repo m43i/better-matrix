@@ -760,6 +760,7 @@
   "schedule.failed": "Couldn't be sent: {{reason}}",
   "schedule.failed_notice": "A scheduled message couldn't be sent: {{reason}}",
   "schedule.dismiss": "Dismiss",
+  "schedule.not_posted": "It didn't appear in the room after its time",
   "schedule.failed_count.one": "{{count}} scheduled message couldn't be sent",
   "schedule.failed_count.other": "{{count}} scheduled messages couldn't be sent",
   "stickers.none": "No stickers yet. Sticker packs you or this room add (MSC2545, as in Element or FluffyChat) show here.",

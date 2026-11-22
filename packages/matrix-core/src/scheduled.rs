@@ -49,8 +49,14 @@ const UNSETTLED_KEPT: u64 = 8 * 24 * 3_600_000;
 /// the room, before its absence there means it wasn't sent.
 const POSTING_GRACE: u64 = 2 * 60_000;
 
-/// Why a message counts as not sent when the server no longer knows it and the room lacks it.
-pub const NOT_POSTED: &str = "It didn't appear in the room";
+/// [`ScheduledMessage::failed`] for one the server no longer knows and the room lacks: a code,
+/// not words, which the apps put in their own.
+pub const NOT_POSTED: &str = "chat.bettermatrix.not_posted";
+
+/// The delay ID the server made an event from, as Synapse tells its sender.
+fn delay_id_of(event: &Value) -> Option<&str> {
+    event["unsigned"]["org.matrix.msc4140.delay_id"].as_str()
+}
 
 /// How long a message the server failed to send stays to be seen, unless let go first.
 const FAILED_KEPT: u64 = 30 * 24 * 3_600_000;
@@ -294,33 +300,106 @@ impl Account {
         .await
     }
 
-    /// Whether `message` shows in its room: one from this account saying the same, posted since
-    /// a minute before its time, in the room's latest pages. `None` when the room can't be read
-    /// now, or it can't be told (no words of its own to look for, or too much said since).
+    /// Whether `message` shows in its room: posted by this account from a minute before its
+    /// time until [`POSTING_GRACE`] after, as the event the server made of it (its delay ID, as
+    /// Synapse tells the sender) or one saying the same. Read forward from its time (the event
+    /// the server finds at that time), so a busy room since doesn't matter; where the server
+    /// can't find events by time, back from now. `None` when it can't be told now.
     async fn appeared(&self, message: &ScheduledMessage) -> Option<bool> {
-        use matrix_sdk::room::MessagesOptions;
-        let body = message.body.as_deref()?;
         let room = self.client().get_room(&matrix_sdk::ruma::RoomId::parse(&message.room_id).ok()?)?;
-        let since = message.send_at_ms.saturating_sub(60_000);
-        let mut from = None;
-        for _ in 0..5 {
-            let mut options = MessagesOptions::backward().from(from.as_deref());
-            options.limit = 50u32.into();
-            let page = room.messages(options).await.ok()?;
-            for event in &page.chunk {
-                let Ok(event) = event.raw().deserialize_as_unchecked::<Value>() else { continue };
-                if event["sender"].as_str() == Some(self.id().as_str())
-                    && body_of(&event["content"]).as_deref() == Some(body)
-                {
-                    return Some(true);
+        let (since, until) =
+            (message.send_at_ms.saturating_sub(60_000), message.send_at_ms.saturating_add(POSTING_GRACE));
+        let me = self.id().as_str();
+        let is_it = |event: &Value| {
+            event["sender"].as_str() == Some(me)
+                && (delay_id_of(event) == Some(message.delay_id.as_str())
+                    || message.body.as_deref().is_some_and(|body| body_of(&event["content"]).as_deref() == Some(body)))
+        };
+        let at = |event: &Value| event["origin_server_ts"].as_u64().unwrap_or_default();
+        match self.read_forward(&room, since).await {
+            Some(Ok(mut pages)) => {
+                for _ in 0..10 {
+                    for event in &pages.0 {
+                        if at(event) > until {
+                            return Some(false);
+                        }
+                        if at(event) >= since && is_it(event) {
+                            return Some(true);
+                        }
+                    }
+                    let Some(from) = pages.1 else { return Some(false) };
+                    pages = self
+                        .page(&room, matrix_sdk::room::MessagesOptions::forward().from(Some(from.as_str())))
+                        .await?;
+                    if pages.0.is_empty() {
+                        return Some(false);
+                    }
                 }
-                if event["origin_server_ts"].as_u64().is_some_and(|at| at < since) {
-                    return Some(false);
-                }
+                None
             }
-            from = Some(page.end?);
+            // Nothing in the room from then on.
+            Some(Err(())) => Some(false),
+            None => {
+                let mut from: Option<String> = None;
+                for _ in 0..5 {
+                    let options = matrix_sdk::room::MessagesOptions::backward().from(from.as_deref());
+                    let (events, end) = self.page(&room, options).await?;
+                    for event in &events {
+                        if at(event) < since {
+                            return Some(false);
+                        }
+                        if at(event) <= until && is_it(event) {
+                            return Some(true);
+                        }
+                    }
+                    from = Some(end?);
+                }
+                None
+            }
         }
-        None
+    }
+
+    /// The room's events from the first at or after `since` on, and the token to read on;
+    /// `Err` when there is none; `None` when the server can't find events by time.
+    async fn read_forward(&self, room: &Room, since: u64) -> Option<Result<(Vec<Value>, Option<String>), ()>> {
+        use matrix_sdk::ruma::api::Direction;
+        use matrix_sdk::ruma::api::client::room::get_event_by_timestamp::v1::Request;
+        let ts = matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(matrix_sdk::ruma::UInt::try_from(since).ok()?);
+        let request = Request::new(room.room_id().to_owned(), ts, Direction::Forward);
+        let start = match self.client().send(request).await {
+            Ok(response) => response.event_id,
+            Err(error) if error.as_client_api_error().is_some_and(|api| api.status_code.as_u16() == 404) => {
+                // Unknown endpoint, or no event after `since`: an endpoint the server lacks says
+                // `M_UNRECOGNIZED`.
+                use matrix_sdk::ruma::api::error::ErrorKind;
+                let unknown = error
+                    .as_client_api_error()
+                    .is_some_and(|api| matches!(api.error_kind(), Some(ErrorKind::Unrecognized)));
+                return if unknown { None } else { Some(Err(())) };
+            }
+            Err(_) => return None,
+        };
+        let context = room.event_with_context(&start, false, 50u32.into(), None).await.ok()?;
+        let events = context
+            .event
+            .into_iter()
+            .chain(context.events_after)
+            .filter_map(|event| event.raw().deserialize_as_unchecked::<Value>().ok())
+            .collect();
+        Some(Ok((events, context.next_batch_token)))
+    }
+
+    /// One page of the room's events (50), and the token to read on.
+    async fn page(
+        &self,
+        room: &Room,
+        mut options: matrix_sdk::room::MessagesOptions,
+    ) -> Option<(Vec<Value>, Option<String>)> {
+        options.limit = 50u32.into();
+        let page = room.messages(options).await.ok()?;
+        let events =
+            page.chunk.iter().filter_map(|event| event.raw().deserialize_as_unchecked::<Value>().ok()).collect();
+        Some((events, page.end))
     }
 
     /// The messages a server's list holds that are still to go.
@@ -579,6 +658,8 @@ mod tests {
         NoList,
         /// The proposal's own, its list failing for now.
         BrokenList,
+        /// The proposal's own, and events found by time (`/timestamp_to_event`, `/context`).
+        ByTime,
     }
 
     type Sent = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
@@ -597,12 +678,12 @@ mod tests {
                     serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap_or_default()).unwrap_or_default();
                 return match endpoints {
                     // As the proposal and Synapse have it: `delay_ms`, the content apart.
-                    Endpoints::Current | Endpoints::NoList | Endpoints::BrokenList
+                    Endpoints::Current | Endpoints::NoList | Endpoints::BrokenList | Endpoints::ByTime
                         if body["delay_ms"].is_u64() && body["content"].is_object() =>
                     {
                         json!({ "delay_id": "d1" })
                     }
-                    Endpoints::Current | Endpoints::NoList | Endpoints::BrokenList => {
+                    Endpoints::Current | Endpoints::NoList | Endpoints::BrokenList | Endpoints::ByTime => {
                         json!({ "errcode": "M_BAD_JSON", "error": "no delay_ms" })
                     }
                     Endpoints::Older | Endpoints::None => unknown(),
@@ -611,7 +692,11 @@ mod tests {
             if first.contains("org.matrix.msc4140.delay=") {
                 return match endpoints {
                     Endpoints::None => json!({ "event_id": "$posted-at-once" }),
-                    Endpoints::Current | Endpoints::Older | Endpoints::NoList | Endpoints::BrokenList => {
+                    Endpoints::Current
+                    | Endpoints::Older
+                    | Endpoints::NoList
+                    | Endpoints::BrokenList
+                    | Endpoints::ByTime => {
                         json!({ "delay_id": "d1" })
                     }
                 };
@@ -619,7 +704,7 @@ mod tests {
             if first.starts_with("POST") && first.contains("/delayed_events/") {
                 let in_path = first.contains("/d1/cancel") || first.contains("/d1/send");
                 return match (endpoints, in_path) {
-                    (Endpoints::Current | Endpoints::NoList | Endpoints::BrokenList, true)
+                    (Endpoints::Current | Endpoints::NoList | Endpoints::BrokenList | Endpoints::ByTime, true)
                     | (Endpoints::Older, false) => {
                         json!({})
                     }
@@ -662,7 +747,22 @@ mod tests {
                 };
                 return json!({ "delayed_events": [delayed("waiting", false), delayed("sent", true)] });
             }
-            // The room's latest messages: one this account posted just now, then an old one.
+            // By time: the first event from then on is one the server made of delay `sent-late`
+            // (saying something else), then nothing more.
+            if endpoints == Endpoints::ByTime && first.contains("/timestamp_to_event") {
+                return json!({ "event_id": "$made", "origin_server_ts": now_ms() });
+            }
+            if endpoints == Endpoints::ByTime && first.contains("/context/") {
+                let made = json!({
+                    "type": "m.room.message", "event_id": "$made", "sender": "@a:example.org",
+                    "origin_server_ts": now_ms(), "room_id": "!room:example.org",
+                    "content": { "msgtype": "m.text", "body": "[Spoiler]" },
+                    "unsigned": { "org.matrix.msc4140.delay_id": "sent-late" }
+                });
+                return json!({ "event": made, "events_before": [], "events_after": [], "state": [] });
+            }
+            // The room's latest messages: one this account posted just now, one it posted long
+            // ago saying `yesterday`, then an old one.
             if first.starts_with("GET") && first.contains("/messages?") {
                 let now = now_ms();
                 let posted = json!({
@@ -675,7 +775,12 @@ mod tests {
                     "origin_server_ts": 1, "room_id": "!room:example.org",
                     "content": { "msgtype": "m.text", "body": "long ago" }
                 });
-                return json!({ "start": "t1", "end": "t0", "chunk": [posted, old] });
+                let yesterday = json!({
+                    "type": "m.room.message", "event_id": "$yesterday", "sender": "@a:example.org",
+                    "origin_server_ts": now - 24 * 3_600_000, "room_id": "!room:example.org",
+                    "content": { "msgtype": "m.text", "body": "yesterday" }
+                });
+                return json!({ "start": "t1", "end": "t0", "chunk": [posted, yesterday, old] });
             }
             if first.contains("/versions") {
                 let held = endpoints != Endpoints::None;
@@ -954,6 +1059,35 @@ mod tests {
         let listed = account.scheduled_messages().await.expect("listed");
         let vanished = listed.iter().find(|message| message.delay_id == "vanished").expect("listed");
         assert_eq!(vanished.failed.as_deref(), Some(NOT_POSTED));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_earlier_message_saying_the_same_should_not_stand_for_it() {
+        let (server, _) = server(false, Endpoints::Current);
+        let account = account(&server, "said-before").await;
+        kept_due_saying(&account, "repeat", "yesterday", 10 * 60_000).await;
+        let listed = account.scheduled_messages().await.expect("listed");
+        let repeat = listed.iter().find(|message| message.delay_id == "repeat").expect("listed");
+        assert_eq!(repeat.failed.as_deref(), Some(NOT_POSTED));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_event_made_of_a_message_should_be_found_by_its_delay_id_from_its_time_on() {
+        let (server, _) = server(false, Endpoints::ByTime);
+        let account = account(&server, "by-time").await;
+        kept_due_saying(&account, "sent-late", "a hidden twist", 60_000).await;
+        account.scheduled_messages().await.expect("listed");
+        assert!(account.keep_scheduled(|_| {}).await.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_missing_from_its_time_on_should_count_as_failed() {
+        let (server, _) = server(false, Endpoints::ByTime);
+        let account = account(&server, "by-time-missing").await;
+        kept_due_saying(&account, "lost-in-a-busy-room", "never posted", 10 * 60_000).await;
+        let listed = account.scheduled_messages().await.expect("listed");
+        let lost = listed.iter().find(|message| message.delay_id == "lost-in-a-busy-room").expect("listed");
+        assert_eq!(lost.failed.as_deref(), Some(NOT_POSTED));
     }
 
     #[tokio::test(flavor = "multi_thread")]

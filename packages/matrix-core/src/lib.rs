@@ -93,6 +93,7 @@ pub use registration::{Policy, RegisterRequest, RegistrationStep};
 pub use rooms::{DirectoryKind, JoinRule, RoomPreview};
 pub use safety::{ReportTarget, Safety, SafetyChange, ShowMedia};
 pub use saved::SavedMessage;
+pub use scheduled::NOT_POSTED;
 pub use search::{MessageHit, SearchUsage};
 pub use secrets::{FileSecrets, MemorySecrets, SecretError, SecretStore};
 pub use security::{Identity, KeyImport, OfflineDevice, RecoveryStatus, SasEmoji, Security, Session, VerificationStep};
