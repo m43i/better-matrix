@@ -81,6 +81,8 @@ pub struct Account {
     pub(crate) status_saves: Arc<tokio::sync::Mutex<()>>,
     /// Held while a room's saved messages change: one change at a time (`crate::saved`).
     pub(crate) saved_changes: Arc<tokio::sync::Mutex<()>>,
+    /// Held while a scheduled message is encrypted: one at a time (`crate::scheduled`).
+    pub(crate) scheduling: Arc<tokio::sync::Mutex<()>>,
     /// Draft reads and writes, in the order they were asked for (`crate::drafts`).
     pub(crate) drafts: crate::drafts::DraftQueue,
     /// The client's own crypto, for sends the SDK doesn't encrypt itself (`crate::scheduled`);
@@ -334,6 +336,7 @@ impl Account {
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
+            scheduling: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
             crypto: Some(Box::new(crypto)),
         }
@@ -361,6 +364,7 @@ impl Account {
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
+            scheduling: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
             crypto: None,
         }
@@ -478,6 +482,7 @@ impl Account {
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
+            scheduling: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
             crypto: Some(Box::new(crypto)),
         })
@@ -1065,6 +1070,7 @@ mod tests {
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
+            scheduling: Arc::default(),
             drafts: crate::drafts::DraftQueue::default(),
             crypto: None,
         }

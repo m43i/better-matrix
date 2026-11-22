@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use matrix_sdk::Room;
 use matrix_sdk::ruma::api::client::delayed_events::{
-    DelayParameters, delayed_message_event, get_all_delayed_events, update_delayed_event,
+    DelayParameters, delayed_message_event, get_all_delayed_events, send_delayed_event, update_delayed_event,
 };
 use matrix_sdk::ruma::events::{AnyMessageLikeEventContent, MessageLikeEventContent, MessageLikeEventType};
 use matrix_sdk::ruma::serde::Raw;
@@ -46,23 +46,50 @@ impl Account {
         let event_type = content.event_type().to_string();
         let mut json = serde_json::to_value(&content).map_err(|e| Error::Storage(e.into()))?;
         relate(&mut json, key.thread.as_deref(), reply_to);
+        // A reply mentions whom it answers, as one sent now does.
+        if let Some(reply_to) = reply_to
+            && let Ok(answered) = room.load_or_fetch_event(&matrix_sdk::ruma::EventId::parse(reply_to)?, None).await
+            && let Ok(Some(sender)) = answered.raw().get_field::<String>("sender")
+        {
+            mention(&mut json, &sender, self.id().as_str());
+        }
         let raw: Raw<AnyMessageLikeEventContent> =
             Raw::new(&json).map_err(|e| Error::Storage(e.into()))?.cast_unchecked();
         let (event_type, raw) = match room.latest_encryption_state().await?.is_encrypted() {
             true => {
                 let crypto = self.crypto.as_ref().ok_or(Error::MessageUnavailable)?;
+                // One at a time: two would share room keys and claim sessions side by side.
+                let _one = self.scheduling.lock().await;
                 ("m.room.encrypted".to_owned(), encrypt(self, crypto, &room, &event_type, &raw).await?)
             }
             false => (event_type, raw),
         };
-        let request = delayed_message_event::unstable::Request::new_raw(
+        let delay = delay.min(LONGEST_DELAY);
+        let txn_id = TransactionId::new();
+        // MSC4140's own endpoint first, then the query parameter on `/send` Synapse took first.
+        let request = send_delayed_event::unstable::Request::new_raw(
+            event_type.as_str().into(),
             room.room_id().to_owned(),
-            TransactionId::new(),
-            MessageLikeEventType::from(event_type),
-            DelayParameters::Timeout { timeout: delay.min(LONGEST_DELAY) },
-            raw,
-        );
-        Ok(self.client().send(request).await?.delay_id)
+            txn_id.clone(),
+            delay,
+            None,
+            raw.clone().cast_unchecked(),
+        )
+        .map_err(|e| Error::Storage(e.into()))?;
+        match self.client().send(request).await {
+            Ok(response) => Ok(response.delay_id),
+            Err(error) if unrecognized(&error) => {
+                let request = delayed_message_event::unstable::Request::new_raw(
+                    room.room_id().to_owned(),
+                    txn_id,
+                    MessageLikeEventType::from(event_type),
+                    DelayParameters::Timeout { timeout: delay },
+                    raw,
+                );
+                Ok(self.client().send(request).await?.delay_id)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// The messages the server holds for the account, soonest first. A message this device
@@ -71,8 +98,10 @@ impl Account {
         let response = self.client().send(get_all_delayed_events::unstable::Request::new()).await?;
         let mut messages = Vec::new();
         for event in response.delayed_events {
-            // Delayed state (a call membership's own expiry) isn't a message.
-            if event.state_key.is_some() {
+            // Delayed state (a call membership's own expiry) isn't a message, and one already
+            // sent, cancelled or failed is done.
+            let finished = event.finalized_ts.is_some() || event.event_id.is_some() || event.error.is_some();
+            if event.state_key.is_some() || finished {
                 continue;
             }
             let content: Value = event.content.deserialize_as_unchecked().unwrap_or_default();
@@ -99,9 +128,17 @@ impl Account {
             ScheduledAction::Cancel => update_delayed_event::UpdateAction::Cancel,
             ScheduledAction::SendNow => update_delayed_event::UpdateAction::Send,
         };
-        let request = update_delayed_event::unstable_v1::Request::new(delay_id.to_owned(), action);
-        self.client().send(request).await?;
-        Ok(())
+        // The action in the path (MSC4140 as it stands), then in the body (Synapse's first).
+        let request = update_delayed_event::unstable_v2::Request::new(delay_id.to_owned(), action.clone());
+        match self.client().send(request).await {
+            Ok(_) => Ok(()),
+            Err(error) if unrecognized(&error) => {
+                let request = update_delayed_event::unstable_v1::Request::new(delay_id.to_owned(), action);
+                self.client().send(request).await?;
+                Ok(())
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// The body of an encrypted scheduled message, when this device holds its key.
@@ -119,6 +156,30 @@ impl Account {
         let decrypted = room.decrypt_event(&raw, None).await.ok()?;
         let event: Value = decrypted.raw().deserialize_as_unchecked().ok()?;
         body_of(&event["content"])
+    }
+}
+
+/// Whether the server doesn't know an endpoint: it answers 404 or 405, or `M_UNRECOGNIZED`.
+fn unrecognized(error: &matrix_sdk::HttpError) -> bool {
+    use matrix_sdk::ruma::api::error::ErrorKind;
+    error.as_client_api_error().is_some_and(|api| {
+        matches!(api.status_code.as_u16(), 404 | 405) || matches!(api.error_kind(), Some(ErrorKind::Unrecognized))
+    })
+}
+
+/// Adds `user_id` to the users a message's content mentions, unless it is `me`.
+fn mention(content: &mut Value, user_id: &str, me: &str) {
+    if user_id == me {
+        return;
+    }
+    let users = &mut content["m.mentions"]["user_ids"];
+    if !users.is_array() {
+        *users = Value::Array(Vec::new());
+    }
+    if let Some(users) = users.as_array_mut()
+        && !users.iter().any(|known| known == user_id)
+    {
+        users.push(Value::String(user_id.to_owned()));
     }
 }
 
@@ -201,6 +262,26 @@ async fn encrypt(
     }
     // `share_room_key` takes the machine itself.
     drop(machine);
+    let shared = share_room_key(crypto, room, client).await;
+    if shared.is_err() {
+        // As the SDK does: a key some members may lack would leave them unable to decrypt.
+        let _ = room.discard_room_key().await;
+    }
+    shared?;
+    let olm = crypto.0.olm_machine().await;
+    let encrypted = olm
+        .as_ref()
+        .ok_or(Error::MessageUnavailable)?
+        .encrypt_room_event_raw(room.room_id(), event_type, content)
+        .await
+        .map_err(|e| Error::Sdk(matrix_sdk::Error::MegolmError(Box::new(e))))?;
+    Ok(encrypted.content.cast_unchecked())
+}
+
+/// Shares the room's current key with its members' devices, marking each request sent.
+async fn share_room_key(crypto: &Crypto, room: &Room, client: &matrix_sdk::Client) -> Result<(), Error> {
+    let crypto_failed =
+        |error: matrix_sdk_base::crypto::OlmError| Error::Sdk(matrix_sdk::Error::OlmError(Box::new(error)));
     for request in crypto.0.share_room_key(room.room_id()).await.map_err(|e| Error::Sdk(e.into()))? {
         let send = matrix_sdk::ruma::api::client::to_device::send_event_to_device::v3::Request::new_raw(
             request.event_type.clone(),
@@ -215,14 +296,7 @@ async fn encrypt(
             .await
             .map_err(crypto_failed)?;
     }
-    let olm = crypto.0.olm_machine().await;
-    let encrypted = olm
-        .as_ref()
-        .ok_or(Error::MessageUnavailable)?
-        .encrypt_room_event_raw(room.room_id(), event_type, content)
-        .await
-        .map_err(|e| Error::Sdk(matrix_sdk::Error::MegolmError(Box::new(e))))?;
-    Ok(encrypted.content.cast_unchecked())
+    Ok(())
 }
 
 #[cfg(test)]
@@ -248,32 +322,78 @@ mod tests {
         assert_eq!(content["m.relates_to"]["is_falling_back"], true);
     }
 
-    /// A server that holds what is sent, and a room `!room:example.org` (encrypted when
-    /// `encrypted`) synced from it.
-    fn server(encrypted: bool) -> (Server, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    #[test]
+    fn a_mention_should_be_added_once_and_never_of_oneself() {
+        let mut content = json!({ "m.mentions": {} });
+        mention(&mut content, "@b:x", "@a:x");
+        mention(&mut content, "@b:x", "@a:x");
+        mention(&mut content, "@a:x", "@a:x");
+        assert_eq!(content["m.mentions"]["user_ids"], json!(["@b:x"]));
+    }
+
+    /// Which MSC4140 endpoints a test server knows.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Endpoints {
+        /// The proposal's own (`/delayed_event/…`, the action in the path).
+        Current,
+        /// Only Synapse's first (`?org.matrix.msc4140.delay=` on `/send`, the action in the body).
+        Older,
+    }
+
+    type Sent = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+    /// A server that keeps what is sent, with a room `!room:example.org` (encrypted when
+    /// `encrypted`) to sync.
+    fn server(encrypted: bool, endpoints: Endpoints) -> (Server, Sent) {
         let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured = sent.clone();
+        let unknown = || json!({ "errcode": "M_NOT_FOUND", "error": "Unrecognized request" });
         let server = Server::new(move |request| {
             captured.lock().expect("requests").push(request.to_owned());
-            if request.contains("org.matrix.msc4140.delay=") {
+            let first = request.lines().next().unwrap_or_default();
+            if first.contains("/delayed_event/") {
+                return if endpoints == Endpoints::Current { json!({ "delay_id": "d1" }) } else { unknown() };
+            }
+            if first.contains("org.matrix.msc4140.delay=") {
                 return json!({ "delay_id": "d1" });
             }
-            if request.contains("/versions") {
+            if first.starts_with("POST") && first.contains("/delayed_events/") {
+                let in_path = first.contains("/d1/cancel") || first.contains("/d1/send");
+                return match (endpoints, in_path) {
+                    (Endpoints::Current, true) | (Endpoints::Older, false) => json!({}),
+                    _ => unknown(),
+                };
+            }
+            if first.starts_with("GET") && first.contains("/delayed_events") {
+                let delayed = |id: &str, done: bool| {
+                    let mut event = json!({
+                        "delay_id": id, "room_id": "!room:example.org", "type": "m.room.message",
+                        "delay": 60000, "running_since": 1000, "content": { "msgtype": "m.text", "body": id }
+                    });
+                    if done {
+                        event["finalised_ts"] = json!(2000);
+                        event["event_id"] = json!("$sent");
+                    }
+                    event
+                };
+                return json!({ "delayed_events": [delayed("waiting", false), delayed("sent", true)] });
+            }
+            if first.contains("/versions") {
                 return json!({ "versions": ["v1.12"] });
             }
-            if !encrypted && request.contains("/state/m.room.encryption") {
+            if !encrypted && first.contains("/state/m.room.encryption") {
                 return json!({ "errcode": "M_NOT_FOUND", "error": "no encryption" });
             }
-            if request.contains("/joined_members") || request.contains("/members") {
+            if first.contains("/joined_members") || first.contains("/members") {
                 return json!({ "chunk": [
                     {"type":"m.room.member","state_key":"@a:example.org","sender":"@a:example.org","event_id":"$join","origin_server_ts":0,"content":{"membership":"join"}}
                 ] });
             }
-            if request.contains("/keys/claim") {
+            if first.contains("/keys/claim") {
                 return json!({ "one_time_keys": {} });
             }
             let mut response = crate::test_server::thread_response(request);
-            if encrypted && request.contains("/sync?") {
+            if encrypted && first.contains("/sync?") {
                 response["rooms"]["join"]["!room:example.org"]["state"]["events"].as_array_mut().expect("state").push(json!({
                     "type":"m.room.encryption","state_key":"","sender":"@a:example.org","event_id":"$e","origin_server_ts":0,
                     "content":{"algorithm":"m.megolm.v1.aes-sha2"}
@@ -284,35 +404,59 @@ mod tests {
         (server, sent)
     }
 
-    fn store(name: &str) -> std::path::PathBuf {
+    /// A signed-in account on its own store, synced with `server`.
+    async fn account(server: &Server, name: &str) -> Account {
         let dir = std::env::temp_dir().join(format!("matrix-core-scheduled-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        dir
-    }
-
-    /// The send that scheduled a message: its request line and body.
-    fn scheduled(sent: &std::sync::Mutex<Vec<String>>) -> (String, Value) {
-        let sent = sent.lock().expect("requests");
-        let request =
-            sent.iter().find(|request| request.contains("org.matrix.msc4140.delay=")).expect("a scheduled send");
-        let line = request.lines().next().unwrap_or_default().to_owned();
-        let body = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap_or_default()).expect("a JSON body");
-        (line, body)
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_message_should_be_scheduled_with_its_delay() {
-        let (server, sent) = server(false);
-        let dir = store("plain");
         let account = Account::for_test_with_store(&server.url(), &dir).await;
         account
             .client()
             .sync_once(matrix_sdk::config::SyncSettings::default().timeout(Duration::ZERO))
             .await
             .expect("sync");
-        let message = Outgoing::Text { body: "later".into(), html: None, mentions: Default::default() };
-        let id =
-            account.schedule(&TimelineKey::room("!room:example.org"), None, &message, Duration::from_secs(90)).await;
+        account
+    }
+
+    /// The request that scheduled a message: its request line and body.
+    fn scheduled(sent: &Sent) -> (String, Value) {
+        let sent = sent.lock().expect("requests");
+        let request = sent
+            .iter()
+            .rev()
+            .find(|request| {
+                let first = request.lines().next().unwrap_or_default();
+                first.contains("/delayed_event/") || first.contains("org.matrix.msc4140.delay=")
+            })
+            .expect("a scheduled send");
+        let line = request.lines().next().unwrap_or_default().to_owned();
+        let body = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap_or_default()).expect("a JSON body");
+        (line, body)
+    }
+
+    fn text(body: &str) -> Outgoing {
+        Outgoing::Text { body: body.into(), html: None, mentions: Default::default() }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_should_be_scheduled_with_its_delay() {
+        let (server, sent) = server(false, Endpoints::Current);
+        let account = account(&server, "current").await;
+        let id = account
+            .schedule(&TimelineKey::room("!room:example.org"), None, &text("later"), Duration::from_secs(90))
+            .await;
+        assert_eq!(id.expect("scheduled"), "d1");
+        let (line, body) = scheduled(&sent);
+        assert!(line.contains("/org.matrix.msc4140/rooms/!room:example.org/delayed_event/m.room.message/"), "{line}");
+        assert_eq!((body["delay"].as_u64(), body["content"]["body"].as_str()), (Some(90_000), Some("later")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_server_with_only_the_first_endpoint_should_still_schedule() {
+        let (server, sent) = server(false, Endpoints::Older);
+        let account = account(&server, "older").await;
+        let id = account
+            .schedule(&TimelineKey::room("!room:example.org"), None, &text("later"), Duration::from_secs(90))
+            .await;
         assert_eq!(id.expect("scheduled"), "d1");
         let (line, body) = scheduled(&sent);
         assert!(line.starts_with("PUT /_matrix/client/v3/rooms/!room:example.org/send/m.room.message/"), "{line}");
@@ -321,42 +465,72 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_message_scheduled_in_an_encrypted_room_should_be_encrypted() {
-        let (server, sent) = server(true);
-        let dir = store("encrypted");
-        let account = Account::for_test_with_store(&server.url(), &dir).await;
-        account
-            .client()
-            .sync_once(matrix_sdk::config::SyncSettings::default().timeout(Duration::ZERO))
-            .await
-            .expect("sync");
-        let message = Outgoing::Text { body: "a secret".into(), html: None, mentions: Default::default() };
-        let id =
-            account.schedule(&TimelineKey::room("!room:example.org"), None, &message, Duration::from_secs(60)).await;
-        assert_eq!(id.expect("scheduled"), "d1");
-        let (line, body) = scheduled(&sent);
-        assert!(line.contains("/send/m.room.encrypted/"), "{line}");
-        assert_eq!(body["algorithm"], "m.megolm.v1.aes-sha2");
-        assert!(body["ciphertext"].is_string() && !body.to_string().contains("a secret"), "{body}");
+    async fn a_scheduled_reply_should_mention_whom_it_answers() {
+        let (server, sent) = server(false, Endpoints::Current);
+        let account = account(&server, "reply").await;
+        let key = TimelineKey::room("!room:example.org");
+        account.schedule(&key, Some("$root"), &text("later"), Duration::from_secs(60)).await.expect("scheduled");
+        let (_, body) = scheduled(&sent);
+        assert_eq!(body["content"]["m.relates_to"]["m.in_reply_to"]["event_id"], "$root");
+        assert_eq!(body["content"]["m.mentions"]["user_ids"], json!(["@b:example.org"]));
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn an_encrypted_scheduled_message_should_list_with_its_body() {
-        let (server, sent) = server(true);
-        let dir = store("listed");
-        let account = Account::for_test_with_store(&server.url(), &dir).await;
-        account
-            .client()
-            .sync_once(matrix_sdk::config::SyncSettings::default().timeout(Duration::ZERO))
-            .await
-            .expect("sync");
-        let message = Outgoing::Text { body: "a secret".into(), html: None, mentions: Default::default() };
-        account
-            .schedule(&TimelineKey::room("!room:example.org"), None, &message, Duration::from_secs(60))
-            .await
-            .expect("scheduled");
+    async fn a_message_scheduled_in_an_encrypted_room_should_be_encrypted() {
+        let (server, sent) = server(true, Endpoints::Current);
+        let account = account(&server, "encrypted").await;
+        let id = account
+            .schedule(&TimelineKey::room("!room:example.org"), None, &text("a secret"), Duration::from_secs(60))
+            .await;
+        assert_eq!(id.expect("scheduled"), "d1");
+        let (line, body) = scheduled(&sent);
+        assert!(line.contains("/delayed_event/m.room.encrypted/"), "{line}");
+        assert_eq!(body["content"]["algorithm"], "m.megolm.v1.aes-sha2");
+        assert!(body["content"]["ciphertext"].is_string() && !body.to_string().contains("a secret"), "{body}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_encrypted_scheduled_message_should_be_read_back_by_its_device() {
+        let (server, sent) = server(true, Endpoints::Current);
+        let account = account(&server, "read-back").await;
+        let key = TimelineKey::room("!room:example.org");
+        account.schedule(&key, None, &text("a secret"), Duration::from_secs(60)).await.expect("scheduled");
         let (_, body) = scheduled(&sent);
-        let content = account.decrypt_scheduled(matrix_sdk::ruma::room_id!("!room:example.org"), &body).await;
+        let content =
+            account.decrypt_scheduled(matrix_sdk::ruma::room_id!("!room:example.org"), &body["content"]).await;
         assert_eq!(content.as_deref(), Some("a secret"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_already_sent_should_not_be_listed() {
+        let (server, _) = server(false, Endpoints::Current);
+        let account = account(&server, "listed").await;
+        let listed = account.scheduled_messages().await.expect("listed");
+        let bodies: Vec<_> = listed.iter().map(|message| message.body.as_deref()).collect();
+        assert_eq!(bodies, [Some("waiting")]);
+        assert_eq!(listed[0].send_at_ms, 61_000);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancelling_should_name_the_action_in_the_path() {
+        let (server, sent) = server(false, Endpoints::Current);
+        let account = account(&server, "cancel").await;
+        account.update_scheduled("d1", ScheduledAction::Cancel).await.expect("cancelled");
+        assert!(
+            sent.lock()
+                .expect("requests")
+                .iter()
+                .any(|request| request.starts_with("POST") && request.contains("/delayed_events/d1/cancel"))
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sending_now_on_a_server_with_only_the_first_endpoint_should_name_the_action_in_the_body() {
+        let (server, sent) = server(false, Endpoints::Older);
+        let account = account(&server, "send-now").await;
+        account.update_scheduled("d1", ScheduledAction::SendNow).await.expect("sent");
+        let sent = sent.lock().expect("requests");
+        let request = sent.iter().rev().find(|request| request.contains("/delayed_events/d1 ")).expect("an update");
+        assert!(request.contains("\"action\":\"send\""), "{request}");
     }
 }

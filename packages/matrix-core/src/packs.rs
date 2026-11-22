@@ -2,10 +2,13 @@
 //! keep them. A pack is a set of images with short codes, each usable as a custom emoji in
 //! text, as a sticker, or both.
 //!
-//! - The user's own pack: global account data `im.ponies.user_emotes`.
-//! - A room's packs: its `im.ponies.room_emotes` state, one pack per state key.
-//! - Packs the user enabled everywhere: `im.ponies.emote_rooms` names rooms and state keys
-//!   whose packs apply in every room.
+//! - The user's own pack: global account data `m.image_pack`.
+//! - A room's packs: its `m.room.image_pack` state, one pack per state key.
+//! - Packs the user enabled everywhere: `m.image_pack.rooms` names rooms and state keys whose
+//!   packs apply in every room.
+//!
+//! Each is read under its name in the spec, then the `im.ponies.*` one clients used before it
+//! (`user_emotes`, `room_emotes`, `emote_rooms`); a room's pack under both names shows once.
 //!
 //! Packs are read from this device's store (sync keeps them), the user's own falling back to
 //! the server when the store has none yet.
@@ -18,9 +21,12 @@ use serde_json::Value;
 use crate::model::{ImagePack, PackImage};
 use crate::{Account, Error};
 
-const USER_PACK: &str = "im.ponies.user_emotes";
-const ROOM_PACK: &str = "im.ponies.room_emotes";
-const ENABLED_ROOMS: &str = "im.ponies.emote_rooms";
+/// The user's own pack: the spec's name, then the one before it.
+const USER_PACK: [&str; 2] = ["m.image_pack", "im.ponies.user_emotes"];
+/// A room's packs.
+const ROOM_PACK: [&str; 2] = ["m.room.image_pack", "im.ponies.room_emotes"];
+/// Rooms whose packs apply everywhere.
+const ENABLED_ROOMS: [&str; 2] = ["m.image_pack.rooms", "im.ponies.emote_rooms"];
 
 impl Account {
     /// The image packs usable in `room_id` (or anywhere, for `None`): the user's own first,
@@ -28,10 +34,16 @@ impl Account {
     pub async fn image_packs(&self, room_id: Option<&str>) -> Result<Vec<ImagePack>, Error> {
         let account = self.client().account();
         let mut packs = Vec::new();
-        let user = match account.account_data_raw(GlobalAccountDataEventType::from(USER_PACK)).await? {
-            Some(raw) => Some(raw),
-            None => account.fetch_account_data(GlobalAccountDataEventType::from(USER_PACK)).await.ok().flatten(),
-        };
+        let mut user = None;
+        for name in USER_PACK {
+            user = match account.account_data_raw(GlobalAccountDataEventType::from(name)).await? {
+                Some(raw) => Some(raw),
+                None => account.fetch_account_data(GlobalAccountDataEventType::from(name)).await.ok().flatten(),
+            };
+            if user.is_some() {
+                break;
+            }
+        }
         if let Some(raw) = user
             && let Ok(content) = serde_json::from_str::<Value>(raw.json().get())
             && let Some(pack) = pack("user".to_owned(), String::new(), &content)
@@ -43,11 +55,13 @@ impl Account {
         {
             packs.extend(room_packs(&room, None).await);
         }
-        let enabled = account.account_data_raw(GlobalAccountDataEventType::from(ENABLED_ROOMS)).await.ok().flatten();
-        if let Some(raw) = enabled
-            && let Ok(content) = serde_json::from_str::<Value>(raw.json().get())
-            && let Some(rooms) = content["rooms"].as_object()
-        {
+        for name in ENABLED_ROOMS {
+            let Some(raw) = account.account_data_raw(GlobalAccountDataEventType::from(name)).await.ok().flatten()
+            else {
+                continue;
+            };
+            let Ok(content) = serde_json::from_str::<Value>(raw.json().get()) else { continue };
+            let Some(rooms) = content["rooms"].as_object() else { continue };
             for (room_id, keys) in rooms {
                 let Some(room) =
                     matrix_sdk::ruma::RoomId::parse(room_id).ok().and_then(|id| self.client().get_room(&id))
@@ -66,9 +80,22 @@ impl Account {
     }
 }
 
-/// A room's packs: all of them, or those under `keys`.
+/// A room's packs: all of them, or those under `keys`; a pack under both names once.
 async fn room_packs(room: &Room, keys: Option<&[String]>) -> Vec<ImagePack> {
-    let Ok(events) = room.get_state_events(StateEventType::from(ROOM_PACK)).await else { return Vec::new() };
+    let mut packs: Vec<ImagePack> = Vec::new();
+    for name in ROOM_PACK {
+        for found in room_packs_named(room, name, keys).await {
+            if !packs.iter().any(|known| known.id == found.id) {
+                packs.push(found);
+            }
+        }
+    }
+    packs
+}
+
+/// A room's packs under one state event type.
+async fn room_packs_named(room: &Room, name: &str, keys: Option<&[String]>) -> Vec<ImagePack> {
+    let Ok(events) = room.get_state_events(StateEventType::from(name)).await else { return Vec::new() };
     let room_name =
         room.cached_display_name().map(|name| name.to_string()).unwrap_or_else(|| room.room_id().to_string());
     let mut packs = Vec::new();
@@ -190,6 +217,37 @@ mod tests {
             json!({ "images": { "bad": { "url": "https://x.org/a.png" }, "good": { "url": "mxc://x.org/a" } } });
         let found = pack("room".into(), "Room".into(), &content).expect("a pack");
         assert_eq!(found.images.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_rooms_packs_should_be_read_under_both_names_once_each() {
+        let pack_event = |kind: &str, key: &str, shortcode: &str| {
+            json!({
+                "type": kind, "state_key": key, "sender": "@a:example.org", "event_id": format!("${kind}{key}"),
+                "origin_server_ts": 1,
+                "content": { "pack": { "display_name": key }, "images": { shortcode: { "url": "mxc://x.org/i" } } }
+            })
+        };
+        let server = crate::test_server::Server::new(move |request| {
+            let mut response = crate::test_server::thread_response(request);
+            if request.contains("/sync?") {
+                let state =
+                    response["rooms"]["join"]["!room:example.org"]["state"]["events"].as_array_mut().expect("state");
+                state.push(pack_event("m.room.image_pack", "cats", "blobcat"));
+                state.push(pack_event("im.ponies.room_emotes", "cats", "oldcat"));
+                state.push(pack_event("im.ponies.room_emotes", "dogs", "dog"));
+            }
+            response
+        });
+        let account = Account::for_test(&server.url()).await;
+        account
+            .client()
+            .sync_once(matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::ZERO))
+            .await
+            .expect("sync");
+        let packs = account.image_packs(Some("!room:example.org")).await.expect("packs");
+        let found: Vec<_> = packs.iter().map(|pack| (pack.name.as_str(), pack.images[0].shortcode.as_str())).collect();
+        assert_eq!(found, [("cats", "blobcat"), ("dogs", "dog")]);
     }
 
     #[test]

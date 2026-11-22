@@ -8,7 +8,8 @@
 //!   policy asks; requests name the app, never the user. Apps credit "© OpenStreetMap
 //!   contributors" beside every map.
 //! - **Search** goes to OpenStreetMap's Nominatim ([`search_places`]), only when the user asks
-//!   (never as they type: its usage policy forbids autocomplete).
+//!   (never as they type: its usage policy forbids autocomplete), at most one request a second
+//!   from the app, the last [`SEARCHES_KEPT`] answers kept, as the policy asks.
 //!
 //! [`Command::FetchMedia`]: crate::Command::FetchMedia
 
@@ -34,6 +35,10 @@ const TILES_KEPT: usize = 64;
 const TILE_SERVER: &str = "https://tile.openstreetmap.org";
 /// Where places are looked up by name.
 const SEARCH_SERVER: &str = "https://nominatim.openstreetmap.org";
+/// How many searches' answers are kept, so asking again asks no one.
+const SEARCHES_KEPT: usize = 32;
+/// The least time between two searches the app sends.
+const SEARCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// The latitude and longitude a `geo:` URI names, in degrees; `None` when it names none
 /// (another coordinate system, out of range, not a geo URI).
@@ -279,6 +284,40 @@ pub(crate) async fn search_places(
     query: &str,
     language: Option<&str>,
 ) -> Result<Vec<Place>, Error> {
+    let asked = (query.trim().to_lowercase(), language.map(str::to_owned));
+    // Held across the request: searches go one at a time, a second apart.
+    let mut searches = searches().lock().await;
+    if let Some((_, places)) = searches.answers.iter().find(|(known, _)| *known == asked) {
+        return Ok(places.clone());
+    }
+    if let Some(last) = searches.last {
+        tokio::time::sleep_until(last + SEARCH_INTERVAL).await;
+    }
+    searches.last = Some(tokio::time::Instant::now());
+    let places = search_nominatim(http, query, language).await?;
+    searches.answers.push((asked, places.clone()));
+    let excess = searches.answers.len().saturating_sub(SEARCHES_KEPT);
+    searches.answers.drain(..excess);
+    Ok(places)
+}
+
+/// The searches sent: when the last went, and the answers kept by query and language.
+#[derive(Default)]
+struct Searches {
+    last: Option<tokio::time::Instant>,
+    answers: Vec<(Asked, Vec<Place>)>,
+}
+
+/// A search: its query (trimmed, lower case) and language.
+type Asked = (String, Option<String>);
+
+fn searches() -> &'static tokio::sync::Mutex<Searches> {
+    static SEARCHES: OnceLock<tokio::sync::Mutex<Searches>> = OnceLock::new();
+    SEARCHES.get_or_init(Default::default)
+}
+
+/// Places matching `query`, as Nominatim answers.
+async fn search_nominatim(http: &reqwest::Client, query: &str, language: Option<&str>) -> Result<Vec<Place>, Error> {
     #[derive(serde::Deserialize)]
     struct Found {
         display_name: String,
