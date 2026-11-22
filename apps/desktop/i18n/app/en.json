@@ -635,7 +635,6 @@
   "update.installing": "Downloading update… The app will restart when ready.",
   "update.failed": "Could not update Better Matrix: {{error}}. Try the update button again, or install the latest release manually.",
   "update.incomplete": "The previous update did not complete. Try the update button again, or install the latest release manually.",
-  "composer.spoiler_fallback": "[Spoiler]",
   "composer.stickers": "Stickers",
   "composer.location": "Share a location",
   "format.spoiler": "Spoiler",

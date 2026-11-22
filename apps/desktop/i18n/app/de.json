@@ -635,7 +635,6 @@
   "update.installing": "Update wird heruntergeladen… Die App startet neu, sobald es bereit ist.",
   "update.failed": "Better Matrix konnte nicht aktualisiert werden: {{error}}. Versuche es erneut über die Update-Schaltfläche oder installiere die neueste Version manuell.",
   "update.incomplete": "Das letzte Update wurde nicht abgeschlossen. Versuche es erneut über die Update-Schaltfläche oder installiere die neueste Version manuell.",
-  "composer.spoiler_fallback": "[Spoiler]",
   "composer.stickers": "Sticker",
   "composer.location": "Standort teilen",
   "format.spoiler": "Spoiler",

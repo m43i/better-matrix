@@ -260,7 +260,8 @@ reply and attachments while the app runs).
 : Something in a text that isn't plain words, held as one piece the caret steps over: a
 mention, `@room`, a spoiler, a formula, a custom emoji. A field holds it as Rune's
 `Mark::Pill` with an id (`user:@ada:x`, `room:#rust:x`, `everyone`, `spoiler`, `math`,
-`emote:mxc://…`); `matrix_core::html` turns Matrix HTML into pills and back.
+`emote:mxc://…`); `matrix_core::html` turns Matrix HTML into pills and back. Phones keep each as
+a draft pill beside the draft's text: its id and where it starts (`DraftPill`).
 
 **Mention**
 : A message naming someone (or a room) on purpose: a link to them on matrix.to in its HTML,

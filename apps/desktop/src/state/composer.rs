@@ -170,6 +170,10 @@ fn html_of(edit: &TextEdit) -> Option<String> {
     formatted.then(|| matrix_core::html::from_pills(&edit.to_html()))
 }
 
+/// What a spoiler's words become in a message's plain body: the same in every language, as
+/// it goes to everyone.
+const SPOILER_FALLBACK: &str = "[Spoiler]";
+
 /// A field's plain body: its text, with each spoiler's words kept out of it, as clients that
 /// show only the body would show them to everyone.
 pub(super) fn body_of(edit: &TextEdit) -> String {
@@ -177,7 +181,7 @@ pub(super) fn body_of(edit: &TextEdit) -> String {
     let mut spoilers: Vec<_> = edit.pills().filter(|(_, id)| *id == "spoiler").map(|(range, _)| range).collect();
     spoilers.sort_by_key(|range| std::cmp::Reverse(range.start));
     for range in spoilers {
-        body.replace_range(range, crate::i18n::t!("composer.spoiler_fallback"));
+        body.replace_range(range, SPOILER_FALLBACK);
     }
     body.trim().to_owned()
 }
