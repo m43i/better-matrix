@@ -79,6 +79,31 @@ export const routes = {
     pathname: '/emoji',
     params: { account, roomId, ...options },
   }),
+  /** A message's earlier versions, from its "edited" label. */
+  editHistory: (account: AccountId, roomId: string, eventId: string): Href => ({
+    pathname: '/edit-history',
+    params: { account, roomId, eventId },
+  }),
+  /** The sticker picker, sending into a room's or thread's timeline. */
+  stickers: (account: AccountId, roomId: string, thread?: string): Href => ({
+    pathname: '/stickers',
+    params: thread ? { account, roomId, thread } : { account, roomId },
+  }),
+  /** Sharing a place: the phone's position or one found by name. */
+  location: (account: AccountId, roomId: string, thread?: string): Href => ({
+    pathname: '/location',
+    params: thread ? { account, roomId, thread } : { account, roomId },
+  }),
+  /** When to send what the composer holds, from a long press on Send. */
+  schedule: (account: AccountId, roomId: string, thread?: string): Href => ({
+    pathname: '/schedule',
+    params: thread ? { account, roomId, thread } : { account, roomId },
+  }),
+  /** A conversation's scheduled messages, to send now or cancel. */
+  scheduled: (account: AccountId, roomId: string): Href => ({
+    pathname: '/scheduled',
+    params: { account, roomId },
+  }),
   newPoll: (account: AccountId, roomId: string, thread?: string): Href => ({
     pathname: '/new-poll',
     params: thread ? { account, roomId, thread } : { account, roomId },

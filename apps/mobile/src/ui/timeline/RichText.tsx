@@ -1,12 +1,16 @@
 // A message's text, drawn from its parsed blocks (state/html.ts) with native text: formatting,
-// links that open in the browser, mention pills, code, quotes and lists. Never raw HTML.
+// links that open in the browser, mention pills, spoilers hidden until tapped, formulas as
+// Unicode, custom emoji as inline pictures, code, quotes and lists. Never raw HTML.
 
-import { memo } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, type TextStyle, View } from 'react-native';
+import { memo, useState } from 'react';
+import { Image, Platform, ScrollView, StyleSheet, Text, type TextStyle, View } from 'react-native';
 
+import { t } from '../../i18n';
 import type { Block, Inline, Marks } from '../../state/html';
+import { mxcMedia } from '../../state/messages';
 import { useAppStore } from '../../state/react';
 import { font } from '../../theme/palette';
+import { AVATAR_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
 import { openLink, openMention } from './open';
@@ -94,14 +98,70 @@ function BlockView({ block, muted }: { block: Block; muted: boolean }) {
 function Inlines({ inlines }: { inlines: Inline[] }) {
   return (
     <>
-      {inlines.map((inline, index) =>
-        inline.type === 'text' ? (
-          <Run key={index} text={inline.text} marks={inline.marks} />
-        ) : (
-          <Pill key={index} inline={inline} />
-        ),
-      )}
+      {inlines.map((inline, index) => {
+        switch (inline.type) {
+          case 'text':
+            return <Run key={index} text={inline.text} marks={inline.marks} />;
+          case 'mention':
+            return <Pill key={index} inline={inline} />;
+          case 'spoiler':
+            return <Spoiler key={index} inlines={inline.inlines} />;
+          case 'math':
+            return <MathText key={index} text={inline.text} latex={inline.latex} />;
+          case 'emote':
+            return <Emote key={index} url={inline.url} label={inline.label} />;
+        }
+      })}
     </>
+  );
+}
+
+/** Hidden text: a block of the muted colour until tapped, then the text as sent. */
+function Spoiler({ inlines }: { inlines: Inline[] }) {
+  const palette = usePalette();
+  const [shown, setShown] = useState(false);
+
+  if (shown) return <Inlines inlines={inlines} />;
+
+  return (
+    <Text
+      accessibilityRole="button"
+      accessibilityLabel={t('mobile.conversation.spoiler')}
+      onPress={() => setShown(true)}
+      suppressHighlighting
+      style={{ color: palette.textMuted, backgroundColor: palette.textMuted }}
+    >
+      <Inlines inlines={inlines} />
+    </Text>
+  );
+}
+
+/** A formula as Unicode, set like maths; its LaTeX is what a screen reader says. */
+function MathText({ text, latex }: { text: string; latex: string }) {
+  return (
+    <Text accessibilityLabel={latex} style={styles.math}>
+      {text}
+    </Text>
+  );
+}
+
+/** How tall custom emoji are drawn: the body's line. */
+const EMOTE = 20;
+
+/** A custom emoji, as a picture in the line once fetched; its short code until then. */
+function Emote({ url, label }: { url: string; label: string }) {
+  const { account } = useTimelineContext();
+  const uri = useMedia(account, mxcMedia(url), AVATAR_SIZE);
+
+  if (!uri) return <Text>{label}</Text>;
+
+  return (
+    <Image
+      source={{ uri }}
+      accessibilityLabel={t('mobile.conversation.custom_emoji', { code: label })}
+      style={styles.emote}
+      resizeMode="contain"
+    />
   );
 }
 
@@ -178,4 +238,6 @@ const styles = StyleSheet.create({
   bullet: { minWidth: 16, textAlign: 'right' },
   itemBody: { flex: 1 },
   rule: { height: StyleSheet.hairlineWidth, marginVertical: 6 },
+  math: { fontFamily: Platform.select({ ios: 'Times New Roman', default: 'serif' }), fontSize: 17 },
+  emote: { width: EMOTE, height: EMOTE },
 });

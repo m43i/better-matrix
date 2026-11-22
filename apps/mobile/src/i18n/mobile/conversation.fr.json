@@ -11,5 +11,14 @@
   "mobile.conversation.play_video": "Lire la vidéo",
   "mobile.conversation.open_thread": "Ouvrir le fil",
   "mobile.conversation.preview_gallery": "Envoyés ensemble",
-  "mobile.conversation.preview_item": "{{name}}, {{index}} sur {{count}}"
+  "mobile.conversation.preview_item": "{{name}}, {{index}} sur {{count}}",
+  "mobile.conversation.location": "Position",
+  "mobile.conversation.location_open": "Ouvrir dans OpenStreetMap",
+  "mobile.conversation.spoiler": "Spoiler, touchez pour afficher",
+  "mobile.conversation.edit_history": "Historique des modifications",
+  "mobile.conversation.edit_history_original": "Original",
+  "mobile.conversation.edit_history_failed": "Impossible de charger l’historique : {{error}}",
+  "mobile.conversation.edit_history_hint": "Afficher les versions précédentes du message",
+  "mobile.conversation.jump_failed": "Impossible de trouver le message : {{error}}",
+  "mobile.conversation.custom_emoji": "Émoji personnalisé {{code}}"
 }

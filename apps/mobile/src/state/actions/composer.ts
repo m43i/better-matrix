@@ -3,7 +3,7 @@
 
 import type { AccountId, Command, TimelineKey } from '@better-matrix/matrix-native/types';
 
-import { t } from '../../i18n';
+import { type Key, t } from '../../i18n';
 import {
   composer,
   endEdit,
@@ -12,7 +12,17 @@ import {
   updateComposer,
 } from '../composer';
 import { rememberEmoji } from '../emoji';
-import { canSend, insertAt, planSend, voiceMessage, withAttachments } from '../outgoing';
+import {
+  canSend,
+  insertAt,
+  planSchedule,
+  planSend,
+  type SendPlan,
+  type SendProblem,
+  voiceMessage,
+  withAttachments,
+} from '../outgoing';
+import { livePills, type Pill } from '../pills';
 import { type PollForm, pollOutgoing } from '../pollForm';
 import { addNotice } from '../reducer';
 import { CommandFailed } from '../requests';
@@ -33,13 +43,18 @@ function sendTold(
   command: Command,
   key: 'notice.not_sent' | 'notice.not_changed' | 'notice.react',
   failed?: () => void,
-): void {
-  store.run(command).catch((cause: unknown) => {
-    if (cause instanceof CommandFailed && cause.cancelled) return;
-    failed?.();
-    const message = cause instanceof Error ? cause.message : String(cause);
-    store.update((s) => addNotice(s, t(key, { error: message })));
-  });
+): Promise<boolean> {
+  return store.run(command).then(
+    () => true,
+    (cause: unknown) => {
+      if (cause instanceof CommandFailed && cause.cancelled) return false;
+      failed?.();
+      const message = cause instanceof Error ? cause.message : String(cause);
+      store.update((s) => addNotice(s, t(key, { error: message })));
+
+      return false;
+    },
+  );
 }
 
 /** The draft changed (and where the caret is). */
@@ -53,10 +68,37 @@ export function setDraft(
   updateComposer(store, account, key, (c) => ({
     ...c,
     draft,
+    // A pill whose label was edited away is gone.
+    pills: c.pills && c.pills.length > 0 ? livePills(draft, c.pills) : c.pills,
     selection: selection ?? c.selection,
     // Typing in an edit changes the sent message, not the draft set aside under it.
     touched: c.touched || !c.editing,
   }));
+}
+
+/**
+ * The draft with a suggestion picked: `draft` (the trigger's text replaced) and the pill it
+ * inserted, if it was one (a mention, a custom emoji).
+ */
+export function completeDraft(
+  store: Store,
+  account: AccountId,
+  key: TimelineKey,
+  draft: string,
+  selection: { start: number; end: number },
+  pill: Pill | null,
+): void {
+  updateComposer(store, account, key, (c) => {
+    const pills = pill ? [...(c.pills ?? []), pill] : (c.pills ?? []);
+
+    return {
+      ...c,
+      draft,
+      pills: livePills(draft, pills),
+      selection,
+      touched: c.touched || !c.editing,
+    };
+  });
 }
 
 /** Remembers where the caret is, for an emoji picked later. */
@@ -69,19 +111,25 @@ export function setSelection(
   updateComposer(store, account, key, (c) => ({ ...c, selection }));
 }
 
-/** Puts `text` at the caret of a timeline's draft (an emoji picked for it). */
+/**
+ * Puts `text` at the caret of a timeline's draft (an emoji picked for it); `pill` when it is
+ * one (a custom emoji, its short code the text).
+ */
 export function insertIntoDraft(
   store: Store,
   account: AccountId,
   key: TimelineKey,
   text: string,
+  pill: Pill | null = null,
 ): void {
   updateComposer(store, account, key, (c) => {
     const inserted = insertAt(c.draft, c.selection, text);
+    const pills = pill ? [...(c.pills ?? []), pill] : c.pills;
 
     return {
       ...c,
       draft: inserted.text,
+      pills: pills && livePills(inserted.text, pills),
       selection: inserted.selection,
       touched: c.touched || !c.editing,
     };
@@ -125,15 +173,49 @@ const newestEdits = new WeakMap<Store, Map<string, number>>();
 
 let editsSent = 0;
 
+/** Where the app goes after a command from the composer worked. */
+export interface AfterCommand {
+  /** A room was joined (`/join`): open it. */
+  joined?: (roomId: string) => void;
+  /** The room was left (`/leave`): leave its screen. */
+  left?: () => void;
+}
+
+/** What a command that can't be done says, as a notice. */
+function problemText(problem: SendProblem): string {
+  return problem.type === 'unknown'
+    ? t('mobile.composer.command_unknown', { name: problem.name })
+    : t('mobile.composer.command_usage', { name: problem.name, args: t(problem.args) });
+}
+
 /**
  * Sends what the composer holds (or saves the edit under way) and empties it. Returns whether
- * anything was sent.
+ * anything was sent. A command that can't be done leaves the draft as it was and says why.
  */
-export function sendComposer(store: Store, account: AccountId, key: TimelineKey): boolean {
+export function sendComposer(
+  store: Store,
+  account: AccountId,
+  key: TimelineKey,
+  after: AfterCommand = {},
+): boolean {
   const current = composer(store.getState(), account, key);
 
   if (!canSend(current) && !current.editing) return false;
   const plan = planSend(current, account, key);
+
+  if (plan.problem) {
+    const problem = plan.problem;
+    store.update((s) => addNotice(s, problemText(problem), account));
+
+    return false;
+  }
+
+  if (plan.after) {
+    carryOut(store, account, key, current, plan, after);
+
+    return true;
+  }
+
   // A draft sent is a draft the user changed: a kept one read late doesn't come back over it.
   updateComposer(store, account, key, () => ({ ...plan.composer, touched: current.touched }));
 
@@ -163,6 +245,79 @@ export function sendComposer(store: Store, account: AccountId, key: TimelineKey)
   }
 
   return plan.commands.length > 0;
+}
+
+/** Sends a command from the composer, going where it says once it worked. */
+function carryOut(
+  store: Store,
+  account: AccountId,
+  key: TimelineKey,
+  before: ReturnType<typeof composer>,
+  plan: SendPlan,
+  after: AfterCommand,
+): void {
+  updateComposer(store, account, key, () => ({ ...plan.composer, touched: before.touched }));
+
+  for (const command of plan.commands) {
+    let joined: string | null = null;
+    store
+      .run(command, (event) => {
+        if (event.type === 'RoomJoined') joined = event.data.room_id;
+      })
+      .then(
+        () => {
+          if (plan.after === 'joined') after.joined?.(joined ?? '');
+
+          if (plan.after === 'left') after.left?.();
+        },
+        (cause: unknown) => {
+          if (cause instanceof CommandFailed && cause.cancelled) return;
+          const message = cause instanceof Error ? cause.message : String(cause);
+          store.update((s) => addNotice(s, t(failedKey(command), { error: message }), account));
+        },
+      );
+  }
+}
+
+/** What a command from the composer says when it fails. */
+function failedKey(command: Command): Key {
+  switch (command.type) {
+    case 'Invite':
+      return 'notice.invite';
+    case 'JoinRoom':
+      return 'notice.join';
+    case 'LeaveRoom':
+      return 'notice.leave';
+    default:
+      return 'mobile.composer.command_failed';
+  }
+}
+
+/**
+ * Asks the server to send what the composer holds in `delayMs` (MSC4140) and empties it; text
+ * only. Returns whether it was scheduled.
+ */
+export function scheduleComposer(
+  store: Store,
+  account: AccountId,
+  key: TimelineKey,
+  delayMs: number,
+): boolean {
+  const current = composer(store.getState(), account, key);
+  const plan = planSchedule(current, account, key, delayMs);
+
+  if (!plan) return false;
+  updateComposer(store, account, key, () => ({ ...plan.composer, touched: current.touched }));
+
+  for (const command of plan.commands)
+    void sendTold(store, command, 'notice.not_sent', () =>
+      // A refused schedule gives the text back, unless something was typed since.
+      updateComposer(store, account, key, (c) =>
+        c.draft === '' && !c.editing ? { ...c, draft: current.draft, pills: current.pills } : c,
+      ),
+    );
+
+  return true;
 }
 
 /** Sends a recorded voice memo; its reply target, if any, stays for the next text. */

@@ -1,7 +1,9 @@
 // The emoji picker: a search over every emoji by name and shortcode, else the recently used (or
 // the quick reactions, before any was used) and every emoji by group, with a tab per group to
-// jump to it. One picker serves reactions and drafts; the route says where a pick goes.
+// jump to it. One picker serves reactions and drafts; the route says where a pick goes. For a
+// draft, the custom emoji of the room's image packs come first (`custom`).
 
+import type { AccountId, PackImage } from '@better-matrix/matrix-native/types';
 import { FlashList, type FlashListRef, type ViewToken } from '@shopify/flash-list';
 import { useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
@@ -19,12 +21,14 @@ import {
 import { shallow, useStore } from '../../state/react';
 import { font } from '../../theme/palette';
 import { EmptyState } from '../components';
+import { PackPicture } from '../composer/Suggestions';
 import { Icon, type IconName } from '../icons';
 import { usePalette } from '../theme';
 
-type Section = 'recent' | Group;
+type Section = 'custom' | 'recent' | Group;
 
 const SECTIONS: Record<Section, { icon: IconName; title: Key }> = {
+  custom: { icon: 'sticker', title: 'mobile.composer.custom_emoji' },
   recent: { icon: 'clock', title: 'mobile.composer.emoji_recent' },
   smileys: { icon: 'smile', title: 'emoji.smileys' },
   people: { icon: 'hand', title: 'emoji.people' },
@@ -37,17 +41,20 @@ const SECTIONS: Record<Section, { icon: IconName; title: Key }> = {
   flags: { icon: 'flag', title: 'mobile.composer.emoji_flags' },
 };
 
+/** One cell: a Unicode emoji, or a custom one (its short code as `emoji`, and its image). */
+interface Cell {
+  emoji: string;
+  label: string;
+  image?: PackImage;
+}
+
 type Item =
   | { type: 'header'; id: string; section: Section; title: string }
-  | { type: 'row'; id: string; section: Section; emoji: Array<{ emoji: string; label: string }> };
+  | { type: 'row'; id: string; section: Section; emoji: Cell[] };
 
 const CELL = 46;
 
-function rows(
-  section: Section,
-  emoji: ReadonlyArray<{ emoji: string; label: string }>,
-  columns: number,
-): Item[] {
+function rows(section: Section, emoji: readonly Cell[], columns: number): Item[] {
   const items: Item[] = [];
 
   for (let i = 0; i < emoji.length; i += columns) {
@@ -61,7 +68,18 @@ function labelled(emoji: Emoji) {
   return { emoji: emoji.emoji, label: emoji.label };
 }
 
-export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
+function customCell(image: PackImage): Cell {
+  return { emoji: `:${image.shortcode}:`, label: image.body, image };
+}
+
+export function EmojiPicker({
+  onPick,
+  custom,
+}: {
+  onPick: (emoji: string) => void;
+  /** Custom emoji to offer first, and what picking one does. */
+  custom?: { account: AccountId; images: readonly PackImage[]; onPick: (image: PackImage) => void };
+}) {
   const palette = usePalette();
   const { width } = useWindowDimensions();
   const recent = useStore((s) => s.recentEmoji, shallow);
@@ -81,11 +99,18 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
       label: emojiLabel(emoji) ?? emoji,
     }));
 
-    const sections: Array<{
-      section: Section;
-      title: string;
-      emoji: Array<{ emoji: string; label: string }>;
-    }> = [
+    const customs = custom?.images ?? [];
+
+    const sections: Array<{ section: Section; title: string; emoji: Cell[] }> = [
+      ...(customs.length > 0
+        ? [
+            {
+              section: 'custom' as const,
+              title: t('mobile.composer.custom_emoji'),
+              emoji: customs.map(customCell),
+            },
+          ]
+        : []),
       {
         section: 'recent',
         title: recent.length > 0 ? t('mobile.composer.emoji_recent') : t('emoji.quick'),
@@ -105,26 +130,45 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
     }
 
     return { items: all, headers: at };
-  }, [groups, recent, columns]);
+  }, [groups, recent, columns, custom?.images]);
 
-  const results = useMemo(() => (query.trim() ? searchEmoji(query).map(labelled) : null), [query]);
+  const results = useMemo(() => {
+    const term = query.trim().toLowerCase();
 
-  const cell = (emoji: { emoji: string; label: string }, place: string) => (
+    if (!term) return null;
+
+    const customs = (custom?.images ?? [])
+      .filter((image) => image.shortcode.toLowerCase().includes(term))
+      .map(customCell);
+
+    return [...customs, ...searchEmoji(query).map(labelled)];
+  }, [query, custom?.images]);
+
+  const choose = (emoji: Cell) => {
+    if (emoji.image && custom) custom.onPick(emoji.image);
+    else onPick(emoji.emoji);
+  };
+
+  const cell = (emoji: Cell, place: string) => (
     <Pressable
       key={`${place}-${emoji.emoji}`}
       testID={`emoji-${place}-${emoji.emoji}`}
       accessibilityRole="button"
       accessibilityLabel={emoji.label}
-      onPress={() => onPick(emoji.emoji)}
+      onPress={() => choose(emoji)}
       android_ripple={{ color: palette.hover, borderless: true, radius: CELL / 2 }}
       style={({ pressed }) => [
         styles.cell,
         { backgroundColor: pressed ? palette.hover : 'transparent' },
       ]}
     >
-      <Text style={styles.glyph} allowFontScaling={false}>
-        {emoji.emoji}
-      </Text>
+      {emoji.image && custom ? (
+        <PackPicture account={custom.account} media={emoji.image.media} size={30} />
+      ) : (
+        <Text style={styles.glyph} allowFontScaling={false}>
+          {emoji.emoji}
+        </Text>
+      )}
     </Pressable>
   );
 
@@ -163,7 +207,7 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
           onSubmitEditing={() => {
             const first = results?.[0];
 
-            if (first) onPick(first.emoji);
+            if (first) choose(first);
           }}
           style={[font.body, styles.searchInput, { color: palette.text }]}
         />
@@ -187,7 +231,10 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
       ) : (
         <>
           <View style={[styles.tabs, { borderBottomColor: palette.divider }]}>
-            {(['recent', ...GROUPS] as const).map((section) => (
+            {[
+              ...((custom?.images.length ?? 0) > 0 ? (['custom'] as const) : []),
+              ...(['recent', ...GROUPS] as const),
+            ].map((section) => (
               <Pressable
                 key={section}
                 testID={`emoji-tab-${section}`}

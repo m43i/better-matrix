@@ -25,6 +25,11 @@ export function mediaKey(media: MediaRef, size: MediaSize): string {
     : `${media}|${size.data.width}x${size.data.height}`;
 }
 
+/** An edited message's key in `AccountData.edits`. */
+export function editsKey(roomId: string, eventId: string): string {
+  return `${roomId}|${eventId}`;
+}
+
 /** A link card's key in `State.linkPreviews`: previews are fetched per account. */
 export function previewKey(account: AccountId, url: string): string {
   return `${account}|${url}`;
@@ -88,6 +93,9 @@ function newAccount(summary: AccountSummary): AccountData {
     files: {},
     pins: {},
     saved: null,
+    packs: {},
+    scheduled: null,
+    edits: {},
     sidebar: EMPTY_LAYOUT,
     searchUsage: { rooms: {}, people: {} },
     sidebarLoaded: false,
@@ -504,6 +512,24 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
         ...a,
         searchUsage: event.data.usage,
       }));
+    case 'ImagePacks':
+      return updateAccount(state, event.data.account, (a) => ({
+        ...a,
+        packs: { ...a.packs, [event.data.room_id ?? '']: event.data.packs },
+      }));
+    case 'ScheduledMessages':
+      return updateAccount(state, event.data.account, (a) => ({
+        ...a,
+        scheduled: event.data.messages,
+      }));
+    case 'EditHistory':
+      return updateAccount(state, event.data.account, (a) => ({
+        ...a,
+        edits: {
+          ...a.edits,
+          [editsKey(event.data.room_id, event.data.event_id)]: event.data.versions,
+        },
+      }));
     // Answers to one request: the store hands them to whoever sent it (requests.ts).
     case 'Finished':
     case 'HomeserverDiscovered':
@@ -511,6 +537,8 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'ContactCodeSent':
     case 'MessagesFound':
     case 'PeopleFound':
+    case 'PlacesFound':
+    case 'MessageLocated':
     // Answers the composer's own read (`state/actions/drafts.ts`).
     case 'DraftLoaded':
     case 'DirectoryFound':

@@ -183,3 +183,51 @@ describe('blocksText', () => {
     ).toBe('hi Ada');
   });
 });
+
+describe('htmlBlocks with Matrix’s inline objects', () => {
+  it('should hide a spoiler’s words behind a spoiler', () => {
+    expect(paragraph(htmlBlocks('he <span data-mx-spoiler="plot">dies</span>'))).toEqual([
+      { type: 'text', text: 'he ', marks: {} },
+      { type: 'spoiler', reason: 'plot', inlines: [{ type: 'text', text: 'dies', marks: {} }] },
+    ]);
+  });
+
+  it('should read a formula as Unicode, keeping its LaTeX', () => {
+    expect(paragraph(htmlBlocks('<span data-mx-maths="x^2"><code>x^2</code></span>'))).toEqual([
+      { type: 'math', latex: 'x^2', text: 'x²', block: false },
+    ]);
+  });
+
+  it('should give a block formula a line of its own', () => {
+    expect(
+      htmlBlocks('a<div data-mx-maths="\\frac{1}{2}"><pre><code>\\frac{1}{2}</code></pre></div>b'),
+    ).toEqual([
+      { type: 'paragraph', inlines: [{ type: 'text', text: 'a', marks: {} }] },
+      {
+        type: 'paragraph',
+        inlines: [{ type: 'math', latex: '\\frac{1}{2}', text: '1/2', block: true }],
+      },
+      { type: 'paragraph', inlines: [{ type: 'text', text: 'b', marks: {} }] },
+    ]);
+  });
+
+  it('should show a custom emoji by its image', () => {
+    expect(
+      paragraph(htmlBlocks('<img data-mx-emoticon src="mxc://x.org/cat" alt=":cat:" height="32">')),
+    ).toEqual([{ type: 'emote', url: 'mxc://x.org/cat', label: ':cat:' }]);
+  });
+
+  it('should show another image by its description', () => {
+    expect(paragraph(htmlBlocks('<img src="mxc://x.org/a" alt="a cat">'))).toEqual([
+      { type: 'text', text: 'a cat', marks: {} },
+    ]);
+  });
+
+  it('should read a spoiler’s words as text for copying', () => {
+    expect(
+      blocksText(
+        htmlBlocks('a <span data-mx-spoiler>b</span> <span data-mx-maths="\\pi">π</span>'),
+      ),
+    ).toBe('a b π');
+  });
+});

@@ -9,25 +9,71 @@ import type {
   TimelineKey,
 } from '@better-matrix/matrix-native/types';
 
+import type { Key } from '../i18n';
 import { type ComposerState, EMPTY_COMPOSER, endEdit, type PendingAttachment } from './composer';
 import { outgoingText } from './format';
+import { coordinatesText } from './geo';
+import { slashOf } from './slash';
 
 /** The commands a send makes, and the composer after it. */
 export interface SendPlan {
   commands: Command[];
   composer: ComposerState;
+  /** What to tell the user instead, when the draft was a command that can't be done. */
+  problem?: SendProblem;
+  /** Where the app goes once the commands worked (a room joined, a room left). */
+  after?: 'stay' | 'joined' | 'left';
+}
+
+/** Why a draft didn't send: a command that doesn't exist, or lacks what it needs. */
+export type SendProblem =
+  | { type: 'unknown'; name: string }
+  | { type: 'usage'; name: string; args: Key };
+
+/** The text message a draft sends: its own text, or what its command makes of it. */
+type DraftMessage =
+  | { type: 'message'; message: Outgoing | null }
+  | { type: 'command'; command: Command; after: 'stay' | 'joined' | 'left' }
+  | { type: 'problem'; problem: SendProblem };
+
+function draftMessage(composer: ComposerState, account: AccountId, key: TimelineKey): DraftMessage {
+  const pills = composer.pills ?? [];
+  const slash = slashOf(composer.draft, pills, { account, roomId: key.room_id });
+
+  if (slash === null) {
+    const text = outgoingText(composer.draft, pills);
+
+    return { type: 'message', message: text.body !== '' ? { type: 'Text', data: text } : null };
+  }
+
+  switch (slash.type) {
+    case 'message':
+      return { type: 'message', message: slash.message };
+    case 'command':
+      return { type: 'command', command: slash.command, after: slash.after };
+    case 'unknown':
+    case 'usage':
+      return { type: 'problem', problem: slash };
+  }
 }
 
 /**
  * Everything a composer sends, text first, then each attachment in the order picked; the reply,
  * if any, goes with the first message (the engine sends files as they are, so a reply rides on
- * the text). HTML only when the text carries formatting. An edit sends `Edit` instead, unless the
- * text is empty or unchanged; either way the draft set aside for it comes back.
+ * the text). HTML only when the text carries formatting or pills; `m.mentions` names whom its
+ * pills mention. A draft starting with a command does what the command says (`state/slash.ts`).
+ * An edit sends `Edit` instead, unless the text is empty or unchanged; either way the draft set
+ * aside for it comes back.
  */
 export function planSend(composer: ComposerState, account: AccountId, key: TimelineKey): SendPlan {
   if (composer.editing) {
-    const { body, html } = outgoingText(composer.draft);
-    const original = outgoingText(composer.setAside?.original ?? '');
+    const { body, html, mentions } = outgoingText(composer.draft, composer.pills ?? []);
+
+    const original = outgoingText(
+      composer.setAside?.original ?? '',
+      composer.setAside?.originalPills ?? [],
+    );
+
     const changed = body !== original.body || html !== original.html;
 
     const commands: Command[] =
@@ -35,7 +81,7 @@ export function planSend(composer: ComposerState, account: AccountId, key: Timel
         ? [
             {
               type: 'Edit',
-              data: { account, key, event_id: composer.editing.event_id, body, html },
+              data: { account, key, event_id: composer.editing.event_id, body, html, mentions },
             },
           ]
         : [];
@@ -48,9 +94,20 @@ export function planSend(composer: ComposerState, account: AccountId, key: Timel
   }
 
   const messages: Outgoing[] = [];
-  const text = outgoingText(composer.draft);
+  const drafted = draftMessage(composer, account, key);
 
-  if (text.body !== '') messages.push({ type: 'Text', data: text });
+  if (drafted.type === 'problem') return { commands: [], composer, problem: drafted.problem };
+
+  if (drafted.type === 'command') {
+    // The command acts in the draft's place; the reply and attachments wait for the next send.
+    return {
+      commands: [drafted.command],
+      composer: { ...composer, draft: '', pills: [], selection: undefined },
+      after: drafted.after,
+    };
+  }
+
+  if (drafted.message) messages.push(drafted.message);
 
   for (const attachment of composer.attachments ?? [])
     messages.push({ type: 'File', data: { type: 'Path', data: attachment.path } });
@@ -67,6 +124,48 @@ export function planSend(composer: ComposerState, account: AccountId, key: Timel
     commands,
     composer: commands.length > 0 ? { ...EMPTY_COMPOSER, kept: composer.kept } : composer,
   };
+}
+
+/** How long the server may hold a scheduled message at most (MSC4140 caps it at 30 days). */
+export const MAX_SCHEDULE_MS = 30 * 86_400_000;
+
+/**
+ * The `Schedule` command for what a composer holds, sent in `delayMs`; `null` when it can't be
+ * scheduled: attachments (uploads go at once), an edit, a command that isn't a message, or
+ * nothing to send. The composer is emptied as a send empties it.
+ */
+export function planSchedule(
+  composer: ComposerState,
+  account: AccountId,
+  key: TimelineKey,
+  delayMs: number,
+): SendPlan | null {
+  if (!canSchedule(composer)) return null;
+  const drafted = draftMessage(composer, account, key);
+
+  if (drafted.type !== 'message' || !drafted.message) return null;
+
+  const command: Command = {
+    type: 'Schedule',
+    data: {
+      account,
+      key,
+      reply_to: composer.replyTo?.event_id ?? null,
+      message: drafted.message,
+      delay_ms: Math.min(Math.max(0, Math.round(delayMs)), MAX_SCHEDULE_MS),
+    },
+  };
+
+  return { commands: [command], composer: { ...EMPTY_COMPOSER, kept: composer.kept } };
+}
+
+/** Whether what a composer holds may be scheduled: text alone, not an edit. */
+export function canSchedule(composer: ComposerState): boolean {
+  return (
+    !composer.editing &&
+    (composer.attachments?.length ?? 0) === 0 &&
+    outgoingText(composer.draft).body !== ''
+  );
 }
 
 /** Whether a composer has anything to send (or an edit to save). */
@@ -98,6 +197,10 @@ export function excerpt(message: Message): string {
   switch (content.type) {
     case 'Text':
       return [...content.data.body].slice(0, EXCERPT).join('');
+    case 'Emote':
+      return [...`* ${message.sender_name} ${content.data.body}`].slice(0, EXCERPT).join('');
+    case 'Location':
+      return content.data.description ?? coordinatesText(content.data.geo_uri) ?? '';
     case 'Attachment':
       return content.data.name;
     case 'Poll':

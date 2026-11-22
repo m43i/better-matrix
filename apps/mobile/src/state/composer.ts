@@ -3,6 +3,7 @@
 
 import type { AccountId, Message, TimelineKey } from '@better-matrix/matrix-native/types';
 
+import type { Pill } from './pills';
 import type { Store } from './store';
 import { timelineId } from './timeline';
 import type { State } from './types';
@@ -14,6 +15,8 @@ export interface ComposerState {
   editing: Message | null;
   /** The unsent text. */
   draft: string;
+  /** The mentions and custom emoji in the draft, by their labels there (`state/pills.ts`). */
+  pills?: Pill[];
   /** Files waiting to go with the next send, in the order they were picked. */
   attachments?: PendingAttachment[];
   /** While editing: the draft, reply and attachments set aside, and the message's text as it read. */
@@ -37,8 +40,12 @@ export interface KeptEdit {
   message: Message;
   /** The text the user sent. */
   text: string;
+  /** The pills in it. */
+  pills?: Pill[];
   /** The message's text as the edit first showed it. */
   original: string;
+  /** The pills the message's text first had. */
+  originalPills?: Pill[];
 }
 
 /** A file picked for the next send. */
@@ -56,10 +63,13 @@ export interface PendingAttachment {
 /** What a composer held before an edit took the field (the desktop's `Draft`). */
 export interface SetAside {
   draft: string;
+  pills?: Pill[];
   replyTo: Message | null;
   attachments: PendingAttachment[];
   /** The edited message's text as the field first showed it: an unchanged edit isn't sent. */
   original: string;
+  /** The pills the edited message's text first had. */
+  originalPills?: Pill[];
 }
 
 export const EMPTY_COMPOSER: ComposerState = { replyTo: null, editing: null, draft: '' };
@@ -89,9 +99,11 @@ export function updateComposer(
 function editing(composer: ComposerState, edit: KeptEdit): ComposerState {
   const setAside: SetAside = {
     draft: composer.draft,
+    pills: composer.pills ?? [],
     replyTo: composer.replyTo,
     attachments: composer.attachments ?? [],
     original: edit.original,
+    originalPills: edit.originalPills ?? [],
   };
 
   return {
@@ -99,6 +111,7 @@ function editing(composer: ComposerState, edit: KeptEdit): ComposerState {
     editing: edit.message,
     replyTo: null,
     draft: edit.text,
+    pills: edit.pills ?? [],
     attachments: [],
     setAside,
     selection: undefined,
@@ -115,6 +128,7 @@ function freed(composer: ComposerState): ComposerState {
     editing: null,
     setAside: null,
     draft: aside?.draft ?? '',
+    pills: aside?.pills ?? [],
     replyTo: aside?.replyTo ?? null,
     attachments: aside?.attachments ?? [],
     selection: undefined,
@@ -173,12 +187,16 @@ export function startEdit(
   key: TimelineKey,
   message: Message,
   text: string,
+  pills: Pill[] = [],
 ): void {
   updateComposer(store, account, key, (c) => {
     // A kept edit of the same message comes back in its place; other kept edits wait.
     const kept = c.kept?.find((edit) => edit.message.event_id === message.event_id);
     const others = c.kept?.filter((edit) => edit !== kept);
 
-    return editing({ ...freed(c), kept: others }, kept ?? { message, text, original: text });
+    return editing(
+      { ...freed(c), kept: others },
+      kept ?? { message, text, pills, original: text, originalPills: pills },
+    );
   });
 }

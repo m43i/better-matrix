@@ -2,7 +2,7 @@
 // blocks, a linked GIF and the link that gets a card; and the rules its parts follow: polls'
 // votes, call cards' status, image preview sizes, which actions the user has on it.
 
-import { draftOf } from './format';
+import { type EditDraft, editDraft } from './format';
 import { matches } from './people';
 import type {
   AccountId,
@@ -18,7 +18,7 @@ import type {
 } from '@better-matrix/matrix-native/types';
 
 import { t } from '../i18n';
-import { type Block, blocksText, htmlBlocks, plainBlocks } from './html';
+import { type Block, blocksText, htmlBlocks, type Inline, plainBlocks } from './html';
 import { findGifLink, findPreviewLink, htmlWithoutLink, withoutLink } from './links';
 import { Lru } from './lru';
 
@@ -83,11 +83,49 @@ export function prepare(message: Message): Prepared {
       result = parseText(body, html);
       parsed.set(key, result);
     }
+  } else if (message.content.type === 'Emote') {
+    // An emote reads as "* Ada waves": the sender's name before the action.
+    const { body, html } = message.content.data;
+    const key = `e${message.sender_name.length}:${message.sender_name}${textKey(body, html)}`;
+    const kept = parsed.get(key);
+
+    if (kept) {
+      result = kept;
+    } else {
+      const text = parseText(body, html);
+      result = {
+        blocks: emoteBlocks(message.sender_name, text.blocks ?? []),
+        gif: null,
+        link: text.link,
+      };
+      parsed.set(key, result);
+    }
   }
 
   prepared.set(message, result);
 
   return result;
+}
+
+/**
+ * The media handle of an unencrypted `mxc://` image a message names in its HTML (a custom
+ * emoji). Handles are the engine's (`MediaRef::of(MediaSource::Plain)`, its JSON), which the
+ * engine hands over for everything else; HTML carries bare `mxc://` URIs, so this one is written
+ * here the same way.
+ */
+export function mxcMedia(url: string): MediaRef {
+  return JSON.stringify({ url });
+}
+
+/** An emote's blocks: "* Name" before the first paragraph's words. */
+function emoteBlocks(sender: string, blocks: Block[]): Block[] {
+  const prefix: Inline = { type: 'text', text: `* ${sender} `, marks: { italic: true } };
+  const [first, ...rest] = blocks;
+
+  if (first?.type === 'paragraph')
+    return [{ ...first, inlines: [prefix, ...first.inlines] }, ...rest];
+
+  return [{ type: 'paragraph', inlines: [prefix] }, ...blocks];
 }
 
 /** The link that gets a card: the first that isn't a GIF, else the GIF's while GIFs don't play. */
@@ -104,6 +142,15 @@ export function messageText(message: Message): string | null {
       return html ? blocksText(htmlBlocks(html)) : body;
     }
 
+    case 'Emote': {
+      const { body, html } = message.content.data;
+
+      return `* ${message.sender_name} ${html ? blocksText(htmlBlocks(html)) : body}`;
+    }
+
+    case 'Location':
+      return message.content.data.description ?? message.content.data.geo_uri;
+
     case 'Attachment':
       return message.content.data.name;
     case 'Poll':
@@ -115,10 +162,17 @@ export function messageText(message: Message): string | null {
 
 /** The plain text an edit starts from: what the user typed. */
 export function editText(message: Message): string {
-  // Formatted messages come back as the composer's markers, so an edit keeps the formatting.
+  return editDraftOf(message).draft;
+}
+
+/**
+ * The draft an edit starts from, with its pills: formatted messages come back as the composer's
+ * markers and their mentions and custom emoji as pills, so an edit keeps them.
+ */
+export function editDraftOf(message: Message): EditDraft {
   return message.content.type === 'Text'
-    ? draftOf(message.content.data.body, message.content.data.html)
-    : '';
+    ? editDraft(message.content.data.body, message.content.data.html)
+    : { draft: '', pills: [] };
 }
 
 /** A local echo, not yet on the server: nothing can act on it by event ID. */
@@ -171,7 +225,12 @@ export function messageActions(
     react: sent && readable,
     reply: sent && readable,
     thread: sent && readable && !inThread,
-    copy: (content.type === 'Text' || content.type === 'Poll') && hasText,
+    copy:
+      (content.type === 'Text' ||
+        content.type === 'Emote' ||
+        content.type === 'Location' ||
+        content.type === 'Poll') &&
+      hasText,
     edit: sent && own && message.editable,
     delete: sent && own && content.type !== 'Redacted',
     endPoll: sent && own && content.type === 'Poll' && !content.data.ended,

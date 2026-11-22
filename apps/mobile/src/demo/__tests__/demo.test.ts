@@ -10,8 +10,11 @@ import {
   DEMO_THREAD,
   DESIGN,
   GENERAL,
+  RELEASES,
   SCREENSHOT,
+  SIGN_OFF,
   TEST_PLAN,
+  THREAD_REPLY,
 } from '../fixtures';
 import { demoScene } from '../link';
 import { scenes, isScene } from '../scenes';
@@ -117,7 +120,10 @@ describe('the demo engine', () => {
           account: ADA,
           key,
           reply_to: null,
-          message: { type: 'Text', data: { body: 'hi', html: null } },
+          message: {
+            type: 'Text',
+            data: { body: 'hi', html: null, mentions: { user_ids: [], room: false } },
+          },
         },
       },
       9,
@@ -212,4 +218,73 @@ it('should list a newly pinned message with its real preview', async () => {
       }),
     ]),
   );
+});
+
+describe('the demo engine’s composer extras', () => {
+  it('should list Ada’s emoji and the room’s stickers', () => {
+    const [event] = answer({ type: 'ListImagePacks', data: { account: ADA, room_id: GENERAL } }, 1);
+    expect(event).toMatchObject({ type: 'ImagePacks', data: { packs: [{ id: 'user' }, {}] } });
+  });
+
+  it('should find places by name', () => {
+    const [event] = answer({ type: 'SearchPlaces', data: { query: 'tor', language: null } }, 2);
+    expect(event).toMatchObject({
+      type: 'PlacesFound',
+      data: { request: 2, places: [{ geo_uri: 'geo:52.516275,13.377704' }] },
+    });
+  });
+
+  it('should list the versions of Ada’s sign-off', () => {
+    const [event] = answer(
+      { type: 'ListEdits', data: { account: ADA, room_id: RELEASES, event_id: SIGN_OFF } },
+      3,
+    );
+
+    expect(event?.type === 'EditHistory' && event.data.versions.length).toBe(3);
+  });
+
+  it('should find a reply in its thread', () => {
+    const [event] = answer(
+      { type: 'LocateMessage', data: { account: ADA, room_id: GENERAL, event_id: THREAD_REPLY } },
+      4,
+    );
+
+    expect(event).toMatchObject({
+      type: 'MessageLocated',
+      data: { key: { room_id: GENERAL, thread: DEMO_THREAD.root } },
+    });
+  });
+
+  it('should hold a scheduled message and send it on request', async () => {
+    const engine = demoEngine(noMedia);
+    const heard: string[] = [];
+    engine.subscribe((event) => {
+      if (event.type === 'ScheduledMessages') heard.push(String(event.data.messages.length));
+
+      if (event.type === 'TimelineChanged') heard.push('sent');
+    });
+
+    const message = {
+      type: 'Text' as const,
+      data: { body: 'later', html: null, mentions: { user_ids: [], room: false } },
+    };
+
+    engine.send({
+      type: 'Schedule',
+      data: {
+        account: ADA,
+        key: { room_id: GENERAL, thread: null },
+        reply_to: null,
+        message,
+        delay_ms: 60_000,
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    engine.send({
+      type: 'UpdateScheduled',
+      data: { account: ADA, delay_id: 'demo-delay-1', action: 'SendNow' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(heard).toEqual(['1', 'sent', '0']);
+  });
 });

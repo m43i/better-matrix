@@ -23,6 +23,10 @@ export function messageText(message: Message): string {
   switch (content.type) {
     case 'Text':
       return content.data.body.replace(/\s+/g, ' ').trim();
+    case 'Emote':
+      return `* ${message.sender_name} ${content.data.body.replace(/\s+/g, ' ').trim()}`;
+    case 'Location':
+      return content.data.description ?? t('mobile.conversation.location');
     case 'Attachment':
       return content.data.name;
     case 'Poll':
@@ -42,6 +46,9 @@ export function messageText(message: Message): string {
 
 /** "Sender: text", the preview under a conversation's name. */
 export function previewLine(message: Message): string {
+  // An emote names its sender already.
+  if (message.content.type === 'Emote') return messageText(message);
+
   return t('overview.preview', { sender: message.sender_name, body: messageText(message) });
 }
 

@@ -10,6 +10,8 @@ import type {
   CallEnd,
   CallInfo,
   Contacts,
+  EditVersion,
+  ImagePack,
   IncomingCall,
   Invitation,
   LinkPreview,
@@ -19,6 +21,7 @@ import type {
   MessagePreview,
   SavedMessage,
   RoomSummary,
+  ScheduledMessage,
   Security,
   Session,
   SharedFile,
@@ -92,6 +95,12 @@ export interface AccountData {
   pins: Record<string, MessagePreview[]>;
   /** The messages the user saved, most recently saved first, once listed. */
   saved: SavedMessage[] | null;
+  /** Custom emoji and sticker packs, by the room they were listed for (`''`: none). */
+  packs: Record<string, ImagePack[]>;
+  /** The messages the server holds to send later, soonest first, once listed. */
+  scheduled: ScheduledMessage[] | null;
+  /** Edited messages' versions, oldest first, by `editsKey` (room and event ID). */
+  edits: Record<string, EditVersion[]>;
   sidebar: SidebarLayout;
   searchUsage: SearchUsage;
   sidebarLoaded: boolean;

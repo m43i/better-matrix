@@ -1,9 +1,27 @@
 // Formatting in the composer. The phone's native text field holds plain text, so formatting is
 // written as markers in it (`**bold**`, `_italic_`, `~~strike~~`, `` `code` ``, `[text](url)`,
-// `- ` and `1. ` lists, `> ` quotes, ``` fences), which the toolbar inserts and removes. On send,
+// `- ` and `1. ` lists, `> ` quotes, ``` fences), which the toolbar inserts and removes; two
+// more the toolbar doesn't offer are Matrix's own, `||spoiler||` and `$$maths$$`. Mentions and
+// custom emoji are pills (`pills.ts`): labels in the text the composer knows. On send,
 // `outgoingText` turns the text into what the desktop's rich field sends: the plain body, and
 // Matrix HTML serialised as Rune's `TextEdit::to_html` does (apps/desktop/src/state/composer.rs),
 // only when the text carries formatting. `draftOf` goes the other way, for editing a message.
+
+import type { Mentions } from '@better-matrix/matrix-native/types';
+
+import { mentionOf } from './html';
+import {
+  emotePill,
+  livePills,
+  mentionsOf,
+  type Pill,
+  pillFormats,
+  pillHtml,
+  pillText,
+  placePills,
+  roomPill,
+  userPill,
+} from './pills';
 
 /** Every formatting action the toolbar offers, in its order (the desktop's `Format::ALL`). */
 export const FORMATS = [
@@ -309,10 +327,14 @@ function toggleFence(text: string, { start, end }: Selection): Edited {
 
 // ----- sending ---------------------------------------------------------------------------------
 
-/** What a draft sends: the plain body, and Matrix HTML when the text carries formatting. */
+/**
+ * What a draft sends: the plain body, Matrix HTML when the text carries formatting or pills, and
+ * whom its pills mention.
+ */
 export interface OutgoingText {
   body: string;
   html: string | null;
+  mentions: Mentions;
 }
 
 interface Marks {
@@ -320,6 +342,10 @@ interface Marks {
   italic: boolean;
   strike: boolean;
   code: boolean;
+  /** Hidden until tapped (`||…||`): `[Spoiler]` in the plain body. */
+  spoiler: boolean;
+  /** A formula (`$$…$$`): the run's text is its LaTeX. */
+  math: boolean;
   link: string | null;
 }
 
@@ -339,21 +365,80 @@ interface Block {
   runs: Run[];
 }
 
-const PLAIN: Marks = { bold: false, italic: false, strike: false, code: false, link: null };
+const PLAIN: Marks = {
+  bold: false,
+  italic: false,
+  strike: false,
+  code: false,
+  spoiler: false,
+  math: false,
+  link: null,
+};
 
-/** The body and HTML the desktop sends for the same text and formatting. */
-export function outgoingText(draft: string): OutgoingText {
-  const blocks = parseBlocks(draft.replace(/\r\n?/g, '\n'));
-  const plain = blocks.map((block) => block.runs.map((run) => run.text).join(''));
-  const body = plain.join('\n').trim();
+/**
+ * Where pills stand while a draft is parsed: each is one character of Unicode's private use area,
+ * so markers around a pill format it and nothing inside its label reads as a marker.
+ */
+const PILL_BASE = 0xe000;
 
-  const formatted = blocks.some(
-    (block) => block.kind.type !== 'paragraph' || block.runs.some((run) => !isPlain(run.marks)),
-  );
+const PILL_CHAR = /[\ue000-\uf8ff]/g;
 
-  if (!formatted || body === '') return { body, html: null };
+/** The body and HTML the desktop sends for the same text, formatting and pills. */
+export function outgoingText(draft: string, pills: readonly Pill[] = []): OutgoingText {
+  const text = draft.replace(/\r\n?/g, '\n');
+  const placed = placePills(text, pills).slice(0, 0x1900);
+  let source = '';
+  let at = 0;
 
-  return { body, html: serialize(trimBlocks(blocks)) };
+  placed.forEach((p, i) => {
+    source += text.slice(at, p.start) + String.fromCharCode(PILL_BASE + i);
+    at = p.end;
+  });
+  source += text.slice(at);
+  const found = placed.map((p) => p.pill);
+  const blocks = parseBlocks(source);
+  const plain = blocks.map((block) => plainRuns(block.runs));
+  const body = expandPills(plain.join('\n').trim(), found, pillText);
+
+  const formatted =
+    found.some(pillFormats) ||
+    blocks.some(
+      (block) => block.kind.type !== 'paragraph' || block.runs.some((run) => !isPlain(run.marks)),
+    );
+
+  const mentions = mentionsOf(text, pills);
+
+  if (!formatted || body === '') return { body, html: null, mentions };
+
+  return { body, html: serialize(trimBlocks(blocks), found), mentions };
+}
+
+/** A line's plain text: a spoiler's words hidden behind `[Spoiler]`, a formula as its LaTeX. */
+function plainRuns(runs: Run[]): string {
+  let out = '';
+  let hidden = false;
+
+  for (const run of runs) {
+    if (run.marks.spoiler) {
+      if (!hidden) out += '[Spoiler]';
+      hidden = true;
+      continue;
+    }
+
+    hidden = false;
+    out += run.text;
+  }
+
+  return out;
+}
+
+/** `text` with each pill's character written as `write` says. */
+function expandPills(text: string, pills: readonly Pill[], write: (pill: Pill) => string): string {
+  return text.replace(PILL_CHAR, (c) => {
+    const pill = pills[c.charCodeAt(0) - PILL_BASE];
+
+    return pill ? write(pill) : c;
+  });
 }
 
 /** Whether a draft has anything to send as text. */
@@ -362,7 +447,15 @@ export function hasText(draft: string): boolean {
 }
 
 function isPlain(marks: Marks): boolean {
-  return !marks.bold && !marks.italic && !marks.strike && !marks.code && marks.link === null;
+  return (
+    !marks.bold &&
+    !marks.italic &&
+    !marks.strike &&
+    !marks.code &&
+    !marks.spoiler &&
+    !marks.math &&
+    marks.link === null
+  );
 }
 
 /** Empty paragraphs before and after the text are dropped, as the body is trimmed. */
@@ -430,7 +523,7 @@ function parseBlocks(text: string): Block[] {
   return blocks;
 }
 
-const ESCAPABLE = '\\`*_~[]()>#-.!';
+const ESCAPABLE = '\\`*_~[]()>#-.!|$';
 
 /** The runs of one line: its text cut where the marks around it change. */
 export function parseInline(source: string): Run[] {
@@ -457,13 +550,16 @@ function sameMarks(a: Marks, b: Marks): boolean {
     a.italic === b.italic &&
     a.strike === b.strike &&
     a.code === b.code &&
+    a.spoiler === b.spoiler &&
+    a.math === b.math &&
     a.link === b.link
   );
 }
 
-const DELIMITERS: ReadonlyArray<[string, keyof Omit<Marks, 'link' | 'code'>]> = [
+const DELIMITERS: ReadonlyArray<[string, 'bold' | 'italic' | 'strike' | 'spoiler']> = [
   ['**', 'bold'],
   ['~~', 'strike'],
+  ['||', 'spoiler'],
   ['_', 'italic'],
   ['*', 'italic'],
 ];
@@ -494,6 +590,17 @@ function inline(source: string, marks: Marks, out: Run[]): void {
         flush();
         out.push({ text: source.slice(i + 1, close), marks: { ...marks, code: true } });
         i = close + 1;
+        continue;
+      }
+    }
+
+    if (source.startsWith('$$', i)) {
+      const close = source.indexOf('$$', i + 2);
+
+      if (close > i + 2) {
+        flush();
+        out.push({ text: source.slice(i + 2, close), marks: { ...marks, math: true } });
+        i = close + 2;
         continue;
       }
     }
@@ -574,10 +681,23 @@ function escapeHtml(text: string): string {
   );
 }
 
-function serializeRuns(runs: Run[]): string {
+function serializeRuns(runs: Run[], pills: readonly Pill[]): string {
   let out = '';
+  let spoiler = false;
 
   for (const { text, marks } of runs) {
+    if (marks.spoiler !== spoiler) {
+      out += marks.spoiler ? '<span data-mx-spoiler>' : '</span>';
+      spoiler = marks.spoiler;
+    }
+
+    if (marks.math) {
+      // A formula's LaTeX is its fallback, as the engine's `from_pills` writes it.
+      const latex = escapeHtml(expandPills(text, pills, (pill) => pill.label));
+      out += `<span data-mx-maths="${latex}"><code>${latex}</code></span>`;
+      continue;
+    }
+
     // Rune's canonical nesting: link, bold, italic, strike, code.
     const open: string[] = [];
     const close: string[] = [];
@@ -599,8 +719,17 @@ function serializeRuns(runs: Run[]): string {
       }
     }
 
-    out += open.join('') + escapeHtml(text) + close.join('');
+    // Inside code a pill is its label; elsewhere its HTML.
+    const inner = escapeHtml(text);
+
+    const written = marks.code
+      ? expandPills(inner, pills, (pill) => escapeHtml(pill.label))
+      : expandPills(inner, pills, pillHtml);
+
+    out += open.join('') + written + close.join('');
   }
+
+  if (spoiler) out += '</span>';
 
   return out;
 }
@@ -643,7 +772,7 @@ function directions(blocks: Block[]): string[] {
   });
 }
 
-function serialize(blocks: Block[]): string {
+function serialize(blocks: Block[], pills: readonly Pill[]): string {
   const dirs = directions(blocks);
   let out = '';
   let i = 0;
@@ -658,7 +787,8 @@ function serialize(blocks: Block[]): string {
         const dir = dirs[i];
 
         while (i < blocks.length && blocks[i]!.kind.type === 'code') {
-          lines.push(escapeHtml(blocks[i]!.runs.map((run) => run.text).join('')));
+          const line = escapeHtml(blocks[i]!.runs.map((run) => run.text).join(''));
+          lines.push(expandPills(line, pills, (pill) => escapeHtml(pill.label)));
           i++;
         }
 
@@ -689,7 +819,7 @@ function serialize(blocks: Block[]): string {
             open.push(next);
           }
 
-          out += `<li${dirs[i]}>${serializeRuns(blocks[i]!.runs)}</li>`;
+          out += `<li${dirs[i]}>${serializeRuns(blocks[i]!.runs, pills)}</li>`;
           i++;
         }
 
@@ -698,11 +828,11 @@ function serialize(blocks: Block[]): string {
       }
 
       case 'quote':
-        out += `<blockquote${dirs[i]}>${serializeRuns(block.runs)}</blockquote>`;
+        out += `<blockquote${dirs[i]}>${serializeRuns(block.runs, pills)}</blockquote>`;
         i++;
         break;
       case 'paragraph':
-        out += `<p${dirs[i]}>${serializeRuns(block.runs)}</p>`;
+        out += `<p${dirs[i]}>${serializeRuns(block.runs, pills)}</p>`;
         i++;
         break;
     }
@@ -744,7 +874,23 @@ function decodeEntities(text: string): string {
  * when it has no HTML. Tags outside what the composer writes keep their text.
  */
 export function draftOf(body: string, html: string | null): string {
-  if (!html) return body;
+  return editDraft(body, html).draft;
+}
+
+/** A message as the composer edits it: its draft, and the pills in it. */
+export interface EditDraft {
+  draft: string;
+  pills: Pill[];
+}
+
+/** A message's draft for editing, with the pills its mentions and custom emoji come back as. */
+export function editDraft(body: string, html: string | null): EditDraft {
+  if (!html) return { draft: body, pills: [] };
+  const pills: Pill[] = [];
+  /** A mention being read: what it stands for, and its words so far. */
+  let mention: { kind: 'user' | 'room'; id: string; text: string } | null = null;
+  /** What each open `<span>` (or `<div>`) is, so its end closes the right thing. */
+  const spans: Array<'spoiler' | 'other'> = [];
   const lines: string[] = [];
   let line = '';
   /** What starts each new line inside the current block (a quote's `> `, an item's indent). */
@@ -776,6 +922,11 @@ export function draftOf(body: string, html: string | null): string {
     if (text !== undefined) {
       if (skip > 0) continue;
 
+      if (mention) {
+        mention.text += decodeEntities(text);
+        continue;
+      }
+
       if (pre) {
         const parts = decodeEntities(text).split('\n');
         parts.forEach((part, index) => {
@@ -801,6 +952,48 @@ export function draftOf(body: string, html: string | null): string {
 
     if (skip > 0) continue;
 
+    if (mention) {
+      if (tag === 'a' && end) {
+        const words = mention.text.trim() || mention.id;
+
+        const pill =
+          mention.kind === 'user' ? userPill(mention.id, words) : roomPill(mention.id, words);
+
+        pills.push(pill);
+        line += pill.label;
+        mention = null;
+      }
+
+      continue;
+    }
+
+    if ((tag === 'span' || tag === 'div') && !end) {
+      const latex = attribute(attrs ?? '', 'data-mx-maths');
+
+      if (latex !== null) {
+        if (tag === 'div') endBlock();
+        line += `$$${latex}$$`;
+        // The fallback inside isn't the formula's text: skip to the element's end.
+        tokens.lastIndex = elementEnd(html, tag, tokens.lastIndex);
+
+        if (tag === 'div') endBlock();
+        continue;
+      }
+
+      const spoiler = attribute(attrs ?? '', 'data-mx-spoiler') !== null;
+      spans.push(spoiler ? 'spoiler' : 'other');
+
+      if (spoiler) {
+        line += '||';
+        continue;
+      }
+    } else if ((tag === 'span' || tag === 'div') && end) {
+      if (spans.pop() === 'spoiler') {
+        line += '||';
+        continue;
+      }
+    }
+
     switch (tag) {
       case 'strong':
       case 'b':
@@ -818,13 +1011,35 @@ export function draftOf(body: string, html: string | null): string {
       case 'code':
         if (!pre) line += '`';
         break;
+      case 'img': {
+        const src = attribute(attrs ?? '', 'src') ?? '';
+
+        if (attribute(attrs ?? '', 'data-mx-emoticon') !== null && src.startsWith('mxc://')) {
+          const code = attribute(attrs ?? '', 'alt') ?? attribute(attrs ?? '', 'title') ?? '';
+          const pill = emotePill(src, code.replace(/^:|:$/g, '') || 'emoji');
+          pills.push(pill);
+          line += pill.label;
+        } else {
+          line += attribute(attrs ?? '', 'alt') ?? '';
+        }
+
+        break;
+      }
+
       case 'a':
         if (end) {
           const href = links.pop();
           line += href === undefined ? '' : `](${href})`;
         } else {
-          const href = /href\s*=\s*"([^"]*)"|href\s*=\s*'([^']*)'/i.exec(attrs ?? '');
-          links.push(decodeEntities(href?.[1] ?? href?.[2] ?? ''));
+          const href = attribute(attrs ?? '', 'href') ?? '';
+          const target = mentionOf(href);
+
+          if (target) {
+            mention = { ...target, text: '' };
+            break;
+          }
+
+          links.push(href);
           line += '[';
         }
 
@@ -899,5 +1114,32 @@ export function draftOf(body: string, html: string | null): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  return draft === '' ? body : draft;
+  return draft === '' ? { draft: body, pills: [] } : { draft, pills: livePills(draft, pills) };
+}
+
+/** Where the `tag` element whose opening tag ends at `from` ends, nested ones included. */
+function elementEnd(html: string, tag: string, from: number): number {
+  const tags = new RegExp(`<${tag}\\b[^>]*>|</${tag}\\s*>`, 'gi');
+  tags.lastIndex = from;
+  let depth = 1;
+
+  for (let next = tags.exec(html); next; next = tags.exec(html)) {
+    depth += next[0].startsWith('</') ? -1 : 1;
+
+    if (depth === 0) return tags.lastIndex;
+  }
+
+  return html.length;
+}
+
+/** An attribute's decoded value in a tag's attribute text; `''` for one without a value. */
+function attribute(attrs: string, name: string): string | null {
+  for (const match of attrs.matchAll(
+    /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g,
+  )) {
+    if (match[1]?.toLowerCase() === name)
+      return decodeEntities(match[2] ?? match[3] ?? match[4] ?? '');
+  }
+
+  return null;
 }

@@ -7,13 +7,17 @@ import type {
   AccountId,
   Attachment,
   CallInfo,
+  EditVersion,
+  ImagePack,
   IncomingCall,
   Invitation,
   MemberRole,
   Members,
   Message,
   MessageContent,
+  PackImage,
   Person,
+  Place,
   Presence,
   RoomMember,
   RoomPreview,
@@ -25,6 +29,9 @@ import type {
   ThreadInfo,
   TimelineEntry,
 } from '@better-matrix/matrix-native/types';
+
+import { mapOf } from '../state/geo';
+import { mxcMedia } from '../state/messages';
 
 export const ADA = '@ada:example.org';
 
@@ -50,6 +57,9 @@ export const DESIGN_INVITE = '!design-community:example.org';
 export const DM_GRACE = '!dm-grace:example.org';
 
 export const DM_KAI = '!dm-kai:example.org';
+
+/** Where releases are signed off: the room that shows every kind of message the composer sends. */
+export const RELEASES = '!releases:example.org';
 
 /** A public room nobody in the demo has joined, as a permalink to it previews. */
 export const DEMO_LINKED_ROOM: RoomPreview = {
@@ -78,6 +88,17 @@ export const DEMO_MEDIA = {
   voice: 'demo-voice-memo',
   /** A video the demo has no file for: its poster shows, the player waits. */
   walkthrough: 'demo-walkthrough',
+  /** Every map the demo draws (the engine draws real ones from OpenStreetMap). */
+  map: 'osm:',
+} as const;
+
+/** The demo's custom emoji and stickers, by `mxc://` URI, as the demo engine serves them. */
+export const DEMO_PACK_IMAGES = {
+  party: 'mxc://example.org/emote-party',
+  ok: 'mxc://example.org/emote-ok',
+  wave: 'mxc://example.org/sticker-wave',
+  ship: 'mxc://example.org/sticker-ship',
+  coffee: 'mxc://example.org/sticker-coffee',
 } as const;
 
 /** The voice memo Grace sends: 14 seconds of speech, with the waveform a client sends along. */
@@ -142,7 +163,170 @@ function blank(): Omit<
     reactions: [],
     reply_to: null,
     thread: null,
+    highlighted: false,
   };
+}
+
+function emote(body: string, markup: string | null = null): MessageContent {
+  return { type: 'Emote', data: { body, html: markup } };
+}
+
+function place(geoUri: string, description: string | null): MessageContent {
+  return { type: 'Location', data: { geo_uri: geoUri, description, map: mapOf(geoUri) } };
+}
+
+/** The Brandenburg Gate, where the release party is. */
+const PARTY_PLACE = 'geo:52.516275,13.377704';
+
+/** Ada's sign-off in #releases, edited twice: the edit history scene opens it. */
+export const SIGN_OFF = `$demo-${ADA}-5`;
+
+/** Kai's link in #releases to Alan's answer inside #general's thread. */
+export const THREAD_LINK = `$demo-${KAI}-6`;
+
+/** The answer Kai's link points at: a reply inside #general's thread. */
+export const THREAD_REPLY = '$thread-1';
+
+/**
+ * #releases: Alan mentions Ada (highlighted), Grace's emote and the party's place, Kai's spoiler
+ * and formula, Ada's sign-off with a custom emoji (edited), and Kai's link into a thread.
+ */
+function releases(): Message[] {
+  const party = `<img data-mx-emoticon src="${DEMO_PACK_IMAGES.party}" alt=":party:" title=":party:" height="32" />`;
+
+  const list = messages([
+    [
+      ALAN,
+      'Alan Turing',
+      html(
+        'Ada Lovelace can you sign off 0.2.0?',
+        `<a href="https://matrix.to/#/${ADA}">Ada Lovelace</a> can you sign off 0.2.0?`,
+      ),
+      0,
+    ],
+    [GRACE, 'Grace Hopper', emote('is writing the release notes'), 3],
+    [GRACE, 'Grace Hopper', place(PARTY_PLACE, 'Release party: Brandenburger Tor'), 2],
+    [
+      KAI,
+      'Kai',
+      html(
+        'Guess the number of fixes: [Spoiler]. Our favourite formula: e^{i\\pi} + 1 = 0',
+        'Guess the number of fixes: <span data-mx-spoiler>42</span>. Our favourite formula: ' +
+          '<span data-mx-maths="e^{i\\pi} + 1 = 0"><code>e^{i\\pi} + 1 = 0</code></span>',
+      ),
+      4,
+    ],
+    [
+      GRACE,
+      'Grace Hopper',
+      html(
+        '@room the tag goes out at 15:00 :ok:',
+        `@room the tag goes out at 15:00 <img data-mx-emoticon src="${DEMO_PACK_IMAGES.ok}" alt=":ok:" title=":ok:" height="32" />`,
+      ),
+      1,
+    ],
+    [
+      ADA,
+      'Ada Lovelace',
+      html('Signed off 0.2.0 :party:', `<p>Signed off <strong>0.2.0</strong> ${party}</p>`),
+      6,
+    ],
+    [
+      KAI,
+      'Kai',
+      text(`Alan answered this in the thread: https://matrix.to/#/${GENERAL}/${THREAD_REPLY}`),
+      2,
+    ],
+  ]);
+
+  list[0] = { ...list[0]!, highlighted: true };
+  list[4] = { ...list[4]!, highlighted: true };
+  list[5] = { ...list[5]!, edited: true };
+
+  return list;
+}
+
+/** The versions of Ada's sign-off, the original first. */
+export function signOffVersions(): EditVersion[] {
+  const at = DEMO_DAY_MS + (9 * 60 + 28) * 60_000;
+
+  return [
+    { event_id: SIGN_OFF, body: 'Signed off 0.2', html: null, timestamp_ms: at },
+    {
+      event_id: '$sign-off-edit-1',
+      body: 'Signed off 0.2.0',
+      html: '<p>Signed off <strong>0.2.0</strong></p>',
+      timestamp_ms: at + 2 * 60_000,
+    },
+    {
+      event_id: '$sign-off-edit-2',
+      body: 'Signed off 0.2.0 :party:',
+      html: `<p>Signed off <strong>0.2.0</strong> <img data-mx-emoticon src="${DEMO_PACK_IMAGES.party}" alt=":party:" title=":party:" height="32" /></p>`,
+      timestamp_ms: at + 5 * 60_000,
+    },
+  ];
+}
+
+function packImage(
+  shortcode: string,
+  body: string,
+  url: string,
+  use: { emoticon: boolean; sticker: boolean },
+): PackImage {
+  return {
+    shortcode,
+    body,
+    url,
+    media: mxcMedia(url),
+    ...use,
+    dimensions: use.sticker ? [256, 256] : [128, 128],
+    mimetype: 'image/png',
+  };
+}
+
+/** Ada's own pack (two custom emoji) and #general's sticker pack. */
+export function demoPacks(): ImagePack[] {
+  const emoticon = { emoticon: true, sticker: false };
+  const sticker = { emoticon: false, sticker: true };
+
+  return [
+    {
+      id: 'user',
+      name: 'Ada’s emoji',
+      avatar: null,
+      images: [
+        packImage('party', 'Party', DEMO_PACK_IMAGES.party, emoticon),
+        packImage('ok', 'OK', DEMO_PACK_IMAGES.ok, emoticon),
+      ],
+    },
+    {
+      id: `${GENERAL}/`,
+      name: 'Engine room',
+      avatar: null,
+      images: [
+        packImage('wave', 'Waving hello', DEMO_PACK_IMAGES.wave, sticker),
+        packImage('ship', 'Ship it', DEMO_PACK_IMAGES.ship, sticker),
+        packImage('coffee', 'Coffee break', DEMO_PACK_IMAGES.coffee, sticker),
+      ],
+    },
+  ];
+}
+
+/** Places found by name, as OpenStreetMap's search answers. */
+export function demoPlaces(query: string): Place[] {
+  const all: Array<[string, string]> = [
+    ['Brandenburger Tor, Pariser Platz, Mitte, Berlin', PARTY_PLACE],
+    ['Fernsehturm, Panoramastraße, Mitte, Berlin', 'geo:52.520815,13.409419'],
+    ['Tempelhofer Feld, Tempelhof, Berlin', 'geo:52.473055,13.40368'],
+  ];
+
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+
+  return all.flatMap(([name, geoUri]) =>
+    words.some((word) => name.toLowerCase().includes(word))
+      ? [{ name, geo_uri: geoUri, map: mapOf(geoUri) }]
+      : [],
+  );
 }
 
 /** Messages `gap` minutes after the one before, from 09:12 UTC on the demo's day. */
@@ -516,10 +700,7 @@ function work(): Fixture {
           ],
         ]),
       ],
-      [
-        { ...room('!releases:example.org', 'releases', null, 1, 1), history: 'Joined' },
-        messages([[ALAN, 'Alan Turing', text('@ada can you sign off 0.2.0?'), 0]]),
-      ],
+      [{ ...room(RELEASES, 'releases', null, 1, 1), history: 'Joined' }, releases()],
       [
         {
           ...room('!meetup:example.org', 'meetup', 'Monthly Rust meetup', 4, 0),
@@ -546,12 +727,7 @@ function work(): Fixture {
       ],
     ],
     spaces: [
-      space(
-        WORK_SPACE,
-        'Analytical Engines',
-        [GENERAL, DESIGN, '!releases:example.org'],
-        [ADA, GRACE, ALAN],
-      ),
+      space(WORK_SPACE, 'Analytical Engines', [GENERAL, DESIGN, RELEASES], [ADA, GRACE, ALAN]),
       space('!rust:example.org', 'Rust Meetup', ['!meetup:example.org'], [ADA, KAI]),
     ],
     threads: [[DEMO_THREAD.roomId, room0[5]!, thread]],

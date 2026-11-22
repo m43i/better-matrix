@@ -42,3 +42,40 @@ describe('openJoined', () => {
     ]);
   });
 });
+
+describe('openJoined at a message', () => {
+  it('should open a reply in its thread', async () => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    openJoined(
+      store,
+      { type: 'room', account: ADA, roomId: '!r:x', eventId: '$reply' },
+      navigation,
+    );
+    const request = sent[0]!.request;
+
+    engine.emit({
+      type: 'MessageLocated',
+      data: {
+        request,
+        account: ADA,
+        key: { room_id: '!r:x', thread: '$root' },
+        event_id: '$reply',
+      },
+    });
+    engine.emit({ type: 'Finished', data: { request, result: { Ok: null } } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(navigation.push.mock.calls).toEqual([[routes.thread(ADA, '!r:x', '$root', '$reply')]]);
+  });
+
+  it('should open the room at the message when the engine can’t tell', async () => {
+    const { engine, sent } = detachedEngine();
+    const store = new Store(engine);
+    engine.emit({ type: 'AccountAdded', data: summary(ADA) });
+    openJoined(store, { type: 'room', account: ADA, roomId: '!r:x', eventId: '$m' }, navigation);
+    engine.emit({ type: 'Finished', data: { request: sent[0]!.request, result: { Err: 'no' } } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(navigation.push.mock.calls).toEqual([[routes.room(ADA, '!r:x', '$m')]]);
+  });
+});

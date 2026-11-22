@@ -10,7 +10,7 @@ import { locale, t } from '../i18n';
 import { setPinned, setSaved, messageLink, translationUrl } from '../state/actions/message-actions';
 import { deleteMessage, react } from '../state/actions/timeline';
 import { startEdit, startReply } from '../state/composer';
-import { editText, findMessage, messageActions, messageText } from '../state/messages';
+import { editDraftOf, findMessage, messageActions, messageText } from '../state/messages';
 import { useAppStore, useStore } from '../state/react';
 import { room, timeline } from '../state/selectors';
 import { roomKey, threadKey } from '../state/timeline';
@@ -185,7 +185,8 @@ export default function MessageActionsScreen() {
             chevron={false}
             testID="message-actions-edit"
             onPress={() => {
-              startEdit(store, account, key, message, editText(message));
+              const { draft, pills } = editDraftOf(message);
+              startEdit(store, account, key, message, draft, pills);
               close();
             }}
           />
