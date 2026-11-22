@@ -782,6 +782,7 @@ export function demoThreads(): ThreadInfo[] {
   return [
     {
       root: DEMO_THREAD.root,
+      sender_id: ALAN,
       sender_name: 'Alan Turing',
       body: 'Cross-signing verification passes on Linux, macOS and Windows.',
       replies: 3,

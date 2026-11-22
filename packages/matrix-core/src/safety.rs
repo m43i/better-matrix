@@ -247,8 +247,8 @@ impl Account {
         Ok(read(&ignored, &media, &invites))
     }
 
-    /// The choices after a sync that carried some of their events, read from the server under the
-    /// same lock as changes: a sync answered before a save finished carries the older event,
+    /// The choices as the server has them, at start and after a sync that carried some of their
+    /// events, read under the same lock as changes: a sync answered before a save finished carries the older event,
     /// which mustn't undo the save. `None` while a change is being saved (its answer, read from
     /// the server, reports them), and when the server doesn't answer (this device's copy may be
     /// that older event; the next sync or change reads them again).

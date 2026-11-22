@@ -210,6 +210,7 @@ export function LinkCard({ url, message }: { url: string; message: Message }) {
             label={t('mobile.safety.hidden_picture')}
             onShow={reveal}
             style={styles.cardImage}
+            height={CARD_IMAGE_SIDE}
             compact
           />
         ) : image ? (
@@ -251,6 +252,7 @@ export function LinkedGif({ url, message }: { url: string; message: Message }) {
         label={t('mobile.safety.hidden_gif')}
         onShow={reveal}
         style={[styles.gif, { width, aspectRatio: aspect }]}
+        height={width / aspect}
       />
     );
 

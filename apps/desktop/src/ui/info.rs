@@ -133,14 +133,18 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
     frame("info-panel", t!("info.title"), content, Some(footer), p)
 }
 
-/// The room's threads; pressing one opens it.
+/// The room's threads, but those started by people the user ignores; pressing one opens it.
 pub fn threads(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
-    let list = match account.threads.get(&room.room_id) {
+    let listed: Option<Vec<_>> = account
+        .threads
+        .get(&room.room_id)
+        .map(|threads| threads.iter().filter(|thread| !account.ignores(&thread.sender_id)).collect());
+    let list = match listed {
         None => col().w_full().child(text(t!("info.loading")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0)),
         Some(threads) if threads.is_empty() => {
             col().w_full().child(text(t!("info.no_threads")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0))
         }
-        Some(threads) => threads.iter().fold(col().w_full(), |list, thread| {
+        Some(threads) => threads.into_iter().fold(col().w_full(), |list, thread| {
             let root = thread.root.clone();
             let mut meta = tp!("thread.replies", thread.replies);
             if let Some(at) = thread.latest_at {

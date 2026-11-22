@@ -2658,6 +2658,14 @@ impl State {
                     let (account, flows, sink, feed) =
                         (account.clone(), flows.clone(), Arc::clone(&self.sink), feed.clone());
                     tokio::spawn(async move {
+                        // The safety choices as this device stored them, before any room or
+                        // invitation shows (the room list follows from the sync loop below): an
+                        // app hides what they hide from the first frame. The server's follow, as
+                        // a save may not have synced here before the app quit.
+                        match account.safety().await {
+                            Ok(safety) => sink.emit(Event::Safety { account: account.id().clone(), safety }),
+                            Err(error) => eprintln!("matrix-engine: could not read the safety choices: {error}"),
+                        }
                         // What this device knew showed at once, even offline; the server's
                         // profile follows.
                         let profile = async {
@@ -2679,9 +2687,8 @@ impl State {
                             sink.emit(Event::SidebarLayout { account: account.id().clone(), layout });
                         };
                         let safety = async {
-                            match account.safety().await {
-                                Ok(safety) => sink.emit(Event::Safety { account: account.id().clone(), safety }),
-                                Err(error) => eprintln!("matrix-engine: could not read the safety choices: {error}"),
+                            if let Some(safety) = account.synced_safety().await {
+                                sink.emit(Event::Safety { account: account.id().clone(), safety });
                             }
                         };
                         let status = account

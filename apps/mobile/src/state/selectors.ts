@@ -9,6 +9,7 @@ import type {
   RoomPreview,
   SavedMessage,
   SharedFile,
+  ThreadInfo,
   TimelineEntry,
   TimelineKey,
 } from '@better-matrix/matrix-native/types';
@@ -321,26 +322,52 @@ function inThreads(
   return [];
 }
 
-/** Each room's listed files as Room Info last showed them, by the list and ignore list. */
-const shownFileLists = new WeakMap<SharedFile[], { ignored: string[]; shown: SharedFile[] }>();
+/** A list as Room Info last showed it, by the list, with the ignore list it hid. */
+type ShownLists<T> = WeakMap<T[], { ignored: string[]; shown: T[] }>;
+
+const shownFileLists: ShownLists<SharedFile> = new WeakMap();
+
+const shownThreadLists: ShownLists<ThreadInfo> = new WeakMap();
 
 /**
- * The files Room Info lists for a room: without those people the user ignores shared (as
- * shown, so a pending ignore hides them too). The same array while nothing changes.
+ * `list` without what people the user ignores (as shown, so a pending ignore hides it too) shared
+ * or started. The same array while neither changes.
  */
+function withoutIgnoredSenders<T extends { sender_id: string }>(
+  list: T[],
+  ignored: string[],
+  cache: ShownLists<T>,
+): T[] {
+  if (ignored.length === 0) return list;
+  const cached = cache.get(list);
+
+  if (cached?.ignored === ignored) return cached.shown;
+  const shown = list.filter((item) => !ignored.includes(item.sender_id));
+  cache.set(list, { ignored, shown });
+
+  return shown;
+}
+
+/** The files Room Info lists for a room, without what people the user ignores shared. */
 export function shownFiles(state: State, id: AccountId, roomId: string): SharedFile[] | undefined {
   const data = account(state, id);
   const files = data?.files[roomId];
 
-  if (!data || !files || data.safety.ignored.length === 0) return files;
-  const ignored = data.safety.ignored;
-  const cached = shownFileLists.get(files);
+  return data && files ? withoutIgnoredSenders(files, data.safety.ignored, shownFileLists) : files;
+}
 
-  if (cached?.ignored === ignored) return cached.shown;
-  const shown = files.filter((file) => !ignored.includes(file.sender_id));
-  shownFileLists.set(files, { ignored, shown });
+/** The threads Room Info lists for a room, without those people the user ignores started. */
+export function shownThreads(
+  state: State,
+  id: AccountId,
+  roomId: string,
+): ThreadInfo[] | undefined {
+  const data = account(state, id);
+  const threads = data?.threads[roomId];
 
-  return shown;
+  return data && threads
+    ? withoutIgnoredSenders(threads, data.safety.ignored, shownThreadLists)
+    : threads;
 }
 
 /** Whether any of a room's kept timelines holds `eventId`, or held it from an ignored sender. */

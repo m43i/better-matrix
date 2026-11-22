@@ -13,6 +13,10 @@ root: string,
  */
 sender_name: string, 
 /**
+ * Their Matrix ID: whether the user ignores them.
+ */
+sender_id: string, 
+/**
  * The root message's text.
  */
 body: string, 

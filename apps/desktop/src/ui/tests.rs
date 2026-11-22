@@ -2261,3 +2261,22 @@ fn a_held_back_video_without_a_poster_should_offer_show_on_its_file_card() {
     press(&mut rt, "file-clip.mp4");
     assert!(rt.state.preview.is_some());
 }
+
+#[test]
+fn the_threads_panel_should_leave_out_threads_of_people_the_user_ignores() {
+    let thread = format!("listed-thread-{}", demo::DEMO_THREAD.1);
+    let open = |s: &mut State| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.toggle_side(SidePanel::Threads);
+        demo::room_history(s);
+    };
+    let rt = runtime(open);
+    assert!(rt.find(&thread).is_some());
+    let rt = runtime(move |s| {
+        open(s);
+        let safety =
+            matrix_core::Safety { ignored: vec!["@alan:example.org".into()], ..matrix_core::Safety::default() };
+        s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, &mut rune::Tx::default());
+    });
+    assert!(rt.find(&thread).is_none());
+}

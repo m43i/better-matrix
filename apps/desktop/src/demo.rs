@@ -472,6 +472,7 @@ pub fn room_history(s: &mut State) {
     let thread = matrix_core::ThreadInfo {
         root: DEMO_THREAD.1.into(),
         sender_name: "Alan Turing".into(),
+        sender_id: ALAN.into(),
         body: "Cross-signing verification passes on Linux, macOS and Windows.".into(),
         replies: 3,
         latest_at: Some(DEMO_DAY_MS + 11 * 3_600_000 + 36 * 60_000),

@@ -18,6 +18,7 @@ import {
   mediaHidden,
   roomPreviewPicture,
   shownFiles,
+  shownThreads,
   previewHidden,
   pinnedPreviews,
   previewItems,
@@ -676,4 +677,22 @@ describe('round six', () => {
     const state = signedIn({ ...DEFAULT_SAFETY, media: 'Private' });
     expect(mediaHidden(state, ADA, '!unknown:x', message('$a'))).toBe(true);
   });
+});
+
+it('Room Info should leave out threads people the user ignores started', () => {
+  const thread = (root: string, sender_id: string) => ({
+    root,
+    sender_id,
+    sender_name: sender_id,
+    body: 'hi',
+    replies: 1,
+    latest_at: 1,
+  });
+
+  const state = apply(signedIn({ ...DEFAULT_SAFETY, ignored: [GRACE] }), {
+    type: 'Threads',
+    data: { account: ADA, room_id: PRIVATE, threads: [thread('$a', GRACE), thread('$b', ADA)] },
+  });
+
+  expect(shownThreads(state, ADA, PRIVATE)?.map((t) => t.root)).toEqual(['$b']);
 });

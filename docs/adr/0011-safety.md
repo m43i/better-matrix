@@ -21,8 +21,9 @@ Date: 2026-11-22
 ## Decision
 
 - **One vocabulary:** `Safety` (per account: `ignored`, `media: ShowMedia`, `invite_pictures`,
-  `hide_stranger_invites`) is reported as `Event::Safety` once an account is ready, when a sync
-  brings any of its account data events, and after `Command::SetSafety(SafetyChange)`, whose
+  `hide_stranger_invites`) is reported as `Event::Safety` once an account is ready (this
+  device's copy before any room or invitation is listed, then the server's, as a save may not
+  have synced here before the app quit), when a sync brings any of its account data events, and after `Command::SetSafety(SafetyChange)`, whose
   answer is read back from the server (the store's copy changes only with the next sync).
   Changes run one at a time per account, in the order they were asked for
   (`Account::safety_queue`), each read-modify-writing the server's latest copy, so two made
@@ -38,8 +39,8 @@ Date: 2026-11-22
 - **Stored in account data**, never on the device:
   - ignored people in `m.ignored_user_list`; the SDK's event cache clears every room when a sync
     brings a new list, so earlier messages from them disappear too. Until then, and for what
-    the apps keep themselves (a room's latest message, saved and pinned messages, the Files
-    list), the apps leave out what an ignored person sent: dropped once the server confirms the
+    the apps keep themselves (a room's latest message, saved and pinned messages, the
+    Threads and Files lists), the apps leave out what an ignored person sent: dropped once the server confirms the
     ignore, filtered where shown while it is saving, so a failed ignore brings it back;
   - media and invitation pictures in MSC4278's event, keeping fields other clients set: read
     under the spec's name first, then the unstable one (as the SDK does); written under the

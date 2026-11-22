@@ -3,7 +3,7 @@
 // a tap shows that message's media until the app restarts.
 
 import type { Message } from '@better-matrix/matrix-native/types';
-import { Pressable, StyleSheet, Text, type ViewStyle } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, type ViewStyle } from 'react-native';
 
 import { t } from '../../i18n';
 import { revealMedia } from '../../state/actions/safety';
@@ -13,6 +13,7 @@ import { font } from '../../theme/palette';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
+import { hiddenLayout, minTap, tapSlop } from './hiddenLayout';
 
 /** Whether this message's media waits for Show, and the way to show it. */
 export function useHiddenMedia(message: Pick<Message, 'sender_id' | 'event_id'>) {
@@ -28,21 +29,28 @@ export function HiddenMedia({
   label,
   onShow,
   style,
+  height,
   compact = false,
 }: {
   /** What is hidden ("Hidden picture"). */
   label: string;
   onShow: () => void;
   style: ViewStyle | ViewStyle[];
+  /** The box's height, which decides what fits in it. */
+  height: number;
   /** Too small for words (a link card's picture): the icon alone. */
   compact?: boolean;
 }) {
   const palette = usePalette();
+  // A short box (a wide banner) fits Show alone; a box smaller than a finger still takes one.
+  const layout = hiddenLayout(height, compact);
+  const slop = tapSlop(height, minTap(Platform.OS));
 
   return (
     <Pressable
       testID="hidden-media"
       onPress={onShow}
+      hitSlop={slop}
       accessibilityRole="button"
       accessibilityLabel={`${label}. ${t('safety.show_media')}`}
       style={[
@@ -51,12 +59,16 @@ export function HiddenMedia({
         { backgroundColor: palette.surface, borderColor: palette.divider },
       ]}
     >
-      <Icon name="eyeOff" size={compact ? 20 : 24} color={palette.textMuted} />
-      {compact ? null : (
-        <>
-          <Text style={[font.meta, { color: palette.textMuted }]}>{label}</Text>
-          <Text style={[font.bodyStrong, { color: palette.accent }]}>{t('safety.show_media')}</Text>
-        </>
+      {layout === 'show' ? null : (
+        <Icon name="eyeOff" size={layout === 'icon' ? 20 : 24} color={palette.textMuted} />
+      )}
+      {layout === 'full' ? (
+        <Text style={[font.meta, { color: palette.textMuted }]}>{label}</Text>
+      ) : null}
+      {layout === 'icon' ? null : (
+        <Text style={[font.bodyStrong, { color: palette.accent }]} numberOfLines={1}>
+          {t('safety.show_media')}
+        </Text>
       )}
     </Pressable>
   );
