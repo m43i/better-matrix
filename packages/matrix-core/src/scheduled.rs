@@ -37,7 +37,16 @@ struct Kept {
     room_id: String,
     send_at_ms: u64,
     body: Option<String>,
+    #[serde(default)]
+    failed: Option<String>,
 }
+
+/// How long a message whose time came is kept while what became of it is unknown: a little
+/// past the week servers are asked to remember sent ones.
+const UNSETTLED_KEPT: u64 = 8 * 24 * 3_600_000;
+
+/// How long a message the server failed to send stays to be seen, unless let go first.
+const FAILED_KEPT: u64 = 30 * 24 * 3_600_000;
 
 fn now_ms() -> u64 {
     u64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis())
@@ -108,13 +117,16 @@ impl Account {
             room_id: key.room_id.clone(),
             send_at_ms: now_ms().saturating_add(delay_ms),
             body: body_of(&json),
+            failed: None,
         };
         self.keep_scheduled(|kept| kept.push(scheduled)).await;
         Ok(delay_id)
     }
 
     /// The messages this account scheduled, as kept in its store (they outlive a restart),
-    /// changed by `change` and written back; those whose time has passed are let go.
+    /// changed by `change` and written back. One whose time came stays until the server says
+    /// what became of it ([`Account::settle_due`]), and one it failed to send until let go;
+    /// both for a bounded time.
     async fn keep_scheduled(&self, change: impl FnOnce(&mut Vec<ScheduledMessage>)) -> Vec<ScheduledMessage> {
         let _one = self.scheduled_here.lock().await;
         let store = self.client().state_store();
@@ -127,13 +139,17 @@ impl Account {
                     room_id: kept.room_id,
                     send_at_ms: kept.send_at_ms,
                     body: kept.body,
+                    failed: kept.failed,
                 })
                 .collect(),
             _ => Vec::new(),
         };
         change(&mut kept);
         let now = now_ms();
-        kept.retain(|message| message.send_at_ms > now);
+        kept.retain(|message| {
+            let kept_for = if message.failed.is_some() { FAILED_KEPT } else { UNSETTLED_KEPT };
+            message.send_at_ms.saturating_add(kept_for) > now
+        });
         let written: Vec<Kept> = kept
             .iter()
             .map(|message| Kept {
@@ -141,6 +157,7 @@ impl Account {
                 room_id: message.room_id.clone(),
                 send_at_ms: message.send_at_ms,
                 body: message.body.clone(),
+                failed: message.failed.clone(),
             })
             .collect();
         if let Ok(bytes) = serde_json::to_vec(&written) {
@@ -155,25 +172,82 @@ impl Account {
         Ok(features.iter().any(|feature| feature.as_str() == FEATURE))
     }
 
-    /// The messages the server holds for the account, soonest first. A message this device
-    /// can't read (another device's encrypted one) has no body.
+    /// The messages the server holds for the account, soonest first, then those of this
+    /// device's the server failed to send. A message this device can't read (another device's
+    /// encrypted one) has no body.
     pub async fn scheduled_messages(&self) -> Result<Vec<ScheduledMessage>, Error> {
         if !self.can_schedule().await? {
             return Ok(Vec::new());
         }
-        let response = match self.client().send(api::list::Request::default()).await {
-            Ok(response) => response,
+        let listed = match self.client().send(api::list::Request::default()).await {
+            Ok(response) => Some(response.delayed_events.iter().filter_map(api::Listed::read).collect::<Vec<_>>()),
             // A server that holds delayed events but can't list them: those this session
-            // scheduled, still to come.
-            Err(error) if unrecognized(&error) => {
-                let mut known = self.keep_scheduled(|_| {}).await;
-                known.sort_by_key(|message| message.send_at_ms);
-                return Ok(known);
-            }
+            // scheduled stand for them.
+            Err(error) if unrecognized(&error) => None,
             Err(error) => return Err(error.into()),
         };
+        let kept = self.settle_due(listed.as_deref().unwrap_or_default()).await;
+        let mut messages = match listed {
+            Some(listed) => self.waiting(listed).await,
+            None => kept.iter().filter(|message| message.failed.is_none()).cloned().collect(),
+        };
+        messages.sort_by_key(|message| message.send_at_ms);
+        let failed: Vec<_> = kept
+            .into_iter()
+            .filter(|message| {
+                message.failed.is_some() && messages.iter().all(|other| other.delay_id != message.delay_id)
+            })
+            .collect();
+        messages.extend(failed);
+        Ok(messages)
+    }
+
+    /// Asks what became of this device's messages whose time came, where the list didn't
+    /// say: one the server failed to send stays, marked; one it sent, or no longer knows,
+    /// goes. One the server can't be asked about now is asked about next time. Returns what
+    /// is then kept.
+    async fn settle_due(&self, listed: &[api::Listed]) -> Vec<ScheduledMessage> {
+        let now = now_ms();
+        let due: Vec<String> = self
+            .keep_scheduled(|_| {})
+            .await
+            .into_iter()
+            .filter(|message| message.failed.is_none() && message.send_at_ms <= now)
+            .map(|message| message.delay_id)
+            .collect();
+        let mut fates = Vec::new();
+        for delay_id in due {
+            let fate = match listed.iter().find(|event| event.delay_id == delay_id) {
+                Some(event) => Some(event.clone()),
+                None => match self.client().send(api::get::Request::new(delay_id.clone())).await {
+                    Ok(response) => api::Listed::read(&response.event),
+                    Err(error) if unrecognized(&error) => None,
+                    Err(_) => continue,
+                },
+            };
+            fates.push((delay_id, fate));
+        }
+        self.keep_scheduled(|kept| {
+            for (delay_id, fate) in fates {
+                match fate {
+                    // Still to go: the server is sending it.
+                    Some(event) if !event.finished => {}
+                    Some(api::Listed { error: Some(error), .. }) => {
+                        if let Some(message) = kept.iter_mut().find(|message| message.delay_id == delay_id) {
+                            message.failed = Some(error);
+                        }
+                    }
+                    _ => kept.retain(|message| message.delay_id != delay_id),
+                }
+            }
+        })
+        .await
+    }
+
+    /// The messages a server's list holds that are still to go.
+    async fn waiting(&self, listed: Vec<api::Listed>) -> Vec<ScheduledMessage> {
         let mut messages = Vec::new();
-        for event in response.delayed_events.iter().filter_map(api::Listed::read) {
+        for event in listed {
             // Delayed state (a call membership's own expiry) isn't a message, and one already
             // sent, cancelled or failed is done.
             if event.state || event.finished {
@@ -191,14 +265,20 @@ impl Account {
                 room_id: event.room_id,
                 send_at_ms: event.send_at_ms,
                 body,
+                failed: None,
             });
         }
-        messages.sort_by_key(|message| message.send_at_ms);
-        Ok(messages)
+        messages
     }
 
-    /// Cancels a scheduled message, or sends it at once.
+    /// Cancels a scheduled message, or sends it at once. One the server failed to send is
+    /// done there: either only lets it go.
     pub async fn update_scheduled(&self, delay_id: &str, action: ScheduledAction) -> Result<(), Error> {
+        let failed = |message: &ScheduledMessage| message.delay_id == delay_id && message.failed.is_some();
+        if self.keep_scheduled(|_| {}).await.iter().any(failed) {
+            self.keep_scheduled(|kept| kept.retain(|message| message.delay_id != delay_id)).await;
+            return Ok(());
+        }
         let action = match action {
             ScheduledAction::Cancel => update_delayed_event::UpdateAction::Cancel,
             ScheduledAction::SendNow => update_delayed_event::UpdateAction::Send,
@@ -463,6 +543,20 @@ mod tests {
             if first.starts_with("GET") && first.contains("/delayed_events") && endpoints == Endpoints::NoList {
                 return unknown();
             }
+            if first.starts_with("GET") && first.contains("/delayed_events/") {
+                // One asked for by ID: `lost` failed, `sent` went, any other is unknown.
+                let finalised = if first.contains("/delayed_events/lost ") {
+                    json!({ "error": { "errcode": "M_FORBIDDEN", "error": "You may not post here" }, "finalised_ts": 2 })
+                } else if first.contains("/delayed_events/sent ") {
+                    json!({ "event_id": "$sent", "finalised_ts": 2 })
+                } else {
+                    return unknown();
+                };
+                return json!({
+                    "delay_id": "x", "room_id": "!room:example.org", "type": "m.room.message",
+                    "delay_ms": 1, "delayed_since_ts": 1, "content": {}, "finalised": finalised
+                });
+            }
             if first.starts_with("GET") && first.contains("/delayed_events") {
                 let delayed = |id: &str, done: bool| {
                     let mut event = json!({
@@ -650,6 +744,98 @@ mod tests {
         let bodies: Vec<_> = listed.iter().map(|message| message.body.as_deref()).collect();
         assert_eq!(bodies, [Some("waiting")]);
         assert_eq!(listed[0].send_at_ms, 61_000);
+    }
+
+    /// Keeps a message this device scheduled, whose time came long ago.
+    async fn kept_due(account: &Account, delay_id: &str) {
+        let message = ScheduledMessage {
+            delay_id: delay_id.into(),
+            room_id: "!room:example.org".into(),
+            send_at_ms: now_ms() - 60_000,
+            body: Some("later".into()),
+            failed: None,
+        };
+        account.keep_scheduled(|kept| kept.push(message)).await;
+    }
+
+    fn kept_ids(kept: &[ScheduledMessage]) -> Vec<&str> {
+        kept.iter().map(|message| message.delay_id.as_str()).collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_the_server_failed_to_send_should_stay_listed_with_why() {
+        let (server, _) = server(false, Endpoints::Current);
+        let account = account(&server, "failed").await;
+        kept_due(&account, "lost").await;
+        let listed = account.scheduled_messages().await.expect("listed");
+        let failed: Vec<_> =
+            listed.iter().map(|message| (message.delay_id.as_str(), message.failed.as_deref())).collect();
+        assert_eq!(failed, [("waiting", None), ("lost", Some("You may not post here"))]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failure_should_be_kept_for_later_listings() {
+        let (server, _) = server(false, Endpoints::Current);
+        let account = account(&server, "failed-twice").await;
+        kept_due(&account, "lost").await;
+        account.scheduled_messages().await.expect("listed");
+        let kept = account.keep_scheduled(|_| {}).await;
+        assert_eq!(kept.first().and_then(|message| message.failed.as_deref()), Some("You may not post here"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_the_server_sent_should_be_let_go() {
+        let (server, _) = server(false, Endpoints::Current);
+        let account = account(&server, "went").await;
+        kept_due(&account, "sent").await;
+        let listed = account.scheduled_messages().await.expect("listed");
+        assert_eq!(kept_ids(&listed), ["waiting"]);
+        assert!(account.keep_scheduled(|_| {}).await.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_the_server_no_longer_knows_should_be_let_go() {
+        let (server, _) = server(false, Endpoints::Current);
+        let account = account(&server, "forgotten").await;
+        kept_due(&account, "forgotten").await;
+        account.scheduled_messages().await.expect("listed");
+        assert!(account.keep_scheduled(|_| {}).await.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_message_still_to_come_should_not_be_asked_after() {
+        let (server, sent) = server(false, Endpoints::Current);
+        let account = account(&server, "to-come").await;
+        account
+            .schedule(&TimelineKey::room("!room:example.org"), None, &text("later"), Duration::from_secs(90))
+            .await
+            .expect("scheduled");
+        account.scheduled_messages().await.expect("listed");
+        assert!(
+            !sent
+                .lock()
+                .expect("requests")
+                .iter()
+                .any(|request| request.starts_with("GET") && request.contains("/delayed_events/d1"))
+        );
+        assert_eq!(kept_ids(&account.keep_scheduled(|_| {}).await), ["d1"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn letting_a_failed_message_go_should_ask_nothing_of_the_server() {
+        let (server, sent) = server(false, Endpoints::Current);
+        let account = account(&server, "dismiss").await;
+        kept_due(&account, "lost").await;
+        account.scheduled_messages().await.expect("listed");
+        account.update_scheduled("lost", ScheduledAction::Cancel).await.expect("let go");
+        assert!(
+            !sent
+                .lock()
+                .expect("requests")
+                .iter()
+                .any(|request| request.starts_with("POST") && request.contains("/delayed_events/lost"))
+        );
+        assert!(account.keep_scheduled(|_| {}).await.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]

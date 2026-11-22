@@ -655,6 +655,7 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
         room_id: key.room_id,
         send_at_ms: Date.now() + delay,
         body,
+        failed: null,
       };
 
       scheduled.set(

@@ -13,7 +13,9 @@ import type {
 } from '@better-matrix/matrix-native/types';
 
 import { initialCallView, reconcileView } from './callView';
+import { t } from '../i18n';
 import { keepUnchanged } from './json';
+import { newlyFailed } from './schedule';
 import { DEFAULT_SETTINGS, type Settings } from './settings';
 import { applyDiffs, timelineId } from './timeline';
 import type { AccountData, State, Timeline } from './types';
@@ -517,11 +519,24 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
         ...a,
         packs: { ...a.packs, [event.data.room_id ?? '']: event.data.packs },
       }));
-    case 'ScheduledMessages':
-      return updateAccount(state, event.data.account, (a) => ({
+    case 'ScheduledMessages': {
+      const before = state.accounts.find((a) => a.summary.id === event.data.account)?.scheduled;
+      const failed = newlyFailed(before, event.data.messages);
+
+      const next = updateAccount(state, event.data.account, (a) => ({
         ...a,
         scheduled: event.data.messages,
       }));
+
+      return failed === null
+        ? next
+        : addNotice(
+            next,
+            t('mobile.composer.scheduled_lost', { error: failed }),
+            event.data.account,
+          );
+    }
+
     case 'EditHistory':
       return updateAccount(state, event.data.account, (a) => ({
         ...a,

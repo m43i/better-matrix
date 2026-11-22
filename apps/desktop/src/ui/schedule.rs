@@ -8,7 +8,7 @@ use super::components::{icon_button, menu_action, popover_panel, when};
 use super::composer::{SCHEDULED_BAR, schedule_button};
 use super::icons;
 use super::theme::{Palette, font};
-use crate::i18n::t;
+use crate::i18n::{t, tf};
 use crate::state::{ComposerTarget, State, When, local_offset, now_ms};
 
 /// When to send a composer's message: half an hour, an hour, tomorrow morning, next Monday.
@@ -50,6 +50,17 @@ pub fn list(s: &State, p: &Palette) -> El {
     for message in s.scheduled_here() {
         let body = message.body.clone().unwrap_or_else(|| t!("schedule.unreadable").to_owned());
         let (send, cancel) = (message.delay_id.clone(), message.delay_id.clone());
+        // One the server couldn't send says why; it can only be let go.
+        let (status, status_color, cancel_label) = match &message.failed {
+            Some(reason) => (tf!("schedule.failed", reason = reason), p.danger, t!("schedule.dismiss")),
+            None => (when(message.send_at_ms), p.accent, t!("schedule.cancel")),
+        };
+        let send_now = message.failed.is_none().then(|| {
+            icon_button(&icons::SEND, t!("schedule.send_now"), false, p.text_muted, p)
+                .key(format!("scheduled-send-{}", message.delay_id))
+                .help(t!("schedule.send_now"))
+                .on_press(move |s: &mut State| s.update_scheduled(&send, ScheduledAction::SendNow))
+        });
         rows = rows.child(
             row()
                 .key(format!("scheduled-{}", message.delay_id))
@@ -65,19 +76,14 @@ pub fn list(s: &State, p: &Palette) -> El {
                         .grow(1.0)
                         .min_w(0.0)
                         .gap(2.0)
-                        .child(text(when(message.send_at_ms)).font(font::META).color(p.accent))
+                        .child(text(status).font(font::META).color(status_color).max_lines(2).truncate())
                         .child(text(body).font(font::BODY).color(p.text).max_lines(2).truncate()),
                 )
+                .children(send_now)
                 .child(
-                    icon_button(&icons::SEND, t!("schedule.send_now"), false, p.text_muted, p)
-                        .key(format!("scheduled-send-{}", message.delay_id))
-                        .help(t!("schedule.send_now"))
-                        .on_press(move |s: &mut State| s.update_scheduled(&send, ScheduledAction::SendNow)),
-                )
-                .child(
-                    icon_button(&icons::TRASH, t!("schedule.cancel"), false, p.text_muted, p)
+                    icon_button(&icons::TRASH, cancel_label, false, p.text_muted, p)
                         .key(format!("scheduled-cancel-{}", message.delay_id))
-                        .help(t!("schedule.cancel"))
+                        .help(cancel_label)
                         .on_press(move |s: &mut State| s.update_scheduled(&cancel, ScheduledAction::Cancel)),
                 ),
         );

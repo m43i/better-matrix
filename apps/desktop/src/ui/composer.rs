@@ -320,10 +320,17 @@ fn scheduled_bar(s: &State, target: ComposerTarget, p: &Palette) -> Option<El> {
     if target != ComposerTarget::Room {
         return None;
     }
-    let count = s.scheduled_here().len();
+    let here = s.scheduled_here();
+    let failed = here.iter().filter(|message| message.failed.is_some()).count();
+    let count = here.len();
     if count == 0 {
         return None;
     }
+    // Any the server couldn't send come first: they wait for the user, not the clock.
+    let (label, color) = match failed {
+        0 => (crate::i18n::tp!("schedule.count", count), p.accent),
+        failed => (crate::i18n::tp!("schedule.failed_count", failed), p.danger),
+    };
     Some(
         row()
             .key(SCHEDULED_BAR)
@@ -338,8 +345,8 @@ fn scheduled_bar(s: &State, target: ComposerTarget, p: &Palette) -> Option<El> {
             .role("button")
             .cursor(rune::Cursor::Pointer)
             .on_press(State::toggle_scheduled)
-            .child(icon(&icons::CLOCK, 14.0).color(p.accent))
-            .child(text(crate::i18n::tp!("schedule.count", count)).font(font::META).color(p.accent)),
+            .child(icon(&icons::CLOCK, 14.0).color(color))
+            .child(text(label).font(font::META).color(color)),
     )
 }
 

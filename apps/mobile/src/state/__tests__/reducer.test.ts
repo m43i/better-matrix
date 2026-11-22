@@ -433,7 +433,7 @@ describe('apply for composer extras', () => {
   });
 
   it('should keep the scheduled messages the server reported', () => {
-    const messages = [{ delay_id: 'd', room_id: '!r', send_at_ms: 1, body: 'hi' }];
+    const messages = [{ delay_id: 'd', room_id: '!r', send_at_ms: 1, body: 'hi', failed: null }];
 
     const state = apply(signedIn(ADA), {
       type: 'ScheduledMessages',
@@ -441,6 +441,22 @@ describe('apply for composer extras', () => {
     });
 
     expect(state.accounts[0]?.scheduled).toEqual(messages);
+  });
+
+  it('should tell once that a scheduled message couldn’t be sent', () => {
+    const messages = [
+      { delay_id: 'd', room_id: '!r', send_at_ms: 1, body: 'hi', failed: 'No posting' },
+    ];
+
+    const event = { type: 'ScheduledMessages' as const, data: { account: ADA, messages } };
+
+    const once = apply(signedIn(ADA), event);
+    const twice = apply(once, event);
+
+    expect(once.notices.map((notice) => notice.message)).toEqual([
+      expect.stringContaining('No posting'),
+    ]);
+    expect(twice.notices).toHaveLength(1);
   });
 
   it('should keep a message’s edit history by room and event', () => {

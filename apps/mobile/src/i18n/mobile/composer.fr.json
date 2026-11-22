@@ -76,6 +76,11 @@
   "mobile.composer.scheduled_unreadable": "Chiffré sur un autre appareil",
   "mobile.composer.scheduled_none": "Rien n’est programmé dans cette conversation.",
   "mobile.composer.scheduled_failed": "Le message programmé n’a pas changé : {{error}}",
+  "mobile.composer.scheduled_not_sent": "Envoi impossible : {{error}}",
+  "mobile.composer.scheduled_lost": "Un message programmé n’a pas pu être envoyé : {{error}}",
+  "mobile.composer.scheduled_dismiss": "Ignorer",
+  "mobile.composer.scheduled_failed_count.one": "{{count}} message programmé n’a pas pu être envoyé",
+  "mobile.composer.scheduled_failed_count.other": "{{count}} messages programmés n’ont pas pu être envoyés",
   "mobile.composer.date_tomorrow": "Demain",
   "mobile.composer.location_use_mine": "Utiliser ma position",
   "mobile.composer.location_pick": "Utilisez votre position ou cherchez un lieu."

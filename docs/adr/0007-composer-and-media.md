@@ -144,6 +144,16 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   never covers a newer. A server that holds delayed events but can't list them (the bulk list is
   optional) shows the messages this account scheduled there, still to come, kept in its store
   across restarts, so they can still be sent now or cancelled. One this device can't decrypt shows as "Encrypted message".
+  A message can still fail when its time comes (its sender lost the right to post, the room
+  went): the server finalises it with an error and lists it no more. So this device keeps what
+  it scheduled past its time until the server says what became of it (from the list, else
+  `GET …/delayed_events/{delay_id}`, the one read MSC4140 keeps since the bulk list moved to
+  MSC4486): a sent one, or one the server no longer knows, is let go; a failed one stays
+  (`ScheduledMessage::failed`, its error), with a notice once, shown first in the bar and in the
+  list with why, until dismissed (cancelling it asks nothing of the server). Unanswered ones go
+  after eight days (servers keep finalised ones for about a week), failed ones after 30.
+  Failures of messages scheduled from another device aren't followed: nothing on this device
+  could dismiss them.
 - **Composer layout:**
   - Room and thread editors grow up to eight lines, then scroll inside their own viewport,
     keeping the caret visible while typing or pasting. Vertical padding and the bottom bar stay outside
@@ -188,7 +198,11 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   answer only for the read that asked (`DraftLoaded.request`, and a token per follow, so a read
   answered after sign-out is dropped), and put it under an edit started meanwhile as the draft
   it sets aside. Phones keep their own composer source (markers
-  and all) as the body, so it comes back exactly; the desktop keeps text and HTML.
+  and all) as the body, so it comes back exactly, and, when it holds pills, the same source as
+  the HTML with each pill as the desktop's field writes one (`<span data-pill="id">label</span>`,
+  the rest escaped text), so mentions, `@room`, custom emoji and spoilers come back as the pills
+  they were; phones read that HTML as their source only when it spells the body exactly, else
+  as a message's. The desktop keeps text and HTML.
 - **Uploads:** `Outgoing::File` carries an `Upload`, a path on disk or bytes with a name.
   - Pastes reach the field through `on_input_paste`. A pasted image joins the draft as
     `image.png`, `image-2.png` and so on; pasted files are attached; text pastes as text.
@@ -459,8 +473,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
 - Every map and place search contacts OpenStreetMap's servers from the device (not the
   homeserver): the app's name, the place, and the device's address. Maps can be turned off;
   searches go only when the user asks.
-- `@room` in a draft kept across a restart comes back as text: drafts keep Matrix HTML, where it
-  is plain words.
+- On the desktop, `@room` in a draft kept across a restart comes back as text: drafts keep
+  Matrix HTML, where it is plain words (phones keep it as a pill).
 - Only what the user looks at is downloaded, and a server hiccup heals without a restart.
 - Two media with the same bytes share one decode in Rune but count twice here; an animation
   whose frame count can't be read counts as one frame.

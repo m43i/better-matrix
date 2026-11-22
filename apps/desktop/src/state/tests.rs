@@ -5812,6 +5812,7 @@ fn the_rooms_scheduled_messages_should_be_listed_for_it_alone() {
         room_id: room_id.into(),
         send_at_ms: 1,
         body: None,
+        failed: None,
     };
     apply(
         &mut s,
@@ -5963,8 +5964,13 @@ fn a_scheduled_message_coming_due_should_list_them_again() {
     let (mut s, mut commands) = state();
     let id = writing(&mut s, &mut commands);
     s.poll(&mut Tx::default());
-    let message =
-        matrix_core::ScheduledMessage { delay_id: "d1".into(), room_id: "!one:x".into(), send_at_ms: 1, body: None };
+    let message = matrix_core::ScheduledMessage {
+        delay_id: "d1".into(),
+        room_id: "!one:x".into(),
+        send_at_ms: 1,
+        body: None,
+        failed: None,
+    };
     apply(&mut s, Event::ScheduledMessages { account: id, messages: vec![message] });
     drain(&mut commands);
     s.poll(&mut Tx::default());
@@ -5974,6 +5980,38 @@ fn a_scheduled_message_coming_due_should_list_them_again() {
         .filter(|command| matches!(command, Command::ListScheduled { .. }))
         .count();
     assert_eq!(listed, 1);
+}
+
+fn failed_scheduled(reason: &str) -> matrix_core::ScheduledMessage {
+    matrix_core::ScheduledMessage {
+        delay_id: "d1".into(),
+        room_id: "!one:x".into(),
+        send_at_ms: 1,
+        body: Some("later".into()),
+        failed: Some(reason.into()),
+    }
+}
+
+#[test]
+fn a_scheduled_message_that_failed_should_say_so_once() {
+    let (mut s, mut commands) = state();
+    let id = writing(&mut s, &mut commands);
+    apply(&mut s, Event::ScheduledMessages { account: id.clone(), messages: vec![failed_scheduled("No posting")] });
+    assert!(s.notice.as_deref().is_some_and(|notice| notice.contains("No posting")));
+    s.notice = None;
+    apply(&mut s, Event::ScheduledMessages { account: id, messages: vec![failed_scheduled("No posting")] });
+    assert_eq!(s.notice, None);
+}
+
+#[test]
+fn a_scheduled_message_that_failed_should_not_keep_asking_for_the_list() {
+    let (mut s, mut commands) = state();
+    let id = writing(&mut s, &mut commands);
+    s.poll(&mut Tx::default());
+    apply(&mut s, Event::ScheduledMessages { account: id, messages: vec![failed_scheduled("No posting")] });
+    drain(&mut commands);
+    s.poll(&mut Tx::default());
+    assert!(!all_commands(&mut commands).iter().any(|command| matches!(command, Command::ListScheduled { .. })));
 }
 
 #[test]

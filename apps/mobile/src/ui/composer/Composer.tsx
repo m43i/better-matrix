@@ -65,7 +65,7 @@ import {
 } from '../../state/pills';
 import { addNotice } from '../../state/reducer';
 import { useAppStore, useStore } from '../../state/react';
-import { scheduledIn } from '../../state/schedule';
+import { failedIn, scheduledIn } from '../../state/schedule';
 import { account as accountOf, room } from '../../state/selectors';
 import { type Suggestion, suggestionsFor } from '../../state/suggestions';
 import { draftChanged, typingEnded, typingFor } from '../../state/typingNotices';
@@ -290,6 +290,7 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
 
   // What the server holds to send here later, kept current while the conversation is open.
   const scheduled = useStore((s) => scheduledIn(accountOf(s, account)?.scheduled, roomId).length);
+  const failed = useStore((s) => failedIn(accountOf(s, account)?.scheduled, roomId));
 
   useScheduledRefresh(account, roomId);
 
@@ -501,11 +502,28 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
           android_ripple={{ color: palette.hover }}
           style={styles.scheduled}
         >
-          <Icon name="scheduleSend" size={16} color={palette.accent} />
-          <Text style={[font.meta, styles.scheduledText, { color: palette.accent }]}>
-            {tp('mobile.composer.scheduled', scheduled)}
+          {/* Any the server couldn't send come first: they wait for the user, not the clock. */}
+          <Icon
+            name="scheduleSend"
+            size={16}
+            color={failed > 0 ? palette.danger : palette.accent}
+          />
+          <Text
+            style={[
+              font.meta,
+              styles.scheduledText,
+              { color: failed > 0 ? palette.danger : palette.accent },
+            ]}
+          >
+            {failed > 0
+              ? tp('mobile.composer.scheduled_failed_count', failed)
+              : tp('mobile.composer.scheduled', scheduled)}
           </Text>
-          <Icon name="chevronRight" size={14} color={palette.accent} />
+          <Icon
+            name="chevronRight"
+            size={14}
+            color={failed > 0 ? palette.danger : palette.accent}
+          />
         </Pressable>
       ) : null}
       {state.replyTo && !editing ? (

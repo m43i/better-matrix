@@ -63,12 +63,40 @@ export function scheduledIn(
     .sort((a, b) => a.send_at_ms - b.send_at_ms);
 }
 
-/** When a room's soonest scheduled message sends; `null` when it has none. */
+/**
+ * When a room's soonest scheduled message still waiting sends; `null` when it has none. One the
+ * server failed to send is done, never due.
+ */
 export function soonestScheduled(
   scheduled: readonly ScheduledMessage[] | null | undefined,
   roomId: string,
 ): number | null {
-  return scheduledIn(scheduled, roomId)[0]?.send_at_ms ?? null;
+  return (
+    scheduledIn(scheduled, roomId).find((message) => message.failed === null)?.send_at_ms ?? null
+  );
+}
+
+/** How many of a room's scheduled messages the server failed to send. */
+export function failedIn(
+  scheduled: readonly ScheduledMessage[] | null | undefined,
+  roomId: string,
+): number {
+  return scheduledIn(scheduled, roomId).filter((message) => message.failed !== null).length;
+}
+
+/**
+ * Why the first message `after` newly reports as failed couldn't be sent, when one is: each
+ * failure is told once.
+ */
+export function newlyFailed(
+  before: readonly ScheduledMessage[] | null | undefined,
+  after: readonly ScheduledMessage[],
+): string | null {
+  const known = new Set((before ?? []).filter((m) => m.failed !== null).map((m) => m.delay_id));
+
+  return (
+    after.find((message) => message.failed !== null && !known.has(message.delay_id))?.failed ?? null
+  );
 }
 
 /** How long to wait before asking again while the server still lists a message as due. */

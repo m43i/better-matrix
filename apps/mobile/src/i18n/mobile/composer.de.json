@@ -76,6 +76,11 @@
   "mobile.composer.scheduled_unreadable": "Auf einem anderen Gerät verschlüsselt",
   "mobile.composer.scheduled_none": "In dieser Unterhaltung ist nichts geplant.",
   "mobile.composer.scheduled_failed": "Die geplante Nachricht wurde nicht geändert: {{error}}",
+  "mobile.composer.scheduled_not_sent": "Konnte nicht gesendet werden: {{error}}",
+  "mobile.composer.scheduled_lost": "Eine geplante Nachricht konnte nicht gesendet werden: {{error}}",
+  "mobile.composer.scheduled_dismiss": "Verwerfen",
+  "mobile.composer.scheduled_failed_count.one": "{{count}} geplante Nachricht konnte nicht gesendet werden",
+  "mobile.composer.scheduled_failed_count.other": "{{count}} geplante Nachrichten konnten nicht gesendet werden",
   "mobile.composer.date_tomorrow": "Morgen",
   "mobile.composer.location_use_mine": "Meinen Standort verwenden",
   "mobile.composer.location_pick": "Verwende deinen Standort oder suche nach einem Ort."

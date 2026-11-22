@@ -74,8 +74,20 @@ pub struct Scheduled {
 }
 
 impl Scheduled {
-    pub fn listed(&mut self, account: AccountId, messages: Vec<ScheduledMessage>) {
+    /// The account's list, as the engine answered; returns why the first message it newly
+    /// reports as failed couldn't be sent, if one is.
+    pub fn listed(&mut self, account: AccountId, messages: Vec<ScheduledMessage>) -> Option<String> {
+        let before = self.listed.get(&account);
+        let new = messages
+            .iter()
+            .filter(|message| {
+                before.is_none_or(|before| {
+                    !before.iter().any(|known| known.delay_id == message.delay_id && known.failed.is_some())
+                })
+            })
+            .find_map(|message| message.failed.clone());
         self.listed.insert(account, messages);
+        new
     }
 
     pub fn forget(&mut self, account: &AccountId) {
@@ -111,8 +123,10 @@ impl State {
     pub(super) fn want_scheduled(&mut self, account: &AccountId, tx: &mut rune::Tx) {
         let (now, at) = (super::now_ms(), std::time::Instant::now());
         let messages = self.scheduled.listed.get(account).map(Vec::as_slice).unwrap_or_default();
-        let due = messages.iter().any(|message| message.send_at_ms <= now);
-        if let Some(next) = messages.iter().map(|message| message.send_at_ms).filter(|at| *at > now).min() {
+        // One that failed is done: only those still waiting come due.
+        let waiting = || messages.iter().filter(|message| message.failed.is_none());
+        let due = waiting().any(|message| message.send_at_ms <= now);
+        if let Some(next) = waiting().map(|message| message.send_at_ms).filter(|at| *at > now).min() {
             tx.wake_after(std::time::Duration::from_millis(next - now));
         }
         let retry = due && self.scheduled.due_asked.is_none_or(|asked| at.duration_since(asked) >= DUE_RETRY);
@@ -219,7 +233,7 @@ impl State {
         }
     }
 
-    /// Cancels a scheduled message, or sends it now.
+    /// Cancels a scheduled message, or sends it now; one that failed is let go.
     pub fn update_scheduled(&mut self, delay_id: &str, action: ScheduledAction) {
         let Some(account) = self.nav.account.clone() else { return };
         let command = Command::UpdateScheduled { account, delay_id: delay_id.to_owned(), action };

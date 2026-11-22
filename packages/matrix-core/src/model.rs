@@ -728,6 +728,10 @@ pub struct ScheduledMessage {
     /// What it says, as far as this device can read it: `None` for content it can't (another
     /// device's encrypted message), else the plain-text body.
     pub body: Option<String>,
+    /// Why the server couldn't send it when its time came (its error message, or code); `None`
+    /// while it waits. Only this device's own messages are followed this far, and one that
+    /// failed stays listed until it is cancelled, which only lets it go.
+    pub failed: Option<String>,
 }
 
 /// What to do with a [`ScheduledMessage`].

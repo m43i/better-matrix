@@ -76,6 +76,11 @@
   "mobile.composer.scheduled_unreadable": "Encrypted on another device",
   "mobile.composer.scheduled_none": "Nothing is scheduled in this conversation.",
   "mobile.composer.scheduled_failed": "The scheduled message didn’t change: {{error}}",
+  "mobile.composer.scheduled_not_sent": "Couldn’t be sent: {{error}}",
+  "mobile.composer.scheduled_lost": "A scheduled message couldn’t be sent: {{error}}",
+  "mobile.composer.scheduled_dismiss": "Dismiss",
+  "mobile.composer.scheduled_failed_count.one": "{{count}} scheduled message couldn’t be sent",
+  "mobile.composer.scheduled_failed_count.other": "{{count}} scheduled messages couldn’t be sent",
   "mobile.composer.date_tomorrow": "Tomorrow",
   "mobile.composer.location_use_mine": "Use my location",
   "mobile.composer.location_pick": "Use your location, or search for a place."

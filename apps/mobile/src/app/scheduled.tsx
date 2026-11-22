@@ -47,9 +47,18 @@ export default function ScheduledScreen() {
       }
       renderItem={({ item }) => (
         <View style={styles.item} testID={`scheduled-${item.delay_id}`}>
-          <Text style={[font.meta, { color: palette.accent }]}>
-            {t('mobile.composer.scheduled_at', { time: sendTimeText(item.send_at_ms, now) })}
-          </Text>
+          {item.failed === null ? (
+            <Text style={[font.meta, { color: palette.accent }]}>
+              {t('mobile.composer.scheduled_at', { time: sendTimeText(item.send_at_ms, now) })}
+            </Text>
+          ) : (
+            <Text
+              style={[font.meta, { color: palette.danger }]}
+              testID={`scheduled-failed-${item.delay_id}`}
+            >
+              {t('mobile.composer.scheduled_not_sent', { error: item.failed })}
+            </Text>
+          )}
           <Text
             style={[
               font.body,
@@ -61,18 +70,25 @@ export default function ScheduledScreen() {
             {item.body ?? t('mobile.composer.scheduled_unreadable')}
           </Text>
           <View style={styles.actions}>
+            {/* One the server failed to send is done there: it can only be let go. */}
+            {item.failed === null ? (
+              <View style={styles.action}>
+                <Button
+                  title={t('mobile.composer.scheduled_send_now')}
+                  icon="send"
+                  kind="secondary"
+                  onPress={() => updateScheduled(store, account, item.delay_id, 'SendNow')}
+                  testID={`scheduled-send-${item.delay_id}`}
+                />
+              </View>
+            ) : null}
             <View style={styles.action}>
               <Button
-                title={t('mobile.composer.scheduled_send_now')}
-                icon="send"
-                kind="secondary"
-                onPress={() => updateScheduled(store, account, item.delay_id, 'SendNow')}
-                testID={`scheduled-send-${item.delay_id}`}
-              />
-            </View>
-            <View style={styles.action}>
-              <Button
-                title={t('mobile.composer.scheduled_cancel')}
+                title={
+                  item.failed === null
+                    ? t('mobile.composer.scheduled_cancel')
+                    : t('mobile.composer.scheduled_dismiss')
+                }
                 icon="trash"
                 kind="plain"
                 onPress={() => updateScheduled(store, account, item.delay_id, 'Cancel')}

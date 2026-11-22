@@ -88,10 +88,47 @@ pub mod list {
     }
 }
 
+/// `GET /_matrix/client/unstable/org.matrix.msc4140/delayed_events/{delay_id}`: one delayed
+/// event, finalised ones included while the server remembers them.
+pub mod get {
+    use super::*;
+
+    metadata! {
+        method: GET,
+        rate_limited: false,
+        authentication: AccessToken,
+        history: {
+            unstable("org.matrix.msc4140") => "/_matrix/client/unstable/org.matrix.msc4140/delayed_events/{delay_id}",
+        }
+    }
+
+    /// Which.
+    #[request]
+    pub struct Request {
+        /// Its ID.
+        #[ruma_api(path)]
+        pub delay_id: String,
+    }
+
+    /// The delayed event, as a list holds one.
+    #[response]
+    pub struct Response {
+        /// Read with [`Listed::read`].
+        #[ruma_api(body)]
+        pub event: Value,
+    }
+
+    impl Request {
+        pub fn new(delay_id: String) -> Self {
+            Self { delay_id }
+        }
+    }
+}
+
 /// One delayed event from a list, in the proposal's current shape (`delay_ms`,
 /// `delayed_since_ts`, `finalised`) or the one before it (`delay`, `running_since`,
 /// `finalised_ts`, `event_id`, `error`).
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Listed {
     pub delay_id: String,
     pub room_id: String,
@@ -103,6 +140,8 @@ pub struct Listed {
     pub state: bool,
     /// It was sent, cancelled or failed.
     pub finished: bool,
+    /// Why it failed: the server's error message, else its code.
+    pub error: Option<String>,
 }
 
 impl Listed {
@@ -110,6 +149,11 @@ impl Listed {
     pub fn read(event: &Value) -> Option<Self> {
         let delay = event["delay_ms"].as_u64().or_else(|| event["delay"].as_u64())?;
         let since = event["delayed_since_ts"].as_u64().or_else(|| event["running_since"].as_u64())?;
+        let error =
+            [&event["finalised"]["error"], &event["error"]].into_iter().find(|error| !error.is_null()).map(|error| {
+                let said = error["error"].as_str().or_else(|| error["errcode"].as_str()).or_else(|| error.as_str());
+                said.unwrap_or("M_UNKNOWN").to_owned()
+            });
         let finished = !event["finalised"].is_null()
             || !event["finalised_ts"].is_null()
             || !event["event_id"].is_null()
@@ -122,6 +166,7 @@ impl Listed {
             content: event["content"].clone(),
             state: !event["state_key"].is_null(),
             finished,
+            error,
         })
     }
 }
@@ -149,6 +194,25 @@ mod tests {
             "delayed_since_ts": 1, "content": {}, "finalised": { "event_id": "$e", "finalised_ts": 2 }
         });
         assert!(Listed::read(&event).expect("read").finished);
+    }
+
+    #[test]
+    fn a_delayed_event_that_failed_should_say_why() {
+        let event = json!({
+            "delay_id": "d1", "room_id": "!r:x", "type": "m.room.message", "delay_ms": 1,
+            "delayed_since_ts": 1, "content": {},
+            "finalised": { "error": { "errcode": "M_FORBIDDEN", "error": "No posting" }, "finalised_ts": 2 }
+        });
+        assert_eq!(Listed::read(&event).expect("read").error.as_deref(), Some("No posting"));
+    }
+
+    #[test]
+    fn a_delayed_event_sent_should_have_no_error() {
+        let event = json!({
+            "delay_id": "d1", "room_id": "!r:x", "type": "m.room.message", "delay_ms": 1,
+            "delayed_since_ts": 1, "content": {}, "finalised": { "event_id": "$e", "finalised_ts": 2 }
+        });
+        assert_eq!(Listed::read(&event).expect("read").error, None);
     }
 
     #[test]

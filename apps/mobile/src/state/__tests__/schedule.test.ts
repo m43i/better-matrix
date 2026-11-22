@@ -1,7 +1,11 @@
+import type { ScheduledMessage } from '@better-matrix/matrix-native/types';
+
 import { MAX_SCHEDULE_MS } from '../outgoing';
 import {
   askedAnyway,
   delayUntil,
+  failedIn,
+  newlyFailed,
   nextRelist,
   presetTime,
   RELIST_RETRY_MS,
@@ -56,6 +60,7 @@ describe('scheduledIn', () => {
       room_id: room,
       send_at_ms: sendAt,
       body: null,
+      failed: null,
     });
 
     expect(
@@ -85,17 +90,36 @@ describe('sendTimeText', () => {
 });
 
 describe('asking again for the scheduled messages', () => {
-  const at = (room_id: string, send_at_ms: number) => ({
+  const at = (room_id: string, send_at_ms: number): ScheduledMessage => ({
     delay_id: `d${send_at_ms}`,
     room_id,
     send_at_ms,
     body: 'later',
+    failed: null,
   });
 
   it('should be due when the room’s soonest message sends', () => {
     expect(soonestScheduled([at('!a', NOW + 9), at('!b', NOW + 1), at('!a', NOW + 5)], '!a')).toBe(
       NOW + 5,
     );
+  });
+
+  it('should never be due for a message the server failed to send', () => {
+    const failed = { ...at('!a', NOW + 1), failed: 'No posting' };
+
+    expect(soonestScheduled([failed, at('!a', NOW + 5)], '!a')).toBe(NOW + 5);
+    expect(soonestScheduled([failed], '!a')).toBeNull();
+  });
+
+  it('should count the room’s messages the server failed to send', () => {
+    expect(failedIn([{ ...at('!a', 1), failed: 'No posting' }, at('!a', 2)], '!a')).toBe(1);
+  });
+
+  it('should tell a failure once', () => {
+    const failed = [{ ...at('!a', 1), failed: 'No posting' }];
+
+    expect(newlyFailed([at('!a', 1)], failed)).toBe('No posting');
+    expect(newlyFailed(failed, failed)).toBeNull();
   });
 
   it('should never ask for a room with nothing scheduled', () => {

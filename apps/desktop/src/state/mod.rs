@@ -1565,7 +1565,11 @@ impl State {
             Event::MessageLocated { request, account, key, event_id } => {
                 self.message_located(request, &account, &key, &event_id);
             }
-            Event::ScheduledMessages { account, messages } => self.scheduled.listed(account, messages),
+            Event::ScheduledMessages { account, messages } => {
+                if let Some(reason) = self.scheduled.listed(account, messages) {
+                    self.notice = Some(tf!("schedule.failed_notice", reason = reason));
+                }
+            }
             Event::ImagePacks { account, room_id, packs } => {
                 if let Some(room_id) = room_id {
                     self.packs.listed(account, room_id, packs);

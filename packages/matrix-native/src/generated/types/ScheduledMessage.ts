@@ -20,4 +20,10 @@ send_at_ms: number,
  * What it says, as far as this device can read it: `None` for content it can't (another
  * device's encrypted message), else the plain-text body.
  */
-body: string | null, };
+body: string | null, 
+/**
+ * Why the server couldn't send it when its time came (its error message, or code); `None`
+ * while it waits. Only this device's own messages are followed this far, and one that
+ * failed stays listed until it is cancelled, which only lets it go.
+ */
+failed: string | null, };

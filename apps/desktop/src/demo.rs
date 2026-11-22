@@ -1432,6 +1432,12 @@ pub fn scheduled(s: &mut State) {
         room_id: DEMO_THREAD.0.into(),
         send_at_ms: crate::state::now_ms() + hours * 3_600_000,
         body: body.map(Into::into),
+        failed: None,
+    };
+    let failed = matrix_core::ScheduledMessage {
+        failed: Some("You don't have permission to post here".into()),
+        send_at_ms: crate::state::now_ms() - 3_600_000,
+        ..message("d0", 0, Some("Office closed on Friday."))
     };
     apply(
         s,
@@ -1440,6 +1446,7 @@ pub fn scheduled(s: &mut State) {
             messages: vec![
                 message("d1", 2, Some("Stand-up moved to 10:30 today.")),
                 message("d2", 26, Some("Happy release day, everyone!")),
+                failed,
             ],
         },
     );
