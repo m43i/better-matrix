@@ -3518,6 +3518,12 @@ impl State {
         self.preview = None;
     }
 
+    /// Whether the preview shows a held-back picture or video, waiting for Show: its file
+    /// actions aren't offered.
+    pub fn preview_held(&self) -> bool {
+        self.preview.as_ref().is_some_and(|preview| matches!(preview.content, PreviewContent::Held))
+    }
+
     /// Saves the previewed file where the user picks.
     pub fn download_preview(&mut self) {
         let Some(preview) = &self.preview else { return };

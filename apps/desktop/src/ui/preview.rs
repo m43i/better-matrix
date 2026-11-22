@@ -154,7 +154,10 @@ pub fn preview(s: &State, preview: &Preview, window: [f32; 2], p: &Palette) -> E
         .modal(false, State::close_preview)
         .label(preview.attachment.name.clone())
         .on_secondary_press(|s: &mut State, point, _| {
-            s.popover = Some(Popover::AttachmentMenu { at: (point.x as i32, point.y as i32) });
+            // A held-back file has no file actions until shown.
+            if !s.preview_held() {
+                s.popover = Some(Popover::AttachmentMenu { at: (point.x as i32, point.y as i32) });
+            }
         })
         .child(backdrop)
         .child(col().w_full().h_full().pb(bottom).center().child(content))
@@ -178,9 +181,14 @@ fn bar(preview: &Preview) -> El {
         let place = tf!("preview.position", index = preview.index + 1, count = preview.batch.len());
         bar = bar.child(text(place).font(font::META).color(Color::WHITE.alpha(0.7)));
     }
-    bar.child(el().grow(1.0))
-        .child(action(&icons::DOWNLOAD, t!("preview.download"), "preview-download").on_press(State::download_preview))
-        .child(action(&icons::CLOSE, t!("preview.close"), "preview-close").on_press(State::close_preview))
+    bar = bar.child(el().grow(1.0));
+    // A held-back file can't be downloaded until shown.
+    if !matches!(preview.content, PreviewContent::Held) {
+        bar = bar.child(
+            action(&icons::DOWNLOAD, t!("preview.download"), "preview-download").on_press(State::download_preview),
+        );
+    }
+    bar.child(action(&icons::CLOSE, t!("preview.close"), "preview-close").on_press(State::close_preview))
 }
 
 /// A round button on the dark layer.

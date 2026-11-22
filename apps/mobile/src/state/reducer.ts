@@ -314,6 +314,54 @@ function withHidden(
   return next;
 }
 
+/** The event IDs `diffs` bring as deleted (redacted) messages. */
+function redactedIn(diffs: TimelineDiff[]): string[] {
+  const entries = diffs.flatMap((diff): TimelineEntry[] => {
+    switch (diff.type) {
+      case 'Reset':
+      case 'Append':
+        return diff.data;
+      case 'PushFront':
+      case 'PushBack':
+        return [diff.data];
+      case 'Insert':
+      case 'Set':
+        return [diff.data.entry];
+      case 'Clear':
+      case 'PopFront':
+      case 'PopBack':
+      case 'Remove':
+      case 'Truncate':
+        return [];
+    }
+  });
+
+  return entries.flatMap((e) =>
+    e.kind.type === 'Message' && e.kind.data.content.type === 'Redacted'
+      ? [e.kind.data.event_id]
+      : [],
+  );
+}
+
+/**
+ * `account` with deleted messages gone from the room's listed files, so Room Info can't open
+ * them again once no timeline holds them any more.
+ */
+function withoutRedactedFiles(
+  account: AccountData,
+  roomId: string,
+  redacted: string[],
+): AccountData {
+  const files = account.files[roomId];
+
+  if (!files || !files.some((f) => redacted.includes(f.event_id))) return account;
+
+  return {
+    ...account,
+    files: { ...account.files, [roomId]: files.filter((f) => !redacted.includes(f.event_id)) },
+  };
+}
+
 /** `diffs` with what ignored people sent drawn as nothing, the positions kept. */
 function diffsWithoutIgnored(
   diffs: TimelineDiff[],
@@ -458,12 +506,17 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
         entries: applyDiffs(t.entries, diffs),
       }));
 
-      return hidden.length === 0
+      const redacted = redactedIn(event.data.diffs);
+
+      return hidden.length === 0 && redacted.length === 0
         ? next
-        : updateAccount(next, event.data.account, (a) => ({
-            ...a,
-            hiddenEvents: withHidden(a.hiddenEvents, hidden),
-          }));
+        : updateAccount(next, event.data.account, (a) =>
+            withoutRedactedFiles(
+              { ...a, hiddenEvents: withHidden(a.hiddenEvents, hidden) },
+              event.data.key.room_id,
+              redacted,
+            ),
+          );
     }
 
     case 'HistoryLoaded':

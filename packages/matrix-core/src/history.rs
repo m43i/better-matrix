@@ -42,6 +42,8 @@ pub struct SharedFile {
     pub event_id: String,
     /// Who shared it.
     pub sender_name: String,
+    /// Their Matrix ID: whether the user ignores them, and whether the file is the user's own.
+    pub sender_id: String,
     /// When, in milliseconds since the epoch.
     pub timestamp: u64,
     /// The file.
@@ -219,6 +221,7 @@ impl Account {
                     files.push(SharedFile {
                         event_id: event["event_id"].as_str().unwrap_or_default().to_owned(),
                         sender_name: sender_name(&room, &event).await,
+                        sender_id: event["sender"].as_str().unwrap_or_default().to_owned(),
                         timestamp: event["origin_server_ts"].as_u64().unwrap_or_default(),
                         attachment,
                     });

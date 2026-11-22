@@ -261,9 +261,13 @@ impl State {
     }
 
     /// Whether the link dialog's room preview shows initials rather than the room's picture: the
-    /// account is invited there and hides invitations' pictures (ADR 0011).
+    /// account is invited there (as the preview says, or as its invitations hold the room) and
+    /// hides invitations' pictures (ADR 0011).
     pub fn link_hides_picture(&self, dialog: &LinkDialog, preview: &RoomPreview) -> bool {
-        preview.invited && self.accounts.get(&dialog.account).is_some_and(|data| !data.safety.invite_pictures)
+        self.accounts.get(&dialog.account).is_some_and(|data| {
+            let invited = preview.invited || data.invitations.iter().any(|invite| invite.room_id == preview.room_id);
+            invited && !data.safety.invite_pictures
+        })
     }
 
     /// The pictures the link dialog shows: the room's or the person's, from its account.

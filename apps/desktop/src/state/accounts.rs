@@ -855,8 +855,8 @@ impl AccountData {
     }
 
     /// Whether listed media (a file in the Files panel, or one opened from anywhere) waits for a
-    /// press: as its message in the room's timeline when loaded there; otherwise its sender is
-    /// unknown and counts as someone else. Only visual media counts ([`visual`]).
+    /// press: as its message in the room's timeline when loaded there, else as the Files panel
+    /// lists its sender; with neither, someone else's. Only visual media counts ([`visual`]).
     pub fn hides_listed_media(
         &self,
         room_id: &str,
@@ -875,11 +875,23 @@ impl AccountData {
         match loaded {
             Some(message) => self.hides_media(room_id, message, revealed),
             None => {
+                // The Files panel's list knows the sender; without it, someone else.
+                let own = self
+                    .files
+                    .get(room_id)
+                    .and_then(|files| files.iter().find(|file| file.event_id == event_id))
+                    .is_some_and(|file| file.sender_id == self.summary.id.as_str());
                 let public = self.room(room_id).is_some_and(|room| room.public);
-                !self.safety.shows_media(public, false)
+                !self.safety.shows_media(public, own)
                     && !revealed.contains(&(self.summary.id.clone(), event_id.to_owned()))
             }
         }
+    }
+
+    /// Whether the user ignores someone, or is saving an ignore of them: what lists of their
+    /// things (the Files panel) leave out.
+    pub fn ignores(&self, user_id: &str) -> bool {
+        self.safety.ignores(user_id) || self.saved_safety.ignores(user_id)
     }
 
     /// The invitations the sidebar and Home list: all but strangers' when the user hides them.

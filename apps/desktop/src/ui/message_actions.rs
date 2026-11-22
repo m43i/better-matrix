@@ -36,8 +36,11 @@ pub fn menu(
         !matches!(message.content, MessageContent::Redacted | MessageContent::Undecryptable | MessageContent::Call(_));
     let action = |glyph, label, id| menu_action(glyph, label, Tone::Normal, p).key(id);
     let mut panel = popover_panel(p).key("message-menu").w(300.0);
-    if let MessageContent::Attachment(file) = &message.content {
-        let actions = super::attachments::actions(&account.summary.id, file, p);
+    // Held-back media offers no file actions until shown (ADR 0011).
+    if let MessageContent::Attachment(file) = &message.content
+        && !account.hides_listed_media(&key.room_id, event_id, file, &s.revealed_media)
+    {
+        let actions = super::attachments::actions(&account.summary.id, file, Some((&key.room_id, event_id)), p);
         if !actions.is_empty() {
             panel = panel.children(actions).child(divider(p));
         }

@@ -3017,6 +3017,11 @@ async fn sync_until_error(
             if crate::safety::changed_in(&response.account_data)
                 && let Ok(safety) = account.safety().await
             {
+                // What a sync brings is the newest the server confirmed, unless a change is being
+                // saved right now; that change keeps its own.
+                if let Ok(mut confirmed) = account.safety_changes.try_lock() {
+                    *confirmed = Some(safety.clone());
+                }
                 sink.emit(Event::Safety { account: account.id().clone(), safety });
             }
             // The user's own, as the server says now: the sync may predate a status message saved

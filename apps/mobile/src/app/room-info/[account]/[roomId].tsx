@@ -25,7 +25,7 @@ import {
 } from '../../../state/actions/people';
 import { filterMembers, fileOpens, mayRename } from '../../../state/people';
 import { useAppStore, useStore } from '../../../state/react';
-import { account as accountOf, room as roomOf } from '../../../state/selectors';
+import { account as accountOf, room as roomOf, shownFiles } from '../../../state/selectors';
 import { font } from '../../../theme/palette';
 import { Avatar } from '../../../ui/Avatar';
 import { Divider, ListRow, ListSection } from '../../../ui/components';
@@ -55,7 +55,8 @@ export default function RoomInfoScreen() {
   const room = useStore((s) => roomOf(s, account, roomId));
   const members = useStore((s) => accountOf(s, account)?.members[roomId]);
   const threads = useStore((s) => accountOf(s, account)?.threads[roomId]);
-  const files = useStore((s) => accountOf(s, account)?.files[roomId]);
+  // What people the user ignores shared stays out of the list (ADR 0011).
+  const files = useStore((s) => shownFiles(s, account, roomId));
 
   const defaultMode = useStore(
     (s) => accountOf(s, account)?.summary.default_notifications ?? 'AllMessages',

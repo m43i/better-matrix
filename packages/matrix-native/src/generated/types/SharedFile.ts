@@ -14,6 +14,10 @@ event_id: string,
  */
 sender_name: string, 
 /**
+ * Their Matrix ID: whether the user ignores them, and whether the file is the user's own.
+ */
+sender_id: string, 
+/**
  * When, in milliseconds since the epoch.
  */
 timestamp: number, 

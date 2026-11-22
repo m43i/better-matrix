@@ -4,7 +4,7 @@ use rune::Tx;
 use super::*;
 use crate::demo::{ADA, DEMO_THREAD};
 use crate::platform::Shell;
-use crate::state::Settings;
+use crate::state::{AttachmentAction, Settings};
 
 fn state() -> (State, DetachedCommands) {
     let (engine, commands) = EngineHandle::detached();
@@ -487,4 +487,90 @@ fn a_link_to_a_room_the_account_is_invited_to_should_hide_its_picture_when_invit
     let safety = Safety { invite_pictures: false, ..Safety::default() };
     s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
     assert!(s.link_pictures().is_none());
+}
+
+#[test]
+fn a_link_to_a_room_the_account_holds_an_invitation_to_should_hide_its_picture_when_invitations_do() {
+    let (mut s, _) = state();
+    crate::demo::invitation(&mut s);
+    let preview = matrix_core::RoomPreview {
+        room_id: "!design:example.org".into(),
+        alias: None,
+        name: Some("Design".into()),
+        topic: None,
+        avatar: Some(matrix_core::MediaRef::opaque("design-picture")),
+        member_count: 3,
+        join_rule: Some(matrix_core::JoinRule::Invite),
+        space: false,
+        joined: false,
+        // The preview doesn't say so; the account's invitations do.
+        invited: false,
+    };
+    let Some(link) = matrix_core::Permalink::parse("https://matrix.to/#/!design:example.org") else { panic!("a link") };
+    s.modal = Some(Modal::Link(crate::state::LinkDialog {
+        link,
+        account: ada(),
+        chosen: false,
+        step: crate::state::LinkStep::Preview(Box::new(preview)),
+    }));
+    let safety = Safety { invite_pictures: false, ..Safety::default() };
+    s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
+    assert!(s.link_pictures().is_none());
+}
+
+#[test]
+fn a_held_preview_item_should_not_be_copied_saved_or_opened() {
+    let (mut s, mut commands) = state();
+    crate::demo::preview_held(&mut s);
+    assert!(s.preview_held());
+    drain(&mut commands);
+    let file = s.preview.as_ref().unwrap().attachment.clone();
+    for action in [AttachmentAction::CopyImage, AttachmentAction::Open, AttachmentAction::Download] {
+        s.act_on_attachment(ada(), &file, action);
+    }
+    s.download_preview();
+    assert!(drain(&mut commands).is_empty());
+}
+
+#[test]
+fn the_files_panel_should_go_by_each_files_sender() {
+    let (mut s, _) = state();
+    crate::demo::seed(&mut s);
+    media_never(&mut s);
+    let picture = |sender: &str| matrix_core::SharedFile {
+        event_id: "$listed".into(),
+        sender_name: sender.into(),
+        sender_id: sender.into(),
+        timestamp: 0,
+        attachment: crate::demo::demo_attachment(),
+    };
+    let held = |s: &State| {
+        s.accounts.get(&ada()).unwrap().hides_listed_media(
+            DEMO_THREAD.0,
+            "$listed",
+            &crate::demo::demo_attachment(),
+            &s.revealed_media,
+        )
+    };
+    s.accounts.set_files(&ada(), DEMO_THREAD.0.into(), vec![picture(ADA)]);
+    assert!(!held(&s), "the user's own file shows");
+    s.accounts.set_files(&ada(), DEMO_THREAD.0.into(), vec![picture("@grace:example.org")]);
+    assert!(held(&s), "someone else's waits for a press");
+}
+
+#[test]
+fn a_held_back_pictures_file_actions_from_its_message_should_do_nothing() {
+    let (mut s, mut commands) = state();
+    crate::demo::hidden_media(&mut s);
+    drain(&mut commands);
+    let file = crate::demo::demo_attachment();
+    for action in [AttachmentAction::CopyImage, AttachmentAction::Open, AttachmentAction::Download] {
+        s.act_on_message_attachment(&ada(), DEMO_THREAD.0, "$attachment", &file, action);
+    }
+    assert!(drain(&mut commands).is_empty());
+    // Shown, they work again.
+    s.reveal_media(&ada(), "$attachment");
+    drain(&mut commands);
+    s.act_on_message_attachment(&ada(), DEMO_THREAD.0, "$attachment", &file, AttachmentAction::CopyImage);
+    assert!(drain(&mut commands).iter().any(|(_, command)| matches!(command, Command::FetchMedia { .. })));
 }

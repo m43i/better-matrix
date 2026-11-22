@@ -694,6 +694,7 @@ fn an_executable_attachment_menu_should_offer_download_without_open() {
             rune::col().w_full().h_full().children(super::attachments::actions(
                 &AccountId::new(demo::ADA),
                 file,
+                None,
                 &super::theme::palette(true),
             ))
         },
@@ -2164,4 +2165,55 @@ fn the_member_menu_should_offer_to_ignore_and_report() {
         &rt.state.modal,
         Some(crate::state::Modal::Confirm(crate::state::Confirm::Ignore { user_id, .. })) if user_id == "@grace:example.org"
     ));
+}
+
+#[test]
+fn the_files_panel_should_leave_out_files_of_people_the_user_ignores() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.toggle_side(SidePanel::Files);
+        demo::room_history(s);
+        let safety =
+            matrix_core::Safety { ignored: vec!["@grace:example.org".into()], ..matrix_core::Safety::default() };
+        s.apply(Event::Safety { account: AccountId::new(demo::ADA), safety }, &mut rune::Tx::default());
+    });
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("listed-file-$file-screenshot-sidebar.png").is_none());
+    assert!(rt.find("listed-file-$file-standup.ogg").is_some());
+}
+
+#[test]
+fn a_held_preview_should_offer_no_file_actions() {
+    let mut rt = runtime(demo::preview_held);
+    assert!(rt.find("preview-download").is_none());
+    let (x, y) = rt.find("preview-held").expect("the held card");
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.popover.is_none());
+}
+
+#[test]
+fn a_held_back_pictures_message_menu_should_offer_no_file_actions() {
+    let menu = |s: &mut State| {
+        s.popover = Some(crate::state::Popover::MessageMenu {
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            event_id: "$attachment".into(),
+            at: Some((600, 200)),
+        });
+    };
+    let rt = runtime(|s| {
+        demo::hidden_media(s);
+        menu(s);
+    });
+    assert!(rt.find("message-menu").is_some());
+    for key in ["attachment-copy-image", "attachment-open", "attachment-download"] {
+        assert!(rt.find(key).is_none(), "{key} offered while held");
+    }
+    let rt = runtime(|s| {
+        demo::hidden_media(s);
+        s.revealed_media.insert((AccountId::new(demo::ADA), "$attachment".into()));
+        menu(s);
+    });
+    assert!(rt.find("attachment-download").is_some());
 }

@@ -199,7 +199,9 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     }
     if let Some(preview) = preview {
         root = root.child(preview);
-        if let (Some(Popover::AttachmentMenu { at }), Some(preview)) = (&s.popover, &s.preview) {
+        if let (Some(Popover::AttachmentMenu { at }), Some(preview)) = (&s.popover, &s.preview)
+            && !s.preview_held()
+        {
             let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
             root = root.child(attachments::menu(&preview.account, &preview.attachment, *at, window, &p));
         }

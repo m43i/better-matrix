@@ -169,15 +169,19 @@ pub fn threads(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
     frame("threads-panel", t!("info.threads"), list, None, p)
 }
 
-/// The files shared in the room; pressing one opens it. A picture or video the media choice
-/// holds back says so, and the first press shows it (ADR 0011).
+/// The files shared in the room, but those of people the user ignores; pressing one opens it. A
+/// picture or video the media choice holds back says so, and the first press shows it (ADR 0011).
 pub fn files(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
-    let list = match account.files.get(&room.room_id) {
+    let listed: Option<Vec<_>> = account
+        .files
+        .get(&room.room_id)
+        .map(|files| files.iter().filter(|file| !account.ignores(&file.sender_id)).collect());
+    let list = match listed {
         None => col().w_full().child(text(t!("info.loading")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0)),
         Some(files) if files.is_empty() => {
             col().w_full().child(text(t!("info.no_files")).font(font::BODY).color(p.text_muted).px(16.0).py(12.0))
         }
-        Some(files) => files.iter().fold(col().w_full(), |list, file| {
+        Some(files) => files.into_iter().fold(col().w_full(), |list, file| {
             let held = account.hides_listed_media(&room.room_id, &file.event_id, &file.attachment, &s.revealed_media);
             let glyph = match file.attachment.kind {
                 _ if held => &icons::EYE_OFF,

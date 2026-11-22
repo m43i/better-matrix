@@ -477,9 +477,10 @@ pub fn room_history(s: &mut State) {
         latest_at: Some(DEMO_DAY_MS + 11 * 3_600_000 + 36 * 60_000),
     };
     apply(s, Event::Threads { account: AccountId::new(ADA), room_id: room_id.clone(), threads: vec![thread] });
-    let file = |name: &str, kind: AttachmentKind, who: &str, minutes: u64| matrix_core::SharedFile {
+    let file = |name: &str, kind: AttachmentKind, (id, who): (&str, &str), minutes: u64| matrix_core::SharedFile {
         event_id: format!("$file-{name}"),
         sender_name: who.into(),
+        sender_id: id.into(),
         timestamp: DEMO_DAY_MS + 10 * 3_600_000 + minutes * 60_000,
         attachment: Attachment {
             kind,
@@ -492,9 +493,9 @@ pub fn room_history(s: &mut State) {
         },
     };
     let files = vec![
-        file("release-notes-0.2.pdf", AttachmentKind::File, "Ada Lovelace", 33),
-        file("screenshot-sidebar.png", AttachmentKind::Image, "Grace Hopper", 12),
-        file("standup.ogg", AttachmentKind::Audio, "Kai", 2),
+        file("release-notes-0.2.pdf", AttachmentKind::File, (ADA, "Ada Lovelace"), 33),
+        file("screenshot-sidebar.png", AttachmentKind::Image, (GRACE, "Grace Hopper"), 12),
+        file("standup.ogg", AttachmentKind::Audio, (KAI, "Kai"), 2),
     ];
     apply(s, Event::Files { account: AccountId::new(ADA), room_id, files });
 }

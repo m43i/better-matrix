@@ -795,23 +795,24 @@ export function demoFiles(): SharedFile[] {
   const shared = (
     name: string,
     kind: Attachment['kind'],
-    who: string,
+    [senderId, who]: [string, string],
     minutes: number,
     extra: Partial<Attachment> = {},
   ): SharedFile => ({
     event_id: `$file-${name}`,
+    sender_id: senderId,
     sender_name: who,
     timestamp: DEMO_DAY_MS + 10 * 3_600_000 + minutes * 60_000,
     attachment: file(name, kind, extra),
   });
 
   return [
-    shared('release-notes-0.2.pdf', 'File', 'Ada Lovelace', 33),
-    shared('screenshot-sidebar.png', 'Image', 'Grace Hopper', 12, {
+    shared('release-notes-0.2.pdf', 'File', [ADA, 'Ada Lovelace'], 33),
+    shared('screenshot-sidebar.png', 'Image', [GRACE, 'Grace Hopper'], 12, {
       media: DEMO_MEDIA.screenshot,
       dimensions: [1024, 1024],
     }),
-    shared('standup.ogg', 'Audio', 'Kai', 2),
+    shared('standup.ogg', 'Audio', [KAI, 'Kai'], 2),
   ];
 }
 

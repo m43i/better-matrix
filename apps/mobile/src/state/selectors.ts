@@ -14,7 +14,7 @@ import type {
 
 import { galleryAround, thumbnailOf } from './gallery';
 import { EMPTY_TIMELINE, mediaKey } from './reducer';
-import { revealKey, showsMedia, shownInvitations } from './safety';
+import { ignores, revealKey, showsMedia, shownInvitations } from './safety';
 import { newestMessages, type NewestMessages } from './sections';
 import { timelineId } from './timeline';
 import type { AccountData, State, Timeline } from './types';
@@ -198,8 +198,8 @@ export function previewHidden(
 const listedMessages = new WeakMap<SharedFile, Message>();
 
 /**
- * A file Room Info lists, as a message the preview can show when no timeline holds it. Its
- * sender's ID isn't listed, so it counts as someone else's: hidden media stays hidden.
+ * A file Room Info lists, as a message the preview can show when no timeline holds it, gated as
+ * its sender's (the user's own show).
  */
 function listedMessage(file: SharedFile): Message {
   let message = listedMessages.get(file);
@@ -207,7 +207,7 @@ function listedMessage(file: SharedFile): Message {
   if (!message) {
     message = {
       event_id: file.event_id,
-      sender_id: '',
+      sender_id: file.sender_id,
       sender_name: file.sender_name,
       sender_avatar: null,
       content: { type: 'Attachment', data: file.attachment },
@@ -238,18 +238,66 @@ export function previewItems(
   current: string,
   opened: string,
 ): Message[] {
+  const data = account(state, id);
   const gallery = galleryAround(timeline(state, id, key).entries, current, opened, key.thread);
+  // Opened from Room Info's files, the message may be held only by one of the room's threads.
+  const found = gallery.length > 0 || !data ? gallery : inThreads(data, key, current, opened);
 
-  if (gallery.length === 0) {
+  if (found.length === 0) {
     // Only an event no timeline holds in any form (deleted, or hidden as its sender is
-    // ignored) is rebuilt from the file Room Info listed.
-    const data = account(state, id);
+    // ignored) is rebuilt from the file Room Info listed, and never one an ignored person sent.
     const file = data?.files[key.room_id]?.find((f) => f.event_id === opened);
 
-    return file && data && !heldAnywhere(data, key.room_id, opened) ? [listedMessage(file)] : [];
+    return file &&
+      data &&
+      !ignores(data.safety, file.sender_id) &&
+      !heldAnywhere(data, key.room_id, opened)
+      ? [listedMessage(file)]
+      : [];
   }
 
-  return gallery.filter((m) => m.event_id === opened || !previewHidden(state, id, key.room_id, m));
+  return found.filter((m) => m.event_id === opened || !previewHidden(state, id, key.room_id, m));
+}
+
+/** The gallery around `opened` in whichever of the room's kept thread timelines holds it. */
+function inThreads(
+  data: AccountData,
+  key: TimelineKey,
+  current: string,
+  opened: string,
+): Message[] {
+  for (const [id, kept] of Object.entries(data.timelines)) {
+    const root = id.startsWith(`${key.room_id}|`) ? id.slice(key.room_id.length + 1) : null;
+
+    if (root === null || root === key.thread) continue;
+    const gallery = galleryAround(kept.entries, current, opened, root);
+
+    if (gallery.length > 0) return gallery;
+  }
+
+  return [];
+}
+
+/** Each room's listed files as Room Info last showed them, by the list and ignore list. */
+const shownFileLists = new WeakMap<SharedFile[], { ignored: string[]; shown: SharedFile[] }>();
+
+/**
+ * The files Room Info lists for a room: without those people the user ignores shared (as
+ * shown, so a pending ignore hides them too). The same array while nothing changes.
+ */
+export function shownFiles(state: State, id: AccountId, roomId: string): SharedFile[] | undefined {
+  const data = account(state, id);
+  const files = data?.files[roomId];
+
+  if (!data || !files || data.safety.ignored.length === 0) return files;
+  const ignored = data.safety.ignored;
+  const cached = shownFileLists.get(files);
+
+  if (cached?.ignored === ignored) return cached.shown;
+  const shown = files.filter((file) => !ignored.includes(file.sender_id));
+  shownFileLists.set(files, { ignored, shown });
+
+  return shown;
 }
 
 /** Whether any of a room's kept timelines holds `eventId`, or held it from an ignored sender. */
@@ -274,9 +322,12 @@ export function roomPreviewPicture(
 ): MediaRef | null {
   if (!preview?.avatar) return null;
 
-  return preview.invited && !(account(state, id)?.safety.invite_pictures ?? true)
-    ? null
-    : preview.avatar;
+  const data = account(state, id);
+
+  const invited =
+    preview.invited || (data?.invitations.some((i) => i.room_id === preview.room_id) ?? false);
+
+  return invited && !(data?.safety.invite_pictures ?? true) ? null : preview.avatar;
 }
 
 /**
