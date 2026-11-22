@@ -657,7 +657,8 @@ fn role_menu(member: &RoomMember, roles: &[MemberRole], custom: bool, p: &Palett
         // Checked by the exact level: a custom level matches no role.
         let held = role.level() == member.level;
         let mut entry = menu_row(check(held), label, None, None, p).key(format!("member-role-{role:?}"));
-        if !held {
+        // Only a role the user may give: a member's shown role may lie above what they may set.
+        if !held && roles.contains(&role) {
             entry = entry.on_press(move |s: &mut State| s.moderate(&id, Moderation::Role(role)));
         }
         panel = panel.child(entry);

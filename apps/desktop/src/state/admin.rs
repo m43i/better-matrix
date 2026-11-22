@@ -470,6 +470,10 @@ impl State {
         let Some(dialog) = self.settings_dialog() else { return };
         let Some(at) = dialog.saving.iter().position(|(sent, _, _)| *sent == request) else { return };
         let (_, field, typed) = dialog.saving.remove(at);
+        // A later save of the same field answers for it: an earlier one leaves it alone.
+        if dialog.saving.iter().any(|(_, other, _)| *other == field) {
+            return;
+        }
         let (Some(settings), true) = (settings, saved) else { return };
         let Some((name, topic)) = dialog.filled.as_mut() else { return };
         let (edit, baseline, fresh) = match field {

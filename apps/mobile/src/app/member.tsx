@@ -313,29 +313,30 @@ export default function MemberScreen() {
                 />
               ) : null}
               {open === 'role'
-                ? ROLES.filter((role) => role === member.role || roles.includes(role)).map(
-                    (role) => (
-                      <ListRow
-                        key={role}
-                        testID={`member-role-${role}`}
-                        title={roleLabel(role)}
-                        selected={roleLevel(role) === member.level}
-                        leading={
-                          busy === role ? (
-                            <ActivityIndicator color={palette.textMuted} />
-                          ) : (
-                            <View style={styles.indent} />
-                          )
-                        }
-                        onPress={
-                          roleLevel(role) === member.level
-                            ? undefined
-                            : () => act({ type: 'Role', data: role })
-                        }
-                        chevron={false}
-                      />
-                    ),
-                  )
+                ? ROLES.filter(
+                    (role) => roleLevel(role) === member.level || roles.includes(role),
+                  ).map((role) => (
+                    <ListRow
+                      key={role}
+                      testID={`member-role-${role}`}
+                      title={roleLabel(role)}
+                      selected={roleLevel(role) === member.level}
+                      leading={
+                        busy === role ? (
+                          <ActivityIndicator color={palette.textMuted} />
+                        ) : (
+                          <View style={styles.indent} />
+                        )
+                      }
+                      onPress={
+                        // Only a role the user may give, and one the member doesn't hold.
+                        roles.includes(role) && roleLevel(role) !== member.level
+                          ? () => act({ type: 'Role', data: role })
+                          : undefined
+                      }
+                      chevron={false}
+                    />
+                  ))
                 : null}
               {open === 'role' && mayLevel ? (
                 <ListRow

@@ -6181,6 +6181,22 @@ fn saving_the_name_should_leave_an_unsaved_topic_alone() {
 }
 
 #[test]
+fn an_earlier_save_answering_should_leave_a_field_to_the_later_one() {
+    let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    s.save_room_topic();
+    let (first, _) = drain(&mut commands).pop().unwrap();
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("C");
+    s.save_room_topic();
+    // Typed back to B while both are on their way; C arrives first, then the first save answers.
+    *s.room_settings_field(SettingsField::Topic) = TextEdit::new("B");
+    let latest = matrix_core::RoomSettings { topic: Some("C".into()), ..admin_settings("!one:x") };
+    apply(&mut s, Event::RoomSettings { account: id, settings: Box::new(latest) });
+    apply(&mut s, Event::Finished { request: first, result: Ok(()) });
+    assert_eq!(settings_dialog(&s).topic.text, "B");
+}
+
+#[test]
 fn a_failed_save_should_keep_the_draft() {
     let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
     *s.room_settings_field(SettingsField::Name) = TextEdit::new("Renamed");
