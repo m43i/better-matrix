@@ -140,6 +140,19 @@ fn custom_id(image: &PackImage) -> String {
     format!("{}:{}", image.url, image.shortcode)
 }
 
+/// The custom emoji whose short code holds every word of `query`, each once though several
+/// packs hold it.
+fn custom_matches(images: Vec<&PackImage>, query: &str) -> Vec<PackImage> {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    let mut seen = std::collections::HashSet::new();
+    images
+        .into_iter()
+        .filter(|image| words.iter().all(|word| image.shortcode.to_lowercase().contains(word.as_str())))
+        .filter(|image| seen.insert(custom_id(image)))
+        .cloned()
+        .collect()
+}
+
 /// The rows of a room's custom emoji, with their keys: none without any.
 fn custom_rows(custom: Vec<PackImage>) -> Vec<(String, Row)> {
     if custom.is_empty() {
@@ -266,17 +279,10 @@ pub fn picker(s: &State, chosen_for: &EmojiFor, anchor: String, p: &Palette) -> 
         .preserve_focus_on_press(true)
         .w(344.0)
         .child(row().w_full().px(8.0).pt(8.0).pb(4.0).child(search_bar));
-    // A composer's picker leads with the room's custom emoji whose short code holds every word.
+    // A composer's picker leads with the room's custom emoji.
     let custom: Vec<PackImage> = match chosen_for {
         EmojiFor::Composer(_) => match (s.nav.account.as_ref(), s.active_room_id()) {
-            (Some(account), Some(room_id)) => {
-                let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-                s.custom_emoji(account, room_id)
-                    .into_iter()
-                    .filter(|image| words.iter().all(|word| image.shortcode.to_lowercase().contains(word.as_str())))
-                    .cloned()
-                    .collect()
-            }
+            (Some(account), Some(room_id)) => custom_matches(s.custom_emoji(account, room_id), query),
             _ => Vec::new(),
         },
         _ => Vec::new(),
@@ -385,9 +391,8 @@ mod tests {
         assert!(unicode_rows().iter().all(|(_, row)| !matches!(row, Row::Emoji(emoji) if emoji.len() > COLUMNS)));
     }
 
-    #[test]
-    fn one_image_under_two_short_codes_should_get_two_rows_keys() {
-        let image = |shortcode: &str| PackImage {
+    fn image(shortcode: &str) -> PackImage {
+        PackImage {
             shortcode: shortcode.into(),
             body: shortcode.into(),
             url: "mxc://x/blob".into(),
@@ -396,10 +401,21 @@ mod tests {
             sticker: false,
             dimensions: None,
             mimetype: None,
-        };
+        }
+    }
+
+    #[test]
+    fn one_image_under_two_short_codes_should_get_two_rows_keys() {
         let custom = std::iter::repeat_with(|| image("blob")).take(COLUMNS).chain([image("blobcat")]).collect();
         let keys: std::collections::HashSet<_> = custom_rows(custom).into_iter().map(|(key, _)| key).collect();
         assert_eq!(keys.len(), 3, "{keys:?}");
+    }
+
+    #[test]
+    fn a_custom_emoji_in_two_packs_should_be_offered_once() {
+        let (blob, again, cat) = (image("blob"), image("blob"), image("blobcat"));
+        let found: Vec<_> = custom_matches(vec![&blob, &again, &cat], "").into_iter().map(|i| i.shortcode).collect();
+        assert_eq!(found, ["blob", "blobcat"]);
     }
 
     #[test]
