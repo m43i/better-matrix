@@ -3535,6 +3535,7 @@ fn a_gif_before_its_first_frame_should_keep_its_placeholders_ground() {
     // A header without frames: the worker never publishes one.
     rt.update(|s, _| s.gifs.loaded(GIF_URL.into(), gif_header(300, 200)));
     rt.frame(1.0 / 60.0);
+    assert!(rt.state.gifs.player(GIF_URL).is_some(), "the GIF should be past its download");
     let e = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("gif-{GIF_URL}"))).expect("the GIF");
     assert_eq!(e.fill, ground, "the frame shows the placeholder's ground until a frame draws");
     assert!(ground.a > 0.0, "the placeholder has a ground");
