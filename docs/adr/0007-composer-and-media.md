@@ -210,8 +210,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     the first. Without a search it shows the quick reactions, a tab per group, then (after a
     composer's room emoji) every emoji (skin tones left out) under its Unicode group, the
     crate's order. Rune builds only the rows in and near view (`virtual_rows`); a row's key
-    names its first emoji, not its place, so room emoji arriving above keep the place. A tab
-    puts its group's title at the grid's top (`scroll_key_to`). Emoji draw in the system's
+    names what it holds (its first emoji; a room emoji by image and short code), not its
+    place. Room emoji arriving while the picker is open reopen the grid at its top (its key
+    changes), so they show instead of landing above the rows Rune holds in view. A tab puts
+    its group's title at the grid's top (`scroll_key_to`). Emoji draw in the system's
     colour emoji font, as everywhere else.
 - **Drafts:** every room and thread keeps its own draft. The desktop's two composers each hold
   the draft of the timeline they write into (`Composer::owner`); when the timeline on screen

@@ -2642,6 +2642,22 @@ fn a_group_tab_in_the_emoji_picker_should_scroll_to_that_group() {
 }
 
 #[test]
+fn custom_emoji_arriving_in_an_open_picker_should_show_at_its_top() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.toggle_popover(crate::state::Popover::Emoji(crate::state::EmojiFor::Composer(
+            crate::state::ComposerTarget::Room,
+        )));
+    });
+    rt.update(|s, _| demo::image_packs(s));
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    let top = |key: &str| rt.presented(key).map(|(rect, _)| rect[1]).unwrap_or_else(|| panic!("no {key}"));
+    assert!((top("emoji-custom-title") - top("emoji-grid-custom")).abs() < 1.0, "the custom emoji lead");
+}
+
+#[test]
 fn classic_rows_should_hold_messages_in_no_bubble() {
     let rt = runtime(|s| short_room(s, 1));
     assert!(rt.find("msg-short-0-bubble").is_none());

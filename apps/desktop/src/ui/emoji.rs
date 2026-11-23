@@ -134,16 +134,19 @@ fn unicode_row(i: usize, custom: usize) -> Option<&'static (String, Row)> {
     i.checked_sub(custom).and_then(|i| unicode_rows().get(i))
 }
 
+/// What tells a custom emoji apart: its image and short code, as a pack may give one image
+/// several short codes.
+fn custom_id(image: &PackImage) -> String {
+    format!("{}:{}", image.url, image.shortcode)
+}
+
 /// The rows of a room's custom emoji, with their keys: none without any.
 fn custom_rows(custom: Vec<PackImage>) -> Vec<(String, Row)> {
     if custom.is_empty() {
         return Vec::new();
     }
     let rows = custom.chunks(COLUMNS).map(|chunk| {
-        (
-            format!("emoji-custom-row-{}", chunk.first().map_or("", |image| image.url.as_str())),
-            Row::Custom(chunk.to_vec()),
-        )
+        (format!("emoji-custom-row-{}", chunk.first().map(custom_id).unwrap_or_default()), Row::Custom(chunk.to_vec()))
     });
     std::iter::once(("emoji-custom-title".to_owned(), Row::CustomTitle)).chain(rows).collect()
 }
@@ -172,7 +175,7 @@ fn custom_button(s: &State, image: &PackImage, target: ComposerTarget, p: &Palet
         None => picture.radius(4.0).fill(p.hover),
     };
     let chosen = image.clone();
-    el().key(format!("emoji-custom-{}", image.url))
+    el().key(format!("emoji-custom-{}", custom_id(image)))
         .size(CELL, CELL)
         .radius(6.0)
         .center()
@@ -289,6 +292,9 @@ pub fn picker(s: &State, chosen_for: &EmojiFor, anchor: String, p: &Palette) -> 
             .child(group_tabs(p));
         // Only the rows in view are built: there are thousands of emoji. The room's custom
         // emoji come first, then the groups' rows.
+        // The grid opens anew once the room's custom emoji arrive, so they show at its top
+        // rather than above the rows in view, which Rune would otherwise hold in place.
+        let grid_key = if custom.is_empty() { "emoji-grid" } else { "emoji-grid-custom" };
         let custom = std::rc::Rc::new(custom_rows(custom));
         let version: Vec<String> = custom.iter().map(|(key, _)| key.clone()).collect();
         let keys = custom.clone();
@@ -315,7 +321,7 @@ pub fn picker(s: &State, chosen_for: &EmojiFor, anchor: String, p: &Palette) -> 
             )
             .virtual_rows_version(version);
         // A fixed height: the rows' own would be an estimate.
-        col().key("emoji-grid").w_full().h(300.0).child(grid)
+        col().key(grid_key).w_full().h(300.0).child(grid)
     } else {
         let mut grid = col().w_full().px(8.0).pb(8.0).gap(6.0);
         if let EmojiFor::Composer(target) = chosen_for
@@ -377,6 +383,23 @@ mod tests {
     #[test]
     fn no_row_should_hold_more_emoji_than_fit_across() {
         assert!(unicode_rows().iter().all(|(_, row)| !matches!(row, Row::Emoji(emoji) if emoji.len() > COLUMNS)));
+    }
+
+    #[test]
+    fn one_image_under_two_short_codes_should_get_two_rows_keys() {
+        let image = |shortcode: &str| PackImage {
+            shortcode: shortcode.into(),
+            body: shortcode.into(),
+            url: "mxc://x/blob".into(),
+            media: matrix_core::MediaRef::opaque("mxc://x/blob"),
+            emoticon: true,
+            sticker: false,
+            dimensions: None,
+            mimetype: None,
+        };
+        let custom = std::iter::repeat_with(|| image("blob")).take(COLUMNS).chain([image("blobcat")]).collect();
+        let keys: std::collections::HashSet<_> = custom_rows(custom).into_iter().map(|(key, _)| key).collect();
+        assert_eq!(keys.len(), 3, "{keys:?}");
     }
 
     #[test]
