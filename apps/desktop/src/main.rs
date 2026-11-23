@@ -1016,7 +1016,8 @@ mod tests {
         text.glyphs_for_layout(&layout, 1.0, [0.0, 0.0], false, &mut quads);
         let bitmap = quads.iter().find(|quad| quad.color != 0).expect("grayscale bitmap");
         let pixels = text.color_glyph(bitmap.color).rgba();
-        assert!(!pixels.is_empty() && pixels.chunks_exact(4).all(|rgba| rgba[0] == rgba[1] && rgba[1] == rgba[2]));
+        let (rgba, remainder) = pixels.as_chunks::<4>();
+        assert!(!rgba.is_empty() && remainder.is_empty() && rgba.iter().all(|[r, g, b, _]| r == g && g == b));
     }
 
     fn runtime(scene: fn(&mut State)) -> Runtime<State> {
