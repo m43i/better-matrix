@@ -2637,7 +2637,8 @@ fn a_group_tab_in_the_emoji_picker_should_scroll_to_that_group() {
     for _ in 0..10 {
         rt.frame(1.0 / 60.0);
     }
-    assert!(rt.find("emoji-group-flags").is_some(), "the flags' title is in view");
+    let top = |key: &str| rt.presented(key).map(|(rect, _)| rect[1]).unwrap_or_else(|| panic!("no {key}"));
+    assert!((top("emoji-group-flags") - top("emoji-grid")).abs() < 1.0, "the flags' title at the grid's top");
 }
 
 #[test]

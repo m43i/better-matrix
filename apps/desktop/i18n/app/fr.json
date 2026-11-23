@@ -790,7 +790,7 @@
   "settings.maps_on_hint": "Les charge depuis OpenStreetMap, qui peut voir votre adresse IP et la zone affichée.",
   "settings.maps_off": "Afficher seulement le nom et les coordonnées du lieu",
   "settings.emoticons": "Émoticônes",
-  "settings.emoticons_hint": "Les visages en texte comme :) :D <3 dans les messages que vous envoyez.",
+  "settings.emoticons_hint": "Des émoticônes comme :) :D <3 dans vos messages.",
   "settings.emoticons_emoji": "Les transformer en emoji",
   "settings.emoticons_emoji_hint": ":) est envoyé comme 🙂. Le code et les liens restent tels que vous les avez tapés.",
   "settings.emoticons_typed": "Les envoyer tels quels",

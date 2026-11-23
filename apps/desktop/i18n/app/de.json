@@ -790,7 +790,7 @@
   "settings.maps_on_hint": "Lädt sie von OpenStreetMap, das deine IP-Adresse und den gezeigten Ausschnitt sehen kann.",
   "settings.maps_off": "Nur Name und Koordinaten des Orts zeigen",
   "settings.emoticons": "Emoticons",
-  "settings.emoticons_hint": "Textgesichter wie :) :D <3 in den Nachrichten, die du sendest.",
+  "settings.emoticons_hint": "Zeichenfolgen wie :) :D <3 in deinen Nachrichten.",
   "settings.emoticons_emoji": "In Emoji umwandeln",
   "settings.emoticons_emoji_hint": ":) wird als 🙂 gesendet. Code und Links bleiben, wie du sie getippt hast.",
   "settings.emoticons_typed": "So senden, wie getippt",

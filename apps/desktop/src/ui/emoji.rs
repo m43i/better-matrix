@@ -101,7 +101,9 @@ fn group_title(group: emojis::Group) -> &'static str {
     }
 }
 
-/// One row of the picker's grid before a search: a title, or up to [`COLUMNS`] emoji.
+/// One row of the picker's grid before a search: a title, or up to [`COLUMNS`] emoji. A row's
+/// key names what it holds, never where it sits, so custom emoji arriving above it keep the
+/// place in the grid.
 enum Row {
     /// The room's custom emoji's title.
     CustomTitle,
@@ -111,28 +113,39 @@ enum Row {
     Emoji(&'static [&'static str]),
 }
 
-impl Row {
-    fn key(&self, index: usize) -> String {
-        match self {
-            Self::CustomTitle => "emoji-custom-title".to_owned(),
-            Self::Title(section) => section.key(),
-            Self::Custom(_) | Self::Emoji(_) => format!("emoji-row-{index}"),
-        }
-    }
+/// Every group's rows with their keys, in order. Built once.
+fn unicode_rows() -> &'static [(String, Row)] {
+    static ROWS: std::sync::LazyLock<Vec<(String, Row)>> = std::sync::LazyLock::new(|| {
+        sections()
+            .iter()
+            .flat_map(|section| {
+                let emoji = section.emoji.chunks(COLUMNS).map(|chunk| {
+                    (format!("emoji-row-{}", chunk.first().copied().unwrap_or_default()), Row::Emoji(chunk))
+                });
+                std::iter::once((section.key(), Row::Title(section))).chain(emoji)
+            })
+            .collect()
+    });
+    &ROWS
 }
 
-/// The grid's rows: the custom emoji given first, then every group's.
-fn rows(custom: Vec<PackImage>) -> Vec<Row> {
-    let mut rows = Vec::new();
-    if !custom.is_empty() {
-        rows.push(Row::CustomTitle);
-        rows.extend(custom.chunks(COLUMNS).map(|chunk| Row::Custom(chunk.to_vec())));
+/// Row `i` of the grid when it is one of the groups' rows, after `custom` rows of custom emoji.
+fn unicode_row(i: usize, custom: usize) -> Option<&'static (String, Row)> {
+    i.checked_sub(custom).and_then(|i| unicode_rows().get(i))
+}
+
+/// The rows of a room's custom emoji, with their keys: none without any.
+fn custom_rows(custom: Vec<PackImage>) -> Vec<(String, Row)> {
+    if custom.is_empty() {
+        return Vec::new();
     }
-    for section in sections() {
-        rows.push(Row::Title(section));
-        rows.extend(section.emoji.chunks(COLUMNS).map(Row::Emoji));
-    }
-    rows
+    let rows = custom.chunks(COLUMNS).map(|chunk| {
+        (
+            format!("emoji-custom-row-{}", chunk.first().map_or("", |image| image.url.as_str())),
+            Row::Custom(chunk.to_vec()),
+        )
+    });
+    std::iter::once(("emoji-custom-title".to_owned(), Row::CustomTitle)).chain(rows).collect()
 }
 
 /// A Unicode emoji's cell. `place` tells apart cells showing the same emoji (the quick
@@ -206,7 +219,8 @@ fn group_tabs(p: &Palette) -> El {
                 .label(group_title(section.group))
                 .help(group_title(section.group))
                 .child(text(section.tab).font(rune::TextStyle::new(16.0, 400.0)))
-                .on_press_tx(move |_: &mut State, tx| tx.scroll_into_view(section.key())),
+                // At the grid's top, so the group's emoji show below its title.
+                .on_press_tx(move |_: &mut State, tx| tx.scroll_key_to(section.key(), 0.0)),
         )
     })
 }
@@ -273,16 +287,35 @@ pub fn picker(s: &State, chosen_for: &EmojiFor, anchor: String, p: &Palette) -> 
             .child(quick)
             .child(divider(p))
             .child(group_tabs(p));
-        // Only the rows in view are built: there are thousands of emoji.
-        let rows = std::rc::Rc::new(rows(custom));
-        let keys = rows.clone();
+        // Only the rows in view are built: there are thousands of emoji. The room's custom
+        // emoji come first, then the groups' rows.
+        let custom = std::rc::Rc::new(custom_rows(custom));
+        let version: Vec<String> = custom.iter().map(|(key, _)| key.clone()).collect();
+        let keys = custom.clone();
         let (chosen_for, palette) = (chosen_for.clone(), *p);
-        col().key("emoji-rows").w_full().px(8.0).pb(8.0).growth(rune::GrowthSpec::default()).virtual_rows(
-            rows.len(),
-            CELL,
-            move |_: &State, i| Cow::Owned(keys.get(i).map_or_else(String::new, |row| row.key(i))),
-            move |s: &State, i| rows.get(i).map_or_else(el, |line| grid_row(s, line, &chosen_for, &palette)),
-        )
+        let grid = col()
+            .key("emoji-rows")
+            .w_full()
+            .px(8.0)
+            .pb(8.0)
+            .growth(rune::GrowthSpec::default())
+            .virtual_rows(
+                custom.len() + unicode_rows().len(),
+                CELL,
+                move |_: &State, i| match keys.get(i) {
+                    Some((key, _)) => Cow::Owned(key.clone()),
+                    None => Cow::Borrowed(unicode_row(i, keys.len()).map_or("", |(key, _)| key.as_str())),
+                },
+                move |s: &State, i| {
+                    custom
+                        .get(i)
+                        .or_else(|| unicode_row(i, custom.len()))
+                        .map_or_else(el, |(_, line)| grid_row(s, line, &chosen_for, &palette))
+                },
+            )
+            .virtual_rows_version(version);
+        // A fixed height: the rows' own would be an estimate.
+        col().key("emoji-grid").w_full().h(300.0).child(grid)
     } else {
         let mut grid = col().w_full().px(8.0).pb(8.0).gap(6.0);
         if let EmojiFor::Composer(target) = chosen_for
@@ -293,16 +326,17 @@ pub fn picker(s: &State, chosen_for: &EmojiFor, anchor: String, p: &Palette) -> 
                 .fold(row().w_full().flex_wrap(), |set, image| set.child(custom_button(s, image, *target, p)));
             grid = grid.child(title(t!("emoji.custom"), p)).child(set);
         }
-        if found.is_empty() {
+        let grid = if found.is_empty() {
             grid.child(text(t!("emoji.none")).font(font::BODY).color(p.text_muted).px(4.0).py(8.0))
         } else {
             grid.child(found.iter().fold(row().w_full().pt(4.0).flex_wrap(), |set, emoji| {
                 set.child(emoji_button(emoji, CELL, "found", chosen_for, p))
             }))
-        }
+        };
+        // Only as tall as the results, up to the browsing grid's height.
+        col().key("emoji-grid").w_full().max_h(300.0).child(grid)
     };
-    let panel =
-        panel.child(col().key("emoji-grid").w_full().h(300.0).scroll(ScrollSpec { stick_bottom: false }).child(grid));
+    let panel = panel.child(grid.scroll(ScrollSpec { stick_bottom: false }));
     match chosen_for {
         EmojiFor::StatusMessage => col().child(panel).anchored(anchor, Side::Right, Align::End, 10.0),
         _ => col().child(panel).anchored(anchor, Side::Top, Align::End, 6.0),
@@ -342,6 +376,12 @@ mod tests {
 
     #[test]
     fn no_row_should_hold_more_emoji_than_fit_across() {
-        assert!(rows(Vec::new()).iter().all(|row| !matches!(row, Row::Emoji(emoji) if emoji.len() > COLUMNS)));
+        assert!(unicode_rows().iter().all(|(_, row)| !matches!(row, Row::Emoji(emoji) if emoji.len() > COLUMNS)));
+    }
+
+    #[test]
+    fn every_row_should_have_its_own_key() {
+        let keys: std::collections::HashSet<_> = unicode_rows().iter().map(|(key, _)| key).collect();
+        assert_eq!(keys.len(), unicode_rows().len());
     }
 }

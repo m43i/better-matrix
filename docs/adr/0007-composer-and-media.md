@@ -207,10 +207,12 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   - One emoji picker serves reactions and drafts; `Popover::Emoji(EmojiFor)` says where a
     picked emoji goes (`State::choose_emoji`). Its search (focused when it opens) matches every
     Unicode emoji by its English name and shortcodes (the `emojis` crate), up to 96; Enter picks
-    the first. Without a search it shows the quick reactions, a tab per group, then every
-    emoji (skin tones left out) under its Unicode group, the crate's order; only the rows in
-    view are built (`virtual_rows`), and a tab scrolls to its group's title. Emoji draw in the
-    system's colour emoji font, as everywhere else.
+    the first. Without a search it shows the quick reactions, a tab per group, then (after a
+    composer's room emoji) every emoji (skin tones left out) under its Unicode group, the
+    crate's order. Rune builds only the rows in and near view (`virtual_rows`); a row's key
+    names its first emoji, not its place, so room emoji arriving above keep the place. A tab
+    puts its group's title at the grid's top (`scroll_key_to`). Emoji draw in the system's
+    colour emoji font, as everywhere else.
 - **Drafts:** every room and thread keeps its own draft. The desktop's two composers each hold
   the draft of the timeline they write into (`Composer::owner`); when the timeline on screen
   changes, `State::follow_drafts` (from `sync_timeline`) sets the draft aside, with its reply and
