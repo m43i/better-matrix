@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::Release;
 use super::release::{self, Platform};
+use super::{Release, Upgrade};
 
 #[derive(Debug)]
 pub struct Install {
@@ -42,6 +42,9 @@ impl Install {
         release: &Release,
         error_file: &Path,
     ) -> Result<(), String> {
+        let Upgrade::Archive { asset_id, digest } = &release.upgrade else {
+            return Err("This release installs outside the app".into());
+        };
         let parent = self.target.parent().ok_or("The install has no parent directory")?;
         let work = tempfile::Builder::new()
             .prefix(".better-matrix-update-")
@@ -49,7 +52,7 @@ impl Install {
             .map_err(|error| format!("The install folder must be writable: {error}"))?;
         let archive = work.path().join("release.zip");
         let mut file = File::create(&archive).map_err(|error| error.to_string())?;
-        release::download(client, release, &mut file)?;
+        release::download(client, *asset_id, digest, &mut file)?;
         file.sync_all().map_err(|error| error.to_string())?;
         drop(file);
         let staged = match self.platform {

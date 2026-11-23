@@ -177,6 +177,9 @@ pub enum Popover {
     Schedule(ComposerTarget),
     /// The room's scheduled messages, from the bar above its composer.
     Scheduled,
+    /// How to install the offered release, from the rail's update button, where the app can't
+    /// install it itself.
+    Update,
 }
 
 /// Which setting a select chooses.

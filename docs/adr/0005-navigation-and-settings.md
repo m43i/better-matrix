@@ -18,7 +18,9 @@ Date: 2026-11-22
   at the bottom. When a newer desktop release is available, its update icon sits directly
   above the avatar, with the plus above it when sticky: Plus → Update → Avatar. The icon's
   tooltip names the version and restart; clicking downloads and installs, disabling the action
-  while busy and keeping it available after a failure. With no newer release the icon is absent.
+  while busy and keeping it available after a failure. On Linux, clicking opens a panel beside
+  it with the command that updates the install, to copy (ADR 0001). With no newer release the
+  icon is absent.
   Spaces scroll behind them through a blurred transition. With short lists,
   the plus follows the last space. The avatar opens the account menu.
 - **Scope:** what the sidebar lists, filtered in one place (`AccountData::rooms_in`).

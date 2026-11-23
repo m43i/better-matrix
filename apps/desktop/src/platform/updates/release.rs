@@ -8,7 +8,8 @@ use semver::Version;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use super::Release;
+use super::linux::Method;
+use super::{Release, Upgrade};
 
 const REPOSITORY: &str = "https://api.github.com/repos/m43i/better-matrix";
 
@@ -25,6 +26,15 @@ impl Platform {
             Self::Windows => "better-matrix-windows-x86_64.zip",
         }
     }
+}
+
+/// How this copy takes a newer release, which decides the asset the release must carry.
+#[derive(Clone, Debug)]
+pub enum Target {
+    /// The app replaces itself with the platform's archive.
+    Archive(Platform),
+    /// The user installs it on Linux the way this copy was installed.
+    Linux(Method),
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,7 +62,7 @@ pub fn client() -> Result<Client, String> {
         .map_err(|error| error.to_string())
 }
 
-pub fn check(client: &Client, platform: Platform) -> Result<Option<Release>, String> {
+pub fn check(client: &Client, target: &Target) -> Result<Option<Release>, String> {
     let response = client
         .get(format!("{REPOSITORY}/releases/latest"))
         .header("Accept", "application/vnd.github+json")
@@ -63,38 +73,49 @@ pub fn check(client: &Client, platform: Platform) -> Result<Option<Release>, Str
     }
     let metadata: Metadata =
         response.error_for_status().map_err(|error| error.to_string())?.json().map_err(|error| error.to_string())?;
-    select(metadata, env!("CARGO_PKG_VERSION"), platform)
+    select(metadata, env!("CARGO_PKG_VERSION"), target)
 }
 
-pub fn select(metadata: Metadata, current: &str, platform: Platform) -> Result<Option<Release>, String> {
+pub fn select(metadata: Metadata, current: &str, target: &Target) -> Result<Option<Release>, String> {
     let version = Version::parse(metadata.tag_name.trim_start_matches('v')).map_err(|error| error.to_string())?;
     let current = Version::parse(current).map_err(|error| error.to_string())?;
     if metadata.draft || metadata.prerelease || !version.pre.is_empty() || version.cmp_precedence(&current).is_le() {
         return Ok(None);
     }
-    let Some(asset) = metadata.assets.into_iter().find(|asset| asset.name == platform.asset()) else {
-        return Ok(None);
+    let upgrade = match target {
+        Target::Archive(platform) => {
+            let asset = metadata.assets.into_iter().find(|asset| asset.name == platform.asset());
+            let Some(Asset { id, digest: Some(digest), .. }) = asset else { return Ok(None) };
+            if !valid_digest(&digest) {
+                return Err("The release has no valid SHA-256 digest".into());
+            }
+            Upgrade::Archive { asset_id: id, digest }
+        }
+        Target::Linux(method) => {
+            if method.asset().is_some_and(|name| !metadata.assets.iter().any(|asset| asset.name == name)) {
+                return Ok(None);
+            }
+            // The tag parsed as a version, so it holds only letters, digits, `.`, `-` and `+`:
+            // safe in a URL and in a shell command.
+            method.upgrade(&metadata.tag_name)
+        }
     };
-    let Some(digest) = asset.digest else { return Ok(None) };
-    if !valid_digest(&digest) {
-        return Err("The release has no valid SHA-256 digest".into());
-    }
-    Ok(Some(Release { version: version.to_string(), asset_id: asset.id, digest }))
+    Ok(Some(Release { version: version.to_string(), upgrade }))
 }
 
 fn valid_digest(digest: &str) -> bool {
     digest.strip_prefix("sha256:").is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-pub fn download(client: &Client, release: &Release, file: &mut std::fs::File) -> Result<(), String> {
+pub fn download(client: &Client, asset_id: u64, digest: &str, file: &mut std::fs::File) -> Result<(), String> {
     let response = client
-        .get(format!("{REPOSITORY}/releases/assets/{}", release.asset_id))
+        .get(format!("{REPOSITORY}/releases/assets/{asset_id}"))
         .header("Accept", "application/octet-stream")
         .timeout(Duration::from_secs(15 * 60))
         .send()
         .and_then(|response| response.error_for_status())
         .map_err(|error| error.to_string())?;
-    copy_verified(response, file, &release.digest)
+    copy_verified(response, file, digest)
 }
 
 pub fn copy_verified(mut source: impl Read, target: &mut impl Write, digest: &str) -> Result<(), String> {

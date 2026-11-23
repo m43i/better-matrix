@@ -107,6 +107,9 @@ When one is available, an update icon appears above your avatar in the rail. Cli
 install and restart. The app never installs an update automatically. The install folder must be
 writable; on macOS, run the app from Applications rather than the disk image. Your accounts,
 history and keys stay where they are. See [the update icon in a scrolling rail](docs/self-update.png).
+On Linux, the app checks the same way, but your package manager owns the install, so the update
+icon opens a panel with the command that updates the way you installed it (apt, dnf, zypper,
+pacman, the `PKGBUILD` or the AppImage in place). Copy it into a terminal and restart the app.
 You can also install a new release the same way as the first to update. To remove
 the app, uninstall the package (`sudo apt remove better-matrix`, `sudo dnf remove better-matrix`,
 `sudo pacman -R better-matrix`, or `sudo pacman -R better-matrix-bin` after a `PKGBUILD` install),

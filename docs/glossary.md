@@ -54,6 +54,12 @@ messages".
 at startup and hourly; only clicking the icon downloads, replaces the install and restarts it.
 Available for installed macOS and Windows release builds.
 
+**Update command**
+: On Linux, where the package manager owns the install, the update icon's panel instead shows
+the terminal command that installs the newer release the way this copy was installed (apt, dnf,
+zypper, pacman, the release's `PKGBUILD`, or the AppImage replaced in place), with a button to
+copy it. An install the app can't place links the release's page instead.
+
 **Overview**
 : The main pane when no room is open: the scope's greeting or size, its unread rooms and recent
 conversations.

@@ -1400,8 +1400,30 @@ pub fn read_receipts(s: &mut State) {
 pub fn update() -> crate::platform::updates::Release {
     crate::platform::updates::Release {
         version: "0.1.0".into(),
-        asset_id: 42,
-        digest: format!("sha256:{}", "a".repeat(64)),
+        upgrade: crate::platform::updates::Upgrade::Archive {
+            asset_id: 42,
+            digest: format!("sha256:{}", "a".repeat(64)),
+        },
+    }
+}
+
+/// A newer release for a Linux package install: the command that updates it.
+pub fn package_update() -> crate::platform::updates::Release {
+    crate::platform::updates::Release {
+        version: "0.1.0".into(),
+        upgrade: crate::platform::updates::Upgrade::Command(
+            "mkdir -p ~/.cache/better-matrix && curl -fLo ~/.cache/better-matrix/better-matrix.deb 'https://github.com/m43i/better-matrix/releases/download/v0.1.0/better-matrix-linux-x86_64.deb' && sudo apt install -y ~/.cache/better-matrix/better-matrix.deb".into(),
+        ),
+    }
+}
+
+/// A newer release for a Linux install of unknown origin: its page.
+pub fn page_update() -> crate::platform::updates::Release {
+    crate::platform::updates::Release {
+        version: "0.1.0".into(),
+        upgrade: crate::platform::updates::Upgrade::Page(
+            "https://github.com/m43i/better-matrix/releases/tag/v0.1.0".into(),
+        ),
     }
 }
 

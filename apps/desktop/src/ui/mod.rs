@@ -148,6 +148,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         (Some(Popover::Stickers(target)), _) => vec![stickers::picker(s, *target, &p)],
         (Some(Popover::Schedule(target)), _) => vec![schedule::menu(*target, &p)],
         (Some(Popover::Scheduled), _) if !s.scheduled_here().is_empty() => vec![schedule::list(s, &p)],
+        (Some(Popover::Update), _) => rail::update_panel(s, &p).into_iter().collect(),
         _ => Vec::new(),
     };
     // A select's list belongs to the settings modal, so it goes over the modal, below.

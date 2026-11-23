@@ -1,17 +1,30 @@
-//! Desktop self-updates: a serial worker checks on startup and hourly, and only downloads
-//! after a user action. Helpers wait for a clean process exit before replacing the install.
+//! Desktop updates: a serial worker checks on startup and hourly. On macOS and Windows the app
+//! updates itself, and only downloads after a user action; helpers wait for a clean process exit
+//! before replacing the install. Linux installs belong to their package manager, so the app
+//! offers the command that updates the way it was installed.
 
 use super::Shell;
 
 mod install;
+mod linux;
 mod release;
 mod worker;
 
-#[derive(Clone, Debug)]
+/// A newer stable release, and how it reaches this install.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Release {
     pub version: String,
-    pub asset_id: u64,
-    pub digest: String,
+    pub upgrade: Upgrade,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Upgrade {
+    /// The app downloads this release asset, checks its SHA-256 and replaces itself.
+    Archive { asset_id: u64, digest: String },
+    /// A command for a terminal that installs the release the way this copy was installed.
+    Command(String),
+    /// The app can't tell how it was installed: the release's page offers its downloads.
+    Page(String),
 }
 
 pub fn start(
@@ -19,7 +32,7 @@ pub fn start(
     cache: std::path::PathBuf,
 ) -> Option<std::sync::mpsc::Sender<Release>> {
     // Development builds and headless runs never replace their executable.
-    if cfg!(any(target_os = "macos", target_os = "windows")) && !cfg!(debug_assertions) {
+    if cfg!(any(target_os = "macos", target_os = "windows", target_os = "linux")) && !cfg!(debug_assertions) {
         return worker::start(app, cache);
     }
     let _ = (app, cache);

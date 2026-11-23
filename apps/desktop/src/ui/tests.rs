@@ -1560,6 +1560,84 @@ fn clicking_the_rail_update_should_start_installation() {
 }
 
 #[test]
+fn a_package_update_should_show_its_command_beside_the_rail() {
+    let mut rt = runtime(|s| s.update_found(demo::package_update()));
+    press(&mut rt, "rail-update");
+    let panel = rt.presented("update-panel").unwrap().0;
+    let button = rt.presented("rail-update").unwrap().0;
+    assert!(panel[0] > button[0] + button[2]);
+    assert!(rt.find("update-command").is_some());
+}
+
+#[test]
+fn a_long_update_command_should_wrap_inside_its_panel() {
+    let mut rt = runtime(|s| s.update_found(demo::package_update()));
+    press(&mut rt, "rail-update");
+    let panel = rt.presented("update-panel").unwrap().0;
+    let command = rt.presented("update-command-text").unwrap().0;
+    assert!(command[0] + command[2] <= panel[0] + panel[2]);
+}
+
+#[test]
+fn a_long_update_command_should_keep_copy_reachable_in_the_smallest_window() {
+    let image = "'/home/alexandra/Downloads/Better Matrix Releases/Better Matrix.AppImage'";
+    let staged = "'/home/alexandra/Downloads/Better Matrix Releases/Better Matrix.AppImage.new'";
+    let command = format!(
+        "curl -fLo {staged} 'https://github.com/m43i/better-matrix/releases/download/v0.1.0/better-matrix-linux-x86_64.AppImage' && chmod +x {staged} && mv {staged} {image}"
+    );
+    let release = crate::platform::updates::Release {
+        version: "0.1.0".into(),
+        upgrade: crate::platform::updates::Upgrade::Command(command),
+    };
+    let mut rt = runtime(|s| s.update_found(release));
+    // The smallest window, 720 by 480 points, at 175% zoom.
+    rt.set_viewport((411.0, 274.0), 1.0);
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, "rail-update");
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    let copy = rt.presented("update-copy").expect("the copy button").0;
+    assert!(copy[1] >= 0.0 && copy[1] + copy[3] <= 274.0, "copy is at {copy:?}");
+    assert!(copy[0] >= 0.0 && copy[0] + copy[2] <= 411.0, "copy is at {copy:?}");
+}
+
+#[test]
+fn copying_the_update_command_should_put_it_on_the_clipboard() {
+    let clipboard = rune::clipboard::memory();
+    let mut rt = runtime(|s| {
+        s.update_found(demo::package_update());
+        s.install_update();
+    });
+    rt.use_clipboard(&clipboard);
+    press(&mut rt, "update-copy");
+    let Some(crate::platform::updates::Upgrade::Command(command)) =
+        rt.state.update.release().map(|release| release.upgrade.clone())
+    else {
+        panic!("no command offered")
+    };
+    assert_eq!(clipboard.text().as_deref().map(String::as_str), Some(command.as_str()));
+}
+
+#[test]
+fn copying_the_update_command_should_close_its_panel_with_a_notice() {
+    let mut rt = runtime(|s| {
+        s.update_found(demo::package_update());
+        s.install_update();
+    });
+    press(&mut rt, "update-copy");
+    assert!(rt.find("update-panel").is_none());
+    assert_eq!(rt.state.notice.as_deref(), Some(crate::i18n::t!("update.copied")));
+}
+
+#[test]
+fn an_unknown_install_should_offer_the_release_page() {
+    let mut rt = runtime(|s| s.update_found(demo::page_update()));
+    press(&mut rt, "rail-update");
+    assert!(rt.find("update-page").is_some());
+    assert!(rt.find("update-command").is_none());
+}
+
+#[test]
 fn an_update_failure_should_keep_the_rail_action_available() {
     let mut rt = runtime(|s| {
         s.update_found(demo::update());

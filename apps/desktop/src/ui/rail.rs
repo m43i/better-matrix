@@ -1,13 +1,15 @@
 //! The rail on the far left: Home and the active account's spaces at the top, the signed-in
 //! user at the bottom, which opens the account menu. Home stays first; the spaces follow in the
 //! user's order, and dragging one moves it among them. The plus after them creates a space.
+//! A newer release shows an update button above the avatar.
 
 use crate::i18n::{t, tf};
-use rune::{El, ScrollSpec, col, el, icon};
+use rune::{El, ScrollSpec, col, el, icon, row, text};
 
 use super::components::{account_avatar, media_avatar, status_dot, unread_dot};
 use super::icons;
-use super::theme::Palette;
+use super::theme::{Palette, font};
+use crate::platform::updates::Upgrade;
 use crate::state::{AccountData, Dragged, DropTarget, Popover, Scope, State, Update, ordered_spaces};
 
 pub const WIDTH: f32 = 68.0;
@@ -18,6 +20,8 @@ const ACTION_GAP: f32 = 16.0;
 const BLUR_EDGE: f32 = 32.0;
 /// The key the account menu anchors to.
 pub const ACCOUNT_BUTTON: &str = "account-button";
+/// The key the update panel anchors to.
+const UPDATE_BUTTON: &str = "rail-update";
 
 pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
     let update = s.update.release();
@@ -136,11 +140,13 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
         let installing = matches!(s.update, Update::Installing(_));
         let label = if installing {
             t!("update.installing").to_owned()
-        } else {
+        } else if matches!(release.upgrade, Upgrade::Archive { .. }) {
             tf!("update.install", version = release.version)
+        } else {
+            tf!("update.available", version = release.version)
         };
         rail = rail.child(
-            el().key("rail-update")
+            el().key(UPDATE_BUTTON)
                 .size(TILE, TILE)
                 .pin(Some((WIDTH - TILE) / 2.0), None, None, Some(EDGE + TILE + ACTION_GAP))
                 .radius(TILE * 0.22)
@@ -245,4 +251,56 @@ pub fn space_menu(account: &AccountData, space_id: &str, p: &Palette) -> El {
             .on_press(move |s: &mut State| s.ask_to_leave_space(&id)),
     );
     col().child(panel).anchored(format!("scope-{space_id}"), rune::Side::Right, rune::Align::Start, 8.0)
+}
+
+/// How to install the offered release where the app can't install it itself: the terminal
+/// command for the way it was installed, to copy, or the release's page.
+pub fn update_panel(s: &State, p: &Palette) -> Option<El> {
+    use super::components::{ButtonKind, button, popover_panel};
+    let release = s.update.release()?;
+    let (hint, content, action) = match &release.upgrade {
+        Upgrade::Archive { .. } => return None,
+        Upgrade::Command(command) => (
+            t!("update.run_command"),
+            Some(
+                // A long command scrolls, so Copy stays in reach on the smallest window.
+                col()
+                    .key("update-command")
+                    .w_full()
+                    .max_h(96.0)
+                    .scroll(ScrollSpec { stick_bottom: false })
+                    .padding(12.0)
+                    .radius(8.0)
+                    .fill(p.bg)
+                    .child(
+                        text(command.clone())
+                            .key("update-command-text")
+                            .font(font::META.mono())
+                            .color(p.text)
+                            .wrap_anywhere()
+                            .selectable(true),
+                    ),
+            ),
+            button(t!("update.copy"), ButtonKind::Primary, true, p)
+                .key("update-copy")
+                .on_press_tx(State::copy_update_command),
+        ),
+        Upgrade::Page(_) => (
+            t!("update.download"),
+            None,
+            button(t!("update.open_page"), ButtonKind::Primary, true, p)
+                .key("update-page")
+                .on_press_tx(State::open_update_page),
+        ),
+    };
+    let panel = popover_panel(p)
+        .key("update-panel")
+        .px(16.0)
+        .py(14.0)
+        .gap(10.0)
+        .child(text(tf!("update.available", version = release.version)).font(font::BODY_STRONG).color(p.text).wrap())
+        .child(text(hint.to_owned()).font(font::BODY).color(p.text_muted).wrap())
+        .children(content)
+        .child(row().w_full().justify_end().child(action));
+    Some(col().child(panel).anchored(UPDATE_BUTTON, rune::Side::Right, rune::Align::End, 8.0))
 }

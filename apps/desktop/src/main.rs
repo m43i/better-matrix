@@ -669,6 +669,16 @@ fn spec() -> AppSpec<State> {
                 demo::many_spaces(s);
                 s.update_found(demo::update());
             }),
+            ("demo-update-command", |s| {
+                demo::seed(s);
+                s.update_found(demo::package_update());
+                s.install_update();
+            }),
+            ("demo-update-page", |s| {
+                demo::seed(s);
+                s.update_found(demo::page_update());
+                s.install_update();
+            }),
             ("demo-updating", |s| {
                 demo::many_spaces(s);
                 s.update_found(demo::update());

@@ -184,6 +184,29 @@ Date: 2026-11-14
     The install directory must be writable; there is no elevation flow. macOS must run from an
     installed `.app`, not a standalone executable or read-only disk image. With ad-hoc signing,
     macOS asks for its permissions again after each update; a Developer ID keeps them.
+- **Linux update commands** (Linux release builds):
+  - The same worker checks the same way, but never downloads. It works out once at start how
+    this copy was installed: `$APPIMAGE` first (an AppImage runs as itself even beside a
+    package), when the executable is inside `$APPDIR` (else the variables were inherited from
+    another AppImage that started it); otherwise only a binary at `/usr/bin/better-matrix` counts
+    as packaged, and the package databases decide: dpkg's file list (apt), pacman's local folders
+    (`better-matrix` for `pacman -U`, `better-matrix-bin` for the release's `PKGBUILD`), then
+    `rpm --query`, with `/etc/os-release` choosing zypper on (open)SUSE and dnf elsewhere. An
+    ostree system (`/run/ostree-booted`, where rpm-ostree layers packages) and anything else is
+    unknown.
+  - The offered release must carry the asset the method downloads (by `uname -m` name), else it
+    isn't offered. The command is the README's install line pinned to the release's tag rather
+    than the moving `latest` link; the tag parsed as a version, so it is safe in a URL and a
+    shell. Packages download as the user (so a proxy in their environment still applies) into
+    `~/.cache/better-matrix`, never a fixed `/tmp` name another user could hold before `sudo`
+    installs it, and without shell variables, so fish runs the line too. (`pacman -U <url>`
+    would need a signature: remote packages require one by default.) An AppImage downloads
+    beside itself and is moved over the old file (paths are single-quoted; a path that isn't
+    UTF-8 or holds a backslash, which fish reads inside single quotes, gets the page). An
+    unknown install gets the release's page.
+  - Clicking the rail's update icon opens a panel beside it (`Popover::Update`) with the command
+    and a button that copies it, or a button that opens the page. Installing stays the user's
+    step: a package manager's files are root's, and its own updates would fight the app's.
 - **`matrix:` links and one process** (desktop):
   - The installs claim the `matrix` scheme: the Linux desktop entry (`packaging/linux`, and
     `bun run install:linux`) has `MimeType=x-scheme-handler/matrix;` and `Exec=… %u`; the macOS
