@@ -448,15 +448,26 @@ fn with_emoji(edit: &TextEdit, emoticons: Emoticons) -> std::borrow::Cow<'_, Tex
 pub(super) const SPOILER_FALLBACK: &str = matrix_core::html::SPOILER_FALLBACK;
 
 /// A field's plain body: its text, with each spoiler's words kept out of it, as clients that
-/// show only the body would show them to everyone.
+/// show only the body would show them to everyone. Blank space around it goes, but code that
+/// starts it keeps its first line's indentation.
 pub(super) fn body_of(edit: &TextEdit) -> String {
+    let starts_with_code = edit
+        .paragraphs()
+        .into_iter()
+        .find(|line| !edit.text[line.range.clone()].trim().is_empty())
+        .is_some_and(|line| line.block == Block::Code);
     let mut body = edit.text.clone();
     let mut spoilers: Vec<_> = edit.pills().filter(|(_, id)| *id == "spoiler").map(|(range, _)| range).collect();
     spoilers.sort_by_key(|range| std::cmp::Reverse(range.start));
     for range in spoilers {
         body.replace_range(range, SPOILER_FALLBACK);
     }
-    body.trim().to_owned()
+    if !starts_with_code {
+        return body.trim().to_owned();
+    }
+    let text = body.len() - body.trim_start().len();
+    let first_line = body[..text].rfind('\n').map_or(0, |at| at + 1);
+    body[first_line..].trim_end().to_owned()
 }
 
 /// Whom a field's pills mention on purpose.
@@ -1387,6 +1398,12 @@ let x = 1;</code></pre><p>done</p>"#;
         let html = "<pre><code class=\"language-rust\">fn a() {}</code></pre><pre><code class=\"language-python\">print(1)</code></pre><p>x</p>";
         c.start_edit(target(), "fn a() {}\nprint(1)\nx", Some(html));
         assert_eq!(c.edit.text, "```rust\nfn a() {}\n```\n```python\nprint(1)\n```\nx");
+    }
+
+    #[test]
+    fn code_starting_a_message_should_keep_its_indentation_in_the_plain_body() {
+        let body = sent_body(composer("```python\n    if ready:\n        go()\n```"));
+        assert_eq!(body, "    if ready:\n        go()");
     }
 
     #[test]
