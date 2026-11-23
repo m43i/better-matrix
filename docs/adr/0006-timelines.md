@@ -199,9 +199,14 @@ see who is typing there.
     cover a moment, and never reaches into the readers' column. It holds React, Reply,
     Thread, a rule, then More; content narrower than the whole toolbar keeps only More, whose menu offers the rest (Add reaction then anchors the picker at
     More). Media and cards fill the column they're given, so their toolbar takes the column's
-    top right. Rising out of its row, the toolbar shares the row's hover group
-    (`El::hover_group_shared`, one key per message): the pointer on it keeps its message
-    hovered, not the one under it.
+    top right. Rising out of its row, the toolbar can lie over the message above, so the
+    pointer can be over two messages at once. A small state machine settles it
+    (`MessageHover`): rows and toolbars report the pointer entering and leaving
+    (`on_hover_change`); a toolbar the pointer reaches while it shows holds it, staying shown
+    and hiding the toolbar (and tint) of the row under it, while one it crosses hidden holds
+    nothing. Rune's hover groups are rectangles, and joining the toolbar to its row's group
+    lit the next message's hidden toolbar over the bottom of each message. Hidden toolbars
+    take no presses (Rune hit-tests only what draws).
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
     reaction's count and whether the user is among them. The picker offers quick reactions,
@@ -212,8 +217,9 @@ see who is typing there.
     composer. A message with replies shows "3 replies · last from …". Clicking the sender's
     name or picture opens their person panel instead
     ([0008](0008-people-and-rooms.md)).
-  - The hover toolbar fades in through the row's hover group, so hovering never rebuilds the
-    view.
+  - The hover toolbar fades in through the row's hover group, and keyboard focus inside a row
+    lights it too. Noting which message the pointer is with rebuilds the view once per message
+    crossed, not per move.
   - A change to messages already shown (only `Set` diffs: a reaction, an edit;
     `RoomTimeline::changes_in_place`) lands like history (`Landing::Due`): the row takes its
     new height at once. Eased, a growing row uncovers what it gained bit by bit, which reads as

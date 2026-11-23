@@ -83,6 +83,7 @@ pub use link_previews::LinkPreviews;
 pub use links::{LinkDialog, LinkStep};
 pub use location::{LocationForm, MAP_PIXELS, MAP_SIZE};
 pub use media::MediaCache;
+pub use message_actions::{MessageAt, MessageHover};
 pub use navigation::{navigate, navigate_now};
 pub use packs::PACK_IMAGE_SIZE;
 pub use panes::{Pane, PaneLayout, PaneSize, PaneWidths};
@@ -985,6 +986,8 @@ pub struct State {
     /// the app restarts.
     pub revealed_media: HashSet<(AccountId, String)>,
     pub popover: Option<Popover>,
+    /// Which message's hover toolbar the pointer is with.
+    pub message_hover: MessageHover,
     pub modal: Option<Modal>,
     /// What the emoji picker searches for.
     pub emoji_search: TextEdit,
@@ -1109,6 +1112,7 @@ impl State {
             link_previews: LinkPreviews::default(),
             revealed_media: HashSet::new(),
             popover: None,
+            message_hover: MessageHover::default(),
             modal: None,
             emoji_search: TextEdit::default(),
             status_draft: None,

@@ -5,6 +5,62 @@ use rune::TextEdit;
 
 use super::{Modal, Purpose, State};
 
+/// A message in one timeline: the room's, or a thread's.
+pub type MessageAt = (TimelineKey, String);
+
+/// Which message's hover toolbar the pointer is with. A toolbar rises out of its row over the
+/// message above, so the pointer can be over two messages at once: a shown toolbar the pointer
+/// is on wins, and hides the toolbar of the row under it; otherwise the row under the pointer
+/// (with keyboard focus, its hover group) shows its own.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MessageHover {
+    /// The message row the pointer is in.
+    row: Option<MessageAt>,
+    /// The message whose shown toolbar the pointer is on.
+    toolbar: Option<MessageAt>,
+}
+
+impl MessageHover {
+    /// The pointer entered or left `message`'s row.
+    pub fn row(&mut self, message: &MessageAt, inside: bool) {
+        if inside {
+            self.row = Some(message.clone());
+        } else if self.row.as_ref() == Some(message) {
+            self.row = None;
+        }
+    }
+
+    /// The pointer entered or left `message`'s toolbar, `shown` or not as the view last built
+    /// it: entering one that isn't shown (the pointer came from the row under it) holds nothing.
+    pub fn toolbar(&mut self, message: &MessageAt, inside: bool, shown: bool) {
+        if inside && shown {
+            self.toolbar = Some(message.clone());
+        } else if !inside && self.toolbar.as_ref() == Some(message) {
+            self.toolbar = None;
+        }
+    }
+
+    /// Whether `message`'s toolbar shows for the pointer: its row is hovered and no other
+    /// toolbar holds the pointer, or the pointer holds its toolbar.
+    pub fn shows(&self, message: &MessageAt) -> bool {
+        match &self.toolbar {
+            Some(held) => held == message,
+            None => self.row.as_ref() == Some(message),
+        }
+    }
+
+    /// Whether the pointer holds `message`'s toolbar, above its row.
+    pub fn holds(&self, message: &MessageAt) -> bool {
+        self.toolbar.as_ref() == Some(message)
+    }
+
+    /// Whether the pointer holds another toolbar in `message`'s timeline: `message`'s row shows
+    /// no hover.
+    pub fn covers(&self, message: &MessageAt) -> bool {
+        self.toolbar.as_ref().is_some_and(|held| held.0 == message.0 && held.1 != message.1)
+    }
+}
+
 impl State {
     pub fn set_message_pinned(&mut self, key: &TimelineKey, event_id: &str, pinned: bool) {
         self.popover = None;

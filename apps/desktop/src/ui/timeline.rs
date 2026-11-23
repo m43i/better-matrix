@@ -77,6 +77,8 @@ pub struct Context<'a> {
     pub show_hidden: bool,
     /// Classic rows or chat bubbles.
     pub layout: MessageLayout,
+    /// Which message's hover toolbar the pointer is with.
+    pub hover: &'a crate::state::MessageHover,
 }
 
 impl<'a> Context<'a> {
@@ -106,6 +108,7 @@ impl<'a> Context<'a> {
             revealed: &s.revealed_media,
             show_hidden: s.settings.show_hidden_events,
             layout: s.settings.message_layout,
+            hover: &s.message_hover,
         }
     }
 
@@ -132,6 +135,11 @@ impl<'a> Context<'a> {
     /// Whether `message` sits at the timeline's right: the user's own, in chat bubbles.
     fn on_right(&self, message: &Message) -> bool {
         self.layout == MessageLayout::Bubbles && message.sender_id == self.account.as_str()
+    }
+
+    /// `message` in this timeline, as the hover toolbar's state names it.
+    fn at(&self, message: &Message) -> crate::state::MessageAt {
+        (self.key.clone(), message.event_id.clone())
     }
 
     /// A key unique to this timeline, so the room and a thread can show the same message.
@@ -897,18 +905,15 @@ fn readers_cell(cx: &Context<'_>, message: &Message, p: &Palette) -> Option<El> 
     Some(readers)
 }
 
-/// The hover group a message's row shares with its toolbar, which rises out of the row: the
-/// pointer on the toolbar keeps the message hovered rather than the one under it.
-fn hover_key(cx: &Context<'_>, message: &Message) -> String {
-    cx.key(&format!("message-hover-{}", message.event_id))
-}
-
-/// What every message row does, whatever its layout: the toolbar's hover group, the menu on a
-/// right click, and in a room, opening the message's thread on a press. The hover toolbar is the
-/// layout's to place.
+/// What every message row does, whatever its layout: the hover group its toolbar shows with
+/// (its hover noted for the toolbar, [`crate::state::MessageHover`]), the menu on a right click,
+/// and in a room, opening the message's thread on a press. The hover toolbar is the layout's to
+/// place.
 fn message_actions(row: El, cx: &Context<'_>, message: &Message) -> El {
     let (menu_key, id) = (cx.key.clone(), message.event_id.clone());
-    let mut row = row.hover_group_shared(hover_key(cx, message)).on_secondary_press(move |s: &mut State, point, _| {
+    let at = cx.at(message);
+    let row = row.hover_group().on_hover_change(move |s: &mut State, inside, _| s.message_hover.row(&at, inside));
+    let mut row = row.on_secondary_press(move |s: &mut State, point, _| {
         s.popover = Some(Popover::MessageMenu {
             key: menu_key.clone(),
             event_id: id.clone(),
@@ -990,7 +995,8 @@ fn classic_row(
     } else if message.highlighted && message.sender_id != cx.account.as_str() {
         row = row.fill(p.warning.alpha(0.10)).border_sides([0.0, 0.0, 0.0, 3.0], p.warning);
     }
-    if interactive {
+    // Under another message's toolbar, which holds the pointer, the row shows no hover.
+    if interactive && !cx.hover.covers(&cx.at(message)) {
         row = row.hover(p.hover);
     }
     if actions { message_actions(row, cx, message) } else { row }
@@ -1190,6 +1196,9 @@ fn toolbar(cx: &Context<'_>, message: &Message, said_width: f32, p: &Palette) ->
         (Some(0.0), None)
     };
     let open = cx.picking == Some(event_id.as_str());
+    // The pointer on this toolbar, above its row, keeps it shown; on another's, hides it.
+    let at = cx.at(message);
+    let (held, covered, shown) = (cx.hover.holds(&at), cx.hover.covers(&at), cx.hover.shows(&at));
     let target = if cx.in_thread() { ComposerTarget::Thread } else { ComposerTarget::Room };
     let button = |glyph: &'static rune::Icon, label: &str, name: &str| {
         el().key(cx.key(&format!("{name}-{event_id}")))
@@ -1216,7 +1225,9 @@ fn toolbar(cx: &Context<'_>, message: &Message, said_width: f32, p: &Palette) ->
         .fill(p.surface)
         .border(1.0, p.divider)
         .shadow(2.0, 10.0, Color::BLACK.alpha(0.16))
-        .group_opacity(if open { 1.0 } else { 0.0 }, 1.0);
+        .group_opacity(if open || held { 1.0 } else { 0.0 }, if covered && !open { 0.0 } else { 1.0 })
+        // Held or let go, it shows or hides with the pointer, not on a fade of its own.
+        .instant_changes();
     if react {
         bar = bar.child(button(&icons::SMILE, t!("actions.react"), "react").on_press(move |s: &mut State| {
             s.toggle_popover(Popover::Emoji(EmojiFor::Reaction {
@@ -1246,9 +1257,8 @@ fn toolbar(cx: &Context<'_>, message: &Message, said_width: f32, p: &Palette) ->
     let bar = bar.child(button(&icons::MORE, t!("actions.more"), "more").on_press(move |s: &mut State| {
         s.toggle_popover(Popover::MessageMenu { key: key.clone(), event_id: id.clone(), at: None });
     }));
-    // Above its row, the toolbar keeps the message hovered through the group they share.
     el().pin(left, Some(TOOLBAR_OVERLAP - TOOLBAR_HEIGHT), right, None)
-        .hover_group_shared(hover_key(cx, message))
+        .on_hover_change(move |s: &mut State, inside, _| s.message_hover.toolbar(&at, inside, shown))
         .child(bar)
 }
 

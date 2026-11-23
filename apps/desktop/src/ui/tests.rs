@@ -4027,7 +4027,51 @@ fn moving_onto_a_toolbar_above_its_row_should_keep_it_shown() {
         let rt = onto_a_continued_messages_more(layout);
         let (_, opacity) = rt.presented("actions-$short-1").expect("the toolbar");
         assert!(opacity > 0.99, "{layout:?}: the toolbar hides under the pointer: {opacity}");
+        let (_, under) = rt.presented("actions-$short-0").expect("the toolbar of the message under it");
+        assert!(under < 0.01, "{layout:?}: the message under the pointer shows its toolbar too: {under}");
     }
+}
+
+#[test]
+fn moving_onto_a_toolbar_above_its_row_should_not_flicker() {
+    let mut rt = runtime(continued_room);
+    let row = element_rect(&rt, "msg-short-1");
+    rt.pointer_move(row[0] + 200.0, row[1] + row[3] / 2.0);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let more = element_rect(&rt, "more-$short-1");
+    let (x, from, to) = (more[0] + more[2] / 2.0, row[1] + row[3] / 2.0, more[1] + more[3] / 2.0);
+    for step in 1..=10 {
+        rt.pointer_move(x, from + (to - from) * step as f32 / 10.0);
+        rt.frame(1.0 / 60.0);
+        let (_, opacity) = rt.presented("actions-$short-1").expect("the toolbar");
+        assert!(opacity > 0.99, "step {step}: the toolbar dims on the way: {opacity}");
+    }
+}
+
+#[test]
+fn entering_a_message_where_the_next_ones_toolbar_would_rise_should_show_only_its_own() {
+    let mut rt = runtime(continued_room);
+    let more = element_rect(&rt, "more-$short-1");
+    // From outside the window, straight into the first message, where the second's toolbar
+    // would rise.
+    rt.pointer_leave();
+    rt.frame(1.0 / 60.0);
+    let (x, y) = (more[0] + more[2] / 2.0, more[1] + more[3] / 2.0);
+    rt.pointer_move(x, y);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let (_, next) = rt.presented("actions-$short-1").expect("the second's toolbar");
+    assert!(next < 0.01, "the second message's toolbar shows over the first: {next}");
+    let (_, own) = rt.presented("actions-$short-0").expect("the first's toolbar");
+    assert!(own > 0.99, "the first message shows its toolbar: {own}");
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.popover.is_none(), "a press there opened {:?}", rt.state.popover);
+    assert_eq!(rt.state.active_thread(), Some("$short-0"), "the press is the first message's");
 }
 
 #[test]

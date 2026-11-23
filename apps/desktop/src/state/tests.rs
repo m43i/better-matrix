@@ -7419,3 +7419,52 @@ fn a_permalink_opened_during_a_search_should_leave_search_closed() {
     s.search_people(std::time::Instant::now());
     assert_eq!(s.popover, None);
 }
+
+// ----- the hover toolbar --------------------------------------------------------------------
+
+fn hovered(id: &str) -> crate::state::MessageAt {
+    (TimelineKey::room("!room:example.org"), id.to_owned())
+}
+
+#[test]
+fn a_hovered_row_should_show_its_toolbar() {
+    let mut hover = crate::state::MessageHover::default();
+    hover.row(&hovered("$a"), true);
+    assert!(hover.shows(&hovered("$a")));
+}
+
+#[test]
+fn the_pointer_on_a_shown_toolbar_should_keep_it_over_the_row_under_it() {
+    let mut hover = crate::state::MessageHover::default();
+    hover.row(&hovered("$b"), true);
+    hover.row(&hovered("$b"), false);
+    hover.row(&hovered("$a"), true);
+    hover.toolbar(&hovered("$b"), true, true);
+    assert!(hover.shows(&hovered("$b")) && hover.holds(&hovered("$b")));
+    assert!(!hover.shows(&hovered("$a")) && hover.covers(&hovered("$a")));
+}
+
+#[test]
+fn the_pointer_on_a_hidden_toolbar_should_hold_nothing() {
+    let mut hover = crate::state::MessageHover::default();
+    hover.row(&hovered("$a"), true);
+    hover.toolbar(&hovered("$b"), true, false);
+    assert!(hover.shows(&hovered("$a")) && !hover.covers(&hovered("$a")));
+}
+
+#[test]
+fn leaving_a_held_toolbar_should_give_the_row_under_it_back() {
+    let mut hover = crate::state::MessageHover::default();
+    hover.row(&hovered("$a"), true);
+    hover.toolbar(&hovered("$b"), true, true);
+    hover.toolbar(&hovered("$b"), false, true);
+    assert!(hover.shows(&hovered("$a")));
+}
+
+#[test]
+fn a_held_toolbar_should_cover_no_other_timeline() {
+    let mut hover = crate::state::MessageHover::default();
+    hover.toolbar(&hovered("$b"), true, true);
+    let thread = (TimelineKey::thread("!room:example.org", "$root"), "$a".to_owned());
+    assert!(!hover.covers(&thread));
+}
