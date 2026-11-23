@@ -1281,6 +1281,12 @@ mod tests {
         }
     }
 
+    /// Asserts the "New" divider `key` has faded: gone, or its space kept while on screen.
+    fn assert_faded(rt: &Runtime<State>, key: &str) {
+        let opacity = rt.presented(key).map_or(0.0, |(_, opacity)| opacity);
+        assert!(opacity < 0.01, "{key} still shows: {opacity}");
+    }
+
     #[test]
     fn a_new_marker_visible_on_open_should_fade_away() {
         let mut rt = runtime(|s| unread_timeline(s, 2));
@@ -1288,7 +1294,7 @@ mod tests {
         for _ in 0..240 {
             rt.frame(1.0 / 60.0);
         }
-        assert!(rt.presented("new-marker").is_none());
+        assert_faded(&rt, "new-marker");
     }
 
     #[test]
@@ -1311,7 +1317,7 @@ mod tests {
         for _ in 0..240 {
             rt.frame(1.0 / 60.0);
         }
-        assert!(rt.presented("new-marker").is_none());
+        assert_faded(&rt, "new-marker");
     }
 
     #[test]
@@ -1374,7 +1380,7 @@ mod tests {
         let key = matrix_core::TimelineKey::room(demo::DEMO_THREAD.0);
         assert!(rt.state.accounts.get(&account).unwrap().timeline(&key).unwrap().read_marker_seen("incoming-marker"));
         rt.frame(1.0 / 60.0);
-        assert!(rt.presented("incoming-marker").is_none());
+        assert_faded(&rt, "incoming-marker");
     }
 
     #[test]
@@ -1394,7 +1400,7 @@ mod tests {
         for _ in 0..240 {
             rt.frame(1.0 / 60.0);
         }
-        assert!(rt.presented("incoming-marker").is_none());
+        assert_faded(&rt, "incoming-marker");
     }
 
     #[test]

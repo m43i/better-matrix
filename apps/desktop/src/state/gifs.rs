@@ -38,6 +38,9 @@ enum Entry {
 #[derive(Debug)]
 pub struct Player {
     pixels: Pixels,
+    /// Its width and height in pixels, as its header gives them: known from the start, so the
+    /// view sizes it before its first frame is decoded.
+    size: Option<(u32, u32)>,
     /// Bytes of decoded frames its worker holds.
     held: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
@@ -55,6 +58,7 @@ impl Drop for Player {
 impl Player {
     /// Plays `bytes` on a worker, counting its decoded frames in `decoded` as well as its own.
     fn start(bytes: Arc<[u8]>, decoded: &Arc<AtomicUsize>) -> Self {
+        let size = header_size(&bytes);
         let pixels = Pixels::new();
         let (stop, paused) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
         let held = Arc::new(AtomicUsize::new(0));
@@ -65,7 +69,7 @@ impl Player {
             .spawn(move || play(bytes, &out, &halt, &hold, &counted))
             .ok()
             .map(|handle| handle.thread().clone());
-        Self { pixels, held, stop, paused, worker }
+        Self { pixels, size, held, stop, paused, worker }
     }
 
     /// Holds or resumes the animation.
@@ -84,6 +88,18 @@ impl Player {
     pub fn pixels(&self) -> &Pixels {
         &self.pixels
     }
+
+    /// Its width and height in pixels, when its header gives both.
+    pub fn size(&self) -> Option<(u32, u32)> {
+        self.size
+    }
+}
+
+/// A GIF's width and height from its header (the logical screen's, little-endian after the
+/// six-byte signature), when both are there and not zero.
+fn header_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    let side = |at: usize| Some(u32::from(u16::from_le_bytes([*bytes.get(at)?, *bytes.get(at + 1)?])));
+    Some((side(6)?, side(8)?)).filter(|(w, h)| *w > 0 && *h > 0)
 }
 
 /// The decoded bytes a worker holds, counted for its player and for all of them; given back
@@ -302,6 +318,16 @@ mod tests {
     }
 
     #[test]
+    fn a_gifs_size_should_be_read_from_its_header() {
+        assert_eq!(header_size(b"GIF89a\x2c\x01\xc8\x00"), Some((300, 200)));
+    }
+
+    #[test]
+    fn a_gif_header_cut_short_should_give_no_size() {
+        assert_eq!(header_size(b"GIF89a\x2c\x01"), None);
+    }
+
+    #[test]
     fn a_gif_off_screen_should_be_the_one_to_make_room() {
         let mut gifs = GifCache::default();
         let urls: Vec<String> = (0..=MAX_PLAYERS).map(|i| format!("https://x/{i}.gif")).collect();
@@ -365,6 +391,7 @@ mod tests {
     fn holding(gifs: &mut GifCache, url: &str, bytes: usize) {
         let player = Player {
             pixels: Pixels::new(),
+            size: None,
             held: Arc::new(AtomicUsize::new(bytes)),
             stop: Arc::default(),
             paused: Arc::default(),

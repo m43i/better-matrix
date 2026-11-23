@@ -189,14 +189,18 @@ see who is typing there.
   - The time (with "edited" or "sending") closes the bubble in `bubble_meta`, which keeps 4.5:1
     on either bubble, as do muted words inside it (a quote, a notice; phones: `InBubble`); reactions and the thread hang below it, on its side. The readers' column,
     menu and press-to-open-thread are the classic row's.
-  - The hover toolbar stands beside a bubble, level with its top, on its open side: right of
-    other people's, left of the user's own. It fits the room the bubble leaves in its column
-    (as laid out the frame before, the widest bubble until then; `beside_toolbar`), never
-    reaching into the readers' column: a narrower room drops Thread, then Reply, then React,
-    and More stays, its menu offering all three (Add reaction anchors the picker at More when
-    React is gone). With no room even for More, More alone takes the row's top corner, where
-    it may cover a long bubble's corner. Media and cards, many of which fill the width they're
-    given, keep the classic row's toolbar at the row's corner (left over the user's own).
+  - The hover toolbar is one component in both layouts, placed as Teams places its own: it
+    floats on the top edge of what the message says (a bubble, the column media and cards stand
+    in, or a classic row's content), reaching `TOOLBAR_OVERLAP` (10 points) down over it, at its
+    top right, `TOOLBAR_INSET` in, so it sits by the words and the pointer barely travels.
+    What a message says narrower than the toolbar (as laid out the frame before, the widest
+    bubble until then) puts it at the message's own edge, reaching into the open side: right
+    of other people's, left of the user's own. It rises over the message above, which it may
+    cover a moment, and never reaches into the readers' column. It holds React, Reply,
+    Thread, a rule, then More; a timeline narrower than the whole toolbar beside a picture
+    keeps only More, whose menu offers the rest (Add reaction then anchors the picker at
+    More). Media and cards fill the column they're given, so their toolbar takes the column's
+    top right.
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
     reaction's count and whether the user is among them. The picker offers quick reactions,
@@ -209,6 +213,10 @@ see who is typing there.
     ([0008](0008-people-and-rooms.md)).
   - The hover toolbar fades in through the row's hover group, so hovering never rebuilds the
     view.
+  - A change to messages already shown (only `Set` diffs: a reaction, an edit, a receipt;
+    `RoomTimeline::changes_in_place`) lands like history (`Landing::Due`): the row takes its
+    new height at once. Eased, a growing row uncovers what it gained bit by bit, which reads as
+    a reaction fading in slowly.
   - Room events and call cards are informational rows: no message toolbar, reactions, replies
     or thread actions. A call card keeps its call-specific controls.
   - A text message's formatting is the sender's HTML; without any, the Markdown in its plain
@@ -327,6 +335,11 @@ see who is typing there.
   MiB GIF).
   - A message with a GIF link shows its other text, then the GIF like an attachment, link
     hidden; a bare link shows the GIF alone. Prepared once on arrival (`TimelineItem::gif`).
+  - Its frame is always `GIF_HEIGHT` (160 points) tall, a placeholder of that height until the
+    GIF arrives, so the message never changes height as it loads; the width follows the GIF's
+    shape from its header (`Player::size`, read before any frame decodes), up to 360 points
+    and the content width, a GIF too wide for that letterboxed in the frame. The frame lands
+    its change at once (`El::instant_changes`) rather than fading the picture in.
   - Frames decode on a worker and stream into a `rune::Pixels`, so animation redraws only the
     picture.
   - Fetching contacts those sites, so General → GIFs from links turns it off. Memory bounds and
@@ -400,10 +413,14 @@ see who is typing there.
     badges follow the counts the SDK works out after sync.
   - The "New" marker is dismissed when its own row enters the viewport, including on open,
     without the media prefetch margin. It fades over a 2.5-second opacity spring, keeping its
-    row's full height until the fade ends, then removing the row. The fading row retains its
+    row's full height until the fade ends, and after (`ReadMarkerFade::Faded`) while the row is
+    in the viewport: closing it on screen would move the messages around it. Once the view
+    reports the row out of view (`State::read_marker_visible`), or the timeline closes, the
+    row goes, off screen. The fading row retains its
     acknowledged neighbours independently of the SDK marker, so advancing receipts can move or
     remove that marker without moving the visible divider. A small fade state machine
-    uses Rune's logical clock and a scheduled wake (150 ms under reduced motion). Removing the
+    uses Rune's logical clock and a scheduled wake (150 ms under reduced motion, the space kept
+    the same way). Removing the
     row at the start of an exit fade would let the virtual list close its space after 150 ms,
     while the divider still draws over the messages. The desktop
     remembers the first unread entry at that boundary across diffs and warm reopens, while
@@ -411,7 +428,8 @@ see who is typing there.
     Phones keep the same rule (`apps/mobile/src/state/newMarker.ts`): the divider stays before
     the entry it first stood before, fades over 2.5 s (150 ms under reduced motion) keeping its
     height when receipts move or drop the SDK's marker, and no later divider shows until the
-    timeline leaves the screen.
+    timeline leaves the screen. Phones close the row when the fade ends; the space the desktop
+    keeps on screen after it isn't theirs yet.
     As in [Element Web](https://github.com/element-hq/element-web/blob/75eaab6ca5ac7ab4bac91a6097c8e77bb469455d/apps/web/src/components/structures/TimelinePanel.tsx),
     the visible indicator is separate from the advancing receipt: once reached it stays hidden
     while reading, including when receipts advance during an upscroll. New boundaries while

@@ -1508,7 +1508,7 @@ impl State {
                     }
                 }
                 if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
-                    if reset || timeline.adds_history(&diffs) {
+                    if reset || timeline.adds_history(&diffs) || RoomTimeline::changes_in_place(&diffs) {
                         timeline.landing = Landing::Due;
                     }
                     timeline.apply(diffs);
@@ -2642,7 +2642,8 @@ impl State {
 
     pub fn read_marker_visible(&mut self, account: &AccountId, key: &TimelineKey, marker: Option<String>) -> bool {
         self.accounts.set_visible_read_marker(account, key, marker.clone());
-        marker.is_some_and(|id| self.read_marker_reached(account, key, &id))
+        let closed = self.accounts.close_faded_read_marker(account, key, marker.as_deref());
+        marker.is_some_and(|id| self.read_marker_reached(account, key, &id)) || closed
     }
 
     fn mark_timeline_read(&mut self, account: AccountId, key: TimelineKey) {

@@ -273,11 +273,10 @@ fn a_fading_new_marker_should_stay_between_messages() {
         }
     }
     assert!(fading_frames > 0, "the test must exercise the fade");
-    assert!(rt.presented("new-marker").is_none(), "the marker must finish leaving");
 }
 
 #[test]
-fn reduced_motion_should_close_the_new_markers_space_after_the_short_fade() {
+fn reduced_motion_should_fade_the_new_marker_out_quickly() {
     let mut rt = runtime(unread_timeline);
     rt.set_system_reduced_motion(true);
     rt.frame(1.0 / 60.0);
@@ -285,7 +284,8 @@ fn reduced_motion_should_close_the_new_markers_space_after_the_short_fade() {
     for _ in 0..30 {
         rt.frame(1.0 / 60.0);
     }
-    assert!(rt.presented("new-marker").is_none(), "reduced motion should not reserve the row for 2.5 seconds");
+    let (_, opacity) = rt.presented("new-marker").expect("the divider's space");
+    assert!(opacity < 0.01, "reduced motion should not fade for 2.5 seconds: {opacity}");
 }
 
 #[test]
@@ -2898,49 +2898,95 @@ fn pressing_a_bubble_beside_its_text_should_open_its_thread() {
     assert_eq!(rt.state.active_thread(), Some("$own"));
 }
 
-#[test]
-fn in_bubbles_the_toolbar_of_the_users_own_message_should_sit_just_left_of_its_bubble() {
-    let rt = runtime(bubble_room);
-    let toolbar = element_rect(&rt, "actions-$own");
-    let own = element_rect(&rt, "msg-own-bubble");
-    let gap = own[0] - (toolbar[0] + toolbar[2]);
-    assert!((gap - super::timeline::TOOLBAR_BESIDE).abs() < 1.0, "beside the bubble, {gap} points off");
-    assert!(toolbar[1] >= own[1] - 1.0, "level with its top, not above it");
+/// Asserts the toolbar `actions` floats on the top edge of `said`: rising above it, reaching
+/// only [`super::timeline::TOOLBAR_OVERLAP`] down over it.
+fn assert_on_top_edge(actions: [f32; 4], said: [f32; 4]) {
+    let overlap = actions[1] + actions[3] - said[1];
+    assert!(
+        (overlap - super::timeline::TOOLBAR_OVERLAP).abs() < 1.0,
+        "the toolbar {actions:?} should reach {} points over {said:?}, not {overlap}",
+        super::timeline::TOOLBAR_OVERLAP
+    );
+}
+
+/// The toolbar of each of a message's actions, in [`bubble_room`] or classic rows.
+fn toolbar_buttons(rt: &Runtime<State>, event_id: &str) -> Vec<&'static str> {
+    ["react", "reply", "thread", "more"].into_iter().filter(|b| rt.find(&format!("{b}-{event_id}")).is_some()).collect()
 }
 
 #[test]
-fn in_bubbles_the_toolbar_of_someone_elses_message_should_sit_just_right_of_its_bubble() {
+fn in_bubbles_the_toolbar_of_someone_elses_short_message_should_start_at_its_bubble() {
     let rt = runtime(bubble_room);
-    let toolbar = element_rect(&rt, "actions-$short-0");
+    let actions = element_rect(&rt, "actions-$short-0");
     let bubble = element_rect(&rt, "msg-short-0-bubble");
-    let gap = toolbar[0] - (bubble[0] + bubble[2]);
-    assert!((gap - super::timeline::TOOLBAR_BESIDE).abs() < 1.0, "beside the bubble, {gap} points off");
+    assert_on_top_edge(actions, bubble);
+    assert!((actions[0] - bubble[0]).abs() < 1.0, "it starts where the bubble does, off the picture");
 }
 
 #[test]
-fn a_wide_bubble_toolbar_should_keep_every_button() {
-    use super::timeline::{ToolbarPlace, beside_toolbar};
-    assert_eq!(beside_toolbar(400.0), ToolbarPlace::Beside { kept: super::timeline::FIXED_BUTTONS });
+fn in_bubbles_the_toolbar_of_the_users_own_short_message_should_end_at_its_bubble() {
+    let rt = runtime(bubble_room);
+    let actions = element_rect(&rt, "actions-$own");
+    let bubble = element_rect(&rt, "msg-own-bubble");
+    assert_on_top_edge(actions, bubble);
+    assert!((actions[0] + actions[2] - (bubble[0] + bubble[2])).abs() < 1.0, "it ends where the bubble does");
 }
 
 #[test]
-fn a_narrower_bubble_toolbar_should_lose_buttons_before_more() {
-    use super::timeline::{TOOLBAR_BESIDE, ToolbarPlace, beside_toolbar, toolbar_width};
-    let room = |buttons| TOOLBAR_BESIDE + toolbar_width(buttons);
-    assert_eq!(beside_toolbar(room(3)), ToolbarPlace::Beside { kept: 2 });
-    assert_eq!(beside_toolbar(room(2)), ToolbarPlace::Beside { kept: 1 });
-    assert_eq!(beside_toolbar(room(1)), ToolbarPlace::Beside { kept: 0 });
+fn in_bubbles_the_toolbar_of_a_long_message_should_sit_at_its_bubbles_top_right() {
+    let mut rt = runtime(bubble_room);
+    change_short_message(&mut rt, |message| {
+        message.content =
+            MessageContent::Text { body: "A message long enough to give its bubble room. ".repeat(3), html: None };
+    });
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let actions = element_rect(&rt, "actions-$short-0");
+    let bubble = element_rect(&rt, "msg-short-0-bubble");
+    assert_on_top_edge(actions, bubble);
+    let inset = bubble[0] + bubble[2] - (actions[0] + actions[2]);
+    assert!((inset - super::timeline::TOOLBAR_INSET).abs() < 1.0, "inset {inset} from the bubble's right");
 }
 
 #[test]
-fn a_bubble_toolbar_without_room_beside_should_keep_only_more_at_the_rows_corner() {
-    use super::timeline::{TOOLBAR_BESIDE, ToolbarPlace, beside_toolbar, toolbar_width};
-    assert_eq!(beside_toolbar(TOOLBAR_BESIDE + toolbar_width(1) - 1.0), ToolbarPlace::Row { kept: 0 });
+fn in_classic_rows_the_toolbar_should_sit_on_the_top_edge_of_the_message() {
+    let rt = runtime(|s| short_room(s, 1));
+    let actions = element_rect(&rt, "actions-$short-0");
+    let name = element_rect(&rt, "msg-short-0-sender-name");
+    let row = element_rect(&rt, "msg-short-0");
+    // The name sits a little below the top of its line.
+    let overlap = actions[1] + actions[3] - name[1];
+    assert!((overlap - super::timeline::TOOLBAR_OVERLAP).abs() < 2.0, "{actions:?} reaches {overlap} over {name:?}");
+    assert!(actions[0] > row[0] + row[2] / 2.0, "at the content's right");
 }
 
-/// Windows where the room beside [`bubble_room`]'s first bubble holds React, Reply and More, and
-/// where the bubble leaves no room beside it.
-const NARROW_BUBBLES: f32 = 640.0;
+#[test]
+fn a_toolbar_should_keep_every_action_where_the_timeline_has_room() {
+    let rt = runtime(bubble_room);
+    assert_eq!(toolbar_buttons(&rt, "$short-0"), ["react", "reply", "thread", "more"]);
+}
+
+#[test]
+fn a_timeline_too_narrow_for_the_toolbar_should_keep_only_more() {
+    let rt = narrow_bubble_room(COMPACT_BUBBLES);
+    assert_eq!(toolbar_buttons(&rt, "$short-0"), ["more"]);
+    let actions = element_rect(&rt, "actions-$short-0");
+    let timeline = element_rect(&rt, "timeline");
+    assert!(actions[0] + actions[2] <= timeline[0] + timeline[2], "{actions:?} within the timeline {timeline:?}");
+}
+
+#[test]
+fn a_toolbar_should_be_as_wide_as_its_buttons() {
+    let rt = runtime(bubble_room);
+    let actions = element_rect(&rt, "actions-$short-0");
+    let more = element_rect(&rt, "more-$short-0");
+    let react = element_rect(&rt, "react-$short-0");
+    assert!((actions[2] - super::timeline::toolbar_width(4)).abs() < 1.0, "{actions:?}");
+    assert!(react[0] > actions[0] && more[0] + more[2] < actions[0] + actions[2], "the buttons fit inside");
+}
+
+/// A window whose timeline is too narrow for a whole toolbar.
 const COMPACT_BUBBLES: f32 = 400.0;
 
 /// [`bubble_room`] in a window `width` points wide.
@@ -2957,23 +3003,7 @@ fn narrow_bubble_room(width: f32) -> Runtime<State> {
 }
 
 #[test]
-fn in_a_narrow_timeline_a_bubbles_toolbar_should_drop_thread_first() {
-    let rt = narrow_bubble_room(NARROW_BUBBLES);
-    assert!(rt.find("thread-$short-0").is_none(), "no room for Thread");
-    assert!(rt.find("reply-$short-0").is_some() && rt.find("more-$short-0").is_some(), "Reply and More stay");
-}
-
-#[test]
-fn in_a_compact_timeline_a_bubbles_toolbar_should_hold_only_more() {
-    let rt = narrow_bubble_room(COMPACT_BUBBLES);
-    for button in ["react", "reply", "thread"] {
-        assert!(rt.find(&format!("{button}-$short-0")).is_none(), "no {button}");
-    }
-    assert!(rt.find("more-$short-0").is_some(), "More stays");
-}
-
-#[test]
-fn adding_a_reaction_from_the_menu_should_open_the_picker_at_more_when_react_is_gone() {
+fn adding_a_reaction_from_the_menu_should_open_the_picker() {
     let mut rt = narrow_bubble_room(COMPACT_BUBBLES);
     rt.update(|s, _| {
         s.popover = Some(crate::state::Popover::MessageMenu {
@@ -3384,6 +3414,161 @@ fn a_held_back_gif_that_failed_should_still_offer_show_and_try_again() {
     press(&mut rt, "show-media-$gif");
     assert!(rt.state.revealed_media.contains(&(AccountId::new(demo::ADA), "$gif".to_owned())));
     assert!(!rt.state.gifs.has_failed(url), "tried again");
+}
+
+// ----- messages changing in place --------------------------------------------------------
+
+/// [`short_room`]'s one message replaced, in a frame that animates, by `change`d.
+fn change_short_message(rt: &mut Runtime<State>, change: impl FnOnce(&mut Message)) {
+    let mut entry = short_message("short-0", 0);
+    if let EntryKind::Message(message) = &mut entry.kind {
+        change(message);
+    }
+    rt.update(|s, tx| {
+        tx.animated();
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::Set { index: 0, entry }],
+            },
+            tx,
+        );
+    });
+    rt.frame(1.0 / 60.0);
+}
+
+/// Asserts the element `key` shows whole: opaque, and not cut off by a row still easing open.
+fn assert_shown_whole(rt: &Runtime<State>, key: &str) {
+    let e = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}"));
+    assert!(e.opacity > 0.99, "{key} fades in: {}", e.opacity);
+    assert!((e.visible[3] - e.rect[3]).abs() < 0.5, "{key} is uncovered bit by bit: {:?} of {:?}", e.visible, e.rect);
+}
+
+#[test]
+fn a_reaction_should_show_at_once() {
+    let mut rt = runtime(|s| short_room(s, 1));
+    change_short_message(&mut rt, |message| {
+        message.reactions = vec![matrix_core::Reaction { key: "👍".into(), count: 1, mine: true }];
+    });
+    rt.frame(1.0 / 60.0);
+    assert_shown_whole(&rt, "reaction-$short-0-👍");
+}
+
+#[test]
+fn a_second_reaction_should_show_at_once() {
+    let mut rt = runtime(|s| short_room(s, 1));
+    let reaction = |key: &str| matrix_core::Reaction { key: key.into(), count: 1, mine: false };
+    change_short_message(&mut rt, |message| message.reactions = vec![reaction("👍")]);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    change_short_message(&mut rt, |message| message.reactions = vec![reaction("👍"), reaction("🎉")]);
+    rt.frame(1.0 / 60.0);
+    assert_shown_whole(&rt, "reaction-$short-0-🎉");
+}
+
+/// A GIF header `width` by `height` pixels, without frames.
+fn gif_header(width: u16, height: u16) -> std::sync::Arc<[u8]> {
+    let mut bytes = b"GIF89a".to_vec();
+    bytes.extend(width.to_le_bytes());
+    bytes.extend(height.to_le_bytes());
+    bytes.into()
+}
+
+const GIF_URL: &str = "https://x.org/party.gif";
+
+/// [`short_room`] with its message linking a GIF that is still downloading.
+fn loading_gif_room(s: &mut State) {
+    short_room(s, 1);
+    let mut entry = short_message("short-0", 0);
+    if let EntryKind::Message(message) = &mut entry.kind {
+        message.content = MessageContent::Text { body: GIF_URL.into(), html: None };
+    }
+    s.apply(
+        Event::TimelineChanged {
+            account: AccountId::new(demo::ADA),
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Set { index: 0, entry }],
+        },
+        &mut rune::Tx::default(),
+    );
+    s.gifs.loading(GIF_URL);
+}
+
+#[test]
+fn a_gif_arriving_should_keep_its_messages_height() {
+    let mut rt = runtime(loading_gif_room);
+    let row = rt.presented("msg-short-0").expect("the message").0;
+    rt.update(|s, tx| {
+        tx.animated();
+        s.gifs.loaded(GIF_URL.into(), gif_header(300, 200));
+    });
+    for frame in 0..30 {
+        rt.frame(1.0 / 60.0);
+        let now = rt.presented("msg-short-0").unwrap().0;
+        assert!((now[3] - row[3]).abs() < 0.5, "frame {frame}: the message went from {} to {} tall", row[3], now[3]);
+    }
+}
+
+#[test]
+fn a_gif_arriving_should_show_at_once() {
+    let mut rt = runtime(loading_gif_room);
+    rt.update(|s, tx| {
+        tx.animated();
+        s.gifs.loaded(GIF_URL.into(), gif_header(300, 200));
+    });
+    rt.frame(1.0 / 60.0);
+    let (gif, opacity) = rt.presented(&format!("gif-{GIF_URL}")).expect("the GIF");
+    assert!(opacity > 0.99, "the GIF fades in: {opacity}");
+    assert!((gif[2] / gif[3] - 1.5).abs() < 0.05, "in the GIF's shape: {gif:?}");
+}
+
+#[test]
+fn a_faded_new_marker_should_keep_its_space_while_on_screen() {
+    let mut rt = runtime(unread_timeline);
+    let after = rt.presented("msg-after").unwrap().0;
+    rt.update(|s, _| s.focus_changed(true));
+    for frame in 0..240 {
+        rt.frame(1.0 / 60.0);
+        let now = rt.presented("msg-after").unwrap().0;
+        assert!((now[1] - after[1]).abs() < 0.5, "frame {frame}: the message moved from {} to {}", after[1], now[1]);
+    }
+    let (_, opacity) = rt.presented("new-marker").expect("the divider's space");
+    assert!(opacity < 0.01, "the divider faded: {opacity}");
+}
+
+/// Many messages, the "New" divider, then a few: the divider shows at the bottom, and
+/// scrolling up takes it out of view.
+fn long_unread_timeline(s: &mut State) {
+    s.select_room(demo::DEMO_THREAD.0);
+    s.focus_changed(false);
+    let mut entries: Vec<TimelineEntry> = (0..30).map(|i| short_message(&format!("before-{i}"), i)).collect();
+    entries.push(TimelineEntry { id: "new-marker".into(), kind: EntryKind::ReadMarker });
+    entries.extend((30..33).map(|i| short_message(&format!("after-{i}"), i)));
+    s.apply(
+        Event::TimelineChanged {
+            account: AccountId::new(demo::ADA),
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(entries)],
+        },
+        &mut rune::Tx::default(),
+    );
+}
+
+#[test]
+fn a_faded_new_marker_should_leave_once_out_of_view() {
+    let mut rt = runtime(long_unread_timeline);
+    rt.update(|s, _| s.focus_changed(true));
+    for _ in 0..240 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.presented("new-marker").is_some(), "the faded divider keeps its space on screen");
+    rt.update(|_, tx| tx.scroll_to_instant("timeline", 0.0, 0.0));
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("new-marker").is_none(), "the divider leaves once scrolled away");
 }
 
 // ----- verification, account actions, linking devices, signing up ------------------------

@@ -782,7 +782,7 @@ fn message_parts(
                 });
             }
             inside.push(if cx.hides(message) {
-                hidden_media(cx, &message.event_id, (cx.content_width.clamp(0.0, 280.0), 160.0), said)
+                hidden_media(cx, &message.event_id, gif_frame(None, cx.content_width), said)
             } else {
                 linked_gif(&gif.url, cx.content_width, cx.gifs, said)
             });
@@ -960,6 +960,8 @@ fn classic_row(
     let pinned = cx.room.pinned.contains(&message.event_id);
     let content =
         if pinned { col().grow(1.0).min_w(0.0).gap(3.0).child(pinned_label(p)).child(content) } else { content };
+    let actions = interactive && !message.pending;
+    let content = if actions { content.child(toolbar(cx, message, cx.content_width, p)) } else { content };
     let gutter = if continues { el().w(AVATAR) } else { sender_face(cx, key, message, p) };
     let mut row = row()
         .key(key.to_owned())
@@ -984,12 +986,7 @@ fn classic_row(
     if interactive {
         row = row.hover(p.hover);
     }
-    if interactive && !message.pending {
-        let place = ToolbarPlace::Row { kept: FIXED_BUTTONS };
-        message_actions(row.child(toolbar(cx, message, place, p)), cx, message)
-    } else {
-        row
-    }
+    if actions { message_actions(row, cx, message) } else { row }
 }
 
 /// The most of the timeline's width a bubble takes, and the most it takes at all.
@@ -1038,18 +1035,14 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
     let card_width = if bubbled { width - 2.0 * pad_x } else { cx.content_width };
     let mut parts = message_parts(cx, item, latest_call, card_width, &inside, p);
     let actions = interactive && !message.pending;
-    // The toolbar stands beside a bubble, in what it leaves of the column (the user's own have
-    // the picture's place too): as laid out last frame, the widest it can be before then. The
-    // toolbar is pinned, so it never changes the bubble's width. Media and cards, many of which
-    // fill the width they're given, keep a classic row's toolbar.
-    let place = if bubbled {
-        let column = if own { cx.content_width + AVATAR + MESSAGE_GAP } else { cx.content_width };
-        let laid_out = rune::memo::layout_with(&format!("{key}-bubble"), |bubble| bubble[2].ceil());
-        beside_toolbar(column - laid_out.map_or(width, |laid_out| laid_out.min(width)))
+    // The toolbar sits on the top edge of what the message says: a bubble as wide as it was
+    // laid out last frame (the widest it can be before then), or the column media and cards
+    // stand in.
+    let said_width = if bubbled {
+        rune::memo::layout_with(&format!("{key}-bubble"), |bubble| bubble[2]).map_or(width, |laid| laid.min(width))
     } else {
-        ToolbarPlace::Row { kept: FIXED_BUTTONS }
+        cx.content_width
     };
-    let beside = matches!(place, ToolbarPlace::Beside { .. });
     if own && !bubbled {
         // A GIF's caption keeps to its side, as the GIF does.
         parts.inside = parts.inside.into_iter().map(El::self_end).collect();
@@ -1088,7 +1081,6 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
             .children(name)
             .children(parts.inside)
             .child(time.color(p.bubble_meta).self_end())
-            .children((actions && beside).then(|| toolbar(cx, message, place, p)))
     } else {
         // Cards and media take the width a classic row gives them, which they are sized for: a
         // poll fills it, a picture keeps its size on the message's side, the time under it.
@@ -1097,6 +1089,7 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
         let said = if own { said.items_end() } else { said.items_start() };
         said.children(name).children(parts.inside).child(time.color(p.text_muted))
     };
+    let said = if actions { said.child(toolbar(cx, message, said_width, p)) } else { said };
 
     let mut column = col().grow(1.0).min_w(0.0).gap(4.0);
     column = if own { column.items_end() } else { column.items_start() };
@@ -1128,11 +1121,7 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
     } else if message.highlighted && message.sender_id != cx.account.as_str() {
         row = row.fill(p.warning.alpha(0.10)).border_sides([0.0, 0.0, 0.0, 3.0], p.warning);
     }
-    if !actions {
-        return row;
-    }
-    let row = if beside { row } else { row.child(toolbar(cx, message, place, p)) };
-    message_actions(row.hover_group(), cx, message)
+    if actions { message_actions(row.hover_group(), cx, message) } else { row }
 }
 
 /// The sender's name or picture on a message, opening their person panel rather than the thread.
@@ -1150,72 +1139,48 @@ fn opens_person(sender: El, message: &Message) -> El {
         .on_press(move |s: &mut State| s.show_side(crate::state::SidePanel::Person(person.clone())))
 }
 
-/// The message toolbar's distance from its row's right edge.
-fn toolbar_right(cx: &Context<'_>) -> f32 {
-    if cx.readers_column { MESSAGE_PAD_X + super::readers::column_width(cx.reader_faces) } else { 16.0 }
-}
-
 /// A toolbar button's side, the space between buttons, and the toolbar's padding around them.
 const TOOL: f32 = 30.0;
 const TOOL_GAP: f32 = 2.0;
-const TOOLBAR_PAD: f32 = 2.0;
-/// The space between a bubble and the toolbar beside it.
-pub(super) const TOOLBAR_BESIDE: f32 = 6.0;
-/// How far a toolbar over a row's top edge rises above it.
-const TOOLBAR_RISE: f32 = 14.0;
+const TOOLBAR_PAD: f32 = 3.0;
+/// The rule between the message's own actions and More, and the room beside it.
+const TOOLBAR_RULE: f32 = 1.0;
+const TOOLBAR_RULE_MARGIN: f32 = 3.0;
+const TOOLBAR_HEIGHT: f32 = TOOL + 2.0 * TOOLBAR_PAD;
+/// How far the toolbar reaches down over the top edge of what its message says.
+pub(super) const TOOLBAR_OVERLAP: f32 = 10.0;
+/// The toolbar's distance from the end of what its message says.
+pub(super) const TOOLBAR_INSET: f32 = 8.0;
 
-/// The width of a toolbar of `buttons`.
+/// The width of a toolbar of `buttons`, More among them, behind a rule when it isn't alone.
 pub(super) fn toolbar_width(buttons: usize) -> f32 {
     let n = buttons as f32;
-    2.0 * TOOLBAR_PAD + n * TOOL + (n - 1.0).max(0.0) * TOOL_GAP
+    let buttons = 2.0 * TOOLBAR_PAD + n * TOOL + (n - 1.0).max(0.0) * TOOL_GAP;
+    // The rule is one more child, so one more gap.
+    if n > 1.0 { buttons + TOOL_GAP + TOOLBAR_RULE + 2.0 * TOOLBAR_RULE_MARGIN } else { buttons }
 }
 
-/// Where a message's hover toolbar sits, and how many of its fixed buttons it keeps besides More.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum ToolbarPlace {
-    /// Over the row's top corner away from the sender.
-    Row { kept: usize },
-    /// Beside the bubble, on its open side.
-    Beside { kept: usize },
-}
-
-/// The buttons a toolbar may hold besides More, in order: React (none on a call's card, which
-/// keeps no reactions), Reply, and Thread (none inside a thread).
-pub(super) const FIXED_BUTTONS: usize = 3;
-
-/// A bubble's toolbar, in the `room` points beside the bubble. A narrow one loses Thread, then
-/// Reply, then React; More, whose menu offers them all, stays. With no room even for More, More
-/// alone takes the row's corner.
-pub(super) fn beside_toolbar(room: f32) -> ToolbarPlace {
-    let fits = |kept: usize| TOOLBAR_BESIDE + toolbar_width(kept + 1) <= room;
-    (0..=FIXED_BUTTONS)
-        .rev()
-        .find(|&kept| fits(kept))
-        .map_or(ToolbarPlace::Row { kept: 0 }, |kept| ToolbarPlace::Beside { kept })
-}
-
-/// React, Reply, Thread and More while the message is hovered (or its reaction picker or menu is
-/// open), as many as `place` keeps. Over a row, at its top corner away from the sender: in a
-/// room, left of the readers' column, so the toolbar never covers a one-line message's read
-/// indicator. Beside a bubble, level with its top.
-fn toolbar(cx: &Context<'_>, message: &Message, place: ToolbarPlace, p: &Palette) -> El {
+/// React, Reply, Thread, then More behind a rule, while the message is hovered (or its reaction
+/// picker or menu is open), floating on the top edge of what the message says, `said_width`
+/// wide: a bubble, or a row's content. It sits at its top right, close to the words rather than
+/// at the far side of the timeline, the same in classic rows and bubbles. On something narrower
+/// than the toolbar it starts at the message's own edge and reaches into the open side: the
+/// right for other people's, the left for the user's own at the right. A timeline too narrow for
+/// the whole toolbar keeps only More, whose menu offers the rest.
+fn toolbar(cx: &Context<'_>, message: &Message, said_width: f32, p: &Palette) -> El {
     let event_id = message.event_id.clone();
-    let (ToolbarPlace::Row { mut kept } | ToolbarPlace::Beside { mut kept }) = place;
-    let mut keep = |wanted: bool| {
-        let shown = wanted && kept > 0;
-        kept -= usize::from(shown);
-        shown
-    };
-    let react = keep(!matches!(message.content, MessageContent::Call(_)));
-    let (reply, thread) = (keep(true), keep(!cx.in_thread()));
-    let width = toolbar_width(1 + usize::from(react) + usize::from(reply) + usize::from(thread));
-    // The user's own sit at the right, under where a row's toolbar would be: theirs takes the
-    // empty left instead, and beside a bubble, the bubble's left.
-    let (left, top, right) = match (place, cx.on_right(message)) {
-        (ToolbarPlace::Row { .. }, true) => (Some(MESSAGE_PAD_X), -TOOLBAR_RISE, None),
-        (ToolbarPlace::Row { .. }, false) => (None, -TOOLBAR_RISE, Some(toolbar_right(cx))),
-        (ToolbarPlace::Beside { .. }, true) => (Some(-(width + TOOLBAR_BESIDE)), 0.0, None),
-        (ToolbarPlace::Beside { .. }, false) => (None, 0.0, Some(-(width + TOOLBAR_BESIDE))),
+    // A call's card keeps no reactions, and a thread has no threads.
+    let (react, thread) = (!matches!(message.content, MessageContent::Call(_)), !cx.in_thread());
+    let roomy = toolbar_width(2 + usize::from(react) + usize::from(thread)) <= cx.content_width + AVATAR + MESSAGE_GAP;
+    let (react, reply, thread) = (roomy && react, roomy, roomy && thread);
+    let buttons = 1 + usize::from(react) + usize::from(reply) + usize::from(thread);
+    let width = toolbar_width(buttons);
+    let (left, right) = if said_width >= width + 2.0 * TOOLBAR_INSET {
+        (None, Some(TOOLBAR_INSET))
+    } else if cx.on_right(message) {
+        (None, Some(0.0))
+    } else {
+        (Some(0.0), None)
     };
     let open = cx.picking == Some(event_id.as_str());
     let target = if cx.in_thread() { ComposerTarget::Thread } else { ComposerTarget::Room };
@@ -1228,21 +1193,23 @@ fn toolbar(cx: &Context<'_>, message: &Message, place: ToolbarPlace, p: &Palette
             .role("button")
             .cursor(rune::Cursor::Pointer)
             .label(label.to_owned())
+            .help(label.to_owned())
             .focusable(true)
             .child(icon(glyph, 18.0).color(p.text_muted))
     };
     let (key, quoted) = (cx.key.clone(), message.clone());
     let mut bar = row()
         .key(cx.key(&format!("actions-{event_id}")))
-        .pin(left, Some(top), right, None)
+        .pin(left, Some(TOOLBAR_OVERLAP - TOOLBAR_HEIGHT), right, None)
         .w(width)
+        .h(TOOLBAR_HEIGHT)
         .px(TOOLBAR_PAD)
-        .py(TOOLBAR_PAD)
         .gap(TOOL_GAP)
+        .center_y()
         .radius(8.0)
         .fill(p.surface)
         .border(1.0, p.divider)
-        .shadow(2.0, 8.0, Color::BLACK.alpha(0.2))
+        .shadow(2.0, 10.0, Color::BLACK.alpha(0.16))
         .group_opacity(if open { 1.0 } else { 0.0 }, 1.0);
     if react {
         bar = bar.child(button(&icons::SMILE, t!("actions.react"), "react").on_press(move |s: &mut State| {
@@ -1264,6 +1231,9 @@ fn toolbar(cx: &Context<'_>, message: &Message, place: ToolbarPlace, p: &Palette
         bar = bar.child(
             button(&icons::THREAD, t!("actions.thread"), "thread").on_press(move |s: &mut State| s.open_thread(&root)),
         );
+    }
+    if buttons > 1 {
+        bar = bar.child(el().w(TOOLBAR_RULE).h(TOOL * 0.6).mx(TOOLBAR_RULE_MARGIN).fill(p.divider));
     }
     // Every sent message has utilities, including other people's messages.
     let (key, id) = (cx.key.clone(), event_id.clone());
@@ -1384,14 +1354,30 @@ fn thread_link(root: &str, thread: &ThreadSummary, media: &MediaCache, p: &Palet
     link.on_press(move |s: &mut State| s.open_thread(&root))
 }
 
-/// A GIF behind a link in the message, playing once it has loaded; up to `max_width` wide.
+/// A linked GIF's height, loading or not, and the most of the width it takes.
+pub(super) const GIF_HEIGHT: f32 = 160.0;
+const GIF_MAX_WIDTH: f32 = 360.0;
+
+/// The frame of a GIF of `size` pixels (4:3 while unknown), no wider than `max_width`: always
+/// [`GIF_HEIGHT`] tall, so the message keeps its height as the GIF arrives, and as wide as the
+/// GIF's shape makes it.
+fn gif_frame(size: Option<(u32, u32)>, max_width: f32) -> (f32, f32) {
+    let shape = size.map_or(4.0 / 3.0, |(w, h)| w as f32 / h as f32);
+    ((GIF_HEIGHT * shape).min(GIF_MAX_WIDTH).clamp(0.0, max_width.max(0.0)), GIF_HEIGHT)
+}
+
+/// A GIF behind a link in the message, playing once it has loaded, up to `max_width` wide; until
+/// then a placeholder of the same height. Its frame lands at once when the GIF arrives, rather
+/// than fading the picture in over the placeholder.
 fn linked_gif(url: &str, max_width: f32, gifs: &GifCache, p: &Palette) -> El {
+    let player = gifs.player(url);
+    let (w, h) = gif_frame(player.and_then(|player| player.size()), max_width);
     let frame =
-        el().key(format!("gif-{url}")).w(max_width.clamp(0.0, 280.0)).radius(8.0).role("img").label(url.to_owned());
-    match gifs.player(url) {
-        Some(player) => frame.pixels(player.pixels()),
+        el().key(format!("gif-{url}")).size(w, h).radius(8.0).role("img").label(url.to_owned()).instant_changes();
+    match player {
+        // Too wide a GIF for the room keeps its shape, centred in the frame.
+        Some(player) => frame.pixels_fit(player.pixels(), rune::SurfaceFit::Fit),
         None => frame
-            .h(160.0)
             .fill(p.surface)
             .border(1.0, p.divider)
             .center()
