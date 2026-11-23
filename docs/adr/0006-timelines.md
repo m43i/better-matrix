@@ -205,7 +205,8 @@ see who is typing there.
     `on_hover_change`): it stays shown, and the row under it shows no hover and no toolbar, its
     toolbar out of reach (inert, so Tab doesn't stop in it unseen). Rune hit-tests only what
     draws, so a hidden toolbar holds nothing and takes no press or right click, and one shown
-    under the pointer hears it arrive; a press between a shown toolbar's buttons is its own.
+    under the pointer hears it arrive (`on_hover_change` reaches only the topmost hit and its
+    ancestors); a press between a shown toolbar's buttons is its own, with no hand cursor.
     Rune's hover groups are rectangles: joining the toolbar to its row's group lit the next
     message's hidden toolbar over the bottom of each message.
 - **Reactions, replies, threads:**

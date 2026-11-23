@@ -4086,6 +4086,15 @@ fn a_press_between_a_raised_toolbars_buttons_should_open_nothing() {
 }
 
 #[test]
+fn the_pointer_between_a_toolbars_buttons_should_show_no_hand() {
+    let mut rt = onto_a_continued_messages_more(crate::state::MessageLayout::Rows);
+    let actions = element_rect(&rt, "actions-$short-1");
+    rt.pointer_move(actions[0] + 1.5, actions[1] + actions[3] / 2.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.cursor(), rune::Cursor::Default, "a press there does nothing");
+}
+
+#[test]
 fn a_toolbar_shown_under_the_pointer_should_stay_as_it_moves_up_onto_it() {
     let mut rt = runtime(continued_room);
     let row = element_rect(&rt, "msg-short-1");

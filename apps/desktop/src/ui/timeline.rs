@@ -1228,9 +1228,10 @@ fn toolbar(cx: &Context<'_>, message: &Message, said_width: f32, p: &Palette) ->
         .instant_changes()
         // Rune hit-tests only what draws: a hidden toolbar never hears the pointer, so it
         // holds nothing and takes no press, and one shown under the pointer hears it arrive. A
-        // press between its buttons is its own, not the message's under it.
+        // press between its buttons is its own, not the message's under it, and shows no hand.
         .on_hover_change(move |s: &mut State, inside, _| s.message_hover.toolbar(&at, inside))
-        .on_press(|_: &mut State| {});
+        .on_press(|_: &mut State| {})
+        .cursor(rune::Cursor::Default);
     // Under another message's toolbar, its own is out of reach: Tab doesn't stop in it unseen.
     let mut bar = if covered { bar.inert() } else { bar };
     if react {
