@@ -800,7 +800,7 @@
   "settings.emoticons_typed": "Send them as typed",
   "settings.emoticons_typed_hint": ":D stays :D.",
   "settings.emoji_style_hint": "Choose how Google Noto emoji look on this device.",
-  "settings.emoji_color": "Color",
+  "settings.emoji_color": "Colour",
   "settings.emoji_monochrome": "Monochrome",
   "slash.not_scheduled": "/{{command}} does something rather than send a message, so it can't be scheduled.",
   "slash.no_spoiler": "/{{command}} can't take a spoiler: what it sets is shown to everyone.",

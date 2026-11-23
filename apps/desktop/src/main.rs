@@ -1007,14 +1007,14 @@ mod tests {
     }
 
     #[test]
-    fn an_emoji_without_noto_outlines_should_draw_in_grayscale_in_monochrome_mode() {
+    fn an_emoji_without_noto_outlines_should_draw_in_greyscale_in_monochrome_mode() {
         let spec = spec();
         EmojiStyle::Monochrome.apply();
         let mut text = rune::text::TextSystem::for_window(spec.fonts, spec.families);
         let layout = text.layout_rich("🫩", &[], rune::TextStyle::new(24.0, 400.0), 1.0, None);
         let mut quads = Vec::new();
         text.glyphs_for_layout(&layout, 1.0, [0.0, 0.0], false, &mut quads);
-        let bitmap = quads.iter().find(|quad| quad.color != 0).expect("grayscale bitmap");
+        let bitmap = quads.iter().find(|quad| quad.color != 0).expect("greyscale bitmap");
         let pixels = text.color_glyph(bitmap.color).rgba();
         let (rgba, remainder) = pixels.as_chunks::<4>();
         assert!(!rgba.is_empty() && remainder.is_empty() && rgba.iter().all(|[r, g, b, _]| r == g && g == b));

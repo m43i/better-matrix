@@ -54,7 +54,7 @@ fn the_emoji_style_should_survive_saving_and_loading_settings() {
 }
 
 #[test]
-fn older_settings_should_use_color_emoji() {
+fn older_settings_should_use_colour_emoji() {
     assert_eq!(load_settings(&Prefs::memory()).emoji_style, EmojiStyle::Color);
 }
 

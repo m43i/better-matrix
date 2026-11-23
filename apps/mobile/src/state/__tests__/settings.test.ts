@@ -59,7 +59,7 @@ describe('parseSettings', () => {
     );
   });
 
-  it('older settings should use color emoji', () => {
+  it('older settings should use colour emoji', () => {
     expect(parseSettings(JSON.stringify({ appearance: 'dark' })).emojiStyle).toBe('color');
   });
 });

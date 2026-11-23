@@ -142,7 +142,7 @@ one message with its formatting pre-parsed. See [ADR 0006](adr/0006-timelines.md
 : An emoji added to a message; the same emoji from several people is counted on one chip.
 
 **Emoji style**
-: The device setting under Emoticons for how Unicode emoji draw. Color uses Noto Color Emoji
+: The device setting under Emoticons for how Unicode emoji draw. Colour uses Noto Color Emoji
 and Monochrome uses Noto Emoji (`EmojiStyle`).
 
 **Read indicator**

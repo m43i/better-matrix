@@ -6,8 +6,8 @@
 - `NotoColorEmoji.ttf` is Google's Noto Color Emoji 2.057 from
   [googlefonts/noto-emoji](https://github.com/googlefonts/noto-emoji/blob/main/2D/fonts/NotoColorEmoji.ttf).
   The Git blob is `e605743d05f261634f0b3f68a439d9b557d8f335`.
-- `BetterMatrixNotoEmoji.ttf` uses Noto Emoji outlines where available and grayscale Noto
-  Color Emoji bitmaps for the remaining glyphs. It keeps the color font's Unicode and ligature
+- `BetterMatrixNotoEmoji.ttf` uses Noto Emoji outlines where available and greyscale Noto
+  Color Emoji bitmaps for the remaining glyphs. It keeps the colour font's Unicode and ligature
   coverage.
 - The files ending in `Sbix.ttf` keep their counterparts' artwork and shaping tables.
   They use Apple's [sbix](https://developer.apple.com/fonts/TrueType-Reference-Manual/RM06/Chap6sbix.html)
