@@ -751,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "better-matrix-desktop"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "chrono",
  "cpal",
@@ -4696,7 +4696,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "matrix-core"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "base64 0.22.1",
  "eyeball-im",
@@ -4730,7 +4730,7 @@ dependencies = [
 
 [[package]]
 name = "matrix-ffi"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "jni 0.21.1",
  "livekit",
