@@ -79,11 +79,19 @@ serde_json.workspace = true
 
 [build-dependencies]
 rune-i18n = { workspace = true, features = ["codegen"] }
-# The Windows executable's version resource (build.rs); a no-op for other targets.
+# The Windows executable's icon and version resources (build.rs).
 embed-resource = "3"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 rune-notify.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 # Notifications: one session-bus connection shows them and hears their clicks.

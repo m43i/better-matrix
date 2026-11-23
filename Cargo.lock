@@ -767,6 +767,7 @@ dependencies = [
  "matrix-core",
  "opuscule",
  "pollster 0.4.0",
+ "raw-window-handle",
  "reqwest 0.13.5",
  "rfd",
  "rune",
@@ -780,6 +781,7 @@ dependencies = [
  "symphonia",
  "tempfile",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
  "zbus 6.3.0",
  "zip",
 ]

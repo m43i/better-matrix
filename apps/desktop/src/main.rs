@@ -857,6 +857,8 @@ fn main() {
             });
             false
         });
+    #[cfg(target_os = "windows")]
+    let app = app.on_window(platform::window_icon::set);
     // Renders, scripts and traces run on the detached demo state: no engine, no keychain, and
     // nothing they change reaches the user's saved settings.
     if rune::is_headless() {

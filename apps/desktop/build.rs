@@ -1,6 +1,5 @@
-//! Compiles the message catalogs in `i18n/` into the binary (see `src/i18n.rs`) and, for Windows,
-//! gives the executable its version resource: the product name and version that Explorer shows
-//! and that code signing checks before it signs (ADR 0001).
+//! Compiles the message catalogs in `i18n/` into the binary (see `src/i18n.rs`) and embeds the
+//! app icon and version info in the Windows executable (ADR 0001).
 
 use std::{env, fs, io, path::Path};
 
@@ -10,14 +9,18 @@ fn main() -> io::Result<()> {
     rune_i18n::codegen::generate(Path::new("i18n"), out)?;
     println!("cargo:rerun-if-changed=build.rs");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        version_resource(out)?;
+        windows_resources(out)?;
     }
     Ok(())
 }
 
-/// Writes `version.rc` from the package version and links it into the `better-matrix` binary.
+/// Links the app icon and package version into the `better-matrix` binary.
 /// The numeric versions drop a pre-release (1.2.3-rc.1 is 1.2.3.0); the text keeps it.
-fn version_resource(out: &Path) -> io::Result<()> {
+fn windows_resources(out: &Path) -> io::Result<()> {
+    let icon = "../../packaging/icons/better-matrix.ico";
+    println!("cargo:rerun-if-changed={icon}");
+    fs::copy(icon, out.join("better-matrix.ico"))?;
+
     let var = |name: &str| env::var(name).map_err(|_| io::Error::other(format!("{name} is not set")));
     let numeric = format!(
         "{},{},{},0",
@@ -26,11 +29,12 @@ fn version_resource(out: &Path) -> io::Result<()> {
         var("CARGO_PKG_VERSION_PATCH")?
     );
     let version = var("CARGO_PKG_VERSION")?;
-    let rc = out.join("version.rc");
+    let rc = out.join("better-matrix.rc");
     fs::write(
         &rc,
         format!(
-            r#"1 VERSIONINFO
+            r#"BETTER_MATRIX_ICON ICON "better-matrix.ico"
+1 VERSIONINFO
 FILEVERSION {numeric}
 PRODUCTVERSION {numeric}
 FILEOS 0x40004
@@ -58,7 +62,7 @@ END
 "#
         ),
     )?;
-    embed_resource::compile_for(&rc, ["better-matrix"], embed_resource::NONE)
+    embed_resource::compile_for(&rc, ["better-matrix"], embed_resource::ParamsIncludeDirs([out]))
         .manifest_required()
-        .map_err(|error| io::Error::other(format!("the version resource didn't compile: {error}")))
+        .map_err(|error| io::Error::other(format!("the Windows resources didn't compile: {error}")))
 }

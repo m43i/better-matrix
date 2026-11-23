@@ -10,6 +10,8 @@ mod secrets;
 pub mod sound;
 pub mod updates;
 pub mod video;
+#[cfg(target_os = "windows")]
+pub mod window_icon;
 
 #[cfg(test)]
 mod tests;
