@@ -255,14 +255,10 @@ impl super::State {
         }));
     }
 
-    pub(super) fn search_destinations(&mut self, now: Instant, account: &matrix_core::AccountId) -> bool {
+    pub(super) fn search_destinations(&mut self, now: Instant, account: &matrix_core::AccountId) {
         use super::Purpose;
         use matrix_core::Command;
 
-        let popover = self.popover.clone();
-        if self.search.field.focused && self.popover.is_none() {
-            self.open_search();
-        }
         let previous = self.search.requests();
         let due = self.search.due(now);
         let current = self.search.requests();
@@ -271,7 +267,7 @@ impl super::State {
                 self.engine.send(Command::Cancel(request));
             }
         }
-        let Some(term) = due else { return self.popover != popover };
+        let Some(term) = due else { return };
         let filter = self.search.filter;
         if filter.includes(SearchFilter::Messages) {
             let command = Command::SearchMessages { account: account.clone(), term: term.clone() };
@@ -290,7 +286,6 @@ impl super::State {
                 self.search.directory_mut(kind).status = SearchStatus::Searching(request);
             }
         }
-        self.popover != popover
     }
 
     /// Drop results and stop their local history scan when a search is left.

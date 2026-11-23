@@ -7409,21 +7409,13 @@ fn raising_a_member_to_the_users_own_level_should_ask_first() {
 }
 
 #[test]
-fn a_gif_on_screen_should_play_while_the_window_shows_and_hold_while_hidden() {
-    let (mut s, mut commands) = state();
+fn a_permalink_opened_during_a_search_should_leave_search_closed() {
+    let (mut s, _) = state();
     let id = AccountId::new("@a:example.org");
-    with_rooms(&mut s, &id, &["!one:x"], Vec::new());
+    with_rooms(&mut s, &id, &["!one:x", "!two:x"], Vec::new());
     s.select_room("!one:x");
-    let reset = matrix_core::TimelineDiff::Reset(vec![gif_entry("a")]);
-    apply(&mut s, Event::TimelineChanged { account: id, key: TimelineKey::room("!one:x"), diffs: vec![reset] });
-    let (request, command) =
-        drain(&mut commands).into_iter().find(|(_, c)| matches!(c, Command::FetchGif { .. })).unwrap();
-    let Command::FetchGif { url } = command else { unreachable!() };
-    apply(&mut s, Event::GifLoaded { url: url.clone(), bytes: Arc::from(&b"GIF89a"[..]) });
-    apply(&mut s, Event::Finished { request, result: Ok(()) });
-    s.focus_changed(false);
-    s.visibility_changed(true);
-    assert!(!s.gifs.player(&url).unwrap().paused(), "an unfocused window beside another still shows it");
-    s.visibility_changed(false);
-    assert!(s.gifs.player(&url).unwrap().paused());
+    s.open_search();
+    s.open_permalink("https://matrix.to/#/!two:x");
+    s.search_people(std::time::Instant::now());
+    assert_eq!(s.popover, None);
 }

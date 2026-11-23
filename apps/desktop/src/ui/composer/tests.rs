@@ -4,6 +4,10 @@ use super::*;
 use crate::{demo, ui};
 
 fn long_draft(target: ComposerTarget) -> Runtime<State> {
+    draft(target, &"Another line\n".repeat(40))
+}
+
+fn draft(target: ComposerTarget, text: &str) -> Runtime<State> {
     let mut state = State::detached();
     demo::seed(&mut state);
     state.select_room(demo::DEMO_THREAD.0);
@@ -12,7 +16,7 @@ fn long_draft(target: ComposerTarget) -> Runtime<State> {
     }
     let mut rt = Runtime::new(state, ui::view, (1200.0, 760.0), Env { system_dark: true, scale: 1.0 });
     rt.frame(0.0);
-    rt.paste("Another line\n".repeat(40));
+    rt.paste(text);
     rt.frame(1.0 / 60.0);
     // A settle lands on the tree as it stood before the frame's input, so the grown composer
     // settles on the frame after the paste.
@@ -69,8 +73,13 @@ fn an_overflowing_composer_should_have_a_scroll_indicator() {
 
 #[test]
 fn dragging_a_selection_above_the_composer_should_reveal_earlier_lines() {
-    for target in [ComposerTarget::Room, ComposerTarget::Thread] {
-        let mut rt = long_draft(target);
+    // In a code fence too, where the composer reveals its own caret.
+    let fenced = format!("```\n{}", "let line = 1;\n".repeat(40));
+    for (target, text) in [ComposerTarget::Room, ComposerTarget::Thread]
+        .into_iter()
+        .flat_map(|target| [(target, "Another line\n".repeat(40)), (target, fenced.clone())])
+    {
+        let mut rt = draft(target, &text);
         let viewport = rt.presented(&key(target, "composer-scroll")).unwrap().0;
         let before = field(&rt, target).scrolled[1];
         let (x, start, end) = (viewport[0] + 30.0, viewport[1] + viewport[3] - 24.0, viewport[1] - 30.0);

@@ -1032,9 +1032,6 @@ pub struct State {
     pub drop_hover: bool,
     /// Whether the window has keyboard focus; notifications for the open room are skipped then.
     pub window_focused: bool,
-    /// Whether the window is on screen (not minimised, hidden or covered whole): linked GIFs
-    /// play only then.
-    pub window_visible: bool,
     /// The selected rail tile's halo: breathing a while after the user turns to the window.
     pub breath: breath::Breath,
     /// The latest error worth telling the user about; dismissable.
@@ -1135,7 +1132,6 @@ impl State {
             settings,
             drop_hover: false,
             window_focused: true,
-            window_visible: true,
             breath: breath::Breath::Asked,
             notice: None,
             pending_link: None,
@@ -2404,16 +2400,12 @@ impl State {
         self.dispatch(command, purpose);
     }
 
-    /// The window went off screen or came back: linked GIFs play only while someone can see them.
-    pub fn visibility_changed(&mut self, visible: bool) {
-        self.window_visible = visible;
-        self.fetch_linked(std::time::Instant::now());
-    }
-
     /// The window gained or lost focus. Coming back marks what is on screen read: messages that
     /// arrived while away count as unread until the user is back.
     pub fn focus_changed(&mut self, focused: bool) {
         self.window_focused = focused;
+        // Linked GIFs play only while someone can see them.
+        self.fetch_linked(std::time::Instant::now());
         if !focused {
             self.write_drafts(std::time::Instant::now(), true);
             return;
@@ -2456,7 +2448,7 @@ impl State {
         }
         changed |= self.call.as_mut().is_some_and(Call::measure_videos);
         self.retry_due(now, tx);
-        changed |= self.search_people(now);
+        self.search_people(now);
         changed |= self.position_message(tx);
         changed |= self.expire_flash(now, tx);
         self.resume_refused();
@@ -2723,7 +2715,7 @@ impl State {
     }
 
     /// Fetches what the links on screen show and isn't here, as far as it may be tried at `now`:
-    /// their cards and their GIFs. The GIFs on screen play while the window can be seen; the rest
+    /// their cards and their GIFs. The GIFs on screen play while the window is focused; the rest
     /// hold their frame.
     fn fetch_linked(&mut self, now: std::time::Instant) {
         self.fetch_link_previews(now);
@@ -2739,7 +2731,7 @@ impl State {
             .map(str::to_owned)
             .collect();
         let mut wanted: Vec<String> = shown.iter().filter(|url| self.gifs.wants(url, now)).cloned().collect();
-        self.gifs.show(shown, self.window_visible);
+        self.gifs.show(shown, self.window_focused);
         wanted.sort_unstable();
         for url in wanted {
             self.gifs.loading(&url);
@@ -3280,11 +3272,10 @@ impl State {
     // ----- people ----------------------------------------------------------------------------
 
     /// Sends the user-directory searches (the top bar's, the invite dialog's, the new chat's)
-    /// whose text has rested by `now`. True when that changed what shows: the top bar's
-    /// results opened or closed.
-    pub fn search_people(&mut self, now: std::time::Instant) -> bool {
-        let Some(account) = self.nav.account.clone() else { return false };
-        let changed = self.search_destinations(now, &account);
+    /// whose text has rested by `now`.
+    pub fn search_people(&mut self, now: std::time::Instant) {
+        let Some(account) = self.nav.account.clone() else { return };
+        self.search_destinations(now, &account);
         if let Some(term) = self.invite_search.due(now) {
             let request = self.dispatch(Command::SearchPeople { account: account.clone(), term }, Purpose::People);
             self.invite_search.request = Some(request);
@@ -3293,7 +3284,6 @@ impl State {
             let request = self.dispatch(Command::SearchPeople { account, term }, Purpose::People);
             self.chat_search.request = Some(request);
         }
-        changed
     }
 
     /// Opens the invite dialog for the open room.
@@ -4254,11 +4244,6 @@ impl State {
     }
 
     pub fn close_popover(&mut self) {
-        // The search's field leaves the view with its popover, so Rune never tells it that it
-        // lost focus; a field still marked focused would open the search again.
-        if self.popover == Some(Popover::Search) {
-            self.search.field.focused = false;
-        }
         self.popover = None;
     }
 

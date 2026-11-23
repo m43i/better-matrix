@@ -301,10 +301,11 @@ fn fingerprint(words: &str) -> u64 {
     hasher.finish()
 }
 
-/// The side of a custom emoji in text: a body line's height, so it never makes the line taller.
-const EMOJI: f32 = 22.0;
-/// How far a custom emoji stands above the baseline: where a body line's baseline sits.
-const EMOJI_ASCENT: f32 = 17.0;
+/// The side of a custom emoji in text: within a body line (Inter at 15 pt on 22 pt stands about
+/// 16.45 pt above its baseline and 5.55 below), so it never makes the line taller.
+const EMOJI: f32 = 21.0;
+/// How far a custom emoji stands above the baseline, the rest of it below.
+const EMOJI_ASCENT: f32 = 16.0;
 
 /// How a pill in a message draws.
 enum Inline {
