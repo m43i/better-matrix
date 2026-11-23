@@ -1,12 +1,13 @@
 //! Read-only message formatting. Selectable text keeps link hit testing and text selection
 //! without making a received message a text field.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rune::{Block, Color, Cursor, El, InlineIcon, Link, Mark, PillStyle, Span, TextEdit, TextStyle, col, row, text};
 
 use super::theme::{Palette, font};
-use crate::state::{MediaCache, SPOILER_LINK, State};
+use crate::i18n::t;
+use crate::state::{MediaCache, PlacedCode, RichText, SPOILER_LINK, State, place_code};
 
 /// What a message's text needs besides its words: whose it is, who reads it, which spoilers
 /// they revealed, and the custom emoji's pictures.
@@ -42,14 +43,23 @@ enum Fit {
     Line(TextStyle, Color),
 }
 
-pub fn formatted(key: &str, edit: &TextEdit, look: Look<'_>, p: &Palette) -> El {
-    formatted_in(key, edit, look, p.text, p)
+pub fn formatted(key: &str, rich: &RichText, look: Look<'_>, p: &Palette) -> El {
+    formatted_in(key, rich, look, p.text, p)
 }
 
 /// [`formatted`] text whose plain words take `color`.
-pub fn formatted_in(key: &str, edit: &TextEdit, look: Look<'_>, color: Color, p: &Palette) -> El {
+pub fn formatted_in(key: &str, rich: &RichText, look: Look<'_>, color: Color, p: &Palette) -> El {
+    let edit = &rich.edit;
     let fit = Fit::Wrap(color);
     let mut body = col().key(key.to_owned()).w_full().selection_group(true);
+    let placed = place_code(edit, &rich.code);
+    let mut colors_by_line = code_colors(rich, &placed, p);
+    // The code block being gathered: which one it is (its place, or none for code no block was
+    // placed on), where it starts, its lines' elements and its code.
+    let mut code: Option<(Option<usize>, usize, Vec<El>, String)> = None;
+    let finish = |code: Option<(Option<usize>, usize, Vec<El>, String)>| {
+        code.map(|(_, start, lines, words)| code_block(key, start, lines, words, p))
+    };
     let mut paragraphs = edit.paragraphs().into_iter().peekable();
     let mut numbers = [0usize; 4];
     while let Some(paragraph) = paragraphs.next() {
@@ -61,7 +71,29 @@ pub fn formatted_in(key: &str, edit: &TextEdit, look: Look<'_>, color: Color, p:
         }
         let block = paragraph.block;
         let line_key = format!("{key}-{}", range.start);
-        let content = inline(&line_key, edit, range, block, look, fit, p);
+        let place = placed.iter().position(|code| code.first <= paragraph.index && paragraph.index <= code.last);
+        // A blank line Rune put between placed blocks belongs to neither: an ordinary line.
+        let block =
+            if block == Block::Code && !placed.is_empty() && place.is_none() { Block::Paragraph } else { block };
+        if block == Block::Code {
+            let colors = colors_by_line.remove(&range.start).unwrap_or_default();
+            let line =
+                row().w_full().px(8.0).child(inline(&line_key, edit, range.clone(), block, colors, look, fit, p));
+            match &mut code {
+                Some((from, _, lines, words)) if *from == place => {
+                    lines.push(line);
+                    words.push('\n');
+                    words.push_str(&edit.text[range]);
+                }
+                _ => {
+                    body = body.children(finish(code.take()));
+                    code = Some((place, range.start, vec![line], edit.text[range].to_owned()));
+                }
+            }
+            continue;
+        }
+        body = body.children(finish(code.take()));
+        let content = inline(&line_key, edit, range, block, Vec::new(), look, fit, p);
         let paragraph = match block {
             Block::Bullet(level) | Block::Numbered(level) => {
                 let level = usize::from(level).min(numbers.len() - 1);
@@ -81,28 +113,84 @@ pub fn formatted_in(key: &str, edit: &TextEdit, look: Look<'_>, color: Color, p:
                     .child(content.copy_prefix(format!("{marker} ")))
             }
             Block::Quote => row().w_full().pl(12.0).border_sides([0.0, 0.0, 0.0, 3.0], p.divider).child(content),
-            Block::Code => row().w_full().px(8.0).fill(p.surface).child(content),
-            Block::Paragraph => {
+            Block::Paragraph | Block::Code => {
                 numbers.fill(0);
                 content
             }
         };
         body = body.child(paragraph);
     }
-    body
+    body.children(finish(code))
+}
+
+/// A code block: its lines, and a button floating at its top right while it's hovered that
+/// copies its code. Its lines keep clear of the button, so it never covers code to select.
+/// Room at a code block's right for its copy button: the button and its margin.
+const COPY_ROOM: f32 = 32.0;
+
+fn code_block(key: &str, start: usize, lines: Vec<El>, code: String, p: &Palette) -> El {
+    let copy = super::components::icon_button(&super::icons::COPY, t!("actions.copy_code"), false, p.text_muted, p)
+        .key(format!("{key}-copy-code-{start}"))
+        .fill(p.surface)
+        .border(1.0, p.divider)
+        .pin(None, Some(4.0), Some(4.0), None)
+        .group_opacity(0.0, 1.0)
+        .on_press_tx(move |_: &mut State, tx| tx.copy(code.clone()));
+    col()
+        .key(format!("{key}-code-{start}"))
+        .w_full()
+        .pr(COPY_ROOM)
+        .fill(p.surface)
+        .radius(4.0)
+        .hover_group()
+        .children(lines)
+        .child(copy)
 }
 
 /// Formatted text on one line in `style` and `color`, cut short with "…": its blocks (list
 /// markers, quotes) are left out, its words keep their marks.
 pub fn line(key: &str, edit: &TextEdit, look: Look<'_>, style: TextStyle, color: Color, p: &Palette) -> El {
-    inline(key, edit, 0..edit.text.len(), Block::Paragraph, look, Fit::Line(style, color), p)
+    inline(key, edit, 0..edit.text.len(), Block::Paragraph, Vec::new(), look, Fit::Line(style, color), p)
 }
 
+/// The colours of `rich`'s code in its blocks' languages: each code line's spans (from the
+/// line's start), by where the line starts in the text. Each block is highlighted whole, once
+/// (and cached), so a comment or string over several lines colours each of them, and its
+/// tokens are walked once alongside its lines.
+fn code_colors(rich: &RichText, placed: &[PlacedCode<'_>], p: &Palette) -> HashMap<usize, Vec<Span>> {
+    let lines = rich.edit.paragraphs();
+    let mut colors = HashMap::new();
+    for block in placed {
+        let Some(language) = block.language else { continue };
+        let (start, end) = (lines[block.first].range.start, lines[block.last].range.end);
+        let Some(code) = rich.edit.text.get(start..end) else { continue };
+        let found = rune_kit::syntax::highlight(Some(language), code);
+        let mut next = 0;
+        for line in &lines[block.first..=block.last] {
+            let (from, to) = (line.range.start - start, line.range.end - start);
+            while found.get(next).is_some_and(|(range, _)| range.end <= from) {
+                next += 1;
+            }
+            // A token running on past the line stays for the next one.
+            let on_line: Vec<_> = found[next..]
+                .iter()
+                .take_while(|(range, _)| range.start < to)
+                .map(|(range, paint)| (range.start.max(from) - from..range.end.min(to) - from, *paint))
+                .collect();
+            colors.insert(line.range.start, p.syntax.spans(&on_line, 0));
+        }
+    }
+    colors
+}
+
+#[expect(clippy::too_many_arguments, reason = "one line's text, place and look, as each caller has them")]
 fn inline(
     key: &str,
     edit: &TextEdit,
     range: std::ops::Range<usize>,
     block: Block,
+    // A code line's colours in its language.
+    colors: Vec<Span>,
     look: Look<'_>,
     fit: Fit,
     p: &Palette,
@@ -116,6 +204,7 @@ fn inline(
     let mut hidden: Vec<std::ops::Range<usize>> = Vec::new();
     if block == Block::Code {
         spans.push(Span::new(0, words.len()).mono());
+        spans.extend(colors);
     } else {
         for mark in edit.marks() {
             let (start, end) = (mark.start.max(range.start), mark.end.min(range.end));
@@ -288,7 +377,7 @@ mod tests {
 
     fn view(s: &State, _: &mut rune::Cx<State>) -> El {
         let edit = TextEdit::from_html("Text <b>before <a href='https://matrix.org'>a link</a></b> after");
-        formatted("message", &edit, test_look(s), &super::super::theme::palette(true))
+        formatted("message", &RichText { edit, code: Vec::new() }, test_look(s), &super::super::theme::palette(true))
     }
 
     #[test]
@@ -312,7 +401,7 @@ mod tests {
 
     fn hidden_spoiler(s: &State, _: &mut rune::Cx<State>) -> El {
         let edit = TextEdit::from_html("<p>the end: <span data-pill=\"spoiler\">the butler did it</span></p>");
-        formatted("message", &edit, test_look(s), &super::super::theme::palette(true))
+        formatted("message", &RichText { edit, code: Vec::new() }, test_look(s), &super::super::theme::palette(true))
     }
 
     #[test]
@@ -328,7 +417,7 @@ mod tests {
         let edit = TextEdit::from_html(
             "<ul><li>first<br>continuation<br>last line</li><li>second</li></ul><ol><li>numbered<br>continued</li><li>next</li></ol>",
         );
-        formatted("message", &edit, test_look(s), &super::super::theme::palette(true))
+        formatted("message", &RichText { edit, code: Vec::new() }, test_look(s), &super::super::theme::palette(true))
     }
 
     #[test]
@@ -350,7 +439,7 @@ mod tests {
         let edit = TextEdit::from_html(&format!(
             "<ul><li>{words}</li></ul><ol><li>{words}</li></ol><blockquote>{words}</blockquote><pre><code>{words}</code></pre>"
         ));
-        formatted("message", &edit, test_look(s), &super::super::theme::palette(true))
+        formatted("message", &RichText { edit, code: Vec::new() }, test_look(s), &super::super::theme::palette(true))
     }
 
     #[test]
@@ -365,5 +454,48 @@ mod tests {
             assert!(block.rect[0] + block.rect[2] - REACH <= 300.5, "overflow: {:?}", block.rect);
             assert!(block.rect[3] > 22.0, "the block must wrap");
         }
+    }
+
+    #[test]
+    fn code_in_a_known_language_should_take_its_colours_on_every_line() {
+        let rich = RichText::from_html("<pre><code class=\"language-rust\">/* one\ntwo */\nfn main() {}</code></pre>");
+        let colors = code_colors(&rich, &place_code(&rich.edit, &rich.code), &super::super::theme::palette(true));
+        let lines: Vec<_> = rich.edit.paragraphs().into_iter().map(|line| line.range.start).collect();
+        // The comment's second line is still a comment: the block is highlighted whole.
+        let comment = &colors[&lines[1]];
+        assert_eq!(comment.first().map(|span| (span.start, span.end)), Some((0, 6)), "{comment:?}");
+        assert!(!colors[&lines[2]].is_empty());
+    }
+
+    #[test]
+    fn code_blocks_that_follow_each_other_should_each_take_their_language() {
+        let rich = RichText::from_html(
+            "<pre><code class=\"language-rust\">fn main() {}</code></pre><pre><code>fn main() {}</code></pre>",
+        );
+        let colors = code_colors(&rich, &place_code(&rich.edit, &rich.code), &super::super::theme::palette(true));
+        let lines: Vec<_> = rich.edit.paragraphs().into_iter().map(|line| line.range.start).collect();
+        assert!(!colors[&lines[0]].is_empty());
+        assert!(!colors.contains_key(&lines[1]), "the second block has no language");
+    }
+
+    fn two_blocks(s: &State, _: &mut rune::Cx<State>) -> El {
+        let rich = RichText::from_html("<pre><code>a\n</code></pre>\n<pre><code>b\n</code></pre>");
+        formatted("message", &rich, test_look(s), &super::super::theme::palette(true))
+    }
+
+    #[test]
+    fn a_blank_line_between_code_blocks_should_get_no_copy_button() {
+        let mut rt = Runtime::new(State::detached(), two_blocks, (500.0, 300.0), Env::new(true, 1.0));
+        rt.frame(0.0);
+        let buttons = rt.elements().into_iter().filter_map(|e| e.key).filter(|key| key.contains("-copy-code-")).count();
+        assert_eq!(buttons, 2);
+    }
+
+    #[test]
+    fn code_without_a_language_should_stay_plain() {
+        let rich = RichText::from_html("<pre><code>fn main() {}</code></pre>");
+        assert!(
+            code_colors(&rich, &place_code(&rich.edit, &rich.code), &super::super::theme::palette(true)).is_empty()
+        );
     }
 }

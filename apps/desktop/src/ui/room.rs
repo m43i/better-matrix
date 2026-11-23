@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use matrix_core::{RoomKind, RoomSummary, TimelineKey};
-use rune::{Cx, El, TextEdit, col, row, text};
+use rune::{Cx, El, col, row, text};
 
 use super::components::icon_button;
 use super::composer::composer;
@@ -16,7 +16,7 @@ use super::theme::{Palette, font};
 use super::thread::thread_panel;
 use super::timeline::{Context, timeline};
 use crate::i18n::{t, tf};
-use crate::state::{AccountData, ComposerTarget, EmojiFor, PaneLayout, Popover, SidePanel, State};
+use crate::state::{AccountData, ComposerTarget, EmojiFor, PaneLayout, Popover, RichText, SidePanel, State};
 
 pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<State>, layout: &PaneLayout) -> El {
     let Some(room) = s.active_room_id().and_then(|id| account.room(id)) else {
@@ -152,7 +152,7 @@ fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, lay
         let shown = match topic_text(topic) {
             Some(edit) => {
                 let look = topic_look(s, account, room);
-                super::message_text::line("room-topic", &edit, look, font::META, p.text_muted, p)
+                super::message_text::line("room-topic", &edit.edit, look, font::META, p.text_muted, p)
             }
             None => text(topic.to_owned()).key("room-topic").font(font::META).color(p.text_muted).truncate(),
         };
@@ -196,9 +196,9 @@ pub fn topic_line(topic: &str) -> Option<&str> {
 
 /// A topic as shown: its Markdown formatted and its web addresses linked. `None` for plain
 /// words, which show as they are. Worked out once per topic, not on every frame.
-pub fn topic_text(topic: &str) -> Option<Rc<TextEdit>> {
+pub fn topic_text(topic: &str) -> Option<Rc<RichText>> {
     thread_local! {
-        static TOPICS: RefCell<HashMap<String, Option<Rc<TextEdit>>>> = RefCell::new(HashMap::new());
+        static TOPICS: RefCell<HashMap<String, Option<Rc<RichText>>>> = RefCell::new(HashMap::new());
     }
     TOPICS.with_borrow_mut(|topics| {
         if let Some(known) = topics.get(topic) {

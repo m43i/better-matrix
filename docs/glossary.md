@@ -317,6 +317,12 @@ and custom emoji after `:` and two letters, slash commands at the start (`state:
 : A message that says what its sender does ("* Ada waves"), sent with `/me`
 (`MessageContent::Emote`, `Outgoing::Emote`).
 
+**Code fence**
+: A Markdown code block typed in the composer: a line of three backticks, the code, and another
+line of backticks, the first naming the code's language (` ```rust `). Sending turns it into
+a code block in that language (`composer::with_code_fences`), whose code shows in the
+language's colours.
+
 **Emoticon**
 : A face typed as text (`:)`, `:D`, `<3`). The composer keeps it as typed; sending turns each
 one that stands as a word of its own, outside code, links and pills, into its emoji

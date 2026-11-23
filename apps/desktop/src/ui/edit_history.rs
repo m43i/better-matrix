@@ -22,10 +22,7 @@ pub fn dialog_for(s: &State, history: &EditHistory, p: &Palette) -> El {
                 };
                 let words = match &version.html {
                     Some(html) => {
-                        let edit = rune::TextEdit::from_html(&matrix_core::html::to_pills(
-                            html,
-                            matrix_core::html::Pills::Display,
-                        ));
+                        let rich = crate::state::RichText::from_html(html);
                         let look = Look {
                             event_id: &version.event_id,
                             me: history.account.as_str(),
@@ -33,7 +30,7 @@ pub fn dialog_for(s: &State, history: &EditHistory, p: &Palette) -> El {
                             media: &s.media,
                             pictures: s.shows_pictures_of(&history.account, &history.room_id, &history.event_id),
                         };
-                        formatted(&format!("edit-{}", version.event_id), &edit, look, p)
+                        formatted(&format!("edit-{}", version.event_id), &rich, look, p)
                     }
                     None => text(version.body.clone()).font(font::BODY).color(p.text).wrap_anywhere().selectable(true),
                 };

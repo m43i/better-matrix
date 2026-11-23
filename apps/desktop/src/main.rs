@@ -39,7 +39,8 @@ fn spec() -> AppSpec<State> {
                 s.popover = Some(Popover::MessageMenu {
                     key: matrix_core::TimelineKey::room(demo::DEMO_THREAD.0),
                     event_id: "$attachment".into(),
-                    at: Some((700, 220)),
+                    // Near the window's bottom edge: the menu opens upwards.
+                    at: Some((700, 700)),
                 });
             }),
             ("demo-attachment-preview", demo::attachment_preview),

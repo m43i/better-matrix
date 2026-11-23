@@ -3,7 +3,7 @@
 use matrix_core::{AccountId, Attachment, AttachmentKind};
 use rune::{El, col};
 
-use super::components::{Tone, menu_action, popover_panel};
+use super::components::{Tone, at_point, menu_action, popover_panel};
 use super::{icons, theme::Palette};
 use crate::i18n::t;
 use crate::state::{AttachmentAction, State, can_open_attachment};
@@ -38,15 +38,13 @@ pub fn actions(account: &AccountId, file: &Attachment, message: Option<(&str, &s
         .collect()
 }
 
-pub fn menu(account: &AccountId, file: &Attachment, at: (i32, i32), window: [f32; 2], p: &Palette) -> El {
-    col()
+pub fn menu(account: &AccountId, file: &Attachment, at: (i32, i32), window: [f32; 2], p: &Palette) -> [El; 2] {
+    const WIDTH: f32 = 260.0;
+    let menu = col()
         .key("attachment-menu")
         .role("menu")
         .focus_group()
         .modal(true, State::close_popover)
-        .absolute(
-            (at.0 as f32).clamp(4.0, (window[0] - 268.0).max(4.0)),
-            (at.1 as f32).clamp(4.0, (window[1] - 132.0).max(4.0)),
-        )
-        .child(popover_panel(p).w(260.0).children(actions(account, file, None, p)))
+        .child(popover_panel(p).w(WIDTH).children(actions(account, file, None, p)));
+    at_point(menu, "attachment-menu", at, WIDTH, window)
 }

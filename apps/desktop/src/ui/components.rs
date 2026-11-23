@@ -127,6 +127,25 @@ pub fn popover_panel(p: &Palette) -> El {
     )
 }
 
+/// A menu opened at a window point, as a right-click opens one: beside the point, down and to
+/// the right of it, opening up or to the left where the window has no room that way, and
+/// shifted to stay inside the window when it fits neither way (Rune's [`El::anchored`], which
+/// shifts it up or down; `width`, the menu's, shifts it left). The point's marker and the menu,
+/// to go at the window's root in that order; `key` names the marker.
+pub fn at_point(menu: El, key: &str, at: (i32, i32), width: f32, window: [f32; 2]) -> [El; 2] {
+    // Rune's margin inside the window.
+    const MARGIN: f32 = 8.0;
+    // A pointer outside the window (it narrowed since) is taken to its edge.
+    let mut x = (at.0 as f32).min(window[0] - MARGIN).max(MARGIN);
+    let y = (at.1 as f32).min(window[1] - MARGIN).max(MARGIN);
+    if x + width > window[0] - MARGIN && x - width < MARGIN {
+        x = (window[0] - MARGIN - width).max(MARGIN);
+    }
+    let point = format!("{key}-point");
+    let marker = el().key(point.clone()).absolute(x, y).size(0.0, 0.0).a11y_hidden();
+    [marker, menu.anchored(point, rune::Side::Right, rune::Align::Start, 0.0)]
+}
+
 /// How strongly a control speaks: normally, or as a warning for something that can't be undone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {

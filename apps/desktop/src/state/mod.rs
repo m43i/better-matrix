@@ -66,8 +66,8 @@ use rune::{TextEdit, Tx};
 pub use account_actions::{KeyFile, KeyFileStep, KeyTransfer, PasswordForm, RecoveryKeyFor};
 pub use accounts::READ_MARKER_FADE;
 pub use accounts::{
-    AccountData, Accounts, EntryView, Landing, RoomTimeline, Scope, TimelineItem, continues_group, now_ms, rich_body,
-    visual, wants_attention,
+    AccountData, Accounts, EntryView, Landing, PlacedCode, RichText, RoomTimeline, Scope, TimelineItem,
+    continues_group, now_ms, place_code, rich_body, visual, wants_attention,
 };
 pub use admin::{
     PRESET_LEVELS, RoomFields, RoomFormField, RoomSettingsDialog, RoomSettingsSection, SettingsConfirm, SettingsField,

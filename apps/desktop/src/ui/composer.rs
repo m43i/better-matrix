@@ -54,6 +54,11 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
             s.composer_mut(target).before_key(key);
             let c = s.composer(target);
             match key.key {
+                // Inside a Markdown code fence, Enter goes on to the next line of code.
+                Key::Enter if !key.mods.shift && c.in_code_fence() => {
+                    s.composer_mut(target).edit.insert("\n");
+                    true
+                }
                 Key::Enter if !key.mods.shift && c.enter_sends() => {
                     s.send_message(target, tx);
                     true
@@ -130,11 +135,13 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
     col().w_full().px(20.0).pt(4.0).children(scheduled_bar(s, target, p)).child(framed).child(below)
 }
 
-/// Rune follows keyboard edits itself; pointer selection also needs its moving end revealed.
-/// The marker lives in content coordinates, so a wheel scroll alone never asks to reveal it.
+/// Rune follows keyboard edits itself; pointer selection also needs its moving end revealed,
+/// and so does the caret in a code fence, where Enter's new line is the composer's own. The
+/// marker lives in content coordinates, so a wheel scroll alone never asks to reveal it.
 fn selection_caret(s: &State, target: ComposerTarget, cx: &Cx<State>) -> Option<El> {
-    let edit = &s.composer(target).edit;
-    if edit.anchor == edit.focus {
+    let c = s.composer(target);
+    let edit = &c.edit;
+    if edit.anchor == edit.focus && !c.in_code_fence() {
         return None;
     }
     let caret = cx.caret(composer_field(target))?;

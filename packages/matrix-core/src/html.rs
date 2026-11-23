@@ -254,6 +254,129 @@ pub fn holds_spoiler(html: &str) -> bool {
     html.as_bytes().windows(NAME.len()).any(|window| window.eq_ignore_ascii_case(NAME))
 }
 
+/// A code block in Matrix HTML (`<pre>`): its language (its `<code>`'s `language-…` class, as
+/// Matrix's spec and CommonMark write it; `None` without one) and how many lines its code takes.
+/// Rich-text models such as Rune's keep code as lines without a language, and join code blocks
+/// that follow each other, so the line counts tell those lines apart again.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CodeBlock {
+    /// The language its code is in, as its class names it (`rust`, `py`, …).
+    pub language: Option<String>,
+    /// How many lines its code takes, at least one.
+    pub lines: usize,
+}
+
+/// Each code block in `html`, in order.
+///
+/// ```
+/// use matrix_core::html::{CodeBlock, code_blocks};
+/// let html = "<pre><code class=\"language-rust\">fn main() {}\nmain();\n</code></pre><pre><code>ls</code></pre>";
+/// assert_eq!(code_blocks(html), [
+///     CodeBlock { language: Some("rust".into()), lines: 2 },
+///     CodeBlock { language: None, lines: 1 },
+/// ]);
+/// ```
+pub fn code_blocks(html: &str) -> Vec<CodeBlock> {
+    let mut blocks = Vec::new();
+    let mut rest = html;
+    while let Some(start) = rest.find('<') {
+        let Some(end) = rest[start..].find('>').map(|end| start + end) else { break };
+        let tag = &rest[start..=end];
+        rest = &rest[end + 1..];
+        if !tag_name(tag).is_some_and(|(name, closing)| name == "pre" && !closing) {
+            continue;
+        }
+        // The block's `<code>`, when it opens straight away.
+        let code = rest
+            .trim_start()
+            .strip_prefix('<')
+            .and_then(|after| after.find('>').map(|end| &after[..=end]))
+            .map(|tag| format!("<{tag}"))
+            .filter(|tag| tag_name(tag).is_some_and(|(name, closing)| name == "code" && !closing));
+        let language = code.and_then(|tag| attribute(&tag, "class")).and_then(|class| {
+            class
+                .split_whitespace()
+                .find_map(|class| class.strip_prefix("language-"))
+                .filter(|language| !language.is_empty())
+                .map(str::to_owned)
+        });
+        // Its code's lines: a first line break goes, as HTML readers drop it, and a last one
+        // ends the last line rather than starting another.
+        let code = code_text(inner_html(rest, "pre"));
+        let code = code.strip_prefix('\n').unwrap_or(&code);
+        let lines = code.strip_suffix('\n').unwrap_or(code).matches('\n').count() + 1;
+        blocks.push(CodeBlock { language, lines });
+    }
+    blocks
+}
+
+/// Code's text: its tags left out, a `<br>` as the line break it makes.
+fn code_text(html: &str) -> String {
+    let mut text = String::new();
+    let mut rest = html;
+    while let Some(start) = rest.find('<') {
+        text.push_str(&rest[..start]);
+        let Some(end) = rest[start..].find('>').map(|end| start + end) else { return text };
+        if tag_name(&rest[start..=end]).is_some_and(|(name, _)| name == "br") {
+            text.push('\n');
+        }
+        rest = &rest[end + 1..];
+    }
+    text.push_str(rest);
+    text
+}
+
+/// `html` as a rich-text model writes code (`<pre><code>` with its lines, as Rune's
+/// `TextEdit::to_html` does, joining blocks that follow each other) with each of `blocks`, in
+/// order, as a block of its own lines in its language: its `<code>`'s `language-…` class. A
+/// language with anything but letters, digits and `+#._-` is left out; lines past the blocks
+/// stay one block without a language.
+///
+/// ```
+/// use matrix_core::html::{CodeBlock, with_code_blocks};
+/// let html = "<pre><code>fn main() {}\nprint(1)</code></pre>";
+/// let blocks = [
+///     CodeBlock { language: Some("rust".into()), lines: 1 },
+///     CodeBlock { language: Some("python".into()), lines: 1 },
+/// ];
+/// assert_eq!(
+///     with_code_blocks(html, &blocks),
+///     "<pre><code class=\"language-rust\">fn main() {}</code></pre><pre><code class=\"language-python\">print(1)</code></pre>"
+/// );
+/// ```
+pub fn with_code_blocks(html: &str, blocks: &[CodeBlock]) -> String {
+    const OPEN: &str = "<pre><code>";
+    const CLOSE: &str = "</code></pre>";
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    let mut blocks = blocks.iter();
+    while let Some(at) = rest.find(OPEN) {
+        out.push_str(&rest[..at]);
+        rest = &rest[at + OPEN.len()..];
+        let end = rest.find(CLOSE).unwrap_or(rest.len());
+        let lines: Vec<&str> = rest[..end].split('\n').collect();
+        rest = rest.get(end + CLOSE.len()..).unwrap_or("");
+        let mut taken = 0;
+        while taken < lines.len() {
+            let block = blocks.next();
+            let count = block.map_or(lines.len() - taken, |block| block.lines.clamp(1, lines.len() - taken));
+            let language = block.and_then(|block| block.language.as_deref()).filter(|language| {
+                !language.is_empty()
+                    && language.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '#' | '.' | '_' | '-'))
+            });
+            match language {
+                Some(language) => out.push_str(&format!("<pre><code class=\"language-{language}\">")),
+                None => out.push_str(OPEN),
+            }
+            out.push_str(&lines[taken..taken + count].join("\n"));
+            out.push_str(CLOSE);
+            taken += count;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// What a spoiler's words read as wherever they can't stay hidden: a message's plain body, and
 /// text taken out of the app (copied, translated, quoted in a search hit).
 pub const SPOILER_FALLBACK: &str = "[Spoiler]";
@@ -731,5 +854,20 @@ mod tests {
             from_pills("<span style=\"x\"><span data-pill=\"user:@a:x\">A</span></span>"),
             "<span style=\"x\"><a href=\"https://matrix.to/#/@a:x\">A</a></span>"
         );
+    }
+
+    #[test]
+    fn a_language_that_could_break_out_of_its_class_should_be_left_out() {
+        let blocks = [super::CodeBlock { language: Some("x\" onclick=\"evil".into()), lines: 1 }];
+        assert_eq!(super::with_code_blocks("<pre><code>ls</code></pre>", &blocks), "<pre><code>ls</code></pre>");
+    }
+
+    #[test]
+    fn a_code_blocks_lines_should_count_its_line_breaks() {
+        let lines = |html: &str| super::code_blocks(html).iter().map(|block| block.lines).collect::<Vec<_>>();
+        assert_eq!(lines("<pre><code>a<br>b<br />c</code></pre>"), [3]);
+        assert_eq!(lines("<pre><code></code></pre>"), [1]);
+        assert_eq!(lines("<pre><code>a\n\nb\n</code></pre>"), [3]);
+        assert_eq!(lines("<pre><code>\nb</code></pre>"), [1], "a first line break goes");
     }
 }

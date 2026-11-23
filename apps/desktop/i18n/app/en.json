@@ -639,6 +639,7 @@
   "saved.retry": "Try again",
   "saved.failed": "Couldn’t load your saved messages: {{error}}",
   "actions.copy_text": "Copy text",
+  "actions.copy_code": "Copy code",
   "actions.translate": "Translate…",
   "info.pins": "Pinned messages",
   "info.no_pins": "No pinned messages yet. Pin a message to keep it here for everyone.",

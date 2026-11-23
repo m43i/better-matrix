@@ -5804,6 +5804,19 @@ fn with_emoticons_as_typed_a_sent_message_should_keep_them() {
 }
 
 #[test]
+fn plain_should_send_code_fences_as_typed() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.composer.edit.insert("/plain ```\ncode\n```");
+    s.send_message(ComposerTarget::Room, &mut Tx::default());
+    let messages = sent(&mut commands);
+    assert!(
+        matches!(messages.as_slice(), [Outgoing::Text { body, html: None, .. }] if body == "```\ncode\n```"),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn shrug_should_add_its_face_to_the_message() {
     let (mut s, mut commands) = state();
     writing(&mut s, &mut commands);

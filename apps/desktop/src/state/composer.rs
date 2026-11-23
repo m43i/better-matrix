@@ -178,9 +178,244 @@ fn html_of(edit: &TextEdit) -> Option<String> {
     formatted.then(|| matrix_core::html::from_pills(&edit.to_html()))
 }
 
-/// The field as it is sent: with [`Emoticons::AsEmoji`], its text emoticons as emoji
+/// A field as it is sent: its code fences as code blocks ([`with_code_fences`]), then its
+/// emoticons as emoji when they go so ([`with_emoji`]), and each code block's language and
+/// lines, in order. The field itself keeps what was typed.
+struct Sent<'a> {
+    edit: std::borrow::Cow<'a, TextEdit>,
+    code: Vec<matrix_core::html::CodeBlock>,
+}
+
+impl Sent<'_> {
+    /// Its Matrix HTML ([`html_of`]), each code block on its own in its language.
+    fn html(&self) -> Option<String> {
+        html_of(&self.edit).map(|html| matrix_core::html::with_code_blocks(&html, &self.code))
+    }
+}
+
+fn as_sent(edit: &TextEdit, emoticons: Emoticons) -> Sent<'_> {
+    let (fenced, code) = with_code_fences(edit);
+    let edit = match fenced {
+        std::borrow::Cow::Borrowed(edit) => with_emoji(edit, emoticons),
+        std::borrow::Cow::Owned(fenced) => std::borrow::Cow::Owned(with_emoji(&fenced, emoticons).into_owned()),
+    };
+    Sent { edit, code }
+}
+
+/// A Markdown code fence typed in a field: the line opening it (three or more backticks and,
+/// optionally, a language) and the line closing it (as many backticks or more, nothing else),
+/// `None` while it is still open. Indices are the field's `\n`-separated lines; only plain
+/// paragraph lines count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CodeFence {
+    open: usize,
+    close: Option<usize>,
+}
+
+/// Whether the caret is on a paragraph line in a Markdown code fence, from its opening line to
+/// before its closing one.
+pub(super) fn in_code_fence(edit: &TextEdit) -> bool {
+    let line = edit.line_of_byte(edit.focus);
+    edit.active_block() == Block::Paragraph
+        && code_fences(edit).iter().any(|fence| fence.open <= line && fence.close.is_none_or(|close| line < close))
+}
+
+/// The fences in a field. A slash command's name isn't part of its line: `/plain ```` opens
+/// one too.
+fn code_fences(edit: &TextEdit) -> Vec<CodeFence> {
+    let command = command_len(edit);
+    let mut fences = Vec::new();
+    let mut open: Option<(usize, usize)> = None;
+    for line in edit.paragraphs() {
+        if line.block != Block::Paragraph {
+            continue;
+        }
+        let text = edit.text[line.range.start.max(command).min(line.range.end)..line.range.end].trim();
+        let ticks = text.len() - text.trim_start_matches('`').len();
+        match open {
+            None if ticks >= 3 && !text[ticks..].contains('`') => open = Some((line.index, ticks)),
+            Some((start, opened)) if ticks >= opened && ticks == text.len() => {
+                fences.push(CodeFence { open: start, close: Some(line.index) });
+                open = None;
+            }
+            _ => {}
+        }
+    }
+    fences.extend(open.map(|(start, _)| CodeFence { open: start, close: None }));
+    fences
+}
+
+/// How many bytes a slash command's name takes at the start of the field; 0 for a message.
+fn command_len(edit: &TextEdit) -> usize {
+    match super::slash::parse(&edit.text) {
+        super::slash::Parsed::Command { len, .. } => len,
+        _ => 0,
+    }
+}
+
+/// The field with each closed Markdown code fence as the code block it stands for, as people
+/// type them out of habit: the lines between the fences become code-block lines without their
+/// marks, and the fence lines go. A fence around blank lines or around a pill stays as typed
+/// (fields keep no pills in code blocks). Rune's code blocks carry no language and join when
+/// they follow each other, so the field's code blocks come beside it, in order: each one's lines
+/// and its opening fence's language (none for a block made with the toolbar).
+fn with_code_fences(edit: &TextEdit) -> (std::borrow::Cow<'_, TextEdit>, Vec<matrix_core::html::CodeBlock>) {
+    let lines = edit.paragraphs();
+    let command = command_len(edit);
+    let pills: Vec<_> = edit.pills().map(|(range, _)| range).collect();
+    let blank = |index: usize| edit.text[lines[index].range.clone()].trim().is_empty();
+    // Each fence: its opening line, its code's first and last line that aren't blank (blank
+    // lines at a block's edges go, as HTML readers drop a code block's first line break), and
+    // its closing line.
+    let fenced: Vec<(usize, usize, usize, usize)> = code_fences(edit)
+        .into_iter()
+        .filter_map(|fence| {
+            let (open, close) = (fence.open, fence.close?);
+            let first = (open + 1..close).find(|&index| !blank(index))?;
+            let last = (open + 1..close).rev().find(|&index| !blank(index))?;
+            Some((open, first, last, close))
+        })
+        // A fence opening on a command's line goes once the command has taken its name.
+        .filter(|&(open, ..)| command <= lines[open].range.start)
+        .filter(|&(open, _, _, close)| {
+            let span = lines[open].range.start..lines[close].range.end;
+            !pills.iter().any(|pill| pill.start < span.end && span.start < pill.end)
+        })
+        .collect();
+    if fenced.is_empty() {
+        return (std::borrow::Cow::Borrowed(edit), Vec::new());
+    }
+
+    let fence_of = |index: usize| fenced.iter().position(|&(_, first, last, _)| first <= index && index <= last);
+    let inside = |index: usize| fence_of(index).is_some();
+    // Each line that stays, by its index in the field: its block, and whether it continues the
+    // line before it (a soft break), which only holds when that line is still the one before it
+    // and neither became code.
+    let mut kept: Vec<(usize, Block, bool)> = Vec::new();
+    for line in &lines {
+        let index = line.index;
+        if fenced.iter().any(|&(open, _, _, close)| open <= index && index <= close) && !inside(index) {
+            continue;
+        }
+        let block = if inside(index) { Block::Code } else { line.block };
+        let soft = line.soft_break
+            && !inside(index)
+            && kept.last().is_some_and(|&(before, _, _)| before + 1 == index && !inside(before));
+        kept.push((index, block, soft));
+    }
+
+    let mut sent = edit.clone();
+    // From the end, so each fence's place still holds.
+    for &(open, first, last, close) in fenced.iter().rev() {
+        sent.set_selection(lines[last].range.end, lines[close].range.end);
+        sent.insert("");
+        sent.set_selection(lines[open].range.start, lines[first].range.start);
+        sent.insert("");
+    }
+    sent.set_blocks(kept.iter().map(|&(_, block, _)| block).collect());
+    let soft_breaks = kept.iter().enumerate().filter(|(_, line)| line.2).map(|(new, _)| new as u32).collect();
+    sent.set_soft_breaks(soft_breaks);
+    let code: Vec<_> = sent
+        .paragraphs()
+        .into_iter()
+        .filter(|line| kept.get(line.index).is_some_and(|&(index, _, _)| inside(index)))
+        .map(|line| line.range)
+        .collect();
+    let marks = sent
+        .marks()
+        .iter()
+        .filter(|mark| !code.iter().any(|line| mark.start < line.end && line.start < mark.end))
+        .cloned()
+        .collect();
+    sent.set_marks(marks);
+    // A block's language is its opening fence's word after the backticks.
+    let language = |fence: usize| {
+        let open = fenced.get(fence)?.0;
+        let opening = edit.text[lines[open].range.clone()].trim().trim_start_matches('`');
+        opening.split_whitespace().next().map(str::to_owned)
+    };
+    // Code lines from the same fence (or the toolbar), one after the other, are one block.
+    let mut code: Vec<(Option<usize>, matrix_core::html::CodeBlock)> = Vec::new();
+    let mut after_code = false;
+    for line in sent.paragraphs() {
+        if line.block != Block::Code {
+            after_code = false;
+            continue;
+        }
+        let fence = kept.get(line.index).and_then(|&(index, _, _)| fence_of(index));
+        match code.last_mut() {
+            Some((from, block)) if after_code && *from == fence => block.lines += 1,
+            _ => code.push((fence, matrix_core::html::CodeBlock { language: fence.and_then(language), lines: 1 })),
+        }
+        after_code = true;
+    }
+    (std::borrow::Cow::Owned(sent), code.into_iter().map(|(_, block)| block).collect())
+}
+
+/// Writes each of a field's code blocks that has a language (`code`: a message's code blocks,
+/// as [`matrix_core::html::code_blocks`] reads them) as the Markdown code fence it came from,
+/// so editing a message keeps its blocks and their languages: Rune's code blocks carry no
+/// language and join when they follow each other. Each fence is longer than any line of
+/// backticks in its code, which would otherwise close it. A blank line Rune put between blocks
+/// becomes an ordinary line. Left alone when the field's code doesn't line up with `code`.
+fn fence_code_blocks(field: &mut TextEdit, code: &[matrix_core::html::CodeBlock]) {
+    let lines = field.paragraphs();
+    let placed = super::place_code(field, code);
+    // A block in a language goes back as its fence; so does one right beside another block,
+    // which would otherwise join it.
+    let beside = |block: &super::PlacedCode<'_>| {
+        placed.iter().any(|other| other.last + 1 == block.first || block.last + 1 == other.first)
+    };
+    let fenced: Vec<(usize, usize, &str)> = placed
+        .iter()
+        .filter(|block| block.language.is_some() || beside(block))
+        .map(|block| (block.first, block.last, block.language.unwrap_or_default()))
+        .collect();
+    if fenced.is_empty() {
+        return;
+    }
+    let mut blocks = Vec::new();
+    let mut soft_breaks = Vec::new();
+    for line in &lines {
+        let fence = fenced.iter().find(|&&(first, last, _)| first <= line.index && line.index <= last);
+        if fence.is_some_and(|&(first, _, _)| first == line.index) {
+            blocks.push(Block::Paragraph);
+        }
+        if line.soft_break && fence.is_none() {
+            soft_breaks.push(blocks.len() as u32);
+        }
+        let in_place = placed.iter().any(|block| block.first <= line.index && line.index <= block.last);
+        let block =
+            if fence.is_some() || (line.block == Block::Code && !in_place) { Block::Paragraph } else { line.block };
+        blocks.push(block);
+        if fence.is_some_and(|&(_, last, _)| last == line.index) {
+            blocks.push(Block::Paragraph);
+        }
+    }
+    // From the end, so each block's place still holds.
+    for &(first, last, language) in fenced.iter().rev() {
+        let longest = lines[first..=last]
+            .iter()
+            .map(|line| field.text[line.range.clone()].trim())
+            .filter(|text| !text.is_empty() && text.chars().all(|c| c == '`'))
+            .map(str::len)
+            .max()
+            .unwrap_or(0);
+        let ticks = "`".repeat(longest.max(2) + 1);
+        let end = lines[last].range.end;
+        field.set_selection(end, end);
+        field.insert(&format!("\n{ticks}"));
+        let start = lines[first].range.start;
+        field.set_selection(start, start);
+        field.insert(&format!("{ticks}{language}\n"));
+    }
+    field.set_blocks(blocks);
+    field.set_soft_breaks(soft_breaks);
+}
+
+/// The field with [`Emoticons::AsEmoji`]: its text emoticons as emoji
 /// (`matrix_core::emoticons`), but not in code, links or pills (mentions, maths, spoilers),
-/// which go as typed. The field itself keeps what was typed.
+/// which go as typed.
 fn with_emoji(edit: &TextEdit, emoticons: Emoticons) -> std::borrow::Cow<'_, TextEdit> {
     if emoticons == Emoticons::AsTyped {
         return std::borrow::Cow::Borrowed(edit);
@@ -265,7 +500,8 @@ impl EditTarget {
 #[derive(Debug)]
 pub struct Editing {
     pub target: EditTarget,
-    /// The message as it read, text and HTML: an unchanged edit isn't sent.
+    /// The message as it read in the field, text and HTML: an edit leaving the field so isn't
+    /// sent.
     original: (String, Option<String>),
     /// The draft set aside while editing.
     draft: Box<Draft>,
@@ -559,7 +795,10 @@ impl Composer {
     pub fn start_edit(&mut self, target: EditTarget, body: &str, html: Option<&str>) {
         let mut field = new_edit();
         match html {
-            Some(html) => paste_matrix_html(&mut field, html, body),
+            Some(html) => {
+                paste_matrix_html(&mut field, html, body);
+                fence_code_blocks(&mut field, &matrix_core::html::code_blocks(html));
+            }
             None => field.insert(body),
         }
         field.clear_history();
@@ -592,12 +831,12 @@ impl Composer {
     /// The edit under way, as the user left it, taken out of the field: the draft comes back.
     pub fn set_aside_edit(&mut self, emoticons: Emoticons) -> Option<Edit> {
         let editing = self.editing.as_ref()?;
-        let sent = with_emoji(&self.edit, emoticons);
+        let sent = as_sent(&self.edit, emoticons);
         let edit = Edit {
             target: editing.target.clone(),
-            body: body_of(&sent),
-            html: html_of(&sent),
-            mentions: mentions_of(&sent),
+            body: body_of(&sent.edit),
+            html: sent.html(),
+            mentions: mentions_of(&sent.edit),
             field: self.edit.clone(),
             original: editing.original.clone(),
         };
@@ -609,7 +848,9 @@ impl Composer {
     /// either way. An emptied message isn't sent: it stays as it was.
     pub fn take_edit(&mut self, emoticons: Emoticons) -> Option<Edit> {
         self.set_aside_edit(emoticons)
-            .filter(|edit| !edit.body.is_empty() && (&edit.body, &edit.html) != (&edit.original.0, &edit.original.1))
+            // Unchanged is the field as it was: what it sends may differ from the message (literal
+            // code fences, emoticons), and opening a message and sending it as it was changes nothing.
+            .filter(|edit| !edit.body.is_empty() && (body_of(&edit.field), html_of(&edit.field)) != edit.original)
     }
 
     /// Takes an edit that failed back into the field, as the user left it, to try again.
@@ -785,18 +1026,30 @@ impl Composer {
     }
 
     /// Whether Enter should send rather than let the editor continue a list or code block.
+    /// Inside a Markdown code fence Enter starts a new line ([`Composer::in_code_fence`]).
     pub fn enter_sends(&self) -> bool {
-        matches!(self.edit.active_block(), Block::Paragraph | Block::Quote)
+        matches!(self.edit.active_block(), Block::Paragraph | Block::Quote) && !self.in_code_fence()
+    }
+
+    /// Whether the caret is in a Markdown code fence: from its opening line to before its
+    /// closing one, where Enter starts a new line as in a code block.
+    pub fn in_code_fence(&self) -> bool {
+        in_code_fence(&self.edit)
+    }
+
+    /// The field's plain body as typed, code fences and all: what `/plain` sends.
+    pub fn typed_body(&self, emoticons: Emoticons) -> String {
+        body_of(&with_emoji(&self.edit, emoticons))
     }
 
     /// Everything to send, text first, and a fresh composer. HTML is sent only when the text
     /// carries formatting. The reply target, if any, goes with the first message.
     pub fn take_outgoing(&mut self, emoticons: Emoticons) -> (Option<ReplyTarget>, Vec<Outgoing>) {
         let mut outgoing = Vec::new();
-        let sent = with_emoji(&self.edit, emoticons);
-        let body = body_of(&sent);
+        let sent = as_sent(&self.edit, emoticons);
+        let body = body_of(&sent.edit);
         if !body.is_empty() {
-            outgoing.push(Outgoing::Text { body, html: html_of(&sent), mentions: mentions_of(&sent) });
+            outgoing.push(Outgoing::Text { body, html: sent.html(), mentions: mentions_of(&sent.edit) });
         }
         drop(sent);
         outgoing.extend(self.attachments.drain(..).map(Outgoing::File));
@@ -1019,6 +1272,191 @@ mod tests {
         let mut c = composer("item");
         c.format(Format::BulletList);
         assert!(!c.enter_sends());
+    }
+
+    #[test]
+    fn a_code_fence_should_be_sent_as_a_code_block_in_its_language() {
+        let Outgoing::Text { body, html, .. } = sent(composer("look:\n```rust\nfn main() {}\nlet x = 1;\n```\ndone"))
+        else {
+            panic!("expected text")
+        };
+        assert_eq!(body, "look:\nfn main() {}\nlet x = 1;\ndone");
+        assert_eq!(
+            html.as_deref(),
+            Some("<p>look:</p><pre><code class=\"language-rust\">fn main() {}\nlet x = 1;</code></pre><p>done</p>")
+        );
+    }
+
+    #[test]
+    fn a_code_fence_typed_with_soft_breaks_should_be_sent_as_a_code_block() {
+        let mut c = Composer::default();
+        let shift_enter =
+            rune::KeyEvent { key: rune::Key::Enter, mods: rune::Mods { shift: true, ..Default::default() } };
+        for line in ["```", "a :)", "```"] {
+            if !c.edit.text.is_empty() {
+                c.edit.key(&shift_enter, None);
+            }
+            c.edit.insert(line);
+        }
+        c.edit.key(&shift_enter, None);
+        c.edit.insert("after");
+        let Outgoing::Text { html, .. } = sent(c) else { panic!("expected text") };
+        assert_eq!(html.as_deref(), Some("<pre><code>a :)</code></pre><p>after</p>"));
+    }
+
+    #[test]
+    fn the_field_should_keep_a_code_fence_as_typed_after_an_edit_is_set_aside() {
+        let mut c = Composer::default();
+        c.start_edit(target(), "hello", None);
+        c.edit.set_selection(0, 5);
+        c.edit.insert("```\nhello\n```");
+        let edit = c.take_edit(Emoticons::AsEmoji).unwrap_or_else(|| panic!("no edit"));
+        assert_eq!((edit.body.as_str(), edit.html.as_deref()), ("hello", Some("<pre><code>hello</code></pre>")));
+        assert_eq!(edit.field.text, "```\nhello\n```");
+    }
+
+    #[test]
+    fn markdown_inside_a_code_fence_should_be_sent_as_typed() {
+        let mut c = composer("```\n**not bold**\n```");
+        let start = c.edit.text.find("**").unwrap_or_default();
+        c.edit.set_selection(start, start + 4);
+        c.format(Format::Bold);
+        let Outgoing::Text { html, .. } = sent(c) else { panic!("expected text") };
+        assert_eq!(html.as_deref(), Some("<pre><code>**not bold**</code></pre>"));
+    }
+
+    #[test]
+    fn a_code_fence_around_blank_lines_should_be_sent_as_typed() {
+        assert_eq!(sent_body(composer("```\n    \n```")), "```\n    \n```");
+    }
+
+    #[test]
+    fn opening_a_message_with_code_fences_and_sending_it_unchanged_should_send_no_edit() {
+        let mut c = Composer::default();
+        c.start_edit(target(), "```\ncode\n```", None);
+        assert!(c.take_edit(Emoticons::AsEmoji).is_none());
+    }
+
+    #[test]
+    fn editing_a_code_block_with_a_language_should_keep_its_language() {
+        let mut c = Composer::default();
+        let html = r#"<p>see</p><pre><code class="language-rust">fn main() {}
+let x = 1;</code></pre><p>done</p>"#;
+        c.start_edit(target(), "see\nfn main() {}\nlet x = 1;\ndone", Some(html));
+        assert_eq!(c.edit.text, "see\n```rust\nfn main() {}\nlet x = 1;\n```\ndone");
+        c.edit.set_selection(c.edit.text.len(), c.edit.text.len());
+        c.edit.insert("!");
+        let edit = c.take_edit(Emoticons::AsEmoji).unwrap_or_else(|| panic!("no edit"));
+        assert_eq!(
+            edit.html.as_deref(),
+            Some("<p>see</p><pre><code class=\"language-rust\">fn main() {}\nlet x = 1;</code></pre><p>done!</p>")
+        );
+    }
+
+    #[test]
+    fn editing_should_leave_a_code_block_holding_fences_as_it_was() {
+        let mut c = Composer::default();
+        let html = "<pre><code class=\"language-markdown\">```\ninner\n```</code></pre><p>after</p>";
+        c.start_edit(target(), "```\ninner\n```\nafter", Some(html));
+        c.edit.set_selection(c.edit.text.len(), c.edit.text.len());
+        c.edit.insert("!");
+        let edit = c.take_edit(Emoticons::AsEmoji).unwrap_or_else(|| panic!("no edit"));
+        assert_eq!(
+            edit.html.as_deref(),
+            Some("<pre><code class=\"language-markdown\">```\ninner\n```</code></pre><p>after!</p>")
+        );
+    }
+
+    #[test]
+    fn code_fences_that_follow_each_other_should_be_sent_as_blocks_of_their_own() {
+        let Outgoing::Text { html, .. } = sent(composer("```rust\nfn a() {}\n```\n```python\nprint(1)\n```")) else {
+            panic!("expected text")
+        };
+        assert_eq!(
+            html.as_deref(),
+            Some(
+                "<pre><code class=\"language-rust\">fn a() {}</code></pre>\
+                 <pre><code class=\"language-python\">print(1)</code></pre>"
+            )
+        );
+    }
+
+    #[test]
+    fn editing_code_blocks_that_follow_each_other_should_keep_each_ones_language() {
+        let mut c = Composer::default();
+        let html = "<pre><code class=\"language-rust\">fn a() {}</code></pre><pre><code class=\"language-python\">print(1)</code></pre><p>x</p>";
+        c.start_edit(target(), "fn a() {}\nprint(1)\nx", Some(html));
+        assert_eq!(c.edit.text, "```rust\nfn a() {}\n```\n```python\nprint(1)\n```\nx");
+    }
+
+    #[test]
+    fn blank_lines_at_a_code_fences_edges_should_not_be_sent() {
+        let Outgoing::Text { html, .. } = sent(composer("```rust\n\nfn a() {}\n\n```\n```python\nprint(1)\n```"))
+        else {
+            panic!("expected text")
+        };
+        assert_eq!(
+            html.as_deref(),
+            Some(
+                "<pre><code class=\"language-rust\">fn a() {}</code></pre>\
+                 <pre><code class=\"language-python\">print(1)</code></pre>"
+            )
+        );
+    }
+
+    #[test]
+    fn editing_code_blocks_without_languages_that_follow_each_other_should_keep_them_apart() {
+        let mut c = Composer::default();
+        c.start_edit(target(), "a\nb\nx", Some("<pre><code>a</code></pre><pre><code>b</code></pre><p>x</p>"));
+        assert_eq!(c.edit.text, "```\na\n```\n```\nb\n```\nx");
+    }
+
+    #[test]
+    fn editing_a_code_block_without_a_language_should_keep_it_a_code_block() {
+        let mut c = Composer::default();
+        c.start_edit(target(), "ls", Some("<pre><code>ls</code></pre>"));
+        assert_eq!((c.edit.text.as_str(), c.edit.blocks()), ("ls", &[Block::Code][..]));
+    }
+
+    #[test]
+    fn an_unclosed_code_fence_should_be_sent_as_typed() {
+        assert_eq!(
+            sent(composer("```\ncode")),
+            Outgoing::Text { body: "```\ncode".into(), html: None, mentions: Default::default() }
+        );
+    }
+
+    #[test]
+    fn a_code_fence_around_a_spoiler_should_be_sent_as_typed() {
+        let mut c = composer("```\n");
+        c.edit.insert_pill("spoiler", "secret");
+        c.edit.insert("\n```");
+        let Outgoing::Text { html, .. } = sent(c) else { panic!("expected text") };
+        assert!(html.is_some_and(|html| html.contains("```") && html.contains("data-mx-spoiler")));
+    }
+
+    #[test]
+    fn enter_should_not_send_inside_an_open_code_fence() {
+        let mut c = composer("```");
+        assert!(!c.enter_sends());
+        c.edit.insert("\ncode");
+        assert!(!c.enter_sends());
+    }
+
+    #[test]
+    fn enter_on_a_closing_code_fence_should_send() {
+        assert!(composer("```\ncode\n```").enter_sends());
+    }
+
+    #[test]
+    fn a_code_fence_opened_after_a_command_should_send_once_it_closes() {
+        assert!(!composer("/plain ```\ncode").enter_sends());
+        assert!(composer("/plain ```\ncode\n```").enter_sends());
+    }
+
+    #[test]
+    fn inline_backticks_should_not_hold_back_enter() {
+        assert!(composer("run ```ls``` now").enter_sends());
     }
 
     #[test]

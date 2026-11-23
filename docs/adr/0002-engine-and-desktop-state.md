@@ -123,7 +123,11 @@ Date: 2026-11-14
   stored form of a draft (by a fingerprint of its field), and the call's watched videos (by
   `Call::videos_key`). Viewport bookkeeping (read position) doesn't commit the view.
 - **Overlays:**
-  - One `Popover` slot holds every floating panel, drawn over a click-outside scrim.
+  - One `Popover` slot holds every floating panel, drawn over a click-outside scrim. A menu a
+    right-click opens at the pointer (`components::at_point`) is anchored to a marker there
+    (Rune's `El::anchored`): it opens down and to the right, up or to the left where the window
+    has no room, and shifts to stay inside the window (left by the menu's width, which it is
+    given), so no action is cut off at an edge.
   - One `Modal` slot holds every dialog over a dimmed backdrop; settings fill 90% of the window.
     A dialog (`components::dialog`) stays inside the window: its title takes two lines at most,
     and in a short window its content scrolls and its buttons stay in view. Long text a dialog

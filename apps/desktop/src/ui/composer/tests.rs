@@ -157,6 +157,63 @@ fn a_composer_should_stay_focused_after_sending_so_the_next_message_can_follow()
 }
 
 #[test]
+fn enter_should_write_a_code_fence_line_by_line_and_send_once_it_closes() {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    state.select_room(demo::DEMO_THREAD.0);
+    let mut rt = Runtime::new(state, ui::view, (1200.0, 760.0), Env { system_dark: true, scale: 1.0 });
+    rt.frame(0.0);
+    rt.update(|_, tx| tx.focus(composer_field(ComposerTarget::Room), false));
+    rt.frame(1.0 / 60.0);
+    let enter = KeyEvent { key: rune::Key::Enter, mods: Mods::default() };
+    for line in ["```", "let x = 1;"] {
+        rt.paste(line);
+        rt.frame(1.0 / 60.0);
+        rt.key(enter.clone());
+        rt.frame(1.0 / 60.0);
+    }
+    rt.paste("```");
+    rt.frame(1.0 / 60.0);
+    assert_eq!(
+        rt.state.composer(ComposerTarget::Room).edit.text,
+        "```\nlet x = 1;\n```",
+        "nothing went before the fence closed"
+    );
+    rt.key(enter);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.composer(ComposerTarget::Room).is_empty(), "the closed fence is sent");
+}
+
+#[test]
+fn enter_in_a_long_code_fence_should_keep_the_caret_visible() {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    state.select_room(demo::DEMO_THREAD.0);
+    let mut rt = Runtime::new(state, ui::view, (1200.0, 760.0), Env { system_dark: true, scale: 1.0 });
+    rt.frame(0.0);
+    rt.update(|_, tx| tx.focus(composer_field(ComposerTarget::Room), false));
+    rt.frame(1.0 / 60.0);
+    rt.paste("```");
+    rt.frame(1.0 / 60.0);
+    for line in 0..20 {
+        rt.key(KeyEvent { key: rune::Key::Enter, mods: Mods::default() });
+        rt.frame(1.0 / 60.0);
+        rt.paste(format!("line {line}"));
+        rt.frame(1.0 / 60.0);
+    }
+    rt.key(KeyEvent { key: rune::Key::Enter, mods: Mods::default() });
+    for _ in 0..3 {
+        rt.frame(1.0 / 60.0);
+    }
+    let viewport = rt.presented(&key(ComposerTarget::Room, "composer-scroll")).unwrap().0;
+    let caret = field(&rt, ComposerTarget::Room).caret.unwrap();
+    assert!(
+        caret[1] >= viewport[1] - 1.0 && caret[1] + caret[3] <= viewport[1] + viewport[3] + 1.0,
+        "caret {caret:?}, viewport {viewport:?}"
+    );
+}
+
+#[test]
 fn a_touchpad_gesture_should_scroll_a_long_draft() {
     for target in [ComposerTarget::Room, ComposerTarget::Thread] {
         let mut rt = long_draft(target);

@@ -16,6 +16,26 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   - The composer edits a rich `TextEdit` limited to what Matrix HTML carries: bold, italic,
     strike, code, links, lists, quotes, code blocks.
   - Formatted text is sent as `to_html()` with the plain body; unformatted text goes plain.
+  - Markdown code fences typed in the field (a line of three or more backticks, optionally a
+    language, and a closing line of as many) go as the code block they stand for
+    (`composer::with_code_fences`, on the copy that is sent; the field keeps what was typed): the
+    lines between become code-block lines without their marks, the fence lines go, from the body
+    too, as for a code block made with the toolbar. The opening fence's language goes as the
+    block's `language-…` class, each fence its own `<pre>` even when fences follow each other
+    (`html::with_code_blocks`; Rune's code blocks carry no language and join, so
+    `composer::Sent` keeps each block's language and lines beside the field). Editing a message
+    puts each block with a language, and each right beside another block, back into the field
+    as the fence it came from, longer than any line of backticks in its code, so an edit keeps the
+    blocks and their languages. Blank lines at a fence's edges go: HTML readers drop a code
+    block's first line break, which would shift the blocks' lines. A fence
+    still open, around blank lines or around a pill goes as typed, and
+    `/plain` sends fences as typed. Between an opening fence and its closing one Enter starts a
+    new line instead of sending and nothing is suggested, so a block is typed as in other chat
+    apps; the caret stays in view as the composer adds lines. An edit counts as unchanged when its
+    field is as it opened (text and formatting), so opening a message holding literal fences and
+    sending it as it was sends no edit. A slash command's name isn't part of its line, so
+    `/plain ```` opens a fence for Enter like any other. Other Markdown in the field goes as
+    typed: the field formats with the toolbar and shortcuts.
   - Received HTML is parsed once on arrival with `TextEdit::from_html` (a sanitising parser)
     and shown as selectable read-only text. Every bare web address in a message, plain or
     formatted, becomes a link mark there too (`links::link_ranges`), except inside code and

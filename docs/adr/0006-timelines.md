@@ -216,6 +216,22 @@ see who is typing there.
     typed, every line break kept). A body without Markdown stays the plain text it was. Both
     then take the same path (pills, then bare web addresses linked; desktop `rich_body`).
     Sending is unchanged: the composer still sends its own formatting.
+  - Code in a code block with a language (`<pre><code class="language-rust">`, as the spec and
+    CommonMark write it) shows in that language's colours. Rune's code blocks carry no language
+    and join when they follow each other, so formatted text is a `RichText`: Rune's rich text and
+    its HTML's code blocks, each one's language and line count
+    (`matrix_core::html::CodeBlock`), which `state::place_code` lays over the code lines in turn
+    (a blank line Rune puts between blocks belongs to neither). The view highlights each block
+    once per render with rune-kit's built-in highlighter (about 80 languages; the whole block,
+    cached, so a comment over several lines stays one) and walks its tokens alongside its lines,
+    in the palette's `syntax` colours. A block without a language, or one the highlighter
+    doesn't know, stays plain; when the lines don't line up with the blocks, none is coloured
+    rather than any in the wrong language. Phones don't colour code yet.
+  - A code block's lines sit in one box, its own hover group: hovering it shows a Copy code
+    button floating at its top right (`message_text::code_block`), which copies the block's code
+    as it reads; the box keeps its lines clear of the button, so it never covers code to select.
+    Blocks that follow each other each get their own; a blank line Rune put between them is an
+    ordinary line.
   - Posted formatted messages use selectable read-only text, with inline links, rather than
     text fields. Links show the pointer; surrounding text keeps the text cursor.
     Plain and formatted text boxes fit their widest rendered line instead of filling the row:

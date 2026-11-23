@@ -55,7 +55,7 @@ pub enum Scope {
 pub struct TimelineItem {
     pub message: Message,
     /// The sender's formatting, parsed from Matrix HTML into Rune's rich-text model.
-    pub rich: Option<TextEdit>,
+    pub rich: Option<RichText>,
     /// A GIF linked from the text, shown below it like an attachment.
     pub gif: Option<GifLink>,
     /// The first other link in the text, which gets a preview card.
@@ -578,7 +578,68 @@ pub struct GifLink {
 #[derive(Debug)]
 pub struct Body {
     pub plain: String,
-    pub rich: Option<TextEdit>,
+    pub rich: Option<RichText>,
+}
+
+/// Formatted text as views show it: Rune's rich text, and its HTML's code blocks (each one's
+/// language and lines), which Rune's code blocks don't carry, so code shows in its language's
+/// colours.
+#[derive(Clone, Debug, Default)]
+pub struct RichText {
+    pub edit: TextEdit,
+    pub code: Vec<matrix_core::html::CodeBlock>,
+}
+
+impl RichText {
+    /// Matrix HTML as it shows: its mentions, spoilers, maths and custom emoji as pills.
+    pub fn from_html(html: &str) -> Self {
+        let edit = TextEdit::from_html(&matrix_core::html::to_pills(html, matrix_core::html::Pills::Display));
+        Self { edit, code: matrix_core::html::code_blocks(html) }
+    }
+}
+
+/// A code block placed in a field: its first and last line, and its language.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlacedCode<'a> {
+    pub first: usize,
+    pub last: usize,
+    pub language: Option<&'a str>,
+}
+
+/// Where `blocks` (a message's code blocks, in order) are among `edit`'s code-block lines,
+/// which Rune joins into one block when blocks follow each other: each takes as many lines as
+/// it has, in turn. Rune may part two blocks with a blank line of its own, which belongs to
+/// neither. Empty when the lines and the blocks don't line up, as colours or fences on the
+/// wrong lines would mislead.
+pub fn place_code<'a>(edit: &TextEdit, blocks: &'a [matrix_core::html::CodeBlock]) -> Vec<PlacedCode<'a>> {
+    let lines: Vec<(usize, bool)> = edit
+        .paragraphs()
+        .into_iter()
+        .filter(|line| line.block == rune::Block::Code)
+        .map(|line| (line.index, edit.text[line.range].trim().is_empty()))
+        .collect();
+    let needed: usize = blocks.iter().map(|block| block.lines.max(1)).sum();
+    let Some(mut spare) = lines.len().checked_sub(needed) else { return Vec::new() };
+    let mut at = 0;
+    let mut placed = Vec::new();
+    for block in blocks {
+        while spare > 0 && lines.get(at).is_some_and(|&(_, blank)| blank) {
+            at += 1;
+            spare -= 1;
+        }
+        let Some(run) = lines.get(at..at + block.lines.max(1)) else { return Vec::new() };
+        // A block's lines follow each other.
+        if run.windows(2).any(|pair| pair[1].0 != pair[0].0 + 1) {
+            return Vec::new();
+        }
+        let (Some(&(first, _)), Some(&(last, _))) = (run.first(), run.last()) else { return Vec::new() };
+        placed.push(PlacedCode { first, last, language: block.language.as_deref() });
+        at += run.len();
+    }
+    if at + spare != lines.len() || (spare > 0 && lines[at..].iter().any(|&(_, blank)| !blank)) {
+        return Vec::new();
+    }
+    placed
 }
 
 impl TimelineItem {
@@ -613,7 +674,7 @@ impl TimelineItem {
         let emotes = rich
             .iter()
             .chain(gif.as_ref().and_then(|gif| gif.rest.as_ref()).and_then(|rest| rest.rich.as_ref()))
-            .flat_map(|edit| edit.pills())
+            .flat_map(|rich| rich.edit.pills())
             .filter_map(|(_, id)| id.strip_prefix("emote:").and_then(matrix_core::MediaRef::from_mxc))
             .collect();
         Self { message, rich, gif, link, emotes }
@@ -623,14 +684,14 @@ impl TimelineItem {
 /// A text body as the timeline shows it: the sender's formatting (or, without any, the
 /// Markdown in its plain text), with every bare web address made a link (but not inside code).
 /// `None` for plain text without Markdown or links, which shows as plain selectable text.
-pub fn rich_body(plain: &str, html: Option<&str>) -> Option<TextEdit> {
+pub fn rich_body(plain: &str, html: Option<&str>) -> Option<RichText> {
     use rune::{Mark, MarkRange};
     let markdown = html.is_none().then(|| matrix_core::markdown::to_html(plain)).flatten();
-    let mut edit = match html.or(markdown.as_deref()) {
+    let RichText { mut edit, code } = match html.or(markdown.as_deref()) {
         // Mentions, spoilers, maths and custom emoji become pills the view draws.
-        Some(html) => TextEdit::from_html(&matrix_core::html::to_pills(html, matrix_core::html::Pills::Display)),
+        Some(html) => RichText::from_html(html),
         None if matrix_core::links::link_ranges(plain).next().is_some() => {
-            TextEdit::from_parts(plain, Vec::new(), Vec::new())
+            RichText { edit: TextEdit::from_parts(plain, Vec::new(), Vec::new()), code: Vec::new() }
         }
         None => return None,
     };
@@ -649,7 +710,7 @@ pub fn rich_body(plain: &str, html: Option<&str>) -> Option<TextEdit> {
         let marks = edit.marks().iter().cloned().chain(links).collect();
         edit.set_marks(marks);
     }
-    Some(edit)
+    Some(RichText { edit, code })
 }
 
 /// How many timelines off screen keep their entries, per account.
@@ -1844,7 +1905,7 @@ mod tests {
 
     #[test]
     fn a_web_address_in_plain_text_should_show_as_a_link() {
-        let edit = rich_body("see https://matrix.org/blog.", None).unwrap_or_default();
+        let edit = rich_body("see https://matrix.org/blog.", None).map(|rich| rich.edit).unwrap_or_default();
         assert_eq!(links(&edit), [("https://matrix.org/blog", "https://matrix.org/blog".to_owned())]);
     }
 
@@ -1879,7 +1940,8 @@ mod tests {
 
     #[test]
     fn markdown_in_a_plain_body_should_be_formatted() {
-        let edit = rich_body("the **build** is [green](https://ci.example)", None).unwrap_or_default();
+        let edit =
+            rich_body("the **build** is [green](https://ci.example)", None).map(|rich| rich.edit).unwrap_or_default();
         assert_eq!(edit.text, "the build is green");
         assert!(edit.marks().iter().any(|mark| mark.mark == rune::Mark::Bold && &edit.text[mark.range()] == "build"));
         assert_eq!(links(&edit), [("green", "https://ci.example".to_owned())]);
@@ -1887,13 +1949,14 @@ mod tests {
 
     #[test]
     fn markdown_should_not_override_the_senders_formatting() {
-        let edit = rich_body("**raw**", Some("<em>**raw**</em>")).unwrap_or_default();
+        let edit = rich_body("**raw**", Some("<em>**raw**</em>")).map(|rich| rich.edit).unwrap_or_default();
         assert_eq!(edit.text, "**raw**");
     }
 
     #[test]
     fn a_link_the_sender_made_should_keep_its_address() {
         let edit = rich_body("", Some(r#"<a href="https://a.example">https://b.example</a> and https://c.example"#))
+            .map(|rich| rich.edit)
             .unwrap_or_default();
         assert_eq!(
             links(&edit),
@@ -1905,8 +1968,56 @@ mod tests {
     }
 
     #[test]
+    fn a_code_block_should_keep_its_language() {
+        let rich = rich_body("", Some(r#"<pre><code class="language-rust">fn main() {}</code></pre>"#));
+        let languages = rich.map(|rich| rich.code.into_iter().map(|block| block.language).collect::<Vec<_>>());
+        assert_eq!(languages, Some(vec![Some("rust".to_owned())]));
+    }
+
+    #[test]
+    fn a_markdown_code_fence_in_a_plain_body_should_keep_its_language() {
+        let rich = rich_body("```python\nprint(1)\n```", None);
+        let languages = rich.map(|rich| rich.code.into_iter().map(|block| block.language).collect::<Vec<_>>());
+        assert_eq!(languages, Some(vec![Some("python".to_owned())]));
+    }
+
+    fn placed(html: &str) -> Vec<(usize, usize, Option<String>)> {
+        let rich = RichText::from_html(html);
+        place_code(&rich.edit, &rich.code)
+            .into_iter()
+            .map(|code| (code.first, code.last, code.language.map(str::to_owned)))
+            .collect()
+    }
+
+    #[test]
+    fn code_blocks_that_follow_each_other_should_each_keep_their_lines() {
+        let html =
+            "<pre><code class=\"language-rust\">a\nb</code></pre><pre><code class=\"language-python\">c</code></pre>";
+        assert_eq!(placed(html), [(0, 1, Some("rust".into())), (2, 2, Some("python".into()))]);
+    }
+
+    #[test]
+    fn a_blank_line_rune_puts_between_code_blocks_should_belong_to_neither() {
+        let html = "<pre><code class=\"language-rust\">a\n</code></pre>\n<pre><code class=\"language-python\">b\n</code></pre>";
+        assert_eq!(placed(html), [(0, 0, Some("rust".into())), (2, 2, Some("python".into()))]);
+    }
+
+    #[test]
+    fn a_code_block_starting_with_a_blank_line_should_keep_its_place() {
+        let html = "<pre><code class=\"language-rust\">\n\nfn a() {}</code></pre><pre><code class=\"language-python\">b</code></pre>";
+        assert_eq!(placed(html), [(0, 1, Some("rust".into())), (2, 2, Some("python".into()))]);
+    }
+
+    #[test]
+    fn code_lines_that_dont_line_up_with_the_blocks_should_place_nothing() {
+        let rich = RichText::from_html("<pre><code class=\"language-rust\">a\nb\nc</code></pre>");
+        let one_line = [matrix_core::html::CodeBlock { language: Some("rust".into()), lines: 1 }];
+        assert!(place_code(&rich.edit, &one_line).is_empty());
+    }
+
+    #[test]
     fn an_address_in_code_should_stay_code() {
-        let edit = rich_body("", Some("<code>https://a.example</code>")).unwrap_or_default();
+        let edit = rich_body("", Some("<code>https://a.example</code>")).map(|rich| rich.edit).unwrap_or_default();
         assert!(links(&edit).is_empty());
     }
 
@@ -2045,7 +2156,7 @@ mod tests {
             kind: EntryKind::Message(Box::new(bold)),
         })]);
         let EntryView::Message(item) = &timeline.entries[0].kind else { panic!("a message") };
-        assert_eq!(item.rich.as_ref().map(|r| r.text.as_str()), Some("hi"));
+        assert_eq!(item.rich.as_ref().map(|r| r.edit.text.as_str()), Some("hi"));
     }
 
     #[test]

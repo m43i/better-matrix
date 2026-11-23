@@ -34,6 +34,8 @@ pub struct Palette {
     pub danger: Color,
     pub success: Color,
     pub warning: Color,
+    /// The colours of code in a known language, by kind of token.
+    pub syntax: rune_kit::syntax::SyntaxTheme,
 }
 
 /// The app's palette, light or dark: the design tokens (`--background`, `--primary`,
@@ -94,6 +96,7 @@ pub fn palette(dark: bool) -> Palette {
         )
     };
     Palette {
+        syntax: rune_kit::syntax::SyntaxTheme::neutral(dark),
         rail_bg: sidebar.rail_bg,
         sidebar_bg: sidebar.sidebar_bg,
         sidebar_text: sidebar.sidebar_text,

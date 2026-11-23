@@ -1506,6 +1506,17 @@ pub fn message_features(s: &mut State) {
                 map: matrix_core::geo::map("geo:52.516275,13.377704"),
             }),
         ),
+        message(
+            "$code",
+            ALAN,
+            "Alan Turing",
+            11,
+            html(
+                "The fix:\nfn retry(times: u32) -> bool {\n    // Once more, then give up.\n    times < 3\n}",
+                "<p>The fix:</p><pre><code class=\"language-rust\">fn retry(times: u32) -&gt; bool {\n    \
+                 // Once more, then give up.\n    times &lt; 3\n}</code></pre>",
+            ),
+        ),
         Message {
             edited: true,
             editable: true,

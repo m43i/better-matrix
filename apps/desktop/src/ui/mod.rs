@@ -239,7 +239,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             && !s.preview_held()
         {
             let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
-            root = root.child(attachments::menu(&preview.account, &preview.attachment, *at, window, &p));
+            root = root.children(attachments::menu(&preview.account, &preview.attachment, *at, window, &p));
         }
     }
     // The top right corner: a notice (it goes by itself), then the calls ringing, one under the

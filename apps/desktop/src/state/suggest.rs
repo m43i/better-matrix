@@ -37,9 +37,10 @@ pub struct Query {
 }
 
 /// The word before the caret, if it starts with a trigger: `@` or `#` anywhere, `:` with two
-/// letters after it, `/` at the start of the message. Never inside code, a pill, or a selection.
+/// letters after it, `/` at the start of the message. Never inside code (a code fence being
+/// typed too), a pill, or a selection.
 pub fn query(edit: &TextEdit) -> Option<Query> {
-    if edit.anchor != edit.focus || edit.active_block() == Block::Code {
+    if edit.anchor != edit.focus || edit.active_block() == Block::Code || super::composer::in_code_fence(edit) {
         return None;
     }
     let caret = edit.focus.min(edit.text.len());
@@ -336,6 +337,12 @@ mod tests {
     #[test]
     fn a_lone_at_sign_should_list_everyone() {
         assert_eq!(query(&field("@")).map(|query| query.text), Some(String::new()));
+    }
+
+    #[test]
+    fn nothing_should_be_suggested_inside_a_code_fence() {
+        assert_eq!(query(&field("```\n@ro")), None);
+        assert!(query(&field("```\ncode\n```\n@ro")).is_some(), "after the fence closes");
     }
 
     #[test]

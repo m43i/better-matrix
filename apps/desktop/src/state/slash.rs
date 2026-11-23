@@ -208,14 +208,16 @@ impl State {
                 let emoticons = self.settings.emoticons;
                 let composer = self.composer_mut(target);
                 composer.cut_front(len);
+                // `/plain` sends the text as typed, code fences and all.
+                let typed = composer.typed_body(emoticons);
                 let (reply, messages) = composer.take_outgoing(emoticons);
                 let mut messages = messages.into_iter();
                 let first = messages.next().map(|message| match message {
                     Outgoing::Text { body, html, mentions } if command == SlashCommand::Me => {
                         Outgoing::Emote { body, html, mentions }
                     }
-                    Outgoing::Text { body, mentions, .. } if command == SlashCommand::Plain => {
-                        Outgoing::Text { body, html: None, mentions }
+                    Outgoing::Text { mentions, .. } if command == SlashCommand::Plain => {
+                        Outgoing::Text { body: typed.clone(), html: None, mentions }
                     }
                     other => other,
                 });

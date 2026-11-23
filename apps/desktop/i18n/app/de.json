@@ -639,6 +639,7 @@
   "saved.retry": "Erneut versuchen",
   "saved.failed": "Gespeicherte Nachrichten konnten nicht geladen werden: {{error}}",
   "actions.copy_text": "Text kopieren",
+  "actions.copy_code": "Code kopieren",
   "actions.translate": "Übersetzen…",
   "info.pins": "Angeheftete Nachrichten",
   "info.no_pins": "Noch keine angehefteten Nachrichten. Hefte eine Nachricht an, damit alle sie hier finden.",

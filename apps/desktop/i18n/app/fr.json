@@ -639,6 +639,7 @@
   "saved.retry": "Réessayer",
   "saved.failed": "Impossible de charger vos messages enregistrés : {{error}}",
   "actions.copy_text": "Copier le texte",
+  "actions.copy_code": "Copier le code",
   "actions.translate": "Traduire…",
   "info.pins": "Messages épinglés",
   "info.no_pins": "Aucun message épinglé. Épinglez un message pour que tout le monde le retrouve ici.",

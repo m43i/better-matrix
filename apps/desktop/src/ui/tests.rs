@@ -1602,6 +1602,29 @@ fn a_long_update_command_should_keep_copy_reachable_in_the_smallest_window() {
 }
 
 #[test]
+fn hovering_a_code_block_should_reveal_a_button_that_copies_its_code() {
+    let clipboard = rune::clipboard::memory();
+    let mut rt = runtime(demo::message_features);
+    rt.use_clipboard(&clipboard);
+    let key = |rt: &Runtime<State>, prefix: &str| {
+        rt.elements().into_iter().filter_map(|e| e.key).find(|key| key.starts_with(prefix)).expect(prefix)
+    };
+    let (copy, block) = (key(&rt, "rich-$code-copy-code-"), key(&rt, "rich-$code-code-"));
+    assert!(rt.presented(&copy).expect("the button").1 < 0.01, "hidden at rest");
+    let (x, y) = rt.find(&block).expect("the code block");
+    rt.pointer_move(x, y);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.presented(&copy).expect("the button").1 > 0.99, "shown while the block is hovered");
+    press(&mut rt, &copy);
+    assert_eq!(
+        clipboard.text().as_deref().map(String::as_str),
+        Some("fn retry(times: u32) -> bool {\n    // Once more, then give up.\n    times < 3\n}")
+    );
+}
+
+#[test]
 fn copying_the_update_command_should_put_it_on_the_clipboard() {
     let clipboard = rune::clipboard::memory();
     let mut rt = runtime(|s| {
@@ -2391,6 +2414,92 @@ fn a_held_preview_should_offer_no_file_actions() {
     rt.secondary_up(x, y);
     rt.frame(1.0 / 60.0);
     assert!(rt.state.popover.is_none());
+}
+
+/// Where a right-click at `at` puts an attachment message's menu, the longest one there is, in
+/// the 1200 x 760 window.
+fn message_menu_at(at: (i32, i32)) -> [f32; 4] {
+    let rt = runtime(|s| {
+        demo::attachment_message(s);
+        s.popover = Some(crate::state::Popover::MessageMenu {
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            event_id: "$attachment".into(),
+            at: Some(at),
+        });
+    });
+    rt.presented("message-menu").expect("the menu").0
+}
+
+#[test]
+fn a_message_menu_opened_near_the_bottom_should_open_upwards_inside_the_window() {
+    let [x, y, w, h] = message_menu_at((600, 740));
+    assert!(y >= 0.0 && y + h <= 760.0, "inside the window: {:?}", [x, y, w, h]);
+    assert!((y + h - 740.0).abs() <= 1.0, "its bottom at the pointer: {:?}", [x, y, w, h]);
+    assert!((x - 600.0).abs() <= 1.0, "beside the pointer: {:?}", [x, y, w, h]);
+}
+
+#[test]
+fn a_message_menu_opened_near_the_top_should_open_downwards_from_the_pointer() {
+    let [_, y, _, h] = message_menu_at((600, 60));
+    assert!((y - 60.0).abs() <= 1.0 && y + h <= 760.0, "{:?}", (y, h));
+}
+
+#[test]
+fn a_message_menu_with_no_room_above_or_below_should_shift_to_stay_inside_the_window() {
+    let [_, y, _, h] = message_menu_at((600, 380));
+    assert!(y >= 0.0 && y + h <= 760.0, "{:?}", (y, h));
+}
+
+#[test]
+fn a_message_menu_opened_at_the_right_edge_should_open_to_the_pointers_left() {
+    let [x, _, w, _] = message_menu_at((1190, 300));
+    assert!((x + w - 1190.0).abs() <= 1.0, "{:?}", (x, w));
+}
+
+#[test]
+fn a_message_menu_with_no_room_beside_the_pointer_should_shift_to_stay_inside_the_window() {
+    // As narrow as a small window zoomed in: 300 points fit on neither side of the pointer.
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    demo::attachment_message(&mut state);
+    state.popover = Some(crate::state::Popover::MessageMenu {
+        key: TimelineKey::room(demo::DEMO_THREAD.0),
+        event_id: "$attachment".into(),
+        at: Some((200, 300)),
+    });
+    let mut rt = Runtime::new(state, super::view, (420.0, 760.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    rt.frame(1.0 / 60.0);
+    let [x, _, w, _] = rt.presented("message-menu").expect("the menu").0;
+    assert!(x >= 0.0 && x + w <= 420.0, "{:?}", (x, w));
+}
+
+#[test]
+fn a_message_menu_opened_where_the_window_no_longer_reaches_should_stay_inside_it() {
+    // Opened at x 1170 in a wider window that narrowed to 720 points since.
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    demo::attachment_message(&mut state);
+    state.popover = Some(crate::state::Popover::MessageMenu {
+        key: TimelineKey::room(demo::DEMO_THREAD.0),
+        event_id: "$attachment".into(),
+        at: Some((1170, 300)),
+    });
+    let mut rt = Runtime::new(state, super::view, (720.0, 760.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    rt.frame(1.0 / 60.0);
+    let [x, _, w, _] = rt.presented("message-menu").expect("the menu").0;
+    assert!(x >= 0.0 && x + w <= 720.0, "{:?}", (x, w));
+}
+
+#[test]
+fn an_attachment_menu_opened_at_the_bottom_corner_should_stay_inside_the_window() {
+    let rt = runtime(|s| {
+        demo::attachment_preview(s);
+        s.popover = Some(crate::state::Popover::AttachmentMenu { at: (1195, 755) });
+    });
+    let [x, y, w, h] = rt.presented("attachment-menu").expect("the menu").0;
+    assert!(x >= 0.0 && y >= 0.0 && x + w <= 1200.0 && y + h <= 760.0, "{:?}", [x, y, w, h]);
 }
 
 #[test]

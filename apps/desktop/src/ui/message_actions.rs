@@ -4,7 +4,7 @@ use matrix_core::{MessageContent, RoomKind, TimelineKey};
 use rune::{El, col, row, text};
 
 use super::components::{
-    ButtonKind, Tone, button, dialog as frame, divider, field_input, media_avatar, menu_action, popover_panel,
+    ButtonKind, Tone, at_point, button, dialog as frame, divider, field_input, media_avatar, menu_action, popover_panel,
 };
 use super::{
     icons,
@@ -12,6 +12,8 @@ use super::{
 };
 use crate::i18n::{I18N, t};
 use crate::state::{ComposerTarget, EmojiFor, Modal, Popover, State};
+
+const MENU_WIDTH: f32 = 300.0;
 
 pub fn menu(
     s: &State,
@@ -35,7 +37,7 @@ pub fn menu(
     let readable =
         !matches!(message.content, MessageContent::Redacted | MessageContent::Undecryptable | MessageContent::Call(_));
     let action = |glyph, label, id| menu_action(glyph, label, Tone::Normal, p).key(id);
-    let mut panel = popover_panel(p).key("message-menu").w(300.0);
+    let mut panel = popover_panel(p).key("message-menu").w(MENU_WIDTH);
     // Held-back media offers no file actions until shown (ADR 0011).
     if let MessageContent::Attachment(file) = &message.content
         && !account.hides_listed_media(&key.room_id, event_id, file, &s.revealed_media)
@@ -174,18 +176,15 @@ pub fn menu(
         .focus_group()
         .modal(true, State::close_popover)
         .child(panel.max_h((window[1] - 16.0).max(100.0)).scroll(rune::ScrollSpec { stick_bottom: false }));
-    vec![match at {
-        Some((x, y)) => menu.absolute(
-            (x as f32).clamp(4.0, (window[0] - 308.0).max(4.0)),
-            (y as f32).clamp(4.0, (window[1] - 440.0).max(4.0)),
-        ),
-        None => menu.anchored(
+    match at {
+        Some(at) => at_point(menu, "message-menu", at, MENU_WIDTH, window).into(),
+        None => vec![menu.anchored(
             format!("{}more-{event_id}", if key.thread.is_some() { "thread-" } else { "" }),
             rune::Side::Bottom,
             rune::Align::End,
             4.0,
-        ),
-    }]
+        )],
+    }
 }
 
 pub fn dialog(s: &State, p: &Palette) -> Option<El> {

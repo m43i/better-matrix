@@ -22,7 +22,7 @@ use super::theme::{Palette, font};
 use crate::i18n::{I18N, t, tf, tp};
 use crate::state::{
     AccountData, AudioClip, ComposerTarget, EmojiFor, EntryView, GifCache, LinkPreviews, MediaCache, MessageLayout,
-    PlaybackSpeed, Popover, RoomTimeline, Scrub, State, TimelineItem, audio_supported,
+    PlaybackSpeed, Popover, RichText, RoomTimeline, Scrub, State, TimelineItem, audio_supported,
 };
 use matrix_core::links::LinkPreview;
 
@@ -1497,7 +1497,7 @@ fn call_card(cx: &Context<'_>, event_id: &str, card: &CallCard, latest_call: boo
 
 /// Message text, formatted when the sender formatted it. It selects, so it shows the text cursor
 /// even inside a row that opens its thread.
-fn text_body(message: &Message, plain: &str, rich: Option<&rune::TextEdit>, cx: &Context<'_>, p: &Palette) -> El {
+fn text_body(message: &Message, plain: &str, rich: Option<&RichText>, cx: &Context<'_>, p: &Palette) -> El {
     let event_id = &message.event_id;
     match rich {
         Some(rich) => super::message_text::formatted(&format!("rich-{event_id}"), rich, cx.look(message), p),
@@ -1520,7 +1520,7 @@ fn text_body(message: &Message, plain: &str, rich: Option<&rune::TextEdit>, cx: 
 }
 
 /// An emote: the sender's name, then what they do, in italics ("* Ada waves").
-fn emote_body(item: &TimelineItem, body: &str, rich: Option<&rune::TextEdit>, cx: &Context<'_>, p: &Palette) -> El {
+fn emote_body(item: &TimelineItem, body: &str, rich: Option<&RichText>, cx: &Context<'_>, p: &Palette) -> El {
     let event_id = &item.message.event_id;
     let name = &item.message.sender_name;
     match rich {
