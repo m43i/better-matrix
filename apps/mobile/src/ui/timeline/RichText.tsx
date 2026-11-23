@@ -23,6 +23,7 @@ import { useAppStore, useStore } from '../../state/react';
 import { inlinePicture } from '../../state/selectors';
 import { hiddenReading, inlineSpoilerId, spoilerCover } from '../../state/spoilers';
 import { font } from '../../theme/palette';
+import { EmojiText } from '../emoji/EmojiText';
 import { AVATAR_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
 import { SpoilerContext, useSpoiler, useTimelineContext } from './context';
@@ -117,7 +118,7 @@ function BlockView({ block, muted, owner, place }: { block: Block; muted: boolea
           ]}
           contentContainerStyle={styles.codeContent}
         >
-          <Text style={[styles.mono, { color: palette.text }]}>{block.text}</Text>
+          <EmojiText style={[styles.mono, { color: palette.text }]}>{block.text}</EmojiText>
         </ScrollView>
       );
     case 'quote':
@@ -214,7 +215,7 @@ function Spoiler({ id, children }: { id: string; children: string }) {
   const palette = usePalette();
   const { shown, reveal } = useSpoiler(id);
 
-  if (shown) return <Text>{children}</Text>;
+  if (shown) return <EmojiText>{children}</EmojiText>;
 
   return (
     <Text
@@ -312,17 +313,17 @@ function Run({ text, marks }: { text: string; marks: Marks }) {
 
   if (link) {
     return (
-      <Text
+      <EmojiText
         style={style}
         onPress={() => openLink(store, link, account, shown)}
         accessibilityRole="link"
       >
         {text}
-      </Text>
+      </EmojiText>
     );
   }
 
-  return <Text style={style}>{text}</Text>;
+  return <EmojiText style={style}>{text}</EmojiText>;
 }
 
 /** A person or room, as a pill; the user's own name stands out. */
@@ -336,7 +337,7 @@ function Pill({ inline }: { inline: Extract<Inline, { type: 'mention' }> }) {
     inline.kind === 'user' && !inline.label.startsWith('@') ? `@${inline.label}` : inline.label;
 
   return (
-    <Text
+    <EmojiText
       accessibilityRole="link"
       onPress={() => openMention(store, account, timelineKey.room_id, inline, shown)}
       style={{
@@ -346,7 +347,7 @@ function Pill({ inline }: { inline: Extract<Inline, { type: 'mention' }> }) {
       }}
     >
       {` ${label} `}
-    </Text>
+    </EmojiText>
   );
 }
 

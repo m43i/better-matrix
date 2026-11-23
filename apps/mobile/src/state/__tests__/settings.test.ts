@@ -52,4 +52,14 @@ describe('parseSettings', () => {
   it('an unknown message layout should show classic rows', () => {
     expect(parseSettings(JSON.stringify({ messageLayout: 'cards' })).messageLayout).toBe('rows');
   });
+
+  it('a saved emoji style should be read back', () => {
+    expect(parseSettings(JSON.stringify({ emojiStyle: 'monochrome' })).emojiStyle).toBe(
+      'monochrome',
+    );
+  });
+
+  it('older settings should use color emoji', () => {
+    expect(parseSettings(JSON.stringify({ appearance: 'dark' })).emojiStyle).toBe('color');
+  });
 });

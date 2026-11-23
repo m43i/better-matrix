@@ -2805,6 +2805,18 @@ fn choosing_typed_emoticons_in_the_appearance_settings_should_keep_them_as_typed
 }
 
 #[test]
+fn choosing_monochrome_in_the_emoticons_settings_should_change_emoji_style() {
+    let mut rt = runtime(|s| {
+        s.open_settings();
+        s.show_settings_section(SettingsSection::Appearance);
+    });
+    rt.update(|_, tx| tx.scroll_to_instant("settings-body", 0.0, 200.0));
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, "emoji-style-monochrome");
+    assert_eq!(rt.state.settings.emoji_style, crate::state::EmojiStyle::Monochrome);
+}
+
+#[test]
 fn a_group_tab_in_the_emoji_picker_should_scroll_to_that_group() {
     let mut rt = runtime(|s| {
         s.select_room(demo::DEMO_THREAD.0);

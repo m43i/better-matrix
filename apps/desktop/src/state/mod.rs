@@ -100,7 +100,7 @@ pub use sections::{
     DIRECT, FAVOURITES, INVITATIONS, LOW_PRIORITY, ROOMS, SectionView, is_builtin, note_to_self, ordered_spaces,
     sections,
 };
-pub use settings::{Appearance, Emoticons, MessageLayout, PlaybackSpeed, Settings, SettingsSection, Zoom};
+pub use settings::{Appearance, EmojiStyle, Emoticons, MessageLayout, PlaybackSpeed, Settings, SettingsSection, Zoom};
 pub use sign_in::{Asked, SignInForm, SignInStep};
 pub use status_message::{leading_emoji, suggestions as status_suggestions};
 pub use suggest::{Suggestion, Trigger};
@@ -5508,6 +5508,13 @@ impl State {
     /// Sends text emoticons as emoji, or as typed.
     pub fn set_emoticons(&mut self, emoticons: Emoticons) {
         self.settings.emoticons = emoticons;
+        self.shell.save_settings(self.settings.clone());
+    }
+
+    /// Redraws this device's Unicode emoji in the chosen style.
+    pub fn set_emoji_style(&mut self, style: EmojiStyle) {
+        self.settings.emoji_style = style;
+        style.apply();
         self.shell.save_settings(self.settings.clone());
     }
 

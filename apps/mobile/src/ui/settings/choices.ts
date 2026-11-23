@@ -3,7 +3,7 @@
 import type { NotificationMode } from '@better-matrix/matrix-native/types';
 
 import { type Key, type Language, LOCALES, resolve, t } from '../../i18n';
-import type { Appearance, MessageLayout } from '../../state/settings';
+import type { Appearance, EmojiStyle, MessageLayout } from '../../state/settings';
 
 /** Each language the app offers: the system's first, named with what it resolves to. */
 export function languageChoices(): Array<{ id: Language; label: string }> {
@@ -16,6 +16,11 @@ export const APPEARANCES: ReadonlyArray<{ id: Appearance; label: Key }> = [
   { id: 'system', label: 'appearance.system' },
   { id: 'light', label: 'appearance.light' },
   { id: 'dark', label: 'appearance.dark' },
+];
+
+export const EMOJI_STYLES: ReadonlyArray<{ id: EmojiStyle; label: Key }> = [
+  { id: 'color', label: 'settings.emoji_color' },
+  { id: 'monochrome', label: 'settings.emoji_monochrome' },
 ];
 
 /** How messages lay out, as the desktop's Appearance settings list them. */

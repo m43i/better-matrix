@@ -45,6 +45,20 @@ fn older_settings_should_turn_emoticons_into_emoji() {
 }
 
 #[test]
+fn the_emoji_style_should_survive_saving_and_loading_settings() {
+    let settings = Settings { emoji_style: EmojiStyle::Monochrome, ..Settings::fixed_english() };
+    let mut prefs = Prefs::memory();
+    write_settings(&mut prefs, &settings).unwrap();
+
+    assert_eq!(load_settings(&prefs).emoji_style, EmojiStyle::Monochrome);
+}
+
+#[test]
+fn older_settings_should_use_color_emoji() {
+    assert_eq!(load_settings(&Prefs::memory()).emoji_style, EmojiStyle::Color);
+}
+
+#[test]
 fn the_message_layout_should_survive_saving_and_loading_settings() {
     let settings = Settings { message_layout: MessageLayout::Bubbles, ..Settings::fixed_english() };
     let mut prefs = Prefs::memory();

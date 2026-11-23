@@ -26,6 +26,7 @@ import { useAppStore, useStore } from '../state/react';
 import { knownPerson } from '../state/selectors';
 import { font } from '../theme/palette';
 import { Button, type ButtonKind } from '../ui/components';
+import { EmojiText } from '../ui/emoji/EmojiText';
 import { Icon } from '../ui/icons';
 import { QrCode } from '../ui/qr/QrCode';
 import { QrScanner } from '../ui/qr/QrScanner';
@@ -312,9 +313,9 @@ function EmojiGrid({ emojis }: { emojis: SasEmoji[] }) {
     <View style={styles.grid} testID="verify-emoji">
       {emojis.map((emoji, index) => (
         <View key={`${index}-${emoji.symbol}`} style={styles.emoji}>
-          <Text style={styles.symbol} allowFontScaling={false}>
+          <EmojiText style={styles.symbol} allowFontScaling={false}>
             {emoji.symbol}
-          </Text>
+          </EmojiText>
           <Text
             style={[font.meta, { color: palette.textMuted, textAlign: 'center' }]}
             numberOfLines={2}

@@ -24,6 +24,7 @@ import { EmptyState } from '../components';
 import { PackPicture } from '../composer/Suggestions';
 import { Icon, type IconName } from '../icons';
 import { usePalette } from '../theme';
+import { EmojiText } from './EmojiText';
 
 type Section = 'custom' | 'recent' | Group;
 
@@ -165,9 +166,9 @@ export function EmojiPicker({
       {emoji.image && custom ? (
         <PackPicture account={custom.account} media={emoji.image.media} size={30} />
       ) : (
-        <Text style={styles.glyph} allowFontScaling={false}>
+        <EmojiText style={styles.glyph} allowFontScaling={false}>
           {emoji.emoji}
-        </Text>
+        </EmojiText>
       )}
     </Pressable>
   );

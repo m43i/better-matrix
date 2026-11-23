@@ -141,6 +141,10 @@ one message with its formatting pre-parsed. See [ADR 0006](adr/0006-timelines.md
 **Reaction**
 : An emoji added to a message; the same emoji from several people is counted on one chip.
 
+**Emoji style**
+: The device setting under Emoticons for how Unicode emoji draw. Color uses Noto Color Emoji
+and Monochrome uses Noto Emoji (`EmojiStyle`).
+
 **Read indicator**
 : The small avatar stack at a message's lower right showing whose latest exposed read position
 is there. Opens the reader list with receipt times (a sheet on mobile); selecting a reader opens

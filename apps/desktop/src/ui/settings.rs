@@ -13,8 +13,8 @@ use super::room_menu::{mode_id, modes};
 use super::theme::{Palette, font};
 use crate::i18n::{Language, t, tf};
 use crate::state::{
-    AccountData, Appearance, ContactStep, Emoticons, MediaCache, MessageLayout, Popover, SelectFor, SettingsSection,
-    State, Zoom,
+    AccountData, Appearance, ContactStep, EmojiStyle, Emoticons, MediaCache, MessageLayout, Popover, SelectFor,
+    SettingsSection, State, Zoom,
 };
 use crate::third_party;
 use matrix_core::{ContactDetail, ContactKind, OfflineDevice, RecoveryStatus, Session, SignInMethod};
@@ -269,13 +269,26 @@ fn appearance(s: &State, p: &Palette) -> El {
                 .on_press(move |s: &mut State| s.set_message_layout(layout)),
         )
     });
-    let emoticons = Emoticons::ALL.into_iter().fold(col().w_full().gap(8.0), |list, emoticons| {
+    let conversion = Emoticons::ALL.into_iter().fold(col().w_full().gap(8.0), |list, emoticons| {
         list.child(
             choice_row(emoticons.label(), Some(emoticons.hint()), s.settings.emoticons == emoticons, p)
                 .key(format!("emoticons-{}", emoticons.id()))
                 .on_press(move |s: &mut State| s.set_emoticons(emoticons)),
         )
     });
+    let emoji_styles = EmojiStyle::ALL.into_iter().fold(col().w_full().gap(8.0), |list, style| {
+        list.child(
+            choice_row(style.label(), None, s.settings.emoji_style == style, p)
+                .key(format!("emoji-style-{}", style.id()))
+                .on_press(move |s: &mut State| s.set_emoji_style(style)),
+        )
+    });
+    let emoticons = col()
+        .w_full()
+        .gap(12.0)
+        .child(conversion)
+        .child(text(t!("settings.emoji_style_hint")).font(font::META).color(p.text_muted))
+        .child(emoji_styles);
     col()
         .w_full()
         .gap(32.0)

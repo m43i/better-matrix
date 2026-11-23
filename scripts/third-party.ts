@@ -17,6 +17,8 @@ const APP = 'better-matrix-desktop';
 const BUNDLED = [
   // Rune's `embedded-fonts`, the app's text face.
   { name: 'Inter (font)', version: '4.001', license: 'OFL-1.1' },
+  { name: 'Noto Color Emoji (font)', version: '2.057', license: 'OFL-1.1' },
+  { name: 'Noto Emoji (font)', version: '3.002', license: 'OFL-1.1' },
   // webrtc-sys's prebuilt Google libwebrtc (WEBRTC_TAG in webrtc-sys-build), for calls. Its
   // bundled parts (BoringSSL, libyuv, Opus, libvpx, …) carry permissive licenses of their own.
   { name: 'libwebrtc', version: 'a545de4', license: 'BSD-3-Clause' },
@@ -32,7 +34,9 @@ const packages = new Map<string, Package>(metadata.packages.map((p: Package) => 
 
 const nodes = new Map<string, Node>(metadata.resolve.nodes.map((n: Node) => [n.id, n]));
 
-const ours = new Set<string>(metadata.workspace_members);
+const ours = new Set<string>(
+  metadata.workspace_members.filter((id: string) => packages.get(id)?.name !== 'rune-text'),
+);
 
 const app = metadata.workspace_members.find((id: string) => packages.get(id)?.name === APP);
 

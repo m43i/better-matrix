@@ -10,6 +10,7 @@ import { t } from '../../i18n';
 import type { Suggestion } from '../../state/suggestions';
 import { font } from '../../theme/palette';
 import { Avatar } from '../Avatar';
+import { EmojiText } from '../emoji/EmojiText';
 import { Icon } from '../icons';
 import { AVATAR_SIZE, useMedia } from '../media';
 import { usePalette } from '../theme';
@@ -97,7 +98,7 @@ function SuggestionRow({ account, suggestion }: { account: AccountId; suggestion
       return (
         <>
           <View style={styles.glyph}>
-            <Text style={styles.emoji}>{suggestion.emoji}</Text>
+            <EmojiText style={styles.emoji}>{suggestion.emoji}</EmojiText>
           </View>
           <Text style={[font.body, styles.label, { color: palette.text }]} numberOfLines={1}>
             {`:${suggestion.shortcode}:`}

@@ -450,4 +450,6 @@ see who is typing there.
 - Any `timeline_mut` moves the revision: a no-op costs a replan, never a stale plan.
 - Typing notices have no off switch; adding one is one check in `send_typing`.
 - No GIF picker: Giphy and Tenor search needs an API key issued to the project.
-- Emoji render through the system's colour emoji font.
+- Unicode emoji use the device's **emoji style**. Colour uses Google Noto Color Emoji.
+  Monochrome uses Google Noto Emoji outlines and grayscale Noto Color Emoji artwork for its
+  gaps. The system font covers characters outside the bundled fonts.

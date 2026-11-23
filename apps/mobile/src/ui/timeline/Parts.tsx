@@ -23,6 +23,7 @@ import { lastReplyText, quoteText, repliesText } from '../../state/timelineText'
 import { routes } from '../../routes';
 import { font } from '../../theme/palette';
 import { Avatar } from '../Avatar';
+import { EmojiText } from '../emoji/EmojiText';
 import { Icon } from '../icons';
 import { useMedia } from '../media';
 import { useNow } from '../shell/useNow';
@@ -51,9 +52,9 @@ export function QuoteBlock({ quote }: { quote: Quote }) {
             {quote.sender_name}
           </Text>
         ) : null}
-        <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={2}>
+        <EmojiText style={[font.meta, { color: palette.textMuted }]} numberOfLines={2}>
           {quoteText(quote)}
-        </Text>
+        </EmojiText>
       </View>
     </Pressable>
   );
@@ -90,9 +91,9 @@ export const Reactions = memo(function Reactions({
             },
           ]}
         >
-          <Text style={[font.body, styles.chipKey]} numberOfLines={1}>
+          <EmojiText style={[font.body, styles.chipKey]} numberOfLines={1}>
             {reaction.key}
-          </Text>
+          </EmojiText>
           <Text style={[font.meta, { color: reaction.mine ? palette.accent : palette.textMuted }]}>
             {reaction.count}
           </Text>

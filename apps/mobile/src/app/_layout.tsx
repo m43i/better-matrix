@@ -26,6 +26,7 @@ import { StoreProvider, useStore } from '../state/react';
 import type { Store } from '../state/store';
 import { VerificationPrompt } from '../ui/accounts/VerificationPrompt';
 import { Rings } from '../ui/call/Rings';
+import { EmojiFontProvider } from '../ui/emoji/EmojiText';
 import { LinkOpener } from '../ui/links/LinkOpener';
 import { Notices } from '../ui/Notices';
 import { ScannerPlaceholder } from '../ui/qr/QrScanner';
@@ -198,9 +199,11 @@ export default function RootLayout() {
         <StoreProvider store={app.store}>
           <PaletteProvider>
             {/* Demo scenes have no camera to point at a code. */}
-            <ScannerPlaceholder value={app.scene !== null}>
-              <Routes key={app.generation} scene={app.scene} />
-            </ScannerPlaceholder>
+            <EmojiFontProvider>
+              <ScannerPlaceholder value={app.scene !== null}>
+                <Routes key={app.generation} scene={app.scene} />
+              </ScannerPlaceholder>
+            </EmojiFontProvider>
           </PaletteProvider>
         </StoreProvider>
       </KeyboardProvider>

@@ -15,6 +15,7 @@ import { wantsAttention } from '../../state/sections';
 import { font } from '../../theme/palette';
 import { Avatar } from '../Avatar';
 import { Badge, Touchable } from '../components';
+import { EmojiText } from '../emoji/EmojiText';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
 import { SearchHighlight } from './SearchHighlight';
@@ -67,7 +68,11 @@ export const RoomRow = memo(function RoomRow({
       style={[attention ? font.navStrong : font.nav, styles.name, { color: nameColor }]}
       numberOfLines={1}
     >
-      {query ? <SearchHighlight text={room.name} query={query} /> : room.name}
+      {query ? (
+        <SearchHighlight text={room.name} query={query} />
+      ) : (
+        <EmojiText>{room.name}</EmojiText>
+      )}
     </Text>
   );
 
@@ -104,7 +109,7 @@ export const RoomRow = memo(function RoomRow({
               ) : null}
             </View>
             <View style={styles.line}>
-              <Text
+              <EmojiText
                 style={[
                   font.meta,
                   styles.preview,
@@ -113,7 +118,7 @@ export const RoomRow = memo(function RoomRow({
                 numberOfLines={1}
               >
                 {last ? previewLine(last) : ''}
-              </Text>
+              </EmojiText>
               <Badge count={badge} mention={room.mentions > 0} />
             </View>
           </View>

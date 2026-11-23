@@ -8,7 +8,12 @@ import { t } from '../../i18n';
 import { updateSettings } from '../../state/actions/core';
 import { useAppStore, useStore } from '../../state/react';
 import { Divider, ListRow, ListSection } from '../../ui/components';
-import { APPEARANCES, languageChoices, MESSAGE_LAYOUTS } from '../../ui/settings/choices';
+import {
+  APPEARANCES,
+  EMOJI_STYLES,
+  languageChoices,
+  MESSAGE_LAYOUTS,
+} from '../../ui/settings/choices';
 import { SettingsPage } from '../../ui/settings/common';
 
 export default function PreferencesScreen() {
@@ -55,6 +60,20 @@ export default function PreferencesScreen() {
               subtitle={t(choice.hint)}
               selected={settings.messageLayout === choice.id}
               onPress={() => updateSettings(store, { messageLayout: choice.id })}
+              chevron={false}
+            />
+          </Fragment>
+        ))}
+      </ListSection>
+      <ListSection title={t('settings.emoticons')} footer={t('settings.emoji_style_hint')}>
+        {EMOJI_STYLES.map((choice, index) => (
+          <Fragment key={choice.id}>
+            {index > 0 ? <Divider inset={16} /> : null}
+            <ListRow
+              testID={`emoji-style-${choice.id}`}
+              title={t(choice.label)}
+              selected={settings.emojiStyle === choice.id}
+              onPress={() => updateSettings(store, { emojiStyle: choice.id })}
               chevron={false}
             />
           </Fragment>

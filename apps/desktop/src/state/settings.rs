@@ -115,6 +115,43 @@ impl Emoticons {
     }
 }
 
+/// Which Google Noto family draws Unicode emoji on this device.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EmojiStyle {
+    #[default]
+    Color,
+    Monochrome,
+}
+
+impl EmojiStyle {
+    pub const ALL: [Self; 2] = [Self::Color, Self::Monochrome];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Color => t!("settings.emoji_color"),
+            Self::Monochrome => t!("settings.emoji_monochrome"),
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Color => "color",
+            Self::Monochrome => "monochrome",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Self {
+        Self::ALL.into_iter().find(|style| style.id() == id).unwrap_or_default()
+    }
+
+    pub fn apply(self) {
+        rune::text::choose_emoji_families(match self {
+            Self::Color => &["Noto Color Emoji"],
+            Self::Monochrome => &["Better Matrix Noto Emoji"],
+        });
+    }
+}
+
 /// How large the whole interface draws, as a browser's page zoom, in percent. It steps through
 /// [`Zoom::LEVELS`]; 100% is the design size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -173,6 +210,7 @@ pub struct Settings {
     pub show_maps: bool,
     /// Sent messages turn their text emoticons into emoji, or keep them as typed.
     pub emoticons: Emoticons,
+    pub emoji_style: EmojiStyle,
     /// The microphone, speaker and camera for calls and voice messages, by name.
     pub devices: matrix_core::DeviceChoice,
     /// Ring aloud for an incoming call; silent, only the notification and the card show.
@@ -236,6 +274,7 @@ impl Default for Settings {
             show_link_previews: true,
             show_maps: true,
             emoticons: Emoticons::default(),
+            emoji_style: EmojiStyle::default(),
             devices: matrix_core::DeviceChoice::default(),
             ring_sound: true,
             playback_speed: PlaybackSpeed::default(),

@@ -5,7 +5,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
-import { Linking, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { locale, t } from '../i18n';
 import { setPinned, setSaved, messageLink, translationUrl } from '../state/actions/message-actions';
@@ -23,6 +23,7 @@ import { previewHidden, room, timeline } from '../state/selectors';
 import { roomKey, threadKey } from '../state/timeline';
 import { routes } from '../routes';
 import { Divider, EmptyState, ListRow } from '../ui/components';
+import { EmojiText } from '../ui/emoji/EmojiText';
 import { Icon } from '../ui/icons';
 import { usePalette } from '../ui/theme';
 import { confirmEndPoll } from '../ui/timeline/PollCard';
@@ -122,7 +123,7 @@ export default function MessageActionsScreen() {
                   { backgroundColor: mine ? `${palette.accent}33` : palette.surface },
                 ]}
               >
-                <Text style={styles.emojiText}>{emoji}</Text>
+                <EmojiText style={styles.emojiText}>{emoji}</EmojiText>
               </Pressable>
             );
           })}

@@ -86,6 +86,11 @@ Date: 2026-11-16
   Rust bridge JSON is trusted from the shared generated types; assertions there document that
   invariant. Tests inject call permissions, media resolution, and navigation through their
   interfaces instead of replacing modules.
+- **Emoji style:** Preferences has an Emoticons group with the same two Noto families as
+  desktop. Expo Font loads the bundled files. `EmojiText` applies the selected family to
+  emoji runs in native text so line breaking, selection and copying use the original string.
+  Android uses the same files as desktop. iOS uses the same outlines and artwork with bitmap
+  strikes in Apple's sbix format.
 - **Bytes become files.** `MediaLoaded` and `GifLoaded` are written under the cache directory,
   named by what they are, and reported as `MediaFile` / `GifFile` with the path; image and
   video views open the file directly. Uploads go the other way as paths (`Upload::Path`);

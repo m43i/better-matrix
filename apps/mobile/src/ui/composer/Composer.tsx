@@ -72,6 +72,7 @@ import { draftChanged, typingEnded, typingFor } from '../../state/typingNotices'
 import { font } from '../../theme/palette';
 import { askToLeave } from '../askToLeave';
 import { IconButton } from '../components';
+import { EmojiText } from '../emoji/EmojiText';
 import { Icon } from '../icons';
 import { usePalette } from '../theme';
 import { AttachTray, type TrayChoice } from './AttachTray';
@@ -670,18 +671,18 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
             >
               {segments.map((part, index) =>
                 part.pill === 'spoiler' ? (
-                  <Text key={index} style={{ backgroundColor: `${palette.textMuted}40` }}>
+                  <EmojiText key={index} style={{ backgroundColor: `${palette.textMuted}40` }}>
                     {part.text}
-                  </Text>
+                  </EmojiText>
                 ) : part.pill === 'pill' ? (
-                  <Text
+                  <EmojiText
                     key={index}
                     style={{ color: palette.accent, backgroundColor: `${palette.accent}1f` }}
                   >
                     {part.text}
-                  </Text>
+                  </EmojiText>
                 ) : (
-                  <Text key={index}>{part.text}</Text>
+                  <EmojiText key={index}>{part.text}</EmojiText>
                 ),
               )}
             </TextInput>

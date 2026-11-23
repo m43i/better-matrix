@@ -195,12 +195,12 @@ Date: 2026-11-22
   - Choices with more than a couple of options (language, each account's notifications,
     the ring, devices) are selects: the current choice in a button that opens its list
     (`select_button`, `select_option`, `select_menu`; `Popover::Select(SelectFor)`). The list
-    draws above the settings modal. The theme, the message layout, emoticons, link previews
-    and GIFs stay as radio rows.
+    draws above the settings modal. The theme, the message layout, emoticons, emoji style, link
+    previews and GIFs stay as radio rows.
   - General holds the language, link previews and GIFs; Appearance, the theme, the message
     layout ([0006](0006-timelines.md)), emoticons (sent as emoji or as typed,
-    [0007](0007-composer-and-media.md)) and the interface size. Phones list the theme and the
-    message layout under Preferences.
+    [0007](0007-composer-and-media.md)), and the interface size. Emoticons also holds the
+    device's emoji style. Phones list the theme, message layout and emoji style under Preferences.
   - Voice & video picks the microphone, speaker and camera by name, for calls and voice
     messages alike (`Settings::devices`, `State::choose_device`); the system's default when
     none is picked or the picked one is gone. The devices list when the section opens

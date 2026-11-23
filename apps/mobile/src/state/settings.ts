@@ -8,6 +8,8 @@ import type { PlaybackSpeed } from './voiceCard';
 
 export type Appearance = 'system' | 'light' | 'dark';
 
+export type EmojiStyle = 'color' | 'monochrome';
+
 /**
  * How conversations lay out their messages: classic rows under each sender's name, or chat
  * bubbles, other people's at the left by their picture and the user's own at the right.
@@ -17,6 +19,7 @@ export type MessageLayout = 'rows' | 'bubbles';
 export interface Settings {
   language: Language;
   appearance: Appearance;
+  emojiStyle: EmojiStyle;
   messageLayout: MessageLayout;
   /** Play GIFs behind Giphy, Tenor and Imgur links inline. */
   showLinkGifs: boolean;
@@ -44,6 +47,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   language: 'system',
   appearance: 'system',
+  emojiStyle: 'color',
   messageLayout: 'rows',
   showLinkGifs: true,
   showMaps: true,
@@ -59,6 +63,7 @@ export const DEFAULT_SETTINGS: Settings = {
 const savedSettings = z.object({
   language: z.enum(['system', 'en', 'de', 'fr']).catch(DEFAULT_SETTINGS.language),
   appearance: z.enum(['system', 'light', 'dark']).catch(DEFAULT_SETTINGS.appearance),
+  emojiStyle: z.enum(['color', 'monochrome']).catch(DEFAULT_SETTINGS.emojiStyle),
   messageLayout: z.enum(['rows', 'bubbles']).catch(DEFAULT_SETTINGS.messageLayout),
   showLinkGifs: z.boolean().catch(DEFAULT_SETTINGS.showLinkGifs),
   showMaps: z.boolean().catch(DEFAULT_SETTINGS.showMaps),

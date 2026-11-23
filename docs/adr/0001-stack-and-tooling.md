@@ -240,6 +240,9 @@ Date: 2026-11-14
   - **Headless** runs and tests use English (`Settings::fixed_english`).
 - **Fonts:** `families` are `("Inter", "ui-monospace")`, so `mono()` text (code, recovery keys,
   the **backdrop**) uses the system's monospace font; Rune's default put Inter in both slots.
+  Both clients bundle Google's Noto Emoji and Noto Color Emoji. Desktop patches the pinned
+  `rune-text` crate to use the chosen family for emoji graphemes before the system fallback.
+  The patch is documented in [vendor/rune-text](../../vendor/rune-text/README.md).
 
 ## Consequences
 
