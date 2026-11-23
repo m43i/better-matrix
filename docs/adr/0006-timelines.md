@@ -197,10 +197,11 @@ see who is typing there.
     bubble until then) puts it at the message's own edge, reaching into the open side: right
     of other people's, left of the user's own. It rises over the message above, which it may
     cover a moment, and never reaches into the readers' column. It holds React, Reply,
-    Thread, a rule, then More; a timeline narrower than the whole toolbar beside a picture
-    keeps only More, whose menu offers the rest (Add reaction then anchors the picker at
+    Thread, a rule, then More; content narrower than the whole toolbar keeps only More, whose menu offers the rest (Add reaction then anchors the picker at
     More). Media and cards fill the column they're given, so their toolbar takes the column's
-    top right.
+    top right. Rising out of its row, the toolbar shares the row's hover group
+    (`El::hover_group_shared`, one key per message): the pointer on it keeps its message
+    hovered, not the one under it.
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
     reaction's count and whether the user is among them. The picker offers quick reactions,
@@ -213,10 +214,11 @@ see who is typing there.
     ([0008](0008-people-and-rooms.md)).
   - The hover toolbar fades in through the row's hover group, so hovering never rebuilds the
     view.
-  - A change to messages already shown (only `Set` diffs: a reaction, an edit, a receipt;
+  - A change to messages already shown (only `Set` diffs: a reaction, an edit;
     `RoomTimeline::changes_in_place`) lands like history (`Landing::Due`): the row takes its
     new height at once. Eased, a growing row uncovers what it gained bit by bit, which reads as
-    a reaction fading in slowly.
+    a reaction fading in slowly. Receipts alone keep to the readers' column and don't land, so
+    news arriving in the same frame still eases in.
   - Room events and call cards are informational rows: no message toolbar, reactions, replies
     or thread actions. A call card keeps its call-specific controls.
   - A text message's formatting is the sender's HTML; without any, the Markdown in its plain
@@ -415,8 +417,8 @@ see who is typing there.
     without the media prefetch margin. It fades over a 2.5-second opacity spring, keeping its
     row's full height until the fade ends, and after (`ReadMarkerFade::Faded`) while the row is
     in the viewport: closing it on screen would move the messages around it. Once the view
-    reports the row out of view (`State::read_marker_visible`), or the timeline closes, the
-    row goes, off screen. The fading row retains its
+    reports the row out of view (`State::read_marker_visible`), or the fade ends with it out of
+    view, or the timeline closes, the row goes, off screen. The fading row retains its
     acknowledged neighbours independently of the SDK marker, so advancing receipts can move or
     remove that marker without moving the visible divider. A small fade state machine
     uses Rune's logical clock and a scheduled wake (150 ms under reduced motion, the space kept

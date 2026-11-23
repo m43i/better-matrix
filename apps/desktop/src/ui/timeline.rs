@@ -897,11 +897,18 @@ fn readers_cell(cx: &Context<'_>, message: &Message, p: &Palette) -> Option<El> 
     Some(readers)
 }
 
-/// What every message row does, whatever its layout: the menu on a right click, and in a room,
-/// opening the message's thread on a press. The hover toolbar is the layout's to place.
+/// The hover group a message's row shares with its toolbar, which rises out of the row: the
+/// pointer on the toolbar keeps the message hovered rather than the one under it.
+fn hover_key(cx: &Context<'_>, message: &Message) -> String {
+    cx.key(&format!("message-hover-{}", message.event_id))
+}
+
+/// What every message row does, whatever its layout: the toolbar's hover group, the menu on a
+/// right click, and in a room, opening the message's thread on a press. The hover toolbar is the
+/// layout's to place.
 fn message_actions(row: El, cx: &Context<'_>, message: &Message) -> El {
     let (menu_key, id) = (cx.key.clone(), message.event_id.clone());
-    let mut row = row.on_secondary_press(move |s: &mut State, point, _| {
+    let mut row = row.hover_group_shared(hover_key(cx, message)).on_secondary_press(move |s: &mut State, point, _| {
         s.popover = Some(Popover::MessageMenu {
             key: menu_key.clone(),
             event_id: id.clone(),
@@ -1121,7 +1128,7 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
     } else if message.highlighted && message.sender_id != cx.account.as_str() {
         row = row.fill(p.warning.alpha(0.10)).border_sides([0.0, 0.0, 0.0, 3.0], p.warning);
     }
-    if actions { message_actions(row.hover_group(), cx, message) } else { row }
+    if actions { message_actions(row, cx, message) } else { row }
 }
 
 /// The sender's name or picture on a message, opening their person panel rather than the thread.
@@ -1171,7 +1178,7 @@ fn toolbar(cx: &Context<'_>, message: &Message, said_width: f32, p: &Palette) ->
     let event_id = message.event_id.clone();
     // A call's card keeps no reactions, and a thread has no threads.
     let (react, thread) = (!matches!(message.content, MessageContent::Call(_)), !cx.in_thread());
-    let roomy = toolbar_width(2 + usize::from(react) + usize::from(thread)) <= cx.content_width + AVATAR + MESSAGE_GAP;
+    let roomy = toolbar_width(2 + usize::from(react) + usize::from(thread)) <= cx.content_width;
     let (react, reply, thread) = (roomy && react, roomy, roomy && thread);
     let buttons = 1 + usize::from(react) + usize::from(reply) + usize::from(thread);
     let width = toolbar_width(buttons);
@@ -1200,7 +1207,6 @@ fn toolbar(cx: &Context<'_>, message: &Message, said_width: f32, p: &Palette) ->
     let (key, quoted) = (cx.key.clone(), message.clone());
     let mut bar = row()
         .key(cx.key(&format!("actions-{event_id}")))
-        .pin(left, Some(TOOLBAR_OVERLAP - TOOLBAR_HEIGHT), right, None)
         .w(width)
         .h(TOOLBAR_HEIGHT)
         .px(TOOLBAR_PAD)
@@ -1237,9 +1243,13 @@ fn toolbar(cx: &Context<'_>, message: &Message, said_width: f32, p: &Palette) ->
     }
     // Every sent message has utilities, including other people's messages.
     let (key, id) = (cx.key.clone(), event_id.clone());
-    bar.child(button(&icons::MORE, t!("actions.more"), "more").on_press(move |s: &mut State| {
+    let bar = bar.child(button(&icons::MORE, t!("actions.more"), "more").on_press(move |s: &mut State| {
         s.toggle_popover(Popover::MessageMenu { key: key.clone(), event_id: id.clone(), at: None });
-    }))
+    }));
+    // Above its row, the toolbar keeps the message hovered through the group they share.
+    el().pin(left, Some(TOOLBAR_OVERLAP - TOOLBAR_HEIGHT), right, None)
+        .hover_group_shared(hover_key(cx, message))
+        .child(bar)
 }
 
 /// The message a reply answers: who wrote it and an excerpt, behind a bar. Pressing it goes to

@@ -3571,6 +3571,22 @@ fn a_faded_new_marker_should_leave_once_out_of_view() {
     assert!(rt.find("new-marker").is_none(), "the divider leaves once scrolled away");
 }
 
+#[test]
+fn a_new_marker_scrolled_away_while_fading_should_leave_when_its_fade_ends() {
+    let mut rt = runtime(long_unread_timeline);
+    rt.update(|s, _| s.focus_changed(true));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let (_, opacity) = rt.presented("new-marker").expect("the divider");
+    assert!(opacity > 0.01, "the fade should be under way: {opacity}");
+    rt.update(|_, tx| tx.scroll_to_instant("timeline", 0.0, 0.0));
+    for _ in 0..240 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("new-marker").is_none(), "the divider's space should close off screen");
+}
+
 // ----- verification, account actions, linking devices, signing up ------------------------
 
 fn grace_identity(verified: bool, changed: bool) -> Option<matrix_core::Identity> {
@@ -3969,4 +3985,63 @@ fn a_custom_emoji_should_keep_its_line_as_tall_as_text() {
     let rt = message_features_runtime();
     let height = |key: &str| element_rect(&rt, key)[3];
     assert_eq!(height("rich-$emoji-0"), height("rich-$mention-0"));
+}
+
+/// Two messages from Grace in one run: the second continues the first, without her name.
+fn continued_room(s: &mut State) {
+    s.select_room(demo::DEMO_THREAD.0);
+    s.apply(
+        Event::TimelineChanged {
+            account: AccountId::new(demo::ADA),
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(vec![short_message("short-0", 0), short_message("short-1", 0)])],
+        },
+        &mut rune::Tx::default(),
+    );
+}
+
+/// Hovers `continued_room`'s second message, then moves onto its toolbar's More, which rises over
+/// the first message.
+fn onto_a_continued_messages_more(layout: crate::state::MessageLayout) -> Runtime<State> {
+    let mut rt = runtime(move |s| {
+        s.settings.message_layout = layout;
+        continued_room(s);
+    });
+    let row = element_rect(&rt, "msg-short-1");
+    rt.pointer_move(row[0] + 200.0, row[1] + row[3] / 2.0);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let more = element_rect(&rt, "more-$short-1");
+    assert!(more[1] + more[3] / 2.0 < row[1], "More should rise above its row for this test");
+    rt.pointer_move(more[0] + more[2] / 2.0, more[1] + more[3] / 2.0);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    rt
+}
+
+#[test]
+fn moving_onto_a_toolbar_above_its_row_should_keep_it_shown() {
+    for layout in [crate::state::MessageLayout::Rows, crate::state::MessageLayout::Bubbles] {
+        let rt = onto_a_continued_messages_more(layout);
+        let (_, opacity) = rt.presented("actions-$short-1").expect("the toolbar");
+        assert!(opacity > 0.99, "{layout:?}: the toolbar hides under the pointer: {opacity}");
+    }
+}
+
+#[test]
+fn pressing_more_above_its_row_should_open_that_messages_menu() {
+    for layout in [crate::state::MessageLayout::Rows, crate::state::MessageLayout::Bubbles] {
+        let mut rt = onto_a_continued_messages_more(layout);
+        let (x, y) = rt.find("more-$short-1").expect("More");
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+        assert!(
+            matches!(&rt.state.popover, Some(crate::state::Popover::MessageMenu { event_id, .. }) if event_id == "$short-1"),
+            "{layout:?}: {:?}",
+            rt.state.popover
+        );
+    }
 }

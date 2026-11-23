@@ -330,6 +330,11 @@ impl RoomTimeline {
             }
         };
         if tx.clock() >= until {
+            // Scrolled away while it faded: nothing on screen moves as its space closes.
+            if self.visible_read_marker.as_deref() != Some(marker.id.as_str()) {
+                self.revision = next_revision();
+                return true;
+            }
             self.read_marker_fade = Some(ReadMarkerFade::Faded(marker));
             return started;
         }
@@ -410,11 +415,20 @@ impl RoomTimeline {
         }
     }
 
-    /// Whether `diffs` only change entries already shown (a reaction, an edit, a receipt): the
-    /// message changes at once, its row taking its new height, rather than easing open and
-    /// uncovering what it gained bit by bit.
-    pub fn changes_in_place(diffs: &[TimelineDiff]) -> bool {
-        !diffs.is_empty() && diffs.iter().all(|diff| matches!(diff, TimelineDiff::Set { .. }))
+    /// Whether `diffs` only change entries already shown (a reaction, an edit), other than in
+    /// who has read them: the message changes at once, its row taking its new height, rather
+    /// than easing open and uncovering what it gained bit by bit. Receipts alone keep to the
+    /// readers' column, and land nothing else that arrives with them.
+    pub fn changes_in_place(&self, diffs: &[TimelineDiff]) -> bool {
+        let only_read =
+            |index: usize, entry: &TimelineEntry| match (self.entries.get(index).map(|e| &e.kind), &entry.kind) {
+                (Some(EntryView::Message(old)), EntryKind::Message(new)) => {
+                    old.message == Message { read_receipts: old.message.read_receipts.clone(), ..(**new).clone() }
+                }
+                _ => false,
+            };
+        diffs.iter().all(|diff| matches!(diff, TimelineDiff::Set { .. }))
+            && diffs.iter().any(|diff| matches!(diff, TimelineDiff::Set { index, entry } if !only_read(*index, entry)))
     }
 
     /// Whether `diffs` bring history rather than news: a message or room event above all the
@@ -2080,6 +2094,40 @@ mod tests {
 
     fn entry(id: &str) -> TimelineEntry {
         TimelineEntry { id: id.into(), kind: EntryKind::Message(Box::new(message(&format!("${id}")))) }
+    }
+
+    /// A timeline of one message, `a`, and that message changed by `change`.
+    fn changed_in_place(change: impl FnOnce(&mut Message)) -> (RoomTimeline, Vec<TimelineDiff>) {
+        let mut timeline = RoomTimeline::default();
+        timeline.apply(vec![TimelineDiff::Reset(vec![entry("a")])]);
+        let mut changed = message("$a");
+        change(&mut changed);
+        let entry = TimelineEntry { id: "a".into(), kind: EntryKind::Message(Box::new(changed)) };
+        (timeline, vec![TimelineDiff::Set { index: 0, entry }])
+    }
+
+    #[test]
+    fn a_reaction_should_change_its_message_in_place() {
+        let (timeline, diffs) = changed_in_place(|message| {
+            message.reactions = vec![matrix_core::Reaction { key: "👍".into(), count: 1, mine: true }];
+        });
+        assert!(timeline.changes_in_place(&diffs));
+    }
+
+    #[test]
+    fn a_receipt_alone_should_not_land_as_a_change_in_place() {
+        let (timeline, diffs) = changed_in_place(|message| {
+            message.read_receipts =
+                vec![matrix_core::ReadReceipt { user_id: "@b:example.org".into(), timestamp_ms: None }];
+        });
+        assert!(!timeline.changes_in_place(&diffs));
+    }
+
+    #[test]
+    fn news_should_not_land_as_a_change_in_place() {
+        let mut timeline = RoomTimeline::default();
+        timeline.apply(vec![TimelineDiff::Reset(vec![entry("a")])]);
+        assert!(!timeline.changes_in_place(&[TimelineDiff::PushBack(entry("b"))]));
     }
 
     fn entry_ids(timeline: &RoomTimeline) -> Vec<&str> {

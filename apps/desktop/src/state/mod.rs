@@ -1508,7 +1508,7 @@ impl State {
                     }
                 }
                 if let Some(timeline) = self.accounts.timeline_mut(&account, &key) {
-                    if reset || timeline.adds_history(&diffs) || RoomTimeline::changes_in_place(&diffs) {
+                    if reset || timeline.adds_history(&diffs) || timeline.changes_in_place(&diffs) {
                         timeline.landing = Landing::Due;
                     }
                     timeline.apply(diffs);
