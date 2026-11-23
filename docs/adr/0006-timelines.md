@@ -200,13 +200,14 @@ see who is typing there.
     Thread, a rule, then More; content narrower than the whole toolbar keeps only More, whose menu offers the rest (Add reaction then anchors the picker at
     More). Media and cards fill the column they're given, so their toolbar takes the column's
     top right. Rising out of its row, the toolbar can lie over the message above, so the
-    pointer can be over two messages at once. A small state machine settles it
-    (`MessageHover`): rows and toolbars report the pointer entering and leaving
-    (`on_hover_change`); a toolbar the pointer reaches while it shows holds it, staying shown
-    and hiding the toolbar (and tint) of the row under it, while one it crosses hidden holds
-    nothing. Rune's hover groups are rectangles, and joining the toolbar to its row's group
-    lit the next message's hidden toolbar over the bottom of each message. Hidden toolbars
-    take no presses (Rune hit-tests only what draws).
+    pointer can be over two messages at once. The toolbar shows through its row's hover group;
+    a shown toolbar the pointer is on holds it (`MessageHover`, from the toolbar's
+    `on_hover_change`): it stays shown, and the row under it shows no hover and no toolbar, its
+    toolbar out of reach (inert, so Tab doesn't stop in it unseen). Rune hit-tests only what
+    draws, so a hidden toolbar holds nothing and takes no press or right click, and one shown
+    under the pointer hears it arrive; a press between a shown toolbar's buttons is its own.
+    Rune's hover groups are rectangles: joining the toolbar to its row's group lit the next
+    message's hidden toolbar over the bottom of each message.
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
     reaction's count and whether the user is among them. The picker offers quick reactions,
@@ -218,8 +219,8 @@ see who is typing there.
     name or picture opens their person panel instead
     ([0008](0008-people-and-rooms.md)).
   - The hover toolbar fades in through the row's hover group, and keyboard focus inside a row
-    lights it too. Noting which message the pointer is with rebuilds the view once per message
-    crossed, not per move.
+    lights it too, so hovering a row never rebuilds the view; only the pointer reaching or
+    leaving a toolbar does.
   - A change to messages already shown (only `Set` diffs: a reaction, an edit;
     `RoomTimeline::changes_in_place`) lands like history (`Landing::Due`): the row takes its
     new height at once. Eased, a growing row uncovers what it gained bit by bit, which reads as

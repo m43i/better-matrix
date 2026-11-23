@@ -171,7 +171,8 @@ keeping its current content and formatting and removing its reply, thread and ed
 **Hover toolbar**
 : React, reply, reply-in-thread and, behind a rule, More, shown while a message is hovered. It
 floats on the top edge of what the message says, at its top right, the same in classic rows and
-chat bubbles; a timeline too narrow for it keeps only More.
+chat bubbles; a timeline too narrow for it keeps only More. Rising over the message above, the
+toolbar the pointer is on wins over the row under it.
 
 **Section**
 : A group in the sidebar: the built-in Rooms, Direct messages, Favourites and Low priority, or one

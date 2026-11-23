@@ -4050,6 +4050,85 @@ fn moving_onto_a_toolbar_above_its_row_should_not_flicker() {
     }
 }
 
+/// The middle of the element `key`.
+fn middle(rt: &Runtime<State>, key: &str) -> (f32, f32) {
+    let r = element_rect(rt, key);
+    (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0)
+}
+
+#[test]
+fn right_clicking_a_message_under_the_next_ones_hidden_toolbar_should_open_its_own_menu() {
+    let mut rt = runtime(continued_room);
+    let (x, y) = middle(&rt, "more-$short-1");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert!(
+        matches!(&rt.state.popover, Some(crate::state::Popover::MessageMenu { event_id, .. }) if event_id == "$short-0"),
+        "{:?}",
+        rt.state.popover
+    );
+}
+
+#[test]
+fn a_press_between_a_raised_toolbars_buttons_should_open_nothing() {
+    let mut rt = onto_a_continued_messages_more(crate::state::MessageLayout::Rows);
+    let actions = element_rect(&rt, "actions-$short-1");
+    let (x, y) = (actions[0] + 1.5, actions[1] + actions[3] / 2.0);
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.popover.is_none() && rt.state.active_thread().is_none(), "the press reached a message");
+}
+
+#[test]
+fn a_toolbar_shown_under_the_pointer_should_stay_as_it_moves_up_onto_it() {
+    let mut rt = runtime(continued_room);
+    let row = element_rect(&rt, "msg-short-1");
+    let (x, more_y) = middle(&rt, "more-$short-1");
+    // Down from the first message into the second, through where its toolbar rises.
+    for y in [row[1] - 30.0, more_y, row[1] + 4.0] {
+        rt.pointer_move(x, y);
+        for _ in 0..10 {
+            rt.frame(1.0 / 60.0);
+        }
+    }
+    // Then straight back up onto More.
+    rt.pointer_move(x, more_y);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let (_, opacity) = rt.presented("actions-$short-1").expect("the toolbar");
+    assert!(opacity > 0.99, "the toolbar hid under the pointer: {opacity}");
+}
+
+#[test]
+fn tab_should_not_stop_in_a_toolbar_hidden_under_a_held_one() {
+    let mut rt = onto_a_continued_messages_more(crate::state::MessageLayout::Rows);
+    let mut reached = 0;
+    for press in 0..40 {
+        rt.key(rune::KeyEvent { key: rune::Key::Tab, mods: rune::Mods::default() });
+        rt.frame(1.0 / 60.0);
+        let Some(focused) = rt.elements().into_iter().find(|e| e.focused) else { continue };
+        let Some(key) = focused.key.as_deref() else { continue };
+        if key.starts_with("react-")
+            || key.starts_with("reply-")
+            || key.starts_with("thread-")
+            || key.starts_with("more-")
+        {
+            let id = key.split_once('-').map_or("", |(_, id)| id);
+            let (_, opacity) = rt.presented(&format!("actions-{id}")).expect("its toolbar");
+            assert!(opacity > 0.99, "Tab {press} focused {key} in a hidden toolbar: {opacity}");
+            reached += 1;
+        }
+    }
+    assert!(reached > 0, "Tab should reach the held toolbar's buttons");
+}
+
 #[test]
 fn entering_a_message_where_the_next_ones_toolbar_would_rise_should_show_only_its_own() {
     let mut rt = runtime(continued_room);
