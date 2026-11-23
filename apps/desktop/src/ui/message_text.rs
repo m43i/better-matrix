@@ -125,7 +125,8 @@ pub fn formatted_in(key: &str, rich: &RichText, look: Look<'_>, color: Color, p:
 
 /// A code block: its lines, and a button floating at its top right while it's hovered that
 /// copies its code. Its lines keep clear of the button, so it never covers code to select.
-/// Room at a code block's right for its copy button: the button and its margin.
+/// Room at a code block's right for its copy button: the button and its margin. A block is at
+/// least as tall, so the button never hangs below a one-line block.
 const COPY_ROOM: f32 = 32.0;
 
 fn code_block(key: &str, start: usize, lines: Vec<El>, code: String, p: &Palette) -> El {
@@ -140,6 +141,7 @@ fn code_block(key: &str, start: usize, lines: Vec<El>, code: String, p: &Palette
         .key(format!("{key}-code-{start}"))
         .w_full()
         .pr(COPY_ROOM)
+        .min_h(COPY_ROOM + 4.0)
         .fill(p.surface)
         .radius(4.0)
         .hover_group()
@@ -489,6 +491,23 @@ mod tests {
         rt.frame(0.0);
         let buttons = rt.elements().into_iter().filter_map(|e| e.key).filter(|key| key.contains("-copy-code-")).count();
         assert_eq!(buttons, 2);
+    }
+
+    fn one_line_block(s: &State, _: &mut rune::Cx<State>) -> El {
+        let rich = RichText::from_html("<pre><code>ls</code></pre><p>after</p>");
+        formatted("message", &rich, test_look(s), &super::super::theme::palette(true))
+    }
+
+    #[test]
+    fn a_one_line_code_blocks_copy_button_should_stay_within_it() {
+        let mut rt = Runtime::new(State::detached(), one_line_block, (500.0, 300.0), Env::new(true, 1.0));
+        rt.frame(0.0);
+        let rect = |rt: &Runtime<State>, part: &str| {
+            let key = rt.elements().into_iter().filter_map(|e| e.key).find(|key| key.contains(part)).expect(part);
+            rt.presented(&key).expect(part).0
+        };
+        let (block, button) = (rect(&rt, "-code-0"), rect(&rt, "-copy-code-"));
+        assert!(button[1] + button[3] <= block[1] + block[3], "button {button:?}, block {block:?}");
     }
 
     #[test]

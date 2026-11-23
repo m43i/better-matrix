@@ -345,17 +345,26 @@ fn code_text(html: &str) -> String {
 /// );
 /// ```
 pub fn with_code_blocks(html: &str, blocks: &[CodeBlock]) -> String {
-    const OPEN: &str = "<pre><code>";
+    const CODE: &str = "<code>";
     const CLOSE: &str = "</code></pre>";
     let mut out = String::with_capacity(html.len());
     let mut rest = html;
     let mut blocks = blocks.iter();
-    while let Some(at) = rest.find(OPEN) {
+    while let Some(at) = rest.find("<pre") {
+        let Some(end) = rest[at..].find('>').map(|end| at + end) else { break };
+        // A `<pre>` with its attributes (`dir="ltr"` beside right-to-left text), then `<code>`.
+        let pre = &rest[at..=end];
+        let after = &rest[end + 1..];
+        if !tag_name(pre).is_some_and(|(name, closing)| name == "pre" && !closing) || !after.starts_with(CODE) {
+            out.push_str(&rest[..=end]);
+            rest = after;
+            continue;
+        }
         out.push_str(&rest[..at]);
-        rest = &rest[at + OPEN.len()..];
-        let end = rest.find(CLOSE).unwrap_or(rest.len());
-        let lines: Vec<&str> = rest[..end].split('\n').collect();
-        rest = rest.get(end + CLOSE.len()..).unwrap_or("");
+        let code = &after[CODE.len()..];
+        let close = code.find(CLOSE).unwrap_or(code.len());
+        let lines: Vec<&str> = code[..close].split('\n').collect();
+        rest = code.get(close + CLOSE.len()..).unwrap_or("");
         let mut taken = 0;
         while taken < lines.len() {
             let block = blocks.next();
@@ -364,9 +373,10 @@ pub fn with_code_blocks(html: &str, blocks: &[CodeBlock]) -> String {
                 !language.is_empty()
                     && language.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '#' | '.' | '_' | '-'))
             });
+            out.push_str(pre);
             match language {
-                Some(language) => out.push_str(&format!("<pre><code class=\"language-{language}\">")),
-                None => out.push_str(OPEN),
+                Some(language) => out.push_str(&format!("<code class=\"language-{language}\">")),
+                None => out.push_str(CODE),
             }
             out.push_str(&lines[taken..taken + count].join("\n"));
             out.push_str(CLOSE);
@@ -860,6 +870,19 @@ mod tests {
     fn a_language_that_could_break_out_of_its_class_should_be_left_out() {
         let blocks = [super::CodeBlock { language: Some("x\" onclick=\"evil".into()), lines: 1 }];
         assert_eq!(super::with_code_blocks("<pre><code>ls</code></pre>", &blocks), "<pre><code>ls</code></pre>");
+    }
+
+    #[test]
+    fn code_blocks_beside_right_to_left_text_should_keep_their_direction_and_languages() {
+        let blocks = [
+            super::CodeBlock { language: Some("rust".into()), lines: 1 },
+            super::CodeBlock { language: Some("python".into()), lines: 1 },
+        ];
+        assert_eq!(
+            super::with_code_blocks("<p dir=\"rtl\">مرحبا</p><pre dir=\"ltr\"><code>a\nb</code></pre>", &blocks),
+            "<p dir=\"rtl\">مرحبا</p><pre dir=\"ltr\"><code class=\"language-rust\">a</code></pre>\
+             <pre dir=\"ltr\"><code class=\"language-python\">b</code></pre>"
+        );
     }
 
     #[test]

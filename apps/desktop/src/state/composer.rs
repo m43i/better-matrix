@@ -1405,6 +1405,17 @@ let x = 1;</code></pre><p>done</p>"#;
     }
 
     #[test]
+    fn code_fences_after_right_to_left_text_should_keep_their_languages() {
+        let Outgoing::Text { html, .. } = sent(composer("مرحبا\n```rust\nfn a() {}\n```\n```python\nprint(1)\n```"))
+        else {
+            panic!("expected text")
+        };
+        let html = html.unwrap_or_default();
+        assert!(html.contains("<code class=\"language-rust\">fn a() {}</code>"), "{html}");
+        assert!(html.contains("<code class=\"language-python\">print(1)</code>"), "{html}");
+    }
+
+    #[test]
     fn editing_code_blocks_without_languages_that_follow_each_other_should_keep_them_apart() {
         let mut c = Composer::default();
         c.start_edit(target(), "a\nb\nx", Some("<pre><code>a</code></pre><pre><code>b</code></pre><p>x</p>"));
