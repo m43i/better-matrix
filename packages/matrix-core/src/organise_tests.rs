@@ -42,7 +42,7 @@ async fn synced(server: &crate::test_server::Server) -> Account {
 async fn summary(account: &Account) -> crate::RoomSummary {
     let room = account.joined_room(ROOM).expect("room");
     let settings = account.client().notification_settings().await;
-    crate::convert::room_summary(&room, &settings, false, &account.sticky).await
+    crate::convert::room_summary(&room, &settings, None, false, &account.sticky).await
 }
 
 fn tags(names: &[&str]) -> Value {

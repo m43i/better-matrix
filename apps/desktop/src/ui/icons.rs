@@ -24,6 +24,7 @@ icons! {
     ARROW_DOWN = "arrow-down": r#"<path d="M12 5v14M19 12l-7 7-7-7"/>"#;
     ARROW_UP = "arrow-up": r#"<path d="M12 19V5M5 12l7-7 7 7"/>"#;
     UNREAD = "unread": r#"<path d="M21 12a9 9 0 0 1-13.2 8L3 21l1.1-4.6A9 9 0 0 1 13.5 3.1"/><circle cx="19" cy="5" r="2.5"/>"#;
+    NOTE = "note": r#"<path d="M15 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4M7 8h10M7 12h6"/>"#;
     BOOKMARK = "bookmark": r#"<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>"#;
     UNBOOKMARK = "unbookmark": r#"<path d="M19 13.5V5a2 2 0 0 0-2-2H8.5M5 5v16l7-5 7 5v-2M3 3l18 18"/>"#;
     COPY = "copy": r#"<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>"#;

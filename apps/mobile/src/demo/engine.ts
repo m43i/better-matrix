@@ -55,6 +55,7 @@ import {
   signOffVersions,
   verificationEmojis,
   LAB_V2,
+  NOTES,
 } from './fixtures';
 
 /** Resolves a demo media ref to a plain file path, or `null` when the demo has no such media. */
@@ -242,6 +243,8 @@ export function answer(
           },
         },
       ];
+    case 'OpenNoteToSelf':
+      return [{ type: 'DirectChat', data: { request, room_id: NOTES } }];
     case 'PreviewRoom':
       return [{ type: 'RoomPreview', data: { request, preview: demoPreview(command.data.room) } }];
     case 'JoinRoom':
@@ -737,6 +740,7 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
     unread: 0,
     mentions: 0,
     dm_users: [],
+    note_to_self: false,
     avatar: null,
     member_count: 1,
     active_member_count: 1,

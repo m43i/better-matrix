@@ -38,11 +38,13 @@ async fn partner_avatar(room: &Room, partner: Option<&String>) -> Option<MediaRe
     member.avatar_url().map(ToOwned::to_owned).and_then(avatar)
 }
 
-/// A room as the room list shows it. `settings` are the account's push rules, read once for the
-/// whole list: reading them per room cost two store reads each, on every sync.
+/// A room as the room list shows it. `settings` are the account's push rules and `note_to_self`
+/// the room its account data names, each read once for the whole list: reading them per room
+/// cost store reads for each, on every sync.
 pub(crate) async fn room_summary(
     room: &Room,
     settings: &NotificationSettings,
+    note_to_self: Option<&matrix_sdk::ruma::RoomId>,
     rtc_service: bool,
     sticky: &crate::calls::StickyMembers,
 ) -> RoomSummary {
@@ -57,24 +59,39 @@ pub(crate) async fn room_summary(
             settings.get_default_room_notification_mode(encrypted, one_to_one).await
         }
     };
-    let kind = if room.is_direct().await.unwrap_or(false) { RoomKind::Direct } else { RoomKind::Group };
+    let direct = room.is_direct().await.unwrap_or(false);
+    let note_to_self = crate::note_to_self::is_note_to_self(room, note_to_self);
+    // The note to self is listed with the direct chats, though it is a normal room.
+    let kind = if direct || note_to_self { RoomKind::Direct } else { RoomKind::Group };
     // Read once for every permission the summary shows: each read deserializes the event.
     let power = room.power_levels().await.ok();
-    // What its settings offer: a direct chat's are narrower (`RoomRights::direct_chat`).
+    // What its settings offer: a direct chat's are narrower (`RoomRights::direct_chat`); the note
+    // to self keeps a room's, so it can be renamed and given a picture.
     let rights = power.as_ref().map_or_else(crate::RoomRights::default, |power| {
         let rights = crate::RoomRights::of(power, room.own_user_id(), room.encryption_state().is_encrypted(), false);
-        if kind == RoomKind::Direct { rights.direct_chat(room.active_members_count() <= 2) } else { rights }
+        if direct { rights.direct_chat(room.active_members_count() <= 2) } else { rights }
     });
     let may_send_state = |event: StateEventType| {
         power.as_ref().is_some_and(|power| power.user_can_send_state(room.own_user_id(), event))
     };
-    let dm_users: Vec<String> =
-        room.direct_targets().iter().filter_map(|t| t.as_user_id()).map(ToString::to_string).collect();
+    // The note to self is with nobody, whatever another client's `m.direct` says.
+    let dm_users: Vec<String> = if note_to_self {
+        Vec::new()
+    } else {
+        room.direct_targets().iter().filter_map(|t| t.as_user_id()).map(ToString::to_string).collect()
+    };
     let avatar = match room.avatar_url() {
         Some(url) => avatar(url),
+        None if note_to_self => partner_avatar(room, Some(&room.own_user_id().to_string())).await,
         None if kind == RoomKind::Direct => partner_avatar(room, dm_users.first()).await,
         None => None,
     };
+    let mut call =
+        call_in(room, kind, rtc_service, power.as_ref(), crate::calls::joined_sticky(room, sticky, false).await);
+    // Nobody to call.
+    if note_to_self {
+        call.via = None;
+    }
     RoomSummary {
         room_id: room.room_id().to_string(),
         name,
@@ -86,10 +103,11 @@ pub(crate) async fn room_summary(
         unread: room.num_unread_messages(),
         mentions: room.num_unread_mentions(),
         dm_users,
+        note_to_self,
         history: history_visibility(room.history_visibility_or_default()),
         notifications: notification_mode(mode),
         custom_notifications: custom.is_some(),
-        call: call_in(room, kind, rtc_service, power.as_ref(), crate::calls::joined_sticky(room, sticky, false).await),
+        call,
         activity_ms: room.latest_event_timestamp().map(|at| at.get().into()),
         encrypted: room.encryption_state().is_encrypted(),
         public: !private_join_rule(room.join_rule().as_ref()),

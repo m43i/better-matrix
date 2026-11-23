@@ -703,6 +703,17 @@ fn spec() -> AppSpec<State> {
                 demo::seed(s);
                 s.toggle_popover(Popover::SpaceMenu(demo::WORK_SPACE.into()));
             }),
+            ("demo-note-to-self", |s| {
+                demo::seed(s);
+                s.open_room(&matrix_core::AccountId::new(demo::ADA), "!notes:example.org");
+            }),
+            // An account without one: typing its name offers to make it.
+            ("demo-note-to-self-search", |s| {
+                demo::seed(s);
+                s.select_account(&matrix_core::AccountId::new("@ada:hobby.chat"));
+                s.search.field = rune::TextEdit::new("note");
+                s.open_search();
+            }),
             ("demo-new-room", |s| {
                 demo::seed(s);
                 s.select_scope(Scope::Space(demo::WORK_SPACE.into()));

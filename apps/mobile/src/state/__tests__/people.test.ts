@@ -17,6 +17,7 @@ import {
   matches,
   may,
   mayChooseLevel,
+  offersNoteToSelf,
   rolesOffered,
   searching,
   spacesForNewRoom,
@@ -343,4 +344,18 @@ describe('dayOf', () => {
       day: 3,
     });
   });
+});
+
+describe('offersNoteToSelf', () => {
+  it('the new-chat search should offer the note to self before anything is typed', () =>
+    expect(offersNoteToSelf(' ', ADA, 'Note to self')).toBe(true));
+
+  it('the new-chat search should offer the note to self for its name', () =>
+    expect(offersNoteToSelf('note to', ADA, 'Note to self')).toBe(true));
+
+  it("the new-chat search should offer the note to self for the user's own ID", () =>
+    expect(offersNoteToSelf(ADA.toUpperCase(), ADA, 'Note to self')).toBe(true));
+
+  it('the new-chat search should not offer the note to self for someone else', () =>
+    expect(offersNoteToSelf('grace', ADA, 'Note to self')).toBe(false));
 });

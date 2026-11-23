@@ -25,6 +25,7 @@ import {
   moveSection,
   moveSpace,
   newestMessages,
+  noteToSelf,
   orderedSpaces,
   priorityIn,
   ROOMS,
@@ -142,6 +143,50 @@ describe('roomsInScope', () => {
     const changed = { ...account, spaces: [spaceSummary('!space', ['!outside'])] };
 
     expect(ids(roomsInScope(changed, { space: '!space' }, 'Group'))).toEqual(['!outside']);
+  });
+});
+
+describe('noteToSelf', () => {
+  const notes = room('!notes', { kind: 'Direct', note_to_self: true, priority: 'Favourite' });
+
+  // Even one the user put in a space.
+  const account = accountWith(
+    [notes, room('!r'), dm('!dm', '@b:x')],
+    [spaceSummary('!space', ['!r', '!notes'], ['@b:x'])],
+  );
+
+  it('the note to self should stand above home', () => {
+    expect(noteToSelf(account, 'home')?.room_id).toBe('!notes');
+  });
+
+  it('a space should not list the note to self', () => {
+    expect(noteToSelf(account, { space: '!space' })).toBeUndefined();
+    expect(ids(roomsInScope(account, { space: '!space' }))).not.toContain('!notes');
+  });
+
+  it('the note to self should not also be listed among the unread rooms or the direct chats', () => {
+    const unread = accountWith([{ ...notes, marked_unread: true }, dm('!dm', '@b:x')]);
+
+    expect(ids(unreadRooms(unread, 'home'))).not.toContain('!notes');
+    expect(ids(directChats(unread, NOW))).toEqual(['!dm']);
+  });
+
+  it('an account without a note to self should show none', () => {
+    expect(noteToSelf(accountWith([room('!r')]), 'home')).toBeUndefined();
+  });
+
+  it('the note to self should be in no section, even as a favourite', () => {
+    const listed = sections(account, 'home', NOW).flatMap((view) => ids(view.rooms));
+
+    expect(listed).not.toContain('!notes');
+    expect(listed).toEqual(['!dm']);
+  });
+
+  it('a room no longer the note to self should be listed like any other', () => {
+    const shared = accountWith([room('!notes', { kind: 'Group' })]);
+
+    expect(noteToSelf(shared, 'home')).toBeUndefined();
+    expect(sections(shared, 'home', NOW).find((view) => view.id === ROOMS)?.rooms).toHaveLength(1);
   });
 });
 

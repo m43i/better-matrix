@@ -1807,6 +1807,77 @@ fn saved_messages_should_open_at_once_while_searching_under_the_unverified_banne
 }
 
 #[test]
+fn the_new_chat_search_should_offer_the_note_to_self_before_anyone() {
+    let rt = runtime(|s| {
+        s.open_new_chat();
+        let grace = matrix_core::Person { id: "@grace:example.org".into(), name: "Grace Hopper".into(), avatar: None };
+        s.chat_search.people = vec![grace];
+    });
+    let note = rt.presented(super::sidebar::NOTE_TO_SELF).expect("the note to self").0;
+    let first = rt.presented("new-chat-@grace:example.org").expect("a suggested person").0;
+    assert!(note[1] < first[1], "the note to self comes first: {note:?} {first:?}");
+}
+
+#[test]
+fn the_note_to_self_should_lead_homes_sidebar() {
+    let rt = runtime(|_| {});
+    let note = rt.presented(super::sidebar::NOTE_TO_SELF_ROW).expect("the note to self").0;
+    let section = rt.presented("section-header-rooms").expect("a section").0;
+    assert!(note[1] < section[1], "{note:?} above {section:?}");
+}
+
+#[test]
+fn the_note_to_self_info_should_lead_to_its_members_to_invite_someone() {
+    let rt = runtime(|s| {
+        let account = s.active_account().unwrap().summary.id.clone();
+        s.open_room(&account, "!notes:example.org");
+        s.toggle_side(SidePanel::Info);
+    });
+    assert!(rt.find("info-members").is_some());
+}
+
+#[test]
+fn a_space_should_not_show_the_note_to_self() {
+    let rt = runtime(|s| s.select_scope(crate::state::Scope::Space(demo::WORK_SPACE.into())));
+    assert!(rt.find(super::sidebar::NOTE_TO_SELF_ROW).is_none());
+    assert!(rt.find("room-!notes:example.org").is_none());
+}
+
+#[test]
+fn an_account_without_a_note_to_self_should_show_none() {
+    let rt = runtime(|s| s.select_account(&AccountId::new("@ada:hobby.chat")));
+    assert!(rt.find(super::sidebar::NOTE_TO_SELF_ROW).is_none());
+}
+
+#[test]
+fn the_new_chat_search_should_offer_the_note_to_self_for_its_name_and_the_users_id() {
+    for (typed, offered) in [("note", true), ("@ada:example.org", true), ("grace", false)] {
+        let rt = runtime(|s| {
+            s.open_new_chat();
+            s.chat_search.field = rune::TextEdit::new(typed);
+        });
+        assert_eq!(rt.find(super::sidebar::NOTE_TO_SELF).is_some(), offered, "{typed}");
+    }
+}
+
+#[test]
+fn choosing_the_note_to_self_should_close_the_new_chat_search() {
+    let mut rt = runtime(State::open_new_chat);
+    press(&mut rt, super::sidebar::NOTE_TO_SELF);
+    assert!(rt.state.popover.is_none());
+}
+
+#[test]
+fn the_note_to_self_should_say_only_the_user_sees_it() {
+    let rt = runtime(|s| {
+        let account = s.active_account().unwrap().summary.id.clone();
+        let notes = s.active_account().unwrap().rooms.iter().find(|room| room.note_to_self).unwrap().room_id.clone();
+        s.open_room(&account, &notes);
+    });
+    assert!(rt.find("room-private").is_some());
+}
+
+#[test]
 fn the_account_menu_should_leave_saved_messages_to_the_top_bar() {
     let rt = runtime(|s| s.toggle_popover(crate::state::Popover::AccountSwitcher));
     assert!(rt.find("account-menu").is_some());

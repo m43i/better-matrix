@@ -1,5 +1,5 @@
-// One conversation in a list. Compact, as the desktop's sidebar draws it: `#` for a room or the
-// other person's picture for a direct chat, the name (bold while it wants attention, dimmed when
+// One conversation in a list. Compact, as the desktop's sidebar draws it: `#` for a room, the
+// other person's picture for a direct chat or a note for the note to self, the name (bold while it wants attention, dimmed when
 // muted), the notification mode's icon and a badge for mentions. The detailed form (the DMs tab)
 // adds the latest message and its time. Tapping opens it; a long press opens its menu.
 
@@ -121,7 +121,9 @@ export const RoomRow = memo(function RoomRow({
       ) : (
         <>
           <View style={styles.leading}>
-            {direct ? (
+            {room.note_to_self ? (
+              <Icon name="note" size={18} color={palette.textMuted} />
+            ) : direct ? (
               <Avatar
                 account={account}
                 id={room.dm_users[0] ?? room.room_id}

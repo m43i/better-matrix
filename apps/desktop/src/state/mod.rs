@@ -97,7 +97,8 @@ pub use room_discovery::Directory;
 pub use scheduled::{When, failure_reason, local_offset};
 pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches};
 pub use sections::{
-    DIRECT, FAVOURITES, INVITATIONS, LOW_PRIORITY, ROOMS, SectionView, is_builtin, ordered_spaces, sections,
+    DIRECT, FAVOURITES, INVITATIONS, LOW_PRIORITY, ROOMS, SectionView, is_builtin, note_to_self, ordered_spaces,
+    sections,
 };
 pub use settings::{Appearance, Emoticons, MessageLayout, PlaybackSpeed, Settings, SettingsSection, Zoom};
 pub use sign_in::{Asked, SignInForm, SignInStep};
@@ -3315,12 +3316,23 @@ impl State {
 
     /// Opens the direct chat with someone, starting one if there is none.
     pub fn open_direct_chat(&mut self, user_id: &str) {
+        self.open_chat(|account| Command::OpenDirectChat { account, user_id: user_id.to_owned() });
+    }
+
+    /// Opens the user's note to self, making it, named in their language, when there is none:
+    /// only the searches that offer it do.
+    pub fn open_note_to_self(&mut self) {
+        self.open_chat(|account| Command::OpenNoteToSelf { account, name: t!("note_to_self.name").to_owned() });
+    }
+
+    /// Closes the searches and opens the chat `command` answers with, once ready.
+    fn open_chat(&mut self, command: impl FnOnce(AccountId) -> Command) {
         let Some(account) = self.nav.account.clone() else { return };
         self.popover = None;
         self.reset_search();
         self.chat_search = PeopleSearch::default();
         let purpose = Purpose::DirectChat(account.clone());
-        self.dispatch(Command::OpenDirectChat { account, user_id: user_id.to_owned() }, purpose);
+        self.dispatch(command(account), purpose);
     }
 
     /// A room or direct chat picked in the top bar's search.

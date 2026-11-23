@@ -83,9 +83,15 @@ pub struct RoomSummary {
     pub unread: u64,
     /// Unread mentions of the user.
     pub mentions: u64,
-    /// For a direct chat, the other people's user IDs; empty for a group room.
+    /// For a direct chat, the other people's user IDs; empty for a group room and the note to
+    /// self.
     pub dm_users: Vec<String>,
-    /// The room's picture; for a direct chat without one, the other person's.
+    /// Whether this is the user's note to self: the room the account data names for it, while
+    /// nobody else is in it. Listed with the direct chats ([`RoomKind::Direct`]), with the
+    /// user's own picture, and never offers a call.
+    pub note_to_self: bool,
+    /// The room's picture; for a direct chat without one, the other person's (the user's own for
+    /// the note to self).
     pub avatar: Option<MediaRef>,
     /// How many people have joined.
     pub member_count: u64,

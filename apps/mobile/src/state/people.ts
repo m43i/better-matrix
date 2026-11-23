@@ -18,6 +18,8 @@ import type {
   SpaceSummary,
 } from '@better-matrix/matrix-native/types';
 
+import { fuzzyMatch } from './search';
+
 // ----- finding members ---------------------------------------------------------------------
 
 /**
@@ -254,6 +256,18 @@ export function finished(search: PeopleSearch, request: RequestId): PeopleSearch
   if (search.suggesting === request) return { ...search, suggesting: null };
 
   return search;
+}
+
+/**
+ * Whether the new-chat search offers the note to self (named `name`) for typed `text`: before
+ * anything is typed, for its name, and for the user's own ID, which the people found leave out.
+ */
+export function offersNoteToSelf(text: string, me: AccountId, name: string): boolean {
+  const typed = text.trim();
+
+  return (
+    typed === '' || typed.toLowerCase() === me.toLowerCase() || fuzzyMatch(name, typed) !== null
+  );
 }
 
 /** Whether `text` is a full Matrix user ID, `@name:server`. */

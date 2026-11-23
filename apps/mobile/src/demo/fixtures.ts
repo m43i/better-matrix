@@ -71,6 +71,9 @@ export const LAB_V2 = '!lab-v12:example.org';
 
 export const DM_KAI = '!dm-kai:example.org';
 
+/** Ada's note to self. */
+export const NOTES = '!notes:example.org';
+
 /** Where releases are signed off: the room that shows every kind of message the composer sends. */
 export const RELEASES = '!releases:example.org';
 
@@ -377,6 +380,7 @@ function room(
     unread,
     mentions,
     dm_users: [],
+    note_to_self: false,
     avatar: null,
     member_count: 4,
     active_member_count: 4,
@@ -397,6 +401,18 @@ function room(
     can_change_settings: true,
     knocks: 0,
     successor: null,
+  };
+}
+
+/** The user's note to self, as the engine reports one: listed with the direct chats, no calls. */
+function noteToSelf(id: string): RoomSummary {
+  return {
+    ...room(id, 'Note to self', null, 0, 0),
+    kind: 'Direct',
+    note_to_self: true,
+    member_count: 1,
+    active_member_count: 1,
+    call: { via: null, participants: [] },
   };
 }
 
@@ -759,6 +775,13 @@ function work(): Fixture {
       [
         { ...dm(DM_KAI, KAI, 'Kai', 1), call: { via: 'Rtc', participants: [KAI] } },
         messages([[KAI, 'Kai', callCard(false), 0]]),
+      ],
+      [
+        noteToSelf(NOTES),
+        messages([
+          [ADA, 'Ada Lovelace', text('Ask Grace whether the reconnect fix made the release'), 0],
+          [ADA, 'Ada Lovelace', text('Slides for the meetup: keep the engine diagram'), 0],
+        ]),
       ],
     ],
     spaces: [

@@ -188,15 +188,17 @@ function findRoomsInScope(
 
   return ofKind.filter(
     (room) =>
-      rooms.has(room.room_id) ||
-      (room.kind === 'Direct' && room.dm_users.some((u) => members.has(u))),
+      // The user's own notes belong to Home alone, even when a space lists the room.
+      !room.note_to_self &&
+      (rooms.has(room.room_id) ||
+        (room.kind === 'Direct' && room.dm_users.some((u) => members.has(u)))),
   );
 }
 
 /**
- * The rooms a scope shows. Home: every direct chat, and the group rooms in no space. A space:
- * its rooms (subspaces included), and direct chats in it or with its members. The same list
- * while the account's rooms and spaces are.
+ * The rooms a scope shows. Home: every direct chat (the note to self included), and the group
+ * rooms in no space. A space: its rooms (subspaces included) and direct chats in it or with its
+ * members, never the note to self. The same list while the account's rooms and spaces are.
  */
 export function roomsInScope(
   account: Pick<AccountData, 'rooms' | 'spaces'>,
@@ -400,6 +402,17 @@ function scopeLayout(layout: SidebarLayout, scope: Scope): ScopeLayout | undefin
 }
 
 /**
+ * The user's note to self, which Home's room list shows above every section; once the user made
+ * one, as only Home lists it.
+ */
+export function noteToSelf(
+  account: Pick<AccountData, 'rooms' | 'spaces'>,
+  scope: Scope,
+): RoomSummary | undefined {
+  return roomsInScope(account, scope, 'Direct').find((room) => room.note_to_self);
+}
+
+/**
  * A scope's sections in order: Favourites, the user's own, then Rooms and Direct messages with
  * whatever isn't in another section, then Low priority; sections the saved order names come
  * first, in its order, except Favourites, which an order saved before it existed leaves first. A
@@ -413,7 +426,8 @@ export function sections(
 ): SectionView[] {
   const kept = scopeLayout(account.sidebar, scope);
   const collapsed = new Set(kept?.collapsed ?? []);
-  const inScope = roomsInScope(account, scope);
+  // The note to self stands above the sections, in none.
+  const inScope = roomsInScope(account, scope).filter((room) => !room.note_to_self);
   const byId = new Map(inScope.filter((r) => tagged(r) === null).map((r) => [r.room_id, r]));
   const placed = new Set<string>();
   const out: SectionView[] = [];
@@ -465,24 +479,27 @@ export function sections(
     .map((x) => x.view);
 }
 
-/** The rooms of a scope wanting attention: mentions first, then by unread count. */
+/**
+ * The rooms of a scope wanting attention: mentions first, then by unread count. The note to self
+ * says so in its own row above them.
+ */
 export function unreadRooms(
   account: Pick<AccountData, 'rooms' | 'spaces'>,
   scope: Scope,
 ): RoomSummary[] {
   return roomsInScope(account, scope)
-    .filter(wantsAttention)
+    .filter((room) => wantsAttention(room) && !room.note_to_self)
     .sort((a, b) => b.mentions - a.mentions || b.unread - a.unread);
 }
 
-/** Every direct chat of an account, latest first. */
+/** Every direct chat of an account, latest first; the note to self is Home's alone. */
 export function directChats(
   account: Pick<AccountData, 'rooms'> & RecencySource,
   now: number,
 ): RoomSummary[] {
   return byRecency(
     account,
-    account.rooms.filter((r) => r.kind === 'Direct'),
+    account.rooms.filter((r) => r.kind === 'Direct' && !r.note_to_self),
     now,
   );
 }

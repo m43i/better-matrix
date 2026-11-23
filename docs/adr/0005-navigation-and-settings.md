@@ -56,6 +56,10 @@ Date: 2026-11-22
     A deferred poll is too late, because Rune polls before input. Threads and side panels keep
     their motion within the current room.
 - **Sections:** separate for Home and for each space.
+  - The note to self (ADR 0008) stands above everything in Home, invitations included, with a
+    note icon instead of a face, once the user has made one. It is in no section, isn't dragged,
+    and its tags don't move it. Spaces never list it, even one the user added it to: it belongs
+    to no community.
   - Invitations is a fixed built-in section before all reorderable sections. It appears only
     when invitations are pending, collapses through the shared sidebar layout, and keeps its
     counter while collapsed. Room invites use the same `#` prefix as other rooms.

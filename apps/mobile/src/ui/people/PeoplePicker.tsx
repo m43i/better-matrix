@@ -20,11 +20,14 @@ export function PeoplePicker({
   placeholder,
   onPick,
   trailing,
+  first,
   testID,
 }: {
   account: AccountId;
   placeholder: string;
   onPick: (person: Person) => void;
+  /** A row above the people for what is typed (`''` before anything is), if any. */
+  first?: (typed: string) => ReactNode;
   /** What follows a person: a status, or nothing when pressing them acts. */
   trailing?: (person: Person) => ReactNode;
   testID: string;
@@ -34,6 +37,7 @@ export function PeoplePicker({
   const people = candidates(search, account);
   const typing = query(search) !== '';
   const loading = busy(search);
+  const top = first?.(query(search));
 
   return (
     <>
@@ -57,16 +61,20 @@ export function PeoplePicker({
         keyboardDismissMode="on-drag"
         ItemSeparatorComponent={() => <Divider inset={68} />}
         ListHeaderComponent={
-          !typing && people.length > 0 ? (
-            <Text style={[styles.section, font.section, { color: palette.textMuted }]}>
-              {t('create.suggested')}
-            </Text>
-          ) : undefined
+          <>
+            {top}
+            {!typing && people.length > 0 ? (
+              <Text style={[styles.section, font.section, { color: palette.textMuted }]}>
+                {t('create.suggested')}
+              </Text>
+            ) : null}
+          </>
         }
         ListEmptyComponent={
           <View style={styles.empty}>
             {loading ? <ActivityIndicator color={palette.textMuted} /> : null}
-            {typing ? (
+            {/* "Nothing found" stays out from under a row that answers what was typed. */}
+            {typing && (loading || !top) ? (
               <Text style={[font.body, { color: palette.textMuted, textAlign: 'center' }]}>
                 {loading ? t('search.searching') : t('search.nothing')}
               </Text>

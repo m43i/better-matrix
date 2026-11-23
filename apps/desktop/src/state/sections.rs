@@ -1,8 +1,9 @@
 //! The sidebar's sections for one scope: the built-in Rooms and Direct messages, which always
 //! exist and list the latest conversation first; Favourites and Low priority, built in too,
 //! which hold the rooms tagged so (room tags every client shares); and the user's own, which
-//! hold the rooms and chats dragged into them in the order they were placed. Also the order of
-//! the spaces on the rail. Changes edit a [`SidebarLayout`]; the state saves it to the account.
+//! hold the rooms and chats dragged into them in the order they were placed. In Home, the note to
+//! self stands above them all, in none. Also the order of the spaces on the rail. Changes edit a
+//! [`SidebarLayout`]; the state saves it to the account.
 
 use matrix_core::{RoomKind, RoomPriority, RoomSummary, ScopeLayout, Section, SidebarLayout, SpaceSummary};
 
@@ -54,6 +55,12 @@ pub fn sections<'a>(account: &'a AccountData, layout: &SidebarLayout, scope: &Sc
     out
 }
 
+/// The user's note to self, which Home's sidebar shows above every section; once the user made
+/// one, as only Home lists it.
+pub fn note_to_self<'a>(account: &'a AccountData, scope: &Scope) -> Option<&'a RoomSummary> {
+    account.rooms_in(scope, RoomKind::Direct).find(|room| room.note_to_self)
+}
+
 /// The built-in section a room's tag puts it in, if any.
 fn tagged(room: &RoomSummary) -> Option<&'static str> {
     match room.priority {
@@ -78,9 +85,13 @@ pub fn priority_in(to: &str) -> RoomPriority {
 fn unordered<'a>(account: &'a AccountData, layout: &SidebarLayout, scope: &Scope) -> Vec<SectionView<'a>> {
     let scope_layout = layout.scopes.get(&scope_key(scope));
     let collapsed = |id: &str| scope_layout.is_some_and(|l| l.collapsed.iter().any(|c| c == id));
-    // The scope's rooms with their places in the account's list, which key their sort names.
-    let in_scope: Vec<(usize, &RoomSummary)> =
-        [RoomKind::Group, RoomKind::Direct].into_iter().flat_map(|kind| account.rooms_at(scope, kind)).collect();
+    // The scope's rooms with their places in the account's list, which key their sort names; the
+    // note to self stands above the sections.
+    let in_scope: Vec<(usize, &RoomSummary)> = [RoomKind::Group, RoomKind::Direct]
+        .into_iter()
+        .flat_map(|kind| account.rooms_at(scope, kind))
+        .filter(|(_, room)| !room.note_to_self)
+        .collect();
     let user_sections = scope_layout.map(|l| l.sections.as_slice()).unwrap_or_default();
     // The scope's untagged rooms by ID, for the user's sections to find theirs (the first of a
     // repeated ID).

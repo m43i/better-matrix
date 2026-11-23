@@ -37,6 +37,7 @@ fn room(room_id: &str) -> RoomSummary {
         unread: 2,
         mentions: 0,
         dm_users: Vec::new(),
+        note_to_self: false,
         avatar: None,
         member_count: 0,
         active_member_count: 0,
@@ -2091,6 +2092,37 @@ fn opening_a_direct_chat_should_show_it_once_ready() {
     assert!(matches!(command, Command::OpenDirectChat { user_id, .. } if user_id == "@b:example.org"));
     apply(&mut s, Event::DirectChat { request, room_id: "!dm:x".into() });
     assert_eq!(s.active_room_id(), Some("!dm:x"));
+}
+
+#[test]
+fn opening_the_note_to_self_should_name_a_new_one_in_the_users_language() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    s.open_note_to_self();
+    let (_, command) = commands.try_next().unwrap();
+    assert!(matches!(command, Command::OpenNoteToSelf { name, .. } if name == "Note to self"));
+}
+
+#[test]
+fn the_note_to_self_should_show_once_ready() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x", "!notes:x"], Vec::new());
+    drain(&mut commands);
+    s.open_note_to_self();
+    let (request, _) = commands.try_next().unwrap();
+    apply(&mut s, Event::DirectChat { request, room_id: "!notes:x".into() });
+    assert_eq!(s.active_room_id(), Some("!notes:x"));
+}
+
+#[test]
+fn a_direct_chat_with_oneself_should_not_make_a_note_to_self() {
+    let (mut s, mut commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x"], Vec::new());
+    drain(&mut commands);
+    s.open_direct_chat("@a:example.org");
+    let (_, command) = commands.try_next().unwrap();
+    assert!(matches!(command, Command::OpenDirectChat { .. }));
 }
 
 #[test]
@@ -6431,6 +6463,26 @@ fn with_summaries(s: &mut State, id: &AccountId, rooms: Vec<RoomSummary>) {
             list: RoomList { rooms, spaces: Vec::new(), invitations: Vec::new() },
         },
     );
+}
+
+#[test]
+fn the_note_to_self_should_stand_above_the_sections_in_none_of_them() {
+    let (mut s, _commands) = state();
+    let id = AccountId::new("@a:example.org");
+    // Even a favourite: its tag would put it in Favourites.
+    let notes = RoomSummary {
+        kind: RoomKind::Direct,
+        note_to_self: true,
+        priority: matrix_core::RoomPriority::Favourite,
+        ..room("!notes:x")
+    };
+    let chat = RoomSummary { kind: RoomKind::Direct, dm_users: vec!["@b:x".into()], ..room("!dm:x") };
+    with_summaries(&mut s, &id, vec![notes, chat, room("!r:x")]);
+    let listed: Vec<String> =
+        section_ids(&s, &id, &matrix_core::SidebarLayout::default()).into_iter().flat_map(|(_, rooms)| rooms).collect();
+    assert!(!listed.iter().any(|room| room == "!notes:x"), "{listed:?}");
+    let data = s.accounts.get(&id).unwrap();
+    assert_eq!(super::note_to_self(data, &Scope::Home).map(|room| room.room_id.as_str()), Some("!notes:x"));
 }
 
 fn section_ids(s: &State, id: &AccountId, layout: &matrix_core::SidebarLayout) -> Vec<(String, Vec<String>)> {

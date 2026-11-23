@@ -182,6 +182,11 @@ export interface SearchResults extends JumpResults {
   /** People from the user directory, never the user. */
   people: Person[];
   messages: MessageHit[];
+  /**
+   * Whether to offer the note to self: the term matches its name and the user has none yet (one
+   * they have is found among the direct chats).
+   */
+  noteToSelf: boolean;
 }
 
 /** What the search lists for `term`: the link it names, the account's own, then `found` people. */
@@ -215,6 +220,10 @@ export function searchResults(
 
   return {
     link: parseTyped(term),
+    noteToSelf:
+      term.trim() !== '' &&
+      !account.rooms.some((r) => r.note_to_self) &&
+      fuzzyMatch(t('note_to_self.name'), term) !== null,
     rooms: ranked(account.rooms.filter((r) => r.kind === 'Group')),
     direct: ranked(account.rooms.filter((r) => r.kind === 'Direct')),
     spaces: ranked(account.spaces),
@@ -246,6 +255,7 @@ function messageUsage(usage: SearchUsage, hit: MessageHit): number {
 export function foundAny(results: SearchResults): boolean {
   return (
     results.link !== null ||
+    results.noteToSelf ||
     results.rooms.length +
       results.direct.length +
       results.spaces.length +

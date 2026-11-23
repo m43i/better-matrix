@@ -1,7 +1,7 @@
 // What the search under a tab's title finds, in the tab's place while something is typed, as the
 // desktop's top bar lists it: a typed link or address to open (a pasted invitation,
-// `#room:server`), the account's rooms, direct chats and spaces by name, then people from the
-// user directory. Picking one empties the search (`onPicked`); a link is opened by the screen
+// `#room:server`), the account's rooms, direct chats (offering the note to self until there is
+// one) and spaces by name, then people from the user directory. Picking one empties the search (`onPicked`); a link is opened by the screen
 // hosting the search (`onLink`), whose jump outlives this list.
 
 import type { MessageHit, Person } from '@better-matrix/matrix-native/types';
@@ -12,7 +12,7 @@ import { SectionList, StyleSheet, Text } from 'react-native';
 import { t } from '../../i18n';
 import { routes } from '../../routes';
 import { setScope } from '../../state/actions/core';
-import { openDirectChat } from '../../state/actions/people';
+import { openDirectChat, openNoteToSelf } from '../../state/actions/people';
 import { foundAny, listTime, searchResults } from '../../state/lists';
 import { busy } from '../../state/people';
 import type { Permalink } from '../../state/permalinks';
@@ -33,6 +33,7 @@ import { useNow } from './useNow';
 type Item =
   | { kind: 'link'; link: Permalink }
   | { kind: 'room'; room: AccountData['rooms'][number] }
+  | { kind: 'noteToSelf' }
   | { kind: 'space'; space: AccountData['spaces'][number] }
   | { kind: 'person'; person: Person }
   | { kind: 'message'; hit: MessageHit };
@@ -90,7 +91,10 @@ export function SearchResults({
       {
         key: 'direct',
         title: t('search.direct'),
-        data: results.direct.map((room) => ({ kind: 'room', room })),
+        data: [
+          ...results.direct.map((room): Item => ({ kind: 'room', room })),
+          ...(results.noteToSelf ? [{ kind: 'noteToSelf' } as const] : []),
+        ],
       },
       {
         key: 'spaces',
@@ -115,9 +119,9 @@ export function SearchResults({
   const loading = busy(people) || messages.status === 'waiting' || messages.status === 'searching';
   const any = foundAny(results);
 
-  const chat = (userId: string) => {
+  const chat = (opening: Promise<string>) => {
     onPicked();
-    openDirectChat(store, id, userId).then(
+    opening.then(
       (roomId) => router.push(routes.room(id, roomId)),
       // The notice says why.
       () => undefined,
@@ -147,6 +151,16 @@ export function SearchResults({
               onPicked();
               router.push(routes.room(id, item.room.room_id));
             }}
+          />
+        );
+      case 'noteToSelf':
+        return (
+          <ListRow
+            testID="search-note-to-self"
+            icon="note"
+            title={t('note_to_self.name')}
+            titleContent={<SearchHighlight text={t('note_to_self.name')} query={term} />}
+            onPress={() => chat(openNoteToSelf(store, id))}
           />
         );
       case 'space':
@@ -215,7 +229,7 @@ export function SearchResults({
                 size={32}
               />
             }
-            onPress={() => chat(item.person.id)}
+            onPress={() => chat(openDirectChat(store, id, item.person.id))}
           />
         );
     }
@@ -237,6 +251,8 @@ export function SearchResults({
             return `link-${item.link.id}`;
           case 'room':
             return item.room.room_id;
+          case 'noteToSelf':
+            return 'note-to-self';
           case 'space':
             return item.space.room_id;
           case 'message':

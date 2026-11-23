@@ -20,6 +20,7 @@ import {
   isBuiltin,
   lastMessage,
   LOW_PRIORITY,
+  noteToSelf,
   ROOMS,
   sameScope,
   scopeKey,
@@ -165,11 +166,17 @@ export default function HomeScreen() {
       ? t('common.home')
       : (account.spaces.find((s) => s.room_id === scope.space)?.name ?? t('common.home'));
 
+  const notes = noteToSelf(account, scope);
+
+  // The banners, then the user's own notes above every section.
   const header = (
     <View>
       <EndedSessions />
       <SecurityBanner />
       <CallBar />
+      {notes ? (
+        <RoomRow account={id} room={notes} last={lastMessage(account, notes.room_id)} now={now} />
+      ) : null}
     </View>
   );
 
@@ -192,7 +199,10 @@ export default function HomeScreen() {
             keyExtractor={(room) => room.room_id}
             stickySectionHeadersEnabled={false}
             ListHeaderComponent={header}
-            ListEmptyComponent={<EmptyState icon="chat" title={t('sidebar.empty')} />}
+            ListEmptyComponent={
+              // The note to self alone is something.
+              notes ? undefined : <EmptyState icon="chat" title={t('sidebar.empty')} />
+            }
             renderSectionHeader={({ section }) => (
               <SectionHeader
                 id={section.id}

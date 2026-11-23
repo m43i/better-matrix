@@ -193,3 +193,31 @@ fn a_public_result_should_open_its_join_preview() {
     assert!(matches!(&rt.state.modal, Some(crate::state::Modal::Link(dialog)) if
         matches!(&dialog.step, crate::state::LinkStep::Preview(room) if room.space)));
 }
+
+/// Types `query` into the top bar's search of the account on screen.
+fn searching(rt: &mut Runtime<State>, query: &str) {
+    click(rt, "top-search");
+    rt.paste(query);
+    rt.settle_all();
+    rt.frame(0.0);
+}
+
+#[test]
+fn searching_its_name_should_offer_to_make_the_note_to_self() {
+    let mut rt = runtime(|s| {
+        demo::seed(s);
+        s.select_account(&matrix_core::AccountId::new("@ada:hobby.chat"));
+    });
+    searching(&mut rt, "note to");
+    click(&mut rt, NOTE_TO_SELF);
+    // The search closes for the chat, which opens once the engine has made it.
+    assert!(rt.state.popover.is_none());
+}
+
+#[test]
+fn searching_an_existing_note_to_self_should_find_it_rather_than_offer_another() {
+    let mut rt = runtime(demo::seed);
+    searching(&mut rt, "note to");
+    assert!(rt.find("found-room-!notes:example.org").is_some());
+    assert!(rt.find(NOTE_TO_SELF).is_none());
+}

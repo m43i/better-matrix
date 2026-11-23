@@ -488,13 +488,18 @@ impl Account {
         Ok(ranked.into_iter().take(LIMIT).map(|(person, _)| person).collect())
     }
 
-    /// Invites someone to a room.
+    /// Invites someone to a room; inviting someone to the note to self ends it. The invite is
+    /// delivered whether or not that worked: the room's member count still sets it apart then.
     pub async fn invite(&self, room_id: &str, user_id: &str) -> Result<(), Error> {
         let room = self
             .client()
             .get_room(&RoomId::parse(room_id)?)
             .ok_or_else(|| Error::UnknownRoom { account: self.id().clone(), room_id: room_id.to_owned() })?;
-        Ok(room.invite_user_by_id(&UserId::parse(user_id)?).await?)
+        room.invite_user_by_id(&UserId::parse(user_id)?).await?;
+        if let Err(error) = self.shared_note_to_self(room.room_id()).await {
+            eprintln!("matrix-engine: could not end the note to self for {}: {error}", self.id());
+        }
+        Ok(())
     }
 
     /// The direct chat with someone: the existing one with them alone (a third person who

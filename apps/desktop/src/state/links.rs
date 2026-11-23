@@ -349,6 +349,7 @@ mod tests {
                 unread: 0,
                 mentions: 0,
                 dm_users: Vec::new(),
+                note_to_self: false,
                 avatar: None,
                 member_count: 2,
                 active_member_count: 2,

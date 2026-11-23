@@ -861,7 +861,7 @@ impl Account {
             changed.is_none_or(|changed| changed.contains(id))
                 || (!cache.rooms.contains_key(id) && !cache.spaces.contains_key(id))
         };
-        let mut settings = None;
+        let (mut settings, mut note_to_self) = (None, None);
         for room in &joined {
             let id = room.room_id().to_string();
             if !stale(&id, cache) {
@@ -875,13 +875,15 @@ impl Account {
                 if !cache.rooms.contains_key(&id) {
                     let _ = self.client.latest_events().await.listen_to_room(room.room_id()).await;
                 }
-                // The push rules are read once per update, and only when a room needs them.
+                // The push rules and the note to self's mark are read once per update, and only
+                // when a room needs them.
                 if settings.is_none() {
                     settings = Some(self.client.notification_settings().await);
+                    note_to_self = self.marked_note_to_self().await;
                 }
                 if let Some(settings) = &settings {
-                    let summary =
-                        convert::room_summary(room, settings, self.rtc_service().is_some(), &self.sticky).await;
+                    let (rtc, marked) = (self.rtc_service().is_some(), note_to_self.as_deref());
+                    let summary = convert::room_summary(room, settings, marked, rtc, &self.sticky).await;
                     moved |= self::changed(&mut cache.rooms, id, summary);
                 }
             }

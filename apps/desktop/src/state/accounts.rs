@@ -948,9 +948,9 @@ impl AccountData {
         self.spaces.get(at).filter(|space| space.room_id == room_id)
     }
 
-    /// The rooms a scope shows, of one kind, in list order. Home shows every direct chat and the
-    /// rooms in no space; a space shows its rooms (subspaces included) and the direct chats with
-    /// its members.
+    /// The rooms a scope shows, of one kind, in list order. Home shows every direct chat (the note
+    /// to self included) and the rooms in no space; a space shows its rooms (subspaces included)
+    /// and the direct chats with its members, never the note to self.
     pub fn rooms_in<'a>(&'a self, scope: &Scope, kind: RoomKind) -> impl Iterator<Item = &'a RoomSummary> + 'a {
         self.rooms_at(scope, kind).map(|(_, room)| room)
     }
@@ -1238,6 +1238,10 @@ enum Filter<'a> {
 
 impl Filter<'_> {
     fn shows(&self, room: &RoomSummary) -> bool {
+        // The user's own notes belong to Home alone.
+        if room.note_to_self {
+            return matches!(self, Filter::NotIn(_));
+        }
         match (self, room.kind) {
             (Filter::NotIn(_), RoomKind::Direct) => true,
             (Filter::NotIn(in_spaces), RoomKind::Group) => !in_spaces.contains(room.room_id.as_str()),
@@ -1308,7 +1312,12 @@ impl RoomIndex {
             if !unique {
                 return listed(filter);
             }
-            let mut found: Vec<usize> = under.iter().filter_map(|id| room_at.get(*id).copied()).collect();
+            // Its children, but never the note to self, which is Home's alone.
+            let mut found: Vec<usize> = under
+                .iter()
+                .filter_map(|id| room_at.get(*id).copied())
+                .filter(|at| rooms.get(*at).is_some_and(|room| !room.note_to_self))
+                .collect();
             found.extend(direct.iter().copied().filter(|at| rooms.get(*at).is_some_and(|room| filter.shows(room))));
             found.sort_unstable();
             found.dedup();
@@ -2059,6 +2068,7 @@ mod tests {
             unread: 0,
             mentions: 0,
             dm_users: Vec::new(),
+            note_to_self: false,
             avatar: None,
             member_count: 0,
             active_member_count: 0,
@@ -2106,6 +2116,21 @@ mod tests {
         account.rooms = vec![room("!a"), room("!b"), room("!c"), dm("!dg", "@grace"), dm("!dk", "@kai")];
         account.spaces = vec![space("!s", &["!a", "!t"], &["@grace"]), space("!t", &["!b", "!s"], &[])];
         account
+    }
+
+    #[test]
+    fn the_note_to_self_should_be_in_home_alone() {
+        let mut account = nested();
+        account.rooms.push(RoomSummary { kind: RoomKind::Direct, note_to_self: true, ..room("!notes") });
+        // Even one the user put in a space.
+        account.spaces[0].children.push("!notes".into());
+        assert!(ids(account.rooms_in(&Scope::Home, RoomKind::Direct)).contains(&"!notes"));
+        for space in ["!s", "!t"] {
+            assert!(
+                !ids(account.rooms_in(&Scope::Space(space.into()), RoomKind::Direct)).contains(&"!notes"),
+                "{space}"
+            );
+        }
     }
 
     fn ids<'a>(rooms: impl Iterator<Item = &'a RoomSummary>) -> Vec<&'a str> {

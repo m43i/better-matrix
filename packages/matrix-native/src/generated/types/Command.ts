@@ -808,7 +808,15 @@ account: AccountId,
 /**
  * Who with.
  */
-user_id: string, } } | { "type": "PreviewRoom", "data": { 
+user_id: string, } } | { "type": "OpenNoteToSelf", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * A new one's name, in the user's language: what other clients show.
+ */
+name: string, } } | { "type": "PreviewRoom", "data": { 
 /**
  * Whose.
  */

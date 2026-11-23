@@ -50,6 +50,15 @@ included) and the direct chats with its members.
 : A conversation with one or a few people, marked direct by the account. Listed under "Direct
 messages".
 
+**Note to self**
+: A room only the user is in, for notes, links and files they keep for themselves; one per
+account. A normal private, encrypted room on the server, which the account data event
+`chat.bettermatrix.note_to_self` names. Made only when the user picks it in the new-chat search
+or the top bar's search. While nobody else has joined or been invited, this app lists it above
+every section of Home (never in a space), with a note icon and no calls; once someone is, it is a
+normal room and the next note to self is a new one. Unlike a saved message, it holds new messages
+rather than marking existing ones.
+
 **Self-update**
 : A newer desktop release offered by an icon above the rail's account avatar. The app checks
 at startup and hourly; only clicking the icon downloads, replaces the install and restarts it.

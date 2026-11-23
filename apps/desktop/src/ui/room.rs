@@ -158,6 +158,18 @@ fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, lay
         };
         Some(shown.grow(1.0).min_w(0.0))
     });
+    // The note to self says who sees it, unless its topic says more.
+    let line = line.or_else(|| {
+        room.note_to_self.then(|| {
+            text(t!("note_to_self.private"))
+                .key("room-private")
+                .font(font::META)
+                .color(p.text_muted)
+                .grow(1.0)
+                .min_w(0.0)
+                .truncate()
+        })
+    });
     let pins = (!room.pinned.is_empty()).then(|| {
         icon_button(&icons::PIN, t!("info.pins"), s.side == Some(SidePanel::Pins), p.text_muted, p)
             .key(PINS)

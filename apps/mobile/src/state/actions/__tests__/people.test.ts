@@ -14,6 +14,7 @@ import {
   listAllMembers,
   listThreads,
   openDirectChat,
+  openNoteToSelf,
   setNotificationMode,
 } from '../people';
 
@@ -127,6 +128,19 @@ describe('people actions', () => {
     app.engine.emit({ type: 'DirectChat', data: { request, room_id: '!dm:example.org' } });
     finish(app.engine, request);
     await expect(chat).resolves.toBe('!dm:example.org');
+  });
+
+  it('should open the note to self, named in the desktop words', async () => {
+    const app = setUp();
+    const notes = openNoteToSelf(app.store, ADA);
+    const { request, command } = last(app);
+    expect(command).toEqual({
+      type: 'OpenNoteToSelf',
+      data: { account: ADA, name: 'Note to self' },
+    });
+    app.engine.emit({ type: 'DirectChat', data: { request, room_id: '!notes:example.org' } });
+    finish(app.engine, request);
+    await expect(notes).resolves.toBe('!notes:example.org');
   });
 
   it('should tell the user in the desktop words when an invite fails', async () => {

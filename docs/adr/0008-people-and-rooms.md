@@ -276,6 +276,49 @@ Date: 2026-11-22
   falling back to the space's server, the room's server, or this account's server if neither ID
   names one. A repeated pagination token is reported as a server pagination error.
 - **Direct chats:** `Command::OpenDirectChat` opens the existing chat or starts one.
+- **Note to self** (`note_to_self.rs`): Matrix has no room of the user's own (Beeper and others
+  make a plain room), and a direct chat can't be started with oneself (the server refuses the
+  invite). So it is a normal room: private, encrypted, no invites, named in the user's language
+  so other clients show a name rather than "Empty room".
+  - The global account data event `chat.bettermatrix.note_to_self` (`{ "room_id": … }`) names it,
+    rather than `m.direct` with the user's own ID, which other clients would list as a broken
+    direct chat. Every session of this app finds the same room; other clients show a normal room.
+  - `Command::OpenNoteToSelf { name }` reads the server's mark, not this device's copy, which may be stale or not have synced
+    one another session made. It opens the marked room while the user is in it alone, joining it
+    first when this device doesn't know it yet (a room the user left refuses them: invite only;
+    any other failure fails the command, which would otherwise replace the room holding their
+    notes); otherwise it makes one and marks it. It runs on the account's admin queue, so opening it
+    twice at once makes one room, and waits (up to 10 s) for sync to bring the mark, then
+    refreshes the room list before answering `Event::DirectChat`, so the app opens it already
+    listed apart; a slower sync lists it apart once the mark arrives. Two sessions opening it for
+    the first time at the same moment can each make one (last mark wins; the other stays a room).
+  - `RoomSummary::note_to_self` holds while the room is marked, nobody else has joined or been
+    invited, nobody may join without an invite (a room made public is a room like any other), and
+    no upgrade replaced it:
+    then `kind` is `Direct` (a chat's wording and menus), `dm_users` empty, the picture
+    the user's own when the room has none, and `call.via` `None`. It keeps a room's rights, so it
+    can be renamed. The room list reads the mark once per update; a sync carrying it rereads
+    every room.
+  - Inviting someone ends it at once (the invited count is enough): the room is then listed like
+    any other, under Rooms, and the next `OpenNoteToSelf` makes a new note to self and marks it.
+    An invite from this app also clears the mark when the server's names that room, so a
+    declined invite or a guest who left doesn't turn a room someone else has seen back into the
+    note to self. The invite counts as delivered even when that fails (logged): the member count
+    still sets the room apart then. Two quick changes on two sessions can still lose a mark (last
+    write wins: account data has no conditional write, as for saved messages).
+  - An upgrade ends it too (the old room is read only): the next note to self is a new room.
+  - Accepted limits: a room made whose mark couldn't be saved
+    stays a plain room, and the next attempt makes another; a space another client added it to
+    still lists it among that space's rooms to manage.
+  - Nothing makes one unasked: it exists once the user picks it from the new-chat search, where
+    it comes first (desktop popover, phone `new-chat` screen), or from the top bar's search,
+    which offers it under Direct messages when the term matches its name and the user has none
+    (one they have is found by name like any chat). Only those searches send `OpenNoteToSelf`:
+    a chat with oneself elsewhere (one's own permalink) stays a direct chat the server refuses.
+  - Both apps list it above every section of Home only, with a note icon (ADR 0005), and nowhere
+    else in the room lists (not the phones' DMs tab or Home's Unread); it can't be moved into a
+    section. The new-chat search also offers it for its name and the user's own ID. The
+    desktop's room header says only the user can see it where a topic would be.
 - **Making rooms** (`Command::CreateRoom` with a `NewRoom`):
   - One command makes rooms and spaces (`NewRoom::space`). The form chooses who may join
     (`JoinRule`): Private (invite only, the default), Space members (restricted to the parent

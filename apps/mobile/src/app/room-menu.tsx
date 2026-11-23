@@ -308,7 +308,8 @@ function RoomPages({
           }}
         />
       </ListSection>
-      {inScope ? (
+      {/* The note to self keeps its own place above the sections. */}
+      {inScope && !room.note_to_self ? (
         <ListSection>
           <ListRow
             testID="room-menu-move"

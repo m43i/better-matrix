@@ -36,11 +36,19 @@ unread: number,
  */
 mentions: number, 
 /**
- * For a direct chat, the other people's user IDs; empty for a group room.
+ * For a direct chat, the other people's user IDs; empty for a group room and the note to
+ * self.
  */
 dm_users: Array<string>, 
 /**
- * The room's picture; for a direct chat without one, the other person's.
+ * Whether this is the user's note to self: the room the account data names for it, while
+ * nobody else is in it. Listed with the direct chats ([`RoomKind::Direct`]), with the
+ * user's own picture, and never offers a call.
+ */
+note_to_self: boolean, 
+/**
+ * The room's picture; for a direct chat without one, the other person's (the user's own for
+ * the note to self).
  */
 avatar: MediaRef | null, 
 /**

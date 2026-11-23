@@ -57,12 +57,14 @@ impl Server {
                 }
                 let mut reply = reply(&String::from_utf8_lossy(&request));
                 // A reply naming `NOT_FOUND_STATUS` answers 404 with the rest as its error body,
-                // as does a Matrix "not found", as servers send it.
+                // as does a Matrix "not found", as servers send it; a Matrix "forbidden" answers
+                // 403.
                 let failing = reply.as_object_mut().and_then(|reply| reply.remove(SERVER_ERROR_STATUS)).is_some();
                 let status = match reply.as_object_mut().and_then(|reply| reply.remove(NOT_FOUND_STATUS)) {
                     _ if failing => "500 Internal Server Error",
                     Some(_) => "404 Not Found",
                     None if reply["errcode"] == "M_NOT_FOUND" => "404 Not Found",
+                    None if reply["errcode"] == "M_FORBIDDEN" => "403 Forbidden",
                     None => "200 OK",
                 };
                 let body = reply.to_string();

@@ -43,6 +43,7 @@ export function roomSummary(
     unread: 0,
     mentions: 0,
     dm_users: [],
+    note_to_self: false,
     avatar: null,
     member_count: 2,
     active_member_count: 2,

@@ -721,6 +721,15 @@ pub enum Command {
         /// Who with.
         user_id: String,
     },
+    /// Open the user's note to self (a room only they are in, for their own notes), making one
+    /// named `name` when there is none; answered by [`Event::DirectChat`] once the room list
+    /// shows it.
+    OpenNoteToSelf {
+        /// Whose.
+        account: AccountId,
+        /// A new one's name, in the user's language: what other clients show.
+        name: String,
+    },
     /// Look at a room the account may not have joined, by its ID or an alias (from a
     /// [`Permalink`](crate::Permalink)); answered by [`Event::RoomPreview`]. Fails when no
     /// server will describe the room.
@@ -1232,7 +1241,8 @@ pub enum Event {
         /// All public rooms, most members first.
         rooms: Vec<crate::PublicRoom>,
     },
-    /// The direct chat for [`Command::OpenDirectChat`].
+    /// The direct chat for [`Command::OpenDirectChat`], or the note to self for
+    /// [`Command::OpenNoteToSelf`].
     DirectChat {
         /// The command it answers.
         request: RequestId,
@@ -2943,6 +2953,23 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            // Queued with the admin changes: opening it twice at once makes one room.
+            Command::OpenNoteToSelf { account: id, name } => {
+                let (account, feed) = (self.account(&id), self.feed(&id));
+                let opening = account.as_ref().ok().map(|account| {
+                    let account = account.clone();
+                    account.admin_changes.clone().run(async move { account.note_to_self(&name).await })
+                });
+                Box::pin(async move {
+                    let (_, feed) = (account?, feed?);
+                    let Some(opening) = opening else { return Ok(Outcome::Done) };
+                    let room_id = opening.await?;
+                    // The app opens the room at once: the list it reads must have it already.
+                    feed.refresh(Some(&HashSet::from([room_id.clone()]))).await;
+                    sink.emit(Event::DirectChat { request, room_id });
+                    Ok(Outcome::Done)
+                })
+            }
             Command::PreviewRoom { account, room, via } => {
                 let account = self.account(&account);
                 Box::pin(async move {
@@ -4019,11 +4046,15 @@ async fn sync_until_error(
                     }
                 }
             }
-            // Only the rooms this sync changed are read again; direct chats and push rules can
-            // change any room, so they read them all.
-            let all = response.account_data.iter().any(|event| {
-                matches!(event.get_field::<String>("type").ok().flatten().as_deref(), Some("m.direct" | "m.push_rules"))
-            });
+            // Only the rooms this sync changed are read again; direct chats, push rules and the
+            // note to self's mark can change any room, so they read them all.
+            let all = crate::note_to_self::changed_in(&response.account_data)
+                || response.account_data.iter().any(|event| {
+                    matches!(
+                        event.get_field::<String>("type").ok().flatten().as_deref(),
+                        Some("m.direct" | "m.push_rules")
+                    )
+                });
             // Keywords are push rules too, changed here or on another session.
             if response
                 .account_data

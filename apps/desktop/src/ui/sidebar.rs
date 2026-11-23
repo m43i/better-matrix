@@ -73,6 +73,11 @@ pub fn sidebar(s: &State, account: &AccountData, p: &Palette) -> El {
 
     let open = s.active_room_id();
     let mut list = col().w_full().px(8.0).py(12.0).gap(12.0);
+    // The user's own notes, above everything.
+    list = list.children(crate::state::note_to_self(account, &scope).map(|room| {
+        let selected = open == Some(room.room_id.as_str());
+        col().key(NOTE_TO_SELF_ROW).w_full().child(room_row(room, None, selected, false, &s.media, p))
+    }));
     list = list.children(super::room_discovery::invitations(s, account, p));
     if account.rooms.is_empty() {
         list = list.child(text(t!("sidebar.syncing")).font(font::NAV).color(p.sidebar_text_muted).px(12.0));
@@ -246,6 +251,7 @@ fn room_row(
     let picture_ready = room.avatar.as_ref().is_some_and(|picture| media.image(picture).is_some());
     let version = (
         (&room.name, room.unread, room.mentions, room.marked_unread, room.notifications, room.kind, &room.dm_users),
+        room.note_to_self,
         partner,
         (&room.avatar, picture_ready, selected, dragged, colour_bits(p.sidebar_bg)),
     );
@@ -301,6 +307,7 @@ fn build_room_row(
         NotificationMode::Mute => Some(icon(&icons::BELL_OFF, 14.0).color(status_color)),
     };
     let leading = match room.kind {
+        _ if room.note_to_self => el().w(18.0).center().child(icon(&icons::NOTE, 16.0).color(p.sidebar_text_muted)),
         RoomKind::Group => el().w(18.0).center().child(text("#").font(font::NAV).color(p.sidebar_text_muted)),
         RoomKind::Direct => {
             let face = media_avatar(
@@ -315,17 +322,22 @@ fn build_room_row(
         }
     };
     let (open, menu) = (room.room_id.clone(), room.room_id.clone());
-    let (drag, zone) = (room.room_id.clone(), room.room_id.clone());
-    nav_row(leading, &room.name, emphasis, status, p)
+    let row = nav_row(leading, &room.name, emphasis, status, p)
         .key(format!("room-{}", room.room_id))
         .opacity(if dragged { 0.35 } else { 1.0 })
         .on_press_tx(crate::state::navigate(move |s| s.select_room(&open)))
-        .on_secondary_press(move |s: &mut State, _, _| s.toggle_room_menu(&menu))
-        .on_drag(move |s: &mut State, gesture, _| s.drag_in_sidebar(Dragged::Room(drag.clone()), gesture))
-        .on_layout_tx(move |s: &mut State, rect, tx| {
+        .on_secondary_press(move |s: &mut State, _, _| s.toggle_room_menu(&menu));
+    // The note to self keeps its place above the sections: it is not dragged into one.
+    if room.note_to_self {
+        return row;
+    }
+    let (drag, zone) = (room.room_id.clone(), room.room_id.clone());
+    row.on_drag(move |s: &mut State, gesture, _| s.drag_in_sidebar(Dragged::Room(drag.clone()), gesture)).on_layout_tx(
+        move |s: &mut State, rect, tx| {
             s.row_zone(&zone, rect);
             tx.live_only();
-        })
+        },
+    )
 }
 
 /// A section's menu: collapse or expand it; the user's own sections can also be renamed or
@@ -412,31 +424,29 @@ pub fn new_chat_panel(s: &State, account: &AccountData, p: &Palette) -> El {
         .on_input_key(State::popover_input_key);
     let me = account.summary.id.as_str();
     let mut list = col().w_full();
+    // The user's own notes come first: before anything is typed, for their name, and for the
+    // user's own ID, which the people found leave out.
+    let typed = s.chat_search.query();
+    if typed.is_empty()
+        || typed.eq_ignore_ascii_case(me)
+        || matrix_core::search::fuzzy_match(t!("note_to_self.name"), typed).is_some()
+    {
+        let mark = el().size(28.0, 28.0).center().child(icon(&icons::NOTE, 18.0).color(p.text_muted));
+        list = list.child(
+            new_chat_row(mark, t!("note_to_self.name").to_owned(), t!("note_to_self.hint").to_owned(), p)
+                .key(NOTE_TO_SELF)
+                .on_press(State::open_note_to_self),
+        );
+    }
     if s.chat_search.query().is_empty() && !s.chat_search.people.is_empty() {
         list = list.child(text(t!("create.suggested")).font(font::SECTION).color(p.text_muted).px(8.0).pt(4.0).pb(4.0));
     }
     for person in s.chat_search.people.iter().filter(|person| person.id != me) {
         let id = person.id.clone();
+        let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), &s.media, 28.0);
         list = list.child(
-            row()
+            new_chat_row(face, person.name.clone(), person.id.clone(), p)
                 .key(format!("new-chat-{id}"))
-                .w_full()
-                .px(8.0)
-                .py(6.0)
-                .gap(10.0)
-                .center_y()
-                .radius(6.0)
-                .hover(p.hover.alpha(p.hover.a * 2.0))
-                .role("button")
-                .cursor(rune::Cursor::Pointer)
-                .child(media_avatar(&person.id, &person.name, person.avatar.as_ref(), &s.media, 28.0))
-                .child(
-                    col()
-                        .grow(1.0)
-                        .min_w(0.0)
-                        .child(text(person.name.clone()).font(font::BODY).color(p.text).truncate())
-                        .child(text(person.id.clone()).font(font::META).color(p.text_muted).truncate()),
-                )
                 .on_press(move |s: &mut State| s.open_direct_chat(&id)),
         );
     }
@@ -450,6 +460,34 @@ pub fn new_chat_panel(s: &State, account: &AccountData, p: &Palette) -> El {
             .child(col().w_full().max_h(320.0).scroll(ScrollSpec { stick_bottom: false }).child(list)),
     );
     col().child(panel).anchored(NEW_CHAT, rune::Side::Bottom, rune::Align::Start, 6.0)
+}
+
+/// The sidebar's place for the note to self, above everything else.
+pub const NOTE_TO_SELF_ROW: &str = "sidebar-note-to-self";
+
+/// The new-chat search's row for the user's note to self.
+pub const NOTE_TO_SELF: &str = "new-chat-note-to-self";
+
+/// One choice in the new-chat search: a face, a name and a line under it.
+fn new_chat_row(face: El, name: String, under: String, p: &Palette) -> El {
+    row()
+        .w_full()
+        .px(8.0)
+        .py(6.0)
+        .gap(10.0)
+        .center_y()
+        .radius(6.0)
+        .hover(p.hover.alpha(p.hover.a * 2.0))
+        .role("button")
+        .cursor(rune::Cursor::Pointer)
+        .child(face)
+        .child(
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .child(text(name).font(font::BODY).color(p.text).truncate())
+                .child(text(under).font(font::META).color(p.text_muted).truncate()),
+        )
 }
 
 /// What can be made here: a section always; a room from Home or inside a space the user may

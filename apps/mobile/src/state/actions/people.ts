@@ -223,20 +223,28 @@ export function invite(
 }
 
 /** The direct chat with someone, started when there is none: answers with its room ID. */
-export async function openDirectChat(
-  store: Store,
-  account: AccountId,
-  userId: string,
-): Promise<string> {
+export function openDirectChat(store: Store, account: AccountId, userId: string): Promise<string> {
+  return openChat(store, { type: 'OpenDirectChat', data: { account, user_id: userId } });
+}
+
+/**
+ * The user's note to self, made (named in their language) when there is none: answers with its
+ * room ID. Only the searches that offer it open it.
+ */
+export function openNoteToSelf(store: Store, account: AccountId): Promise<string> {
+  return openChat(store, {
+    type: 'OpenNoteToSelf',
+    data: { account, name: t('note_to_self.name') },
+  });
+}
+
+/** The chat `command` opens, as `Event::DirectChat` answers it. */
+async function openChat(store: Store, command: Command): Promise<string> {
   let roomId: string | null = null;
-  await attempt(
-    store,
-    { type: 'OpenDirectChat', data: { account, user_id: userId } },
-    'notice.direct_chat',
-    (event) => {
-      if (event.type === 'DirectChat') roomId = event.data.room_id;
-    },
-  );
+
+  await attempt(store, command, 'notice.direct_chat', (event) => {
+    if (event.type === 'DirectChat') roomId = event.data.room_id;
+  });
 
   if (roomId === null) throw new Error('the engine opened no chat');
 

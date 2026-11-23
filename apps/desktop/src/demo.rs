@@ -897,6 +897,7 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
         unread,
         mentions,
         dm_users: Vec::new(),
+        note_to_self: false,
         avatar: None,
         member_count: 4,
         active_member_count: 4,
@@ -931,6 +932,19 @@ fn dm(id: &str, with: &str, name: &str, unread: u64) -> RoomSummary {
         member_count: 2,
         active_member_count: 2,
         ..room(id, name, None, unread, unread)
+    }
+}
+
+/// The user's note to self, as the engine reports one.
+fn note_to_self(id: &str) -> RoomSummary {
+    RoomSummary {
+        kind: RoomKind::Direct,
+        note_to_self: true,
+        member_count: 1,
+        active_member_count: 1,
+        // Nobody to call.
+        call: matrix_core::RoomCall::default(),
+        ..room(id, "Note to self", None, 0, 0)
     }
 }
 
@@ -1113,6 +1127,13 @@ fn work() -> Fixture {
                     ..dm("!dm-kai:example.org", KAI, "Kai", 1)
                 },
                 messages(vec![(KAI, "Kai", call_card(Some(false)), 0)]),
+            ),
+            (
+                note_to_self("!notes:example.org"),
+                messages(vec![
+                    (ADA, "Ada Lovelace", text("Ask Grace whether the reconnect fix made the release"), 0),
+                    (ADA, "Ada Lovelace", text("Slides for the meetup: keep the engine diagram"), 0),
+                ]),
             ),
         ],
         spaces: vec![

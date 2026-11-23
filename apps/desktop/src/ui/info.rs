@@ -105,7 +105,8 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .w_full()
         .child(head)
         .child(divider(p))
-        .children((room.kind == RoomKind::Group || count > 2).then(|| {
+        // The note to self keeps them too: inviting someone is how it becomes a room to share.
+        .children((room.kind == RoomKind::Group || count > 2 || room.note_to_self).then(|| {
             // Requests to join wait in the member list: their count shows beside the members'.
             let detail = match room.knocks {
                 0 => count.to_string(),

@@ -67,6 +67,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, window: [f3
     let room_row = |room: &RoomSummary| {
         let id = room.room_id.clone();
         let mark = match room.kind {
+            _ if room.note_to_self => note_mark(p),
             RoomKind::Group => el().size(28.0, 28.0).center().child(text("#").font(font::HEADER).color(p.text_muted)),
             RoomKind::Direct => media_avatar(
                 room.dm_users.first().unwrap_or(&room.room_id),
@@ -92,6 +93,11 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, window: [f3
             .child(highlighted(&display_name(room), query, p).grow(1.0))
             .on_press_tx(crate::state::navigate(move |s| s.open_found_room(&id)))
     };
+    // Typing its name offers the note to self until there is one, which is then found as a room.
+    let offer_notes = !query.is_empty()
+        && filter.includes(SearchFilter::Rooms)
+        && !account.rooms.iter().any(|room| room.note_to_self)
+        && fuzzy_match(t!("note_to_self.name"), query).is_some();
     for (kind, title) in [(RoomKind::Group, t!("search.rooms")), (RoomKind::Direct, t!("search.direct"))] {
         let mut found: Vec<_> = account
             .rooms
@@ -101,12 +107,32 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, window: [f3
             .collect();
         found.sort_by_key(|(room, rank)| (std::cmp::Reverse(account.search_usage.room(&room.room_id)), *rank));
         found.truncate(RESULTS);
-        if !found.is_empty() {
+        let notes = kind == RoomKind::Direct && offer_notes;
+        if !found.is_empty() || notes {
             any = true;
             list = list.child(section(title, p));
             for (room, _) in found {
                 list = list.child(room_row(room));
             }
+        }
+        if notes {
+            list = list.child(
+                row()
+                    .key(NOTE_TO_SELF)
+                    .w_full()
+                    .px(10.0)
+                    .py(6.0)
+                    .gap(10.0)
+                    .center_y()
+                    .radius(6.0)
+                    .hover(p.hover.alpha(p.hover.a * 2.0))
+                    .role("button")
+                    .focusable(true)
+                    .cursor(rune::Cursor::Pointer)
+                    .child(note_mark(p))
+                    .child(highlighted(t!("note_to_self.name"), query, p).grow(1.0))
+                    .on_press(State::open_note_to_self),
+            );
         }
     }
     let mut spaces: Vec<_> = account
@@ -293,6 +319,14 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, window: [f3
                 .child(list),
         );
     col().child(panel).anchored("search-anchor", Side::Bottom, Align::Center, 6.0)
+}
+
+/// The search's offer to make the note to self.
+pub const NOTE_TO_SELF: &str = "found-note-to-self";
+
+/// The note to self's mark in a result: its note, where a room has `#` and a chat a face.
+fn note_mark(p: &Palette) -> El {
+    el().size(28.0, 28.0).center().child(icon(&icons::NOTE, 18.0).color(p.text_muted))
 }
 
 fn filter_details(filter: SearchFilter) -> (&'static str, &'static str) {

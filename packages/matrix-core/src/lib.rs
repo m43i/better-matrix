@@ -43,6 +43,7 @@ mod convert;
 mod drafts;
 mod edits;
 mod history;
+mod note_to_self;
 mod offline_device;
 mod outgoing;
 mod packs;

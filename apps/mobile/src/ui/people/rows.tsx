@@ -12,20 +12,26 @@ import { Icon } from '../icons';
 import { usePalette } from '../theme';
 import { roleLabel } from './labels';
 
-/** Someone found or suggested: their picture, name and user ID, and what follows them. */
+/**
+ * Someone found or suggested: their picture, name and user ID (or `subtitle`), and what follows
+ * them.
+ */
 export function PersonRow({
   account,
   person,
+  subtitle,
   trailing,
   onPress,
   testID,
 }: {
   account: AccountId;
   person: Person;
+  subtitle?: string;
   trailing?: ReactNode;
   onPress?: () => void;
   testID?: string;
 }) {
+  const under = subtitle ?? (person.name !== person.id ? person.id : null);
   const palette = usePalette();
 
   const body = (
@@ -35,9 +41,9 @@ export function PersonRow({
         <Text style={[font.body, { color: palette.text }]} numberOfLines={1}>
           {person.name}
         </Text>
-        {person.name !== person.id ? (
+        {under !== null ? (
           <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
-            {person.id}
+            {under}
           </Text>
         ) : null}
       </View>

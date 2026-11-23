@@ -150,6 +150,19 @@ describe('searchResults', () => {
     ]);
   });
 
+  it('its name should offer the note to self while the user has none', () =>
+    expect(searchResults(accountWith([]), 'note to', [], NOW).noteToSelf).toBe(true));
+
+  it('a note to self the user has should be found, not offered again', () => {
+    const notes = { ...roomSummary('!notes', 'Note to self', 'Direct'), note_to_self: true };
+    const results = searchResults(accountWith([notes]), 'note to', [], NOW);
+    expect(results.noteToSelf).toBe(false);
+    expect(results.direct.map((r) => r.room_id)).toEqual(['!notes']);
+  });
+
+  it('an empty term should not offer the note to self', () =>
+    expect(searchResults(accountWith([]), ' ', [], NOW).noteToSelf).toBe(false));
+
   it('a term matching nothing should find nothing', () =>
     expect(foundAny(searchResults(accountWith([]), 'zzz', [], NOW))).toBe(false));
 });
