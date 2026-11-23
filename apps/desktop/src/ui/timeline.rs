@@ -897,11 +897,11 @@ fn readers_cell(cx: &Context<'_>, message: &Message, p: &Palette) -> Option<El> 
     Some(readers)
 }
 
-/// What every message row does, whatever its layout: the hover toolbar, the menu on a right
-/// click, and in a room, opening the message's thread on a press.
-fn message_actions(row: El, cx: &Context<'_>, message: &Message, p: &Palette) -> El {
+/// What every message row does, whatever its layout: the menu on a right click, and in a room,
+/// opening the message's thread on a press. The hover toolbar is the layout's to place.
+fn message_actions(row: El, cx: &Context<'_>, message: &Message) -> El {
     let (menu_key, id) = (cx.key.clone(), message.event_id.clone());
-    let mut row = row.child(toolbar(cx, message, p)).on_secondary_press(move |s: &mut State, point, _| {
+    let mut row = row.on_secondary_press(move |s: &mut State, point, _| {
         s.popover = Some(Popover::MessageMenu {
             key: menu_key.clone(),
             event_id: id.clone(),
@@ -984,7 +984,12 @@ fn classic_row(
     if interactive {
         row = row.hover(p.hover);
     }
-    if interactive && !message.pending { message_actions(row, cx, message, p) } else { row }
+    if interactive && !message.pending {
+        let place = ToolbarPlace::Row { kept: FIXED_BUTTONS };
+        message_actions(row.child(toolbar(cx, message, place, p)), cx, message)
+    } else {
+        row
+    }
 }
 
 /// The most of the timeline's width a bubble takes, and the most it takes at all.
@@ -1032,6 +1037,19 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
     // A card in a bubble fits the bubble; one standing alone, the classic row's width.
     let card_width = if bubbled { width - 2.0 * pad_x } else { cx.content_width };
     let mut parts = message_parts(cx, item, latest_call, card_width, &inside, p);
+    let actions = interactive && !message.pending;
+    // The toolbar stands beside a bubble, in what it leaves of the column (the user's own have
+    // the picture's place too): as laid out last frame, the widest it can be before then. The
+    // toolbar is pinned, so it never changes the bubble's width. Media and cards, many of which
+    // fill the width they're given, keep a classic row's toolbar.
+    let place = if bubbled {
+        let column = if own { cx.content_width + AVATAR + MESSAGE_GAP } else { cx.content_width };
+        let laid_out = rune::memo::layout_with(&format!("{key}-bubble"), |bubble| bubble[2].ceil());
+        beside_toolbar(column - laid_out.map_or(width, |laid_out| laid_out.min(width)))
+    } else {
+        ToolbarPlace::Row { kept: FIXED_BUTTONS }
+    };
+    let beside = matches!(place, ToolbarPlace::Beside { .. });
     if own && !bubbled {
         // A GIF's caption keeps to its side, as the GIF does.
         parts.inside = parts.inside.into_iter().map(El::self_end).collect();
@@ -1070,6 +1088,7 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
             .children(name)
             .children(parts.inside)
             .child(time.color(p.bubble_meta).self_end())
+            .children((actions && beside).then(|| toolbar(cx, message, place, p)))
     } else {
         // Cards and media take the width a classic row gives them, which they are sized for: a
         // poll fills it, a picture keeps its size on the message's side, the time under it.
@@ -1109,7 +1128,11 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
     } else if message.highlighted && message.sender_id != cx.account.as_str() {
         row = row.fill(p.warning.alpha(0.10)).border_sides([0.0, 0.0, 0.0, 3.0], p.warning);
     }
-    if interactive && !message.pending { message_actions(row.hover_group(), cx, message, p) } else { row }
+    if !actions {
+        return row;
+    }
+    let row = if beside { row } else { row.child(toolbar(cx, message, place, p)) };
+    message_actions(row.hover_group(), cx, message)
 }
 
 /// The sender's name or picture on a message, opening their person panel rather than the thread.
@@ -1132,20 +1155,73 @@ fn toolbar_right(cx: &Context<'_>) -> f32 {
     if cx.readers_column { MESSAGE_PAD_X + super::readers::column_width(cx.reader_faces) } else { 16.0 }
 }
 
-/// React, reply and reply in thread, at the message's top right while it is hovered (or its
-/// reaction picker is open): in a room, left of the readers' column, so the toolbar never covers
-/// a one-line message's read indicator.
-fn toolbar(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
+/// A toolbar button's side, the space between buttons, and the toolbar's padding around them.
+const TOOL: f32 = 30.0;
+const TOOL_GAP: f32 = 2.0;
+const TOOLBAR_PAD: f32 = 2.0;
+/// The space between a bubble and the toolbar beside it.
+pub(super) const TOOLBAR_BESIDE: f32 = 6.0;
+/// How far a toolbar over a row's top edge rises above it.
+const TOOLBAR_RISE: f32 = 14.0;
+
+/// The width of a toolbar of `buttons`.
+pub(super) fn toolbar_width(buttons: usize) -> f32 {
+    let n = buttons as f32;
+    2.0 * TOOLBAR_PAD + n * TOOL + (n - 1.0).max(0.0) * TOOL_GAP
+}
+
+/// Where a message's hover toolbar sits, and how many of its fixed buttons it keeps besides More.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum ToolbarPlace {
+    /// Over the row's top corner away from the sender.
+    Row { kept: usize },
+    /// Beside the bubble, on its open side.
+    Beside { kept: usize },
+}
+
+/// The buttons a toolbar may hold besides More, in order: React (none on a call's card, which
+/// keeps no reactions), Reply, and Thread (none inside a thread).
+pub(super) const FIXED_BUTTONS: usize = 3;
+
+/// A bubble's toolbar, in the `room` points beside the bubble. A narrow one loses Thread, then
+/// Reply, then React; More, whose menu offers them all, stays. With no room even for More, More
+/// alone takes the row's corner.
+pub(super) fn beside_toolbar(room: f32) -> ToolbarPlace {
+    let fits = |kept: usize| TOOLBAR_BESIDE + toolbar_width(kept + 1) <= room;
+    (0..=FIXED_BUTTONS)
+        .rev()
+        .find(|&kept| fits(kept))
+        .map_or(ToolbarPlace::Row { kept: 0 }, |kept| ToolbarPlace::Beside { kept })
+}
+
+/// React, Reply, Thread and More while the message is hovered (or its reaction picker or menu is
+/// open), as many as `place` keeps. Over a row, at its top corner away from the sender: in a
+/// room, left of the readers' column, so the toolbar never covers a one-line message's read
+/// indicator. Beside a bubble, level with its top.
+fn toolbar(cx: &Context<'_>, message: &Message, place: ToolbarPlace, p: &Palette) -> El {
     let event_id = message.event_id.clone();
-    // The user's own bubble sits at the right, under where the toolbar would be: it takes the
-    // empty left instead.
-    let (left, right) =
-        if cx.on_right(message) { (Some(MESSAGE_PAD_X), None) } else { (None, Some(toolbar_right(cx))) };
+    let (ToolbarPlace::Row { mut kept } | ToolbarPlace::Beside { mut kept }) = place;
+    let mut keep = |wanted: bool| {
+        let shown = wanted && kept > 0;
+        kept -= usize::from(shown);
+        shown
+    };
+    let react = keep(!matches!(message.content, MessageContent::Call(_)));
+    let (reply, thread) = (keep(true), keep(!cx.in_thread()));
+    let width = toolbar_width(1 + usize::from(react) + usize::from(reply) + usize::from(thread));
+    // The user's own sit at the right, under where a row's toolbar would be: theirs takes the
+    // empty left instead, and beside a bubble, the bubble's left.
+    let (left, top, right) = match (place, cx.on_right(message)) {
+        (ToolbarPlace::Row { .. }, true) => (Some(MESSAGE_PAD_X), -TOOLBAR_RISE, None),
+        (ToolbarPlace::Row { .. }, false) => (None, -TOOLBAR_RISE, Some(toolbar_right(cx))),
+        (ToolbarPlace::Beside { .. }, true) => (Some(-(width + TOOLBAR_BESIDE)), 0.0, None),
+        (ToolbarPlace::Beside { .. }, false) => (None, 0.0, Some(-(width + TOOLBAR_BESIDE))),
+    };
     let open = cx.picking == Some(event_id.as_str());
     let target = if cx.in_thread() { ComposerTarget::Thread } else { ComposerTarget::Room };
     let button = |glyph: &'static rune::Icon, label: &str, name: &str| {
         el().key(cx.key(&format!("{name}-{event_id}")))
-            .size(30.0, 30.0)
+            .size(TOOL, TOOL)
             .radius(6.0)
             .center()
             .hover(p.hover.alpha(p.hover.a * 3.0))
@@ -1158,17 +1234,17 @@ fn toolbar(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
     let (key, quoted) = (cx.key.clone(), message.clone());
     let mut bar = row()
         .key(cx.key(&format!("actions-{event_id}")))
-        .pin(left, Some(-14.0), right, None)
-        .px(2.0)
-        .py(2.0)
-        .gap(2.0)
+        .pin(left, Some(top), right, None)
+        .w(width)
+        .px(TOOLBAR_PAD)
+        .py(TOOLBAR_PAD)
+        .gap(TOOL_GAP)
         .radius(8.0)
         .fill(p.surface)
         .border(1.0, p.divider)
         .shadow(2.0, 8.0, Color::BLACK.alpha(0.2))
         .group_opacity(if open { 1.0 } else { 0.0 }, 1.0);
-    // A call's card takes no reactions: the timeline keeps none on it.
-    if !matches!(message.content, MessageContent::Call(_)) {
+    if react {
         bar = bar.child(button(&icons::SMILE, t!("actions.react"), "react").on_press(move |s: &mut State| {
             s.toggle_popover(Popover::Emoji(EmojiFor::Reaction {
                 key: key.clone(),
@@ -1176,25 +1252,24 @@ fn toolbar(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
             }));
         }));
     }
-    let reply = message.clone();
-    bar = bar.child(
-        button(&icons::REPLY, t!("actions.reply"), "reply")
-            .on_press_tx(move |s: &mut State, tx| s.start_reply(target, &reply, tx)),
-    );
-    if !cx.in_thread() {
+    if reply {
+        let reply = message.clone();
+        bar = bar.child(
+            button(&icons::REPLY, t!("actions.reply"), "reply")
+                .on_press_tx(move |s: &mut State, tx| s.start_reply(target, &reply, tx)),
+        );
+    }
+    if thread {
         let root = event_id.clone();
         bar = bar.child(
             button(&icons::THREAD, t!("actions.thread"), "thread").on_press(move |s: &mut State| s.open_thread(&root)),
         );
     }
     // Every sent message has utilities, including other people's messages.
-    {
-        let (key, id) = (cx.key.clone(), event_id.clone());
-        bar = bar.child(button(&icons::MORE, t!("actions.more"), "more").on_press(move |s: &mut State| {
-            s.toggle_popover(Popover::MessageMenu { key: key.clone(), event_id: id.clone(), at: None });
-        }));
-    }
-    bar
+    let (key, id) = (cx.key.clone(), event_id.clone());
+    bar.child(button(&icons::MORE, t!("actions.more"), "more").on_press(move |s: &mut State| {
+        s.toggle_popover(Popover::MessageMenu { key: key.clone(), event_id: id.clone(), at: None });
+    }))
 }
 
 /// The message a reply answers: who wrote it and an excerpt, behind a bar. Pressing it goes to

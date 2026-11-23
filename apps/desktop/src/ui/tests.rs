@@ -2477,11 +2477,99 @@ fn pressing_a_bubble_beside_its_text_should_open_its_thread() {
 }
 
 #[test]
-fn in_bubbles_the_toolbar_of_the_users_own_message_should_keep_clear_of_its_bubble() {
+fn in_bubbles_the_toolbar_of_the_users_own_message_should_sit_just_left_of_its_bubble() {
     let rt = runtime(bubble_room);
     let toolbar = element_rect(&rt, "actions-$own");
     let own = element_rect(&rt, "msg-own-bubble");
-    assert!(toolbar[0] + toolbar[2] < own[0], "the toolbar sits left of the bubble");
+    let gap = own[0] - (toolbar[0] + toolbar[2]);
+    assert!((gap - super::timeline::TOOLBAR_BESIDE).abs() < 1.0, "beside the bubble, {gap} points off");
+    assert!(toolbar[1] >= own[1] - 1.0, "level with its top, not above it");
+}
+
+#[test]
+fn in_bubbles_the_toolbar_of_someone_elses_message_should_sit_just_right_of_its_bubble() {
+    let rt = runtime(bubble_room);
+    let toolbar = element_rect(&rt, "actions-$short-0");
+    let bubble = element_rect(&rt, "msg-short-0-bubble");
+    let gap = toolbar[0] - (bubble[0] + bubble[2]);
+    assert!((gap - super::timeline::TOOLBAR_BESIDE).abs() < 1.0, "beside the bubble, {gap} points off");
+}
+
+#[test]
+fn a_wide_bubble_toolbar_should_keep_every_button() {
+    use super::timeline::{ToolbarPlace, beside_toolbar};
+    assert_eq!(beside_toolbar(400.0), ToolbarPlace::Beside { kept: super::timeline::FIXED_BUTTONS });
+}
+
+#[test]
+fn a_narrower_bubble_toolbar_should_lose_buttons_before_more() {
+    use super::timeline::{TOOLBAR_BESIDE, ToolbarPlace, beside_toolbar, toolbar_width};
+    let room = |buttons| TOOLBAR_BESIDE + toolbar_width(buttons);
+    assert_eq!(beside_toolbar(room(3)), ToolbarPlace::Beside { kept: 2 });
+    assert_eq!(beside_toolbar(room(2)), ToolbarPlace::Beside { kept: 1 });
+    assert_eq!(beside_toolbar(room(1)), ToolbarPlace::Beside { kept: 0 });
+}
+
+#[test]
+fn a_bubble_toolbar_without_room_beside_should_keep_only_more_at_the_rows_corner() {
+    use super::timeline::{TOOLBAR_BESIDE, ToolbarPlace, beside_toolbar, toolbar_width};
+    assert_eq!(beside_toolbar(TOOLBAR_BESIDE + toolbar_width(1) - 1.0), ToolbarPlace::Row { kept: 0 });
+}
+
+/// Windows where the room beside [`bubble_room`]'s first bubble holds React, Reply and More, and
+/// where the bubble leaves no room beside it.
+const NARROW_BUBBLES: f32 = 640.0;
+const COMPACT_BUBBLES: f32 = 400.0;
+
+/// [`bubble_room`] in a window `width` points wide.
+fn narrow_bubble_room(width: f32) -> Runtime<State> {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    bubble_room(&mut state);
+    let mut rt = Runtime::new(state, super::view, (width, 760.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    rt
+}
+
+#[test]
+fn in_a_narrow_timeline_a_bubbles_toolbar_should_drop_thread_first() {
+    let rt = narrow_bubble_room(NARROW_BUBBLES);
+    assert!(rt.find("thread-$short-0").is_none(), "no room for Thread");
+    assert!(rt.find("reply-$short-0").is_some() && rt.find("more-$short-0").is_some(), "Reply and More stay");
+}
+
+#[test]
+fn in_a_compact_timeline_a_bubbles_toolbar_should_hold_only_more() {
+    let rt = narrow_bubble_room(COMPACT_BUBBLES);
+    for button in ["react", "reply", "thread"] {
+        assert!(rt.find(&format!("{button}-$short-0")).is_none(), "no {button}");
+    }
+    assert!(rt.find("more-$short-0").is_some(), "More stays");
+}
+
+#[test]
+fn adding_a_reaction_from_the_menu_should_open_the_picker_at_more_when_react_is_gone() {
+    let mut rt = narrow_bubble_room(COMPACT_BUBBLES);
+    rt.update(|s, _| {
+        s.popover = Some(crate::state::Popover::MessageMenu {
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            event_id: "$short-0".into(),
+            at: None,
+        })
+    });
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, "message-react");
+    assert!(matches!(
+        &rt.state.popover,
+        Some(crate::state::Popover::Emoji(crate::state::EmojiFor::Reaction { event_id, .. })) if event_id == "$short-0"
+    ));
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("emoji-picker").is_some(), "the picker shows");
 }
 
 #[test]

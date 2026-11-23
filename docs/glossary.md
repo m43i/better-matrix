@@ -151,7 +151,9 @@ messages show as a `MessagePreview` outside their timeline.
 keeping its current content and formatting and removing its reply, thread and edit relations.
 
 **Hover toolbar**
-: React, reply and reply-in-thread buttons at a message's top right, shown while it is hovered.
+: React, reply, reply-in-thread and More buttons at a message's top right, shown while it is
+hovered. In chat bubbles it stands beside the bubble and keeps only the buttons that fit there,
+More last.
 
 **Section**
 : A group in the sidebar: the built-in Rooms, Direct messages, Favourites and Low priority, or one

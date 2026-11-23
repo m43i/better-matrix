@@ -186,9 +186,15 @@ see who is typing there.
     `ContentWidthContext`).
   - The time (with "edited" or "sending") closes the bubble in `bubble_meta`, which keeps 4.5:1
     on either bubble, as do muted words inside it (a quote, a notice; phones: `InBubble`); reactions and the thread hang below it, on its side. The readers' column,
-    menu and press-to-open-thread are the classic row's; the hover toolbar moves to the row's
-    left over the user's own bubbles, which take its usual place (in a timeline too narrow for
-    both it may cover a long first line, as it does a classic row's).
+    menu and press-to-open-thread are the classic row's.
+  - The hover toolbar stands beside a bubble, level with its top, on its open side: right of
+    other people's, left of the user's own. It fits the room the bubble leaves in its column
+    (as laid out the frame before, the widest bubble until then; `beside_toolbar`), never
+    reaching into the readers' column: a narrower room drops Thread, then Reply, then React,
+    and More stays, its menu offering all three (Add reaction anchors the picker at More when
+    React is gone). With no room even for More, More alone takes the row's top corner, where
+    it may cover a long bubble's corner. Media and cards, many of which fill the width they're
+    given, keep the classic row's toolbar at the row's corner (left over the user's own).
 - **Reactions, replies, threads:**
   - `Command::React` toggles the user's reaction (`toggle_reaction`). Messages carry each
     reaction's count and whether the user is among them. The picker offers quick reactions,

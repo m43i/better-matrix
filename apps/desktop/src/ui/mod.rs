@@ -133,10 +133,12 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         }
         (Some(Popover::Emoji(chosen_for)), _) => {
             let anchor = match chosen_for {
-                EmojiFor::Reaction { key, event_id } => match key.thread {
-                    None => format!("react-{event_id}"),
-                    Some(_) => format!("thread-react-{event_id}"),
-                },
+                // Beside its message's React, or its More when a bubble's toolbar had no room.
+                EmojiFor::Reaction { key, event_id } => {
+                    let prefix = if key.thread.is_some() { "thread-" } else { "" };
+                    let react = format!("{prefix}react-{event_id}");
+                    if cx.layout_size(&react).is_some() { react } else { format!("{prefix}more-{event_id}") }
+                }
                 EmojiFor::Composer(target) => composer::emoji_button(*target),
                 // In the account menu's place: the menu closes while the picker is open.
                 EmojiFor::StatusMessage => rail::ACCOUNT_BUTTON.to_owned(),

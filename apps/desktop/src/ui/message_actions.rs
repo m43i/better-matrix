@@ -11,7 +11,7 @@ use super::{
     theme::{Palette, font},
 };
 use crate::i18n::{I18N, t};
-use crate::state::{ComposerTarget, Modal, State};
+use crate::state::{ComposerTarget, EmojiFor, Modal, Popover, State};
 
 pub fn menu(
     s: &State,
@@ -46,6 +46,12 @@ pub fn menu(
         }
     }
     if readable {
+        // A bubble's toolbar may have no room for React; the menu always offers it.
+        let (react_key, id) = (key.clone(), event_id.to_owned());
+        panel =
+            panel.child(action(&icons::SMILE, t!("actions.react"), "message-react").on_press(move |s: &mut State| {
+                s.popover = Some(Popover::Emoji(EmojiFor::Reaction { key: react_key.clone(), event_id: id.clone() }));
+            }));
         let reply = message.clone();
         panel = panel.child(action(&icons::REPLY, t!("actions.reply"), "message-reply").on_press_tx(
             move |s: &mut State, tx| {
