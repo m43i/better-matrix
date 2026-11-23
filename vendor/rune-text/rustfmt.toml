@@ -1,2 +1,0 @@
-# Preserve the upstream formatting when running cargo fmt for the workspace.
-disable_all_formatting = true

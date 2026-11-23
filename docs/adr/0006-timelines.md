@@ -450,6 +450,8 @@ see who is typing there.
 - Any `timeline_mut` moves the revision: a no-op costs a replan, never a stale plan.
 - Typing notices have no off switch; adding one is one check in `send_typing`.
 - No GIF picker: Giphy and Tenor search needs an API key issued to the project.
-- Unicode emoji use the device's **emoji style**. Colour uses Google Noto Color Emoji.
-  Monochrome uses Google Noto Emoji outlines and greyscale Noto Color Emoji artwork for its
-  gaps. The system font covers characters outside the bundled fonts.
+- The desktop emoji picker, reaction chips and read-only messages draw Unicode emoji using
+  the device's **emoji style**. Colour uses Google Noto Color Emoji. Monochrome uses Google
+  Noto Emoji outlines and greyscale Noto Color Emoji artwork for its gaps. The system font
+  covers the editable composer, links, code, styled text and emoji outside the bundled fonts.
+  Inline artwork keeps the authored Unicode for copying and accessibility.

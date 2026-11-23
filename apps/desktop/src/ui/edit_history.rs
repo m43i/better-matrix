@@ -28,6 +28,7 @@ pub fn dialog_for(s: &State, history: &EditHistory, p: &Palette) -> El {
                             me: history.account.as_str(),
                             revealed: &s.revealed,
                             media: &s.media,
+                            emoji_style: s.settings.emoji_style,
                             pictures: s.shows_pictures_of(&history.account, &history.room_id, &history.event_id),
                         };
                         formatted(&format!("edit-{}", version.event_id), &rich, look, p)

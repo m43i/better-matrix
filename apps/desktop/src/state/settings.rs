@@ -116,7 +116,7 @@ impl Emoticons {
 }
 
 /// Which Google Noto family draws Unicode emoji on this device.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum EmojiStyle {
     #[default]
     Color,
@@ -142,13 +142,6 @@ impl EmojiStyle {
 
     pub fn from_id(id: &str) -> Self {
         Self::ALL.into_iter().find(|style| style.id() == id).unwrap_or_default()
-    }
-
-    pub fn apply(self) {
-        rune::text::choose_emoji_families(match self {
-            Self::Color => &["Noto Color Emoji"],
-            Self::Monochrome => &["Better Matrix Noto Emoji"],
-        });
     }
 }
 

@@ -234,6 +234,7 @@ pub fn topic_look<'a>(s: &'a State, account: &'a AccountData, room: &'a RoomSumm
         revealed: &s.revealed,
         media: &s.media,
         pictures: true,
+        emoji_style: s.settings.emoji_style,
     }
 }
 

@@ -16,7 +16,6 @@ use matrix_core::{ClientIdentity, Engine, EngineConfig};
 use platform::Shell;
 use rune::{App, AppSpec, Key, KeyEvent, Tx};
 use state::{Appearance, EmojiStyle, Popover, Scope, SettingsSection, State};
-use std::sync::LazyLock;
 
 /// Reverse-DNS app ID: data folders, keychain service, notification identity.
 pub const APP_ID: &str = "chat.bettermatrix.desktop";
@@ -25,17 +24,12 @@ pub const APP_ID: &str = "chat.bettermatrix.desktop";
 /// show it on the consent screen and require `https`. Placeholder until the project has a site.
 const CLIENT_URI: &str = "https://example.org/better-matrix";
 
-const NOTO_COLOR_EMOJI: &[u8] = include_bytes!("../../../assets/emoji/NotoColorEmoji.ttf");
-const NOTO_EMOJI: &[u8] = include_bytes!("../../../assets/emoji/BetterMatrixNotoEmoji.ttf");
-
 /// The demo scenes that switch the app's language. The language is global, so a test running
 /// alongside one would read it: tests that run every scene leave these out.
 #[cfg(test)]
 const LANGUAGE_SCENES: &[&str] = &["demo-de", "demo-fr-settings"];
 
 fn spec() -> AppSpec<State> {
-    static FONTS: LazyLock<Vec<&'static [u8]>> =
-        LazyLock::new(|| rune::text::DEFAULT_FONTS.iter().copied().chain([NOTO_COLOR_EMOJI, NOTO_EMOJI]).collect());
     AppSpec {
         min_size: Some((720.0, 480.0)),
         scenes: &[
@@ -341,14 +335,12 @@ fn spec() -> AppSpec<State> {
                 s.poll_form.answers[1].insert("Café");
             }),
             ("demo-emoji", |s| {
-                demo::seed(s);
-                s.select_room(demo::DEMO_THREAD.0);
+                demo::noto_emoji(s);
                 demo::image_packs(s);
                 s.toggle_popover(Popover::Emoji(state::EmojiFor::Composer(state::ComposerTarget::Room)));
             }),
             ("demo-emoji-monochrome", |s| {
-                demo::seed(s);
-                s.select_room(demo::DEMO_THREAD.0);
+                demo::noto_emoji(s);
                 s.set_emoji_style(EmojiStyle::Monochrome);
                 s.toggle_popover(Popover::Emoji(state::EmojiFor::Composer(state::ComposerTarget::Room)));
             }),
@@ -816,7 +808,6 @@ fn spec() -> AppSpec<State> {
         // Inter for text; the system's monospace font for code, recovery keys and the sign-in
         // backdrop (Rune's default mono slot is Inter too).
         families: ("Inter", "ui-monospace"),
-        fonts: &FONTS,
         setup: Some(|s, waker| s.media.attach(waker)),
         poll: Some(|s, clock, tx| {
             let moved = s.animate(clock, tx);
@@ -875,7 +866,6 @@ fn main() {
     // The window reports this id (Wayland `app_id`, X11 `WM_CLASS`), so the desktop matches it
     // to the installed entry and its icon.
     rune::set_app_id(APP_ID);
-    EmojiStyle::default().apply();
     let app = App::new(spec())
         .on_focus(|s, focused, _| s.focus_changed(focused))
         // Permalinks the system opens with the app: every link on macOS, `scheme://` ones from a
@@ -949,7 +939,6 @@ fn main() {
         Ok(engine) => {
             let prefs = rune::prefs::Prefs::open(APP_ID);
             let settings = platform::load_settings(&prefs);
-            settings.emoji_style.apply();
             let scratch = dirs.cache().join("scratch");
             platform::reset_scratch(&scratch);
             let shell_scratch = scratch.clone();
@@ -981,44 +970,6 @@ mod tests {
     use rune::{Env, Runtime};
 
     use super::*;
-
-    #[test]
-    fn switching_emoji_style_should_shape_and_draw_with_the_selected_noto_font() {
-        use rune::text::parley::PositionedLayoutItem;
-
-        let spec = spec();
-        EmojiStyle::Color.apply();
-        let mut text = rune::text::TextSystem::for_window(spec.fonts, spec.families);
-        for (style, font, color) in
-            [(EmojiStyle::Color, NOTO_COLOR_EMOJI, true), (EmojiStyle::Monochrome, NOTO_EMOJI, false)]
-        {
-            style.apply();
-            text.follow_chosen();
-            let layout = text.layout_rich("🙂", &[], rune::TextStyle::new(20.0, 400.0), 1.0, None);
-            let font_matches = layout.lines().flat_map(|line| line.items()).find_map(|item| match item {
-                PositionedLayoutItem::GlyphRun(run) => Some(run.run().font().data.as_ref() == font),
-                _ => None,
-            });
-            assert_eq!(font_matches, Some(true), "{style:?}");
-            let mut quads = Vec::new();
-            text.glyphs_for_layout(&layout, 1.0, [0.0, 0.0], false, &mut quads);
-            assert_eq!(quads.iter().any(|quad| quad.color != 0), color, "{style:?}");
-        }
-    }
-
-    #[test]
-    fn an_emoji_without_noto_outlines_should_draw_in_greyscale_in_monochrome_mode() {
-        let spec = spec();
-        EmojiStyle::Monochrome.apply();
-        let mut text = rune::text::TextSystem::for_window(spec.fonts, spec.families);
-        let layout = text.layout_rich("🫩", &[], rune::TextStyle::new(24.0, 400.0), 1.0, None);
-        let mut quads = Vec::new();
-        text.glyphs_for_layout(&layout, 1.0, [0.0, 0.0], false, &mut quads);
-        let bitmap = quads.iter().find(|quad| quad.color != 0).expect("greyscale bitmap");
-        let pixels = text.color_glyph(bitmap.color).rgba();
-        let (rgba, remainder) = pixels.as_chunks::<4>();
-        assert!(!rgba.is_empty() && remainder.is_empty() && rgba.iter().all(|[r, g, b, _]| r == g && g == b));
-    }
 
     fn runtime(scene: fn(&mut State)) -> Runtime<State> {
         let mut s = State::detached();

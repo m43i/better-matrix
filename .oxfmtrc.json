@@ -16,7 +16,6 @@
     ".windsurf/**",
     ".agent-tools/**",
     "tools/oxlint/anti-slop/**",
-    "vendor/rune-text/**",
     "packages/matrix-native/src/generated/**",
     "apps/mobile/android/**",
     "apps/mobile/ios/**",

@@ -34,9 +34,7 @@ const packages = new Map<string, Package>(metadata.packages.map((p: Package) => 
 
 const nodes = new Map<string, Node>(metadata.resolve.nodes.map((n: Node) => [n.id, n]));
 
-const ours = new Set<string>(
-  metadata.workspace_members.filter((id: string) => packages.get(id)?.name !== 'rune-text'),
-);
+const ours = new Set<string>(metadata.workspace_members);
 
 const app = metadata.workspace_members.find((id: string) => packages.get(id)?.name === APP);
 

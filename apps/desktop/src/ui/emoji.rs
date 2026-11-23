@@ -9,7 +9,7 @@ use rune::{Align, El, ScrollSpec, Side, col, el, icon, row, text, text_input};
 use super::components::{divider, popover_panel};
 use super::theme::{Palette, font};
 use crate::i18n::t;
-use crate::state::{ComposerTarget, EmojiFor, State};
+use crate::state::{ComposerTarget, EmojiFor, EmojiStyle, State};
 
 /// How many search results show at most.
 const RESULTS: usize = 96;
@@ -166,7 +166,14 @@ fn custom_rows(custom: Vec<PackImage>) -> Vec<(String, Row)> {
 
 /// A Unicode emoji's cell. `place` tells apart cells showing the same emoji (the quick
 /// reactions repeat some of the groups').
-fn emoji_button(emoji: &'static str, size: f32, place: &str, chosen_for: &EmojiFor, p: &Palette) -> El {
+fn emoji_button(
+    emoji: &'static str,
+    size: f32,
+    place: &str,
+    chosen_for: &EmojiFor,
+    style: EmojiStyle,
+    p: &Palette,
+) -> El {
     let chosen_for = chosen_for.clone();
     el().key(format!("emoji-{place}-{emoji}"))
         .size(size, size)
@@ -176,7 +183,7 @@ fn emoji_button(emoji: &'static str, size: f32, place: &str, chosen_for: &EmojiF
         .role("button")
         .cursor(rune::Cursor::Pointer)
         .label(emoji)
-        .child(text(emoji).font(rune::TextStyle::new(size * 0.6, 400.0)))
+        .child(super::emoji_art::glyph(emoji, style, p.text, size * 0.6))
         .on_press(move |s: &mut State| s.choose_emoji(chosen_for.clone(), emoji))
 }
 
@@ -211,9 +218,9 @@ fn grid_row(s: &State, line: &Row, chosen_for: &EmojiFor, p: &Palette) -> El {
     match line {
         Row::CustomTitle => title(t!("emoji.custom"), p),
         Row::Title(section) => title(group_title(section.group), p),
-        Row::Emoji(emoji) => {
-            emoji.iter().fold(row().w_full(), |set, emoji| set.child(emoji_button(emoji, CELL, "set", chosen_for, p)))
-        }
+        Row::Emoji(emoji) => emoji.iter().fold(row().w_full(), |set, emoji| {
+            set.child(emoji_button(emoji, CELL, "set", chosen_for, s.settings.emoji_style, p))
+        }),
         Row::Custom(images) => {
             let EmojiFor::Composer(target) = chosen_for else { return el() };
             images.iter().fold(row().w_full(), |set, image| set.child(custom_button(s, image, *target, p)))
@@ -289,7 +296,7 @@ pub fn picker(s: &State, chosen_for: &EmojiFor, anchor: String, p: &Palette) -> 
     };
     let grid = if query.is_empty() {
         let quick = QUICK.iter().fold(row().w_full().px(8.0).gap(2.0), |row, emoji| {
-            row.child(emoji_button(emoji, 36.0, "quick", chosen_for, p))
+            row.child(emoji_button(emoji, 36.0, "quick", chosen_for, s.settings.emoji_style, p))
         });
         panel = panel
             .child(text(t!("emoji.quick")).font(font::SECTION).color(p.text_muted).px(12.0).py(6.0))
@@ -342,7 +349,7 @@ pub fn picker(s: &State, chosen_for: &EmojiFor, anchor: String, p: &Palette) -> 
             grid.child(text(t!("emoji.none")).font(font::BODY).color(p.text_muted).px(4.0).py(8.0))
         } else {
             grid.child(found.iter().fold(row().w_full().pt(4.0).flex_wrap(), |set, emoji| {
-                set.child(emoji_button(emoji, CELL, "found", chosen_for, p))
+                set.child(emoji_button(emoji, CELL, "found", chosen_for, s.settings.emoji_style, p))
             }))
         };
         // Only as tall as the results, up to the browsing grid's height.

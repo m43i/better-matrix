@@ -5514,7 +5514,6 @@ impl State {
     /// Redraws this device's Unicode emoji in the chosen style.
     pub fn set_emoji_style(&mut self, style: EmojiStyle) {
         self.settings.emoji_style = style;
-        style.apply();
         self.shell.save_settings(self.settings.clone());
     }
 

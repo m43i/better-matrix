@@ -287,7 +287,7 @@ fn appearance(s: &State, p: &Palette) -> El {
         .w_full()
         .gap(12.0)
         .child(conversion)
-        .child(text(t!("settings.emoji_style_hint")).font(font::META).color(p.text_muted))
+        .child(text(t!("settings.desktop_emoji_style_hint")).font(font::META).color(p.text_muted))
         .child(emoji_styles);
     col()
         .w_full()

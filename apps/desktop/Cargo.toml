@@ -59,6 +59,9 @@ rune-kit.workspace = true
 cpal = "0.18"
 # Every emoji with its name and shortcodes, for the picker's search.
 emojis = "0.9"
+# Shapes and rasterises the bundled Noto fonts for read-only emoji artwork.
+swash = "0.2"
+unicode-segmentation = "1.13"
 opuscule = "0.2"
 # Logs to stderr, only when RUST_LOG asks for them.
 tracing-subscriber.workspace = true

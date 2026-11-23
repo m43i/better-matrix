@@ -13,6 +13,7 @@ mod confirm;
 mod developer;
 mod edit_history;
 mod emoji;
+mod emoji_art;
 mod icons;
 mod info;
 mod link;

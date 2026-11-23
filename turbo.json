@@ -31,8 +31,6 @@
         "cargo",
         "clippy",
         "--workspace",
-        "--exclude",
-        "rune-text",
         "--all-targets",
         "--locked",
         "--",

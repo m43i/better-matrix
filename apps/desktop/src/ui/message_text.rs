@@ -2,12 +2,14 @@
 //! without making a received message a text field.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use rune::{Block, Color, Cursor, El, InlineIcon, Link, Mark, PillStyle, Span, TextEdit, TextStyle, col, row, text};
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::theme::{Palette, font};
 use crate::i18n::t;
-use crate::state::{MediaCache, PlacedCode, RichText, SPOILER_LINK, State, place_code};
+use crate::state::{EmojiStyle, MediaCache, PlacedCode, RichText, SPOILER_LINK, State, place_code};
 
 /// What a message's text needs besides its words: whose it is, who reads it, which spoilers
 /// they revealed, and the custom emoji's pictures.
@@ -19,6 +21,7 @@ pub struct Look<'a> {
     pub me: &'a str,
     pub revealed: &'a HashSet<String>,
     pub media: &'a MediaCache,
+    pub emoji_style: EmojiStyle,
     /// Whether its custom emoji show as pictures: not while the account keeps the message's
     /// media back (ADR 0011), when they read as their short codes.
     pub pictures: bool,
@@ -37,8 +40,8 @@ pub fn reach(text: El) -> El {
 /// How formatted text fits its place: wrapping as a message's body does, or one line cut short.
 #[derive(Clone, Copy)]
 enum Fit {
-    /// Body text in `color`, wrapping.
-    Wrap(Color),
+    /// Body text in its usual or italic style, wrapping.
+    Wrap(TextStyle, Color),
     /// One line in `style` and `color`, ending in "…" when longer than its room.
     Line(TextStyle, Color),
 }
@@ -50,7 +53,7 @@ pub fn formatted(key: &str, rich: &RichText, look: Look<'_>, p: &Palette) -> El 
 /// [`formatted`] text whose plain words take `color`.
 pub fn formatted_in(key: &str, rich: &RichText, look: Look<'_>, color: Color, p: &Palette) -> El {
     let edit = &rich.edit;
-    let fit = Fit::Wrap(color);
+    let fit = Fit::Wrap(font::BODY, color);
     let mut body = col().key(key.to_owned()).w_full().selection_group(true);
     let placed = place_code(edit, &rich.code);
     let mut colors_by_line = code_colors(rich, &placed, p);
@@ -155,6 +158,11 @@ pub fn line(key: &str, edit: &TextEdit, look: Look<'_>, style: TextStyle, color:
     inline(key, edit, 0..edit.text.len(), Block::Paragraph, Vec::new(), look, Fit::Line(style, color), p)
 }
 
+pub fn plain(key: &str, words: &str, look: Look<'_>, style: TextStyle, color: Color, p: &Palette) -> El {
+    let edit = TextEdit::new(words);
+    inline(key, &edit, 0..words.len(), Block::Paragraph, Vec::new(), look, Fit::Wrap(style, color), p)
+}
+
 /// The colours of `rich`'s code in its blocks' languages: each code line's spans (from the
 /// line's start), by where the line starts in the text. Each block is highlighted whole, once
 /// (and cached), so a comment or string over several lines colours each of them, and its
@@ -189,7 +197,7 @@ fn code_colors(rich: &RichText, placed: &[PlacedCode<'_>], p: &Palette) -> HashM
 fn inline(
     key: &str,
     edit: &TextEdit,
-    range: std::ops::Range<usize>,
+    range: Range<usize>,
     block: Block,
     // A code line's colours in its language.
     colors: Vec<Span>,
@@ -202,8 +210,20 @@ fn inline(
     let mut links = Vec::new();
     let mut strikes = Vec::new();
     let mut pills = Vec::new();
-    let mut emoji = Vec::new();
-    let mut hidden: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut hidden = Vec::new();
+    let artwork = if block == Block::Code { Vec::new() } else { illustrations(edit, &range, look, p) };
+    // Rune attaches an inline image to the word that follows it. A hair space after
+    // the emoji ends that word when another character follows. Keep the authored
+    // Unicode in the text, and exclude only the added spaces from copying.
+    const SEPARATOR: char = '\u{200a}';
+    let separators: Vec<_> = artwork
+        .iter()
+        .map(|(range, _, _)| range.end)
+        .filter(|&end| words[end..].starts_with(|c: char| !c.is_whitespace()))
+        .collect();
+    let remap = |at: usize, include_at: bool| {
+        at + SEPARATOR.len_utf8() * separators.partition_point(|&end| end < at || (include_at && end == at))
+    };
     if block == Block::Code {
         spans.push(Span::new(0, words.len()).mono());
         spans.extend(colors);
@@ -213,7 +233,8 @@ fn inline(
             if start >= end {
                 continue;
             }
-            let (start, end) = (start - range.start, end - range.start);
+            let original = start - range.start..end - range.start;
+            let (start, end) = (remap(original.start, true), remap(original.end, false));
             let span = Span::new(start, end);
             let span = match &mark.mark {
                 Mark::Bold => span.weight(650.0),
@@ -230,10 +251,10 @@ fn inline(
                 }
                 Mark::Pill(id) => {
                     let absolute = mark.start;
-                    match pill(id, start..end, absolute, &words[start..end], look, p) {
+                    match pill(id, start..end, absolute, &words[original.clone()], look, p) {
                         Inline::Chip { style, link, span: chip_span, hides } => {
                             if hides {
-                                hidden.push(start..end);
+                                hidden.push(original);
                             }
                             pills.push((start..end, style));
                             links.extend(link.map(|link| *link));
@@ -241,11 +262,6 @@ fn inline(
                                 Some(chip_span) => chip_span,
                                 None => continue,
                             }
-                        }
-                        Inline::Emoji(pixels) => {
-                            emoji.push((start, pixels));
-                            // The short code stays the text (copying it gives `:blobcat:`), unseen.
-                            span.color(Color::TRANSPARENT).size(1.0)
                         }
                         Inline::Plain => continue,
                     }
@@ -261,10 +277,27 @@ fn inline(
     for range in hidden {
         shown.replace_range(range.clone(), &" ".repeat(range.len()));
     }
-    let content = rune::rich(shown, spans).key(key.to_owned());
+    let accessible = (!separators.is_empty()).then(|| shown.clone());
+    for &end in separators.iter().rev() {
+        shown.insert(end, SEPARATOR);
+        let at = remap(end, false);
+        spans.push(Span::new(at, at + SEPARATOR.len_utf8()).size(0.1));
+    }
+    for (range, _, _) in &artwork {
+        let (start, end) = (remap(range.start, true), remap(range.end, false));
+        spans.push(Span::new(start, end).color(Color::TRANSPARENT).size(0.1));
+    }
+    let mut content = rune::rich(shown, spans).key(key.to_owned());
+    if let Some(accessible) = accessible {
+        content = content.label(accessible);
+    }
+    for end in separators.iter().copied() {
+        let at = remap(end, false);
+        content = content.uncopied(at..at + SEPARATOR.len_utf8());
+    }
     let content = match fit {
-        Fit::Wrap(color) => content
-            .font(font::BODY)
+        Fit::Wrap(style, color) => content
+            .font(style)
             .color(color)
             .self_start()
             .shrink()
@@ -280,16 +313,76 @@ fn inline(
         .cursor(Cursor::Text)
         .on_press(|_: &mut State| {})
         .on_link(|s: &mut State, url, tx| s.open_link(url, tx));
-    for (at, pixels) in emoji {
-        content = content.inline_icon(at, InlineIcon::image(pixels).size(EMOJI).gap(0.0).radius(3.0));
+    for (range, pixels, custom) in artwork {
+        let size = match (custom, fit) {
+            (true, _) => EMOJI,
+            (false, Fit::Line(style, _)) => style.size,
+            (false, _) => font::BODY.size + 2.0,
+        };
+        let radius = if custom { 3.0 } else { 0.0 };
+        let icon = InlineIcon::image(pixels).size(size).gap(0.0).radius(radius);
+        content = content.inline_icon(remap(range.start, true), icon);
     }
-    if matches!(fit, Fit::Wrap(_)) {
+    if matches!(fit, Fit::Wrap(..)) {
         content = reach(content);
     }
     for link in links {
         content = content.link(link);
     }
     content
+}
+
+/// Artwork at an authored byte range. Rune's link hit areas and text decorations cover
+/// glyphs, so linked, underlined and struck Unicode emoji keep their font rendering.
+fn illustrations(
+    edit: &TextEdit,
+    line: &Range<usize>,
+    look: Look<'_>,
+    p: &Palette,
+) -> Vec<(Range<usize>, rune::Pixels, bool)> {
+    let mut occupied = Vec::new();
+    let mut decorated = Vec::new();
+    let mut custom = Vec::new();
+    for mark in edit.marks() {
+        let (start, end) = (mark.start.max(line.start), mark.end.min(line.end));
+        if start >= end {
+            continue;
+        }
+        let range = start - line.start..end - line.start;
+        match &mark.mark {
+            Mark::Pill(id) if id.starts_with("emote:") => custom.push((range, id)),
+            Mark::Code | Mark::Pill(_) => occupied.push(range),
+            Mark::Link(_) | Mark::Underline | Mark::Strike => decorated.push(range),
+            _ => {}
+        }
+    }
+    let intersects = |a: &Range<usize>, b: &Range<usize>| a.start < b.end && b.start < a.end;
+    let available = |range: &Range<usize>| !occupied.iter().any(|chip| intersects(chip, range));
+    let mut artwork: Vec<_> = custom
+        .iter()
+        .filter(|(range, _)| available(range))
+        .filter_map(|(range, id)| {
+            let media = matrix_core::MediaRef::from_mxc(id.strip_prefix("emote:")?).filter(|_| look.pictures)?;
+            Some((range.clone(), look.media.image(&media)?.pixels().clone(), true))
+        })
+        .collect();
+    let words = &edit.text[line.clone()];
+    if !words.is_ascii() {
+        artwork.extend(words.grapheme_indices(true).filter_map(|(start, sequence)| {
+            let emoji = emojis::get(sequence).filter(|emoji| emoji.as_str() == sequence)?;
+            let range = start..start + sequence.len();
+            if !available(&range)
+                || decorated.iter().any(|mark| intersects(mark, &range))
+                || custom.iter().any(|(chip, _)| intersects(chip, &range))
+            {
+                return None;
+            }
+            let pixels = super::emoji_art::artwork(emoji, look.emoji_style, p.text)?;
+            Some((range, pixels, false))
+        }));
+    }
+    artwork.sort_unstable_by_key(|(range, _, _)| range.start);
+    artwork
 }
 
 /// A short fingerprint of a spoiler's words, for its link id.
@@ -308,9 +401,7 @@ enum Inline {
     /// A chip, maybe pressable, maybe with its words styled; `hides` its words (a spoiler not
     /// revealed yet).
     Chip { style: PillStyle, link: Option<Box<Link>>, span: Option<Span>, hides: bool },
-    /// A custom emoji's picture.
-    Emoji(rune::Pixels),
-    /// Its words as they are (a custom emoji whose picture isn't here yet).
+    /// Its words as they are, with any artwork placed separately.
     Plain,
 }
 
@@ -357,14 +448,6 @@ fn pill(id: &str, range: std::ops::Range<usize>, absolute: usize, words: &str, l
             hides: false,
         };
     }
-    if let Some(url) = id.strip_prefix("emote:") {
-        if !look.pictures {
-            return Inline::Plain;
-        }
-        let pixels = matrix_core::MediaRef::from_mxc(url)
-            .and_then(|media| look.media.image(&media).map(|image| image.pixels().clone()));
-        return pixels.map_or(Inline::Plain, Inline::Emoji);
-    }
     Inline::Plain
 }
 
@@ -374,11 +457,44 @@ mod tests {
     use rune::{Env, Runtime};
 
     fn test_look(s: &State) -> Look<'_> {
-        Look { event_id: "$m", me: "@me:x", revealed: &s.revealed, media: &s.media, pictures: true }
+        Look {
+            event_id: "$m",
+            me: "@me:x",
+            revealed: &s.revealed,
+            media: &s.media,
+            pictures: true,
+            emoji_style: s.settings.emoji_style,
+        }
+    }
+
+    const EMOJI_LINE: &str = "Hi🙂👩‍💻!\u{200a}Good!";
+
+    fn adjacent_emoji(s: &State, _: &mut rune::Cx<State>) -> El {
+        let p = super::super::theme::palette(false);
+        plain("adjacent", EMOJI_LINE, test_look(s), font::BODY, p.text, &p)
+    }
+
+    #[test]
+    fn selecting_a_line_with_adjacent_emoji_should_keep_its_original_unicode() {
+        let mut rt = Runtime::new(State::detached(), adjacent_emoji, (360.0, 120.0), Env::default());
+        rt.frame(0.0);
+        let line =
+            rt.elements().into_iter().find(|element| element.key.as_deref() == Some("adjacent")).expect("message line");
+        assert_eq!(line.label.as_deref(), Some(EMOJI_LINE));
+        let rect = line.rect;
+        let (x, y) = (rect[0] + rect[2] - REACH + 4.0, rect[1] + rect[3] / 2.0);
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.frame(1.0 / 60.0);
+        rt.pointer_move(rect[0], y);
+        rt.frame(1.0 / 60.0);
+        rt.pointer_up(rect[0], y);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.selected_text().as_deref(), Some(EMOJI_LINE));
     }
 
     fn view(s: &State, _: &mut rune::Cx<State>) -> El {
-        let edit = TextEdit::from_html("Text <b>before <a href='https://matrix.org'>a link</a></b> after");
+        let edit = TextEdit::from_html("Text 🙂<b>before <a href='https://matrix.org'>a link 🙂</a></b> after");
         formatted("message", &RichText { edit, code: Vec::new() }, test_look(s), &super::super::theme::palette(true))
     }
 

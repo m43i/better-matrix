@@ -799,6 +799,7 @@
   "settings.emoticons_emoji_hint": ":) est envoyé comme 🙂. Le code et les liens restent tels que vous les avez tapés.",
   "settings.emoticons_typed": "Les envoyer tels quels",
   "settings.emoticons_typed_hint": ":D reste :D.",
+  "settings.desktop_emoji_style_hint": "Choisissez l?apparence des emoji Google Noto dans les messages, les r?actions et le s?lecteur d?emoji.",
   "settings.emoji_style_hint": "Choisissez l’apparence des emoji Google Noto sur cet appareil.",
   "settings.emoji_color": "En couleur",
   "settings.emoji_monochrome": "Monochrome",

@@ -1451,6 +1451,30 @@ pub fn page_update() -> crate::platform::updates::Release {
 /// The custom emoji the demo's messages and packs use.
 pub const DEMO_EMOJI: &str = "mxc://example.org/party";
 
+/// Unicode emoji in a plain message and on its reaction chips, alongside the picker.
+pub fn noto_emoji(s: &mut State) {
+    seed(s);
+    s.select_room(DEMO_THREAD.0);
+    let message = Message {
+        event_id: "$noto-emoji".into(),
+        sender_id: GRACE.into(),
+        sender_name: "Grace Hopper".into(),
+        timestamp_ms: DEMO_DAY_MS + 15 * 3_600_000,
+        content: text("Looks good! 🙂👍🏽 Thanks for checking. 👩‍💻"),
+        reactions: vec![Reaction { key: "🎉".into(), count: 3, mine: true }],
+        ..Message::default()
+    };
+    seed_timeline(
+        s,
+        &AccountId::new(ADA),
+        &TimelineKey::room(DEMO_THREAD.0),
+        TimelineDiff::PushBack(TimelineEntry {
+            id: message.event_id.clone(),
+            kind: EntryKind::Message(Box::new(message)),
+        }),
+    );
+}
+
 /// Messages showing what the composer can send: a mention of the user and a room, an emote, a
 /// spoiler, formulas, a custom emoji, a place, and an edited reply.
 pub fn message_features(s: &mut State) {

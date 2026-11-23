@@ -21,8 +21,8 @@ use super::room::{display_name, inline_name};
 use super::theme::{Palette, font};
 use crate::i18n::{I18N, t, tf, tp};
 use crate::state::{
-    AccountData, AudioClip, ComposerTarget, EmojiFor, EntryView, GifCache, LinkPreviews, MediaCache, MessageLayout,
-    PlaybackSpeed, Popover, RichText, RoomTimeline, Scrub, State, TimelineItem, audio_supported,
+    AccountData, AudioClip, ComposerTarget, EmojiFor, EmojiStyle, EntryView, GifCache, LinkPreviews, MediaCache,
+    MessageLayout, PlaybackSpeed, Popover, RichText, RoomTimeline, Scrub, State, TimelineItem, audio_supported,
 };
 use matrix_core::links::LinkPreview;
 
@@ -77,6 +77,7 @@ pub struct Context<'a> {
     pub show_hidden: bool,
     /// Classic rows or chat bubbles.
     pub layout: MessageLayout,
+    pub emoji_style: EmojiStyle,
 }
 
 impl<'a> Context<'a> {
@@ -106,6 +107,7 @@ impl<'a> Context<'a> {
             revealed: &s.revealed_media,
             show_hidden: s.settings.show_hidden_events,
             layout: s.settings.message_layout,
+            emoji_style: s.settings.emoji_style,
         }
     }
 
@@ -117,6 +119,7 @@ impl<'a> Context<'a> {
             revealed: self.spoilers,
             media: self.media,
             pictures: !self.hides(message),
+            emoji_style: self.emoji_style,
         }
     }
 
@@ -1335,7 +1338,9 @@ fn reactions(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
                 .label(format!("{} {}", reaction.key, reaction.count))
                 .checked(reaction.mine)
                 // A long reaction (a shortcode, say) is cut short; its label keeps all of it.
-                .child(text(reaction.key.clone()).font(font::BODY).shrink().truncate())
+                .child(
+                    super::emoji_art::glyph(&reaction.key, cx.emoji_style, p.text, font::BODY.size).shrink().truncate(),
+                )
                 .child(text(reaction.count.to_string()).font(font::META).color(if reaction.mine {
                     p.accent
                 } else {
@@ -1501,21 +1506,7 @@ fn text_body(message: &Message, plain: &str, rich: Option<&RichText>, cx: &Conte
     let event_id = &message.event_id;
     match rich {
         Some(rich) => super::message_text::formatted(&format!("rich-{event_id}"), rich, cx.look(message), p),
-        // Its own handler keeps the clicks, and those just beside it: a double-click takes a
-        // word, a triple-click the paragraph, rather than opening the thread.
-        None => super::message_text::reach(
-            text(plain.to_owned())
-                .key(format!("text-{event_id}"))
-                .font(font::BODY)
-                .color(p.text)
-                .self_start()
-                // A word longer than the line (a hash, say) breaks rather than runs out of the
-                // message.
-                .wrap_anywhere()
-                .selectable(true)
-                .cursor(rune::Cursor::Text)
-                .on_press(|_: &mut State| {}),
-        ),
+        None => super::message_text::plain(&format!("text-{event_id}"), plain, cx.look(message), font::BODY, p.text, p),
     }
 }
 
@@ -1531,16 +1522,13 @@ fn emote_body(item: &TimelineItem, body: &str, rich: Option<&RichText>, cx: &Con
             .child(
                 super::message_text::formatted(&format!("rich-{event_id}"), rich, cx.look(&item.message), p).shrink(),
             ),
-        None => super::message_text::reach(
-            text(format!("* {name} {body}"))
-                .key(format!("text-{event_id}"))
-                .font(font::BODY.italic())
-                .color(p.text)
-                .self_start()
-                .wrap_anywhere()
-                .selectable(true)
-                .cursor(rune::Cursor::Text)
-                .on_press(|_: &mut State| {}),
+        None => super::message_text::plain(
+            &format!("text-{event_id}"),
+            &format!("* {name} {body}"),
+            cx.look(&item.message),
+            font::BODY.italic(),
+            p.text,
+            p,
         ),
     }
 }
