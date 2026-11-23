@@ -135,13 +135,13 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
     col().w_full().px(20.0).pt(4.0).children(scheduled_bar(s, target, p)).child(framed).child(below)
 }
 
-/// Rune follows keyboard edits itself; pointer selection also needs its moving end revealed,
-/// and so does the caret in a code fence, where Enter's new line is the composer's own. The
-/// marker lives in content coordinates, so a wheel scroll alone never asks to reveal it.
+/// Rune follows keyboard edits and a selection dragged past the editor's edge itself; the
+/// caret in a code fence needs revealing here, since Enter's new line there is the composer's
+/// own. The marker lives in content coordinates, so a wheel scroll alone never asks to reveal it.
 fn selection_caret(s: &State, target: ComposerTarget, cx: &Cx<State>) -> Option<El> {
     let c = s.composer(target);
     let edit = &c.edit;
-    if edit.anchor == edit.focus && !c.in_code_fence() {
+    if !c.in_code_fence() {
         return None;
     }
     let caret = cx.caret(composer_field(target))?;

@@ -128,7 +128,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   and polls). A received image from `mxc://` is a custom
   emoji, `data-mx-emoticon` or not: the SDK's sanitiser drops that attribute, which the spec's
   list of allowed attributes lacks. Received custom emoji draw as their picture
-  inline (`El::inline_icon`), their short code kept as unseen text so copying gives `:code:`;
+  inline in place of their short code (`El::inline_image`, a body line tall), which selection
+  and copying still see, so copying gives `:code:`;
   pictures load like other media on screen (`TimelineItem::emotes`, 128 px), and like it wait
   while the account keeps the message's media back (ADR 0011), reading as their short codes
   until it is shown. Adding to packs
@@ -214,9 +215,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     The editor shrinks again when text is removed.
   - The wheel works over the text and its side padding. A Rune Kit scrollbar indicates the
     position and can be dragged without taking focus. Keyboard navigation and selection keep
-    the caret visible. Pointer selections use a content-space caret marker to reveal their
-    moving end too; only a changed selection or caret line requests a reveal, so scrolling by
-    hand can leave the caret off screen.
+    the caret visible, and a selection dragged past the editor's edge scrolls it while held
+    (both Rune's). The caret in a code fence, whose Enter the composer handles, uses a
+    content-space caret marker to reveal itself; only a changed selection or caret line
+    requests a reveal, so scrolling by hand can leave the caret off screen.
   - The field comes first. A bottom bar holds attach, emoji, `Aa`, voice memo and poll, with send at
     the right. The formatting toolbar shows only while `Aa` is on.
     Formatting and recording controls wrap inside a narrow pane so resizing keeps them reachable.
@@ -416,8 +418,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   - One stopped to make room is marked, not forgotten, so it isn't refetched while shown.
   - GIFs of timelines no longer shown, or all with linked GIFs off, are let go; a download
     finishing after that is dropped, not played.
-  - Only those on screen play, and only while the window is focused; the rest hold their
-    frame. A player lets go of the file once decoded.
+  - Only those on screen play, and only while the window can be seen (`App::on_visibility`:
+    not minimised, hidden or covered whole), focused or not; the rest hold their frame. A player lets go of the file once decoded.
   - A download that isn't a GIF (`GIF8`) is marked broken: the link shows as text.
 - **Retries:** a failed download (media or linked GIF) waits 5 s, doubling up to 5 minutes, and
   is fetched again only if still on screen (`state::retry::Retries`). `poll` wakes when the

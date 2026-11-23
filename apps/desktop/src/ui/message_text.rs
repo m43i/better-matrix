@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rune::{Block, Color, Cursor, El, InlineIcon, Link, Mark, PillStyle, Span, TextEdit, TextStyle, col, row, text};
+use rune::{Block, Color, Cursor, El, InlineImage, Link, Mark, PillStyle, Span, TextEdit, TextStyle, col, row, text};
 
 use super::theme::{Palette, font};
 use crate::i18n::t;
@@ -243,9 +243,10 @@ fn inline(
                             }
                         }
                         Inline::Emoji(pixels) => {
-                            emoji.push((start, pixels));
-                            // The short code stays the text (copying it gives `:blobcat:`), unseen.
-                            span.color(Color::TRANSPARENT).size(1.0)
+                            // The picture stands in for the short code, which stays the text
+                            // that selection and copying see (`:blobcat:`).
+                            emoji.push((start..end, pixels));
+                            continue;
                         }
                         Inline::Plain => continue,
                     }
@@ -280,8 +281,8 @@ fn inline(
         .cursor(Cursor::Text)
         .on_press(|_: &mut State| {})
         .on_link(|s: &mut State, url, tx| s.open_link(url, tx));
-    for (at, pixels) in emoji {
-        content = content.inline_icon(at, InlineIcon::image(pixels).size(EMOJI).gap(0.0).radius(3.0));
+    for (range, pixels) in emoji {
+        content = content.inline_image(range, InlineImage::new(pixels, EMOJI, EMOJI_ASCENT, EMOJI - EMOJI_ASCENT));
     }
     if matches!(fit, Fit::Wrap(_)) {
         content = reach(content);
@@ -300,8 +301,10 @@ fn fingerprint(words: &str) -> u64 {
     hasher.finish()
 }
 
-/// The side of a custom emoji in text.
+/// The side of a custom emoji in text: a body line's height, so it never makes the line taller.
 const EMOJI: f32 = 22.0;
+/// How far a custom emoji stands above the baseline: where a body line's baseline sits.
+const EMOJI_ASCENT: f32 = 17.0;
 
 /// How a pill in a message draws.
 enum Inline {

@@ -644,13 +644,21 @@ ruma-identifiers-validation	0.14.0	MIT
 ruma-macros	0.20.2	MIT
 ruma-signatures	0.22.1	MIT
 rune	0.0.1	MIT
+rune-core	0.0.1	MIT
+rune-edit	0.0.1	MIT
+rune-gpu	0.0.1	MIT
 rune-highlights	0.0.1	MIT AND Apache-2.0
 rune-i18n	0.1.0	MIT
+rune-image	0.0.1	MIT
 rune-kit	0.0.1	MIT
+rune-media	0.0.1	MIT
 rune-motion	0.1.0	MIT
 rune-notify	0.0.1	MIT
+rune-spell	0.0.1	MIT
 rune-staging	0.0.1	MIT
 rune-taffy	0.0.1	MIT
+rune-text	0.0.1	MIT
+rune-tiny-skia-path	0.11.4	BSD-3-Clause
 rusqlite	0.40.2	MIT
 rustc_version	0.4.1	MIT OR Apache-2.0
 rustc-demangle	0.1.28	MIT OR Apache-2.0
@@ -762,7 +770,6 @@ time	0.3.55	MIT OR Apache-2.0
 time-core	0.1.9	MIT OR Apache-2.0
 time-macros	0.2.32	MIT OR Apache-2.0
 tiny-skia	0.11.4	BSD-3-Clause
-tiny-skia-path	0.11.4	BSD-3-Clause
 tiny-skia-path	0.11.4	BSD-3-Clause
 tinystr	0.8.5	Unicode-3.0
 tinyvec	1.13.3	Zlib OR Apache-2.0 OR MIT

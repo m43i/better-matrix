@@ -13,6 +13,9 @@ fn long_draft(target: ComposerTarget) -> Runtime<State> {
     let mut rt = Runtime::new(state, ui::view, (1200.0, 760.0), Env { system_dark: true, scale: 1.0 });
     rt.frame(0.0);
     rt.paste("Another line\n".repeat(40));
+    rt.frame(1.0 / 60.0);
+    // A settle lands on the tree as it stood before the frame's input, so the grown composer
+    // settles on the frame after the paste.
     rt.settle_all();
     rt.frame(1.0 / 60.0);
     rt
@@ -83,7 +86,9 @@ fn dragging_a_selection_above_the_composer_should_reveal_earlier_lines() {
         assert_ne!(edit.anchor, edit.focus);
         assert!(field(&rt, target).scrolled[1] < before);
         let caret = field(&rt, target).caret.unwrap();
-        assert!(caret[1] >= viewport[1] - 1.0 && caret[1] + caret[3] <= viewport[1] + viewport[3] + 1.0);
+        // Rune scrolls while the drag is held past the edge; the selection's moving end stays on
+        // the line under the pointer, as a browser's text field leaves it.
+        assert!(caret[1] <= end && end < caret[1] + caret[3], "caret {caret:?}, pointer at {end}");
     }
 }
 

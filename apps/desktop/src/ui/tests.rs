@@ -3740,3 +3740,19 @@ fn a_press_on_a_dialogs_empty_space_should_keep_it_open() {
     rt.frame(1.0 / 60.0);
     assert!(rt.state.modal.is_some());
 }
+
+#[test]
+fn a_custom_emoji_should_copy_as_its_short_code() {
+    let mut state = State::detached();
+    demo::message_features(&mut state);
+    let mut rt = Runtime::new(state, super::view, (1000.0, 1500.0), Env::new(true, 1.0));
+    rt.poll = crate::spec().poll;
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    let key = "rich-$emoji-0";
+    assert!(rt.find(key).is_some(), "the message with the emoji shows");
+    rt.update(|_, tx| tx.select_all_text(key));
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.selected_text().as_deref(), Some("Shipped :party: nice work"));
+}

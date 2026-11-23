@@ -68,6 +68,12 @@ impl Player {
         Self { pixels, held, stop, paused, worker }
     }
 
+    /// Whether the animation is held.
+    #[cfg(test)]
+    pub fn paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
     /// Holds or resumes the animation.
     fn set_paused(&self, paused: bool) {
         if self.paused.swap(paused, Ordering::Relaxed) && !paused {
@@ -241,13 +247,13 @@ impl GifCache {
         self.retries.retain(|url| shown.contains(url));
     }
 
-    /// Plays the GIFs in `shown` while the window is focused, and holds every other. Past
+    /// Plays the GIFs in `shown` while the window can be seen, and holds every other. Past
     /// [`MAX_TOTAL_BYTES`] of frames, those off screen are forgotten, the one shown longest ago
     /// first, and fetched again if they come back.
-    pub fn show(&mut self, shown: std::collections::HashSet<String>, focused: bool) {
+    pub fn show(&mut self, shown: std::collections::HashSet<String>, visible: bool) {
         for (url, entry) in &self.entries {
             if let Entry::Playing(player) = entry {
-                player.set_paused(!focused || !shown.contains(url));
+                player.set_paused(!visible || !shown.contains(url));
             }
         }
         // Those on screen move behind the rest, keeping their order.

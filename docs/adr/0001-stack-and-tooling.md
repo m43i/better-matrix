@@ -59,8 +59,8 @@ Date: 2026-11-14
     `cargo-xwin` (clang-cl, lld-link).
   - Windows release builds use the GUI subsystem: no console window.
   - Windows builds embed the installer artwork (`packaging/icons/better-matrix.ico`) in
-    `better-matrix.exe`. Rune's native window callback applies that resource to the taskbar
-    button and the window caption each time the window is created.
+    `better-matrix.exe` as icon resource 1; `rune::set_app_icon_resource` gives every window
+    that icon for its caption, the taskbar and Alt+Tab, at the size it shows.
 - **CI and releases** (`.github/`), kept to as little compute as gives confidence:
   - Hosted runners are pinned to current stable images: Ubuntu 26.04 for CI and release
     orchestration, macOS 26 arm64 and Windows Server 2025 for their release builds. Linux

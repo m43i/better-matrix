@@ -14,6 +14,9 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+/// The app icon's resource ID, `APP_ICON` in `main.rs` too.
+const APP_ICON: u16 = 1;
+
 /// Links the app icon and package version into the `better-matrix` binary.
 /// The numeric versions drop a pre-release (1.2.3-rc.1 is 1.2.3.0); the text keeps it.
 fn windows_resources(out: &Path) -> io::Result<()> {
@@ -33,7 +36,7 @@ fn windows_resources(out: &Path) -> io::Result<()> {
     fs::write(
         &rc,
         format!(
-            r#"BETTER_MATRIX_ICON ICON "better-matrix.ico"
+            r#"{APP_ICON} ICON "better-matrix.ico"
 1 VERSIONINFO
 FILEVERSION {numeric}
 PRODUCTVERSION {numeric}
