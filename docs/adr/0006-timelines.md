@@ -126,7 +126,14 @@ see who is typing there.
   they offer no copy-text action for their filename. Empty text has no copy action either.
   Phones use the same content rules in their message sheet, with the system share action too.
   The message menu establishes a modal input boundary, so rows behind it cannot hover or
-  reveal their toolbars. Calls keep their own controls.
+  reveal their toolbars. Under other popovers (the emoji picker, a menu, search) the timelines
+  go inert, and under a composer's suggestions its own timeline (`State::timeline_covered`):
+  Rune hovers by rectangle, not by the topmost hit, so their rows lit up and showed their
+  toolbars as the pointer crossed the panel. Inert, only the timelines lose the pointer (and
+  their scrolling) meanwhile; the composer, the top bar, the call controls and focus elsewhere
+  are untouched, which a modal boundary on every popover would not leave them. The read
+  receipts' panel, opened from a button inside the timeline, leaves it live so the button keeps
+  the keyboard. Calls keep their own controls.
   `Command::Forward` reads the open timeline's latest event JSON (including edits), strips source
   relations, mentions and legacy reply fallbacks, and sends the text or attachment through the
   chosen room on the same account. The destination picker separates Rooms (`#` and name)
@@ -189,17 +196,20 @@ see who is typing there.
   - The time (with "edited" or "sending") closes the bubble in `bubble_meta`, which keeps 4.5:1
     on either bubble, as do muted words inside it (a quote, a notice; phones: `InBubble`); reactions and the thread hang below it, on its side. The readers' column,
     menu and press-to-open-thread are the classic row's.
-  - The hover toolbar is one component in both layouts, placed as Teams places its own: it
-    floats on the top edge of what the message says (a bubble, the column media and cards stand
-    in, or a classic row's content), reaching `TOOLBAR_OVERLAP` (10 points) down over it, at its
-    top right, `TOOLBAR_INSET` in, so it sits by the words and the pointer barely travels.
-    What a message says narrower than the toolbar (as laid out the frame before, the widest
-    bubble until then) puts it at the message's own edge, reaching into the open side: right
-    of other people's, left of the user's own. It rises over the message above, which it may
-    cover a moment, and never reaches into the readers' column. It holds React, Reply,
-    Thread, a rule, then More; content narrower than the whole toolbar keeps only More, whose menu offers the rest (Add reaction then anchors the picker at
-    More). Media and cards fill the column they're given, so their toolbar takes the column's
-    top right. Rising out of its row, the toolbar can lie over the message above, so the
+  - The hover toolbar is one component in both layouts, placed by the words (`ToolbarAt`), so
+    the pointer barely travels. It floats on the top edge of what the message says, reaching
+    `TOOLBAR_OVERLAP` (10 points) down over it. In a classic row it starts `TOOLBAR_INSET` after
+    the row's first line as laid out the frame before: the sender's name and time heading a
+    run, or a plain message's words continuing one. A pin's label, a quote, media or formatted
+    text first take the content's top right, as does a line leaving the toolbar no room. On
+    someone else's bubble (and on media and cards, which fill the column they're given) it sits
+    at the top right, `TOOLBAR_INSET` in, as Teams places its own; on something narrower than
+    the toolbar it starts at the message's own edge and reaches into the open side. Beside the
+    user's own bubble it sits on the bubble's left, `TOOLBAR_BESIDE` away and level with its
+    top, as before the Teams placement; where the timeline leaves no room there, over the
+    bubble's top left corner. It never reaches into the readers' column. It holds React, Reply,
+    Thread, a rule, then More; content narrower than the whole toolbar keeps only More, whose
+    menu offers the rest (Add reaction then anchors the picker at More). Rising out of its row, the toolbar can lie over the message above, so the
     pointer can be over two messages at once. The toolbar shows through its row's hover group;
     a shown toolbar the pointer is on holds it (`MessageHover`, from the toolbar's
     `on_hover_change`): it stays shown, and the row it lies over (by last frame's layout) shows

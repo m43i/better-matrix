@@ -11,6 +11,10 @@ use super::theme::{Palette, font};
 use crate::i18n::t;
 use crate::state::{ComposerTarget, State, Suggestion, Trigger};
 
+/// The widest a composer's suggestions are, and the narrowest, which still reads.
+const WIDTH: f32 = 400.0;
+const MIN_WIDTH: f32 = 240.0;
+
 /// The lists for the composers on screen that have something to offer.
 pub fn lists(s: &State, p: &Palette) -> Vec<El> {
     [ComposerTarget::Room, ComposerTarget::Thread].into_iter().filter_map(|target| list(s, target, p)).collect()
@@ -29,9 +33,13 @@ fn list(s: &State, target: ComposerTarget, p: &Palette) -> Option<El> {
         ComposerTarget::Room => "suggestion",
         ComposerTarget::Thread => "thread-suggestion",
     };
+    // No wider than its composer, so it doesn't reach over the other pane's timeline, which
+    // stays live under it (`State::timeline_covered`), unless the composer is too slim to read
+    // a name in.
+    let width = rune::memo::layout_size(&frame_key(target)).map_or(WIDTH, |[frame, _]| frame.clamp(MIN_WIDTH, WIDTH));
     let mut panel = col()
         .key(format!("{prefix}s"))
-        .w(400.0)
+        .w(width)
         .padding(6.0)
         .radius(10.0)
         .fill(p.surface)

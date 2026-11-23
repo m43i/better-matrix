@@ -170,9 +170,10 @@ keeping its current content and formatting and removing its reply, thread and ed
 
 **Hover toolbar**
 : React, reply, reply-in-thread and, behind a rule, More, shown while a message is hovered. It
-floats on the top edge of what the message says, at its top right, the same in classic rows and
-chat bubbles; a timeline too narrow for it keeps only More. Rising over the message above, the
-toolbar the pointer is on wins over the row under it.
+floats on the top edge of what the message says, by its words: in a classic row just after its
+first line (the sender's name and time), on someone else's bubble at its top right, and beside
+the user's own bubble on its left. A timeline too narrow for it keeps only More. Rising over the
+message above, the toolbar the pointer is on wins over the row under it.
 
 **Section**
 : A group in the sidebar: the built-in Rooms, Direct messages, Favourites and Low priority, or one
@@ -411,7 +412,8 @@ size. See [ADR 0005](adr/0005-navigation-and-settings.md).
 when it notifies for mentions only or is muted; and any room marked unread.
 
 **Popover**
-: A floating panel over the window (account menu, room menu). One at a time.
+: A floating panel over the window (account menu, room menu, emoji picker). One at a time; the
+timelines under it take no hover while it is open.
 
 **Modal**
 : A dialog over the whole window with the rest dimmed (settings, confirmations). One at a time.

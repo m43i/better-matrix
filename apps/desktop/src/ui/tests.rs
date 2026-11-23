@@ -527,35 +527,43 @@ fn right_clicking_message_text_should_open_the_full_message_menu() {
     assert!(rt.find("message-edit").is_none());
 }
 
+/// A room of four messages several lines tall, for popovers to open over.
+fn tall_rows_room(s: &mut State) {
+    tall_rows(s, 4);
+}
+
+/// A room of `count` messages several lines tall.
+fn tall_rows(s: &mut State, count: u64) {
+    s.select_room(demo::DEMO_THREAD.0);
+    let entries = (0..count)
+        .map(|i| TimelineEntry {
+            id: format!("menu-row-{i}"),
+            kind: EntryKind::Message(Box::new(Message {
+                event_id: format!("$menu-{i}"),
+                sender_id: "@grace:example.org".into(),
+                sender_name: "Grace".into(),
+                timestamp_ms: demo::DEMO_DAY_MS + i * 600_000,
+                content: MessageContent::Text {
+                    body: "A message\nwith several lines\nto hover over".into(),
+                    html: None,
+                },
+                ..Message::default()
+            })),
+        })
+        .collect();
+    s.apply(
+        Event::TimelineChanged {
+            account: AccountId::new(demo::ADA),
+            key: TimelineKey::room(demo::DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Reset(entries)],
+        },
+        &mut rune::Tx::default(),
+    );
+}
+
 #[test]
 fn a_message_menu_should_keep_other_rows_from_hovering_underneath_it() {
-    let mut rt = runtime(|s| {
-        s.select_room(demo::DEMO_THREAD.0);
-        let entries = (0..4)
-            .map(|i| TimelineEntry {
-                id: format!("menu-row-{i}"),
-                kind: EntryKind::Message(Box::new(Message {
-                    event_id: format!("$menu-{i}"),
-                    sender_id: "@grace:example.org".into(),
-                    sender_name: "Grace".into(),
-                    timestamp_ms: demo::DEMO_DAY_MS + i * 600_000,
-                    content: MessageContent::Text {
-                        body: "A message\nwith several lines\nto hover over".into(),
-                        html: None,
-                    },
-                    ..Message::default()
-                })),
-            })
-            .collect();
-        s.apply(
-            Event::TimelineChanged {
-                account: AccountId::new(demo::ADA),
-                key: TimelineKey::room(demo::DEMO_THREAD.0),
-                diffs: vec![TimelineDiff::Reset(entries)],
-            },
-            &mut rune::Tx::default(),
-        );
-    });
+    let mut rt = runtime(tall_rows_room);
     let (x, y) = rt.find("text-$menu-2").unwrap();
     rt.update(|s, _| {
         s.popover = Some(crate::state::Popover::MessageMenu {
@@ -570,6 +578,154 @@ fn a_message_menu_should_keep_other_rows_from_hovering_underneath_it() {
         rt.frame(1.0 / 60.0);
     }
     assert_eq!(rt.presented("actions-$menu-2").unwrap().1, 0.0);
+}
+
+/// Rests the pointer on the open panel `panel` where it lies over one of [`tall_rows`]'s
+/// messages other than the first, in view, and gives that message's toolbar's opacity.
+fn toolbar_under_panel(rt: &mut Runtime<State>, key: &str) -> f32 {
+    let (panel, timeline) = (element_rect(rt, key), element_rect(rt, "timeline"));
+    // Where the panel lies over the timeline's viewport: rows scrolled past it don't hover.
+    let top = panel[1].max(timeline[1]);
+    let over = [panel[0], top, panel[2], (panel[1] + panel[3]).min(timeline[1] + timeline[3]) - top];
+    let (id, row) = (1..)
+        .map_while(|i| {
+            let row = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("msg-menu-row-{i}")))?;
+            Some((format!("$menu-{i}"), row.rect))
+        })
+        .find(|(_, row)| row[1] + row[3] > over[1] + 4.0 && row[1] < over[1] + over[3] - 4.0)
+        .unwrap_or_else(|| panic!("{key} lies over no other message"));
+    let top = row[1].max(over[1]);
+    let bottom = (row[1] + row[3]).min(over[1] + over[3]);
+    rt.pointer_move(over[0] + over[2] / 2.0, (top + bottom) / 2.0);
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    rt.presented(&format!("actions-{id}")).expect("its toolbar").1
+}
+
+#[test]
+fn an_emoji_picker_should_keep_the_rows_under_it_from_hovering() {
+    let mut rt = runtime(tall_rows_room);
+    let (x, y) = rt.find("react-$menu-0").expect("the first message's React");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(matches!(rt.state.popover, Some(crate::state::Popover::Emoji(_))), "{:?}", rt.state.popover);
+    assert_eq!(toolbar_under_panel(&mut rt, "emoji-picker"), 0.0);
+    assert!(matches!(rt.state.popover, Some(crate::state::Popover::Emoji(_))));
+}
+
+#[test]
+fn a_composers_suggestions_should_keep_the_rows_under_them_from_hovering() {
+    let mut rt = runtime(|s| {
+        tall_rows(s, 12);
+        s.composer.edit.insert("@");
+        s.composer.edit.focused = true;
+    });
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert_eq!(toolbar_under_panel(&mut rt, "suggestions"), 0.0);
+}
+
+#[test]
+fn a_composers_suggestions_should_keep_within_its_pane() {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    state.select_room(demo::DEMO_THREAD.0);
+    state.open_thread(demo::DEMO_THREAD.1);
+    let thread = state.composer_mut(crate::state::ComposerTarget::Thread);
+    thread.edit.insert("@");
+    thread.edit.focused = true;
+    // Narrow enough that the thread's composer is slimmer than a whole list.
+    let mut rt = Runtime::new(state, super::view, (920.0, 760.0), Env::new(true, 1.0));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let list = element_rect(&rt, "thread-suggestions");
+    let frame = element_rect(&rt, &super::composer::frame_key(crate::state::ComposerTarget::Thread));
+    assert!(frame[2] < 400.0, "the composer {frame:?} is as wide as a whole list");
+    assert!(list[0] >= frame[0] - 1.0 && list[0] + list[2] <= frame[0] + frame[2] + 1.0, "{list:?} leaves {frame:?}");
+}
+
+#[test]
+fn a_slim_composers_suggestions_should_stay_wide_enough_to_read() {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    state.select_room(demo::DEMO_THREAD.0);
+    state.open_thread(demo::DEMO_THREAD.1);
+    state.composer.edit.insert("@");
+    state.composer.edit.focused = true;
+    // The smallest window at 150%: the room's composer is slimmer than a name.
+    state.settings.zoom = crate::state::Zoom::from_percent(150);
+    let mut rt = Runtime::new(state, super::view, (720.0, 480.0), Env::new(true, 1.0));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let list = element_rect(&rt, "suggestions");
+    let frame = element_rect(&rt, &super::composer::frame_key(crate::state::ComposerTarget::Room));
+    assert!(frame[2] < 240.0, "the composer {frame:?} has room for a name");
+    assert!(list[2] >= 239.0, "the list {list:?} is too slim to read");
+}
+
+#[test]
+fn a_toolbar_should_let_go_once_its_emoji_picker_closes() {
+    let mut rt = runtime(tall_rows_room);
+    let (x, y) = rt.find("react-$menu-1").expect("the second message's React");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    press(&mut rt, "emoji-quick-👍");
+    assert!(rt.state.popover.is_none());
+    // Down onto the last message, away from the toolbar the picker opened from.
+    let (x, y) = rt.find("text-$menu-3").expect("the last message");
+    rt.pointer_move(x, y);
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    let (_, opacity) = rt.presented("actions-$menu-3").expect("its toolbar");
+    assert!(opacity > 0.99, "the last message's toolbar stays hidden: {opacity}");
+    let (_, opacity) = rt.presented("actions-$menu-1").expect("the picker's toolbar");
+    assert!(opacity < 0.01, "the picker's toolbar stays shown: {opacity}");
+}
+
+#[test]
+fn search_results_should_keep_the_rows_under_them_from_hovering() {
+    let mut rt = runtime(|s| {
+        tall_rows(s, 12);
+        s.search.field = rune::TextEdit::new("gr");
+        s.open_search();
+        s.search.people =
+            vec![matrix_core::Person { id: "@grace:example.org".into(), name: "Grace Hopper".into(), avatar: None }];
+    });
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert_eq!(toolbar_under_panel(&mut rt, "search-results"), 0.0);
+    assert_eq!(rt.state.popover, Some(crate::state::Popover::Search));
+}
+
+#[test]
+fn a_long_sender_name_should_be_cut_short_within_its_message() {
+    let mut rt = runtime(|s| short_room(s, 1));
+    change_short_message(&mut rt, |message| message.sender_name = "Grace Brewster Murray Hopper ".repeat(20));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let line = element_rect(&rt, "msg-short-0-meta");
+    let text = element_rect(&rt, "text-$short-0");
+    let row = element_rect(&rt, "msg-short-0");
+    assert!(line[0] + line[2] <= row[0] + row[2], "the line {line:?} runs out of its row {row:?}");
+    // The time keeps its place beside the name, inside the content's width as the words have it.
+    assert!(line[2] < row[2] - (text[0] - row[0]), "the line {line:?} is wider than the content");
 }
 
 #[test]
@@ -2924,12 +3080,59 @@ fn in_bubbles_the_toolbar_of_someone_elses_short_message_should_start_at_its_bub
 }
 
 #[test]
-fn in_bubbles_the_toolbar_of_the_users_own_short_message_should_end_at_its_bubble() {
+fn in_bubbles_the_toolbar_of_the_users_own_message_should_sit_beside_it_on_the_left() {
     let rt = runtime(bubble_room);
     let actions = element_rect(&rt, "actions-$own");
     let bubble = element_rect(&rt, "msg-own-bubble");
+    let gap = bubble[0] - (actions[0] + actions[2]);
+    assert!((gap - super::timeline::TOOLBAR_BESIDE).abs() < 1.0, "{actions:?} ends {gap} left of {bubble:?}");
+    assert!((actions[1] - bubble[1]).abs() < 1.0, "level with the bubble's top: {actions:?} {bubble:?}");
+}
+
+/// Makes [`bubble_room`]'s own message long enough to fill the widest bubble.
+fn lengthen_own_message(rt: &mut Runtime<State>) {
+    rt.update(|s, tx| {
+        let mut own = short_message("own", 1);
+        if let EntryKind::Message(message) = &mut own.kind {
+            message.sender_id = demo::ADA.into();
+            message.content =
+                MessageContent::Text { body: "A message long enough to fill its bubble. ".repeat(8), html: None };
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::Set { index: 1, entry: own }],
+            },
+            tx,
+        );
+    });
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+}
+
+#[test]
+fn in_bubbles_the_toolbar_of_the_users_own_widest_bubble_should_sit_beside_it_where_the_timeline_has_room() {
+    let mut rt = runtime(bubble_room);
+    lengthen_own_message(&mut rt);
+    let actions = element_rect(&rt, "actions-$own");
+    let bubble = element_rect(&rt, "msg-own-bubble");
+    let gap = bubble[0] - (actions[0] + actions[2]);
+    assert!((gap - super::timeline::TOOLBAR_BESIDE).abs() < 1.0, "{actions:?} ends {gap} left of {bubble:?}");
+}
+
+#[test]
+fn in_bubbles_the_toolbar_of_the_users_own_wide_message_should_sit_at_its_bubbles_top_left() {
+    // Too narrow a timeline to keep the toolbar beside the bubble, wide enough for all of it.
+    let mut rt = narrow_bubble_room(900.0);
+    lengthen_own_message(&mut rt);
+    assert_eq!(toolbar_buttons(&rt, "$own"), ["react", "reply", "thread", "more"]);
+    let actions = element_rect(&rt, "actions-$own");
+    let bubble = element_rect(&rt, "msg-own-bubble");
     assert_on_top_edge(actions, bubble);
-    assert!((actions[0] + actions[2] - (bubble[0] + bubble[2])).abs() < 1.0, "it ends where the bubble does");
+    let inset = actions[0] - bubble[0];
+    assert!((inset - super::timeline::TOOLBAR_INSET).abs() < 1.0, "inset {inset} from the bubble's left");
 }
 
 #[test]
@@ -2950,15 +3153,58 @@ fn in_bubbles_the_toolbar_of_a_long_message_should_sit_at_its_bubbles_top_right(
 }
 
 #[test]
-fn in_classic_rows_the_toolbar_should_sit_on_the_top_edge_of_the_message() {
+fn in_classic_rows_the_toolbar_should_sit_on_the_top_edge_just_after_the_senders_name_and_time() {
     let rt = runtime(|s| short_room(s, 1));
     let actions = element_rect(&rt, "actions-$short-0");
     let name = element_rect(&rt, "msg-short-0-sender-name");
-    let row = element_rect(&rt, "msg-short-0");
+    let line = element_rect(&rt, "msg-short-0-meta");
     // The name sits a little below the top of its line.
     let overlap = actions[1] + actions[3] - name[1];
     assert!((overlap - super::timeline::TOOLBAR_OVERLAP).abs() < 2.0, "{actions:?} reaches {overlap} over {name:?}");
-    assert!(actions[0] > row[0] + row[2] / 2.0, "at the content's right");
+    assert!(
+        line[2] > name[2] && line[0] + line[2] < actions[0],
+        "the line {line:?} holds the time, before {actions:?}"
+    );
+    let gap = actions[0] - (line[0] + line[2]);
+    assert!((gap - super::timeline::TOOLBAR_INSET).abs() < 1.0, "{gap} after the line {line:?}");
+}
+
+#[test]
+fn in_classic_rows_the_toolbar_of_a_continuing_message_should_sit_just_after_its_words() {
+    let rt = runtime(continued_room);
+    let actions = element_rect(&rt, "actions-$short-1");
+    let text = element_rect(&rt, "text-$short-1");
+    let words_end = text[0] + text[2] - super::message_text::REACH;
+    let gap = actions[0] - words_end;
+    assert!((gap - super::timeline::TOOLBAR_INSET).abs() < 1.0, "{actions:?} starts {gap} after the words {text:?}");
+}
+
+#[test]
+fn in_classic_rows_the_toolbar_of_a_line_too_long_to_follow_should_sit_at_the_contents_top_right() {
+    let mut rt = runtime(continued_room);
+    rt.update(|s, tx| {
+        let mut entry = short_message("short-1", 0);
+        if let EntryKind::Message(message) = &mut entry.kind {
+            message.content =
+                MessageContent::Text { body: "A message long enough to fill its line. ".repeat(8), html: None };
+        }
+        s.apply(
+            Event::TimelineChanged {
+                account: AccountId::new(demo::ADA),
+                key: TimelineKey::room(demo::DEMO_THREAD.0),
+                diffs: vec![TimelineDiff::Set { index: 1, entry }],
+            },
+            tx,
+        );
+    });
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let actions = element_rect(&rt, "actions-$short-1");
+    let text = element_rect(&rt, "text-$short-1");
+    let words_end = text[0] + text[2] - super::message_text::REACH;
+    let inset = words_end - (actions[0] + actions[2]);
+    assert!((inset - super::timeline::TOOLBAR_INSET).abs() < 2.0, "{actions:?} ends {inset} before {text:?}");
 }
 
 #[test]

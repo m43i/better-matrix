@@ -22,7 +22,7 @@ pub fn thread_panel(
     ui: &mut Cx<State>,
 ) -> El {
     let key = TimelineKey::thread(&room.room_id, root);
-    let cx = Context::new(s, account, room, &key);
+    let cx = Context { covered: s.timeline_covered(ComposerTarget::Thread), ..Context::new(s, account, room, &key) };
     let header = row()
         .key("thread-header")
         .w_full()

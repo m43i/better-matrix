@@ -4252,6 +4252,18 @@ impl State {
         self.popover = None;
     }
 
+    /// Whether something floats over the timeline that `target`'s composer writes to, which its
+    /// rows must not hover through: a popover, or that composer's suggestions. Two popovers
+    /// open from inside a timeline leave it live, as they always did: the message menu is modal
+    /// already, and the read receipts' button keeps the keyboard while its panel shows.
+    pub fn timeline_covered(&self, target: ComposerTarget) -> bool {
+        let popover = self
+            .popover
+            .as_ref()
+            .is_some_and(|popover| !matches!(popover, Popover::MessageMenu { .. } | Popover::ReadReceipts { .. }));
+        popover || self.suggestions(target).is_some()
+    }
+
     /// A popover's field must dismiss before the editor consumes Escape to blur itself.
     pub fn popover_input_key(&mut self, key: &rune::KeyEvent, tx: &mut Tx) -> bool {
         if key.key == rune::Key::Escape && self.popover.is_some() {

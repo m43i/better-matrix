@@ -23,7 +23,7 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
         return super::overview::overview(s, account, p);
     };
     let key = TimelineKey::room(&room.room_id);
-    let cx = Context::new(s, account, room, &key);
+    let cx = Context { covered: s.timeline_covered(ComposerTarget::Room), ..Context::new(s, account, room, &key) };
     let mut main = col()
         .key("room")
         .grow(1.0)

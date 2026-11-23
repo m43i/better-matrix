@@ -7449,3 +7449,34 @@ fn a_held_toolbar_should_cover_no_other_timeline() {
     let thread = (TimelineKey::thread("!room:example.org", "$root"), "$a".to_owned());
     assert!(hover.other_held(&thread).is_none());
 }
+
+#[test]
+fn a_popover_over_the_timelines_should_cover_them() {
+    let (mut s, _) = state();
+    assert!(!s.timeline_covered(ComposerTarget::Room));
+    s.toggle_popover(Popover::Emoji(EmojiFor::StatusMessage));
+    assert!(s.timeline_covered(ComposerTarget::Room) && s.timeline_covered(ComposerTarget::Thread));
+}
+
+#[test]
+fn the_message_menu_and_read_receipts_should_leave_the_timelines_live() {
+    let (mut s, _) = state();
+    let key = TimelineKey::room("!r:example.org");
+    s.popover = Some(Popover::MessageMenu { key: key.clone(), event_id: "$m".into(), at: None });
+    assert!(!s.timeline_covered(ComposerTarget::Room));
+    s.popover = Some(Popover::ReadReceipts { key, event_id: "$m".into(), member: None, shown: 0..0 });
+    assert!(!s.timeline_covered(ComposerTarget::Room));
+}
+
+#[test]
+fn a_composers_suggestions_should_cover_only_its_own_timeline() {
+    let (mut s, _) = state();
+    crate::demo::seed(&mut s);
+    s.select_room(crate::demo::DEMO_THREAD.0);
+    s.open_thread(crate::demo::DEMO_THREAD.1);
+    let thread = s.composer_mut(ComposerTarget::Thread);
+    thread.edit.insert("@");
+    thread.edit.focused = true;
+    assert!(s.timeline_covered(ComposerTarget::Thread));
+    assert!(!s.timeline_covered(ComposerTarget::Room));
+}
