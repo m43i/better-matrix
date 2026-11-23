@@ -159,8 +159,9 @@ see who is typing there.
   itself notes, and a format of our own would give up the shared one. `ListSavedMessages` reads each saved event from the event cache, else fetches it,
   most recently saved first; unreadable ones keep a placeholder. Its text is the event's as sent:
   a later edit shows once the message is opened (fetching every message's relations would cost a
-  request each). The account menu opens the list: a dialog on desktop (`Modal::Saved`), a pushed
-  screen on phones (`app/saved-messages.tsx`). Rows show sender, room, excerpt and time; one no
+  request each). The bookmark beside the top bar's search opens the list on desktop, as a dialog
+  (`Modal::Saved`); the account menu opens it on phones, as a pushed screen
+  (`app/saved-messages.tsx`). Rows show sender, room, excerpt and time; one no
   longer saved leaves at once, and one saved meanwhile reloads the open list (checked again when
   a list request finishes; phones run list requests one at a time). Opening a row uses the shared
   message jump; its bookmark button stops saving it. The desktop's rows act on the dialog's

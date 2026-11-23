@@ -2,7 +2,7 @@
 //! info, and the invite dialog.
 
 use matrix_core::{Person, RoomSummary};
-use rune::{Color, El, ScrollSpec, col, icon, row, text, text_input};
+use rune::{Color, El, ScrollSpec, col, el, icon, row, text, text_input};
 
 use super::components::{ButtonKind, button, dialog, media_avatar};
 use super::icons;
@@ -19,7 +19,15 @@ pub const MEMBERS: &str = "room-members";
 /// The info button's key, which the room's info anchors to.
 pub const INFO: &str = "room-info";
 
-/// The bar across the top of the window, with the search in its middle.
+/// The top bar's height; the search's backdrop starts below it.
+pub const TOP_BAR_HEIGHT: f32 = 44.0;
+/// The saved-messages button's key, beside the search.
+pub const SAVED: &str = "top-saved";
+/// The saved-messages button's width and its gap to the search; the search keeps its middle.
+const SAVED_SPAN: f32 = 30.0 + 8.0;
+
+/// The bar across the top of the window, with the search in its middle and the account's saved
+/// messages beside it.
 pub fn top_bar(s: &State, account: &AccountData, p: &Palette) -> El {
     let placeholder = tf!("search.placeholder", account = account.summary.display_name);
     let field = if s.popover == Some(crate::state::Popover::Search) {
@@ -60,7 +68,8 @@ pub fn top_bar(s: &State, account: &AccountData, p: &Palette) -> El {
     let search = row()
         .key("search-anchor")
         .on_press(State::open_search)
-        .w_full()
+        .grow(1.0)
+        .min_w(0.0)
         .max_w(640.0)
         .h(30.0)
         .px(10.0)
@@ -76,12 +85,33 @@ pub fn top_bar(s: &State, account: &AccountData, p: &Palette) -> El {
     row()
         .key("top-bar")
         .w_full()
-        .h(44.0)
+        .h(TOP_BAR_HEIGHT)
         .px(16.0)
         .center()
         .fill(p.rail_bg)
         .border_sides([0.0, 0.0, 1.0, 0.0], p.sidebar_divider)
+        .child(el().w(SAVED_SPAN).h(30.0))
         .child(search)
+        .child(saved_button(s, p))
+}
+
+/// Opens the account's saved messages; lit while they show.
+fn saved_button(s: &State, p: &Palette) -> El {
+    let open = matches!(s.modal, Some(crate::state::Modal::Saved(_)));
+    el().key(SAVED)
+        .ml(8.0)
+        .size(30.0, 30.0)
+        .radius(8.0)
+        .center()
+        .fill(if open { p.sidebar_hover.alpha(p.sidebar_hover.a * 2.0) } else { Color::TRANSPARENT })
+        .hover(p.sidebar_hover)
+        .role("button")
+        .label(t!("saved.title").to_owned())
+        .help(t!("saved.title"))
+        .focusable(true)
+        .cursor(rune::Cursor::Pointer)
+        .child(icon(&icons::BOOKMARK, 18.0).color(if open { p.sidebar_text } else { p.sidebar_text_muted }))
+        .on_press(State::open_saved)
 }
 
 /// One result or member: a picture, a name, and a line under it.

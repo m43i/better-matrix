@@ -11,7 +11,8 @@ each has its own client, store and sync loop. `AccountId` in code.
 
 **Account menu**
 : The popover opened from the signed-in user's avatar at the bottom of the rail: the user's
-status, switch account, add an account, saved messages, profile, settings, sign out. On phones, the sheet the avatar at the header's right opens.
+status, switch or add an account, profile, settings, and sign out (set apart, in red). Saved
+messages open from the top bar instead. On phones, the sheet the avatar at the header's right opens.
 
 **Status**
 : What others see of the user on one account, as the user sets it in the account menu: Online,
@@ -150,7 +151,8 @@ pinned list, including older messages.
 **Saved message**
 : A message the user keeps for themselves, from its message actions. Private to the user and
 following them to every session: MSC2437 tagged events (`m.favourite`) in the room's account data.
-The account menu lists them across the account's rooms. `SavedMessage` in code; pinned and saved
+The bookmark beside the top bar's search lists them across the account's rooms (on phones, the
+account menu). `SavedMessage` in code; pinned and saved
 messages show as a `MessagePreview` outside their timeline.
 
 **Forward**

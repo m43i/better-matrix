@@ -23,6 +23,12 @@ Date: 2026-11-22
   icon is absent.
   Spaces scroll behind them through a blurred transition. With short lists,
   the plus follows the last space. The avatar opens the account menu.
+- **Account menu:** what changes often comes first and stays quick to reach: status message,
+  then status. Then the accounts, with adding one at their end; then profile and settings.
+  Signing out comes last, behind a divider and in the danger colour, since it ends the session.
+  Everyday destinations don't belong here: saved messages sit beside the top bar's search, as a
+  bookmark button lit while the list shows. The search keeps the bar's middle: a spacer as wide
+  as the button balances it. Phones keep saved messages in their account sheet (ADR 0010).
 - **Scope:** what the sidebar lists, filtered in one place (`AccountData::rooms_in`).
   - Home: every direct chat, and the rooms in no space.
   - A space: its rooms, subspaces included (cycle-safe), and direct chats with its members.

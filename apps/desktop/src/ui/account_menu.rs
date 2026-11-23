@@ -1,10 +1,12 @@
-//! The menu behind the user's avatar: the account's status, every signed-in account, then
-//! adding one, the account's saved messages, profile, settings and signing out.
+//! The menu behind the user's avatar: the account's status; every signed-in account and adding
+//! one; profile and settings; and, set apart in red, signing out. Saved messages open from the
+//! top bar.
 
 use rune::{Align, El, Side, col, el, icon, row, text, text_input};
 
 use super::components::{
-    ButtonKind, account_avatar, button, divider, icon_button, menu_icon, menu_row, popover_panel, status_dot,
+    ButtonKind, Tone, account_avatar, button, divider, icon_button, menu_action, menu_icon, menu_row, popover_panel,
+    status_dot,
 };
 use super::icons;
 use super::rail::ACCOUNT_BUTTON;
@@ -64,17 +66,12 @@ pub fn account_menu(s: &State, window: [f32; 2], p: &Palette) -> El {
         );
     }
     panel = panel
-        .child(divider(p))
         .child(
             menu_row(menu_icon(&icons::PLUS, p), t!("accounts.add"), None, None, p)
                 .key("menu-add-account")
                 .on_press_tx(crate::state::navigate(State::start_adding_account)),
         )
-        .children(s.active_account().map(|_| {
-            menu_row(menu_icon(&icons::BOOKMARK, p), t!("saved.title"), None, None, p)
-                .key("menu-saved")
-                .on_press(State::open_saved)
-        }))
+        .child(divider(p))
         .children(s.active_account().map(|_| {
             menu_row(menu_icon(&icons::USER, p), t!("settings.profile"), None, None, p)
                 .key("menu-profile")
@@ -87,16 +84,11 @@ pub fn account_menu(s: &State, window: [f32; 2], p: &Palette) -> El {
         );
     if let Some(account) = s.active_account() {
         let id = account.summary.id.clone();
-        panel = panel.child(
-            menu_row(
-                menu_icon(&icons::SIGN_OUT, p),
-                &tf!("accounts.sign_out", name = account.summary.display_name),
-                None,
-                None,
-                p,
-            )
-            .key("menu-sign-out")
-            .on_press(move |s: &mut State| s.sign_out(&id)),
+        let title = tf!("accounts.sign_out", name = account.summary.display_name);
+        panel = panel.child(divider(p)).child(
+            menu_action(&icons::SIGN_OUT, &title, Tone::Danger, p)
+                .key("menu-sign-out")
+                .on_press(move |s: &mut State| s.sign_out(&id)),
         );
     }
     let panel = panel.max_h((window[1] - 16.0).max(100.0)).scroll(rune::ScrollSpec { stick_bottom: false });

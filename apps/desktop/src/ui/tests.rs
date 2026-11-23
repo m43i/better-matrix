@@ -1766,10 +1766,43 @@ fn choosing_away_in_the_account_menu_should_set_the_status() {
 }
 
 #[test]
-fn the_account_menu_should_open_saved_messages() {
-    let mut rt = runtime(|s| s.toggle_popover(crate::state::Popover::AccountSwitcher));
-    press(&mut rt, "menu-saved");
+fn the_top_bar_should_open_saved_messages() {
+    let mut rt = runtime(|_| {});
+    press(&mut rt, super::people::SAVED);
     assert!(rt.find("saved-dialog").is_some());
+}
+
+#[test]
+fn saved_messages_should_open_at_once_while_searching_under_the_unverified_banner() {
+    let mut rt = runtime(|s| {
+        s.select_account(&AccountId::new("@ada:hobby.chat"));
+        s.open_search();
+    });
+    assert!(rt.find("unverified-bar").is_some());
+    press(&mut rt, super::people::SAVED);
+    assert!(rt.find("saved-dialog").is_some());
+}
+
+#[test]
+fn the_account_menu_should_leave_saved_messages_to_the_top_bar() {
+    let rt = runtime(|s| s.toggle_popover(crate::state::Popover::AccountSwitcher));
+    assert!(rt.find("account-menu").is_some());
+    assert!(rt.find("menu-saved").is_none());
+}
+
+#[test]
+fn the_account_menu_should_end_the_accounts_with_adding_one() {
+    let rt = runtime(|s| s.toggle_popover(crate::state::Popover::AccountSwitcher));
+    let last = rt.state.accounts.iter().last().map(|account| account.summary.id.clone()).expect("an account");
+    let last_account = rt.presented(&format!("switch-{last}")).expect("the last account").0;
+    let add = rt.presented("menu-add-account").expect("add account").0;
+    let profile = rt.presented("menu-profile").expect("profile").0;
+    let account_end = last_account[1] + last_account[3];
+    assert!(
+        (add[1] - account_end).abs() < 0.5,
+        "no divider between the accounts and adding one: {last_account:?} {add:?}"
+    );
+    assert!(profile[1] - (add[1] + add[3]) > 1.0, "a divider ends the accounts: {add:?} {profile:?}");
 }
 
 #[test]
@@ -1808,6 +1841,14 @@ fn the_bookmark_button_should_not_open_the_saved_message() {
     press(&mut rt, &format!("saved-remove-{room_id}-{event_id}"));
     assert!(rt.find("saved-dialog").is_some());
     assert!(rt.state.message_jump.is_none());
+}
+
+#[test]
+fn the_account_menu_should_set_signing_out_apart() {
+    let rt = runtime(|s| s.toggle_popover(crate::state::Popover::AccountSwitcher));
+    let settings = rt.presented("menu-settings").expect("settings").0;
+    let sign_out = rt.presented("menu-sign-out").expect("sign out").0;
+    assert!(sign_out[1] - (settings[1] + settings[3]) > 1.0, "a divider above signing out: {settings:?} {sign_out:?}");
 }
 
 #[test]
