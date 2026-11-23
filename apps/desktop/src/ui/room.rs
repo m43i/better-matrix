@@ -1,12 +1,17 @@
 //! The open room: header, timeline and composer, with the open thread beside it. Files dropped
 //! on the room attach to its composer.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use matrix_core::{RoomKind, RoomSummary, TimelineKey};
-use rune::{Cx, El, col, row, text};
+use rune::{Cx, El, TextEdit, col, row, text};
 
 use super::components::icon_button;
 use super::composer::composer;
 use super::icons;
+use super::message_text::Look;
 use super::theme::{Palette, font};
 use super::thread::thread_panel;
 use super::timeline::{Context, timeline};
@@ -122,14 +127,14 @@ pub fn display_name(room: &RoomSummary) -> String {
     }
 }
 
-/// The room's name, then its members and its info at the right. The topic is behind the info
-/// button rather than in the header.
+/// The room's name beside its topic's first line (a direct chat's presence instead), then its
+/// members, its pinned messages when it has any, and its info at the right.
 fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, layout: &PaneLayout) -> El {
     let info_open = s.side == Some(SidePanel::Info);
     let name = text(display_name(room)).key("room-name").font(font::HEADER).color(p.text).shrink().truncate();
     // A direct chat says what its person shows: their dot, then "Away · 🌴 On vacation".
     let shown = super::sidebar::dm_partner(room).and_then(|id| account.presence.get(id));
-    let line = shown.and_then(|shown| {
+    let presence = shown.and_then(|shown| {
         let words = super::components::presence_text(shown)?;
         Some(
             row()
@@ -142,6 +147,23 @@ fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, lay
                 .child(text(words).font(font::BODY).color(p.text_muted).shrink().truncate()),
         )
     });
+    let line = presence.or_else(|| {
+        let topic = topic_line(room.topic.as_deref()?)?;
+        let shown = match topic_text(topic) {
+            Some(edit) => {
+                let look = topic_look(s, account, room);
+                super::message_text::line("room-topic", &edit, look, font::META, p.text_muted, p)
+            }
+            None => text(topic.to_owned()).key("room-topic").font(font::META).color(p.text_muted).truncate(),
+        };
+        Some(shown.grow(1.0).min_w(0.0))
+    });
+    let pins = (!room.pinned.is_empty()).then(|| {
+        icon_button(&icons::PIN, t!("info.pins"), s.side == Some(SidePanel::Pins), p.text_muted, p)
+            .key(PINS)
+            .help(t!("info.pins"))
+            .on_press(|s: &mut State| s.toggle_side(SidePanel::Pins))
+    });
     row()
         .key("room-header")
         .w_full()
@@ -151,16 +173,56 @@ fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, lay
         .center_y()
         .border_sides([0.0, 0.0, 1.0, 0.0], p.divider)
         .children(s.call_here().filter(|_| layout.sidebar_available).map(|call| super::call::sidebar_button(call, p)))
-        // Beside the presence line, the name keeps its width and the line takes the rest.
+        // Beside the line, the name keeps its width and the line takes the rest.
         .child(if line.is_some() { name } else { name.grow(1.0) })
         .children(line)
         .children(super::call::header_buttons(s, room, p))
         .children((room.kind == RoomKind::Group).then(|| super::people::members_button(s, account, room, p)))
+        .children(pins)
         .child(
             icon_button(&icons::INFO, t!("room.info"), info_open, p.text_muted, p)
                 .key(super::people::INFO)
                 .on_press(|s: &mut State| s.toggle_side(SidePanel::Info)),
         )
+}
+
+/// The header's pinned-messages button, shown while the room has pins.
+pub const PINS: &str = "room-pins";
+
+/// The topic's first non-blank line, which the header shows beside the room's name.
+pub fn topic_line(topic: &str) -> Option<&str> {
+    topic.lines().map(str::trim).find(|line| !line.is_empty())
+}
+
+/// A topic as shown: its Markdown formatted and its web addresses linked. `None` for plain
+/// words, which show as they are. Worked out once per topic, not on every frame.
+pub fn topic_text(topic: &str) -> Option<Rc<TextEdit>> {
+    thread_local! {
+        static TOPICS: RefCell<HashMap<String, Option<Rc<TextEdit>>>> = RefCell::new(HashMap::new());
+    }
+    TOPICS.with_borrow_mut(|topics| {
+        if let Some(known) = topics.get(topic) {
+            return known.clone();
+        }
+        // Topics change rarely; a full cache is just started again.
+        if topics.len() >= 64 {
+            topics.clear();
+        }
+        let edit = crate::state::rich_body(topic, None).map(Rc::new);
+        topics.insert(topic.to_owned(), edit.clone());
+        edit
+    })
+}
+
+/// What a topic's mentions and custom emoji need to draw: the room's spoilers and the reader.
+pub fn topic_look<'a>(s: &'a State, account: &'a AccountData, room: &'a RoomSummary) -> Look<'a> {
+    Look {
+        event_id: &room.room_id,
+        me: account.summary.id.as_str(),
+        revealed: &s.revealed,
+        media: &s.media,
+        pictures: true,
+    }
 }
 
 pub fn empty_state(message: &str, p: &Palette) -> El {

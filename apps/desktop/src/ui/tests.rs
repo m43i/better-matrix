@@ -718,6 +718,86 @@ fn room_info_should_open_the_shared_pinned_messages() {
 }
 
 #[test]
+fn a_room_with_pins_should_open_them_from_its_header() {
+    let mut rt = runtime(demo::pinned_messages);
+    press(&mut rt, super::room::PINS);
+    assert_eq!(rt.state.side, Some(SidePanel::Pins));
+    assert!(rt.find("pins-panel").is_some());
+}
+
+#[test]
+fn the_header_pin_button_should_sit_between_the_members_and_the_info() {
+    let rt = runtime(demo::pinned_messages);
+    let members = rt.find(super::people::MEMBERS).expect("members button").0;
+    let pins = rt.find(super::room::PINS).expect("pins button").0;
+    let info = rt.find(super::people::INFO).expect("info button").0;
+    assert!(members < pins && pins < info);
+}
+
+#[test]
+fn a_room_without_pins_should_have_no_pin_button_in_its_header() {
+    let rt = runtime(|s| s.select_room(demo::DEMO_THREAD.0));
+    assert!(rt.find("room-header").is_some());
+    assert!(rt.find(super::room::PINS).is_none());
+}
+
+#[test]
+fn the_header_should_show_the_topic_beside_the_room_name() {
+    let rt = runtime(|s| s.select_room(demo::DEMO_THREAD.0));
+    let topic = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("room-topic")).expect("topic");
+    assert_eq!(topic.text.as_deref(), Some("Company-wide announcements and chatter"));
+}
+
+/// Gives the demo's #general `topic`.
+fn general_topic(s: &mut State, topic: &str) {
+    let account = AccountId::new(demo::ADA);
+    let Some(data) = s.accounts.get(&account) else { return };
+    let (mut rooms, spaces) = (data.rooms.clone(), data.spaces.clone());
+    if let Some(room) = rooms.iter_mut().find(|r| r.room_id == demo::DEMO_THREAD.0) {
+        room.topic = Some(topic.to_owned());
+    }
+    s.accounts.set_room_list(&account, matrix_core::RoomList { rooms, spaces, invitations: Vec::new() });
+    s.select_room(demo::DEMO_THREAD.0);
+}
+
+#[test]
+fn a_markdown_topic_should_show_formatted_in_the_header() {
+    let rt = runtime(|s| general_topic(s, "[Github](https://github.com/x) | **Office**\nSecond line"));
+    let topic = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("room-topic")).expect("topic");
+    assert_eq!(topic.text.as_deref(), Some("Github | Office"));
+}
+
+#[test]
+fn a_markdown_topic_should_show_formatted_in_room_info() {
+    let rt = runtime(|s| {
+        general_topic(s, "[Github](https://github.com/x) | **Office**");
+        s.show_side(SidePanel::Info);
+    });
+    let words = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("info-topic-0")).expect("topic");
+    assert_eq!(words.text.as_deref(), Some("Github | Office"));
+}
+
+#[test]
+fn a_room_without_a_topic_should_show_none_in_its_header_or_info() {
+    let rt = runtime(|s| {
+        s.select_room("!releases:example.org");
+        s.show_side(SidePanel::Info);
+    });
+    assert!(rt.find("room-topic").is_none());
+    assert!(rt.find("info-topic").is_none());
+}
+
+#[test]
+fn a_multi_line_topic_should_show_only_its_first_line() {
+    assert_eq!(super::room::topic_line("\n  Releases every Friday  \nAsk in #help"), Some("Releases every Friday"));
+}
+
+#[test]
+fn a_blank_topic_should_show_nothing() {
+    assert_eq!(super::room::topic_line(" \n\t"), None);
+}
+
+#[test]
 fn opening_a_pin_should_jump_to_its_message_in_the_conversation() {
     let mut rt = runtime(|s| {
         demo::pinned_messages(s);

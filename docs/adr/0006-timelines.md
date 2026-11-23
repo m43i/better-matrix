@@ -137,7 +137,8 @@ see who is typing there.
 - **Pins:** `RoomSummary::{pinned, can_pin}` come from room state and power levels.
   `Command::SetPinned` uses SDK pin/unpin so existing pins are preserved; server sync updates
   both apps. Pinned rows show a pin label, accent border and subtle background. Room info leads
-  to Pinned messages (`SidePanel::Pins` on desktop, a native stack screen on phones).
+  to Pinned messages (`SidePanel::Pins` on desktop, a native stack screen on phones); on
+  desktop, a room with pins also has a pin button in its header that toggles the panel.
   `ListPinnedMessages` uses an SDK pinned timeline and waits for its initial background fetch
   (at most five seconds), independently of loaded history; unreadable events retain
   a placeholder with unpin available to authorized members. The list uses normal avatar/message
@@ -209,6 +210,11 @@ see who is typing there.
     view.
   - Room events and call cards are informational rows: no message toolbar, reactions, replies
     or thread actions. A call card keeps its call-specific controls.
+  - A text message's formatting is the sender's HTML; without any, the Markdown in its plain
+    body (`matrix_core::markdown::to_html`: CommonMark with strikethrough, raw HTML shown as
+    typed, every line break kept). A body without Markdown stays the plain text it was. Both
+    then take the same path (pills, then bare web addresses linked; desktop `rich_body`).
+    Sending is unchanged: the composer still sends its own formatting.
   - Posted formatted messages use selectable read-only text, with inline links, rather than
     text fields. Links show the pointer; surrounding text keeps the text cursor.
     Plain and formatted text boxes fit their widest rendered line instead of filling the row:

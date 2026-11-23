@@ -187,7 +187,8 @@ Date: 2026-11-22
     it doesn't list; opening it asks for the complete member list and the picture it shows. The
     user's own shows Edit profile, and their name and picture from the account, which a save
     updates at once.
-  - Info (the header's info button): the room's picture, name and topic, rows leading to the
+  - Info (the header's info button): the room's picture, name and topic (formatted from its
+    Markdown, as the header's line is; absent without one), rows leading to the
     members, pinned messages, threads, files and widgets, and leave room (or delete chat).
   - Threads: the server's thread list (`Command::ListThreads`, `Account::threads`); a press
     opens the thread. Files: messages with media, newest first (`Command::ListFiles`), the
@@ -216,8 +217,11 @@ Date: 2026-11-22
   - Not supported: the widget API (MSC2762) and integration managers (bots, stickers), which
     need an embedded web view.
 - **Members:**
-  - The room header shows the name, up to three faces and the member count (opening the member
-    list), and an info button.
+  - The room header shows the name, then the topic's first non-blank line (its Markdown
+    formatted, links pressable; nothing without a topic), small and truncated
+    (a direct chat shows its person's presence there instead), then up to three faces and the
+    member count (opening the member list), a pin button while the room has pinned messages
+    (desktop, toggling `SidePanel::Pins`), and an info button.
   - A complete loaded member list supplies the displayed count; a partial list is a lower
     bound on the sync summary's count. The header, member list and Info use the same rule.
     Sync membership/power-level changes and changed summary counts invalidate cached snapshots
@@ -297,6 +301,11 @@ Date: 2026-11-22
     `RoomRights` read from the power levels. Settings are offered only when
     `RoomSummary::can_change_settings` / `SpaceSummary::can_change_settings` (any right), and
     each part shows only with its right; read-only parts aren't shown.
+  - A direct chat's rights are narrower (`RoomRights::direct_chat`): no access, history,
+    guest, addresses, permissions or upgrade, which are for rooms people find and join. A
+    chat with one other person also offers no name or picture (both apps show that person's),
+    leaving the topic and turning on encryption; a group chat keeps its name and picture.
+    The room list's `can_rename` and `can_change_settings` follow the same rights.
   - On desktop the settings are a modal (`Modal::RoomSettings`, `state/admin.rs`) opened from
     the room info panel, the sidebar's room menu and the rail's space menu. Its sections
     (General, Access, Addresses, Security, Permissions, Advanced) show only when they hold a

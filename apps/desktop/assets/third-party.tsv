@@ -586,6 +586,7 @@ prost-build	0.14.6	Apache-2.0
 prost-derive	0.14.6	Apache-2.0
 prost-types	0.14.6	Apache-2.0
 psm	0.1.32	MIT OR Apache-2.0
+pulldown-cmark	0.13.6	MIT
 pulseaudio	0.3.2	MIT
 pxfm	0.1.30	BSD-3-Clause OR Apache-2.0
 qrcode	0.14.1	MIT OR Apache-2.0

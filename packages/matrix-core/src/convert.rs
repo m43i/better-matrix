@@ -60,6 +60,11 @@ pub(crate) async fn room_summary(
     let kind = if room.is_direct().await.unwrap_or(false) { RoomKind::Direct } else { RoomKind::Group };
     // Read once for every permission the summary shows: each read deserializes the event.
     let power = room.power_levels().await.ok();
+    // What its settings offer: a direct chat's are narrower (`RoomRights::direct_chat`).
+    let rights = power.as_ref().map_or_else(crate::RoomRights::default, |power| {
+        let rights = crate::RoomRights::of(power, room.own_user_id(), room.encryption_state().is_encrypted(), false);
+        if kind == RoomKind::Direct { rights.direct_chat(room.active_members_count() <= 2) } else { rights }
+    });
     let may_send_state = |event: StateEventType| {
         power.as_ref().is_some_and(|power| power.user_can_send_state(room.own_user_id(), event))
     };
@@ -88,7 +93,7 @@ pub(crate) async fn room_summary(
         activity_ms: room.latest_event_timestamp().map(|at| at.get().into()),
         encrypted: room.encryption_state().is_encrypted(),
         public: !private_join_rule(room.join_rule().as_ref()),
-        can_rename: may_send_state(StateEventType::RoomName),
+        can_rename: rights.name,
         pinned: room.pinned_event_ids().unwrap_or_default().iter().map(ToString::to_string).collect(),
         saved: crate::saved::saved_ids(room).await,
         can_pin: may_send_state(StateEventType::RoomPinnedEvents),
@@ -100,9 +105,7 @@ pub(crate) async fn room_summary(
             RoomPriority::Normal
         },
         marked_unread: room.is_marked_unread(),
-        can_change_settings: power.as_ref().is_some_and(|power| {
-            crate::RoomRights::of(power, room.own_user_id(), room.encryption_state().is_encrypted(), false).any()
-        }),
+        can_change_settings: rights.any(),
         knocks: knocks(room, power.as_ref()).await,
         successor: successor(room).await,
     }

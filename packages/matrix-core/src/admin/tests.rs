@@ -304,3 +304,38 @@ async fn guest_access_should_be_read_from_the_server_when_sync_left_it_out() {
     assert_eq!(room.guest_access(), GuestAccess::Forbidden, "the store lacks it");
     assert_eq!(account.guest_access(&room).await, Some(true));
 }
+
+fn every_right() -> RoomRights {
+    RoomRights {
+        name: true,
+        topic: true,
+        avatar: true,
+        join_rule: true,
+        history: true,
+        guest_access: true,
+        addresses: true,
+        encryption: true,
+        permissions: true,
+        upgrade: true,
+        space_rooms: true,
+    }
+}
+
+#[test]
+fn a_direct_chat_should_offer_no_room_only_settings() {
+    let rights = every_right().direct_chat(false);
+    assert!(!rights.join_rule && !rights.history && !rights.guest_access);
+    assert!(!rights.addresses && !rights.permissions && !rights.upgrade && !rights.space_rooms);
+}
+
+#[test]
+fn a_group_direct_chat_should_keep_its_name_topic_picture_and_encryption() {
+    let rights = every_right().direct_chat(false);
+    assert!(rights.name && rights.topic && rights.avatar && rights.encryption);
+}
+
+#[test]
+fn a_one_to_one_chat_should_offer_only_its_topic_and_encryption() {
+    let rights = every_right().direct_chat(true);
+    assert_eq!(rights, RoomRights { topic: true, encryption: true, ..RoomRights::default() });
+}

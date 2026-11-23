@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use rune::{Block, Color, Cursor, El, InlineIcon, Link, Mark, PillStyle, Span, TextEdit, col, row, text};
+use rune::{Block, Color, Cursor, El, InlineIcon, Link, Mark, PillStyle, Span, TextEdit, TextStyle, col, row, text};
 
 use super::theme::{Palette, font};
 use crate::state::{MediaCache, SPOILER_LINK, State};
@@ -33,7 +33,22 @@ pub fn reach(text: El) -> El {
     text.px(REACH).mx(-REACH)
 }
 
+/// How formatted text fits its place: wrapping as a message's body does, or one line cut short.
+#[derive(Clone, Copy)]
+enum Fit {
+    /// Body text in `color`, wrapping.
+    Wrap(Color),
+    /// One line in `style` and `color`, ending in "…" when longer than its room.
+    Line(TextStyle, Color),
+}
+
 pub fn formatted(key: &str, edit: &TextEdit, look: Look<'_>, p: &Palette) -> El {
+    formatted_in(key, edit, look, p.text, p)
+}
+
+/// [`formatted`] text whose plain words take `color`.
+pub fn formatted_in(key: &str, edit: &TextEdit, look: Look<'_>, color: Color, p: &Palette) -> El {
+    let fit = Fit::Wrap(color);
     let mut body = col().key(key.to_owned()).w_full().selection_group(true);
     let mut paragraphs = edit.paragraphs().into_iter().peekable();
     let mut numbers = [0usize; 4];
@@ -46,7 +61,7 @@ pub fn formatted(key: &str, edit: &TextEdit, look: Look<'_>, p: &Palette) -> El 
         }
         let block = paragraph.block;
         let line_key = format!("{key}-{}", range.start);
-        let content = inline(&line_key, edit, range, block, look, p);
+        let content = inline(&line_key, edit, range, block, look, fit, p);
         let paragraph = match block {
             Block::Bullet(level) | Block::Numbered(level) => {
                 let level = usize::from(level).min(numbers.len() - 1);
@@ -77,7 +92,21 @@ pub fn formatted(key: &str, edit: &TextEdit, look: Look<'_>, p: &Palette) -> El 
     body
 }
 
-fn inline(key: &str, edit: &TextEdit, range: std::ops::Range<usize>, block: Block, look: Look<'_>, p: &Palette) -> El {
+/// Formatted text on one line in `style` and `color`, cut short with "…": its blocks (list
+/// markers, quotes) are left out, its words keep their marks.
+pub fn line(key: &str, edit: &TextEdit, look: Look<'_>, style: TextStyle, color: Color, p: &Palette) -> El {
+    inline(key, edit, 0..edit.text.len(), Block::Paragraph, look, Fit::Line(style, color), p)
+}
+
+fn inline(
+    key: &str,
+    edit: &TextEdit,
+    range: std::ops::Range<usize>,
+    block: Block,
+    look: Look<'_>,
+    fit: Fit,
+    p: &Palette,
+) -> El {
     let words = &edit.text[range.clone()];
     let mut spans = Vec::new();
     let mut links = Vec::new();
@@ -141,15 +170,19 @@ fn inline(key: &str, edit: &TextEdit, range: std::ops::Range<usize>, block: Bloc
     for range in hidden {
         shown.replace_range(range.clone(), &" ".repeat(range.len()));
     }
-    let mut content = rune::rich(shown, spans)
-        .key(key.to_owned())
-        .font(font::BODY)
-        .color(p.text)
-        .self_start()
-        .shrink()
-        .min_h(22.0)
-        // A word longer than the line (a link, say) breaks rather than runs out of the message.
-        .wrap_anywhere()
+    let content = rune::rich(shown, spans).key(key.to_owned());
+    let content = match fit {
+        Fit::Wrap(color) => content
+            .font(font::BODY)
+            .color(color)
+            .self_start()
+            .shrink()
+            .min_h(22.0)
+            // A word longer than the line (a link, say) breaks rather than runs out of the message.
+            .wrap_anywhere(),
+        Fit::Line(style, color) => content.font(style).color(color).min_w(0.0).truncate(),
+    };
+    let mut content = content
         .strikes(strikes)
         .pills(pills)
         .selectable(true)
@@ -159,7 +192,9 @@ fn inline(key: &str, edit: &TextEdit, range: std::ops::Range<usize>, block: Bloc
     for (at, pixels) in emoji {
         content = content.inline_icon(at, InlineIcon::image(pixels).size(EMOJI).gap(0.0).radius(3.0));
     }
-    content = reach(content);
+    if matches!(fit, Fit::Wrap(_)) {
+        content = reach(content);
+    }
     for link in links {
         content = content.link(link);
     }

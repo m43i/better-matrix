@@ -176,6 +176,33 @@ fn html_of(edit: &TextEdit) -> Option<String> {
     formatted.then(|| matrix_core::html::from_pills(&edit.to_html()))
 }
 
+/// The field as it is sent: its text emoticons as emoji (`matrix_core::emoticons`), but not in
+/// code, links or pills (mentions, maths, spoilers), which go as typed. The field itself keeps
+/// what was typed.
+fn with_emoji(edit: &TextEdit) -> std::borrow::Cow<'_, TextEdit> {
+    let kept: Vec<std::ops::Range<usize>> = edit
+        .marks()
+        .iter()
+        .filter(|mark| matches!(mark.mark, Mark::Code | Mark::Link(_) | Mark::Pill(_)))
+        .map(rune::MarkRange::range)
+        .chain(edit.paragraphs().into_iter().filter(|p| p.block == Block::Code).map(|p| p.range))
+        .collect();
+    let found: Vec<_> = matrix_core::emoticons::find(&edit.text)
+        .into_iter()
+        .filter(|(range, _)| !kept.iter().any(|kept| kept.start < range.end && range.start < kept.end))
+        .collect();
+    if found.is_empty() {
+        return std::borrow::Cow::Borrowed(edit);
+    }
+    let mut sent = edit.clone();
+    // From the end, so each range still points at its emoticon.
+    for (range, emoji) in found.into_iter().rev() {
+        sent.set_selection(range.start, range.end);
+        sent.insert(emoji);
+    }
+    std::borrow::Cow::Owned(sent)
+}
+
 /// What a spoiler's words become in a message's plain body: the same in every language, as
 /// it goes to everyone.
 pub(super) const SPOILER_FALLBACK: &str = matrix_core::html::SPOILER_FALLBACK;
@@ -560,11 +587,12 @@ impl Composer {
     /// The edit under way, as the user left it, taken out of the field: the draft comes back.
     pub fn set_aside_edit(&mut self) -> Option<Edit> {
         let editing = self.editing.as_ref()?;
+        let sent = with_emoji(&self.edit);
         let edit = Edit {
             target: editing.target.clone(),
-            body: body_of(&self.edit),
-            html: html_of(&self.edit),
-            mentions: mentions_of(&self.edit),
+            body: body_of(&sent),
+            html: html_of(&sent),
+            mentions: mentions_of(&sent),
             field: self.edit.clone(),
             original: editing.original.clone(),
         };
@@ -760,10 +788,12 @@ impl Composer {
     /// carries formatting. The reply target, if any, goes with the first message.
     pub fn take_outgoing(&mut self) -> (Option<ReplyTarget>, Vec<Outgoing>) {
         let mut outgoing = Vec::new();
-        let body = body_of(&self.edit);
+        let sent = with_emoji(&self.edit);
+        let body = body_of(&sent);
         if !body.is_empty() {
-            outgoing.push(Outgoing::Text { body, html: html_of(&self.edit), mentions: mentions_of(&self.edit) });
+            outgoing.push(Outgoing::Text { body, html: html_of(&sent), mentions: mentions_of(&sent) });
         }
+        drop(sent);
         outgoing.extend(self.attachments.drain(..).map(Outgoing::File));
         // The emptied field keeps its focus, so the next message can follow straight away.
         let focused = self.edit.focused;
@@ -790,6 +820,84 @@ mod tests {
             composer("hello").take_outgoing().1,
             [Outgoing::Text { body: "hello".into(), html: None, mentions: Default::default() }]
         );
+    }
+
+    fn sent(mut c: Composer) -> Outgoing {
+        c.take_outgoing().1.into_iter().next().unwrap_or_else(|| panic!("nothing sent"))
+    }
+
+    fn sent_body(c: Composer) -> String {
+        match sent(c) {
+            Outgoing::Text { body, .. } => body,
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn text_emoticons_should_be_sent_as_emoji() {
+        assert_eq!(sent_body(composer(":) :P :D :( :/ o.O O.o <3")), "🙂 😛 😃 🙁 😕 🤨 🤨 ❤️");
+    }
+
+    #[test]
+    fn a_comparison_should_be_sent_as_typed() {
+        assert_eq!(sent_body(composer("is 2<3? f(:)")), "is 2<3? f(:)");
+    }
+
+    #[test]
+    fn the_composer_should_keep_emoticons_until_sending() {
+        let c = composer("hi :)");
+        assert_eq!(c.edit.text, "hi :)");
+    }
+
+    #[test]
+    fn an_emoticon_in_inline_code_should_be_sent_as_typed() {
+        let mut c = composer("type :) for :)");
+        c.edit.set_selection(5, 7);
+        c.format(Format::Code);
+        assert_eq!(sent_body(c), "type :) for 🙂");
+    }
+
+    #[test]
+    fn an_emoticon_in_a_code_block_should_be_sent_as_typed() {
+        let mut c = composer("x <3 y :)");
+        c.format(Format::CodeBlock);
+        assert_eq!(sent_body(c), "x <3 y :)");
+    }
+
+    #[test]
+    fn an_emoticon_in_maths_should_be_sent_as_typed() {
+        let mut c = composer("a <3 b");
+        c.edit.set_selection(0, 6);
+        c.format(Format::Math);
+        let Outgoing::Text { body, html, .. } = sent(c) else { panic!("expected text") };
+        assert!(!body.contains('❤'), "{body}");
+        assert!(!html.unwrap_or_default().contains('❤'));
+    }
+
+    #[test]
+    fn a_formatted_message_should_send_the_emoji_in_its_html_too() {
+        let mut c = composer("great :D");
+        c.edit.set_selection(0, 5);
+        c.format(Format::Bold);
+        let Outgoing::Text { body, html: Some(html), .. } = sent(c) else { panic!("expected formatted text") };
+        assert_eq!(body, "great 😃");
+        assert!(html.contains("😃") && !html.contains(":D"), "{html}");
+    }
+
+    #[test]
+    fn an_edit_should_be_sent_with_emoji() {
+        let mut c = Composer::default();
+        let target = EditTarget {
+            account: AccountId::new("@ada:x.org"),
+            key: TimelineKey::room("!r:x.org"),
+            event_id: "$e".into(),
+        };
+        c.start_edit(target, "hello", None);
+        c.edit.set_selection(5, 5);
+        c.edit.insert(" :)");
+        let edit = c.take_edit().unwrap_or_else(|| panic!("no edit"));
+        assert_eq!(edit.body, "hello 🙂");
+        assert_eq!(edit.field.text, "hello :)");
     }
 
     #[test]

@@ -63,7 +63,16 @@ fn link_row(glyph: &'static rune::Icon, title: &str, detail: Option<String>, key
 /// The room's overview.
 pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
     let count = s.active_account().map_or(room.member_count, |account| account.member_count(room));
-    let topic = room.topic.clone().unwrap_or_else(|| t!("room.no_topic").to_owned());
+    // Without a topic there is nothing to say: no placeholder.
+    let topic = room.topic.as_deref().map(str::trim).filter(|topic| !topic.is_empty()).map(|topic| {
+        match (super::room::topic_text(topic), s.active_account()) {
+            (Some(edit), Some(account)) => {
+                let look = super::room::topic_look(s, account, room);
+                super::message_text::formatted_in("info-topic", &edit, look, p.text_muted, p)
+            }
+            _ => text(topic.to_owned()).key("info-topic").font(font::BODY).color(p.text_muted).wrap().selectable(true),
+        }
+    });
     let head = col()
         .w_full()
         .padding(20.0)
@@ -71,7 +80,7 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .items_center()
         .child(media_avatar(&room.room_id, &room.name, room.avatar.as_ref(), &s.media, 72.0))
         .child(text(super::room::display_name(room)).font(font::HEADER).color(p.text).wrap())
-        .child(text(topic).key("info-topic").font(font::BODY).color(p.text_muted).wrap().selectable(true));
+        .children(topic);
     let room_id = room.room_id.clone();
     let (leave_label, leave_icon) = match room.kind {
         RoomKind::Group => (t!("room_menu.leave"), &icons::LEAVE),

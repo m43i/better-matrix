@@ -138,7 +138,8 @@ The desktop offers the same actions under More and in the right-click message me
 
 **Pinned message**
 : A message kept for everyone in a room through Matrix's `m.room.pinned_events` state. Its row
-has a pin marker; room info leads to the full pinned list, including older messages.
+has a pin marker; room info, and on desktop the room header's pin button, lead to the full
+pinned list, including older messages.
 
 **Saved message**
 : A message the user keeps for themselves, from its message actions. Private to the user and
@@ -307,6 +308,11 @@ and custom emoji after `:` and two letters, slash commands at the start (`state:
 **Emote**
 : A message that says what its sender does ("* Ada waves"), sent with `/me`
 (`MessageContent::Emote`, `Outgoing::Emote`).
+
+**Emoticon**
+: A face typed as text (`:)`, `:D`, `<3`). The composer keeps it as typed; sending turns each
+one that stands as a word of its own, outside code, links and pills, into its emoji
+(`matrix_core::emoticons`).
 
 **Spoiler**
 : Words hidden until the reader presses them (`data-mx-spoiler`).

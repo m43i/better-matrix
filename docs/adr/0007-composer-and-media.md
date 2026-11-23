@@ -58,6 +58,13 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   link dialog for a join (`open_typed_link`), the leave confirmation, `Command::ChangeRoom` (`RoomSetting::Topic`, the room settings' own path), the
   global display name. A name the app doesn't know stops the send with a notice and keeps the
   text: a typo never goes out. `//` sends a leading slash; `/usr/bin` is a message.
+- **Emoticons** (`matrix_core::emoticons`): the field keeps `:)`, `:D`, `<3` and the like as
+  typed; sending a message or an edit sends each as its emoji (desktop `composer::with_emoji`,
+  the field itself unchanged). One counts only as a word of its own: whitespace or the start
+  before it, whitespace, the end or `.`, `,`, `!`, `?` after it, and not between backticks; `<3`
+  beside a number stays a comparison. The desktop also leaves code, code blocks, links and pills
+  (mentions, maths, spoilers) as typed. There is no setting; inline code sends one literally.
+  Phones don't replace them yet.
 - **Spoilers and formulas:** received spoilers draw as a block of their own colour, carrying an
   app link (`SPOILER_LINK`, naming the message, the place and a fingerprint of the words) a press
   reveals for the run (`State::revealed`): an edit hiding other words there hides them again.

@@ -620,12 +620,13 @@ impl TimelineItem {
     }
 }
 
-/// A text body as the timeline shows it: the sender's formatting, with every bare web address
-/// made a link (but not inside code). `None` for plain text without links, which shows as plain
-/// selectable text.
-fn rich_body(plain: &str, html: Option<&str>) -> Option<TextEdit> {
+/// A text body as the timeline shows it: the sender's formatting (or, without any, the
+/// Markdown in its plain text), with every bare web address made a link (but not inside code).
+/// `None` for plain text without Markdown or links, which shows as plain selectable text.
+pub fn rich_body(plain: &str, html: Option<&str>) -> Option<TextEdit> {
     use rune::{Mark, MarkRange};
-    let mut edit = match html {
+    let markdown = html.is_none().then(|| matrix_core::markdown::to_html(plain)).flatten();
+    let mut edit = match html.or(markdown.as_deref()) {
         // Mentions, spoilers, maths and custom emoji become pills the view draws.
         Some(html) => TextEdit::from_html(&matrix_core::html::to_pills(html, matrix_core::html::Pills::Display)),
         None if matrix_core::links::link_ranges(plain).next().is_some() => {
@@ -1874,6 +1875,20 @@ mod tests {
     #[test]
     fn plain_text_without_links_should_stay_plain() {
         assert!(rich_body("hello there", None).is_none());
+    }
+
+    #[test]
+    fn markdown_in_a_plain_body_should_be_formatted() {
+        let edit = rich_body("the **build** is [green](https://ci.example)", None).unwrap_or_default();
+        assert_eq!(edit.text, "the build is green");
+        assert!(edit.marks().iter().any(|mark| mark.mark == rune::Mark::Bold && &edit.text[mark.range()] == "build"));
+        assert_eq!(links(&edit), [("green", "https://ci.example".to_owned())]);
+    }
+
+    #[test]
+    fn markdown_should_not_override_the_senders_formatting() {
+        let edit = rich_body("**raw**", Some("<em>**raw**</em>")).unwrap_or_default();
+        assert_eq!(edit.text, "**raw**");
     }
 
     #[test]

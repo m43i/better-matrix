@@ -333,6 +333,27 @@ impl RoomRights {
         }
     }
 
+    /// Narrowed to a direct chat's: no addresses, joining, history, guest or permission
+    /// settings and no upgrade, which are for rooms people find and join. A chat with one other
+    /// person (`one_to_one`) also keeps the name and picture other clients show as that
+    /// person's, leaving its topic and turning on encryption.
+    #[must_use]
+    pub fn direct_chat(self, one_to_one: bool) -> Self {
+        Self {
+            name: self.name && !one_to_one,
+            topic: self.topic,
+            avatar: self.avatar && !one_to_one,
+            join_rule: false,
+            history: false,
+            guest_access: false,
+            addresses: false,
+            encryption: self.encryption,
+            permissions: false,
+            upgrade: false,
+            space_rooms: false,
+        }
+    }
+
     /// Whether any setting may be changed: whether the settings are offered at all.
     pub fn any(&self) -> bool {
         let Self {
@@ -717,6 +738,9 @@ impl Account {
         let space = room.is_space();
         let encrypted = room.encryption_state().is_encrypted();
         let mut rights = RoomRights::of(&power, &me, encrypted, space);
+        if room.is_direct().await.unwrap_or(false) {
+            rights = rights.direct_chat(room.active_members_count() <= 2);
+        }
         // A room already replaced isn't upgraded again: its members follow the successor it names.
         rights.upgrade &= !room.is_tombstoned();
         let rules = room.clone_info().room_version_rules_or_default();
