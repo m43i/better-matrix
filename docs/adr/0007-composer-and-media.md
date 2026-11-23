@@ -30,7 +30,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     block's first line break, which would shift the blocks' lines. A fence
     still open, around blank lines or around a pill goes as typed, and
     `/plain` sends fences as typed. Between an opening fence and its closing one Enter starts a
-    new line instead of sending and nothing is suggested, so a block is typed as in other chat
+    new line instead of sending, nothing is suggested, and a paste goes as plain text (a copied
+    code block would carry on past the closing fence), so a block is typed as in other chat
     apps; the caret stays in view as the composer adds lines. An edit counts as unchanged when its
     field is as it opened (text and formatting), so opening a message holding literal fences and
     sending it as it was sends no edit. A slash command's name isn't part of its line, so

@@ -185,6 +185,36 @@ fn enter_should_write_a_code_fence_line_by_line_and_send_once_it_closes() {
 }
 
 #[test]
+fn a_code_block_pasted_into_a_code_fence_should_go_as_its_text() {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    state.select_room(demo::DEMO_THREAD.0);
+    let mut rt = Runtime::new(state, ui::view, (1200.0, 760.0), Env { system_dark: true, scale: 1.0 });
+    rt.frame(0.0);
+    rt.update(|_, tx| tx.focus(composer_field(ComposerTarget::Room), false));
+    rt.frame(1.0 / 60.0);
+    let enter = KeyEvent { key: rune::Key::Enter, mods: Mods::default() };
+    rt.paste("```python");
+    rt.frame(1.0 / 60.0);
+    rt.key(enter.clone());
+    rt.frame(1.0 / 60.0);
+    rt.paste_content(
+        rune::ClipboardContent::new("print(1)").with_html("<pre><code class=\"language-python\">print(1)</code></pre>"),
+    );
+    rt.frame(1.0 / 60.0);
+    rt.key(enter.clone());
+    rt.frame(1.0 / 60.0);
+    rt.paste("```");
+    rt.frame(1.0 / 60.0);
+    let c = rt.state.composer(ComposerTarget::Room);
+    assert_eq!(c.edit.text, "```python\nprint(1)\n```");
+    assert!(c.edit.blocks().iter().all(|block| *block == rune::Block::Paragraph), "{:?}", c.edit.blocks());
+    rt.key(enter);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.composer(ComposerTarget::Room).is_empty(), "the closed fence is sent");
+}
+
+#[test]
 fn enter_in_a_long_code_fence_should_keep_the_caret_visible() {
     let mut state = State::detached();
     demo::seed(&mut state);

@@ -663,13 +663,14 @@ impl Composer {
         stripped
     }
 
-    /// Whether a paste would land in a code block, where the field pastes plain text: a
-    /// spoiler copied there would lose its pill and go as plain words.
+    /// Whether a paste would land in a code block or a Markdown code fence, where text pastes
+    /// plain: a spoiler copied there would lose its pill and go as plain words.
     pub fn pastes_into_code(&self) -> bool {
         let (start, end) = (self.edit.anchor.min(self.edit.focus), self.edit.anchor.max(self.edit.focus));
-        self.edit.paragraphs().iter().any(|paragraph| {
-            paragraph.block == Block::Code && paragraph.range.start <= end && start <= paragraph.range.end
-        })
+        self.in_code_fence()
+            || self.edit.paragraphs().iter().any(|paragraph| {
+                paragraph.block == Block::Code && paragraph.range.start <= end && start <= paragraph.range.end
+            })
     }
 
     /// Whether the field's text starts inside a pill: a slash there is a spoiler's or a

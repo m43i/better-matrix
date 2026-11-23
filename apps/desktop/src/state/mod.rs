@@ -5441,6 +5441,12 @@ impl State {
                 return true;
             }
         }
+        // In a Markdown code fence everything pastes as plain text, as in a code block: a copied
+        // code block or formatting would carry on past the fence's closing line.
+        if composer.in_code_fence() {
+            composer.edit.insert(content.text());
+            return true;
+        }
         // In a code block links can't be, so the address pastes as text; nor is a copied pill
         // (a spoiler holding only an address) made a link: the field restores it as it was.
         let pills = content.html().is_some_and(|html| html.contains("data-pill"));
