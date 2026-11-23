@@ -971,7 +971,7 @@ fn classic_row(
     let content =
         if pinned { col().grow(1.0).min_w(0.0).gap(3.0).child(pinned_label(p)).child(content) } else { content };
     let actions = interactive && !message.pending;
-    let content = if actions { content.child(toolbar(cx, message, cx.content_width, p)) } else { content };
+    let content = if actions { content.child(toolbar(cx, key, message, cx.content_width, p)) } else { content };
     let gutter = if continues { el().w(AVATAR) } else { sender_face(cx, key, message, p) };
     let mut row = row()
         .key(key.to_owned())
@@ -994,7 +994,7 @@ fn classic_row(
         row = row.fill(p.warning.alpha(0.10)).border_sides([0.0, 0.0, 0.0, 3.0], p.warning);
     }
     // Under another message's toolbar, which holds the pointer, the row shows no hover.
-    if interactive && !cx.hover.covers(&cx.at(message)) {
+    if interactive && !under_held_toolbar(cx, key, message) {
         row = row.hover(p.hover);
     }
     if actions { message_actions(row, cx, message) } else { row }
@@ -1100,7 +1100,7 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
         let said = if own { said.items_end() } else { said.items_start() };
         said.children(name).children(parts.inside).child(time.color(p.text_muted))
     };
-    let said = if actions { said.child(toolbar(cx, message, said_width, p)) } else { said };
+    let said = if actions { said.child(toolbar(cx, key, message, said_width, p)) } else { said };
 
     let mut column = col().grow(1.0).min_w(0.0).gap(4.0);
     column = if own { column.items_end() } else { column.items_start() };
@@ -1178,7 +1178,7 @@ pub(super) fn toolbar_width(buttons: usize) -> f32 {
 /// than the toolbar it starts at the message's own edge and reaches into the open side: the
 /// right for other people's, the left for the user's own at the right. A timeline too narrow for
 /// the whole toolbar keeps only More, whose menu offers the rest.
-fn toolbar(cx: &Context<'_>, message: &Message, said_width: f32, p: &Palette) -> El {
+fn toolbar(cx: &Context<'_>, key: &str, message: &Message, said_width: f32, p: &Palette) -> El {
     let event_id = message.event_id.clone();
     // A call's card keeps no reactions, and a thread has no threads.
     let (react, thread) = (!matches!(message.content, MessageContent::Call(_)), !cx.in_thread());
@@ -1196,7 +1196,7 @@ fn toolbar(cx: &Context<'_>, message: &Message, said_width: f32, p: &Palette) ->
     let open = cx.picking == Some(event_id.as_str());
     // The pointer on this toolbar, above its row, keeps it shown; on another's, hides it.
     let at = cx.at(message);
-    let (held, covered) = (cx.hover.holds(&at), cx.hover.covers(&at) && !open);
+    let (held, covered) = (cx.hover.holds(&at), under_held_toolbar(cx, key, message) && !open);
     let target = if cx.in_thread() { ComposerTarget::Thread } else { ComposerTarget::Room };
     let button = |glyph: &'static rune::Icon, label: &str, name: &str| {
         el().key(cx.key(&format!("{name}-{event_id}")))
@@ -1264,6 +1264,16 @@ fn toolbar(cx: &Context<'_>, message: &Message, said_width: f32, p: &Palette) ->
         s.toggle_popover(Popover::MessageMenu { key: key.clone(), event_id: id.clone(), at: None });
     }));
     el().pin(left, Some(TOOLBAR_OVERLAP - TOOLBAR_HEIGHT), right, None).child(bar)
+}
+
+/// Whether the row `key` of `message` lies under another message's toolbar that holds the
+/// pointer, as laid out last frame: the row shows no hover, and its own toolbar hides, out of
+/// reach. Rows elsewhere keep theirs, keyboard focus in them included.
+fn under_held_toolbar(cx: &Context<'_>, key: &str, message: &Message) -> bool {
+    let Some(held) = cx.hover.other_held(&cx.at(message)) else { return false };
+    let bar = rune::memo::layout(&cx.key(&format!("actions-{held}")));
+    let (Some(bar), Some(row)) = (bar, rune::memo::layout(key)) else { return false };
+    bar[0] < row[0] + row[2] && row[0] < bar[0] + bar[2] && bar[1] < row[1] + row[3] && row[1] < bar[1] + bar[3]
 }
 
 /// The message a reply answers: who wrote it and an excerpt, behind a bar. Pressing it goes to
@@ -1396,16 +1406,21 @@ fn gif_frame(size: Option<(u32, u32)>, max_width: f32) -> (f32, f32) {
 fn linked_gif(url: &str, max_width: f32, gifs: &GifCache, p: &Palette) -> El {
     let player = gifs.player(url);
     let (w, h) = gif_frame(player.and_then(|player| player.size()), max_width);
-    let frame =
-        el().key(format!("gif-{url}")).size(w, h).radius(8.0).role("img").label(url.to_owned()).instant_changes();
+    // The placeholder's ground stays under the picture: until the worker decodes its first
+    // frame, the frame shows it rather than nothing.
+    let frame = el()
+        .key(format!("gif-{url}"))
+        .size(w, h)
+        .radius(8.0)
+        .fill(p.surface)
+        .border(1.0, p.divider)
+        .role("img")
+        .label(url.to_owned())
+        .instant_changes();
     match player {
         // Too wide a GIF for the room keeps its shape, centred in the frame.
         Some(player) => frame.pixels_fit(player.pixels(), rune::SurfaceFit::Fit),
-        None => frame
-            .fill(p.surface)
-            .border(1.0, p.divider)
-            .center()
-            .child(text("GIF").font(font::SECTION).color(p.text_muted)),
+        None => frame.center().child(text("GIF").font(font::SECTION).color(p.text_muted)),
     }
 }
 

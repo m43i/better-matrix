@@ -202,8 +202,9 @@ see who is typing there.
     top right. Rising out of its row, the toolbar can lie over the message above, so the
     pointer can be over two messages at once. The toolbar shows through its row's hover group;
     a shown toolbar the pointer is on holds it (`MessageHover`, from the toolbar's
-    `on_hover_change`): it stays shown, and the row under it shows no hover and no toolbar, its
-    toolbar out of reach (inert, so Tab doesn't stop in it unseen). Rune hit-tests only what
+    `on_hover_change`): it stays shown, and the row it lies over (by last frame's layout) shows
+    no hover and no toolbar, its toolbar out of reach (inert, so Tab doesn't stop in it
+    unseen); other rows keep theirs, keyboard focus in them included. Rune hit-tests only what
     draws, so a hidden toolbar holds nothing and takes no press or right click, and one shown
     under the pointer hears it arrive (`on_hover_change` reaches only the topmost hit and its
     ancestors); a press between a shown toolbar's buttons is its own, with no hand cursor.
@@ -346,7 +347,8 @@ see who is typing there.
   - A message with a GIF link shows its other text, then the GIF like an attachment, link
     hidden; a bare link shows the GIF alone. Prepared once on arrival (`TimelineItem::gif`).
   - Its frame is always `GIF_HEIGHT` (160 points) tall, a placeholder of that height until the
-    GIF arrives, so the message never changes height as it loads; the width follows the GIF's
+    GIF arrives, so the message never changes height as it loads, and keeps the placeholder's
+    ground under the picture until the worker decodes its first frame; the width follows the GIF's
     shape from its header (`Player::size`, read before any frame decodes), up to 360 points
     and the content width, a GIF too wide for that letterboxed in the frame. The frame lands
     its change at once (`El::instant_changes`) rather than fading the picture in.

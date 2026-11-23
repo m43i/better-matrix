@@ -3525,6 +3525,22 @@ fn a_gif_arriving_should_show_at_once() {
 }
 
 #[test]
+fn a_gif_before_its_first_frame_should_keep_its_placeholders_ground() {
+    let mut rt = runtime(loading_gif_room);
+    let (_, ground) = {
+        let e =
+            rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("gif-{GIF_URL}"))).expect("the GIF");
+        (e.rect, e.fill)
+    };
+    // A header without frames: the worker never publishes one.
+    rt.update(|s, _| s.gifs.loaded(GIF_URL.into(), gif_header(300, 200)));
+    rt.frame(1.0 / 60.0);
+    let e = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("gif-{GIF_URL}"))).expect("the GIF");
+    assert_eq!(e.fill, ground, "the frame shows the placeholder's ground until a frame draws");
+    assert!(ground.a > 0.0, "the placeholder has a ground");
+}
+
+#[test]
 fn a_faded_new_marker_should_keep_its_space_while_on_screen() {
     let mut rt = runtime(unread_timeline);
     let after = rt.presented("msg-after").unwrap().0;
@@ -4113,6 +4129,28 @@ fn a_toolbar_shown_under_the_pointer_should_stay_as_it_moves_up_onto_it() {
     }
     let (_, opacity) = rt.presented("actions-$short-1").expect("the toolbar");
     assert!(opacity > 0.99, "the toolbar hid under the pointer: {opacity}");
+}
+
+#[test]
+fn holding_one_toolbar_should_leave_keyboard_focus_in_another_messages() {
+    let mut rt = runtime(|s| short_room(s, 3));
+    rt.update(|_, tx| tx.focus("react-$short-0", true));
+    rt.frame(1.0 / 60.0);
+    let (x, y) = middle(&rt, "msg-short-2");
+    rt.pointer_move(x, y);
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    let (x, y) = middle(&rt, "more-$short-2");
+    rt.pointer_move(x, y);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.state.message_hover.holds(&(TimelineKey::room(demo::DEMO_THREAD.0), "$short-2".to_owned())));
+    let focused = rt.elements().into_iter().find(|e| e.focused).and_then(|e| e.key);
+    assert_eq!(focused.as_deref(), Some("react-$short-0"), "keyboard focus stays where it was");
+    let (_, opacity) = rt.presented("actions-$short-0").expect("its toolbar");
+    assert!(opacity > 0.99, "the focused toolbar shows: {opacity}");
 }
 
 #[test]

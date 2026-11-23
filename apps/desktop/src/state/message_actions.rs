@@ -10,7 +10,7 @@ pub type MessageAt = (TimelineKey, String);
 
 /// Which message's hover toolbar holds the pointer. A toolbar rises out of its row over the
 /// message above, so the pointer can be over two messages at once: a shown toolbar the pointer
-/// is on stays shown, and hides the toolbar (and hover) of the row under it.
+/// is on stays shown, and hides the toolbar (and hover) of the row it lies over.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MessageHover {
     toolbar: Option<MessageAt>,
@@ -31,10 +31,10 @@ impl MessageHover {
         self.toolbar.as_ref() == Some(message)
     }
 
-    /// Whether the pointer holds another toolbar in `message`'s timeline: `message`'s row shows
-    /// no hover.
-    pub fn covers(&self, message: &MessageAt) -> bool {
-        self.toolbar.as_ref().is_some_and(|held| held.0 == message.0 && held.1 != message.1)
+    /// The message whose toolbar holds the pointer, when it's another in `message`'s timeline:
+    /// where that toolbar lies over `message`'s row, the row shows no hover and no toolbar.
+    pub fn other_held(&self, message: &MessageAt) -> Option<&str> {
+        self.toolbar.as_ref().filter(|held| held.0 == message.0 && held.1 != message.1).map(|held| held.1.as_str())
     }
 }
 

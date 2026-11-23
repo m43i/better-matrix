@@ -7427,11 +7427,11 @@ fn hovered(id: &str) -> crate::state::MessageAt {
 }
 
 #[test]
-fn the_pointer_on_a_toolbar_should_hold_it_over_the_row_under_it() {
+fn the_pointer_on_a_toolbar_should_hold_it_over_other_messages() {
     let mut hover = crate::state::MessageHover::default();
     hover.toolbar(&hovered("$b"), true);
-    assert!(hover.holds(&hovered("$b")) && !hover.covers(&hovered("$b")));
-    assert!(hover.covers(&hovered("$a")));
+    assert!(hover.holds(&hovered("$b")) && hover.other_held(&hovered("$b")).is_none());
+    assert_eq!(hover.other_held(&hovered("$a")), Some("$b"));
 }
 
 #[test]
@@ -7439,7 +7439,7 @@ fn leaving_a_held_toolbar_should_give_the_row_under_it_back() {
     let mut hover = crate::state::MessageHover::default();
     hover.toolbar(&hovered("$b"), true);
     hover.toolbar(&hovered("$b"), false);
-    assert!(!hover.holds(&hovered("$b")) && !hover.covers(&hovered("$a")));
+    assert!(!hover.holds(&hovered("$b")) && hover.other_held(&hovered("$a")).is_none());
 }
 
 #[test]
@@ -7447,5 +7447,5 @@ fn a_held_toolbar_should_cover_no_other_timeline() {
     let mut hover = crate::state::MessageHover::default();
     hover.toolbar(&hovered("$b"), true);
     let thread = (TimelineKey::thread("!room:example.org", "$root"), "$a".to_owned());
-    assert!(!hover.covers(&thread));
+    assert!(hover.other_held(&thread).is_none());
 }
