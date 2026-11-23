@@ -99,7 +99,7 @@ pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches
 pub use sections::{
     DIRECT, FAVOURITES, INVITATIONS, LOW_PRIORITY, ROOMS, SectionView, is_builtin, ordered_spaces, sections,
 };
-pub use settings::{Appearance, MessageLayout, PlaybackSpeed, Settings, SettingsSection, Zoom};
+pub use settings::{Appearance, Emoticons, MessageLayout, PlaybackSpeed, Settings, SettingsSection, Zoom};
 pub use sign_in::{Asked, SignInForm, SignInStep};
 pub use status_message::{leading_emoji, suggestions as status_suggestions};
 pub use suggest::{Suggestion, Trigger};
@@ -2312,6 +2312,7 @@ impl State {
         // open: closing the thread, another room and the overview all drop it. An edit of a
         // message there is set aside, its draft back, and returns when the timeline does.
         // Kept edits come back only once each composer holds its new timeline's draft.
+        let emoticons = self.settings.emoticons;
         for target in [ComposerTarget::Room, ComposerTarget::Thread] {
             if self.composer(target).voice.as_ref().is_some_and(|memo| !shown.contains(&memo.timeline))
                 && let Some(memo) = self.composer_mut(target).voice.take()
@@ -2320,7 +2321,7 @@ impl State {
             }
             let editing = self.composer(target).editing.as_ref().map(|editing| &editing.target);
             if editing.is_some_and(|edited| !shown.iter().any(|(a, k)| *a == edited.account && *k == edited.key))
-                && let Some(edit) = self.composer_mut(target).set_aside_edit()
+                && let Some(edit) = self.composer_mut(target).set_aside_edit(emoticons)
             {
                 self.set_edit_aside(edit);
             }
@@ -5103,7 +5104,8 @@ impl State {
         let edited = composer::EditTarget { account, key, event_id: message.event_id.clone() };
         // An edit of another message under way is kept, to come back after this one, when it
         // changed anything.
-        if let Some(other) = self.composer_mut(target).take_edit() {
+        let emoticons = self.settings.emoticons;
+        if let Some(other) = self.composer_mut(target).take_edit(emoticons) {
             self.set_edit_aside(other);
         }
         // What was kept of an earlier edit of this message comes back as the user left it, when
@@ -5237,7 +5239,8 @@ impl State {
     pub fn send_message(&mut self, target: ComposerTarget, tx: &mut Tx) {
         if self.composer(target).editing.is_some() {
             // Unchanged, nothing is sent; either way the draft comes back.
-            if let Some(edit) = self.composer_mut(target).take_edit() {
+            let emoticons = self.settings.emoticons;
+            if let Some(edit) = self.composer_mut(target).take_edit(emoticons) {
                 // This edit supersedes one of the same message kept from before, or under way in
                 // the other composer (a thread's root shows in both).
                 self.set_aside.retain(|kept| !kept.target.same_message(&edit.target));
@@ -5269,7 +5272,10 @@ impl State {
         // A pill stripped into a code block since the last frame comes back before anything goes.
         self.composer_mut(target).keep_pills();
         match self.run_command(target) {
-            None => Some(self.composer_mut(target).take_outgoing()),
+            None => {
+                let emoticons = self.settings.emoticons;
+                Some(self.composer_mut(target).take_outgoing(emoticons))
+            }
             Some(messages) if messages.is_empty() => None,
             Some(messages) => Some((self.composer_mut(target).reply_to.take(), messages)),
         }
@@ -5479,6 +5485,12 @@ impl State {
         self.shell.save_settings(self.settings.clone());
         self.fetch_link_previews(std::time::Instant::now());
         self.request_timeline_media();
+    }
+
+    /// Sends text emoticons as emoji, or as typed.
+    pub fn set_emoticons(&mut self, emoticons: Emoticons) {
+        self.settings.emoticons = emoticons;
+        self.shell.save_settings(self.settings.clone());
     }
 
     /// Shows shared places' maps, or not.

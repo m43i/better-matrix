@@ -63,8 +63,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   the field itself unchanged). One counts only as a word of its own: whitespace or the start
   before it, whitespace, the end or `.`, `,`, `!`, `?` after it, and not between backticks; `<3`
   beside a number stays a comparison. The desktop also leaves code, code blocks, links and pills
-  (mentions, maths, spoilers) as typed. There is no setting; inline code sends one literally.
-  Phones don't replace them yet.
+  (mentions, maths, spoilers) as typed. Inline code sends one literally. A device setting
+  under Appearance (`Settings::emoticons`, `Emoticons::AsEmoji` by default, or `AsTyped`)
+  sends them all as typed instead, so `:D` can go as it is; the composer takes the choice
+  when it builds what to send (`take_outgoing`, `take_edit`). Phones don't replace them yet.
 - **Spoilers and formulas:** received spoilers draw as a block of their own colour, carrying an
   app link (`SPOILER_LINK`, naming the message, the place and a fingerprint of the words) a press
   reveals for the run (`State::revealed`): an edit hiding other words there hides them again.
@@ -205,7 +207,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   - One emoji picker serves reactions and drafts; `Popover::Emoji(EmojiFor)` says where a
     picked emoji goes (`State::choose_emoji`). Its search (focused when it opens) matches every
     Unicode emoji by its English name and shortcodes (the `emojis` crate), up to 96; Enter picks
-    the first. Without a search it shows the quick reactions and the curated groups.
+    the first. Without a search it shows the quick reactions, a tab per group, then every
+    emoji (skin tones left out) under its Unicode group, the crate's order; only the rows in
+    view are built (`virtual_rows`), and a tab scrolls to its group's title. Emoji draw in the
+    system's colour emoji font, as everywhere else.
 - **Drafts:** every room and thread keeps its own draft. The desktop's two composers each hold
   the draft of the timeline they write into (`Composer::owner`); when the timeline on screen
   changes, `State::follow_drafts` (from `sync_timeline`) sets the draft aside, with its reply and

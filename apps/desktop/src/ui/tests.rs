@@ -2615,6 +2615,32 @@ fn choosing_chat_bubbles_in_the_appearance_settings_should_lay_messages_out_in_b
 }
 
 #[test]
+fn choosing_typed_emoticons_in_the_appearance_settings_should_keep_them_as_typed() {
+    let mut rt = runtime(|s| {
+        s.open_settings();
+        s.show_settings_section(SettingsSection::Appearance);
+    });
+    press(&mut rt, "emoticons-typed");
+    assert_eq!(rt.state.settings.emoticons, crate::state::Emoticons::AsTyped);
+}
+
+#[test]
+fn a_group_tab_in_the_emoji_picker_should_scroll_to_that_group() {
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        s.toggle_popover(crate::state::Popover::Emoji(crate::state::EmojiFor::Composer(
+            crate::state::ComposerTarget::Room,
+        )));
+    });
+    assert!(rt.find("emoji-group-flags").is_none(), "the flags come last");
+    press(&mut rt, "emoji-tab-flags");
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("emoji-group-flags").is_some(), "the flags' title is in view");
+}
+
+#[test]
 fn classic_rows_should_hold_messages_in_no_bubble() {
     let rt = runtime(|s| short_room(s, 1));
     assert!(rt.find("msg-short-0-bubble").is_none());

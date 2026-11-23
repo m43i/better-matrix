@@ -333,6 +333,12 @@ fn spec() -> AppSpec<State> {
                 s.poll_form.answers[0].insert("Office");
                 s.poll_form.answers[1].insert("Café");
             }),
+            ("demo-emoji", |s| {
+                demo::seed(s);
+                s.select_room(demo::DEMO_THREAD.0);
+                demo::image_packs(s);
+                s.toggle_popover(Popover::Emoji(state::EmojiFor::Composer(state::ComposerTarget::Room)));
+            }),
             ("demo-emoji-search", |s| {
                 demo::seed(s);
                 s.select_room(demo::DEMO_THREAD.0);

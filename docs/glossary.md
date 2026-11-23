@@ -320,7 +320,8 @@ and custom emoji after `:` and two letters, slash commands at the start (`state:
 **Emoticon**
 : A face typed as text (`:)`, `:D`, `<3`). The composer keeps it as typed; sending turns each
 one that stands as a word of its own, outside code, links and pills, into its emoji
-(`matrix_core::emoticons`).
+(`matrix_core::emoticons`), unless the desktop's Emoticons setting sends them as typed
+(`Emoticons`).
 
 **Spoiler**
 : Words hidden until the reader presses them (`data-mx-spoiler`).

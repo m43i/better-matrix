@@ -76,6 +76,45 @@ impl MessageLayout {
     }
 }
 
+/// What sending a message does with the text emoticons in it (`:)`, `:D`, `<3`): turns each
+/// into its emoji (`matrix_core::emoticons`), or sends it as typed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Emoticons {
+    #[default]
+    AsEmoji,
+    AsTyped,
+}
+
+impl Emoticons {
+    pub const ALL: [Emoticons; 2] = [Emoticons::AsEmoji, Emoticons::AsTyped];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AsEmoji => t!("settings.emoticons_emoji"),
+            Self::AsTyped => t!("settings.emoticons_typed"),
+        }
+    }
+
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::AsEmoji => t!("settings.emoticons_emoji_hint"),
+            Self::AsTyped => t!("settings.emoticons_typed_hint"),
+        }
+    }
+
+    /// A stable name for keys and the prefs file, the same in every language.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::AsEmoji => "emoji",
+            Self::AsTyped => "typed",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Self {
+        Self::ALL.into_iter().find(|emoticons| emoticons.id() == id).unwrap_or_default()
+    }
+}
+
 /// How large the whole interface draws, as a browser's page zoom, in percent. It steps through
 /// [`Zoom::LEVELS`]; 100% is the design size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,6 +171,8 @@ pub struct Settings {
     /// Shared places show a map, drawn from OpenStreetMap's tiles: loading it contacts
     /// OpenStreetMap.
     pub show_maps: bool,
+    /// Sent messages turn their text emoticons into emoji, or keep them as typed.
+    pub emoticons: Emoticons,
     /// The microphone, speaker and camera for calls and voice messages, by name.
     pub devices: matrix_core::DeviceChoice,
     /// Ring aloud for an incoming call; silent, only the notification and the card show.
@@ -194,6 +235,7 @@ impl Default for Settings {
             show_link_gifs: true,
             show_link_previews: true,
             show_maps: true,
+            emoticons: Emoticons::default(),
             devices: matrix_core::DeviceChoice::default(),
             ring_sound: true,
             playback_speed: PlaybackSpeed::default(),
@@ -214,7 +256,7 @@ impl Settings {
 pub enum SettingsSection {
     #[default]
     General,
-    /// The theme, the interface size and how messages lay out.
+    /// The theme, the interface size, how messages lay out and whether emoticons become emoji.
     Appearance,
     /// The active account's name, picture and contact details.
     Profile,

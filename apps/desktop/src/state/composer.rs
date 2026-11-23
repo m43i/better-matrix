@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use matrix_core::{AccountId, Outgoing, TimelineKey, Upload};
 use rune::{Block, Mark, TextEdit};
 
+use super::Emoticons;
+
 /// Every formatting action the composer offers. The toolbar renders this list; shortcuts and
 /// menus can call [`Composer::format`] with the same values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,10 +178,13 @@ fn html_of(edit: &TextEdit) -> Option<String> {
     formatted.then(|| matrix_core::html::from_pills(&edit.to_html()))
 }
 
-/// The field as it is sent: its text emoticons as emoji (`matrix_core::emoticons`), but not in
-/// code, links or pills (mentions, maths, spoilers), which go as typed. The field itself keeps
-/// what was typed.
-fn with_emoji(edit: &TextEdit) -> std::borrow::Cow<'_, TextEdit> {
+/// The field as it is sent: with [`Emoticons::AsEmoji`], its text emoticons as emoji
+/// (`matrix_core::emoticons`), but not in code, links or pills (mentions, maths, spoilers),
+/// which go as typed. The field itself keeps what was typed.
+fn with_emoji(edit: &TextEdit, emoticons: Emoticons) -> std::borrow::Cow<'_, TextEdit> {
+    if emoticons == Emoticons::AsTyped {
+        return std::borrow::Cow::Borrowed(edit);
+    }
     let kept: Vec<std::ops::Range<usize>> = edit
         .marks()
         .iter()
@@ -585,9 +590,9 @@ impl Composer {
     }
 
     /// The edit under way, as the user left it, taken out of the field: the draft comes back.
-    pub fn set_aside_edit(&mut self) -> Option<Edit> {
+    pub fn set_aside_edit(&mut self, emoticons: Emoticons) -> Option<Edit> {
         let editing = self.editing.as_ref()?;
-        let sent = with_emoji(&self.edit);
+        let sent = with_emoji(&self.edit, emoticons);
         let edit = Edit {
             target: editing.target.clone(),
             body: body_of(&sent),
@@ -602,8 +607,8 @@ impl Composer {
 
     /// The edit to send, if one is under way and changed the message; the draft comes back
     /// either way. An emptied message isn't sent: it stays as it was.
-    pub fn take_edit(&mut self) -> Option<Edit> {
-        self.set_aside_edit()
+    pub fn take_edit(&mut self, emoticons: Emoticons) -> Option<Edit> {
+        self.set_aside_edit(emoticons)
             .filter(|edit| !edit.body.is_empty() && (&edit.body, &edit.html) != (&edit.original.0, &edit.original.1))
     }
 
@@ -786,9 +791,9 @@ impl Composer {
 
     /// Everything to send, text first, and a fresh composer. HTML is sent only when the text
     /// carries formatting. The reply target, if any, goes with the first message.
-    pub fn take_outgoing(&mut self) -> (Option<ReplyTarget>, Vec<Outgoing>) {
+    pub fn take_outgoing(&mut self, emoticons: Emoticons) -> (Option<ReplyTarget>, Vec<Outgoing>) {
         let mut outgoing = Vec::new();
-        let sent = with_emoji(&self.edit);
+        let sent = with_emoji(&self.edit, emoticons);
         let body = body_of(&sent);
         if !body.is_empty() {
             outgoing.push(Outgoing::Text { body, html: html_of(&sent), mentions: mentions_of(&sent) });
@@ -817,13 +822,13 @@ mod tests {
     #[test]
     fn plain_text_should_be_sent_without_html() {
         assert_eq!(
-            composer("hello").take_outgoing().1,
+            composer("hello").take_outgoing(Emoticons::AsEmoji).1,
             [Outgoing::Text { body: "hello".into(), html: None, mentions: Default::default() }]
         );
     }
 
     fn sent(mut c: Composer) -> Outgoing {
-        c.take_outgoing().1.into_iter().next().unwrap_or_else(|| panic!("nothing sent"))
+        c.take_outgoing(Emoticons::AsEmoji).1.into_iter().next().unwrap_or_else(|| panic!("nothing sent"))
     }
 
     fn sent_body(c: Composer) -> String {
@@ -836,6 +841,24 @@ mod tests {
     #[test]
     fn text_emoticons_should_be_sent_as_emoji() {
         assert_eq!(sent_body(composer(":) :P :D :( :/ o.O O.o <3")), "🙂 😛 😃 🙁 😕 🤨 🤨 ❤️");
+    }
+
+    #[test]
+    fn with_emoticons_as_typed_they_should_be_sent_as_typed() {
+        let Some(Outgoing::Text { body, .. }) = composer("hi :D <3").take_outgoing(Emoticons::AsTyped).1.pop() else {
+            panic!("nothing sent")
+        };
+        assert_eq!(body, "hi :D <3");
+    }
+
+    #[test]
+    fn with_emoticons_as_typed_an_edit_should_be_sent_as_typed() {
+        let mut c = Composer::default();
+        c.start_edit(target(), "hello", None);
+        c.edit.set_selection(5, 5);
+        c.edit.insert(" :)");
+        let edit = c.take_edit(Emoticons::AsTyped).unwrap_or_else(|| panic!("no edit"));
+        assert_eq!(edit.body, "hello :)");
     }
 
     #[test]
@@ -895,7 +918,7 @@ mod tests {
         c.start_edit(target, "hello", None);
         c.edit.set_selection(5, 5);
         c.edit.insert(" :)");
-        let edit = c.take_edit().unwrap_or_else(|| panic!("no edit"));
+        let edit = c.take_edit(Emoticons::AsEmoji).unwrap_or_else(|| panic!("no edit"));
         assert_eq!(edit.body, "hello 🙂");
         assert_eq!(edit.field.text, "hello :)");
     }
@@ -905,7 +928,8 @@ mod tests {
         let mut c = composer("hello");
         c.edit.set_selection(0, 5);
         c.format(Format::Bold);
-        let Some(Outgoing::Text { html: Some(html), .. }) = c.take_outgoing().1.into_iter().next() else {
+        let Some(Outgoing::Text { html: Some(html), .. }) = c.take_outgoing(Emoticons::AsEmoji).1.into_iter().next()
+        else {
             panic!("expected formatted text");
         };
         assert!(html.contains("<b>hello</b>") || html.contains("<strong>hello</strong>"), "{html}");
@@ -965,7 +989,7 @@ mod tests {
     fn attachments_should_be_sent_after_the_text() {
         let mut c = composer("look");
         c.attach([PathBuf::from("/tmp/a.png")]);
-        assert_eq!(c.take_outgoing().1[1], Outgoing::File(Upload::Path(PathBuf::from("/tmp/a.png"))));
+        assert_eq!(c.take_outgoing(Emoticons::AsEmoji).1[1], Outgoing::File(Upload::Path(PathBuf::from("/tmp/a.png"))));
     }
 
     #[test]
@@ -978,7 +1002,7 @@ mod tests {
     #[test]
     fn sending_should_leave_an_empty_composer() {
         let mut c = composer("hi");
-        c.take_outgoing();
+        c.take_outgoing(Emoticons::AsEmoji);
         assert!(c.is_empty());
     }
 
@@ -986,7 +1010,7 @@ mod tests {
     fn sending_should_keep_the_field_focused() {
         let mut c = composer("hi");
         c.edit.focused = true;
-        c.take_outgoing();
+        c.take_outgoing(Emoticons::AsEmoji);
         assert!(c.edit.focused);
     }
 
@@ -1029,7 +1053,7 @@ mod tests {
         let mut c = Composer::default();
         c.start_edit(target(), "helo", None);
         c.edit.insert("!");
-        let edit = c.take_edit().map(|edit| (edit.target, edit.body, edit.html));
+        let edit = c.take_edit(Emoticons::AsEmoji).map(|edit| (edit.target, edit.body, edit.html));
         assert_eq!(edit, Some((target(), "helo!".to_owned(), None)));
         assert!(c.editing.is_none() && c.is_empty());
     }
@@ -1039,7 +1063,7 @@ mod tests {
         let mut c = Composer::default();
         c.start_edit(target(), "loud", Some("<strong>loud</strong>"));
         c.edit.insert("er");
-        let html = c.take_edit().and_then(|edit| edit.html).unwrap_or_default();
+        let html = c.take_edit(Emoticons::AsEmoji).and_then(|edit| edit.html).unwrap_or_default();
         assert!(html.contains("<strong>louder</strong>"), "{html}");
     }
 
@@ -1049,14 +1073,14 @@ mod tests {
         c.start_edit(target(), "x", None);
         c.edit.set_selection(0, 1);
         c.edit.insert("");
-        assert!(c.take_edit().is_none());
+        assert!(c.take_edit(Emoticons::AsEmoji).is_none());
     }
 
     #[test]
     fn an_unchanged_edit_should_not_be_sent() {
         let mut c = Composer::default();
         c.start_edit(target(), "same", None);
-        assert!(c.take_edit().is_none());
+        assert!(c.take_edit(Emoticons::AsEmoji).is_none());
     }
 
     #[test]
@@ -1067,7 +1091,7 @@ mod tests {
         let draft = stored_draft(&c.edit).expect("a draft");
         let mut restored = composer("");
         restored.edit = field_of(&draft);
-        let (_, sent) = restored.take_outgoing();
+        let (_, sent) = restored.take_outgoing(Emoticons::AsEmoji);
         assert!(matches!(sent.as_slice(), [Outgoing::Text { mentions, .. }] if mentions.room), "{sent:?}");
     }
 
@@ -1086,7 +1110,7 @@ mod tests {
         let mut c = composer("draft");
         c.start_edit(target(), "helo", None);
         c.edit.insert("!");
-        let Some(edit) = c.take_edit() else { panic!("expected an edit") };
+        let Some(edit) = c.take_edit(Emoticons::AsEmoji) else { panic!("expected an edit") };
         c.resume_edit(edit);
         assert_eq!(c.edit.text, "helo!");
         c.cancel_edit();

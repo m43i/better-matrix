@@ -28,6 +28,23 @@ fn clearing_the_last_used_account_should_survive_saving_and_loading_settings() {
 }
 
 #[test]
+fn the_emoticons_choice_should_survive_saving_and_loading_settings() {
+    let settings = Settings { emoticons: Emoticons::AsTyped, ..Settings::fixed_english() };
+    let mut prefs = Prefs::memory();
+    write_settings(&mut prefs, &settings).unwrap();
+
+    assert_eq!(load_settings(&prefs).emoticons, Emoticons::AsTyped);
+}
+
+#[test]
+fn older_settings_should_turn_emoticons_into_emoji() {
+    let mut prefs = Prefs::memory();
+    prefs.set(LANGUAGE, "en").unwrap();
+
+    assert_eq!(load_settings(&prefs).emoticons, Emoticons::AsEmoji);
+}
+
+#[test]
 fn the_message_layout_should_survive_saving_and_loading_settings() {
     let settings = Settings { message_layout: MessageLayout::Bubbles, ..Settings::fixed_english() };
     let mut prefs = Prefs::memory();

@@ -115,7 +115,8 @@ impl State {
             self.typing.left(usize::from(thread));
             if let Some(left) = self.composer_mut(target).owner.take() {
                 // An edit still in the field is set aside first: only the draft is the timeline's.
-                if let Some(edit) = self.composer_mut(target).set_aside_edit() {
+                let emoticons = self.settings.emoticons;
+                if let Some(edit) = self.composer_mut(target).set_aside_edit(emoticons) {
                     self.set_edit_aside(edit);
                 }
                 let draft = self.composer_mut(target).take_draft();

@@ -25,7 +25,7 @@ pub use notify::Toast;
 pub use secrets::system_secrets;
 
 use crate::i18n::Language;
-use crate::state::{Appearance, MessageLayout, PlaybackSpeed, Settings, State, Zoom};
+use crate::state::{Appearance, Emoticons, MessageLayout, PlaybackSpeed, Settings, State, Zoom};
 
 /// The OS services the app uses, or inert stand-ins when headless.
 pub struct Shell {
@@ -288,6 +288,7 @@ const MESSAGE_LAYOUT: &str = "message_layout";
 const LINK_GIFS: &str = "link_gifs";
 const LINK_PREVIEWS: &str = "link_previews";
 const MAPS: &str = "maps";
+const EMOTICONS: &str = "emoticons";
 const ZOOM: &str = "zoom";
 const RING_SOUND: &str = "ring_sound";
 const PLAYBACK_SPEED: &str = "playback_speed";
@@ -305,6 +306,7 @@ fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::pr
     prefs.set(LINK_GIFS, &settings.show_link_gifs)?;
     prefs.set(LINK_PREVIEWS, &settings.show_link_previews)?;
     prefs.set(MAPS, &settings.show_maps)?;
+    prefs.set(EMOTICONS, &settings.emoticons.id())?;
     prefs.set(RING_SOUND, &settings.ring_sound)?;
     prefs.set(PLAYBACK_SPEED, &settings.playback_speed.percent())?;
     prefs.set(MICROPHONE, &settings.devices.microphone)?;
@@ -327,6 +329,7 @@ pub fn load_settings(prefs: &Prefs) -> Settings {
         show_link_gifs: prefs.get::<bool>(LINK_GIFS).unwrap_or(true),
         show_link_previews: prefs.get::<bool>(LINK_PREVIEWS).unwrap_or(true),
         show_maps: prefs.get::<bool>(MAPS).unwrap_or(true),
+        emoticons: prefs.get::<String>(EMOTICONS).map_or_else(Emoticons::default, |id| Emoticons::from_id(&id)),
         devices: matrix_core::DeviceChoice {
             microphone: prefs.get::<Option<String>>(MICROPHONE).flatten(),
             speaker: prefs.get::<Option<String>>(SPEAKER).flatten(),

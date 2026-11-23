@@ -5794,6 +5794,16 @@ fn me_should_send_an_emote() {
 }
 
 #[test]
+fn with_emoticons_as_typed_a_sent_message_should_keep_them() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.set_emoticons(crate::state::Emoticons::AsTyped);
+    s.composer.edit.insert("nice :D");
+    s.send_message(ComposerTarget::Room, &mut Tx::default());
+    assert!(matches!(sent(&mut commands).as_slice(), [Outgoing::Text { body, .. }] if body == "nice :D"));
+}
+
+#[test]
 fn shrug_should_add_its_face_to_the_message() {
     let (mut s, mut commands) = state();
     writing(&mut s, &mut commands);

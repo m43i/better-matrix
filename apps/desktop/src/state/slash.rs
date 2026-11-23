@@ -194,7 +194,8 @@ impl State {
                 let composer = self.composer_mut(target);
                 composer.cut_front(len);
                 let words = composer.edit.text.trim().to_owned();
-                let (reply, messages) = composer.take_outgoing();
+                // Only the files are kept: the words go as typed, in the spoiler.
+                let (reply, messages) = composer.take_outgoing(super::Emoticons::AsTyped);
                 composer.reply_to = reply;
                 let html = matrix_core::html::spoiler(&words);
                 let body = super::composer::SPOILER_FALLBACK.to_owned();
@@ -204,9 +205,10 @@ impl State {
                 Some(std::iter::once(spoiler).chain(files).collect())
             }
             SlashCommand::Me | SlashCommand::Plain => {
+                let emoticons = self.settings.emoticons;
                 let composer = self.composer_mut(target);
                 composer.cut_front(len);
-                let (reply, messages) = composer.take_outgoing();
+                let (reply, messages) = composer.take_outgoing(emoticons);
                 let mut messages = messages.into_iter();
                 let first = messages.next().map(|message| match message {
                     Outgoing::Text { body, html, mentions } if command == SlashCommand::Me => {

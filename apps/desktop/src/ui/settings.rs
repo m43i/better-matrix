@@ -13,7 +13,8 @@ use super::room_menu::{mode_id, modes};
 use super::theme::{Palette, font};
 use crate::i18n::{Language, t, tf};
 use crate::state::{
-    AccountData, Appearance, ContactStep, MediaCache, MessageLayout, Popover, SelectFor, SettingsSection, State, Zoom,
+    AccountData, Appearance, ContactStep, Emoticons, MediaCache, MessageLayout, Popover, SelectFor, SettingsSection,
+    State, Zoom,
 };
 use crate::third_party;
 use matrix_core::{ContactDetail, ContactKind, OfflineDevice, RecoveryStatus, Session, SignInMethod};
@@ -251,7 +252,8 @@ fn general(s: &State, p: &Palette) -> El {
         .child(setting_group(&icons::CODE, t!("settings.developer"), t!("settings.developer_hint"), hidden, p))
 }
 
-/// How the app looks: the theme, how messages lay out, and the interface size.
+/// How the app looks: the theme, how messages lay out, whether emoticons become emoji, and the
+/// interface size.
 fn appearance(s: &State, p: &Palette) -> El {
     let themes = Appearance::ALL.into_iter().fold(col().w_full().gap(8.0), |list, appearance| {
         list.child(
@@ -267,11 +269,19 @@ fn appearance(s: &State, p: &Palette) -> El {
                 .on_press(move |s: &mut State| s.set_message_layout(layout)),
         )
     });
+    let emoticons = Emoticons::ALL.into_iter().fold(col().w_full().gap(8.0), |list, emoticons| {
+        list.child(
+            choice_row(emoticons.label(), Some(emoticons.hint()), s.settings.emoticons == emoticons, p)
+                .key(format!("emoticons-{}", emoticons.id()))
+                .on_press(move |s: &mut State| s.set_emoticons(emoticons)),
+        )
+    });
     col()
         .w_full()
         .gap(32.0)
         .child(setting_group(&icons::SUN_MOON, t!("settings.theme"), t!("settings.theme_hint"), themes, p))
         .child(setting_group(&icons::CHAT, t!("settings.messages"), t!("settings.messages_hint"), layouts, p))
+        .child(setting_group(&icons::SMILE, t!("settings.emoticons"), t!("settings.emoticons_hint"), emoticons, p))
         .child(setting_group(&icons::ZOOM, t!("settings.zoom"), t!("settings.zoom_hint"), zoom(s, p), p))
 }
 
