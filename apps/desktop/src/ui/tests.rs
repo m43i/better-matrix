@@ -3163,6 +3163,58 @@ fn hidden_events_should_show_only_while_turned_on() {
 }
 
 #[test]
+fn a_picture_waiting_to_be_sent_should_show_as_its_thumbnail() {
+    let rt = runtime(demo::upload_thumbnails);
+    assert!(rt.find("attachment-0-remove").is_some(), "the pasted picture's remove button over it");
+    assert!(rt.find("attachment-2-remove").is_none(), "the PDF is a chip, its button inside");
+}
+
+#[test]
+fn a_thumbnails_remove_button_should_remove_its_picture() {
+    let mut rt = runtime(demo::upload_thumbnails);
+    press(&mut rt, "attachment-0-remove");
+    let names: Vec<String> = rt.state.composer.attachments.iter().map(matrix_core::Upload::name).collect();
+    assert_eq!(names, ["better-matrix-256.png", "Release notes.pdf"]);
+}
+
+#[test]
+fn the_room_info_should_open_the_room_log() {
+    let mut rt = runtime(|s| {
+        demo::room_changes(s);
+        s.show_side(SidePanel::Info);
+    });
+    press(&mut rt, "info-log");
+    assert!(rt.find("log-panel").is_some());
+}
+
+#[test]
+fn the_room_log_should_list_the_changes_the_timeline_leaves_out() {
+    let rt = runtime(|s| {
+        demo::room_changes(s);
+        s.show_side(SidePanel::Log);
+    });
+    assert!(rt.find("log-ev-grace-picture").is_some() && rt.find("log-ev-topic").is_some());
+}
+
+#[test]
+fn the_room_log_should_list_the_newest_change_first() {
+    let rt = runtime(|s| {
+        demo::room_changes(s);
+        s.show_side(SidePanel::Log);
+    });
+    let (newer, older) = (rt.find("log-ev-grace-picture").expect("newer"), rt.find("log-ev-topic").expect("older"));
+    assert!(newer.1 < older.1);
+}
+
+#[test]
+fn room_changes_should_show_in_the_timeline_only_while_turned_on() {
+    let mut rt = runtime(demo::room_changes);
+    assert!(!rt.state.settings.show_room_changes, "off by default");
+    rt.update(|s, _| s.set_show_room_changes(true));
+    assert!(rt.state.settings.show_room_changes);
+}
+
+#[test]
 fn a_hidden_events_source_button_should_ask_for_its_source() {
     let mut rt = runtime(demo::hidden_events);
     press(&mut rt, "hidden-acl-source");

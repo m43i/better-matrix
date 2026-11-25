@@ -115,8 +115,8 @@ describe('planTimeline', () => {
 
   it('should not merge other room events', () => {
     const entries = [
-      roomEventEntry('1', ada, { type: 'RoomName', data: 'a' }),
-      roomEventEntry('2', ada, { type: 'RoomName', data: 'b' }),
+      roomEventEntry('1', ada, { type: 'Invited', data: grace }),
+      roomEventEntry('2', ada, { type: 'Invited', data: grace }),
     ];
 
     expect(kinds(entries)).toEqual(['events', 'events']);
@@ -217,6 +217,89 @@ describe('planTimeline', () => {
     );
 
     expect(rows.map((r) => r.kind)).toEqual(['events', 'hidden', 'events']);
+  });
+
+  it('should leave a room change only the room log lists out by default', () => {
+    expect(kinds([roomEventEntry('1', ada, { type: 'ProfilePicture' })])).toEqual([]);
+  });
+
+  it('should draw a room change only the room log lists while room changes show', () => {
+    const rows = planTimeline(timelineOf([roomEventEntry('1', ada, { type: 'ProfilePicture' })]), {
+      ...room,
+      showRoomChanges: true,
+    });
+
+    expect(rows.map((r) => r.kind)).toEqual(['events']);
+  });
+
+  it('should merge joins across a room change left out', () => {
+    const rows = planTimeline(
+      timelineOf([
+        roomEventEntry('1', ada, { type: 'Joined' }),
+        roomEventEntry('2', ada, { type: 'DisplayName', data: 'Ada L.' }),
+        roomEventEntry('3', grace, { type: 'Joined' }),
+      ]),
+      room,
+    );
+
+    expect(rows.map((r) => (r.kind === 'events' ? r.events.length : 0))).toEqual([2]);
+  });
+
+  it('should continue a message group across a room change left out', () => {
+    const rows = planTimeline(
+      timelineOf([
+        messageEntry('a'),
+        roomEventEntry('e', grace, { type: 'ProfilePicture' }),
+        messageEntry('b', { timestamp_ms: T + 60_000 }),
+      ]),
+      room,
+    );
+
+    expect(rows.map((r) => r.kind === 'message' && r.continues)).toEqual([false, true]);
+  });
+
+  it('should leave out a date divider over a day with nothing drawn', () => {
+    const entries: TimelineEntry[] = [
+      { id: 'd1', kind: { type: 'DateDivider', data: T } },
+      roomEventEntry('e', ada, { type: 'RoomTopic', data: 'Plans' }),
+      hiddenEntry('h'),
+      { id: 'd2', kind: { type: 'DateDivider', data: T + 86_400_000 } },
+      messageEntry('a'),
+    ];
+
+    expect(planTimeline(timelineOf(entries), room).map((r) => r.key)).toEqual(['d2', 'msg-a']);
+  });
+
+  it('should leave out a date divider over a day only an ignored person wrote in', () => {
+    const entries: TimelineEntry[] = [
+      messageEntry('a', { sender_id: ADA }),
+      { id: 'd', kind: { type: 'DateDivider', data: T } },
+      messageEntry('b', { sender_id: GRACE }),
+    ];
+
+    const rows = planTimeline(timelineOf(entries), { ...room, ignored: [GRACE] });
+
+    expect(rows.map((r) => r.key)).toEqual(['msg-a']);
+  });
+
+  it('should keep a date divider over a day with something drawn', () => {
+    const entries: TimelineEntry[] = [
+      { id: 'd', kind: { type: 'DateDivider', data: T } },
+      roomEventEntry('e', ada, { type: 'RoomTopic', data: 'Plans' }),
+      messageEntry('a'),
+    ];
+
+    expect(planTimeline(timelineOf(entries), room).map((r) => r.key)).toEqual(['d', 'msg-a']);
+  });
+
+  it('should not count the New divider as something drawn on its day', () => {
+    const entries: TimelineEntry[] = [
+      messageEntry('a'),
+      { id: 'd', kind: { type: 'DateDivider', data: T } },
+      { id: 'r', kind: { type: 'ReadMarker' } },
+    ];
+
+    expect(kinds(entries)).toEqual(['message', 'new']);
   });
 
   it('should mark only the newest call card as the latest', () => {

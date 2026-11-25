@@ -208,13 +208,22 @@ export function Timeline({
   const shownMarker = marker.shown;
 
   const showHidden = useStore((s) => s.settings.showHiddenEvents);
+  const showRoomChanges = useStore((s) => s.settings.showRoomChanges);
   // What people the user ignores sent never draws, hidden events included, and nor does what
   // someone whose ignore is being undone sent until that is saved (ADR 0011).
   const ignored = useStore((s) => shownIgnored(accountOf(s, account)) ?? NO_ONE, shallow);
 
   const rows = useMemo(
-    () => planTimeline(timeline, { thread, root, marker: shownMarker, showHidden, ignored }),
-    [timeline, thread, root, shownMarker, showHidden, ignored],
+    () =>
+      planTimeline(timeline, {
+        thread,
+        root,
+        marker: shownMarker,
+        showHidden,
+        showRoomChanges,
+        ignored,
+      }),
+    [timeline, thread, root, shownMarker, showHidden, showRoomChanges, ignored],
   );
 
   const list = useRef<FlashListRef<Row>>(null);

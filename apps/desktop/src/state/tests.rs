@@ -1020,6 +1020,21 @@ fn scrolling_near_the_top_should_load_older_messages() {
 }
 
 #[test]
+fn the_room_logs_load_earlier_should_load_older_messages() {
+    let (mut s, mut commands) = scrolled_room();
+    s.load_earlier_log();
+    assert!(matches!(&open_commands(&mut commands)[..], [Command::LoadOlder { key, .. }] if key.thread.is_none()));
+}
+
+#[test]
+fn the_room_logs_load_earlier_should_not_ask_twice_while_a_page_is_on_its_way() {
+    let (mut s, mut commands) = scrolled_room();
+    s.load_earlier_log();
+    s.load_earlier_log();
+    assert_eq!(open_commands(&mut commands).len(), 1);
+}
+
+#[test]
 fn a_page_in_flight_should_not_be_requested_twice() {
     let (mut s, mut commands) = scrolled_room();
     s.near_top.store(true, Ordering::Relaxed);

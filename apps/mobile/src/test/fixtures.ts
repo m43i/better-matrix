@@ -124,8 +124,13 @@ export function hiddenEntry(id: string, eventType = 'm.room.server_acl'): Timeli
   };
 }
 
-export function roomEventEntry(id: string, sender: Person, change: RoomChange): TimelineEntry {
-  return { id, kind: { type: 'RoomEvent', data: { sender, change } } };
+export function roomEventEntry(
+  id: string,
+  sender: Person,
+  change: RoomChange,
+  timestamp_ms = 1,
+): TimelineEntry {
+  return { id, kind: { type: 'RoomEvent', data: { sender, change, timestamp_ms } } };
 }
 
 /** A timeline holding `entries`, with its paging as given. */

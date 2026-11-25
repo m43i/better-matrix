@@ -267,6 +267,7 @@ fn room_event(event: &EventTimelineItem) -> Option<RoomEvent> {
     use matrix_sdk::ruma::events::StateEventContentChange as Change;
     use matrix_sdk_ui::timeline::{AnyOtherStateEventContentChange as Other, MembershipChange};
 
+    let timestamp_ms = u64::from(event.timestamp().0);
     let change = match event.content() {
         TimelineItemContent::MembershipChange(membership) => {
             let member = Person {
@@ -277,9 +278,11 @@ fn room_event(event: &EventTimelineItem) -> Option<RoomEvent> {
             match membership.change()? {
                 MembershipChange::Joined | MembershipChange::InvitationAccepted | MembershipChange::KnockAccepted => {
                     // The member joined; they are who the line is about.
-                    return Some(RoomEvent { sender: member, change: RoomChange::Joined });
+                    return Some(RoomEvent { sender: member, change: RoomChange::Joined, timestamp_ms });
                 }
-                MembershipChange::Left => return Some(RoomEvent { sender: member, change: RoomChange::Left }),
+                MembershipChange::Left => {
+                    return Some(RoomEvent { sender: member, change: RoomChange::Left, timestamp_ms });
+                }
                 MembershipChange::Invited => RoomChange::Invited(member),
                 MembershipChange::InvitationRevoked => RoomChange::InviteRevoked(member),
                 MembershipChange::InvitationRejected => RoomChange::InviteDeclined,
@@ -332,5 +335,5 @@ fn room_event(event: &EventTimelineItem) -> Option<RoomEvent> {
         }
         _ => return None,
     };
-    Some(RoomEvent { sender: sender(event), change })
+    Some(RoomEvent { sender: sender(event), change, timestamp_ms })
 }

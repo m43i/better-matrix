@@ -8,32 +8,29 @@ import { Directory, File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 
 import type { PendingAttachment } from '../../state/composer';
-import { fileName, pathFromUri, uploadName } from '../../state/outgoing';
+import { attachmentKind, fileName, pathFromUri, uploadName } from '../../state/outgoing';
 
 /** Why nothing came back: the user said no to the camera. */
 export const DENIED = 'denied';
 
 type Kind = PendingAttachment['kind'];
 
-function kindOf(mime: string | null | undefined, fallback: Kind = 'file'): Kind {
-  if (mime?.startsWith('image/')) return 'image';
-
-  if (mime?.startsWith('video/')) return 'video';
-
-  return fallback;
-}
-
 /** A unique folder in the cache for one copy. */
 let copies = 0;
 
-/** `uri` as an attachment named `name` (with the extension on disk). */
+/**
+ * `uri` as an attachment named `given` (with the extension on disk), previewing as its media type
+ * or name says, else as `fallback`.
+ */
 async function attachment(
   uri: string,
   given: string | null | undefined,
-  kind: Kind,
+  mime: string | null | undefined,
+  fallback: Kind = 'file',
 ): Promise<PendingAttachment> {
   const original = pathFromUri(uri);
   const name = uploadName(original, given);
+  const kind = attachmentKind(mime, name, fallback);
 
   if (name === fileName(original)) return { path: original, name, kind, uri };
 
@@ -56,7 +53,8 @@ function fromAssets(assets: ImagePicker.ImagePickerAsset[]): Promise<PendingAtta
       attachment(
         asset.uri,
         asset.fileName,
-        asset.type === 'video' ? 'video' : kindOf(asset.mimeType, 'image'),
+        asset.mimeType,
+        asset.type === 'video' ? 'video' : 'image',
       ),
     ),
   );
@@ -99,6 +97,6 @@ export async function pickFiles(): Promise<PendingAttachment[]> {
   if (result.canceled) return [];
 
   return Promise.all(
-    result.assets.map((asset) => attachment(asset.uri, asset.name, kindOf(asset.mimeType))),
+    result.assets.map((asset) => attachment(asset.uri, asset.name, asset.mimeType)),
   );
 }

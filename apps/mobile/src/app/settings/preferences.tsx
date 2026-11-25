@@ -1,6 +1,6 @@
-// Preferences on this device: language, theme, how messages lay out, link previews, GIFs from
-// links and maps from OpenStreetMap, and hidden events (developer tools), as the desktop's General
-// and Appearance settings.
+// Preferences on this device: language, theme, how messages lay out, room changes in
+// conversations, link previews, GIFs from links and maps from OpenStreetMap, and hidden events
+// (developer tools), as the desktop's General and Appearance settings.
 
 import { Fragment } from 'react';
 
@@ -8,7 +8,12 @@ import { t } from '../../i18n';
 import { updateSettings } from '../../state/actions/core';
 import { useAppStore, useStore } from '../../state/react';
 import { Divider, ListRow, ListSection } from '../../ui/components';
-import { APPEARANCES, languageChoices, MESSAGE_LAYOUTS } from '../../ui/settings/choices';
+import {
+  APPEARANCES,
+  languageChoices,
+  MESSAGE_LAYOUTS,
+  ROOM_CHANGES,
+} from '../../ui/settings/choices';
 import { SettingsPage } from '../../ui/settings/common';
 
 export default function PreferencesScreen() {
@@ -55,6 +60,20 @@ export default function PreferencesScreen() {
               subtitle={t(choice.hint)}
               selected={settings.messageLayout === choice.id}
               onPress={() => updateSettings(store, { messageLayout: choice.id })}
+              chevron={false}
+            />
+          </Fragment>
+        ))}
+      </ListSection>
+      <ListSection title={t('settings.room_changes')} footer={t('settings.room_changes_hint')}>
+        {ROOM_CHANGES.map((choice, index) => (
+          <Fragment key={String(choice.on)}>
+            {index > 0 ? <Divider inset={16} /> : null}
+            <ListRow
+              testID={`room-changes-${choice.on ? 'on' : 'off'}`}
+              title={t(choice.label)}
+              selected={settings.showRoomChanges === choice.on}
+              onPress={() => updateSettings(store, { showRoomChanges: choice.on })}
               chevron={false}
             />
           </Fragment>

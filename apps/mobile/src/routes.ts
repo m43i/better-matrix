@@ -61,6 +61,11 @@ export const routes = {
     pathname: '/pinned-messages',
     params: { account, roomId },
   }),
+  /** A room's log: every room event its timeline holds, newest first. */
+  roomLog: (account: AccountId, roomId: string): Href => ({
+    pathname: '/room-log',
+    params: { account, roomId },
+  }),
   /** An event's source (developer tools). */
   eventSource: (account: AccountId, roomId: string, eventId: string): Href => ({
     pathname: '/event-source',

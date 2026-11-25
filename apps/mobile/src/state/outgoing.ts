@@ -317,6 +317,31 @@ export function uploadName(path: string, given: string | null | undefined): stri
   return stem === '' ? own : stem + extension;
 }
 
+const IMAGE_EXTENSIONS = ['avif', 'bmp', 'gif', 'heic', 'heif', 'jpeg', 'jpg', 'png', 'webp'];
+
+const VIDEO_EXTENSIONS = ['3gp', 'm4v', 'mkv', 'mov', 'mp4', 'webm'];
+
+/**
+ * How a picked file previews in the composer: a picture or video by its media type, else by its
+ * name's extension (pickers may give no type, or a generic one), else `fallback`.
+ */
+export function attachmentKind(
+  mime: string | null | undefined,
+  name: string,
+  fallback: PendingAttachment['kind'] = 'file',
+): PendingAttachment['kind'] {
+  if (mime?.startsWith('image/')) return 'image';
+
+  if (mime?.startsWith('video/')) return 'video';
+  const extension = /\.([^./]+)$/.exec(name)?.[1]?.toLowerCase() ?? '';
+
+  if (IMAGE_EXTENSIONS.includes(extension)) return 'image';
+
+  if (VIDEO_EXTENSIONS.includes(extension)) return 'video';
+
+  return fallback;
+}
+
 /** Adds picked files to a composer, each once, after those picked before. */
 export function withAttachments(
   composer: ComposerState,

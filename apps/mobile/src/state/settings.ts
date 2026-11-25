@@ -37,6 +37,11 @@ export interface Settings {
   pushOff: string[];
   /** How fast voice memos and audio clips play, at their own pitch. */
   playbackSpeed: PlaybackSpeed;
+  /**
+   * Conversations draw the room changes only the room log lists otherwise (`logOnly`): profile
+   * and room setup changes.
+   */
+  showRoomChanges: boolean;
   /** Timelines draw the events they otherwise leave out (developer tools). */
   showHiddenEvents: boolean;
 }
@@ -53,6 +58,7 @@ export const DEFAULT_SETTINGS: Settings = {
   pushEnabled: true,
   pushOff: [],
   playbackSpeed: 1,
+  showRoomChanges: false,
   showHiddenEvents: false,
 };
 
@@ -70,6 +76,7 @@ const savedSettings = z.object({
   playbackSpeed: z
     .union([z.literal(1), z.literal(1.5), z.literal(2)])
     .catch(DEFAULT_SETTINGS.playbackSpeed),
+  showRoomChanges: z.boolean().catch(DEFAULT_SETTINGS.showRoomChanges),
   showHiddenEvents: z.boolean().catch(DEFAULT_SETTINGS.showHiddenEvents),
 });
 

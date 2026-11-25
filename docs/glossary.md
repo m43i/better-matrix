@@ -220,6 +220,16 @@ louder.
 name (`RoomEvent`, `RoomChange`). Shown as a small line; joins and leaves in a row merge. See
 [ADR 0006](adr/0006-timelines.md).
 
+**Room log**
+: Every room event of a room's loaded history, newest first with its date and time: the
+profile and room-setting changes timelines leave out by default (`RoomChange::log_only`), and
+who came and went. Opened from the room's info (`SidePanel::Log`); "Load earlier" pages the
+room's history back. See [ADR 0006](adr/0006-timelines.md).
+
+**Room changes** (setting)
+: Whether timelines also show the room events only the room log lists by default
+(`show_room_changes`, a setting on this device).
+
 **Hidden event**
 : An event timelines leave out: room state the app draws no line for, an event that didn't
 parse, a membership event that changed nothing (`EntryKind::Hidden`, `HiddenEvent`). With "Show
@@ -277,6 +287,10 @@ it with a strip of thumbnails, the arrow keys or a swipe (`preview::batch`, `sta
 
 **Upload**
 : A file to send: a path on disk or bytes in memory, such as a pasted screenshot (`Upload`).
+
+**Upload thumbnail**
+: A picture waiting in the composer, shown as a small square of itself with a remove button
+instead of a file chip (`UploadThumbnails`). See [ADR 0007](adr/0007-composer-and-media.md).
 
 **Warm timeline**
 : A timeline closed lately and kept built in the engine, so opening it again is instant; an open
@@ -649,7 +663,7 @@ device until the user signs in as it again (which takes them back) or removes it
 
 **Side panel**
 : The panel beside the open room, in the thread's place: the room's info, its members, its
-threads or its files, or someone's person panel (`SidePanel`). See [ADR 0008](adr/0008-people-and-rooms.md).
+threads, its files, its pins, its widgets or its room log, or someone's person panel (`SidePanel`). See [ADR 0008](adr/0008-people-and-rooms.md).
 
 **Person panel**
 : Someone's profile in the side panel, from their name or picture on a message: picture,

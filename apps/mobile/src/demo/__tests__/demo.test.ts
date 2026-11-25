@@ -1,5 +1,5 @@
 import { previewGallery } from '../../state/gallery';
-import { activeAccount, activeRoomList } from '../../state/selectors';
+import { activeAccount, activeRoomList, roomLogOf } from '../../state/selectors';
 import { timelineId } from '../../state/timeline';
 import { bootDemo } from '../boot';
 import { canStartMeeting, room, roomMeetings } from '../../state/selectors';
@@ -77,6 +77,11 @@ describe('scenes', () => {
   it('should fill the general room’s timeline', () => {
     const general = bootDemo('room', noMedia).getState().accounts[0]!.timelines[GENERAL]!;
     expect(general.entries.some((e) => e.kind.type === 'Message')).toBe(true);
+  });
+
+  it('should give the general room changes only its log lists', () => {
+    const log = roomLogOf(bootDemo('room-log', noMedia).getState(), ADA, GENERAL);
+    expect(log.map((e) => e.event.change.type)).toContain('RoomTopic');
   });
 
   it('should fill the demo thread', () => {

@@ -75,6 +75,8 @@ pub struct Context<'a> {
     pub revealed: &'a std::collections::HashSet<(AccountId, String)>,
     /// Hidden events get a line (developer tools).
     pub show_hidden: bool,
+    /// Profile and room-setting changes get a line too, not only the room log.
+    pub show_room_changes: bool,
     /// Classic rows or chat bubbles.
     pub layout: MessageLayout,
     /// Which message's hover toolbar the pointer is with.
@@ -109,6 +111,7 @@ impl<'a> Context<'a> {
             show_maps: s.settings.show_maps,
             revealed: &s.revealed_media,
             show_hidden: s.settings.show_hidden_events,
+            show_room_changes: s.settings.show_room_changes,
             layout: s.settings.message_layout,
             hover: &s.message_hover,
             covered: false,
@@ -133,6 +136,12 @@ impl<'a> Context<'a> {
 
     fn in_thread(&self) -> bool {
         self.key.thread.is_some()
+    }
+
+    /// Whether a room event gets a line: a profile or room-setting change only with
+    /// `show_room_changes`, else the room log alone lists it.
+    fn draws(&self, event: &RoomEvent) -> bool {
+        self.show_room_changes || !event.change.log_only()
     }
 
     /// Whether `message` sits at the timeline's right: the user's own, in chat bubbles.
@@ -246,7 +255,7 @@ const NAMES: &str = "\u{1}";
 const EVENT_AVATAR: f32 = 18.0;
 
 /// What one room event says, in the user's language.
-fn room_event_text(event: &RoomEvent) -> String {
+pub(super) fn room_event_text(event: &RoomEvent) -> String {
     let name = event.sender.name.as_str();
     match &event.change {
         RoomChange::Created => tf!("event.created", name = name),
@@ -376,7 +385,8 @@ fn plan_version(revision: u64, ignored: u64) -> u64 {
 
 /// The rows of a timeline and their keys: one cheap pass over the entries. Messages from people
 /// the user ignores have no row: a timeline kept from before the ignore still holds them until
-/// the engine reloads it.
+/// the engine reloads it. A date divider whose day draws nothing (only room changes the room log
+/// keeps, hidden events, ignored people) has no row either.
 fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)> {
     let mut rows = Vec::new();
     let entries = timeline.map_or(&[][..], |t| t.entries.as_slice());
@@ -391,6 +401,8 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
     }
     let mut previous: Option<&Message> = None;
     let fading = timeline.and_then(RoomTimeline::fading_read_marker);
+    // The last date divider's row, until a row under it draws something.
+    let mut empty_day: Option<usize> = None;
     let mut index = 0;
     while let Some(entry) = entries.get(index) {
         let at = index;
@@ -400,16 +412,20 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
             rows.push((cx.key(id), Row::ReadMarker(id.to_owned())));
         }
         index += 1;
+        let drawn = rows.len();
         match &entry.kind {
+            // Left to the room log, it is passed over like a hidden event.
+            EntryView::RoomEvent(event) if !cx.draws(event) => {}
             EntryView::RoomEvent(event) => {
-                // Joins (or leaves) in a row read as one line; hidden entries between them
-                // don't break the run.
+                // Joins (or leaves) in a row read as one line; entries between them that draw
+                // nothing don't break the run.
                 while event.change.groups()
                     && fading.is_none_or(|(_, boundary)| boundary != index)
                     && let Some(next) = entries.get(index)
                 {
                     match &next.kind {
                         EntryView::RoomEvent(other) if other.change == event.change => {}
+                        EntryView::RoomEvent(other) if !cx.draws(other) => {}
                         EntryView::Hidden(_) if !cx.show_hidden => {}
                         _ => break,
                     }
@@ -428,8 +444,13 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
             EntryView::ReadMarker if timeline.is_some_and(|t| t.read_marker_seen(&entry.id)) => {}
             EntryView::ReadMarker => rows.push((cx.key(&entry.id), Row::ReadMarker(entry.id.clone()))),
             EntryView::DateDivider(_) => {
+                if let Some(empty) = empty_day.take() {
+                    rows.remove(empty);
+                }
+                empty_day = Some(rows.len());
                 rows.push((cx.key(&entry.id), Row::Divider(at)));
                 previous = None;
+                continue;
             }
             EntryView::Start if !cx.in_thread() => {
                 rows.push((entry.id.clone(), Row::Start));
@@ -442,6 +463,13 @@ fn plan(cx: &Context<'_>, timeline: Option<&RoomTimeline>) -> Vec<(String, Row)>
             }
             EntryView::Start | EntryView::Hidden(_) => {}
         }
+        // Anything but the "New" marker gives the day under the divider something to show.
+        if rows[drawn..].iter().any(|(_, row)| !matches!(row, Row::ReadMarker(_))) {
+            empty_day = None;
+        }
+    }
+    if let Some(empty) = empty_day {
+        rows.remove(empty);
     }
     if let Some((id, boundary)) = fading
         && boundary == entries.len()
@@ -2247,6 +2275,62 @@ pub fn human_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The keys of the rows #general plans with the changes of its setup (`demo::room_changes`).
+    fn planned(show_room_changes: bool) -> Vec<String> {
+        let mut s = State::detached();
+        crate::demo::room_changes(&mut s);
+        s.settings.show_room_changes = show_room_changes;
+        let account = AccountId::new(crate::demo::ADA);
+        let key = TimelineKey::room(crate::demo::DEMO_THREAD.0);
+        let data = s.accounts.get(&account).expect("the account");
+        let (room, timeline) = (data.room(&key.room_id).expect("the room"), data.timeline(&key));
+        plan(&Context::new(&s, data, room, &key), timeline).into_iter().map(|(key, _)| key).collect()
+    }
+
+    #[test]
+    fn a_room_setting_change_should_leave_the_timeline_by_default() {
+        let rows = planned(false);
+        assert!(!rows.iter().any(|key| key == "ev-topic" || key == "ev-created"), "{rows:?}");
+    }
+
+    #[test]
+    fn a_profile_change_should_leave_the_timeline_by_default() {
+        assert!(!planned(false).iter().any(|key| key == "ev-grace-picture"));
+    }
+
+    #[test]
+    fn an_invite_should_stay_in_the_timeline() {
+        assert!(planned(false).iter().any(|key| key == "ev-invited"));
+    }
+
+    #[test]
+    fn room_changes_should_show_in_the_timeline_when_turned_on() {
+        let rows = planned(true);
+        assert!(["ev-topic", "ev-created", "ev-grace-picture"].iter().all(|key| rows.iter().any(|row| row == key)));
+    }
+
+    #[test]
+    fn joins_should_read_as_one_line_across_a_change_the_timeline_leaves_out() {
+        let rows = planned(false);
+        let joins = rows.iter().filter(|key| key.starts_with("ev-joined-")).count();
+        assert_eq!(joins, 1, "{rows:?}");
+    }
+
+    #[test]
+    fn a_day_of_only_changes_the_timeline_leaves_out_should_have_no_date_divider() {
+        assert!(!planned(false).iter().any(|key| key == "day-setup"));
+    }
+
+    #[test]
+    fn a_day_with_something_to_show_should_keep_its_date_divider() {
+        assert!(planned(false).iter().any(|key| key == "day"));
+    }
+
+    #[test]
+    fn a_day_of_room_changes_should_keep_its_date_divider_while_they_show() {
+        assert!(planned(true).iter().any(|key| key == "day-setup"));
+    }
 
     #[test]
     fn a_reply_to_a_call_should_quote_the_kind_of_call() {

@@ -868,7 +868,7 @@ fn room_events() -> Vec<TimelineEntry> {
     let ada = person(ADA, "Ada Lovelace");
     let event = |id: &str, sender: Person, change: RoomChange| TimelineEntry {
         id: id.into(),
-        kind: EntryKind::RoomEvent(Box::new(RoomEvent { sender, change })),
+        kind: EntryKind::RoomEvent(Box::new(RoomEvent { sender, change, timestamp_ms: DEMO_DAY_MS })),
     };
     let mut events = vec![
         event("ev-created", ada.clone(), RoomChange::Created),
@@ -886,6 +886,42 @@ fn room_events() -> Vec<TimelineEntry> {
         joined.iter().map(|(id, name)| event(&format!("ev-joined-{id}"), person(id, name), RoomChange::Joined)),
     );
     events
+}
+
+/// #general with the changes of its setup: a day before the messages on which the room only got
+/// its name, topic and picture (the room log keeps those, so that day shows nothing), and Grace
+/// changing her picture among the joins (which still read as one line).
+pub fn room_changes(s: &mut State) {
+    seed(s);
+    let account = AccountId::new(ADA);
+    let key = TimelineKey::room(DEMO_THREAD.0);
+    let person = |id: &str, name: &str| Person { id: id.into(), name: name.into(), avatar: None };
+    let event = |id: &str, sender: Person, change: RoomChange, timestamp_ms: u64| TimelineEntry {
+        id: id.into(),
+        kind: EntryKind::RoomEvent(Box::new(RoomEvent { sender, change, timestamp_ms })),
+    };
+    let ada = person(ADA, "Ada Lovelace");
+    let setup = DEMO_DAY_MS - 86_400_000 + 9 * 3_600_000;
+    let entries = [
+        TimelineEntry { id: "day-setup".into(), kind: EntryKind::DateDivider(setup) },
+        event("ev-named", ada.clone(), RoomChange::RoomName("general".into()), setup),
+        event("ev-topic", ada.clone(), RoomChange::RoomTopic("Company-wide news".into()), setup + 60_000),
+        event("ev-picture", ada, RoomChange::RoomPicture, setup + 120_000),
+    ];
+    // After the timeline's start.
+    for (index, entry) in (1..).zip(entries) {
+        seed_timeline(s, &account, &key, TimelineDiff::Insert { index, entry });
+    }
+    let grace = "@grace:example.org";
+    let after_join = s
+        .accounts
+        .get(&account)
+        .and_then(|data| data.timeline(&key))
+        .and_then(|timeline| timeline.entries.iter().position(|entry| entry.id == format!("ev-joined-{grace}")))
+        .map_or(0, |at| at + 1);
+    let picture = event("ev-grace-picture", person(grace, "Grace Hopper"), RoomChange::ProfilePicture, DEMO_DAY_MS);
+    seed_timeline(s, &account, &key, TimelineDiff::Insert { index: after_join, entry: picture });
+    s.select_room(DEMO_THREAD.0);
 }
 
 fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -> RoomSummary {
@@ -1613,6 +1649,19 @@ pub fn typing(s: &mut State, typed: &str) {
     image_packs(s);
     s.composer.edit.insert(typed);
     s.composer.edit.focused = true;
+}
+
+/// A draft with files to send: a pasted screenshot and a picked picture show as thumbnails, a
+/// PDF as a chip, all decoded before the scene draws.
+pub fn upload_thumbnails(s: &mut State) {
+    typing(s, "Here are the release assets");
+    s.media.attach(std::sync::Arc::new(|| {}));
+    let icon = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packaging/icons/better-matrix-256.png");
+    let composer = &mut s.composer;
+    composer.attach_pasted_image(include_bytes!("../../../packaging/icons/better-matrix-256.png"));
+    composer.attach([std::path::PathBuf::from(icon), std::path::PathBuf::from("Release notes.pdf")]);
+    s.upload_thumbnails.sync(&s.media, s.composer.attachments.iter());
+    s.upload_thumbnails.wait();
 }
 
 /// A draft holding a mention, a spoiler and a formula as pills.

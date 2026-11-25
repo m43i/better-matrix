@@ -1,6 +1,6 @@
 //! The room's panels beside its timeline, besides the member list: its overview (from the info
 //! button: name, topic, and the ways to its members, threads and files, and to leave it), its
-//! threads, and the files shared in it.
+//! threads, the files shared in it, and its room log.
 
 use matrix_core::{AttachmentKind, RoomKind, RoomSummary};
 use rune::{El, ScrollSpec, col, el, icon, row, text};
@@ -8,7 +8,7 @@ use rune::{El, ScrollSpec, col, el, icon, row, text};
 use super::components::{ButtonKind, button, divider, icon_button, media_avatar, when};
 use super::icons;
 use super::theme::{Palette, font};
-use crate::i18n::{t, tp};
+use crate::i18n::{t, tf, tp};
 use crate::state::{AccountData, SidePanel, State};
 
 /// A panel's frame: a title and a close button, then its content, which scrolls, and a footer
@@ -126,6 +126,10 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .child(
             link_row(&icons::FILE, t!("info.files"), None, "info-files", p)
                 .on_press(|s: &mut State| s.show_side(SidePanel::Files)),
+        )
+        .child(
+            link_row(&icons::HISTORY, t!("info.log"), None, "info-log", p)
+                .on_press(|s: &mut State| s.show_side(SidePanel::Log)),
         )
         .child(
             link_row(
@@ -351,4 +355,73 @@ pub fn pins(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -
         }
     }
     frame("pins-panel", t!("info.pins"), list, None, p)
+}
+
+/// The room log: every room event in the room's history loaded so far (profile and room-setting
+/// changes, which the timeline leaves out by default, and who came and went), newest first, with
+/// when each happened. Its foot loads the history before.
+pub fn log(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
+    let timeline = account.timeline(&matrix_core::TimelineKey::room(&room.room_id));
+    let mut list = col().w_full().py(8.0);
+    let mut listed = 0;
+    for (id, event) in timeline.into_iter().flat_map(|t| t.room_log()) {
+        if account.ignores(&event.sender.id) {
+            continue;
+        }
+        listed += 1;
+        list = list.child(
+            row()
+                .key(format!("log-{id}"))
+                .w_full()
+                .px(16.0)
+                .py(8.0)
+                .gap(10.0)
+                .items_start()
+                .child(
+                    media_avatar(&event.sender.id, &event.sender.name, event.sender.avatar.as_ref(), &s.media, 28.0)
+                        .mt(2.0),
+                )
+                .child(
+                    col()
+                        .grow(1.0)
+                        .min_w(0.0)
+                        .gap(2.0)
+                        .child(
+                            text(super::timeline::room_event_text(event))
+                                .font(font::BODY)
+                                .color(p.text)
+                                .wrap()
+                                .selectable(true),
+                        )
+                        .child(text(when(event.timestamp_ms)).font(font::META).color(p.text_muted)),
+                ),
+        );
+    }
+    if listed == 0 {
+        let empty = if timeline.is_some() { t!("info.no_log") } else { t!("info.loading") };
+        list = list.child(text(empty).font(font::BODY).color(p.text_muted).px(16.0).py(12.0).wrap());
+    }
+    let footer = timeline.filter(|t| !t.reached_start).map(|t| {
+        let foot = col().w_full().px(16.0).py(10.0).gap(8.0).border_sides([1.0, 0.0, 0.0, 0.0], p.divider);
+        match &t.history_error {
+            Some(error) => {
+                let key = matrix_core::TimelineKey::room(&room.room_id);
+                foot.child(text(t!("timeline.history_failed")).font(font::META).color(p.danger).wrap()).child(
+                    button(t!("common.try_again"), ButtonKind::Secondary, true, p)
+                        .key("log-retry")
+                        .label(tf!("timeline.history_failed_detail", error = error))
+                        .on_press(move |s: &mut State| s.retry_history(&key)),
+                )
+            }
+            None if t.loading => {
+                foot.child(text(t!("timeline.loading")).key("log-loading").font(font::META).color(p.text_muted))
+            }
+            None => foot.child(
+                button(t!("info.log_earlier"), ButtonKind::Secondary, true, p)
+                    .key("log-earlier")
+                    .on_press(State::load_earlier_log),
+            ),
+        }
+    });
+    frame("log-panel", t!("info.log"), list, footer, p)
 }

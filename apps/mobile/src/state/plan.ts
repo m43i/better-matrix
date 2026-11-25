@@ -1,8 +1,10 @@
 // The timeline plan: a timeline's rows, worked out in one pass over its entries before any row
 // is drawn (the desktop's `plan` in ui/timeline.rs). Messages from one sender close together
 // share a header, joins and leaves in a row merge into one line, and the list shows where
-// visible history starts, a failed or loading page, date dividers and the "New" marker. The
-// list draws only the rows near the screen, each by its plan entry.
+// visible history starts, a failed or loading page, date dividers and the "New" marker. Changes
+// only the room log lists take no row unless room changes show, and a date divider over a day
+// with nothing drawn is left out. The list draws only the rows near the screen, each by its plan
+// entry.
 
 import type {
   HiddenEvent,
@@ -11,6 +13,7 @@ import type {
   TimelineEntry,
 } from '@better-matrix/matrix-native/types';
 
+import { logOnly } from './roomLog';
 import { isStandIn } from './safety';
 import type { ShownMarker } from './newMarker';
 import type { Timeline } from './types';
@@ -53,6 +56,11 @@ export interface PlanOptions {
   /** Draw hidden events (developer tools); left out, they take no row. */
   showHidden?: boolean;
   /**
+   * Draw room changes only the room log lists otherwise (`logOnly`): profile and room setup
+   * changes. Left out, they take no row, as an undrawn hidden event.
+   */
+  showRoomChanges?: boolean;
+  /**
    * People the user ignores, confirmed or on the way, and those whose ignore is being undone
    * until that is saved: nothing they sent takes a row (their hidden entries even with
    * `showHidden`).
@@ -80,6 +88,45 @@ function groups(event: RoomEvent): boolean {
   return event.change.type === 'Joined' || event.change.type === 'Left';
 }
 
+/** Rows with content of their own: a date divider before none of them is left out. */
+function drawn(row: Row): boolean {
+  switch (row.kind) {
+    case 'message':
+    case 'events':
+    case 'hidden':
+    case 'start':
+    case 'replies':
+      return true;
+    case 'date':
+    case 'new':
+    case 'loading':
+    case 'historyFailed':
+      return false;
+  }
+}
+
+/** The rows without date dividers that have nothing drawn after them before the next one. */
+function withoutEmptyDays(rows: Row[]): Row[] {
+  let content = false;
+  const kept: Row[] = [];
+
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+
+    if (row === undefined) continue;
+
+    if (row.kind === 'date') {
+      if (content) kept.push(row);
+      content = false;
+    } else {
+      kept.push(row);
+      content ||= drawn(row);
+    }
+  }
+
+  return kept.reverse();
+}
+
 /** The rows of a timeline, oldest first. */
 export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
   const { thread } = options;
@@ -89,6 +136,15 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
   // sent, and never a stand-in for an ignored person's message (ADR 0011).
   const draws = (entry: TimelineEntry, event: HiddenEvent) =>
     (options.showHidden ?? false) && !ignored.includes(event.sender.id) && !isStandIn(entry);
+
+  // A room change only the room log lists takes no row unless room changes show.
+  const shows = (event: RoomEvent) => (options.showRoomChanges ?? false) || !logOnly(event.change);
+
+  // Entries that take no row: hidden ones not drawn, room changes left out.
+  const leftOut = (entry: TimelineEntry) =>
+    entry.kind.type === 'Hidden'
+      ? !draws(entry, entry.kind.data)
+      : entry.kind.type === 'RoomEvent' && !shows(entry.kind.data);
 
   const inThread = thread !== null;
   const entries = timeline.entries;
@@ -158,8 +214,10 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
 
     switch (kind.type) {
       case 'RoomEvent': {
+        // Left out, it is as an undrawn hidden entry: messages around it still group.
+        if (!shows(kind.data)) break;
         const events = [kind.data];
-        // Hidden entries between joins don't break the run.
+        // Hidden entries and room changes left out between joins don't break the run.
         // A run stops at the "New" divider, which stands between two of its events.
         const atMarker = () => marker != null && entries[index]?.id === marker.boundary;
 
@@ -172,7 +230,7 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
 
           if (next.type === 'RoomEvent' && next.data.change.type === kind.data.change.type)
             events.push(next.data);
-          else if (next.type !== 'Hidden' || draws(after, next.data)) break;
+          else if (!leftOut(after)) break;
           index += 1;
         }
 
@@ -209,16 +267,18 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
     }
   }
 
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const row = rows[i];
+  const shown = withoutEmptyDays(rows);
+
+  for (let i = shown.length - 1; i >= 0; i--) {
+    const row = shown[i];
 
     if (row?.kind === 'message' && row.message.content.type === 'Call') {
-      rows[i] = { ...row, latestCall: true };
+      shown[i] = { ...row, latestCall: true };
       break;
     }
   }
 
-  return rows;
+  return shown;
 }
 
 /** The row showing the message with this event ID. */

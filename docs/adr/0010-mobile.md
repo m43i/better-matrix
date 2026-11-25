@@ -263,7 +263,9 @@ Date: 2026-11-16
   composer is empty again (`withRefusedBack`, applied on every composer change), as refused
   edits wait in `kept`; like those it lives for the run only. Sends are planned as
   data (`state/outgoing.ts`): text with the reply first, then each attachment as
-  `Upload::Path`; voice memos are AAC `.m4a` from expo-audio, sent with a 100-point waveform
+  `Upload::Path`. A picked picture waits in the composer as a thumbnail, any other file as a
+  chip; what is a picture is decided by the picker's media type, then the file name's extension
+  (`attachmentKind`), so a picture handed over without a type still shows as one; voice memos are AAC `.m4a` from expo-audio, sent with a 100-point waveform
   from the recorder's metering (read 20 times a second, `waveformFromLevels`, on the desktop's
   scale).
 - **Voice memos** look and behave as the desktop's voice card (ADR 0007), with the same pure
@@ -451,6 +453,17 @@ Date: 2026-11-16
     meeting options. `/meet` and the room menu start a meeting where offered; room details count
     the widgets (`roomWidgetCount`). Scenes: `widgets`, `meeting`, `meeting-start`,
     `meeting-command`, `widget-permissions`, `integrations`.
+- **Room changes and the room log** follow the desktop (ADR 0006). Changes only the room log
+  lists (`logOnly` in `state/roomLog.ts`, mirroring `RoomChange::log_only`) take no row unless
+  the device setting `showRoomChanges` is on (Preferences, Room changes); left out, they pass
+  like an undrawn hidden event, so message groups and runs of joins or leaves continue across
+  them. `planTimeline` drops a date divider when nothing drawn (a message, a room event line, a
+  hidden event, the start or a thread's reply count) follows it before the next divider; the
+  "New" marker doesn't count. Room info opens the room log (`app/room-log.tsx`, pushed): every
+  room event of the room's main timeline, newest first, without what ignored people did
+  (`roomLogOf`), each with the sender's picture, the timeline's sentence and its date and time.
+  It retains the room's timeline while it shows, and "Load earlier" pages it back with
+  `loadOlder` until it reaches the start.
 - **Message HTML** is parsed by a small tokenizer of our own (`state/html.ts`) into a safe node
   tree: only the desktop's allowed tags become formatting, links keep `http(s)`, `mailto` and
   `ftp`, reply fallbacks and scripts are dropped, nesting is capped. Nothing renders raw HTML.

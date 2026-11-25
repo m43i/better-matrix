@@ -94,6 +94,7 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
         Some(SidePanel::Members) => Some(super::members::panel(s, account, room, p)),
         Some(SidePanel::Threads) => Some(super::info::threads(account, room, p)),
         Some(SidePanel::Pins) => Some(super::info::pins(s, account, room, p)),
+        Some(SidePanel::Log) => Some(super::info::log(s, account, room, p)),
         Some(SidePanel::Files) => Some(super::info::files(s, account, room, p)),
         Some(SidePanel::Widgets) => Some(super::developer::widgets(s, account, room, p)),
         None => s.active_thread().map(|root| thread_panel(s, account, room, root, p, ui)),

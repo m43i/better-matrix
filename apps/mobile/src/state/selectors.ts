@@ -21,9 +21,10 @@ import type {
 import { galleryAround, thumbnailOf } from './gallery';
 import { findMessage, mxcMedia } from './messages';
 import { EMPTY_TIMELINE, mediaKey } from './reducer';
+import { type LogEntry, roomLog } from './roomLog';
 import { hiddenEntry, revealKey, showsMedia, shownInvitations } from './safety';
 import { newestMessages, type NewestMessages } from './sections';
-import { timelineId } from './timeline';
+import { roomKey, timelineId } from './timeline';
 import type { AccountData, State, Timeline } from './types';
 import { meetingsOf } from './widgets';
 
@@ -518,6 +519,25 @@ export function shownThreads(
   return data && threads
     ? withoutIgnoredSenders(threads, shownIgnored(data) ?? [], shownThreadLists)
     : threads;
+}
+
+const roomLogs = new WeakMap<TimelineEntry[], { ignored: string; log: LogEntry[] }>();
+
+/**
+ * The room log of a room: every room event its main timeline holds, newest first, without what
+ * people the user ignores did. The same array while neither changes.
+ */
+export function roomLogOf(state: State, id: AccountId, roomId: string): LogEntry[] {
+  const entries = timeline(state, id, roomKey(roomId)).entries;
+  const ignored = shownIgnored(account(state, id)) ?? [];
+  const key = ignored.join(',');
+  const cached = roomLogs.get(entries);
+
+  if (cached?.ignored === key) return cached.log;
+  const log = roomLog(entries, ignored);
+  roomLogs.set(entries, { ignored: key, log });
+
+  return log;
 }
 
 /** Whether any of a room's kept timelines holds `eventId`, or held it from an ignored sender. */

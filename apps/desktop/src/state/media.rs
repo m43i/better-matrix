@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 
-use matrix_core::MediaRef;
+use matrix_core::{MediaRef, Upload};
 use rune::{Image, ImageCache, Waker};
 
 use super::retry::Retries;
@@ -329,6 +329,16 @@ impl MediaCache {
         self.decoder.as_ref().map(|decoder| decoder.load(encoded))
     }
 
+    /// An image upload, read and decoded on Rune's worker: a file is read there, never here.
+    /// `None` without a decoder (headless) or for an upload that isn't an image.
+    pub fn upload(&self, upload: &Upload) -> Option<Image> {
+        let decoder = self.decoder.as_ref().filter(|_| is_image(upload))?;
+        Some(match upload {
+            Upload::Path(path) => decoder.file(path, THUMBNAIL_SIZE, 2.0),
+            Upload::Bytes { bytes, .. } => decoder.load(std::sync::Arc::clone(bytes)),
+        })
+    }
+
     /// The image, once decoded.
     pub fn image(&self, media: &MediaRef) -> Option<&Image> {
         match self.entries.get(media)? {
@@ -378,11 +388,131 @@ impl MediaCache {
     }
 }
 
+/// The size an upload thumbnail draws at, in points: SVGs rasterize for it.
+pub const THUMBNAIL_SIZE: f32 = 64.0;
+
+/// Whether an upload is a picture, by its name: it shows as a thumbnail in the composer.
+pub fn is_image(upload: &Upload) -> bool {
+    upload.mime().type_() == "image"
+}
+
+/// The composers' upload thumbnails: one decoded picture per image upload waiting to be sent,
+/// let go once the upload is sent, removed or set aside with its draft.
+#[derive(Debug, Default)]
+pub struct UploadThumbnails {
+    shown: Vec<Thumbnail>,
+}
+
+#[derive(Debug)]
+struct Thumbnail {
+    upload: Upload,
+    image: Image,
+    /// Whether the view has drawn it since it decoded (or failed to).
+    settled: bool,
+}
+
+impl UploadThumbnails {
+    /// Keeps a thumbnail for each image in `uploads` and none other, starting the new ones'
+    /// decoding. True when what shows changed: a thumbnail came, went, decoded or failed.
+    pub fn sync<'a>(&mut self, media: &MediaCache, uploads: impl Iterator<Item = &'a Upload>) -> bool {
+        let wanted: Vec<&Upload> = uploads.filter(|upload| is_image(upload)).collect();
+        let before = self.shown.len();
+        self.shown.retain(|thumbnail| wanted.contains(&&thumbnail.upload));
+        let mut changed = self.shown.len() != before;
+        for upload in wanted {
+            if self.shown.iter().any(|thumbnail| &thumbnail.upload == upload) {
+                continue;
+            }
+            if let Some(image) = media.upload(upload) {
+                self.shown.push(Thumbnail { upload: upload.clone(), image, settled: false });
+                changed = true;
+            }
+        }
+        for thumbnail in &mut self.shown {
+            if !thumbnail.settled && thumbnail.image.is_ready() {
+                thumbnail.settled = true;
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// Blocks until every thumbnail has decoded or failed: for headless scenes, which draw once.
+    pub fn wait(&self) {
+        for thumbnail in &self.shown {
+            let _ = thumbnail.image.wait();
+        }
+    }
+
+    /// The thumbnail of `upload`: decoding (drawn empty until it is) or decoded. `None` for a
+    /// file that isn't an image, or one that couldn't be decoded: it shows as a file.
+    pub fn get(&self, upload: &Upload) -> Option<&Image> {
+        self.shown
+            .iter()
+            .find(|thumbnail| &thumbnail.upload == upload)
+            .map(|thumbnail| &thumbnail.image)
+            .filter(|image| image.error().is_none())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use matrix_core::MediaSize;
 
     use super::*;
+
+    fn upload(name: &str, bytes: &[u8]) -> Upload {
+        Upload::Bytes { name: name.into(), bytes: bytes.into() }
+    }
+
+    const PNG: &[u8] = include_bytes!("../../../../packaging/icons/better-matrix-256.png");
+
+    #[test]
+    fn a_picture_upload_should_get_a_thumbnail() {
+        let (media, mut thumbnails, picture) = (cache(), UploadThumbnails::default(), upload("shot.png", PNG));
+        thumbnails.sync(&media, [&picture].into_iter());
+        assert!(thumbnails.get(&picture).is_some());
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_picture_should_get_no_thumbnail() {
+        let (media, mut thumbnails, pdf) = (cache(), UploadThumbnails::default(), upload("notes.pdf", b"%PDF"));
+        thumbnails.sync(&media, [&pdf].into_iter());
+        assert!(thumbnails.get(&pdf).is_none());
+    }
+
+    #[test]
+    fn a_picture_that_cannot_be_decoded_should_show_as_a_file() {
+        let (media, mut thumbnails, broken) = (cache(), UploadThumbnails::default(), upload("shot.png", b"nope"));
+        thumbnails.sync(&media, [&broken].into_iter());
+        thumbnails.wait();
+        assert!(thumbnails.get(&broken).is_none());
+    }
+
+    #[test]
+    fn a_removed_upload_should_let_its_thumbnail_go() {
+        let (media, mut thumbnails, picture) = (cache(), UploadThumbnails::default(), upload("shot.png", PNG));
+        thumbnails.sync(&media, [&picture].into_iter());
+        assert!(thumbnails.sync(&media, std::iter::empty()), "a change to draw");
+        assert!(thumbnails.get(&picture).is_none());
+    }
+
+    #[test]
+    fn a_thumbnail_decoding_should_ask_for_a_redraw_once() {
+        let (media, mut thumbnails, picture) = (cache(), UploadThumbnails::default(), upload("shot.png", PNG));
+        thumbnails.sync(&media, [&picture].into_iter());
+        thumbnails.wait();
+        assert!(thumbnails.sync(&media, [&picture].into_iter()));
+        assert!(!thumbnails.sync(&media, [&picture].into_iter()));
+    }
+
+    #[test]
+    fn headless_uploads_should_show_as_files() {
+        let (media, mut thumbnails, picture) =
+            (MediaCache::default(), UploadThumbnails::default(), upload("shot.png", PNG));
+        thumbnails.sync(&media, [&picture].into_iter());
+        assert!(thumbnails.get(&picture).is_none());
+    }
 
     /// A cache that decodes, and an image counted at 2400×2400: two fit the budget, three don't.
     fn cache() -> MediaCache {

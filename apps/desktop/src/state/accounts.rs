@@ -287,6 +287,14 @@ fn next_revision() -> u64 {
 }
 
 impl RoomTimeline {
+    /// The room log: every room event loaded so far, newest first, with its entry's ID.
+    pub fn room_log(&self) -> impl Iterator<Item = (&str, &matrix_core::RoomEvent)> {
+        self.entries.iter().rev().filter_map(|entry| match &entry.kind {
+            EntryView::RoomEvent(event) => Some((entry.id.as_str(), event.as_ref())),
+            _ => None,
+        })
+    }
+
     /// The fading divider and its insertion point in the current entries.
     pub fn fading_read_marker(&self) -> Option<(&str, usize)> {
         let marker = self.read_marker_fade.as_ref()?.marker();

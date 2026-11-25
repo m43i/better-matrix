@@ -86,7 +86,7 @@ pub use gifs::GifCache;
 pub use link_previews::LinkPreviews;
 pub use links::{LinkDialog, LinkStep};
 pub use location::{LocationForm, MAP_PIXELS, MAP_SIZE};
-pub use media::MediaCache;
+pub use media::{MediaCache, THUMBNAIL_SIZE, UploadThumbnails};
 pub use message_actions::{MessageAt, MessageHover};
 pub use navigation::{navigate, navigate_now};
 pub use packs::PACK_IMAGE_SIZE;
@@ -218,6 +218,8 @@ pub enum SidePanel {
     Threads,
     Files,
     Pins,
+    /// The room log: the room events of the history loaded, newest first, with their times.
+    Log,
     /// The room's widgets: web apps pinned to it, opened in the browser.
     Widgets,
     /// Someone's profile, from their name or picture on a message: as the message shows them,
@@ -1002,6 +1004,8 @@ pub struct State {
     /// Where the rail's space tiles are, by room ID, for the place a dropped space takes.
     space_zones: HashMap<String, [f32; 4]>,
     pub media: MediaCache,
+    /// The composers' image uploads, as thumbnails.
+    pub upload_thumbnails: UploadThumbnails,
     pub gifs: GifCache,
     /// Links' preview cards.
     pub link_previews: LinkPreviews,
@@ -1135,6 +1139,7 @@ impl State {
             space_zones: HashMap::new(),
             row_zones: HashMap::new(),
             media: MediaCache::default(),
+            upload_thumbnails: UploadThumbnails::default(),
             gifs: GifCache::default(),
             link_previews: LinkPreviews::default(),
             revealed_media: HashSet::new(),
@@ -2336,7 +2341,7 @@ impl State {
                     SidePanel::Pins => {
                         self.accounts.pins_failed(&account, room_id, error.clone());
                     }
-                    SidePanel::Info | SidePanel::Members | SidePanel::Person(_) => {}
+                    SidePanel::Info | SidePanel::Members | SidePanel::Log | SidePanel::Person(_) => {}
                 }
                 if panel != SidePanel::Pins {
                     self.notice = Some(tf!("notice.side", error = error));
@@ -2507,6 +2512,9 @@ impl State {
         }
         // Images decoded since the last frame count at their exact size from now on.
         changed |= self.media.measure();
+        changed |= self
+            .upload_thumbnails
+            .sync(&self.media, self.composer.attachments.iter().chain(&self.thread_composer.attachments));
         changed |= self.preview.as_mut().is_some_and(|preview| preview.content.poll());
         // However the preview moved (a key, an arrow, a thumbnail, opening), its thumbnail shows.
         if std::mem::take(&mut self.reveal_thumbnail)
@@ -2556,27 +2564,42 @@ impl State {
             if !flag.swap(false, Ordering::Relaxed) {
                 continue;
             }
-            let Some((account, key)) =
+            if let Some((account, key)) =
                 self.open_timelines.iter().find(|(_, key)| key.thread.is_some() == thread).cloned()
-            else {
-                continue;
-            };
-            // Checked before asking to change it: a change moves the revision and replans rows.
-            let idle = self
-                .accounts
-                .get(&account)
-                .and_then(|data| data.timeline(&key))
-                .is_some_and(|t| !t.loading && !t.reached_start && t.history_error.is_none());
-            if !idle {
-                continue;
+            {
+                changed |= self.load_older(account, key);
             }
-            let Some(timeline) = self.accounts.kept_timeline_mut(&account, &key) else { continue };
-            timeline.loading = true;
-            let purpose = Purpose::History { account: account.clone(), key: key.clone() };
-            self.dispatch(Command::LoadOlder { account, key }, purpose);
-            changed = true;
         }
         changed
+    }
+
+    /// Asks for the page of history before what the open timeline `key` holds, unless one is on
+    /// its way, its start is in, or the last page failed (that waits for a retry). True when it
+    /// asked.
+    fn load_older(&mut self, account: AccountId, key: TimelineKey) -> bool {
+        // Checked before asking to change it: a change moves the revision and replans rows.
+        let idle = self
+            .accounts
+            .get(&account)
+            .and_then(|data| data.timeline(&key))
+            .is_some_and(|t| !t.loading && !t.reached_start && t.history_error.is_none());
+        if !idle {
+            return false;
+        }
+        let Some(timeline) = self.accounts.kept_timeline_mut(&account, &key) else { return false };
+        timeline.loading = true;
+        let purpose = Purpose::History { account: account.clone(), key: key.clone() };
+        self.dispatch(Command::LoadOlder { account, key }, purpose);
+        true
+    }
+
+    /// The room log's "Load earlier": the page of the room's history before what it holds.
+    pub fn load_earlier_log(&mut self) {
+        let (Some(account), Some(room_id)) = (self.nav.account.clone(), self.active_room_id()) else { return };
+        let key = TimelineKey::room(room_id);
+        if self.open_timelines.contains(&(account.clone(), key.clone())) {
+            self.load_older(account, key);
+        }
     }
 
     /// Moves animations driven by the clock (seconds since start, virtual when headless) on:
@@ -4235,7 +4258,7 @@ impl State {
                 self.request_avatars();
                 self.load_identity(&user_id);
             }
-            Some(SidePanel::Info) | None => {}
+            Some(SidePanel::Info | SidePanel::Log) | None => {}
         }
     }
 
