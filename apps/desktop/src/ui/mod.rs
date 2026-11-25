@@ -135,11 +135,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         }
         (Some(Popover::MessageMenu { key, event_id, at }), _) => {
             let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
-            // More leaves Edit to its toolbar, unless the toolbar had no room for it; right-click
-            // offers it.
-            let prefix = if key.thread.is_some() { "thread-" } else { "" };
-            let skip_edit = at.is_none() && cx.layout_size(&format!("{prefix}edit-{event_id}")).is_some();
-            message_actions::menu(s, key, event_id, *at, skip_edit, window, &p)
+            message_actions::menu(s, key, event_id, *at, window, &p)
         }
         (Some(Popover::Emoji(chosen_for)), _) => {
             let anchor = match chosen_for {

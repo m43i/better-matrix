@@ -211,8 +211,9 @@ see who is typing there.
     user's own bubble it sits on the bubble's left, `TOOLBAR_BESIDE` away and level with its
     top, as before the Teams placement; where the timeline leaves no room there, over the
     bubble's top left corner. It never reaches into the readers' column. It holds React, Reply,
-    Thread, Edit on the user's own editable text, a rule, then More; content narrower than the whole toolbar keeps only More, whose
-    menu offers the rest (Add reaction then anchors the picker at More). Rising out of its row, the toolbar can lie over the message above, so the
+    Thread, Edit on the user's own editable text, a rule, then More; content narrower than the whole toolbar keeps only More. More's
+    menu is the right click's, every action the toolbar's included, so the two never differ
+    (Add reaction anchors the picker at More when the toolbar has no React). Rising out of its row, the toolbar can lie over the message above, so the
     pointer can be over two messages at once. The toolbar shows through its row's hover group;
     a shown toolbar the pointer is on holds it (`MessageHover`, from the toolbar's
     `on_hover_change`): it stays shown, and the row it lies over (by last frame's layout) shows

@@ -3322,27 +3322,72 @@ fn pressing_edit_in_a_toolbar_should_start_editing_its_message() {
     assert_eq!(editing.target.event_id, "$own");
 }
 
-#[test]
-fn more_should_leave_edit_to_its_toolbar() {
-    let mut rt = runtime(own_editable_room);
-    let row = element_rect(&rt, "msg-own");
-    rt.pointer_move(row[0] + 200.0, row[1] + row[3] / 2.0);
+/// The actions the open message menu offers, in order.
+fn menu_actions(rt: &Runtime<State>) -> Vec<&'static str> {
+    [
+        "react",
+        "reply",
+        "thread",
+        "forward",
+        "edit",
+        "copy-link",
+        "pin",
+        "save",
+        "copy",
+        "translate",
+        "source",
+        "report",
+        "end-poll",
+        "delete",
+    ]
+    .into_iter()
+    .filter(|action| rt.find(&format!("message-{action}")).is_some())
+    .collect()
+}
+
+/// The actions More offers on `event_id`, its row hovered at `x` across it.
+fn more_menu_actions(rt: &mut Runtime<State>, event_id: &str, x: f32) -> Vec<&'static str> {
+    let row = element_rect(rt, &format!("msg-{}", event_id.trim_start_matches('$')));
+    rt.pointer_move(row[0] + x, row[1] + row[3] / 2.0);
     for _ in 0..30 {
         rt.frame(1.0 / 60.0);
     }
-    press(&mut rt, "more-$own");
-    assert!(rt.find("message-menu").is_some());
-    assert!(rt.find("message-edit").is_none());
+    press(rt, &format!("more-{event_id}"));
+    assert!(rt.find("message-menu").is_some(), "More opens the menu");
+    let actions = menu_actions(rt);
+    rt.update(|s, _| s.popover = None);
+    rt.frame(0.1);
+    actions
 }
 
-#[test]
-fn right_clicking_the_users_own_editable_message_should_still_offer_edit() {
-    let mut rt = runtime(own_editable_room);
-    let (x, y) = rt.find("text-$own").expect("the message's words");
+/// The actions a right click on `event_id`'s words offers.
+fn right_click_menu_actions(rt: &mut Runtime<State>, event_id: &str) -> Vec<&'static str> {
+    let (x, y) = rt.find(&format!("text-{event_id}")).expect("the message's words");
     rt.secondary_down(x, y);
     rt.secondary_up(x, y);
     rt.frame(0.1);
-    assert!(rt.find("message-edit").is_some());
+    assert!(rt.find("message-menu").is_some(), "the right click opens the menu");
+    let actions = menu_actions(rt);
+    rt.update(|s, _| s.popover = None);
+    rt.frame(0.1);
+    actions
+}
+
+#[test]
+fn more_should_offer_the_same_actions_as_a_right_click_on_the_users_own_message() {
+    let mut rt = runtime(own_editable_room);
+    assert!(rt.find("edit-$own").is_some(), "the toolbar offers Edit too");
+    let more = more_menu_actions(&mut rt, "$own", 200.0);
+    assert!(more.contains(&"edit"), "{more:?}");
+    assert_eq!(more, right_click_menu_actions(&mut rt, "$own"));
+}
+
+#[test]
+fn more_should_offer_the_same_actions_as_a_right_click_on_someone_elses_message() {
+    let mut rt = runtime(own_editable_room);
+    let more = more_menu_actions(&mut rt, "$short-0", 200.0);
+    assert!(more.contains(&"report"), "{more:?}");
+    assert_eq!(more, right_click_menu_actions(&mut rt, "$short-0"));
 }
 
 #[test]
@@ -3353,13 +3398,8 @@ fn more_should_offer_edit_where_the_toolbar_has_no_room_for_it() {
         rt.frame(1.0 / 60.0);
     }
     assert!(rt.find("edit-$own").is_none(), "the narrow toolbar keeps Edit");
-    let row = element_rect(&rt, "msg-own");
-    rt.pointer_move(row[0] + row[2] / 2.0, row[1] + row[3] / 2.0);
-    for _ in 0..30 {
-        rt.frame(1.0 / 60.0);
-    }
-    press(&mut rt, "more-$own");
-    assert!(rt.find("message-edit").is_some());
+    let width = element_rect(&rt, "msg-own")[2];
+    assert!(more_menu_actions(&mut rt, "$own", width / 2.0).contains(&"edit"));
 }
 
 #[test]
