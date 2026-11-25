@@ -61,6 +61,8 @@ Date: 2026-11-14
   - Windows builds embed the installer artwork (`packaging/icons/better-matrix.ico`) in
     `better-matrix.exe` as icon resource 1; `rune::set_app_icon_resource` gives every window
     that icon for its caption, the taskbar and Alt+Tab, at the size it shows.
+  - macOS builds embed the 512 px packaging artwork. Rune sets it as a fallback for the Dock
+    and app switcher when the binary runs outside an app bundle. Bundled launches use the `.icns`.
 - **CI and releases** (`.github/`), kept to as little compute as gives confidence:
   - Hosted runners are pinned to current stable images: Ubuntu 26.04 for CI and release
     orchestration, macOS 26 arm64 and Windows Server 2025 for their release builds. Linux

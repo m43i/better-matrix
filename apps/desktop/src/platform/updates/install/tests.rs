@@ -4,14 +4,14 @@ use std::io::Write;
 #[test]
 fn a_mac_install_should_replace_the_whole_bundle() {
     assert_eq!(
-        bundle(Path::new("/Applications/Better Matrix.app/Contents/MacOS/better-matrix")),
+        app_bundle(Path::new("/Applications/Better Matrix.app/Contents/MacOS/better-matrix")),
         Some(PathBuf::from("/Applications/Better Matrix.app"))
     );
 }
 
 #[test]
 fn an_unbundled_mac_executable_should_not_be_updated() {
-    assert!(bundle(Path::new("/usr/local/bin/better-matrix")).is_none());
+    assert!(app_bundle(Path::new("/usr/local/bin/better-matrix")).is_none());
 }
 
 #[test]

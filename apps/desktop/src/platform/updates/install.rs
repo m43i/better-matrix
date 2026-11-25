@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::platform::launch::app_bundle;
+
 use super::release::{self, Platform};
 use super::{Release, Upgrade};
 
@@ -26,7 +28,7 @@ impl Install {
         };
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let target = match platform {
-            Platform::Mac => bundle(&executable).ok_or("Updates require an installed Better Matrix.app")?,
+            Platform::Mac => app_bundle(&executable).ok_or("Updates require an installed Better Matrix.app")?,
             Platform::Windows => executable,
         };
         Ok(Some(Self { platform, target }))
@@ -142,14 +144,6 @@ impl Install {
             std::thread::sleep(Duration::from_millis(50));
         }
     }
-}
-
-fn bundle(executable: &Path) -> Option<PathBuf> {
-    let macos = executable.parent()?;
-    let contents = macos.parent()?;
-    let bundle = contents.parent()?;
-    (macos.file_name()? == "MacOS" && contents.file_name()? == "Contents" && bundle.extension()? == "app")
-        .then(|| bundle.to_path_buf())
 }
 
 fn extract_executable(archive: &Path, destination: &Path) -> Result<PathBuf, String> {

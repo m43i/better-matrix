@@ -1,6 +1,5 @@
-//! Permalinks the app is launched with (`better-matrix matrix:r/rust:matrix.org`, as the desktop
-//! entry or the Windows registry start it for a link), and handing them to the app's running
-//! process.
+//! The macOS app bundle and the permalinks the app is launched with
+//! (`better-matrix matrix:r/rust:matrix.org`, as the desktop entry or Windows registry starts it).
 //!
 //! Rune keeps one process per app (`rune::single_instance`) and passes a later launch's links to
 //! the running one, but only links shaped `scheme://…`: `https://matrix.to/#/…` reaches
@@ -18,6 +17,15 @@ use matrix_core::Permalink;
 /// A link handed on longer ago than this was never taken (its launch was killed, or the app it
 /// went to quit): it is dropped rather than opened out of the blue.
 const FRESH: Duration = Duration::from_secs(60);
+
+/// The macOS app bundle containing `executable`, if it was launched from one.
+pub fn app_bundle(executable: &Path) -> Option<PathBuf> {
+    let macos = executable.parent()?;
+    let contents = macos.parent()?;
+    let bundle = contents.parent()?;
+    (macos.file_name()? == "MacOS" && contents.file_name()? == "Contents" && bundle.extension()? == "app")
+        .then(|| bundle.to_path_buf())
+}
 
 /// The permalinks among `args` that Rune doesn't pass on by itself.
 pub fn links(args: impl IntoIterator<Item = String>) -> Vec<String> {

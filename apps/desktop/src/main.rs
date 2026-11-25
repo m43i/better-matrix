@@ -887,6 +887,14 @@ fn main() {
     if rune::is_headless() {
         return app.run();
     }
+    // Cargo launches a bare binary on macOS, so the Dock has no bundle icon to load.
+    #[cfg(target_os = "macos")]
+    if std::env::current_exe().is_ok_and(|path| platform::launch::app_bundle(&path).is_none()) {
+        let icon = include_bytes!("../../../packaging/icons/better-matrix-512.png");
+        if let Err(error) = rune::set_app_icon(icon.as_slice()) {
+            eprintln!("better-matrix: could not set the Dock icon: {error}");
+        }
+    }
     // The engine's and its libraries' logs go to stderr when `RUST_LOG` names what to show
     // (`RUST_LOG=matrix_core=debug,livekit=info`).
     if let Ok(filter) = tracing_subscriber::EnvFilter::try_from_default_env() {
