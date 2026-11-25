@@ -54,6 +54,8 @@ use rune::{Color, Cx, El, col, el, row, text};
 use crate::state::{EmojiFor, Modal, Pane, Popover, Screen, SidePanel, State};
 use theme::{Palette, font, palette};
 
+const UNVERIFIED_BAR: &str = "unverified-bar";
+
 pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     cx.zoom(s.settings.zoom.factor());
     // What the state's own animations (the backdrop) read when they step.
@@ -94,12 +96,13 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
 
     let unverified = s.screen() == Screen::Chat
         && account.and_then(|a| a.security).is_some_and(|security| !security.session_verified);
+    if let (Screen::Chat, Some(account)) = (s.screen(), account) {
+        base = base.child(people::top_bar(s, account, &p, cx.chrome_insets()));
+    }
     if unverified {
         base = base.child(unverified_bar(&p));
     }
-    if let (Screen::Chat, Some(account)) = (s.screen(), account) {
-        base = base.child(people::top_bar(s, account, &p));
-    }
+    let banner_height = if unverified { cx.layout_size(UNVERIFIED_BAR).map_or(0.0, |size| size[1]) } else { 0.0 };
     let mut root = el().key("root").w_full().h_full().child(base.child(body.child(content)));
     let panels = match (&s.popover, account) {
         (Some(Popover::AccountSwitcher), _) => {
@@ -110,7 +113,9 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             room_menu::room_menu(account, room_id, *notifications, &p)
         }
         (Some(Popover::Search), Some(account)) => {
-            vec![search::search_results(s, account, &p, cx.layout_size("root").unwrap_or([1200.0, 760.0]))]
+            let [width, height] = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
+            let anchor = if unverified { UNVERIFIED_BAR } else { people::SEARCH_ANCHOR };
+            vec![search::search_results(s, account, &p, [width, height - banner_height], anchor)]
         }
         (Some(Popover::SectionMenu(id)), Some(account)) => vec![sidebar::section_menu(s, account, id, &p)],
         (Some(Popover::NewChat), Some(account)) => vec![sidebar::new_chat_panel(s, account, &p)],
@@ -165,11 +170,9 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     root = root.children(suggestions::lists(s, &p));
     if !panels.is_empty() {
         let backdrop = if s.popover == Some(Popover::Search) {
-            // Keep the top bar (the field, its removable filter chip, saved messages) clickable
-            // above the backdrop, below the unverified-session banner when it shows.
+            // Keep the top bar and the unverified-session banner clickable above the backdrop.
             let height = cx.layout_size("root").unwrap_or([1200.0, 760.0])[1];
-            let banner = if unverified { cx.layout_size("unverified-bar").map_or(0.0, |size| size[1]) } else { 0.0 };
-            let top = banner + people::TOP_BAR_HEIGHT;
+            let top = banner_height + people::TOP_BAR_HEIGHT;
             scrim().absolute(0.0, top).h((height - top).max(0.0))
         } else {
             scrim()
@@ -254,7 +257,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         root = root.child(
             col()
                 .key("corner")
-                .pin(None, Some(56.0), Some(20.0), None)
+                .pin(None, Some(56.0 + banner_height), Some(20.0), None)
                 .gap(12.0)
                 .items_end()
                 .children(notice)
@@ -289,7 +292,7 @@ fn scrim() -> El {
 /// then.
 fn unverified_bar(p: &Palette) -> El {
     row()
-        .key("unverified-bar")
+        .key(UNVERIFIED_BAR)
         .w_full()
         .px(16.0)
         .py(8.0)

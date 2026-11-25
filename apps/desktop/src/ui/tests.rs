@@ -1952,7 +1952,7 @@ fn the_top_bar_should_open_saved_messages() {
 }
 
 #[test]
-fn saved_messages_should_open_at_once_while_searching_under_the_unverified_banner() {
+fn saved_messages_should_open_at_once_while_searching_with_an_unverified_session() {
     let mut rt = runtime(|s| {
         s.select_account(&AccountId::new("@ada:hobby.chat"));
         s.open_search();
@@ -1960,6 +1960,33 @@ fn saved_messages_should_open_at_once_while_searching_under_the_unverified_banne
     assert!(rt.find("unverified-bar").is_some());
     press(&mut rt, super::people::SAVED);
     assert!(rt.find("saved-dialog").is_some());
+}
+
+#[test]
+fn search_results_should_open_below_the_unverified_banner_in_a_narrow_window() {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    state.select_account(&AccountId::new("@ada:hobby.chat"));
+    state.settings.zoom = crate::state::Zoom::from_percent(125);
+    state.open_search();
+    let mut rt = Runtime::new(state, super::view, (720.0, 480.0), Env::new(true, 1.0));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let [_, top, _, height] = element_rect(&rt, "unverified-bar");
+    let [_, results_top, _, _] = element_rect(&rt, "search-results");
+    assert!(results_top >= top + height);
+}
+
+#[test]
+fn a_notice_should_appear_below_the_unverified_banner() {
+    let rt = runtime(|s| {
+        s.select_account(&AccountId::new("@ada:hobby.chat"));
+        s.notice = Some("Could not send the message.".into());
+    });
+    let [_, top, _, height] = element_rect(&rt, "unverified-bar");
+    let [_, notice_top, _, _] = element_rect(&rt, "notice");
+    assert!(notice_top >= top + height);
 }
 
 #[test]

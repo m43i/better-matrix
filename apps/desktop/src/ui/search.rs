@@ -30,7 +30,7 @@ pub fn highlights(value: &str, positions: &[usize], p: &Palette) -> El {
 
 /// The search's results under the field: a typed link or address to open, rooms, direct chats
 /// and spaces on this device, then people from the user directory.
-pub fn search_results(s: &State, account: &AccountData, p: &Palette, window: [f32; 2]) -> El {
+pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: [f32; 2], anchor: &str) -> El {
     let query = s.search.query();
     let filter = s.search.filter;
     let mut list = col().w_full().px(6.0).pb(6.0);
@@ -308,17 +308,17 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, window: [f3
     }
     let panel = popover_panel(p)
         .key("search-results")
-        .w(560.0_f32.min(window[0] - 24.0))
+        .w(560.0_f32.min(available[0] - 24.0))
         .preserve_focus_on_press(true)
         .child(filter_row(filter, p))
         .child(
             col()
                 .w_full()
-                .max_h((window[1] - 112.0).clamp(60.0, 460.0))
+                .max_h((available[1] - 112.0).clamp(60.0, 460.0))
                 .scroll(ScrollSpec { stick_bottom: false })
                 .child(list),
         );
-    col().child(panel).anchored("search-anchor", Side::Bottom, Align::Center, 6.0)
+    col().child(panel).anchored(anchor, Side::Bottom, Align::Center, 6.0)
 }
 
 /// The search's offer to make the note to self.

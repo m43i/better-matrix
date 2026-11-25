@@ -2277,6 +2277,38 @@ mod tests {
     }
 
     #[test]
+    fn the_unverified_banner_should_sit_below_the_top_bar() {
+        let rt = runtime(|s| {
+            demo::seed(s);
+            s.select_account(&matrix_core::AccountId::new("@ada:hobby.chat"));
+        });
+        let ([_, top, _, height], _) = rt.presented("top-bar").unwrap();
+        let ([_, banner_top, _, _], _) = rt.presented("unverified-bar").unwrap();
+        assert_eq!(top + height, banner_top);
+    }
+
+    #[test]
+    fn the_top_bar_should_clear_the_window_controls_in_a_narrow_window() {
+        let mut s = State::detached();
+        demo::seed(&mut s);
+        let mut rt = Runtime::new(s, ui::view, (720.0, 480.0), Env { system_dark: true, scale: 1.0 });
+        let mut chrome = rune::ChromeInsets::default();
+        for (left, right) in [(67.0, 0.0), (0.0, 67.0)] {
+            chrome.leading = left;
+            chrome.trailing = right;
+            rt.set_chrome_insets(chrome);
+            rt.frame(0.0);
+
+            let elements = rt.elements();
+            for key in ["search-anchor", "top-saved"] {
+                let control = elements.iter().find(|e| e.key.as_deref() == Some(key)).unwrap();
+                let [x, _, width, _] = control.target;
+                assert!(x >= left && x + width <= 720.0 - right, "{key}");
+            }
+        }
+    }
+
+    #[test]
     fn a_verified_account_should_show_no_banner() {
         let rt = runtime(demo::seed);
         assert!(rt.find("unverified-bar").is_none());
