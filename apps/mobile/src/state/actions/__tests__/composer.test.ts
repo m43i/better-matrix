@@ -1,11 +1,19 @@
 import { detachedEngine } from '@better-matrix/matrix-native/client';
 
 import { t } from '../../../i18n';
-import { ADA, EVERY_PRIVATE_USE, message, summary, withContent } from '../../../test/fixtures';
+import {
+  ADA,
+  EVERY_PRIVATE_USE,
+  message,
+  roomSummary,
+  summary,
+  withContent,
+} from '../../../test/fixtures';
 import { composer, startEdit, startReply } from '../../composer';
 import { applyFormat, continueBlock } from '../../format';
 import { editDraftOf } from '../../messages';
 import { newPollForm } from '../../pollForm';
+import { apply } from '../../reducer';
 import { Store } from '../../store';
 import { roomKey, threadKey } from '../../timeline';
 import { emotePill, pillAt, spoilerPill, userPill } from '../../pills';
@@ -702,5 +710,47 @@ describe('scheduling from the composer', () => {
       type: 'Schedule',
       data: { message: { type: 'Emote', data: { body: 'waves' } } },
     });
+  });
+});
+
+describe('/meet from the composer', () => {
+  /** The account's rooms: the lab, able to start a meeting or not. */
+  const withLab = (store: Store, canStartMeeting: boolean) =>
+    store.update((s) =>
+      apply(s, {
+        type: 'RoomsUpdated',
+        data: {
+          account: ADA,
+          list: {
+            rooms: [{ ...roomSummary(ROOM, 'lab'), can_start_meeting: canStartMeeting }],
+            spaces: [],
+            invitations: [],
+          },
+        },
+      }),
+    );
+
+  it('should open a meeting and empty the draft where the room can start one', () => {
+    const { store, commands } = setUp();
+    withLab(store, true);
+    let opened = 0;
+    setDraft(store, ADA, KEY, '/meet');
+    sendComposer(store, ADA, KEY, { meeting: () => opened++ });
+    expect([opened, commands(), composer(store.getState(), ADA, KEY).draft]).toEqual([1, [], '']);
+  });
+
+  it('should say a meeting can’t start and keep the draft where the room can’t', () => {
+    const { store, commands } = setUp();
+    withLab(store, false);
+    let opened = 0;
+    setDraft(store, ADA, KEY, '/meet');
+    sendComposer(store, ADA, KEY, { meeting: () => opened++ });
+
+    expect([
+      opened,
+      commands(),
+      composer(store.getState(), ADA, KEY).draft,
+      store.getState().notices.map((n) => n.message),
+    ]).toEqual([0, [], '/meet', [t('mobile.widgets.meet_unavailable')]]);
   });
 });

@@ -912,6 +912,7 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
         can_rename: true,
         pinned: Vec::new(),
         can_pin: true,
+        can_start_meeting: true,
         saved: Vec::new(),
         priority: matrix_core::RoomPriority::Normal,
         marked_unread: false,
@@ -1227,7 +1228,7 @@ pub fn link_preview(s: &mut State) {
             invited: false,
         };
         let event = matrix_core::Event::RoomPreview { request: *request, preview: Box::new(preview) };
-        s.apply(event, &mut rune::Tx::default());
+        s.apply(event, &mut Tx::default());
     }
 }
 
@@ -1242,7 +1243,7 @@ pub fn link_person(s: &mut State) {
     {
         let grace = matrix_core::Person { id: "@grace:example.org".into(), name: "Grace Hopper".into(), avatar: None };
         let event = matrix_core::Event::PeopleFound { request: *request, people: vec![grace] };
-        s.apply(event, &mut rune::Tx::default());
+        s.apply(event, &mut Tx::default());
     }
 }
 
@@ -1728,35 +1729,118 @@ pub fn hidden_events(s: &mut State) {
     s.select_room(DEMO_THREAD.0);
 }
 
-/// The general room's widgets panel: a board, a dashboard and a Jitsi meeting.
+/// The general room's widgets: a board, a dashboard, and two meetings (Jitsi, BigBlueButton).
+fn room_widgets() -> matrix_core::Widgets {
+    let widget = |id: &str, name: &str, kind: &str, url: &str, meeting: Option<matrix_core::Meeting>| {
+        let host = url.split('/').nth(2).unwrap_or_default().to_owned();
+        matrix_core::Widget {
+            id: id.into(),
+            name: name.into(),
+            kind: kind.into(),
+            url: url.into(),
+            host,
+            creator: Some("@grace:example.org".into()),
+            can_remove: true,
+            meeting,
+        }
+    };
+    matrix_core::Widgets {
+        widgets: vec![
+            widget("board", "Sprint board", "m.custom", "https://board.example.org/team", None),
+            widget("grafana", "Server dashboard", "m.grafana", "https://grafana.example.org/d/1", None),
+            widget(
+                "review",
+                "Design review",
+                "bigbluebutton",
+                "https://bbb.example.org/b/design-review",
+                Some(matrix_core::Meeting::BigBlueButton),
+            ),
+            widget(
+                "standup",
+                "Standup",
+                "jitsi",
+                "https://meet.example.org/TeamStandup",
+                Some(matrix_core::Meeting::Jitsi),
+            ),
+        ],
+        can_add: true,
+    }
+}
+
+/// The general room's widgets panel.
 pub fn widgets(s: &mut State) {
     seed(s);
     s.select_room(DEMO_THREAD.0);
     s.show_side(crate::state::SidePanel::Widgets);
-    let widget = |id: &str, name: &str, kind: &str, url: &str, host: &str| matrix_core::Widget {
-        id: id.into(),
-        name: name.into(),
-        kind: kind.into(),
-        url: url.into(),
-        host: host.into(),
-        creator: Some("@grace:example.org".into()),
-        can_remove: true,
+    s.accounts.set_widgets(&AccountId::new(ADA), DEMO_THREAD.0.into(), room_widgets());
+}
+
+/// The general room with a meeting just started: the header's video button with its chevron
+/// (the call, joining the meeting, starting another), and the line that says Grace started it.
+pub fn meeting(s: &mut State) {
+    seed(s);
+    let account = AccountId::new(ADA);
+    let started = TimelineEntry {
+        id: "ev-meeting".into(),
+        kind: EntryKind::RoomEvent(Box::new(RoomEvent {
+            sender: Person { id: "@grace:example.org".into(), name: "Grace Hopper".into(), avatar: None },
+            change: RoomChange::WidgetAdded { name: "Standup".into(), meeting: Some(matrix_core::Meeting::Jitsi) },
+        })),
     };
-    let widgets = matrix_core::Widgets {
-        widgets: vec![
-            widget("board", "Sprint board", "m.custom", "https://board.example.org/team", "board.example.org"),
-            widget(
-                "grafana",
-                "Server dashboard",
-                "m.grafana",
-                "https://grafana.example.org/d/1",
-                "grafana.example.org",
-            ),
-            widget("standup", "Standup", "jitsi", "https://meet.example.org/TeamStandup", "meet.example.org"),
-        ],
-        can_add: true,
+    seed_timeline(s, &account, &TimelineKey::room(DEMO_THREAD.0), TimelineDiff::PushBack(started));
+    let mut widgets = room_widgets();
+    widgets.widgets.retain(|widget| widget.meeting != Some(matrix_core::Meeting::BigBlueButton));
+    s.accounts.set_widgets(&account, DEMO_THREAD.0.into(), widgets);
+    s.select_room(DEMO_THREAD.0);
+}
+
+/// The general room with a meeting pinned, the menu of ways to meet open beside its video
+/// button: joining the meeting, starting another.
+pub fn video_options(s: &mut State) {
+    meeting(s);
+    s.toggle_video_options();
+}
+
+/// The general room with a meeting pinned where the server allows no calls: the video button
+/// joins the meeting.
+pub fn meeting_without_calls(s: &mut State) {
+    meeting(s);
+    change_room(s, DEMO_THREAD.0, |room| room.call.via = None);
+}
+
+/// The sprint board, opened in its window, asks what it may do; one permission is unticked.
+pub fn widget_permissions(s: &mut State) {
+    widgets(s);
+    let Some(request) = s.run_widget("board", false) else { return };
+    let permission = |capability: &str, kind: matrix_core::PermissionKind, subject: Option<&str>| {
+        matrix_core::WidgetPermission { capability: capability.into(), kind, subject: subject.map(Into::into) }
     };
-    s.accounts.set_widgets(&AccountId::new(ADA), DEMO_THREAD.0.into(), widgets);
+    use matrix_core::PermissionKind as Kind;
+    let permissions = vec![
+        permission("org.matrix.msc2762.receive.event:m.room.message", Kind::ReadEvents, Some("m.room.message")),
+        permission("org.matrix.msc2762.send.event:m.room.message", Kind::SendEvents, Some("m.room.message")),
+        permission("org.matrix.msc2762.receive.state_event:m.room.member", Kind::ReadState, Some("m.room.member")),
+        permission("org.matrix.msc4039.download_file", Kind::DownloadFiles, None),
+        permission("io.element.requires_client", Kind::StayInApp, None),
+        permission("org.example.board.sync", Kind::Other, None),
+    ];
+    let event = Event::WidgetPermissions { request, question: 1, widget: "Sprint board".into(), permissions };
+    s.apply(event, &mut Tx::default());
+    if let Some(key) = s.widget_prompt().map(crate::state::WidgetPrompt::key) {
+        s.toggle_widget_permission(key, 5);
+    }
+}
+
+/// The integration manager's terms, before it opens.
+pub fn integration_terms(s: &mut State) {
+    widgets(s);
+    let Some(request) = s.open_integrations() else { return };
+    let policy = |name: &str, url: &str| Policy { name: name.into(), url: url.into() };
+    let policies = vec![
+        policy("Terms of Service", "https://integrations.example.org/terms"),
+        policy("Privacy Policy", "https://integrations.example.org/privacy"),
+    ];
+    s.apply(Event::IntegrationTerms { request, policies }, &mut Tx::default());
 }
 
 /// The source of an encrypted message: as this device reads it, and as it was sent.

@@ -11,6 +11,7 @@ pub mod sound;
 mod taskbar;
 pub mod updates;
 pub mod video;
+pub mod widget_window;
 
 #[cfg(test)]
 mod tests;
@@ -49,6 +50,9 @@ pub struct Shell {
     /// Where a later launch of the app leaves its permalinks for this process
     /// ([`launch`]); none headless.
     handoff: Option<std::path::PathBuf>,
+    /// The widget windows open, each in a process of its own; headless, none (what was asked is
+    /// kept).
+    widget_windows: widget_window::Windows,
 }
 
 impl std::fmt::Debug for Shell {
@@ -65,6 +69,7 @@ impl Shell {
         let notifier = notify::system(app.clone());
         Self {
             updates: updates::start(app.clone(), scratch.with_file_name("updates")),
+            widget_windows: widget_window::Windows::native(app.clone()),
             app: Some(app),
             notifier,
             taskbar,
@@ -92,6 +97,7 @@ impl Shell {
             visit_saves: Arc::default(),
             scratch: std::env::temp_dir(),
             handoff: None,
+            widget_windows: widget_window::Windows::headless(),
         }
     }
 
@@ -113,6 +119,7 @@ impl Shell {
                 visit_saves: Arc::default(),
                 scratch: std::env::temp_dir(),
                 handoff: None,
+                widget_windows: widget_window::Windows::headless(),
             },
             posted,
         )
@@ -288,6 +295,17 @@ impl Shell {
     /// The ring of an incoming call on the picked speaker, until dropped; none headless.
     pub fn ring(&self, speaker: Option<String>) -> Option<sound::Ring> {
         self.app.is_some().then(|| sound::Ring::start(speaker))
+    }
+
+    /// The widget windows: running widgets' pages, beside the app.
+    pub fn widget_windows(&mut self) -> &mut widget_window::Windows {
+        &mut self.widget_windows
+    }
+
+    /// What was asked of the widget windows, headless.
+    #[cfg(test)]
+    pub fn widget_window_calls(&self) -> &[widget_window::WindowCall] {
+        self.widget_windows.calls()
     }
 
     /// Shows a notification, and flashes the taskbar button. A click opens its room.

@@ -85,27 +85,14 @@ impl Account {
 
 impl Account {
     /// A room's pack state events as the server holds them, under sliding sync (read once a run
-    /// per room); none otherwise, or when the server can't be asked now (asked again next time).
+    /// per room, with the other state it leaves out); none otherwise, or when the server can't be
+    /// asked now (asked again next time).
     async fn server_pack_state(&self, room: &Room) -> Vec<Value> {
         if !self.sliding() {
             return Vec::new();
         }
-        let room_id = room.room_id().to_string();
-        if let Some(known) = self.pack_state.lock().ok().and_then(|known| known.get(&room_id).cloned()) {
-            return known;
-        }
-        let request =
-            matrix_sdk::ruma::api::client::state::get_state_events::v3::Request::new(room.room_id().to_owned());
-        let Ok(response) = self.client().send(request).await else { return Vec::new() };
-        let events: Vec<Value> = response
-            .room_state
-            .iter()
-            .filter_map(|raw| raw.deserialize_as_unchecked::<Value>().ok())
-            .filter(|event| event["type"].as_str().is_some_and(|kind| ROOM_PACK.contains(&kind)))
-            .collect();
-        if let Ok(mut known) = self.pack_state.lock() {
-            known.insert(room_id, events.clone());
-        }
+        let mut events = self.extra_state(room).await;
+        events.retain(|event| event["type"].as_str().is_some_and(|kind| ROOM_PACK.contains(&kind)));
         events
     }
 }
@@ -136,20 +123,9 @@ async fn room_packs_named(room: &Room, name: &str, keys: Option<&[String]>, serv
             RawAnySyncOrStrippedState::Stripped(raw) => raw.deserialize_as_unchecked().ok(),
         })
         .collect();
-    // Of the store's and the server's copies of a pack, the newer counts: the store's may be
-    // older (kept from before sliding sync, which brings no pack changes) or newer (a change
-    // in a timeline since the server's state was read). Alike in time, the server's does: the
-    // same event, redacted since, keeps its time.
-    let at = |event: &Value| event["origin_server_ts"].as_u64().unwrap_or_default();
-    let fetched = server.iter().filter(|event| event["type"].as_str() == Some(name));
-    let mut newest: Vec<Value> = Vec::new();
-    for event in fetched.chain(local.iter()) {
-        match newest.iter_mut().find(|known| known["state_key"] == event["state_key"]) {
-            Some(known) if at(event) > at(known) => *known = event.clone(),
-            Some(_) => {}
-            None => newest.push(event.clone()),
-        }
-    }
+    // Of the store's and the server's copies of a pack, the newer counts.
+    let fetched = server.iter().filter(|event| event["type"].as_str() == Some(name)).cloned().collect();
+    let newest = crate::widgets::newest(fetched, local);
     let mut packs = Vec::new();
     for json in newest {
         let state_key = json["state_key"].as_str().unwrap_or_default().to_owned();

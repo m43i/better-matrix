@@ -94,6 +94,21 @@ fn spec() -> AppSpec<State> {
             }),
             ("demo-hidden-events", demo::hidden_events),
             ("demo-widgets", demo::widgets),
+            ("demo-widgets-menu", |s| {
+                demo::widgets(s);
+                s.toggle_widgets_menu();
+            }),
+            ("demo-meeting", demo::meeting),
+            // The homeserver offers meetings and none is pinned: the header starts one.
+            ("demo-meeting-start", |s| {
+                demo::seed(s);
+                s.select_room(demo::DEMO_THREAD.0);
+            }),
+            ("demo-meet-command", |s| demo::typing(s, "/m")),
+            ("demo-video-options", demo::video_options),
+            ("demo-meeting-no-calls", demo::meeting_without_calls),
+            ("demo-widget-permissions", demo::widget_permissions),
+            ("demo-integration-terms", demo::integration_terms),
             ("demo-source", demo::event_source),
             ("demo-saved-menu", |s| {
                 demo::saved_messages(s);
@@ -874,7 +889,18 @@ fn on_key(s: &mut State, key: &KeyEvent, tx: &mut Tx) -> bool {
 /// How long quitting waits for the engine to leave a call.
 const QUIT_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 
-fn main() {
+fn main() -> std::process::ExitCode {
+    // A widget window the app started (`platform::widget_window`): its own small process, no
+    // Rune, no engine.
+    if std::env::args().nth(1).as_deref() == Some(platform::widget_window::FLAG) {
+        return platform::widget_window::helper::run();
+    }
+    run_app();
+    std::process::ExitCode::SUCCESS
+}
+
+/// The app itself.
+fn run_app() {
     // The window reports this id (Wayland `app_id`, X11 `WM_CLASS`), so the desktop matches it
     // to the installed entry and its icon.
     rune::set_app_id(APP_ID);

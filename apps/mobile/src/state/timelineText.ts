@@ -144,6 +144,12 @@ export function roomEventText(event: RoomEvent): string {
       return t('event.moderation_rules', { name });
     case 'LiveLocation':
       return t('event.live_location', { name });
+    case 'WidgetAdded':
+      return change.data.meeting === null
+        ? t('mobile.widgets.event_added', { name, widget: change.data.name })
+        : t('mobile.widgets.event_meeting', { name });
+    case 'WidgetRemoved':
+      return t('mobile.widgets.event_removed', { name });
   }
 }
 

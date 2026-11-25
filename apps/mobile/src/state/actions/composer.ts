@@ -38,6 +38,7 @@ import {
 import { type PollForm, pollOutgoing } from '../pollForm';
 import { addNotice } from '../reducer';
 import { CommandFailed } from '../requests';
+import { room } from '../selectors';
 import type { Store } from '../store';
 import { roomKey, threadKey } from '../timeline';
 
@@ -232,6 +233,8 @@ export interface AfterCommand {
   joined?: (roomId: string) => void;
   /** The room was left (`/leave`): leave its screen. */
   left?: () => void;
+  /** `/meet`: open the widget screen starting a meeting in the room. */
+  meeting?: () => void;
   /**
    * `/leave` asks first, as the room menu does (`ui/askToLeave`): `leave` carries it out once the
    * user agreed, told whether to forget the room (a direct chat is deleted). Without it, nothing
@@ -251,6 +254,8 @@ function problemText(problem: SendProblem): string {
       return t('slash.no_spoiler', { command: problem.name });
     case 'pills':
       return t('mobile.composer.pills_unkept');
+    case 'no_meetings':
+      return t('mobile.widgets.meet_unavailable');
   }
 }
 
@@ -267,7 +272,8 @@ export function sendComposer(
   const current = composer(store.getState(), account, key);
 
   if (!canSend(current) && !current.editing) return false;
-  const plan = planSend(current, account, key);
+  const canStartMeeting = room(store.getState(), account, key.room_id)?.can_start_meeting ?? false;
+  const plan = planSend(current, account, key, canStartMeeting);
 
   if (plan.problem) {
     const problem = plan.problem;
@@ -328,6 +334,12 @@ function carryOut(
   after: AfterCommand,
 ): void {
   updateComposer(store, account, key, () => ({ ...plan.composer, touched: before.touched }));
+
+  if (plan.after === 'meeting') {
+    after.meeting?.();
+
+    return;
+  }
 
   if (plan.after === 'left') {
     after.confirmLeave?.((forget) =>

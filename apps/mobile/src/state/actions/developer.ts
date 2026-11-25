@@ -1,5 +1,5 @@
 // Developer tools and widgets (the desktop's `state/developer.rs`): an event's source, and a
-// room's widgets, web apps pinned to it that open in the browser.
+// room's widgets, web apps pinned to it (running them is `state/actions/widgets.ts`).
 
 import type { AccountId, EventSource } from '@better-matrix/matrix-native/types';
 

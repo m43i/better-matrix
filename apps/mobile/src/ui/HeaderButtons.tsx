@@ -54,6 +54,14 @@ export function HeaderCancel({ onPress, testID }: { onPress: () => void; testID:
   return <CloseIcon onPress={onPress} testID={testID} label={t('common.cancel')} />;
 }
 
+/** Closing a modal that holds no changes (a widget's page): Close at the left, or the icon. */
+export function HeaderClose({ onPress, testID }: { onPress: () => void; testID: string }) {
+  if (Platform.OS !== 'android')
+    return <HeaderButton title={t('common.close')} onPress={onPress} testID={testID} />;
+
+  return <CloseIcon onPress={onPress} testID={testID} label={t('common.close')} />;
+}
+
 /**
  * Closing a modal that saves as it goes (invite): Done at the right on iOS, the close icon at the
  * left on Android. Spread into the screen's options.

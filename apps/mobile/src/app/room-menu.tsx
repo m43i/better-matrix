@@ -43,6 +43,7 @@ import { Avatar } from '../ui/Avatar';
 import { Button, Divider, EmptyState, ListRow, ListSection, TextField } from '../ui/components';
 import type { IconName } from '../ui/icons';
 import { usePalette } from '../ui/theme';
+import { openWidget } from '../ui/widgets/launch';
 
 type Page =
   | { kind: 'menu' }
@@ -285,6 +286,19 @@ function RoomPages({
           />
         )}
       </ListSection>
+      {room.can_start_meeting ? (
+        <ListSection>
+          <ListRow
+            testID="room-menu-start-meeting"
+            icon="meeting"
+            title={t('mobile.widgets.start_meeting')}
+            onPress={() => {
+              done();
+              openWidget(router, id, room.room_id, { type: 'meeting', video: true });
+            }}
+          />
+        </ListSection>
+      ) : null}
       <ListSection>
         <ListRow
           testID="room-menu-favourite"

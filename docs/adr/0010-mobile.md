@@ -408,9 +408,49 @@ Date: 2026-11-16
   shapes: "Show hidden events" is a switch in Preferences (`Settings::showHiddenEvents`), and
   the timeline plan gives each hidden event a line that opens its source; "View source" in a
   message's sheet opens `app/event-source.tsx` (selectable JSON, Copy JSON). A room's details
-  lead to `app/widgets.tsx`, which opens a widget in the browser (`Linking.openURL`) and, for
-  whoever may change them, offers Remove (with an alert) and a + in the header to
-  `app/add-widget.tsx`. No widget is embedded: no web view.
+  lead to `app/widgets.tsx`: one plain list, meetings first (a muted "Join"), a tap runs one
+  in the app (a meeting joins), a long press offers Open, Open in browser and Remove; the
+  header's + is a native menu with Start a meeting (where the room offers one,
+  `RoomSummary::can_start_meeting`, ADR 0012), Add widget and Bots and integrations. Widgets run
+  in an in-app web view (`react-native-webview`, `app/widget.tsx`), meetings included (ADR
+  0012): `WidgetRun` (`state/actions/widgets.ts`) starts the run with `store.run`, answers the
+  page, the permissions (a sheet with a switch each; an empty question withdraws it) and the
+  terms (shown in the screen, with links), and cancels the run when the screen closes. The
+  bridge's scripts and filters are pure functions (`state/widgets.ts`):
+  - A random token per screen (`expo-crypto`) in the main-frame script, messages from the page's
+    origin only, `window.postMessage` taken over so the page never hears its own requests. The
+    script installs once per document, ignores frames inside the page, and reports each
+    document's start and load (`WidgetLoading`, `WidgetLoaded`), so History API changes, which
+    the web view reports as loads, aren't. On Android the patched web view registers it at
+    document start (`addDocumentStartJavaScript`, where supported); a document on the page's
+    origin that reported nothing by its load's end gets it injected then.
+  - Engine messages go in only while the main frame's address is on the page's origin, and the
+    script itself checks `window.location.origin` before the message exists in the page. A
+    repeated `WidgetPage` for the run reloads the page; an `OpenUrl` (an HTTP widget, no
+    bridge) opens the browser and closes the screen.
+  - A bridged page stays on its origin (others open in the browser; one that commits anyway
+    counts as a new document); a meeting may go anywhere on the web (join links redirect).
+    Every scheme reaches that policy (`originWhitelist: ['*']`), and a navigation whose frame
+    Android doesn't report counts as the top's.
+  - The widget screen needs a one-time launch code the app registers before opening it
+    (`state/launches.ts`), so a link alone opens nothing.
+  - Permissions: the sheet (and the browser flow's alert) answers only the question it was
+    shown for, by its number; a withdrawn question closes it unanswered.
+  - Media: meetings play inline without a gesture; their camera and microphone go to the
+    approved host only (iOS `prompt`: WebKit asks per site; Android `grantIfSameHostElseDeny`
+    with the host in `mediaCaptureHost`, which the patched web view checks natively, ADR 0012),
+    and a redirect to another host asks first (Android). Other widgets are refused natively
+    (`deny`). No widget gets the location (`geolocationEnabled: false`, and every page's main
+    frame has geolocation fail, its prototype included). Load errors end the run and log only
+    their code.
+  - "Open in browser" answers a permission the engine asks first (an alert naming who learns
+    it).
+    The room header's video button is the one meeting control: it runs the first of the video call
+    (where calls work), joining a pinned meeting and starting one (where offered); a long press
+    offers the others (`videoOptions`); during a call, beside the Join pill, it keeps only the
+    meeting options. `/meet` and the room menu start a meeting where offered; room details count
+    the widgets (`roomWidgetCount`). Scenes: `widgets`, `meeting`, `meeting-start`,
+    `meeting-command`, `widget-permissions`, `integrations`.
 - **Message HTML** is parsed by a small tokenizer of our own (`state/html.ts`) into a safe node
   tree: only the desktop's allowed tags become formatting, links keep `http(s)`, `mailto` and
   `ftp`, reply fallbacks and scripts are dropped, nesting is capped. Nothing renders raw HTML.

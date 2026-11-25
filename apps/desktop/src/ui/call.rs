@@ -8,15 +8,17 @@ use super::components::{account_avatar, icon_button, media_avatar, menu_row, pop
 use super::icons;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf};
-use crate::state::{AccountData, Call, CallLayout, CallTile, Popover, State};
+use crate::state::{AccountData, Call, CallLayout, CallTile, Popover, State, VideoOption};
 
 /// The size of a face on a voice call's stage.
 const FACE: f32 = 96.0;
 /// The size of a round control button.
 const CONTROL: f32 = 48.0;
 
-/// The header's call buttons: Join while a call is under way in the room, else voice and video
-/// call. None while the room's own call shows here, or where the room allows no call.
+/// The header's call buttons: Join while a call is under way in the room, else the voice call;
+/// then the video button, which meets by video the room's default way (a video call, else its
+/// meeting, else a new one), with a chevron beside it listing the other ways. None while the
+/// room's own call shows here.
 pub fn header_buttons(s: &State, room: &RoomSummary, p: &Palette) -> Vec<El> {
     if let Some(call) = s.call_here() {
         let mut buttons = Vec::new();
@@ -29,28 +31,84 @@ pub fn header_buttons(s: &State, room: &RoomSummary, p: &Palette) -> Vec<El> {
         }
         return buttons;
     }
-    if room.call.via.is_none() {
-        return Vec::new();
-    }
-    if !room.call.participants.is_empty() {
+    let voice = if room.call.via.is_none() {
+        None
+    } else if !room.call.participants.is_empty() {
         let label = tf!("call.people", count = room.call.participants.len());
-        return vec![
+        Some(
             pill(&icons::CALL, t!("call.join"), p.success, p)
                 .key("call-join")
                 .help(label)
                 .on_press(|s: &mut State| s.start_call(false)),
-        ];
+        )
+    } else {
+        Some(
+            icon_button(&icons::CALL, t!("call.start"), false, p.text_muted, p)
+                .key("call-start")
+                .help(t!("call.start"))
+                .on_press(|s: &mut State| s.start_call(false)),
+        )
+    };
+    voice.into_iter().chain(video_button(s, p)).collect()
+}
+
+/// The video button's key.
+pub const VIDEO: &str = "call-start-video";
+/// The key of the chevron beside it, which its menu hangs from.
+pub const VIDEO_OPTIONS: &str = "video-options";
+
+/// What a way to meet by video says, and its icon.
+fn video_option_label(option: &VideoOption) -> (String, &'static rune::Icon) {
+    match option {
+        VideoOption::Call => (t!("call.start_video").to_owned(), &icons::VIDEO),
+        VideoOption::Join { name, .. } => (tf!("widgets.join_meeting_named", name = name), &icons::MEETING),
+        VideoOption::Start => (t!("widgets.start_meeting").to_owned(), &icons::MEETING),
     }
-    vec![
-        icon_button(&icons::CALL, t!("call.start"), false, p.text_muted, p)
-            .key("call-start")
-            .help(t!("call.start"))
-            .on_press(|s: &mut State| s.start_call(false)),
-        icon_button(&icons::VIDEO, t!("call.start_video"), false, p.text_muted, p)
-            .key("call-start-video")
-            .help(t!("call.start_video"))
-            .on_press(|s: &mut State| s.start_call(true)),
-    ]
+}
+
+/// A stable key part per way to meet.
+fn video_option_key(option: &VideoOption) -> String {
+    match option {
+        VideoOption::Call => "video-option-call".to_owned(),
+        VideoOption::Join { widget_id, .. } => format!("video-option-join-{widget_id}"),
+        VideoOption::Start => "video-option-start".to_owned(),
+    }
+}
+
+/// The video button, for the room's default way to meet by video, and the chevron listing the
+/// others when there are any. None without a way.
+fn video_button(s: &State, p: &Palette) -> Option<El> {
+    let options = s.video_options();
+    let (label, _) = video_option_label(options.first()?);
+    let button = icon_button(&icons::VIDEO, &label, false, p.text_muted, p)
+        .key(VIDEO)
+        .help(label.clone())
+        .on_press(State::start_video);
+    if options.len() < 2 {
+        return Some(button);
+    }
+    let open = s.popover == Some(Popover::VideoOptions);
+    let chevron = chevron_button(VIDEO_OPTIONS, t!("call.video_options"), &icons::CHEVRON_DOWN, 28.0, p)
+        .expanded(open)
+        .on_press(State::toggle_video_options);
+    Some(row().gap(2.0).center_y().child(button).child(chevron))
+}
+
+/// The ways to meet by video besides the video button's, under its chevron.
+pub fn video_options_menu(s: &State, p: &Palette) -> El {
+    let mut panel = popover_panel(p).key("video-options-menu").w(280.0);
+    for option in s.video_options().into_iter().skip(1) {
+        let (label, glyph) = video_option_label(&option);
+        let leading = el().size(28.0, 28.0).center().child(icon(glyph, 18.0).color(p.text_muted));
+        let key = video_option_key(&option);
+        panel = panel.child(
+            menu_row(leading, &label, None, None, p)
+                .key(key)
+                .role("menuitem")
+                .on_press(move |s: &mut State| s.choose_video_option(&option)),
+        );
+    }
+    col().child(panel).anchored(VIDEO_OPTIONS, rune::Side::Bottom, rune::Align::End, 6.0)
 }
 
 /// A rounded button with an icon and a label, filled with `color`.
@@ -442,20 +500,25 @@ fn controls(call: &Call, p: &Palette) -> El {
 
 /// A control with a chevron beside it that opens the devices of its kind.
 fn with_devices(button: El, kind: DeviceKind, size: f32, p: &Palette) -> El {
-    let chevron = el()
-        .key(devices_key(kind))
-        .size(20.0, size)
+    let chevron = chevron_button(&devices_key(kind), t!("call.devices"), &icons::CHEVRON_UP, size, p)
+        .on_press(move |s: &mut State| s.open_call_devices(kind));
+    row().gap(2.0).center_y().child(button).child(chevron)
+}
+
+/// The narrow chevron beside a control that opens more of it: its devices, its other options.
+/// The caller adds its press.
+fn chevron_button(key: &str, label: &str, glyph: &'static rune::Icon, height: f32, p: &Palette) -> El {
+    el().key(key.to_owned())
+        .size(20.0, height)
         .radius(10.0)
         .center()
         .hover(p.hover.alpha(p.hover.a * 2.0))
         .role("button")
         .cursor(rune::Cursor::Pointer)
         .focusable(true)
-        .label(t!("call.devices").to_owned())
-        .help(t!("call.devices").to_owned())
-        .child(icon(&icons::CHEVRON_UP, 14.0).color(p.text_muted))
-        .on_press(move |s: &mut State| s.open_call_devices(kind));
-    row().gap(2.0).center_y().child(button).child(chevron)
+        .label(label.to_owned())
+        .help(label.to_owned())
+        .child(icon(glyph, 14.0).color(p.text_muted))
 }
 
 fn devices_key(kind: DeviceKind) -> String {

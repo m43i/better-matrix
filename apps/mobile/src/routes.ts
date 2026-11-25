@@ -5,6 +5,7 @@ import type { AccountId, JoinRule, ReportTarget } from '@better-matrix/matrix-na
 import type { Href } from 'expo-router';
 
 import type { Reach } from './state/seek';
+import type { WidgetTarget } from './state/widgets';
 
 export const routes = {
   /** The Home tab, under every other screen. */
@@ -65,10 +66,18 @@ export const routes = {
     pathname: '/event-source',
     params: { account, roomId, eventId },
   }),
-  /** A room's widgets: web apps pinned to it, opened in the browser. */
+  /** A room's widgets: web apps pinned to it, opened in the app or the browser. */
   widgets: (account: AccountId, roomId: string): Href => ({
     pathname: '/widgets',
     params: { account, roomId },
+  }),
+  /**
+   * A widget, a new meeting or the integration manager, running in the app's web view, with the
+   * app's own one-time `launch` (`Launches`): a link alone opens nothing.
+   */
+  widget: (account: AccountId, roomId: string, target: WidgetTarget, launch: string): Href => ({
+    pathname: '/widget',
+    params: { account, roomId, ...widgetParams(target), launch },
   }),
   /** Pinning a web page to a room as a widget. */
   addWidget: (account: AccountId, roomId: string): Href => ({
@@ -269,6 +278,36 @@ export const routes = {
     params: account ? { uri, account } : { uri },
   }),
 };
+
+/** What the widget screen runs, as route params (`widgetTarget` reads them back). */
+type WidgetParams = { widgetId: string } | { meeting: 'video' | 'voice' } | { integrations: '1' };
+
+function widgetParams(target: WidgetTarget): WidgetParams {
+  switch (target.type) {
+    case 'widget':
+      return { widgetId: target.widgetId };
+    case 'meeting':
+      return { meeting: target.video ? 'video' : 'voice' };
+    case 'integrations':
+      return { integrations: '1' };
+  }
+}
+
+/** What `routes.widget` put in its params, if they name something to run. */
+export function widgetTarget(params: {
+  widgetId?: string;
+  meeting?: string;
+  integrations?: string;
+}): WidgetTarget | null {
+  if (params.widgetId) return { type: 'widget', widgetId: params.widgetId };
+
+  if (params.meeting === 'video' || params.meeting === 'voice')
+    return { type: 'meeting', video: params.meeting === 'video' };
+
+  if (params.integrations === '1') return { type: 'integrations' };
+
+  return null;
+}
 
 /** A new room's params: its space and its join rule, chosen ahead. */
 type NewRoomParams = { space?: string; join?: JoinRule };

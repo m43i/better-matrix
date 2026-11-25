@@ -83,6 +83,7 @@ import { DENIED, pickFiles, pickFromLibrary, takeWithCamera } from './pickers';
 import { useScheduledRefresh } from './useScheduledRefresh';
 import { useVoiceMemo } from './useVoiceMemo';
 import { VoiceGlow } from './VoiceGlow';
+import { openWidget } from '../widgets/launch';
 
 export interface ComposerProps {
   account: AccountId;
@@ -262,6 +263,7 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
         if (joined) router.push(routes.room(account, joined));
       },
       left: () => router.navigate(routes.home()),
+      meeting: () => openWidget(router, account, roomId, { type: 'meeting', video: true }),
       confirmLeave: (leave) => {
         const leaving = room(store.getState(), account, timelineKey.room_id);
 

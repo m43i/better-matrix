@@ -250,7 +250,21 @@ describe('commandSuggestions', () => {
     expect(commandSuggestions('t').map((c) => c.name)).toEqual(['tableflip', 'topic']);
   });
 
-  it('should suggest every command for a bare slash', () => {
-    expect(commandSuggestions('').length).toBe(12);
+  it('should suggest every command for a bare slash where a meeting can start', () => {
+    expect(commandSuggestions('', true).length).toBe(13);
+  });
+
+  it('should suggest /meet where the room can start a meeting', () => {
+    expect(commandSuggestions('mee', true).map((c) => c.name)).toEqual(['meet']);
+  });
+
+  it('should not suggest /meet where the room can’t start a meeting', () => {
+    expect(commandSuggestions('mee').map((c) => c.name)).toEqual([]);
+  });
+});
+
+describe('/meet', () => {
+  it('should start a meeting', () => {
+    expect(slash('/meet')).toEqual({ type: 'meet' });
   });
 });

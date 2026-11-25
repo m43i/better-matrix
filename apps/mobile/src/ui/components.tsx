@@ -240,6 +240,7 @@ export function ListRow({
   danger = false,
   selected,
   checked,
+  titleLines = 1,
   testID,
 }: {
   title: string;
@@ -256,6 +257,8 @@ export function ListRow({
   danger?: boolean;
   selected?: boolean;
   checked?: boolean;
+  /** How many lines the title may take before it is cut short; 0 for as many as it needs. */
+  titleLines?: number;
   testID?: string;
 }) {
   const palette = usePalette();
@@ -268,7 +271,7 @@ export function ListRow({
           <Icon name={icon} size={22} color={danger ? palette.danger : palette.textMuted} />
         ) : null)}
       <View style={styles.rowText}>
-        <Text style={[font.body, { color }]} numberOfLines={1}>
+        <Text style={[font.body, { color }]} numberOfLines={titleLines}>
           {titleContent ?? title}
         </Text>
         {subtitle || subtitleContent ? (
@@ -367,7 +370,9 @@ export function EmptyState({
 export function IconButton({
   icon,
   onPress,
+  onLongPress,
   label,
+  hint,
   color,
   background,
   size = 40,
@@ -375,7 +380,11 @@ export function IconButton({
 }: {
   icon: IconName;
   onPress: () => void;
+  /** More choices, as a long press offers them (an action sheet). */
+  onLongPress?: () => void;
   label: string;
+  /** What else it does, for screen readers (a long press's choices). */
+  hint?: string;
   color?: string;
   background?: string;
   size?: number;
@@ -387,8 +396,15 @@ export function IconButton({
     <Pressable
       testID={testID}
       onPress={onPress}
+      onLongPress={onLongPress}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityHint={hint}
+      // Screen readers reach the long press's choices as the button's own action.
+      accessibilityActions={onLongPress ? [{ name: 'longpress' }] : undefined}
+      onAccessibilityAction={(event) => {
+        if (event.nativeEvent.actionName === 'longpress') onLongPress?.();
+      }}
       hitSlop={8}
       android_ripple={{ color: palette.hover, borderless: true, radius: size / 2 }}
       style={({ pressed }) => ({

@@ -1,6 +1,7 @@
-// A room: the native header with its face and name (opening its info) and the call buttons, the
-// compact stage while its call runs with the chat chosen, the timeline, who is typing, and the
-// composer. An `eventId` scrolls to that message.
+// A room: the native header with its face and name (opening its info) and the call buttons (the
+// video button also joining or starting the room's meetings), the compact stage while its call
+// runs with the chat chosen, the timeline, who is typing, and the composer. An `eventId` scrolls
+// to that message.
 
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';

@@ -1,8 +1,8 @@
 //! Developer tools and widgets: an event's source, hidden events in timelines, and a room's
-//! widgets (web apps pinned to it, opened in the browser).
+//! widgets (web apps pinned to it; running them is `state::widgets`).
 
 use matrix_core::{AccountId, Command, EventSource, RequestId};
-use rune::{TextEdit, Tx};
+use rune::TextEdit;
 
 use super::{Confirm, Modal, Purpose, State, focused};
 use crate::i18n::tf;
@@ -42,13 +42,6 @@ impl State {
         self.settings.show_hidden_events = show;
         self.shell.save_settings(self.settings.clone());
         self.accounts.replan_timelines();
-    }
-
-    /// Opens a widget in the browser.
-    pub fn open_widget(&mut self, url: &str, tx: &mut Tx) {
-        if let Err(error) = tx.open_url(url) {
-            self.notice = Some(tf!("notice.browser", error = error));
-        }
     }
 
     /// Asks for a web page to pin to the room shown.

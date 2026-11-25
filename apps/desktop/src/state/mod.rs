@@ -53,6 +53,7 @@ mod status_message;
 mod suggest;
 mod typing;
 mod updates;
+mod widgets;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -110,6 +111,7 @@ pub use sign_in::{Asked, SignInForm, SignInStep};
 pub use status_message::{leading_emoji, suggestions as status_suggestions};
 pub use suggest::{Suggestion, Trigger};
 pub use updates::Update;
+pub use widgets::{PromptKey, VideoOption, WidgetPermissions, WidgetPrompt};
 
 use crate::i18n::{Language, t, tf};
 use crate::platform::{Shell, Toast};
@@ -186,6 +188,11 @@ pub enum Popover {
     /// How to install the offered release, from the rail's update button, where the app can't
     /// install it itself.
     Update,
+    /// The other ways to meet by video in the room shown ([`State::video_options`]), from the
+    /// chevron beside the header's video button.
+    VideoOptions,
+    /// What can be added to the room shown (a meeting, a widget, bots), from the widgets panel.
+    WidgetsMenu,
 }
 
 /// Which setting a select chooses.
@@ -555,6 +562,8 @@ pub enum Modal {
     Report(Box<ReportForm>),
     /// An event's source, for developer tools.
     Source(developer::SourceView),
+    /// A running widget's question: the run's first in [`State::widget_prompt`]'s queue.
+    WidgetPrompt(PromptKey),
 }
 
 /// The report dialog: what is reported, the user's reason, and whether to ignore them too.
@@ -837,6 +846,14 @@ enum Purpose {
     },
     /// Adding or removing a room's widget.
     Widget,
+    /// Running a widget, a meeting or the integration manager (`state::widgets`); `closed` once
+    /// the user closed it, so its cancelled finish says nothing.
+    WidgetRun {
+        closed: bool,
+    },
+    /// Answering a running widget: its page's messages, its permissions, the terms. A failure
+    /// means the run ended, which its own finish says.
+    WidgetAnswer,
     /// An event's source, for the source dialog showing that request.
     Source,
     /// Reading a room's or space's settings.
@@ -995,6 +1012,9 @@ pub struct State {
     /// Which message's hover toolbar the pointer is with.
     pub message_hover: MessageHover,
     pub modal: Option<Modal>,
+    /// Running widgets' questions, oldest first, until answered or their run ends; the oldest
+    /// shows whenever no other dialog does.
+    widget_prompts: Vec<WidgetPrompt>,
     /// What the emoji picker searches for.
     pub emoji_search: TextEdit,
     /// The account whose status message is being written in the account menu, while one is.
@@ -1121,6 +1141,7 @@ impl State {
             popover: None,
             message_hover: MessageHover::default(),
             modal: None,
+            widget_prompts: Vec::new(),
             emoji_search: TextEdit::default(),
             status_draft: None,
             status_edit: TextEdit::default(),
@@ -1283,6 +1304,13 @@ impl State {
                 {
                     *shown = Some(url.clone());
                 }
+                if let Err(error) = tx.open_url(&url) {
+                    self.notice = Some(tf!("notice.browser", error = error));
+                }
+            }
+            Event::OpenUrl { request, url }
+                if matches!(self.pending.get(&request), Some(Purpose::WidgetRun { closed: false })) =>
+            {
                 if let Err(error) = tx.open_url(&url) {
                     self.notice = Some(tf!("notice.browser", error = error));
                 }
@@ -1804,7 +1832,19 @@ impl State {
             }
             Event::DraftLoaded { account, key, draft, .. } => self.draft_loaded((account, key), draft),
             Event::Files { account, room_id, files } => self.accounts.set_files(&account, room_id, files),
-            Event::Widgets { account, room_id, widgets } => self.accounts.set_widgets(&account, room_id, widgets),
+            Event::Widgets { account, room_id, widgets } => {
+                self.accounts.set_widgets(&account, room_id, widgets);
+                // The menu of other ways to meet goes once there are none.
+                if self.popover == Some(Popover::VideoOptions) && self.video_options().len() < 2 {
+                    self.popover = None;
+                }
+            }
+            Event::WidgetPage { request, page } => self.widget_page(request, page),
+            Event::WidgetMessage { request, message } => self.widget_message(request, message),
+            Event::WidgetPermissions { request, question, widget, permissions } => {
+                self.widget_permissions_asked(request, question, widget, permissions);
+            }
+            Event::IntegrationTerms { request, policies } => self.integration_terms(request, policies),
             Event::EventSource { request, source } => self.source_loaded(request, source),
             // Pushes are for phones: the desktop syncs while it runs and never registers a pusher.
             Event::PushContent { .. } => {}
@@ -1826,6 +1866,7 @@ impl State {
             }
             Event::PlacesFound { request, places } => self.places_found(request, places),
         }
+        self.settle_widget_prompts();
         self.remember_account();
         self.show_taskbar();
         if !location.is_current(self) {
@@ -2069,6 +2110,10 @@ impl State {
                     self.add_contact(kind);
                 }
                 Purpose::Guarded { .. } if matches!(self.modal, Some(Modal::Password { .. })) => self.modal = None,
+                Purpose::WidgetRun { closed } => {
+                    let closed = *closed;
+                    self.widget_run_finished(request, closed, None);
+                }
                 _ => {}
             }
             if purpose == Purpose::SignIn {
@@ -2256,6 +2301,8 @@ impl State {
             }
             Purpose::Create { .. } => self.notice = Some(tf!("notice.create", error = error)),
             Purpose::Widget => self.notice = Some(tf!("notice.widget", error = error)),
+            Purpose::WidgetRun { closed } => self.widget_run_finished(request, closed, Some(error)),
+            Purpose::WidgetAnswer => {}
             Purpose::Source => self.source_failed(request, &error),
             Purpose::ReadRoomSettings => self.notice = Some(tf!("notice.room_settings_read", error = error)),
             Purpose::RoomSettings => self.notice = Some(tf!("notice.room_settings", error = error)),
@@ -2448,6 +2495,8 @@ impl State {
     /// scrolled near its top. True when it changed state.
     pub fn poll(&mut self, tx: &mut Tx) -> bool {
         let mut changed = self.expire_notice(tx);
+        // Whatever closed or replaced a dialog since, a widget's question shows once none does.
+        changed |= self.settle_widget_prompts();
         changed |= self.accounts.poll_timelines(tx, self.reduced_motion.get());
         let now = std::time::Instant::now();
         for command in self.receipts.due(now) {
@@ -4935,6 +4984,12 @@ impl State {
                     self.dispatch(Command::Cancel(request), Purpose::Cancel);
                 }
             }
+            // Closed unanswered, a widget gets none of what it asked for; the terms, not agreed to,
+            // keep the integration manager shut.
+            Some(Modal::WidgetPrompt(key)) => {
+                self.modal = Some(Modal::WidgetPrompt(key));
+                self.dismiss_widget_prompt();
+            }
             // Giving up on the password leaves the contact detail waiting to be confirmed.
             Some(Modal::Password { action: Guarded::AddContact { pending }, .. }) => {
                 if let ContactStep::Sent { busy, .. } = &mut self.profile.contact_mut(pending.kind).step {
@@ -4943,6 +4998,8 @@ impl State {
             }
             _ => {}
         }
+        // A widget's question waiting behind the dialog shows now.
+        self.settle_widget_prompts();
     }
 
     pub fn set_language(&mut self, language: Language) {

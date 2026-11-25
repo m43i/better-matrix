@@ -104,6 +104,8 @@ pub use sidebar::{ScopeLayout, Section, SidebarLayout};
 pub use source::EventSource;
 pub use status::Status;
 pub use store::StoreLayout;
+pub use widgets::meetings::Meeting;
+pub use widgets::session::{PermissionKind, WidgetBridge, WidgetPage, WidgetPermission};
 pub use widgets::{Widget, Widgets};
 
 /// Shown to other devices and in the server's session list.
@@ -130,6 +132,15 @@ pub enum Error {
     /// A widget's address isn't a web page (`http` or `https`).
     #[error("a widget needs a web address")]
     InvalidWidgetUrl,
+    /// The widget is no longer pinned to the room.
+    #[error("that widget is no longer in the room")]
+    WidgetGone,
+    /// A meeting's server couldn't be reached or wouldn't let the user join.
+    #[error("could not join the meeting: {0}")]
+    Meeting(String),
+    /// The integration manager couldn't be reached or refused the account.
+    #[error("could not open the integration manager: {0}")]
+    Integrations(String),
     /// A poll needs a question and two to twenty answers.
     #[error("a poll needs two to twenty answers")]
     InvalidPoll,

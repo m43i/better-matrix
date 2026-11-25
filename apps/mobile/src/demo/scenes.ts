@@ -15,6 +15,7 @@ import { pillAt, userPill } from '../state/pills';
 import type { Settings } from '../state/settings';
 import type { Store } from '../state/store';
 import { roomKey, threadKey } from '../state/timeline';
+import { widgetLaunches } from '../ui/widgets/launch';
 import {
   ADA,
   ADA_HOBBY,
@@ -30,6 +31,7 @@ import {
   DM_GRACE,
   demoQr,
   demoSessions,
+  demoWidgets,
   DM_KAI,
   GENERAL,
   GRACE,
@@ -63,8 +65,8 @@ export interface Scene {
   events?: EngineEvent[];
   /** Changes on this device after the events (the account or scope on screen, a draft). */
   setup?: (store: Store) => void;
-  /** The screens to open, in order, over the tabs. */
-  routes?: Href[];
+  /** The screens to open, in order, over the tabs; made as the scene opens when they need to be. */
+  routes?: Href[] | (() => Href[]);
 }
 
 const general = (store: Store) => setScope(store, ADA, { space: WORK_SPACE });
@@ -154,7 +156,10 @@ export const scenes = {
     about: 'An invitation to accept or decline',
     routes: [routes.invitation(ADA, DESIGN_INVITE)],
   },
-  'room-menu': { about: 'A room’s long-press menu', routes: [routes.roomMenu(ADA, GENERAL)] },
+  'room-menu': {
+    about: 'A room’s long-press menu, with Start a meeting',
+    routes: [routes.roomMenu(ADA, GENERAL)],
+  },
   room: {
     about: 'The general room: replies, reactions, a poll, a thread, a link card',
     setup: general,
@@ -353,8 +358,48 @@ export const scenes = {
     routes: [routes.room(ADA, GENERAL), routes.roomInfo(ADA, GENERAL)],
   },
   widgets: {
-    about: 'A room’s widgets, opened in the browser',
+    about: 'A room’s widgets in one list, its meeting first; the header’s + holds the rest',
     routes: [routes.roomInfo(ADA, GENERAL), routes.widgets(ADA, GENERAL)],
+  },
+  meeting: {
+    about: 'A room with a Jitsi meeting pinned: its video button’s long press offers to join it',
+    setup: general,
+    events: [{ type: 'Widgets', data: { account: ADA, room_id: GENERAL, widgets: demoWidgets() } }],
+    routes: [routes.room(ADA, GENERAL)],
+  },
+  'meeting-start': {
+    about: 'A room where a meeting can start, none pinned: its video button offers to start one',
+    setup: general,
+    events: [
+      {
+        type: 'Widgets',
+        data: { account: ADA, room_id: DESIGN, widgets: { widgets: [], can_add: true } },
+      },
+    ],
+    routes: [routes.room(ADA, DESIGN)],
+  },
+  'meeting-command': {
+    about: 'Typing /mee in a room that can start a meeting: /meet suggested',
+    setup: drafting('/mee'),
+    routes: [routes.room(ADA, GENERAL)],
+  },
+  'widget-permissions': {
+    about: 'A widget running in the app, asking for permissions over its page',
+    setup: general,
+    events: [{ type: 'Widgets', data: { account: ADA, room_id: GENERAL, widgets: demoWidgets() } }],
+    // The app's own launch, as a tap on the widget registers it.
+    routes: () => [
+      routes.room(ADA, GENERAL),
+      routes.widget(ADA, GENERAL, { type: 'widget', widgetId: 'board' }, widgetLaunches.register()),
+    ],
+  },
+  integrations: {
+    about: 'The integration manager’s terms, before it opens',
+    // The app's own launch, as Bots and integrations registers it.
+    routes: () => [
+      routes.widgets(ADA, GENERAL),
+      routes.widget(ADA, GENERAL, { type: 'integrations' }, widgetLaunches.register()),
+    ],
   },
   'event-source': {
     about: 'A message’s source, decrypted and as sent',

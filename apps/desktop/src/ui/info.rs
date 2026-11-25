@@ -128,8 +128,16 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
                 .on_press(|s: &mut State| s.show_side(SidePanel::Files)),
         )
         .child(
-            link_row(&icons::LAYOUT, t!("widgets.title"), None, "info-widgets", p)
-                .on_press(|s: &mut State| s.show_side(SidePanel::Widgets)),
+            link_row(
+                &icons::LAYOUT,
+                t!("widgets.title"),
+                s.active_account()
+                    .and_then(|account| super::room::widget_count(account, room))
+                    .map(|count| count.to_string()),
+                "info-widgets",
+                p,
+            )
+            .on_press(|s: &mut State| s.show_side(SidePanel::Widgets)),
         )
         .children(room.can_change_settings.then(|| {
             let id = room.room_id.clone();

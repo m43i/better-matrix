@@ -233,9 +233,36 @@ menu. See [ADR 0006](adr/0006-timelines.md).
 
 **Widget**
 : A web app pinned to a room as state (`im.vector.modular.widgets`, `m.widget`): a board, a
-dashboard, a Jitsi meeting (`Widget`). Listed in the room's details and opened in the browser
-with its URL's template variables filled in; whoever may change the room's state adds and removes
-them. See [ADR 0008](adr/0008-people-and-rooms.md).
+dashboard, a meeting (`Widget`). Listed in the room's details and run in the app (the widget
+window, a phone's web view) or the browser, with its URL's template variables filled in;
+whoever may change the room's state adds and removes them. See
+[ADR 0012](adr/0012-widgets-and-integrations.md).
+
+**Meeting**
+: A video conference pinned to a room as a widget, Jitsi or BigBlueButton (`Meeting`,
+`Widget::meeting`), joined as itself rather than through Element's page; not a call, which the
+app runs natively. The room offers Join meeting while one is pinned. See
+[ADR 0012](adr/0012-widgets-and-integrations.md).
+
+**Widget run**
+: One widget open in the app: a long-running `Command::RunWidget` whose page the app shows
+(`WidgetPage`) and whose messages it passes through the page's bridge (`WidgetBridge`) until the
+app closes it. See [ADR 0012](adr/0012-widgets-and-integrations.md).
+
+**Widget window**
+: The desktop's window for a widget run: the same binary as a web-view helper
+(`better-matrix --widget-window`), one process per run. See
+[ADR 0012](adr/0012-widgets-and-integrations.md).
+
+**Widget permission**
+: Something a running widget asks to do through the widget API, granted or refused by the user
+and remembered per room and widget (`WidgetPermission`, `Grants`). See
+[ADR 0012](adr/0012-widgets-and-integrations.md).
+
+**Integration manager**
+: The page that adds bots, bridges and widgets to a room (Element's, Dimension), named by the
+homeserver's well-known file and run like a widget (`Command::OpenIntegrations`). "Bots and
+integrations" in the widgets panel. See [ADR 0012](adr/0012-widgets-and-integrations.md).
 
 **Attachment preview**
 : An image, PDF, video or audio clip shown full size over the window, with download, close and

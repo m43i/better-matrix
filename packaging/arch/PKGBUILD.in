@@ -11,7 +11,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/m43i/better-matrix"
 license=('MIT')
 depends=('alsa-lib' 'glib2' 'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-libav' 'libxkbcommon' 'wayland'
-         'vulkan-icd-loader')
+         'vulkan-icd-loader' 'webkit2gtk-4.1' 'gtk3')
 optdepends=('pipewire: screen sharing on Wayland')
 # Already built and stripped: nothing to strip or split off as debug info.
 options=('!strip' '!debug')

@@ -70,8 +70,9 @@ the path generally and record it in its area's ADR.
   `[patch.crates-io]` entry use the same rev, and the patch table mirrors Rune's own. When
   bumping: update every rev, compare with Rune's root `Cargo.toml`, run `bun run agent-tools`.
 - `rust-toolchain.toml` matches Rune's toolchain.
-- Linux builds need `libxkbcommon`, `wayland`, `alsa`, `glib`, `pipewire` and `gstreamer` (with
-  `gst-plugins-base`, for video) development packages
+- Linux builds need `libxkbcommon`, `wayland`, `alsa`, `glib`, `pipewire`, `gstreamer` (with
+  `gst-plugins-base`, for video) and `webkit2gtk-4.1` (with `gtk3`, `libsoup3`, `javascriptcoregtk`,
+  for the widget window, ADR 0012) development packages
   and clang 21+ (libwebrtc's bundled libc++ requires it; `CC`/`CXX` pick it); the first build
   downloads a prebuilt libwebrtc for calls (ADR 0009).
 
@@ -111,7 +112,8 @@ never edit them, configure `apps/mobile/app.json` or a config plugin.
   background work). Await an answer: `await store.run(command, onEvent)`; it rejects with
   `CommandFailed` (`.cancelled` when cancelled), and `onEvent` hears the request's own events
   (`HomeserverDiscovered`, `OpenUrl`, `PeopleFound`, `DirectChat`, `RoomCreated`,
-  `PasswordNeeded`, `ContactCodeSent`).
+  `PasswordNeeded`, `ContactCodeSent`, and a widget run's `WidgetPage`, `WidgetMessage`,
+  `WidgetPermissions`, `IntegrationTerms`).
 - Everything else the engine reports goes through `apply` into state; read it with
   `useStore(selector)` (pass `shallow` when the selector builds a new array or object).
 - Media: `useMedia(account, media, size)` gives a `file://` URI once fetched. Never fetch in

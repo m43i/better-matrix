@@ -51,6 +51,7 @@ fn room(room_id: &str) -> RoomSummary {
         can_rename: true,
         pinned: Vec::new(),
         can_pin: true,
+        can_start_meeting: false,
         saved: Vec::new(),
         can_change_settings: true,
         knocks: 0,
@@ -5967,6 +5968,71 @@ fn topic_should_set_the_rooms_topic() {
         |command| matches!(command, Command::ChangeRoom { room_id, setting: matrix_core::RoomSetting::Topic(topic), .. } if room_id == "!one:x" && topic == "Release week")
     ));
     assert!(s.composer.is_empty());
+}
+
+/// Writing in a room where the homeserver offers meetings, or not.
+fn writing_where_meetings(s: &mut State, commands: &mut DetachedCommands, offered: bool) {
+    let id = AccountId::new("@a:example.org");
+    with_summaries(s, &id, vec![RoomSummary { can_start_meeting: offered, ..room("!one:x") }]);
+    s.select_room("!one:x");
+    s.composer.edit.focused = true;
+    drain(commands);
+}
+
+/// The commands suggested for what the composer holds.
+fn commands_suggested(s: &State) -> Vec<slash::SlashCommand> {
+    let found = s.suggestions(ComposerTarget::Room).map(|(_, found)| found).unwrap_or_default();
+    found
+        .into_iter()
+        .filter_map(|suggestion| match suggestion {
+            Suggestion::Command(command) => Some(command),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn meet_should_be_suggested_where_the_homeserver_offers_meetings() {
+    let (mut s, mut commands) = state();
+    writing_where_meetings(&mut s, &mut commands, true);
+    s.composer.edit.insert("/mee");
+    assert_eq!(commands_suggested(&s), [slash::SlashCommand::Meet]);
+}
+
+#[test]
+fn meet_should_not_be_suggested_where_meetings_arent_offered() {
+    let (mut s, mut commands) = state();
+    writing_where_meetings(&mut s, &mut commands, false);
+    s.composer.edit.insert("/m");
+    assert_eq!(commands_suggested(&s), [slash::SlashCommand::Me]);
+}
+
+#[test]
+fn meet_should_start_a_video_meeting_in_the_browser() {
+    let (mut s, mut commands) = state();
+    writing_where_meetings(&mut s, &mut commands, true);
+    s.composer.edit.insert("/meet");
+    s.send_message(ComposerTarget::Room, &mut Tx::default());
+    assert_eq!(
+        all_commands(&mut commands),
+        [Command::StartMeeting {
+            account: AccountId::new("@a:example.org"),
+            room_id: "!one:x".into(),
+            video: true,
+            browser: true
+        }]
+    );
+    assert!(s.composer.is_empty());
+}
+
+#[test]
+fn meet_where_meetings_arent_offered_should_stop_with_a_notice() {
+    let (mut s, mut commands) = state();
+    writing_where_meetings(&mut s, &mut commands, false);
+    s.composer.edit.insert("/meet");
+    s.send_message(ComposerTarget::Room, &mut Tx::default());
+    assert_eq!(all_commands(&mut commands), []);
+    assert_eq!(s.notice.as_deref(), Some("Meetings aren't available on your homeserver."));
 }
 
 #[test]

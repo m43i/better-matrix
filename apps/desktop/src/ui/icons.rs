@@ -50,6 +50,7 @@ icons! {
     FILE = "file": r#"<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5"/>"#;
     IMAGE = "image": r#"<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>"#;
     VIDEO = "video": r#"<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-3v10l-6-3z"/>"#;
+    MEETING = "meeting": r#"<rect x="2" y="3" width="20" height="14" rx="2"/><circle cx="9" cy="8.5" r="2"/><circle cx="15" cy="8.5" r="2"/><path d="M5.5 14a3.5 3.5 0 0 1 7 0M11.5 14a3.5 3.5 0 0 1 7 0M8 21h8M12 17v4"/>"#;
     AUDIO = "audio": r#"<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>"#;
     HOME = "home": r#"<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>"#;
     UPDATE = "update": r#"<path d="M20 7a9 9 0 1 0 1 9M20 3v5h-5M12 17V9M9 12l3-3 3 3"/>"#;

@@ -616,6 +616,44 @@ pub enum Command {
         /// The widget (`Widget::id`).
         widget_id: String,
     },
+    /// Run one of a room's widgets ([`crate::widgets::session`]): in the browser (`browser`),
+    /// answered by [`Event::OpenUrl`]; else in the app's web view, which shows
+    /// [`Event::WidgetPage`] and passes its messages ([`Event::WidgetMessage`],
+    /// [`Answer::WidgetMessage`]), until the app closes it with [`Command::Cancel`]. A widget
+    /// asking for permissions waits for [`Event::WidgetPermissions`]'s answer
+    /// ([`Answer::WidgetPermissions`]). A meeting opens as itself, joined as its server asks.
+    RunWidget {
+        /// Whose room.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+        /// The widget (`Widget::id`).
+        widget_id: String,
+        /// Whether to open it in the browser rather than the app.
+        browser: bool,
+    },
+    /// Start a Jitsi meeting in a room: pin it as Element does (the room's widgets are listed
+    /// again), then run it as [`Command::RunWidget`] does.
+    StartMeeting {
+        /// Whose room.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+        /// Whether it starts with video, rather than audio only.
+        video: bool,
+        /// Whether to open it in the browser rather than the app.
+        browser: bool,
+    },
+    /// Open the integration manager for a room ([`crate::widgets::integrations`]): bots,
+    /// bridges and widgets. Runs like [`Command::RunWidget`] in the app's web view; its terms,
+    /// when not yet agreed to, come first ([`Event::IntegrationTerms`], [`Answer::Agree`]). It
+    /// ends when the manager closes itself or the app cancels it.
+    OpenIntegrations {
+        /// Whose room.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+    },
     /// List a room's threads; answered by [`Event::Threads`].
     ListThreads {
         /// Whose room.
@@ -1018,6 +1056,22 @@ pub enum Answer {
     Agree,
     /// The email address to confirm ([`RegistrationStep::Email`](crate::RegistrationStep::Email)).
     Email(String),
+    /// A message a running widget's page posted ([`Command::RunWidget`]), as JSON.
+    WidgetMessage(String),
+    /// The permissions the user grants a running widget, by capability
+    /// ([`Event::WidgetPermissions`]); those left out are refused.
+    WidgetPermissions {
+        /// The question answered ([`Event::WidgetPermissions::question`]); an answer to another
+        /// is dropped.
+        question: u64,
+        /// The capabilities granted.
+        granted: Vec<String>,
+    },
+    /// A running widget's page started loading a new document: what it posts waits for that
+    /// document's widget API ([`Answer::WidgetLoaded`]).
+    WidgetLoading,
+    /// A running widget's page finished loading: the widget API starts talking to it.
+    WidgetLoaded,
     /// The user finished the step in the browser ([`RegistrationStep::Browser`](crate::RegistrationStep::Browser)),
     /// or opened the emailed link ([`RegistrationStep::EmailSent`](crate::RegistrationStep::EmailSent)).
     Continue,
@@ -1219,6 +1273,42 @@ pub enum Event {
         room_id: String,
         /// Its widgets.
         widgets: crate::Widgets,
+    },
+    /// Show a running widget's page ([`Command::RunWidget`], [`Command::StartMeeting`],
+    /// [`Command::OpenIntegrations`]). Again for the same run: load it again (the widget starts
+    /// over, as after a permission answered too late for the page's first question).
+    WidgetPage {
+        /// The run.
+        request: RequestId,
+        /// The page.
+        page: crate::WidgetPage,
+    },
+    /// Post a message into a running widget's page, as its bridge says.
+    WidgetMessage {
+        /// The run.
+        request: RequestId,
+        /// The message, as JSON.
+        message: String,
+    },
+    /// A running widget asks for permissions; the user answers with
+    /// [`Answer::WidgetPermissions`]. Until then it waits. No permissions withdraws the question
+    /// showing (the page started over): the app stops asking.
+    WidgetPermissions {
+        /// The run.
+        request: RequestId,
+        /// The question's number within the run, which the answer names.
+        question: u64,
+        /// The widget's name.
+        widget: String,
+        /// What it asks for.
+        permissions: Vec<crate::WidgetPermission>,
+    },
+    /// The integration manager's terms, to agree to ([`Answer::Agree`]) before it opens.
+    IntegrationTerms {
+        /// The run.
+        request: RequestId,
+        /// Its policies.
+        policies: Vec<crate::Policy>,
     },
     /// People found for [`Command::SearchPeople`].
     PeopleFound {
@@ -1782,6 +1872,7 @@ impl Engine {
             accounts: HashMap::new(),
             tasks: JoinSet::new(),
             running: HashMap::new(),
+            widget_runs: HashMap::new(),
             http: crate::links::http_client().map_err(|e| e.to_string()),
             signals,
             call: None,
@@ -1973,6 +2064,9 @@ struct State {
     tasks: JoinSet<Completion>,
     /// Command tasks still running, for [`Command::Cancel`].
     running: HashMap<RequestId, AbortHandle>,
+    /// Widget runs ([`Command::RunWidget`] and the like), by the account they act for: signing
+    /// it out ends them.
+    widget_runs: HashMap<RequestId, AccountId>,
     /// For linked files and call services; shared by every account, carries no credentials.
     http: Result<matrix_sdk::reqwest::Client, String>,
     /// Where the accounts' call signals go, for [`State::run`] to route.
@@ -2123,6 +2217,26 @@ impl State {
     }
 
     /// An account went: its call ends and its rings stop.
+    /// Stops a running command; it finishes as cancelled.
+    fn cancel(&mut self, target: RequestId) {
+        self.answers.remove(&target);
+        self.widget_runs.remove(&target);
+        if let Some(handle) = self.running.remove(&target) {
+            handle.abort();
+            self.forget_opening(target);
+            self.sink.emit(Event::Finished { request: target, result: Err(Error::Cancelled.to_string()) });
+        }
+    }
+
+    /// Ends the widget runs acting for an account that is going.
+    fn end_widget_runs(&mut self, account: &AccountId) {
+        let runs: Vec<RequestId> =
+            self.widget_runs.iter().filter(|(_, owner)| *owner == account).map(|(request, _)| *request).collect();
+        for request in runs {
+            self.cancel(request);
+        }
+    }
+
     fn forget_calls(&mut self, account: &AccountId) {
         if self.call.as_ref().is_some_and(|call| call.account == *account) {
             self.hang_up();
@@ -2322,12 +2436,7 @@ impl State {
                 return;
             }
             Command::Cancel(target) => {
-                self.answers.remove(&target);
-                if let Some(handle) = self.running.remove(&target) {
-                    handle.abort();
-                    self.forget_opening(target);
-                    self.sink.emit(Event::Finished { request: target, result: Err(Error::Cancelled.to_string()) });
-                }
+                self.cancel(target);
                 self.sink.emit(Event::Finished { request, result: Ok(()) });
                 return;
             }
@@ -2449,6 +2558,18 @@ impl State {
                         tokio::spawn(async move {
                             let http = room.client().http_client().clone();
                             account.sticky.fetch(&room, &http).await;
+                        });
+                    }
+                    // The room's widgets, so it can offer its meetings (read from the server once
+                    // a run under sliding sync, which leaves them out).
+                    if key.thread.is_none() {
+                        let (account, sink, room_id) =
+                            (running.account.clone(), Arc::clone(&sink), key.room_id.clone());
+                        tokio::spawn(async move {
+                            let freshness = crate::widgets::Freshness::Known;
+                            if let Ok(widgets) = account.room_widgets(&room_id, freshness).await {
+                                sink.emit(Event::Widgets { account: account.id().clone(), room_id, widgets });
+                            }
                         });
                     }
                     (running.take_warm(&key), fetch_keys)
@@ -2843,6 +2964,45 @@ impl State {
                     if let Some(widgets) = account.widgets_after_write(&room_id).await {
                         sink.emit(Event::Widgets { account: id, room_id, widgets });
                     }
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::RunWidget { account: id, room_id, widget_id, browser } => {
+                self.widget_runs.insert(request, id.clone());
+                let account = self.account(&id);
+                let answers = self.answers_for(request);
+                Box::pin(async move {
+                    // From the server: one removed since sync last said opens no more.
+                    let fresh = crate::widgets::Freshness::Server;
+                    crate::widgets::session::run(account?, room_id, widget_id, browser, fresh, request, sink, answers)
+                        .await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::StartMeeting { account: id, room_id, video, browser } => {
+                self.widget_runs.insert(request, id.clone());
+                let account = self.account(&id);
+                let answers = self.answers_for(request);
+                Box::pin(async move {
+                    let account = account?;
+                    let widget_id = account.start_meeting(&room_id, video).await?;
+                    // Started, even when the list can't be read again: retrying would start another.
+                    if let Some(widgets) = account.widgets_after_write(&room_id).await {
+                        sink.emit(Event::Widgets { account: id, room_id: room_id.clone(), widgets });
+                    }
+                    // Read from the server: sync may not have brought it yet.
+                    let fresh = crate::widgets::Freshness::Server;
+                    crate::widgets::session::run(account, room_id, widget_id, browser, fresh, request, sink, answers)
+                        .await?;
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::OpenIntegrations { account: id, room_id } => {
+                self.widget_runs.insert(request, id.clone());
+                let account = self.account(&id);
+                let answers = self.answers_for(request);
+                Box::pin(async move {
+                    crate::widgets::integrations::run(account?, id, room_id, request, sink, answers).await?;
                     Ok(Outcome::Done)
                 })
             }
@@ -3613,6 +3773,7 @@ impl State {
         if let Some(request) = request {
             self.running.remove(&request);
             self.answers.remove(&request);
+            self.widget_runs.remove(&request);
         }
         let result = match result {
             Ok(Outcome::Done) => Ok(()),
@@ -3686,6 +3847,15 @@ impl State {
                                 }
                             }
                         };
+                        // Once the homeserver names a Jitsi server, rooms offer meetings.
+                        let meetings = {
+                            let (account, feed) = (account.clone(), feed.clone());
+                            async move {
+                                if account.discover_meetings().await {
+                                    feed.refresh(None).await;
+                                }
+                            }
+                        };
                         // What people show as this device stored it, before syncing starts: a
                         // sync's newer report must not come first and be undone by it.
                         let people = account.known_presence().await;
@@ -3711,6 +3881,7 @@ impl State {
                             status,
                             own,
                             calls,
+                            meetings,
                             crate::security::watch(account.clone(), Arc::clone(&sink)),
                             sync_loop(account.clone(), Arc::clone(&sink), feed, Arc::clone(&own_refresh)),
                         );
@@ -3760,6 +3931,7 @@ impl State {
                 Ok(())
             }
             Ok(Outcome::LoggedOut(id)) => {
+                self.end_widget_runs(&id);
                 self.forget_calls(&id);
                 self.accounts.remove(&id);
                 self.sink.emit(Event::AccountRemoved(id));
@@ -3776,6 +3948,49 @@ impl State {
             self.sink.emit(Event::Finished { request, result });
         }
     }
+}
+
+/// Lists a room's widgets again, from the server, whenever sync brings a change to them, so the
+/// room offers the meetings pinned to it as they come and go (under sliding sync the store
+/// keeps no widget state from timelines).
+fn follow_widgets(account: Account, sink: Arc<dyn EventSink>) -> AbortHandle {
+    let mut synced = account.client().subscribe_to_all_room_updates();
+    tokio::spawn(async move {
+        loop {
+            let rooms = match synced.recv().await {
+                Ok(updates) => {
+                    // A redaction may have removed a widget: the rooms on screen are read again
+                    // (others when next opened).
+                    let (mut rooms, redacted) = crate::widgets::changed_rooms(&updates);
+                    let followed = account.followed_rooms();
+                    for room in redacted {
+                        if followed.contains(&room) {
+                            rooms.push(room);
+                        } else {
+                            // Read from the server when next opened.
+                            account.forget_extra_state(&room);
+                        }
+                    }
+                    rooms
+                }
+                // Missed some: the rooms on screen are read again.
+                // Missed some (a redaction elsewhere among them): every room's cached state is
+                // read again when it opens, the rooms on screen at once.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    account.forget_all_extra_state();
+                    account.followed_rooms()
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            for room_id in rooms {
+                let freshness = crate::widgets::Freshness::Server;
+                if let Ok(widgets) = account.room_widgets(&room_id, freshness).await {
+                    sink.emit(Event::Widgets { account: account.id().clone(), room_id, widgets });
+                }
+            }
+        }
+    })
+    .abort_handle()
 }
 
 /// Syncs one account until it fails or is aborted, reporting rooms, new messages and
@@ -3802,6 +4017,7 @@ async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, o
     let (wanted_members, members) = fetch_space_members(feed.clone());
     let _members = AbortOnDrop(members);
     let _unread = AbortOnDrop(follow_notable_updates(feed.clone(), updates));
+    let _widgets = AbortOnDrop(follow_widgets(account.clone(), Arc::clone(&sink)));
     // Until the first long-poll sync has caught up, the room list's sliding sync marks no one
     // present either (`status::sync_presence`).
     let _ = account.client().set_presence(PresenceState::Offline, None, false).await;

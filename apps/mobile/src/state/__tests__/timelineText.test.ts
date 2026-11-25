@@ -49,6 +49,22 @@ describe('room events', () => {
     expect(roomEventText(event({ type: 'Joined' }))).toBe('Ada joined');
   });
 
+  it('should say who started a meeting', () => {
+    expect(
+      roomEventText(event({ type: 'WidgetAdded', data: { name: 'Jitsi', meeting: 'Jitsi' } })),
+    ).toBe('Ada started a meeting');
+  });
+
+  it('should name a widget someone added', () => {
+    expect(
+      roomEventText(event({ type: 'WidgetAdded', data: { name: 'Board', meeting: null } })),
+    ).toBe('Ada added the widget Board');
+  });
+
+  it('should say who removed a widget', () => {
+    expect(roomEventText(event({ type: 'WidgetRemoved' }))).toBe('Ada removed a widget');
+  });
+
   it('should name whom an invite was for', () => {
     expect(roomEventText(event({ type: 'Invited', data: person('@g:x', 'Grace') }))).toBe(
       'Ada invited Grace',

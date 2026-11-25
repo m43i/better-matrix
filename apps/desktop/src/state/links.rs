@@ -370,6 +370,7 @@ mod tests {
                 can_rename: false,
                 pinned: Vec::new(),
                 can_pin: true,
+                can_start_meeting: false,
                 saved: Vec::new(),
                 priority: matrix_core::RoomPriority::Normal,
                 marked_unread: false,

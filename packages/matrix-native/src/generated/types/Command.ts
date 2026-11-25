@@ -687,7 +687,47 @@ room_id: string,
 /**
  * The widget (`Widget::id`).
  */
-widget_id: string, } } | { "type": "ListThreads", "data": { 
+widget_id: string, } } | { "type": "RunWidget", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, 
+/**
+ * The widget (`Widget::id`).
+ */
+widget_id: string, 
+/**
+ * Whether to open it in the browser rather than the app.
+ */
+browser: boolean, } } | { "type": "StartMeeting", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, 
+/**
+ * Whether it starts with video, rather than audio only.
+ */
+video: boolean, 
+/**
+ * Whether to open it in the browser rather than the app.
+ */
+browser: boolean, } } | { "type": "OpenIntegrations", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, } } | { "type": "ListThreads", "data": { 
 /**
  * Whose room.
  */

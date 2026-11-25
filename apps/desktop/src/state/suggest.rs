@@ -245,12 +245,17 @@ impl State {
                 );
                 found.extend(emoji_for(typed));
             }
-            Trigger::Command => found.extend(
-                SlashCommand::ALL
-                    .into_iter()
-                    .filter(|command| command.name().starts_with(&typed.to_lowercase()))
-                    .map(Suggestion::Command),
-            ),
+            Trigger::Command => {
+                // `/meet` only where the homeserver offers meetings.
+                let meets = account.room(room_id).is_some_and(|room| room.can_start_meeting);
+                found.extend(
+                    SlashCommand::ALL
+                        .into_iter()
+                        .filter(|command| *command != SlashCommand::Meet || meets)
+                        .filter(|command| command.name().starts_with(&typed.to_lowercase()))
+                        .map(Suggestion::Command),
+                );
+            }
         }
         found.truncate(MOST);
         (!found.is_empty()).then_some((query, found))
