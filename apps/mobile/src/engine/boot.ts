@@ -9,6 +9,7 @@ import { installAccountEffects } from '../state/actions/accounts';
 import { Store } from '../state/store';
 import { CLIENT_NAME, CLIENT_URI, OAUTH_REDIRECT } from './identity';
 import { installNotifications } from './notifications';
+import { installGiphyKey } from './giphyKey';
 import { dataDirectory, pathOf, readSettings, saveSettings } from './paths';
 import { installPush } from './push';
 import { secureStore } from './secrets';
@@ -38,6 +39,7 @@ export function boot(): Store {
   installNotifications(store);
   installAccountEffects(store);
   installPush(store, data);
+  installGiphyKey(store);
   let saved = settings;
   store.subscribe(() => {
     const next = store.getState().settings;

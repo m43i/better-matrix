@@ -22,11 +22,13 @@ use rune::AppHandle;
 use rune::prefs::Prefs;
 
 pub use notify::Toast;
-pub use secrets::system_secrets;
+pub use secrets::{system_keychain, system_secrets};
 pub use taskbar::Taskbar;
 
 use crate::i18n::Language;
-use crate::state::{Appearance, Emoticons, MessageLayout, PlaybackSpeed, Settings, State, Visits, Zoom};
+use crate::state::{
+    Appearance, Emoticons, MessageLayout, PlaybackSpeed, RecentStickers, Settings, State, Visits, Zoom,
+};
 
 /// The OS services the app uses, or inert stand-ins when headless.
 pub struct Shell {
@@ -44,6 +46,12 @@ pub struct Shell {
     saves: Arc<std::sync::atomic::AtomicU64>,
     /// Counts saves of the rooms opened, which go apart from the settings.
     visit_saves: Arc<std::sync::atomic::AtomicU64>,
+    sticker_saves: Arc<std::sync::atomic::AtomicU64>,
+    /// The system keychain alone (no files standing in for it): the user's GIPHY key lives
+    /// there. None headless.
+    secrets: Option<Arc<dyn matrix_core::SecretStore>>,
+    /// Counts GIPHY key saves, and keeps them one at a time: only the latest writes.
+    key_saves: Arc<(std::sync::atomic::AtomicU64, Mutex<()>)>,
     /// Where files made for a moment go (audio to play, voice memos being recorded): private to
     /// the user, and emptied at launch and exit.
     scratch: std::path::PathBuf,
@@ -78,6 +86,9 @@ impl Shell {
             document: Arc::default(),
             saves: Arc::default(),
             visit_saves: Arc::default(),
+            sticker_saves: Arc::default(),
+            secrets: None,
+            key_saves: Arc::default(),
             scratch,
             handoff: None,
         }
@@ -95,6 +106,9 @@ impl Shell {
             document: Arc::default(),
             saves: Arc::default(),
             visit_saves: Arc::default(),
+            sticker_saves: Arc::default(),
+            secrets: None,
+            key_saves: Arc::default(),
             scratch: std::env::temp_dir(),
             handoff: None,
             widget_windows: widget_window::Windows::headless(),
@@ -117,6 +131,9 @@ impl Shell {
                 document: Arc::default(),
                 saves: Arc::default(),
                 visit_saves: Arc::default(),
+                sticker_saves: Arc::default(),
+                secrets: None,
+                key_saves: Arc::default(),
                 scratch: std::env::temp_dir(),
                 handoff: None,
                 widget_windows: widget_window::Windows::headless(),
@@ -153,6 +170,57 @@ impl Shell {
             eprintln!("better-matrix: could not render the document: {error}");
         }
         render
+    }
+
+    /// Keeps the user's GIPHY key in `secrets`: the system keychain ([`system_keychain`]).
+    pub fn with_secrets(mut self, secrets: Arc<dyn matrix_core::SecretStore>) -> Self {
+        self.secrets = Some(secrets);
+        self
+    }
+
+    /// Reads the user's GIPHY key from the keychain off the UI thread; it arrives through
+    /// [`State::gif_key_loaded`]. False when there is no keychain to ask (headless).
+    pub fn load_gif_key(&self) -> bool {
+        let (Some(app), Some(secrets)) = (self.app.clone(), self.secrets.clone()) else { return false };
+        let spawned = std::thread::Builder::new().name("giphy-key".into()).spawn(move || {
+            let key = match secrets.get(GIPHY_SECRET) {
+                Ok(key) => key,
+                Err(error) => {
+                    eprintln!("better-matrix: could not read the GIPHY key: {error}");
+                    None
+                }
+            };
+            app.update(move |s: &mut State, _| s.gif_key_loaded(key));
+        });
+        if spawned.is_err() {
+            eprintln!("better-matrix: could not read the GIPHY key");
+            return false;
+        }
+        true
+    }
+
+    /// Keeps the user's GIPHY key in the keychain (`None` removes it), off the UI thread; of
+    /// quick changes, the latest writes. A failure comes back through
+    /// [`State::gif_key_not_kept`] with the key asked for and `previous`, the key kept before.
+    pub fn save_gif_key(&self, key: Option<String>, previous: Option<String>) {
+        use std::sync::atomic::Ordering;
+        let Some(secrets) = self.secrets.clone() else { return };
+        let (app, saves) = (self.app.clone(), Arc::clone(&self.key_saves));
+        let save = saves.0.fetch_add(1, Ordering::Relaxed) + 1;
+        let _ = std::thread::Builder::new().name("save-giphy-key".into()).spawn(move || {
+            let Ok(_one_at_a_time) = saves.1.lock() else { return };
+            if saves.0.load(Ordering::Relaxed) != save {
+                return;
+            }
+            let written = match &key {
+                Some(key) => secrets.set(GIPHY_SECRET, key),
+                None => secrets.delete(GIPHY_SECRET),
+            };
+            if let (Err(error), Some(app)) = (written, app) {
+                let error = error.to_string();
+                app.update(move |s: &mut State, _| s.gif_key_not_kept(key, previous, &error));
+            }
+        });
     }
 
     /// Reads the permalinks later launches leave in `handoff` (see [`launch`]).
@@ -206,6 +274,17 @@ impl Shell {
     /// Saves the rooms opened, off the UI thread, apart from the settings: one write per open.
     pub fn save_visits(&self, visits: Visits) {
         save(&self.prefs, &self.visit_saves, "visits", move |prefs| prefs.set(VISITS, &visits));
+    }
+
+    /// The stickers sent lately on this device, as last saved: read from the prefs already
+    /// loaded.
+    pub fn recent_stickers(&self) -> RecentStickers {
+        self.prefs.lock().ok().and_then(|prefs| prefs.get(RECENT_STICKERS)).unwrap_or_default()
+    }
+
+    /// Saves the stickers sent lately, off the UI thread, apart from the settings.
+    pub fn save_recent_stickers(&self, recent: RecentStickers) {
+        save(&self.prefs, &self.sticker_saves, "stickers", move |prefs| prefs.set(RECENT_STICKERS, &recent));
     }
 
     /// A player for `media`'s file on the picked speaker; the view runs again once it is
@@ -368,6 +447,9 @@ const LAST_ACCOUNT: &str = "last_account";
 const HIDDEN_EVENTS: &str = "hidden_events";
 const ROOM_CHANGES: &str = "room_changes";
 const VISITS: &str = "visits";
+/// The user's GIPHY key in the keychain.
+const GIPHY_SECRET: &str = "giphy-api-key";
+const RECENT_STICKERS: &str = "recent_stickers";
 
 /// Runs `write` on the prefs on a worker of its own, unless a newer save counted by `saves`
 /// comes first: that one writes instead, so quick changes can't land out of order.

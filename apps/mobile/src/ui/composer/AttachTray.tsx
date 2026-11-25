@@ -25,7 +25,7 @@ const CHOICES: ReadonlyArray<{ id: TrayChoice; icon: IconName; label: Key }> = [
   { id: 'files', icon: 'folder', label: 'mobile.composer.files' },
   { id: 'poll', icon: 'poll', label: 'mobile.composer.poll' },
   { id: 'location', icon: 'location', label: 'mobile.composer.location' },
-  { id: 'sticker', icon: 'sticker', label: 'mobile.composer.sticker' },
+  { id: 'sticker', icon: 'sticker', label: 'mobile.stickers.tray' },
   { id: 'format', icon: 'textFormat', label: 'composer.formatting' },
   { id: 'emoji', icon: 'smile', label: 'composer.emoji' },
 ];

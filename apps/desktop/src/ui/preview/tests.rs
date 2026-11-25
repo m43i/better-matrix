@@ -23,6 +23,7 @@ fn the_cached_thumbnail_should_stay_in_place_when_the_original_arrives() {
             thumbnail: None,
             dimensions: None,
             audio: None,
+            sticker: false,
         },
         media: MediaRef::opaque("picture"),
         batch: Vec::new(),
@@ -155,6 +156,7 @@ fn opening_the_last_of_a_long_batch_should_scroll_its_thumbnail_into_view() {
             thumbnail: None,
             dimensions: Some((100, 100)),
             audio: None,
+            sticker: false,
         })
         .collect();
     let last = files[39].clone();

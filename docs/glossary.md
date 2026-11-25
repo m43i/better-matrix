@@ -318,6 +318,7 @@ dots, and "Ada is typing…". The user's own typing is sent as typing notices.
 
 **Linked GIF**
 : A GIF behind a Giphy, Tenor or Imgur link in a message, played inline; a setting turns it off.
+GIFs sent from the **sticker and GIF picker** are linked GIFs.
 
 **Link card**
 : The card below a message for the first link in it (not a GIF): the page's site, title,
@@ -396,7 +397,23 @@ one that stands as a word of its own, outside code, links and pills, into its em
 
 **Image pack**
 : A set of images with short codes, the user's own or a room's (MSC2545), each usable as a
-**custom emoji** in text, a **sticker** sent on its own, or both (`ImagePack`, `PackImage`).
+**custom emoji** in text, a **sticker** sent on its own, or both (`ImagePack`, `PackImage`). Where
+it is kept is its **pack place** (`PackPlace`: the user's account data, or a room's state under a
+state key); a room's pack may be **used everywhere** (in all the user's rooms).
+
+**Sticker and GIF picker**
+: The composer's one button for pictures sent on their own, with two tabs: **Stickers** (the
+image packs' stickers, searchable, recently used first) and **GIFs** (found on GIPHY with the
+user's **GIPHY key**, sent as their GIPHY link). `Popover::Stickers`, `State::picker`.
+
+**GIPHY key**
+: The user's own GIPHY API key, which GIF search needs; the app ships none. Kept in the system
+keychain (the phone's secure store), never shown again once kept: only replaced or removed.
+
+**Sticker manager**
+: The dialog (a screen on phones) for managing image packs: adding pictures as stickers,
+renaming, describing, choosing sticker or emoji use, the pack's picture, new room packs, and
+using a room's pack everywhere (`Modal::Packs`, `Command::EditImagePack`).
 
 **Location**
 : A place a message shares (`m.location`), shown with a **map** drawn from OpenStreetMap's

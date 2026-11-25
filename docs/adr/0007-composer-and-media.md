@@ -121,19 +121,93 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   (a room's pack under both names once), read from the store (under sliding sync, whose fixed
   required state leaves packs out, also from the room's state on the server, once a run per
   room, what sync brought since winning for the same pack), listed per room once a run
-  (`Command::ListImagePacks`; the sticker picker lists again as it opens). The emoji picker
-  leads with the room's custom emoji; a sticker button opens a grid of the packs' stickers, a
-  press sends `Outgoing::Sticker` (`m.sticker`), as a reply and into a thread like any message
+  (`Command::ListImagePacks`; the sticker picker lists again as it opens). The user's own pack
+  is always listed, empty or not, so it can be added to; the listing says whether the account
+  may add a pack to the room (`may_add`), and each pack where it is kept (`PackPlace`), whether
+  the account may change it and whether the user uses it everywhere. The emoji picker
+  leads with the room's custom emoji. The composer's sticker button opens the sticker and GIF
+  picker: its Stickers tab filters by short code or description as one types, leads with the
+  16 stickers sent last on this device (`RecentStickers`, saved in the prefs), then each pack's;
+  a press sends `Outgoing::Sticker` (`m.sticker`), as a reply and into a thread like any message
   (the SDK relates only room messages itself, so the engine writes the relation for stickers
-  and polls). A received image from `mxc://` is a custom
+  and polls).
+- **Pack images load** as their file when they are stickers (pickers, the manager, suggestions),
+  as the timeline shows a sent sticker: the image cache keeps one rendition per image, and a
+  server thumbnail loaded first would leave the sent sticker still. Emoji-only images load as
+  128-pixel thumbnails.
+- **Managing packs** (`Command::EditImagePack` with a `PackEdit`, answered by
+  `Event::ImagePackEdited`): rename, set the pack's picture (one of its images), add images,
+  change an image's short code, description and use, remove one, make or delete a room pack,
+  use a room pack everywhere. Image packs are in the spec since Matrix 1.19: a room's packs and
+  the rooms used everywhere are written under its names (`m.room.image_pack`,
+  `m.image_pack.rooms`), the user's own pack, which the spec doesn't name, under
+  `im.ponies.user_emotes`, which Cinny, FluffyChat and Nheko read; a pack already kept under the
+  other name is changed there too. Pictures are uploaded first; then an account's pack changes
+  go one at a time (`Account::pack_edits`), each reading every copy of the pack as the server
+  holds it now (account data fetched, a room pack's state read by key), so two changes, here or
+  on another device, never write over each other; each copy is changed as it stands, keeping
+  what the app doesn't know, and written back under its own name. A new image takes a short code
+  free in every copy; changing or removing an image touches another copy only where the same
+  code names the same picture as the copy the apps show (the first), which is written last, so a
+  change failing part way still shows as not done and doing it again reaches every copy. An edit
+  acts on the pack as the server holds it when it runs (last writer wins, as for any edit made
+  from a view another admin changed since). A change one copy refuses
+  (a short code taken there) is refused for all; a room pack deleted meanwhile is not made again
+  (only `Create` makes one). Using a pack everywhere names it in the list matching each name it is
+  kept under (`m.image_pack.rooms` for `m.room.image_pack`, `im.ponies.emote_rooms` for the
+  older), so apps reading either find it; stopping takes it off both. A write failing part way
+  still has the room's pack state read again. After a write a room's pack
+  state is read again from the server (`Account::pack_state`, its own times, kept even without
+  sliding sync), and the user's own pack waits up to five seconds for sync, so listing right
+  after shows the change. A new room pack (`PackEdit::Create`) takes a state key made from its
+  name with a random part, so no key is used twice: two people making packs at once, or a
+  deleted pack's key that people still use everywhere. Added pictures are uploaded
+  unencrypted (packs aren't encrypted, as the spec warns); a picture from an encrypted message
+  is downloaded and uploaded again, which both apps ask about first. `info` gives the size the
+  image shows at, its side at most 256 pixels, as sticker tools do: other apps draw stickers at
+  that size. Short codes follow the spec's grammar (1 to 100 ASCII letters, digits, `-`, `_`):
+  made from file names (the rest `_`), numbered when taken; images already named otherwise still
+  show. Per-image use (`usage` on an image) is kept from MSC2545: the spec has use only per pack,
+  so other apps may offer such an image both ways; a pack naming its use is widened to every use
+  its images name (a sticker added to an emoji pack makes it a sticker pack too), so the spec's
+  apps offer it. The desktop's sticker manager
+  (`Modal::Packs`, from the picker's gear) lists the user's pack, the room's (with "New pack"
+  when `may_add`, the right to send `m.room.image_pack`) and those used everywhere; added
+  pictures are stickers until changed. After a change the packs shown are listed again; other
+  rooms' lists are dropped and listed when next needed.
+- **GIF search** (`Command::SearchGifs`, `matrix_core::gif_search`): GIPHY, with the user's
+  own API key (Settings → General → GIF search, or the picker's GIF tab, which asks for it with
+  a link to GIPHY's dashboard); the app ships no key, so no one pays for everyone's searches.
+  The key goes into the system keychain alone (`system_keychain`: unlike sessions, never into
+  files when no keychain is reachable; the key then lasts the run), read and written off the
+  UI thread (`Shell::load_gif_key`,
+  `Shell::save_gif_key`, the latest of quick changes winning) and held in memory, never in the
+  settings file. Once kept it is never shown again: Settings and the GIF tab offer Replace (an
+  empty field, the old key kept until a new one is saved) and Remove (`picker::GifKey`: loading,
+  missing, kept). A keychain that refuses a new key says so (it lasts the run); one that can't
+  remove the key says so and shows it as kept again; Settings then tells a key kept until quitting
+  (`GifKey::Session`) from one saved.
+  Blank is what's trending, shown as the tab opens; typed text is searched once typing pauses
+  500 ms (free keys allow 100 searches an hour) or on Enter, 24 to a page, "More GIFs" for the
+  next, two pages at most (48: what the picker's players hold; a narrower search finds the
+  rest); only the
+  latest search's answer counts, and none is kept between visits: the GIF tab searches afresh
+  each time it shows, and its previews' players are let go once it doesn't. Rated PG; the app's language goes along. GIPHY's
+  rules apply: its media URLs are used exactly as given (linked `.gif` files are now fetched with
+  their query, `links::gif_source`), its order kept, its "Powered by GIPHY" mark (from GIPHY's attribution marks,
+  `assets/giphy-powered-by.png`) shows under the grid (its words until decoded), a failed search
+  offers Try again (and is tried again as the picker opens) beside Replace key,
+  and a sent GIF is reported to its `onsent` address with a random ID new each run. Previews
+  (200 pixels wide) load through players of their own (below) while the tab shows them, whatever
+  the setting for GIFs in messages says, still until hovered. A press sends `Outgoing::Gif`: the GIF's giphy.com
+  page as plain text, which this app plays as a linked GIF and other apps show as a link. A received image from `mxc://` is a custom
   emoji, `data-mx-emoticon` or not: the SDK's sanitiser drops that attribute, which the spec's
   list of allowed attributes lacks. Received custom emoji draw as their picture
   inline in place of their short code (`El::inline_image`, 21 pt, within a body line so it
   never grows it), which selection and copying still see, so copying gives `:code:`;
   pictures load like other media on screen (`TimelineItem::emotes`, 128 px), and like it wait
   while the account keeps the message's media back (ADR 0011), reading as their short codes
-  until it is shown. Adding to packs
-  stays with clients that edit them.
+  until it is shown.
 - **Locations** (`matrix_core::geo`): `Outgoing::Location` sends `m.location` with a
   `geo:` URI, a pin asset (MSC3488) and the place's name as its body (else its coordinates).
   Maps come from OpenStreetMap, as asked: a map is a `MediaRef` (`osm:lat,lon,zoom`) that
@@ -435,7 +509,12 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   - GIFs of timelines no longer shown, or all with linked GIFs off, are let go; a download
     finishing after that is dropped, not played.
   - Only those on screen play, and only while the window is focused; the rest hold their
-    frame. A player lets go of the file once decoded.
+    frame.
+  - The GIF picker's previews have players of their own (`Picker::players`, at most 48), so a
+    picker never pauses, stops or shares a timeline's GIF. They are still: each holds its first
+    frame and plays only while the pointer is over it (`GifCache::keep_still`), so a grid of
+    them stays calm; a player starts held when it wouldn't play, and a held player decodes only
+    its first frame until it first plays, so a grid of still previews holds one frame each. A player lets go of the file once decoded.
   - A download that isn't a GIF (`GIF8`) is marked broken: the link shows as text.
 - **Retries:** a failed download (media or linked GIF) waits 5 s, doubling up to 5 minutes, and
   is fetched again only if still on screen (`state::retry::Retries`). `poll` wakes when the

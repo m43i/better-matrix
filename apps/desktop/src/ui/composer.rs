@@ -462,7 +462,7 @@ pub fn emoji_button(target: ComposerTarget) -> String {
     key(target, "emoji")
 }
 
-/// The element key of a composer's sticker button, which the sticker picker anchors to.
+/// The element key of a composer's sticker and GIF button, which the picker anchors to.
 pub fn sticker_button(target: ComposerTarget) -> String {
     key(target, "stickers")
 }
@@ -550,9 +550,9 @@ fn bottom_bar(s: &State, target: ComposerTarget, p: &Palette) -> El {
                 .on_press(move |s: &mut State| s.open_composer_emoji(target)),
         )
         .children((!editing).then(|| {
-            bar_button(&icons::STICKER, t!("composer.stickers"), s.popover == Some(Popover::Stickers(target)), p)
+            bar_button(&icons::STICKER, t!("composer.stickers_gifs"), s.popover == Some(Popover::Stickers(target)), p)
                 .key(sticker_button(target))
-                .help(t!("composer.stickers"))
+                .help(t!("composer.stickers_gifs"))
                 .on_press(move |s: &mut State| s.open_stickers(target))
         }))
         .child(

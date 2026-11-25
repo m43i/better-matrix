@@ -1,8 +1,9 @@
 // The demo engine: an engine with nothing behind it that answers like a homeserver would, from
 // the fixtures. Every command finishes (so no screen waits forever); lists come back with the
 // demo's members, threads, files and sessions; messages sent appear in their timeline; media the
-// demo names is served from the app's own assets. Image packs, places, edit histories, where a
-// message is and scheduled messages are answered from the fixtures too.
+// demo names is served from the app's own assets. Image packs (and edits to them), GIFs found,
+// places, edit histories, where a message is and scheduled messages are answered from the
+// fixtures too.
 
 import { Engine, type EngineEvent } from '@better-matrix/matrix-native/client';
 import type {
@@ -18,6 +19,7 @@ import type {
   RoomList,
   RequestId,
   RoomPreview,
+  ImagePack,
   ScheduledMessage,
   Safety,
   RoomSettings,
@@ -27,6 +29,7 @@ import type {
 import { withPending } from '../state/admin';
 import { mapOf } from '../state/geo';
 import { messageText } from '../state/messages';
+import { demoGifPage, DEMO_GIFS, editedPacks, editedPlace, packsFor } from './stickers';
 import { DEFAULT_SAFETY, withChange } from '../state/safety';
 import { roleLevel } from '../state/people';
 import { fuzzyMatch } from '../state/search';
@@ -326,7 +329,8 @@ export function answer(
           data: {
             account: command.data.account,
             room_id: command.data.room_id,
-            packs: demoPacks(),
+            packs: packsFor(demoPacks(), command.data.room_id),
+            may_add: true,
           },
         },
       ];
@@ -659,8 +663,11 @@ function sentContent(message: Outgoing): MessageContent | null {
       return { type: 'Emote', data: { body: message.data.body, html: message.data.html } };
     case 'Location':
       return { type: 'Location', data: { ...message.data, map: mapOf(message.data.geo_uri) } };
+    case 'Gif':
+      // A GIF goes as its link, as the engine sends it.
+      return { type: 'Text', data: { body: message.data.url, html: null } };
     case 'Sticker':
-      // A sticker shows as an image, as the engine reads one.
+      // A sticker shows as an image drawn on its own, as the engine reads one.
       return {
         type: 'Attachment',
         data: {
@@ -671,6 +678,7 @@ function sentContent(message: Outgoing): MessageContent | null {
           thumbnail: null,
           dimensions: message.data.dimensions,
           audio: null,
+          sticker: true,
         },
       };
     case 'Poll':
@@ -705,6 +713,7 @@ function sentContent(message: Outgoing): MessageContent | null {
           thumbnail: null,
           dimensions: null,
           audio: null,
+          sticker: false,
         },
       };
     }
@@ -764,6 +773,9 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
   /** Rooms' settings and member lists as changes left them, by account and room. */
   const settings = new Map<string, RoomSettings>();
   const members = new Map<string, Members>();
+  /** Each account's image packs as edits left them. */
+  const packs = new Map<string, ImagePack[]>();
+  const packsOf = (account: string) => packs.get(account) ?? demoPacks();
   engine.subscribe((event) => {
     if (event.type === 'RoomsUpdated') lists.set(event.data.account, event.data.list);
 
@@ -1142,6 +1154,60 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
     });
 
   async function respond(command: Command, request: RequestId) {
+    if (command.type === 'ListImagePacks') {
+      const { account, room_id: roomId } = command.data;
+      engine.emit({
+        type: 'ImagePacks',
+        data: {
+          account,
+          room_id: roomId,
+          packs: packsFor(packsOf(account), roomId),
+          may_add: true,
+        },
+      });
+      finish(request);
+
+      return;
+    }
+
+    if (command.type === 'EditImagePack') {
+      const { account, pack, edit } = command.data;
+      packs.set(account, editedPacks(packsOf(account), pack, edit, request));
+      engine.emit({
+        type: 'ImagePackEdited',
+        data: { request, account, pack: editedPlace(pack, edit, request) },
+      });
+      finish(request);
+
+      return;
+    }
+
+    if (command.type === 'SearchGifs') {
+      const { key, query, offset } = command.data;
+
+      if (key.trim() === '') {
+        finish(request, 'GIF search needs a GIPHY API key');
+
+        return;
+      }
+
+      const previews = new Map<string, string>();
+
+      for (const gif of DEMO_GIFS) {
+        const path = await resolveMedia(gif.media).catch(() => null);
+
+        if (path) previews.set(gif.media, `file://${path}`);
+      }
+
+      engine.emit({
+        type: 'GifsFound',
+        data: { request, query, offset, page: demoGifPage(query, offset, previews) },
+      });
+      finish(request);
+
+      return;
+    }
+
     if (command.type === 'ListPinnedMessages') {
       const { account, room_id: roomId } = command.data;
       const pins = lists.get(account)?.rooms.find((r) => r.room_id === roomId)?.pinned ?? [];

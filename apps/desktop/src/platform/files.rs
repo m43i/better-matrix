@@ -1,5 +1,5 @@
-//! The system file dialog: several files to attach, one picture for the profile or a room, or a
-//! key file to import. Rune's file dialog picks one file, so this uses rfd's async dialog, driven
+//! The system file dialog: several files to attach, pictures for an image pack, one picture for
+//! the profile or a room, or a key file to import. Rune's file dialog picks one file, so this uses rfd's async dialog, driven
 //! from a worker thread: that is safe on every platform (on macOS rfd hops to the main thread
 //! itself) and never blocks the window.
 
@@ -7,7 +7,7 @@ use rune::AppHandle;
 
 use crate::state::{PickFor, State};
 
-/// Picture types a profile picture may be.
+/// Picture types a profile picture or a pack image may be.
 const IMAGE_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "gif", "webp"];
 
 pub fn pick(app: AppHandle<State>, picked_for: PickFor) {
@@ -23,6 +23,13 @@ pub fn pick(app: AppHandle<State>, picked_for: PickFor) {
                     .set_title(crate::i18n::t!("dialog.avatar_title"))
                     .add_filter(crate::i18n::t!("dialog.images"), &IMAGE_EXTENSIONS);
                 pollster::block_on(dialog.pick_file()).into_iter().map(|file| file.path().to_owned()).collect()
+            }
+            PickFor::PackImages { .. } => {
+                let dialog = rfd::AsyncFileDialog::new()
+                    .set_title(crate::i18n::t!("dialog.pack_images_title"))
+                    .add_filter(crate::i18n::t!("dialog.images"), &IMAGE_EXTENSIONS);
+                let picked = pollster::block_on(dialog.pick_files()).unwrap_or_default();
+                picked.iter().map(|file| file.path().to_owned()).collect()
             }
             PickFor::KeyFile => {
                 let dialog = rfd::AsyncFileDialog::new().set_title(crate::i18n::t!("dialog.key_file_title"));

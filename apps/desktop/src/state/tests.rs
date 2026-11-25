@@ -1724,6 +1724,7 @@ fn attachment(name: &str, kind: matrix_core::AttachmentKind) -> matrix_core::Att
         thumbnail: None,
         dimensions: None,
         audio: None,
+        sticker: false,
     }
 }
 
@@ -6257,6 +6258,345 @@ fn a_sticker_should_be_sent_from_its_composer() {
     };
     s.send_sticker(ComposerTarget::Room, image, &mut Tx::default());
     assert!(matches!(sent(&mut commands).as_slice(), [Outgoing::Sticker(image)] if image.url == "mxc://x/wave"));
+}
+
+fn wave() -> matrix_core::PackImage {
+    matrix_core::PackImage {
+        shortcode: "wave".into(),
+        body: "wave".into(),
+        url: "mxc://x/wave".into(),
+        media: MediaRef::opaque("wave"),
+        emoticon: false,
+        sticker: true,
+        dimensions: None,
+        mimetype: None,
+    }
+}
+
+#[test]
+fn a_sent_sticker_should_lead_the_recent_ones() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.send_sticker(ComposerTarget::Room, wave(), &mut Tx::default());
+    let account = AccountId::new("@a:example.org");
+    assert_eq!(s.recent_stickers.images(&account).first().map(|image| image.url.as_str()), Some("mxc://x/wave"));
+}
+
+#[test]
+fn a_recent_sticker_should_stay_with_its_account() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.send_sticker(ComposerTarget::Room, wave(), &mut Tx::default());
+    assert!(s.recent_stickers.images(&AccountId::new("@other:example.org")).is_empty());
+}
+
+#[test]
+fn a_recent_sticker_should_be_offered_as_its_pack_has_it_now() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.send_sticker(ComposerTarget::Room, wave(), &mut Tx::default());
+    let renamed = matrix_core::PackImage { body: "A wave".into(), ..wave() };
+    let pack = matrix_core::ImagePack {
+        id: "user".into(),
+        name: String::new(),
+        avatar: None,
+        avatar_url: None,
+        images: vec![renamed],
+        place: matrix_core::PackPlace::User,
+        editable: true,
+        everywhere: false,
+    };
+    let account = AccountId::new("@a:example.org");
+    apply(
+        &mut s,
+        Event::ImagePacks {
+            account: account.clone(),
+            room_id: Some("!one:x".into()),
+            packs: vec![pack],
+            may_add: false,
+        },
+    );
+    let recent = s.recent_stickers_here(&account, "!one:x");
+    assert_eq!(recent.first().map(|image| image.body.as_str()), Some("A wave"));
+}
+
+#[test]
+fn a_recent_sticker_no_longer_in_a_pack_here_should_not_be_offered() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.send_sticker(ComposerTarget::Room, wave(), &mut Tx::default());
+    let account = AccountId::new("@a:example.org");
+    assert!(s.recent_stickers_here(&account, "!one:x").is_empty());
+}
+
+/// The picker open on its GIF tab, with a GIPHY key or not.
+fn picking_gifs(s: &mut State, commands: &mut DetachedCommands, key: &str) {
+    writing(s, commands);
+    s.picker.giphy =
+        if key.is_empty() { crate::state::GifKey::Missing } else { crate::state::GifKey::Kept(key.into()) };
+    s.open_stickers(ComposerTarget::Room);
+    s.show_picker_tab(crate::state::PickerTab::Gifs);
+}
+
+#[test]
+fn the_gif_tab_should_show_whats_trending_with_the_users_key() {
+    let (mut s, mut commands) = state();
+    picking_gifs(&mut s, &mut commands, "my-key");
+    assert!(all_commands(&mut commands).iter().any(
+        |command| matches!(command, Command::SearchGifs { key, query, offset: 0, .. } if key == "my-key" && query.is_empty())
+    ));
+}
+
+#[test]
+fn the_gif_tab_without_a_key_should_ask_giphy_nothing() {
+    let (mut s, mut commands) = state();
+    picking_gifs(&mut s, &mut commands, "");
+    s.poll(&mut Tx::default());
+    assert!(all_commands(&mut commands).iter().all(|command| !matches!(command, Command::SearchGifs { .. })));
+}
+
+#[test]
+fn reopening_the_picker_should_ask_giphy_afresh() {
+    let (mut s, mut commands) = picking_with_gifs();
+    s.popover = None;
+    s.open_stickers(ComposerTarget::Room);
+    assert!(s.picker.gifs.gifs.is_empty());
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(command, Command::SearchGifs { .. })));
+}
+
+#[test]
+fn leaving_the_gif_tab_should_let_its_previews_go() {
+    let (mut s, _commands) = picking_with_gifs();
+    s.show_picker_tab(crate::state::PickerTab::Stickers);
+    assert!(s.picker.players.wants(&gif().preview, std::time::Instant::now()));
+}
+
+#[test]
+fn closing_the_picker_should_let_its_previews_go() {
+    let (mut s, _commands) = picking_with_gifs();
+    s.close_popover();
+    assert!(s.picker.players.wants(&gif().preview, std::time::Instant::now()));
+}
+
+#[test]
+fn a_sticker_should_load_as_its_file_in_the_picker_as_in_the_timeline() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    let pack = matrix_core::ImagePack {
+        id: "user".into(),
+        name: String::new(),
+        avatar: None,
+        avatar_url: None,
+        images: vec![wave()],
+        place: matrix_core::PackPlace::User,
+        editable: true,
+        everywhere: false,
+    };
+    apply(
+        &mut s,
+        Event::ImagePacks {
+            account: AccountId::new("@a:example.org"),
+            room_id: Some("!one:x".into()),
+            packs: vec![pack],
+            may_add: false,
+        },
+    );
+    s.media.attach(Arc::new(|| {}));
+    drain(&mut commands);
+    s.open_stickers(ComposerTarget::Room);
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(
+        command,
+        Command::FetchMedia { media, size: matrix_core::MediaSize::Original, .. } if *media == MediaRef::opaque("wave")
+    )));
+}
+
+#[test]
+fn gifs_found_should_show_in_the_gif_tab() {
+    let (mut s, mut commands) = state();
+    picking_gifs(&mut s, &mut commands, "k");
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::SearchGifs { .. }))
+        .expect("a search");
+    let page = matrix_core::GifPage { gifs: vec![gif()], next: Some(24) };
+    apply(&mut s, Event::GifsFound { request, query: String::new(), offset: 0, page });
+    assert_eq!((s.picker.gifs.gifs.len(), s.picker.gifs.next), (1, Some(24)));
+}
+
+fn gif() -> matrix_core::FoundGif {
+    matrix_core::FoundGif {
+        id: "a1".into(),
+        title: "A cat".into(),
+        url: "https://giphy.com/gifs/cat-a1".into(),
+        preview: "https://media.giphy.com/media/a1/200w.gif?cid=x".into(),
+        preview_size: Some((200, 150)),
+        sent_ping: None,
+    }
+}
+
+#[test]
+fn gif_previews_should_load_into_the_pickers_own_players() {
+    let (s, mut commands) = picking_with_gifs();
+    let fetched: Vec<Command> = all_commands(&mut commands);
+    assert!(fetched.iter().any(|command| matches!(command, Command::FetchGif { url } if *url == gif().preview)));
+    assert!(!s.picker.players.wants(&gif().preview, std::time::Instant::now()));
+    assert!(s.gifs.wants(&gif().preview, std::time::Instant::now()), "the timelines' players stay apart");
+}
+
+/// The picker on its GIF tab, showing one GIF found.
+fn picking_with_gifs() -> (State, DetachedCommands) {
+    let (mut s, mut commands) = state();
+    picking_gifs(&mut s, &mut commands, "k");
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::SearchGifs { .. }))
+        .expect("a search");
+    let page = matrix_core::GifPage { gifs: vec![gif()], next: None };
+    apply(&mut s, Event::GifsFound { request, query: String::new(), offset: 0, page });
+    (s, commands)
+}
+
+#[test]
+fn a_picture_from_an_encrypted_message_should_be_asked_about_before_it_joins_the_stickers() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    let encrypted = MediaRef::opaque(
+        r#"{"file":{"url":"mxc://x.org/secret","key":{"kty":"oct","key_ops":["encrypt","decrypt"],"alg":"A256CTR","k":"qcHVMSgYg-71CauWBezXI5qkaRb0LuIy-Wx5kIaHMIA","ext":true},"iv":"X85+XgHN+HEAAAAAAAAAAA","hashes":{"sha256":"aWOHudBnDkJ9IwaR1Nd8XKoI7DOrqDTwt6xDPfVGN6Q"},"v":"v2"}}"#,
+    );
+    s.add_to_my_stickers(encrypted, "photo.jpg".into(), None);
+    assert!(matches!(s.modal, Some(Modal::Confirm(Confirm::CopyToStickers { .. }))));
+    assert!(all_commands(&mut commands).iter().all(|command| !matches!(command, Command::EditImagePack { .. })));
+    s.confirm();
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(command, Command::EditImagePack { .. })));
+}
+
+#[test]
+fn a_picked_gif_should_be_sent_and_close_the_picker() {
+    let (mut s, mut commands) = state();
+    picking_gifs(&mut s, &mut commands, "k");
+    s.send_gif(ComposerTarget::Room, gif(), &mut Tx::default());
+    assert!(s.popover.is_none());
+    assert!(
+        matches!(sent(&mut commands).as_slice(), [Outgoing::Gif(gif)] if gif.url == "https://giphy.com/gifs/cat-a1")
+    );
+}
+
+#[test]
+fn a_saved_gif_key_should_be_used_for_the_next_search() {
+    let (mut s, mut commands) = state();
+    picking_gifs(&mut s, &mut commands, "");
+    s.picker.key = rune::TextEdit::new("  new-key ");
+    s.save_gif_key();
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|command| matches!(command, Command::SearchGifs { key, .. } if key == "new-key"))
+    );
+}
+
+#[test]
+fn pictures_picked_should_be_added_to_the_users_pack_as_stickers() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.open_pack_manager();
+    s.files_picked(
+        crate::state::PickFor::PackImages {
+            account: AccountId::new("@a:example.org"),
+            pack: matrix_core::PackPlace::User,
+        },
+        &[PathBuf::from("/tmp/cat.png")],
+    );
+    let edits: Vec<Command> = all_commands(&mut commands)
+        .into_iter()
+        .filter(|command| matches!(command, Command::EditImagePack { .. }))
+        .collect();
+    assert!(matches!(
+        edits.as_slice(),
+        [Command::EditImagePack { pack: matrix_core::PackPlace::User, edit: matrix_core::PackEdit::AddImages(images), .. }]
+            if images.len() == 1 && images[0].sticker && !images[0].emoticon
+    ));
+}
+
+#[test]
+fn a_pack_change_going_through_should_list_the_packs_again() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.open_pack_manager();
+    drain(&mut commands);
+    s.add_to_my_stickers(MediaRef::opaque("cat"), "cat.png".into(), Some((64, 64)));
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::EditImagePack { .. }))
+        .expect("an edit");
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+    assert!(all_commands(&mut commands).iter().any(|command| matches!(command, Command::ListImagePacks { .. })));
+    assert!(s.notice.is_some());
+}
+
+#[test]
+fn a_pack_image_should_keep_at_least_one_use() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.open_pack_manager();
+    let room = s.active_room_id().map(str::to_owned).unwrap_or_default();
+    let pack = matrix_core::ImagePack {
+        id: "user".into(),
+        name: String::new(),
+        avatar: None,
+        avatar_url: None,
+        images: vec![wave()],
+        place: matrix_core::PackPlace::User,
+        editable: true,
+        everywhere: false,
+    };
+    apply(
+        &mut s,
+        Event::ImagePacks {
+            account: AccountId::new("@a:example.org"),
+            room_id: Some(room),
+            packs: vec![pack],
+            may_add: false,
+        },
+    );
+    s.open_pack_image("wave");
+    s.toggle_pack_image_use(true);
+    let form = s.pack_manager.as_ref().and_then(|manager| manager.image.as_ref()).expect("the image's details");
+    assert!(form.sticker && !form.emoticon);
+}
+
+#[test]
+fn deleting_a_pack_should_not_show_it_again_once_deleted() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.open_pack_manager();
+    let room = matrix_core::PackPlace::Room { room_id: "!one:x".into(), state_key: "cats".into() };
+    if let Some(manager) = &mut s.pack_manager {
+        manager.selected = "user".into();
+        manager.busy = Some(RequestId(7));
+    }
+    apply(
+        &mut s,
+        Event::ImagePackEdited { request: RequestId(7), account: AccountId::new("@a:example.org"), pack: room },
+    );
+    assert_eq!(s.pack_manager.as_ref().map(|manager| manager.selected.as_str()), Some("user"));
+}
+
+#[test]
+fn a_new_pack_should_show_once_made() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.open_pack_manager();
+    if let Some(manager) = &mut s.pack_manager {
+        manager.new_pack = Some(rune::TextEdit::new("Cats"));
+    }
+    s.create_pack();
+    let (request, _) = drain(&mut commands)
+        .into_iter()
+        .find(|(_, command)| matches!(command, Command::EditImagePack { edit: matrix_core::PackEdit::Create(_), .. }))
+        .expect("a new pack");
+    let made = matrix_core::PackPlace::Room { room_id: "!one:x".into(), state_key: "cats-a1b2c3".into() };
+    apply(&mut s, Event::ImagePackEdited { request, account: AccountId::new("@a:example.org"), pack: made });
+    assert_eq!(s.pack_manager.as_ref().map(|manager| manager.selected.as_str()), Some("!one:x/cats-a1b2c3"));
 }
 
 #[test]

@@ -193,6 +193,7 @@ describe('people actions', () => {
       thumbnail: null,
       dimensions: null,
       audio: null,
+      sticker: false,
     };
 
     const uri = fileForSharing(app.store, ADA, attachment);

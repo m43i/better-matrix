@@ -114,7 +114,11 @@ function Routes({ scene }: { scene: SceneName | null }) {
           <Stack.Screen name="link" options={fittedSheet} />
           <Stack.Screen name="new-poll" options={{ presentation: 'modal' }} />
           <Stack.Screen name="edit-history" options={sheet} />
-          <Stack.Screen name="stickers" options={sheet} />
+          <Stack.Screen name="stickers" options={{ ...sheet, sheetAllowedDetents: [0.6, 1] }} />
+          <Stack.Screen name="packs" />
+          <Stack.Screen name="pack" />
+          <Stack.Screen name="pack-image" options={{ ...sheet, sheetAllowedDetents: [0.75, 1] }} />
+          <Stack.Screen name="new-pack" options={{ presentation: 'modal' }} />
           <Stack.Screen name="location" options={{ ...sheet, sheetAllowedDetents: [0.75, 1] }} />
           <Stack.Screen name="schedule" options={fittedSheet} />
           <Stack.Screen name="scheduled" options={sheet} />

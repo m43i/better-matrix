@@ -85,6 +85,11 @@ fn spec() -> AppSpec<State> {
                 demo::typing(s, "");
                 s.popover = Some(Popover::Stickers(state::ComposerTarget::Room));
             }),
+            ("demo-gifs", demo::gif_picker),
+            ("demo-gif-key", demo::gif_key),
+            ("demo-packs", |s| demo::pack_manager(s, false)),
+            ("demo-pack-image", |s| demo::pack_manager(s, true)),
+            ("demo-sticker-message", demo::sticker_message),
             ("demo-schedule", |s| {
                 demo::scheduled(s);
                 s.popover = Some(Popover::Schedule(state::ComposerTarget::Room));
@@ -233,6 +238,11 @@ fn spec() -> AppSpec<State> {
             ("demo-sign-in-browser", demo::sign_in_browser),
             ("demo-settings", |s| {
                 demo::seed(s);
+                s.open_settings();
+            }),
+            ("demo-settings-giphy", |s| {
+                demo::seed(s);
+                s.picker.giphy = state::GifKey::Kept("demo".into());
                 s.open_settings();
             }),
             ("demo-settings-info", |s| {
@@ -1009,7 +1019,10 @@ fn run_app() {
             let shell_scratch = scratch.clone();
             let stopped = engine.stopped();
             app.init(move || {
-                let shell = Shell::native(handle, prefs, shell_scratch, taskbar).with_handoff(handoff);
+                let shell = Shell::native(handle, prefs, shell_scratch, taskbar)
+                    .with_handoff(handoff)
+                    // The GIPHY key lives in the keychain only, never in files.
+                    .with_secrets(platform::system_keychain());
                 let mut state = State::new(engine, shell, settings);
                 // They wait for the first account's rooms.
                 links.iter().for_each(|link| state.open_permalink(link));
@@ -1199,6 +1212,7 @@ mod tests {
                         thumbnail: None,
                         dimensions: Some((100, 100)),
                         audio: None,
+                        sticker: false,
                     }),
                 )
             });

@@ -326,6 +326,13 @@ export default function RoomInfoScreen() {
         />
         <Divider inset={52} />
         <ListRow
+          icon="sticker"
+          title={t('mobile.stickers.manager_title')}
+          testID="info-stickers"
+          onPress={() => router.push(routes.packs(account, roomId))}
+        />
+        <Divider inset={52} />
+        <ListRow
           testID="info-members"
           icon="users"
           title={t('members.count', { count: room.member_count })}

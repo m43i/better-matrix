@@ -8,6 +8,7 @@ import type { Contacts } from "./Contacts";
 import type { Draft } from "./Draft";
 import type { EditVersion } from "./EditVersion";
 import type { EventSource } from "./EventSource";
+import type { GifPage } from "./GifPage";
 import type { Homeserver } from "./Homeserver";
 import type { Identity } from "./Identity";
 import type { ImagePack } from "./ImagePack";
@@ -22,6 +23,7 @@ import type { Message } from "./Message";
 import type { MessageHit } from "./MessageHit";
 import type { MessagePreview } from "./MessagePreview";
 import type { Notification } from "./Notification";
+import type { PackPlace } from "./PackPlace";
 import type { Password } from "./Password";
 import type { PendingContact } from "./PendingContact";
 import type { Person } from "./Person";
@@ -678,9 +680,42 @@ account: AccountId,
  */
 room_id: string | null, 
 /**
- * The packs: the user's own first.
+ * The packs: the user's own first (always, empty or not), then the room's, then those
+ * the user uses everywhere.
  */
-packs: Array<ImagePack>, } } | { "type": "PlacesFound", "data": { 
+packs: Array<ImagePack>, 
+/**
+ * Whether the account may add packs to the room.
+ */
+may_add: boolean, } } | { "type": "ImagePackEdited", "data": { 
+/**
+ * The change.
+ */
+request: RequestId, 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The pack changed: a new room pack's place, for [`PackEdit::Create`](crate::PackEdit::Create).
+ */
+pack: PackPlace, } } | { "type": "GifsFound", "data": { 
+/**
+ * The search.
+ */
+request: RequestId, 
+/**
+ * What was searched for, as asked.
+ */
+query: string, 
+/**
+ * Where the page starts, as asked.
+ */
+offset: number, 
+/**
+ * The GIFs.
+ */
+page: GifPage, } } | { "type": "PlacesFound", "data": { 
 /**
  * The search it answers.
  */

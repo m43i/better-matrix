@@ -1,12 +1,15 @@
 // Preferences on this device: language, theme, how messages lay out, room changes in
-// conversations, link previews, GIFs from links and maps from OpenStreetMap, and hidden events
-// (developer tools), as the desktop's General and Appearance settings.
+// conversations, link previews, GIFs from links, the GIPHY key for GIF search and maps from
+// OpenStreetMap, and hidden events (developer tools), as the desktop's General and Appearance
+// settings.
 
+import { router } from 'expo-router';
 import { Fragment } from 'react';
 
 import { t } from '../../i18n';
 import { updateSettings } from '../../state/actions/core';
 import { useAppStore, useStore } from '../../state/react';
+import { routes } from '../../routes';
 import { Divider, ListRow, ListSection } from '../../ui/components';
 import {
   APPEARANCES,
@@ -19,6 +22,7 @@ import { SettingsPage } from '../../ui/settings/common';
 export default function PreferencesScreen() {
   const store = useAppStore();
   const settings = useStore((s) => s.settings);
+  const giphyKey = useStore((s) => s.giphyKey !== null);
 
   return (
     <SettingsPage title={t('mobile.accounts.preferences')} testID="preferences">
@@ -107,6 +111,18 @@ export default function PreferencesScreen() {
             value: settings.showLinkGifs,
             onChange: (on) => updateSettings(store, { showLinkGifs: on }),
           }}
+        />
+      </ListSection>
+      <ListSection
+        title={t('mobile.stickers.giphy_title')}
+        footer={t('mobile.stickers.giphy_hint')}
+      >
+        <ListRow
+          testID="giphy-key"
+          icon="key"
+          title={t('mobile.stickers.giphy_key')}
+          value={t(giphyKey ? 'mobile.stickers.giphy_set' : 'mobile.stickers.giphy_not_set')}
+          onPress={() => router.push(routes.settingsGiphy())}
         />
       </ListSection>
       <ListSection

@@ -205,6 +205,7 @@ describe('excerpt', () => {
           thumbnail: null,
           dimensions: null,
           audio: null,
+          sticker: false,
         },
       },
     };

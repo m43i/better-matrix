@@ -52,4 +52,29 @@ describe('parseSettings', () => {
   it('an unknown message layout should show classic rows', () => {
     expect(parseSettings(JSON.stringify({ messageLayout: 'cards' })).messageLayout).toBe('rows');
   });
+
+  it('recently sent stickers should be read back by account', () => {
+    const SIDE: [number, number] = [256, 256];
+
+    const sticker = {
+      shortcode: 'wave',
+      body: 'Waving hello',
+      url: 'mxc://x/wave',
+      media: 'm-wave',
+      emoticon: false,
+      sticker: true,
+      dimensions: SIDE,
+      mimetype: null,
+    };
+
+    const saved = JSON.stringify({ ...DEFAULT_SETTINGS, recentStickers: { '@ada:x': [sticker] } });
+
+    expect(parseSettings(saved).recentStickers).toEqual({ '@ada:x': [sticker] });
+  });
+
+  it('broken recent stickers should be forgotten', () => {
+    expect(
+      parseSettings(JSON.stringify({ recentStickers: { '@ada:x': [1] } })).recentStickers,
+    ).toEqual({});
+  });
 });

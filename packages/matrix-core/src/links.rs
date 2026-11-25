@@ -56,9 +56,8 @@ pub fn gif_source(link: &str) -> Option<GifSource> {
         "i.imgur.com" if last.ends_with(".gifv") => {
             Some(GifSource::File(format!("https://i.imgur.com/{}.gif", last.trim_end_matches(".gifv"))))
         }
-        _ if last.to_ascii_lowercase().ends_with(".gif") => {
-            Some(GifSource::File(link.split(['?', '#']).next()?.to_owned()))
-        }
+        // Fetched with its query: GIPHY's media links carry parameters it asks to be kept.
+        _ if last.to_ascii_lowercase().ends_with(".gif") => Some(GifSource::File(link.split('#').next()?.to_owned())),
         _ => None,
     }
 }
@@ -425,8 +424,11 @@ mod tests {
 
     #[test]
     fn a_direct_gif_link_should_be_fetched_as_is() {
-        let link = "https://media.tenor.com/abc/cat.gif?width=200";
-        assert_eq!(gif_source(link), Some(GifSource::File("https://media.tenor.com/abc/cat.gif".into())));
+        let link = "https://media.giphy.com/media/abc/200w.gif?cid=x&ct=g#top";
+        assert_eq!(
+            gif_source(link),
+            Some(GifSource::File("https://media.giphy.com/media/abc/200w.gif?cid=x&ct=g".into()))
+        );
     }
 
     #[test]

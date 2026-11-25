@@ -100,6 +100,8 @@ pub struct Account {
     /// Rooms' state the room list's sliding sync doesn't bring (image packs, widgets), as read
     /// from the server, by room, once a run (`crate::widgets::EXTRA_STATE`).
     pub(crate) extra_state: Arc<Mutex<crate::widgets::ExtraState>>,
+    /// Held while the account's image packs change, so changes go one at a time.
+    pub(crate) pack_edits: Arc<tokio::sync::Mutex<()>>,
     /// The rooms open timelines show, which the room list's sliding sync subscribes to.
     followed: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Held while the room list's subscriptions are updated (`Account::subscribe_followed`).
@@ -444,6 +446,7 @@ impl Account {
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
             extra_state: Arc::default(),
+            pack_edits: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
@@ -487,6 +490,7 @@ impl Account {
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
             extra_state: Arc::default(),
+            pack_edits: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
@@ -626,6 +630,7 @@ impl Account {
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
             extra_state: Arc::default(),
+            pack_edits: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
@@ -986,7 +991,8 @@ impl Account {
             | Outgoing::Emote { .. }
             | Outgoing::Location { .. }
             | Outgoing::Poll { .. }
-            | Outgoing::Sticker(_) => {
+            | Outgoing::Sticker(_)
+            | Outgoing::Gif(_) => {
                 if let Some(content) = crate::outgoing::event(message)? {
                     queue.send(content).await?;
                 }
@@ -1458,6 +1464,7 @@ mod tests {
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
             extra_state: Arc::default(),
+            pack_edits: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),

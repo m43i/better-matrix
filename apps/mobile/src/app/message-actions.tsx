@@ -1,6 +1,6 @@
-// A message's actions, from a long press (Slack's sheet): quick reactions and the picker, reply,
-// reply in thread, copy, edit and delete the user's own, end their poll, save or share a file,
-// and view its source.
+// A message's actions, from a long press (Slack's sheet): quick reactions and the picker, add a
+// sticker or picture to the user's own stickers, reply, reply in thread, copy, edit and delete the
+// user's own, end their poll, save or share a file, and view its source.
 
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -9,12 +9,14 @@ import { Linking, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'r
 
 import { locale, t } from '../i18n';
 import { setPinned, setSaved, messageLink, translationUrl } from '../state/actions/message-actions';
+import { saveToStickers } from '../state/actions/stickers';
 import { deleteMessage, react } from '../state/actions/timeline';
 import { startEdit, startReply } from '../state/composer';
 import {
   attachmentRows,
   editDraftOf,
   findMessage,
+  isEncryptedMedia,
   messageActions,
   messageText,
 } from '../state/messages';
@@ -156,6 +158,39 @@ export default function MessageActionsScreen() {
               message={message}
               attachment={attachment}
               onDone={close}
+            />
+            <Divider inset={52} />
+          </>
+        ) : null}
+        {can.saveSticker && attachment && !held ? (
+          <>
+            <ListRow
+              icon="sticker"
+              title={t('mobile.stickers.save_sticker')}
+              chevron={false}
+              testID="message-actions-save-sticker"
+              onPress={() => {
+                close();
+
+                // An encrypted picture's copy goes up unencrypted: ask first.
+                if (!attachment.media || !isEncryptedMedia(attachment.media)) {
+                  void saveToStickers(store, account, attachment);
+
+                  return;
+                }
+
+                Alert.alert(
+                  t('mobile.stickers.copy_encrypted_title'),
+                  t('mobile.stickers.copy_encrypted_body'),
+                  [
+                    { text: t('common.cancel'), style: 'cancel' },
+                    {
+                      text: t('mobile.stickers.copy_encrypted_confirm'),
+                      onPress: () => void saveToStickers(store, account, attachment),
+                    },
+                  ],
+                );
+              }}
             />
             <Divider inset={52} />
           </>

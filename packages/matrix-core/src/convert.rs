@@ -309,6 +309,16 @@ impl MediaRef {
         serde_json::to_string(source).ok().map(Self)
     }
 
+    /// Whether the media is an encrypted file (from an encrypted room): copying it into an image
+    /// pack uploads it unencrypted, which the apps ask about first.
+    ///
+    /// ```
+    /// assert!(!matrix_core::MediaRef::from_mxc("mxc://example.org/cat").is_some_and(|media| media.is_encrypted()));
+    /// ```
+    pub fn is_encrypted(&self) -> bool {
+        matches!(media_source(self), Ok(MediaSource::Encrypted(_)))
+    }
+
     /// The handle for unencrypted media at an `mxc://` URI, as messages' HTML names it (a
     /// custom emoji's image); `None` for anything else.
     ///
@@ -375,6 +385,7 @@ pub(crate) fn sticker(sticker: &matrix_sdk::ruma::events::sticker::StickerEventC
         thumbnail: None,
         dimensions: dimensions(),
         audio: None,
+        sticker: true,
     })
 }
 
@@ -391,6 +402,7 @@ pub(crate) fn content(msgtype: &MessageType) -> MessageContent {
         thumbnail: None,
         dimensions: None,
         audio: None,
+        sticker: false,
     };
     let dimensions = |w: Option<UInt>, h: Option<UInt>| Some((u32::try_from(w?).ok()?, u32::try_from(h?).ok()?));
     let thumbnail = |source: Option<&MediaSource>| source.and_then(MediaRef::of);

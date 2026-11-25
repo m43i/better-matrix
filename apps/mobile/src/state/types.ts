@@ -111,6 +111,8 @@ export interface AccountData {
   saved: SavedMessage[] | null;
   /** Custom emoji and sticker packs, by the room they were listed for (`''`: none). */
   packs: Record<string, ImagePack[]>;
+  /** Whether the account may add packs to a room, by the room they were listed for. */
+  packsMayAdd: Record<string, boolean>;
   /** The messages the server holds to send later, soonest first, once listed. */
   scheduled: ScheduledMessage[] | null;
   /** Edited messages' versions, oldest first, by `editsKey` (room and event ID). */
@@ -207,6 +209,11 @@ export interface State {
   /** Emoji the user picked lately, newest first: the picker shows them first. */
   recentEmoji: string[];
   settings: Settings;
+  /**
+   * The user's own GIPHY API key, for the GIF picker; `null` until they enter one. Kept in the
+   * device's secure store (engine/giphyKey.ts), not with the settings.
+   */
+  giphyKey: string | null;
   /** The pushers this device registered, by account (engine/push.ts keeps them, saved apart). */
   pushers: Record<AccountId, PusherRegistration>;
 }

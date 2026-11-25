@@ -23,6 +23,7 @@ function attachment(kind: Attachment['kind'], change: Partial<Attachment> = {}):
     thumbnail: null,
     dimensions: null,
     audio: null,
+    sticker: false,
     ...change,
   };
 }

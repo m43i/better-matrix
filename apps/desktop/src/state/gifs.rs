@@ -1,5 +1,8 @@
 //! GIFs linked from messages: fetched once per link, decoded and played on a worker that streams
 //! frames into a [`Pixels`], so animation redraws only the picture and never rebuilds the view.
+//! The GIF picker's previews have a cache of their own ([`PICKER_PLAYERS`]), apart from the
+//! timelines', and are still: each holds its first frame and plays only while the pointer is
+//! over it.
 //! Bounded: a GIF whose frames would exceed [`MAX_FRAME_BYTES`] plays only its first frame, at
 //! most [`MAX_PLAYERS`] play at once, and past [`MAX_TOTAL_BYTES`] of frames across them the GIFs
 //! shown longest ago that are off screen are let go.
@@ -16,8 +19,10 @@ use super::retry::Retries;
 
 /// Decoded frames one GIF may hold.
 const MAX_FRAME_BYTES: usize = 48 << 20;
-/// GIFs kept playing; the oldest stop beyond this.
+/// GIFs a timeline's players keep; the oldest stop beyond this.
 const MAX_PLAYERS: usize = 16;
+/// GIFs the GIF picker's players keep: two pages of previews, which hold still.
+pub const PICKER_PLAYERS: usize = 48;
 /// Decoded frames all GIFs may hold together before those off screen are let go; those on
 /// screen keep theirs.
 const MAX_TOTAL_BYTES: usize = 128 << 20;
@@ -56,11 +61,12 @@ impl Drop for Player {
 }
 
 impl Player {
-    /// Plays `bytes` on a worker, counting its decoded frames in `decoded` as well as its own.
-    fn start(bytes: Arc<[u8]>, decoded: &Arc<AtomicUsize>) -> Self {
+    /// Plays `bytes` on a worker (held on its first frame when `paused`), counting its decoded
+    /// frames in `decoded` as well as its own.
+    fn start(bytes: Arc<[u8]>, decoded: &Arc<AtomicUsize>, paused: bool) -> Self {
         let size = header_size(&bytes);
         let pixels = Pixels::new();
-        let (stop, paused) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let (stop, paused) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(paused)));
         let held = Arc::new(AtomicUsize::new(0));
         let (out, halt, hold) = (pixels.clone(), Arc::clone(&stop), Arc::clone(&paused));
         let counted = Held { own: Arc::clone(&held), all: Arc::clone(decoded) };
@@ -140,6 +146,11 @@ fn play(bytes: Arc<[u8]>, out: &Pixels, stop: &AtomicBool, paused: &AtomicBool, 
         if first {
             let (w, h, rgba, _) = &frames[0];
             out.set(*w, *h, rgba.clone());
+            // Held from the start (a still picker preview, a GIF off screen): only its first
+            // frame is decoded until it plays, so a grid of still GIFs holds one frame each.
+            while paused.load(Ordering::Relaxed) && !stop.load(Ordering::Relaxed) {
+                std::thread::park_timeout(Duration::from_secs(5));
+            }
         }
         if total > MAX_FRAME_BYTES || stop.load(Ordering::Relaxed) {
             frames.truncate(1);
@@ -178,8 +189,10 @@ fn wait_frame(delay: Duration, stop: &AtomicBool, paused: &AtomicBool) {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GifCache {
+    /// GIFs kept playing; the oldest stop beyond this.
+    max_players: usize,
     entries: HashMap<String, Entry>,
     /// The GIFs playing, those shown longest ago first.
     playing: VecDeque<String>,
@@ -188,9 +201,36 @@ pub struct GifCache {
     retries: Retries<String>,
     /// The GIFs on screen, as last shown.
     on_screen: std::collections::HashSet<String>,
+    /// The GIFs that play only under the pointer (the GIF picker's previews).
+    still: std::collections::HashSet<String>,
+    /// The GIF under the pointer.
+    hovered: Option<String>,
+    /// Whether the window is focused, as last shown.
+    focused: bool,
+}
+
+impl Default for GifCache {
+    fn default() -> Self {
+        Self::with_players(MAX_PLAYERS)
+    }
 }
 
 impl GifCache {
+    /// A cache keeping at most `max_players` GIFs (the GIF picker's has its own).
+    pub fn with_players(max_players: usize) -> Self {
+        Self {
+            max_players,
+            entries: HashMap::new(),
+            playing: VecDeque::new(),
+            decoded: Arc::default(),
+            retries: Retries::default(),
+            on_screen: std::collections::HashSet::new(),
+            still: std::collections::HashSet::new(),
+            hovered: None,
+            focused: false,
+        }
+    }
+
     /// Whether `url` has to be fetched at `now`: it isn't here, and if it failed, its wait is
     /// over.
     pub fn wants(&self, url: &str, now: Instant) -> bool {
@@ -229,11 +269,12 @@ impl GifCache {
             self.entries.insert(url, Entry::Broken);
             return;
         }
-        self.entries.insert(url.clone(), Entry::Playing(Player::start(bytes, &self.decoded)));
+        let paused = !self.plays(&url);
+        self.entries.insert(url.clone(), Entry::Playing(Player::start(bytes, &self.decoded, paused)));
         self.playing.push_back(url);
         // Making room: the oldest off screen is forgotten, and fetched again if it comes back;
         // only when every one shows does the oldest stop, holding its place.
-        while self.playing.len() > MAX_PLAYERS {
+        while self.playing.len() > self.max_players {
             match self.playing.iter().position(|url| !self.on_screen.contains(url)) {
                 Some(index) => {
                     if let Some(gone) = self.playing.remove(index) {
@@ -257,22 +298,51 @@ impl GifCache {
         self.retries.retain(|url| shown.contains(url));
     }
 
-    /// Plays the GIFs in `shown` while the window is focused, and holds every other. Past
-    /// [`MAX_TOTAL_BYTES`] of frames, those off screen are forgotten, the one shown longest ago
-    /// first, and fetched again if they come back.
+    /// Takes the GIFs on screen (`shown`): they play while the window is focused (a still one
+    /// only under the pointer), and every other holds its frame. Past [`MAX_TOTAL_BYTES`] of frames, those off screen
+    /// are forgotten, the one shown longest ago first, and fetched again if they come back.
     pub fn show(&mut self, shown: std::collections::HashSet<String>, focused: bool) {
-        for (url, entry) in &self.entries {
-            if let Entry::Playing(player) = entry {
-                player.set_paused(!focused || !shown.contains(url));
-            }
-        }
         // Those on screen move behind the rest, keeping their order.
         let (on_screen, off_screen): (VecDeque<String>, VecDeque<String>) =
             self.playing.drain(..).partition(|url| shown.contains(url));
         self.playing = off_screen;
         self.playing.extend(on_screen);
+        self.focused = focused;
         self.on_screen = shown;
+        self.hold_all_but_hovered();
         self.trim(MAX_TOTAL_BYTES);
+    }
+
+    /// Takes the GIFs that play only under the pointer.
+    pub fn keep_still(&mut self, still: std::collections::HashSet<String>) {
+        self.still = still;
+        self.hold_all_but_hovered();
+    }
+
+    /// Takes the GIF under the pointer (`None`: none): a still one plays while it is there.
+    pub fn hover(&mut self, url: Option<String>) {
+        self.hovered = url;
+        self.hold_all_but_hovered();
+    }
+
+    /// The GIF under the pointer.
+    pub fn hovered(&self) -> Option<&str> {
+        self.hovered.as_deref()
+    }
+
+    /// Whether `url` plays now: on screen in a focused window, and if still, under the pointer.
+    fn plays(&self, url: &str) -> bool {
+        self.focused
+            && self.on_screen.contains(url)
+            && (!self.still.contains(url) || self.hovered.as_deref() == Some(url))
+    }
+
+    fn hold_all_but_hovered(&self) {
+        for (url, entry) in &self.entries {
+            if let Entry::Playing(player) = entry {
+                player.set_paused(!self.plays(url));
+            }
+        }
     }
 
     /// Forgets GIFs off screen, the one shown longest ago first, until their frames come to
@@ -402,6 +472,44 @@ mod tests {
         gifs.playing.push_back(url.to_owned());
     }
 
+    fn paused(gifs: &GifCache, url: &str) -> bool {
+        gifs.player(url).is_some_and(|player| player.paused.load(Ordering::Relaxed))
+    }
+
+    #[test]
+    fn a_gif_in_a_message_should_play_while_on_screen() {
+        let mut gifs = GifCache::default();
+        gifs.show(shown(&["a".into()]), true);
+        gifs.loading("a");
+        gifs.loaded("a".into(), Arc::from(&b"GIF89a"[..]));
+        assert!(!paused(&gifs, "a"));
+    }
+
+    #[test]
+    fn a_still_gif_should_hold_its_frame_until_the_pointer_is_over_it() {
+        let mut gifs = GifCache::default();
+        gifs.keep_still(shown(&["a".into()]));
+        gifs.show(shown(&["a".into()]), true);
+        gifs.loading("a");
+        gifs.loaded("a".into(), Arc::from(&b"GIF89a"[..]));
+        assert!(paused(&gifs, "a"));
+        gifs.hover(Some("a".into()));
+        assert!(!paused(&gifs, "a"));
+        gifs.hover(None);
+        assert!(paused(&gifs, "a"));
+    }
+
+    #[test]
+    fn a_hovered_gif_should_hold_while_the_window_is_not_focused() {
+        let mut gifs = GifCache::default();
+        gifs.keep_still(shown(&["a".into()]));
+        gifs.loading("a");
+        gifs.loaded("a".into(), Arc::from(&b"GIF89a"[..]));
+        gifs.hover(Some("a".into()));
+        gifs.show(shown(&["a".into()]), false);
+        assert!(paused(&gifs, "a"));
+    }
+
     #[test]
     fn past_the_budget_the_gif_shown_longest_ago_off_screen_should_go() {
         let mut gifs = GifCache::default();
@@ -434,7 +542,7 @@ mod tests {
             encoder.encode_frames([frame(), frame()]).unwrap();
         }
         let decoded = Arc::new(AtomicUsize::new(0));
-        let player = Player::start(Arc::from(bytes), &decoded);
+        let player = Player::start(Arc::from(bytes), &decoded, false);
         let deadline = Instant::now() + Duration::from_secs(2);
         while decoded.load(Ordering::Relaxed) < 2 * 8 * 8 * 4 && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(1));
@@ -445,6 +553,30 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!((playing, decoded.load(Ordering::Relaxed)), (2 * 8 * 8 * 4, 0));
+    }
+
+    #[test]
+    fn a_held_player_should_decode_only_its_first_frame_until_it_plays() {
+        let frame = || image::Frame::new(image::RgbaImage::from_pixel(8, 8, image::Rgba([255, 0, 0, 255])));
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
+            encoder.encode_frames([frame(), frame(), frame()]).unwrap();
+        }
+        let decoded = Arc::new(AtomicUsize::new(0));
+        let player = Player::start(Arc::from(bytes), &decoded, true);
+        let one = 8 * 8 * 4;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while decoded.load(Ordering::Relaxed) < one && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        let held = decoded.load(Ordering::Relaxed);
+        player.set_paused(false);
+        while decoded.load(Ordering::Relaxed) < 3 * one && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!((held, decoded.load(Ordering::Relaxed)), (one, 3 * one));
     }
 
     #[test]

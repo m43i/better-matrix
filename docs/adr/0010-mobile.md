@@ -152,7 +152,7 @@ Date: 2026-11-16
 - **The composer is one row:** + then the text field then the mic (send once there is something
   to send). The field grows with its text to about six lines, then scrolls, as the desktop's
   does. + opens every other option in the keyboard's place (photos and videos, camera, files,
-  poll, location, sticker, formatting, emoji), four to a row; formatting, once picked, puts the
+  poll, location, stickers & GIFs, formatting, emoji), four to a row; formatting, once picked, puts the
   toolbar above the row until it is closed. A long press on Send schedules the message (below).
 - **The composer writes formatting as markers.** The native text field holds plain text;
   `Format`s insert and remove markdown-style markers (`**bold**`, `_italic_`, `~~strike~~`,
@@ -223,15 +223,61 @@ Date: 2026-11-16
   (`SetDisplayName`). A command acts in the draft's place; the reply and attachments wait for
   the next send. An unknown command or one missing its argument keeps the draft and says so;
   `//text` sends `/text`. Each failure says what failed (`notice.invite`, `notice.join`, …).
-- **Stickers and custom emoji** come from MSC2545 packs (`ListImagePacks`, kept per room in
-  `AccountData.packs`): the sticker sheet (`app/stickers.tsx`) sends `Outgoing::Sticker`; the
-  emoji picker, writing (not reacting), offers the custom emoji first as pills. Received
-  stickers arrive as images (the engine's conversion). Custom emoji in messages are drawn
-  inline from their `mxc://` URI, as a media handle written the engine's way
-  (`mxcMedia`: `MediaSource::Plain` as JSON), the one handle the app writes itself. Any `<img>`
-  from `mxc://` is one (label: `alt`, else `title`), marked `data-mx-emoticon` or not, as the
-  engine's `to_pills` reads it: the SDK's sanitiser drops that attribute. Other images show
-  their `alt`.
+- **Stickers and custom emoji** come from image packs (Matrix 1.19; `ListImagePacks`, kept per room in
+  `AccountData.packs`, with whether the account may add a pack there in `packsMayAdd`): the
+  emoji picker, writing (not reacting), offers the custom emoji first as pills.
+  - **One sheet for stickers and GIFs** (`app/stickers.tsx`), the composer's single "Stickers &
+    GIFs" entry, its two tabs a native segmented control (`ui/people/Segments`). Stickers: a
+    search over short codes and descriptions, the stickers the account sent lately first
+    (`Settings.recentStickers`, 16 per account, saved with the settings), then each pack's
+    (the user's own as "Your stickers"), and Manage; tapping sends `Outgoing::Sticker`.
+  - **GIFs come from GIPHY with the user's own API key**: an open-source app can't hand out
+    one key to everyone. The key lives in the secure store (`engine/giphyKey.ts`, outside the
+    settings file), read at launch into state as `giphyKey`. Saving or removing it
+    (`saveGiphyKey`) waits for the secure store, one write after another (the last asked for is
+    the last kept), and changes `giphyKey` as each one is through, so it always shows the key
+    last kept; a failure keeps what was shown and says so (saving and removing in words of their own). The form waits meanwhile; the GIF tab asks for it (why, a button to GIPHY's
+    developer dashboard, the field) until there is one. A key kept is never shown again, nor put
+    in a field: Preferences → GIF search (`app/settings/giphy.tsx`) says one is saved and offers
+    Replace (an empty field, Save and Cancel) and Remove, and a key GIPHY refuses opens the
+    empty field at once. Trending shows
+    for a blank search; a search goes once typing pauses 500 ms or on Search (beta keys allow
+    100 calls an hour), only the latest answer shows (typing drops those on their way), and Load
+    more asks for the next page of the search shown, which only that search's GIFs may join
+    (`gifPageShown`); a new search that fails leaves nothing of the one before to page through
+    (`gifSearchFailed`). Previews play straight from GIPHY's URLs exactly as given (expo-image,
+    not cached at all: GIPHY forbids storing its media), in rows in GIPHY's order, so a screen
+    reader goes through them in it too (`gifRows`, a row as tall as its tallest, each fitting its
+    tile), with GIPHY's "Powered by GIPHY" mark (from its attribution marks,
+    `assets/images/giphy-powered-by.png`) pinned below the scrolling grid, always in view, as
+    GIPHY asks. A search that fails can be tried again, and a failed edit lists the packs again
+    (part of it may have gone through). A tap sends
+    `Outgoing::Gif` (the engine sends its giphy.com link as text, which this app plays and others
+    show as a link) as a sticker would and closes.
+  - **Managing packs** (`app/packs.tsx` from the sheet's Manage or room info's Stickers & emoji;
+    `app/pack.tsx`; `app/pack-image.tsx` as a sheet; `app/new-pack.tsx`): the user's own pack,
+    the room's (with New pack where the account may add one: `PackEdit::Create`, for which the
+    engine picks a state key never used before and names it in `ImagePackEdited`; the new pack
+    opens), and other rooms' packs used everywhere. Short codes typed follow the spec's grammar
+    (1 to 100 ASCII letters, digits, `-` and `_`, `validShortcode`); pictures already named
+    otherwise still show. An
+    editable pack takes a new name, pictures from the library (`pickPictures`, uploaded as
+    stickers) and, per picture, a short code, a description, sticker and/or emoji, being the
+    pack's picture, and removal (confirmed); a room's pack has "Use in all my rooms" and, where
+    the account may, Delete (confirmed). Others' packs are read-only. Each change is one
+    `EditImagePack`; once it finishes every pack list the account holds is listed again (the
+    user's own pack shows in each), and a failure is a notice with the engine's reason.
+  - **Received stickers** (`Attachment.sticker`) draw on their own, no frame, fitted into
+    160 points from their dimensions, from the file as sent so they keep moving; a long press
+    on a sticker or a picture offers "Add to my stickers" (`AddImages` to the user's pack from
+    the message's media, a sticker's name as its description). A picture sent encrypted
+    (`isEncryptedMedia`: its handle names a `file`) asks first: the engine uploads a copy
+    unencrypted, which the homeserver, and anyone with its link, can see. Custom emoji in messages are drawn
+    inline from their `mxc://` URI, as a media handle written the engine's way
+    (`mxcMedia`: `MediaSource::Plain` as JSON), the one handle the app writes itself. Any `<img>`
+    from `mxc://` is one (label: `alt`, else `title`), marked `data-mx-emoticon` or not, as the
+    engine's `to_pills` reads it: the SDK's sanitiser drops that attribute. Other images show
+    their `alt`.
 - **Locations:** the sheet (`app/location.tsx`) takes the phone's position (expo-location,
   when-in-use permission only, configured in `app.json`), looked up only once the user presses
   "Use my location", or a place found by name (`SearchPlaces`, only on submit: Nominatim's
@@ -545,9 +591,11 @@ Date: 2026-11-16
   open a batch Grace posts into #design (two images, a video the demo has no file for, an
   audio clip). #releases holds every message kind the composer sends (`message-kinds`); the
   composer scenes are `mention`, `mention-pill`, `commands`, `emoji-suggestions`,
-  `emoji-custom`, `stickers`, `location`, `schedule`, `scheduled-bar`, `scheduled` and
-  `edit-history`. The demo engine answers packs, place search, edit history, `LocateMessage`
-  and scheduled messages, and serves one stand-in map (`assets/demo/map.png`) for every place
+  `emoji-custom`, `stickers`, `gifs`, `gifs-key`, `packs`, `pack`, `pack-image`, `new-pack`,
+  `sticker`, `sticker-actions`, `settings-giphy`, `settings-giphy-saved`, `location`, `schedule`, `scheduled-bar`,
+  `scheduled` and `edit-history`. The demo engine answers packs (and keeps edits to them for the
+  run, `demo/stickers.ts`), GIF searches (the demo pack's pictures standing in for GIFs), place
+  search, edit history, `LocateMessage` and scheduled messages, and serves one stand-in map (`assets/demo/map.png`) for every place
   and the demo pack's images from `assets/demo`.
 - **The attachment preview** (`app/preview.tsx`) shows one attachment full screen on black: an
   image to pinch, pan and double-tap to zoom, a video in expo-video's player with the

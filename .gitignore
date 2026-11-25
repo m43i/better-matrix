@@ -20,3 +20,6 @@ Thumbs.db
 .idea/
 .vscode/
 /dist/
+
+# Local secrets (a GIPHY key for the live GIF search test)
+.env

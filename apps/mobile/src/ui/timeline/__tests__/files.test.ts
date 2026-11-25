@@ -12,6 +12,7 @@ const image: Attachment = {
   thumbnail: 'thumbnail',
   dimensions: null,
   audio: null,
+  sticker: false,
   size: null,
 };
 

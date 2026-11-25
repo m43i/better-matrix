@@ -13,8 +13,8 @@ use super::room_menu::{mode_id, modes};
 use super::theme::{Palette, font};
 use crate::i18n::{Language, t, tf};
 use crate::state::{
-    AccountData, Appearance, ContactStep, Emoticons, MediaCache, MessageLayout, Popover, SelectFor, SettingsSection,
-    State, Zoom,
+    AccountData, Appearance, ContactStep, Emoticons, GifKey, MediaCache, MessageLayout, Popover, SelectFor,
+    SettingsSection, State, Zoom,
 };
 use crate::third_party;
 use matrix_core::{ContactDetail, ContactKind, OfflineDevice, RecoveryStatus, Session, SignInMethod};
@@ -257,6 +257,7 @@ fn general(s: &State, p: &Palette) -> El {
         .child(setting_group(&icons::LANGUAGE, t!("settings.language"), t!("settings.language_hint"), languages, p))
         .child(setting_group(&icons::LINK, t!("settings.previews"), t!("settings.previews_hint"), previews, p))
         .child(setting_group(&icons::IMAGE, t!("settings.gifs"), t!("settings.gifs_hint"), gifs, p))
+        .child(setting_group(&icons::KEY, t!("settings.giphy"), t!("settings.giphy_hint"), giphy_key(s, p), p))
         .child(setting_group(&icons::MAP_PIN, t!("settings.maps"), t!("settings.maps_hint"), maps, p))
         .child(setting_group(
             &icons::HISTORY,
@@ -266,6 +267,43 @@ fn general(s: &State, p: &Palette) -> El {
             p,
         ))
         .child(setting_group(&icons::CODE, t!("settings.developer"), t!("settings.developer_hint"), hidden, p))
+}
+
+/// The user's GIPHY API key for the GIF picker, kept in the keychain: once kept it is never
+/// shown, only replaced or removed; without one, a field to give one.
+fn giphy_key(s: &State, p: &Palette) -> El {
+    if s.picker.giphy == GifKey::Loading {
+        return text(t!("picker.key_loading")).font(font::META).color(p.text_muted);
+    }
+    if s.asks_gif_key() {
+        return col().w_full().gap(8.0).child(super::stickers::gif_key_field(s, "settings-giphy-key", p)).child(
+            button(t!("picker.get_key"), ButtonKind::Link, true, p)
+                .key("settings-giphy-get")
+                .on_press_tx(|s: &mut State, tx| s.open_giphy_keys(tx)),
+        );
+    }
+    row()
+        .w_full()
+        .gap(8.0)
+        .center_y()
+        .child({
+            let said = if matches!(s.picker.giphy, GifKey::Session(_)) {
+                t!("settings.giphy_session")
+            } else {
+                t!("settings.giphy_saved")
+            };
+            text(said).font(font::BODY).color(p.text).grow(1.0).min_w(0.0).wrap()
+        })
+        .child(
+            button(t!("picker.replace_key"), ButtonKind::Secondary, true, p)
+                .key("settings-giphy-replace")
+                .on_press(State::replace_gif_key),
+        )
+        .child(
+            button(t!("settings.giphy_remove"), ButtonKind::Secondary, true, p)
+                .key("settings-giphy-remove")
+                .on_press(State::remove_gif_key),
+        )
 }
 
 /// How the app looks: the theme, how messages lay out, whether emoticons become emoji, and the

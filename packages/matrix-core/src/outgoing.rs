@@ -28,11 +28,12 @@ pub(crate) fn text(body: &str, html: Option<&str>, mentioned: &Mentions) -> Room
     content.add_mentions(mentions(mentioned))
 }
 
-/// The room message `message` is, for the kinds that are one (text, emotes, locations): these
-/// may answer another message or join a thread.
+/// The room message `message` is, for the kinds that are one (text, emotes, locations, GIFs):
+/// these may answer another message or join a thread.
 pub(crate) fn room_message(message: &Outgoing) -> Option<RoomMessageEventContentWithoutRelation> {
     Some(match message {
         Outgoing::Text { body, html, mentions } => text(body, html.as_deref(), mentions),
+        Outgoing::Gif(gif) => text(&gif.url, None, &Mentions::default()),
         Outgoing::Emote { body, html, mentions: mentioned } => {
             let content = match html {
                 Some(html) => RoomMessageEventContentWithoutRelation::emote_html(body, html),
@@ -141,6 +142,23 @@ mod tests {
     fn a_location_without_a_name_should_describe_its_coordinates() {
         let message = Outgoing::Location { geo_uri: "geo:52.5163,13.3777".into(), description: None };
         assert_eq!(json(&message)["body"], "Location: 52.5163, 13.3777");
+    }
+
+    #[test]
+    fn a_gif_should_go_as_its_link() {
+        let gif = crate::model::FoundGif {
+            id: "a1".into(),
+            title: "A cat waves".into(),
+            url: "https://giphy.com/gifs/cat-a1".into(),
+            preview: "https://media.giphy.com/media/a1/200w.gif".into(),
+            preview_size: None,
+            sent_ping: None,
+        };
+        let content = json(&Outgoing::Gif(gif));
+        assert_eq!(
+            (content["msgtype"].as_str(), content["body"].as_str()),
+            (Some("m.text"), Some("https://giphy.com/gifs/cat-a1"))
+        );
     }
 
     #[test]

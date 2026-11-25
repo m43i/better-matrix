@@ -463,6 +463,7 @@ fn a_held_back_video_without_a_poster_should_not_open_directly() {
         thumbnail: None,
         dimensions: None,
         audio: None,
+        sticker: false,
     };
     crate::demo::image_message(&mut s, video.clone());
     media_never(&mut s);
@@ -946,6 +947,7 @@ fn a_clip_should_stop_once_its_sender_is_ignored() {
         thumbnail: None,
         dimensions: None,
         audio: None,
+        sticker: false,
     };
     crate::demo::image_message(&mut s, clip.clone());
     s.toggle_audio(&clip);

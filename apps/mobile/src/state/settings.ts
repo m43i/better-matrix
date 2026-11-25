@@ -3,6 +3,8 @@
 
 import { z } from 'zod';
 
+import type { PackImage } from '@better-matrix/matrix-native/types';
+
 import type { Language } from '../i18n';
 import type { PlaybackSpeed } from './voiceCard';
 
@@ -44,6 +46,8 @@ export interface Settings {
   showRoomChanges: boolean;
   /** Timelines draw the events they otherwise leave out (developer tools). */
   showHiddenEvents: boolean;
+  /** The stickers each account sent lately, newest first: the sticker picker shows them first. */
+  recentStickers: Record<string, PackImage[]>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -60,7 +64,19 @@ export const DEFAULT_SETTINGS: Settings = {
   playbackSpeed: 1,
   showRoomChanges: false,
   showHiddenEvents: false,
+  recentStickers: {},
 };
+
+const packImage = z.object({
+  shortcode: z.string(),
+  body: z.string(),
+  url: z.string(),
+  media: z.string(),
+  emoticon: z.boolean(),
+  sticker: z.boolean(),
+  dimensions: z.tuple([z.number(), z.number()]).nullable(),
+  mimetype: z.string().nullable(),
+});
 
 const savedSettings = z.object({
   language: z.enum(['system', 'en', 'de', 'fr']).catch(DEFAULT_SETTINGS.language),
@@ -78,6 +94,7 @@ const savedSettings = z.object({
     .catch(DEFAULT_SETTINGS.playbackSpeed),
   showRoomChanges: z.boolean().catch(DEFAULT_SETTINGS.showRoomChanges),
   showHiddenEvents: z.boolean().catch(DEFAULT_SETTINGS.showHiddenEvents),
+  recentStickers: z.record(z.string(), z.array(packImage)).catch(() => ({})),
 });
 
 /** Settings from saved JSON: unknown or broken fields fall back to their defaults. */
