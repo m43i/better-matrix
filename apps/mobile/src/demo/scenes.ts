@@ -14,6 +14,7 @@ import { updateComposer } from '../state/composer';
 import { pathFromUri } from '../state/outgoing';
 import { pillAt, userPill } from '../state/pills';
 import type { Settings } from '../state/settings';
+import { showGiphyKey } from '../state/actions/stickers';
 import type { Store } from '../state/store';
 import { roomKey, threadKey } from '../state/timeline';
 import { widgetLaunches } from '../ui/widgets/launch';
@@ -27,6 +28,7 @@ import {
   callShares,
   DEMO_BATCH,
   DEMO_THREAD,
+  demoPacks,
   DESIGN,
   DESIGN_INVITE,
   DM_GRACE,
@@ -48,6 +50,8 @@ import {
   SCREENSHOT,
   seedEvents,
   SIGN_OFF,
+  STICKER_MESSAGE,
+  stickerEvents,
   TEST_PLAN,
   typingPeople,
   upgradedLab,
@@ -353,9 +357,69 @@ export const scenes = {
     routes: [routes.room(ADA, GENERAL), routes.emoji(ADA, GENERAL)],
   },
   stickers: {
-    about: 'The sticker picker',
+    about: 'The sticker and GIF picker on its stickers, one sent lately first',
     setup: general,
+    settings: {
+      recentStickers: {
+        [ADA]: demoPacks()
+          .flatMap((pack) => pack.images)
+          .filter((image) => image.shortcode === 'ship'),
+      },
+    },
     routes: [routes.room(ADA, GENERAL), routes.stickers(ADA, GENERAL)],
+  },
+  gifs: {
+    about: 'The sticker and GIF picker on its GIFs, with a GIPHY key',
+    setup: (store) => {
+      general(store);
+      showGiphyKey(store, 'demo-key');
+    },
+    routes: [routes.room(ADA, GENERAL), routes.stickers(ADA, GENERAL, undefined, 'gifs')],
+  },
+  'gifs-key': {
+    about: 'The GIFs tab asking for the user’s own GIPHY key',
+    setup: general,
+    routes: [routes.room(ADA, GENERAL), routes.stickers(ADA, GENERAL, undefined, 'gifs')],
+  },
+  packs: {
+    about: 'Stickers & emoji: Ada’s pack and #general’s, which she may change',
+    setup: general,
+    routes: [routes.room(ADA, GENERAL), routes.packs(ADA, GENERAL)],
+  },
+  pack: {
+    about: 'One of #general’s packs, to rename, add to and use everywhere',
+    setup: general,
+    routes: [
+      routes.room(ADA, GENERAL),
+      routes.packs(ADA, GENERAL),
+      routes.pack(ADA, `${GENERAL}/`, GENERAL),
+    ],
+  },
+  'pack-image': {
+    about: 'A pack’s sticker: short code, description, sticker or emoji',
+    setup: general,
+    routes: [
+      routes.room(ADA, GENERAL),
+      routes.pack(ADA, `${GENERAL}/`, GENERAL),
+      routes.packImage(ADA, `${GENERAL}/`, 'wave', GENERAL),
+    ],
+  },
+  'new-pack': {
+    about: 'Making a pack in #general',
+    setup: general,
+    routes: [routes.room(ADA, GENERAL), routes.packs(ADA, GENERAL), routes.newPack(ADA, GENERAL)],
+  },
+  sticker: {
+    about: 'A sticker Grace sent, drawn on its own',
+    events: stickerEvents(),
+    setup: general,
+    routes: [routes.room(ADA, GENERAL)],
+  },
+  'sticker-actions': {
+    about: 'A sticker’s long-press sheet, with Add to my stickers',
+    events: stickerEvents(),
+    setup: general,
+    routes: [routes.room(ADA, GENERAL), routes.messageActions(ADA, GENERAL, STICKER_MESSAGE)],
   },
   location: {
     about: 'Sharing a place: the phone’s position or one found by name',
@@ -526,6 +590,15 @@ export const scenes = {
     routes: [routes.leaveSpace(ADA, WORK_SPACE)],
   },
   settings: { about: 'Settings', routes: [routes.settings()] },
+  'settings-giphy': {
+    about: 'Preferences: entering the user’s own GIPHY key',
+    routes: [routes.settings(), routes.settingsPreferences(), routes.settingsGiphy()],
+  },
+  'settings-giphy-saved': {
+    about: 'Preferences: a GIPHY key saved, offered only to replace or remove',
+    setup: (store) => showGiphyKey(store, 'demo-key'),
+    routes: [routes.settings(), routes.settingsPreferences(), routes.settingsGiphy()],
+  },
   'settings-preferences': {
     about: 'Language and appearance',
     routes: [routes.settings(), routes.settingsPreferences()],

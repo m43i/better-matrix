@@ -167,6 +167,7 @@ function file(name: string, kind: Attachment['kind'], extra: Partial<Attachment>
     thumbnail: null,
     dimensions: null,
     audio: null,
+    sticker: false,
     ...extra,
   };
 }
@@ -314,6 +315,10 @@ export function demoPacks(): ImagePack[] {
       id: 'user',
       name: 'Ada’s emoji',
       avatar: null,
+      avatar_url: null,
+      place: { type: 'User' },
+      editable: true,
+      everywhere: false,
       images: [
         packImage('party', 'Party', DEMO_PACK_IMAGES.party, emoticon),
         packImage('ok', 'OK', DEMO_PACK_IMAGES.ok, emoticon),
@@ -323,6 +328,10 @@ export function demoPacks(): ImagePack[] {
       id: `${GENERAL}/`,
       name: 'Engine room',
       avatar: null,
+      avatar_url: DEMO_PACK_IMAGES.wave,
+      place: { type: 'Room', data: { room_id: GENERAL, state_key: '' } },
+      editable: true,
+      everywhere: false,
       images: [
         packImage('wave', 'Waving hello', DEMO_PACK_IMAGES.wave, sticker),
         packImage('ship', 'Ship it', DEMO_PACK_IMAGES.ship, sticker),
@@ -717,6 +726,45 @@ export function batchEvents(): EngineEvent[] {
           type: 'PushBack' as const,
           data: { id: m.event_id, kind: { type: 'Message' as const, data: m } },
         })),
+      },
+    },
+  ];
+}
+
+/** The sticker Grace sends into #general after the sign-off. */
+export const STICKER_MESSAGE = '$demo-sticker';
+
+/** Grace answers in #general with a sticker from the room's pack. */
+export function stickerEvents(): EngineEvent[] {
+  const message: Message = {
+    ...blank(),
+    event_id: STICKER_MESSAGE,
+    sender_id: GRACE,
+    sender_name: 'Grace Hopper',
+    content: {
+      type: 'Attachment',
+      data: file('Ship it', 'Image', {
+        media: mxcMedia(DEMO_PACK_IMAGES.ship),
+        dimensions: [256, 256],
+        size: null,
+        sticker: true,
+      }),
+    },
+    timestamp_ms: DEMO_DAY_MS + (9 * 60 + 40) * 60_000,
+  };
+
+  return [
+    {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: { room_id: GENERAL, thread: null },
+        diffs: [
+          {
+            type: 'PushBack',
+            data: { id: message.event_id, kind: { type: 'Message', data: message } },
+          },
+        ],
       },
     },
   ];

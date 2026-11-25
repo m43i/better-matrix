@@ -2,6 +2,8 @@
 // blocks, a linked GIF and the link that gets a card; and the rules its parts follow: polls'
 // votes, call cards' status, image preview sizes, which actions the user has on it.
 
+import { z } from 'zod';
+
 import { type EditDraft, editDraft } from './format';
 import { matches } from './people';
 import type {
@@ -121,6 +123,21 @@ export function mxcMedia(url: string): MediaRef {
   return JSON.stringify({ url });
 }
 
+/**
+ * Whether media is an encrypted file (`MediaSource::Encrypted`, written `{ file }`, where plain
+ * media is `{ url }`): copying it into a pack uploads it unencrypted, so the app asks first.
+ */
+export function isEncryptedMedia(media: MediaRef): boolean {
+  try {
+    return ENCRYPTED_SOURCE.safeParse(JSON.parse(media)).success;
+  } catch {
+    return false;
+  }
+}
+
+/** An encrypted `MediaSource`, as the engine writes it. */
+const ENCRYPTED_SOURCE = z.object({ file: z.object({}).loose() });
+
 /** An emote's blocks: "* Name" before the first paragraph's words. */
 function emoteBlocks(sender: string, blocks: Block[]): Block[] {
   const prefix: Inline = { type: 'text', text: `* ${sender} `, marks: { italic: true } };
@@ -206,6 +223,8 @@ export interface MessageActions {
   file: boolean;
   /** Reporting someone else's message to the homeserver's admins. */
   report: boolean;
+  /** Adding its sticker or picture to the user's own stickers. */
+  saveSticker: boolean;
 }
 
 export function messageActions(
@@ -245,6 +264,11 @@ export function messageActions(
     endPoll: sent && own && content.type === 'Poll' && !content.data.ended,
     file: content.type === 'Attachment' && content.data.media !== null,
     report: sent && !own && content.type !== 'Redacted',
+    saveSticker:
+      sent &&
+      content.type === 'Attachment' &&
+      content.data.kind === 'Image' &&
+      content.data.media !== null,
   };
 }
 
@@ -321,6 +345,10 @@ export function attachmentPreview(
   if (attachment.kind !== 'Image') return null;
 
   if (attachment.thumbnail) return { media: attachment.thumbnail, size: { type: 'Original' } };
+
+  // A sticker is small and may move: its file as sent, which a server thumbnail would freeze.
+  if (attachment.media && attachment.sticker)
+    return { media: attachment.media, size: { type: 'Original' } };
 
   if (attachment.media) return { media: attachment.media, size: PREVIEW };
 

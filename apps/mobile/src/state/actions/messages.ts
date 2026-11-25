@@ -8,6 +8,7 @@ import { t } from '../../i18n';
 import { composer, updateComposer } from '../composer';
 import { addNotice } from '../reducer';
 import { CommandFailed } from '../requests';
+import { rememberSticker } from '../stickers';
 import type { Store } from '../store';
 
 /** Lists the custom emoji and sticker packs usable in a room, in the background. */
@@ -24,7 +25,10 @@ function takeReply(store: Store, account: AccountId, key: TimelineKey): string |
   return replyTo;
 }
 
-/** Sends a pack's image as a sticker, answering what the timeline's composer answers. */
+/**
+ * Sends a pack's image as a sticker, answering what the timeline's composer answers; the picker
+ * shows it first among the account's recent stickers from then on.
+ */
 export function sendSticker(
   store: Store,
   account: AccountId,
@@ -32,6 +36,16 @@ export function sendSticker(
   image: PackImage,
 ): void {
   const replyTo = takeReply(store, account, key);
+  store.update((s) => ({
+    ...s,
+    settings: {
+      ...s.settings,
+      recentStickers: {
+        ...s.settings.recentStickers,
+        [account]: rememberSticker(s.settings.recentStickers[account] ?? [], image),
+      },
+    },
+  }));
   store.send({
     type: 'Send',
     data: { account, key, reply_to: replyTo, message: { type: 'Sticker', data: image } },

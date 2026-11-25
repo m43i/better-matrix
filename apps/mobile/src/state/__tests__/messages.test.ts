@@ -6,7 +6,9 @@ import {
   attachmentRows,
   callStatus,
   cardLink,
+  isEncryptedMedia,
   messageActions,
+  mxcMedia,
   forwardSections,
   marksMention,
   messageText,
@@ -154,11 +156,34 @@ describe('messageActions', () => {
         thumbnail: null,
         dimensions: null,
         audio: null,
+        sticker: false,
         size: null,
       },
     });
 
     expect(messageActions(attachment, ADA, false).copy).toBe(false);
+  });
+
+  it('should offer to add a picture someone sent to the user’s stickers', () => {
+    const picture = withContent('$m', {
+      type: 'Attachment',
+      data: {
+        kind: 'Image',
+        name: 'Ship it',
+        media: 'original',
+        thumbnail: null,
+        dimensions: null,
+        audio: null,
+        sticker: true,
+        size: null,
+      },
+    });
+
+    expect(messageActions(picture, ADA, false).saveSticker).toBe(true);
+  });
+
+  it('should not offer to add a text message to the user’s stickers', () => {
+    expect(messageActions(text('hi'), ADA, false).saveSticker).toBe(false);
   });
 
   it('should not offer to copy empty message text', () => {
@@ -217,6 +242,7 @@ describe('attachmentActions', () => {
     thumbnail: null,
     dimensions: null,
     audio: null,
+    sticker: false,
     size: null,
   };
 
@@ -366,6 +392,7 @@ describe('attachments', () => {
     thumbnail: null,
     dimensions: [1440, 720],
     audio: null,
+    sticker: false,
   };
 
   it('should preview an image from its thumbnail when it has one', () => {
@@ -381,6 +408,13 @@ describe('attachments', () => {
 
   it('should not preview a file', () => {
     expect(attachmentPreview({ ...image, kind: 'File' })).toBeNull();
+  });
+
+  it('should show a sticker from its file as sent, so it keeps moving', () => {
+    expect(attachmentPreview({ ...image, sticker: true })).toEqual({
+      media: 'mxc-a',
+      size: { type: 'Original' },
+    });
   });
 
   it('should fit a wide image to the box width', () => {
@@ -502,5 +536,22 @@ describe('marksMention', () => {
 
   it('should not mark a message that doesn’t mention the user', () => {
     expect(marksMention(message('$a'), ADA)).toBe(false);
+  });
+});
+
+describe('isEncryptedMedia', () => {
+  it('should tell an encrypted file from plain media', () => {
+    const encrypted = JSON.stringify({
+      file: { url: 'mxc://x.org/e', key: {}, iv: '', hashes: {}, v: 'v2' },
+    });
+
+    expect([isEncryptedMedia(encrypted), isEncryptedMedia(mxcMedia('mxc://x.org/p'))]).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it('should not count a handle it can’t read as encrypted', () => {
+    expect(isEncryptedMedia('opaque')).toBe(false);
   });
 });

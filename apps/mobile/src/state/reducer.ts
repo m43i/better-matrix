@@ -67,6 +67,7 @@ export function initialState(settings: Settings = DEFAULT_SETTINGS): State {
     composers: {},
     recentEmoji: [],
     settings,
+    giphyKey: null,
     pushers: {},
   };
 }
@@ -104,6 +105,7 @@ function newAccount(summary: AccountSummary): AccountData {
     pins: {},
     saved: null,
     packs: {},
+    packsMayAdd: {},
     scheduled: null,
     edits: {},
     sidebar: EMPTY_LAYOUT,
@@ -758,6 +760,7 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
       return updateAccount(state, event.data.account, (a) => ({
         ...a,
         packs: { ...a.packs, [event.data.room_id ?? '']: event.data.packs },
+        packsMayAdd: { ...a.packsMayAdd, [event.data.room_id ?? '']: event.data.may_add },
       }));
     case 'ScheduledMessages': {
       const before = state.accounts.find((a) => a.summary.id === event.data.account)?.scheduled;
@@ -822,6 +825,12 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'PushContent':
     // Presence dots and status messages are desktop-only for now.
     case 'Presence':
+      return state;
+    // Answers its search alone (`store.run`), into the picker that asked.
+    case 'GifsFound':
+      return state;
+    // Answers its change alone (`store.run`); the packs are listed again after it.
+    case 'ImagePackEdited':
       return state;
     // The bridge reports these as files (MediaFile, GifFile) instead.
     case 'MediaLoaded':

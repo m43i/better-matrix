@@ -1834,7 +1834,42 @@ fn link_card(
 /// sender's dimensions so the timeline doesn't jump when it loads; a placeholder of the same size
 /// until then. Without the sender's dimensions, or with ones the picture doesn't match, the loaded
 /// picture's own decide. A video's poster carries a play button.
+/// The largest side a sticker is drawn at.
+const STICKER_SIDE: f32 = 160.0;
+
+/// A sticker: its picture alone, at most [`STICKER_SIDE`] a side, with no frame; its
+/// description shows on hover.
+fn sticker(event_id: &str, attachment: &Attachment, cx: &Context<'_>, held: bool, p: &Palette) -> El {
+    let image = attachment.preview().and_then(|(media_ref, _)| cx.media.image(&media_ref)).filter(|_| !held);
+    let loaded = image.and_then(|image| image.size()).map(|[w, h]| (w, h));
+    let (w, h) = match shown_dimensions(attachment.dimensions, loaded) {
+        Some((w, h)) => {
+            let (w, h) = (w as f32, h as f32);
+            let scale = (STICKER_SIDE / w.max(h)).min(cx.content_width / w);
+            (w * scale, h * scale)
+        }
+        None => (STICKER_SIDE, STICKER_SIDE),
+    };
+    if held {
+        return hidden_media(cx, event_id, (w.max(120.0), h.max(120.0)), p).mt(4.0);
+    }
+    let frame = el()
+        .key(format!("sticker-{event_id}"))
+        .size(w, h)
+        .mt(4.0)
+        .role("img")
+        .label(attachment.name.clone())
+        .help(attachment.name.clone());
+    match image {
+        Some(image) => frame.pixels_fit(image.pixels(), SurfaceFit::Fit),
+        None => frame.radius(12.0).fill(p.hover),
+    }
+}
+
 fn image_preview(event_id: &str, attachment: &Attachment, cx: &Context<'_>, held: bool, p: &Palette) -> El {
+    if attachment.sticker {
+        return sticker(event_id, attachment, cx, held, p);
+    }
     let max_width = cx.content_width;
     let image = attachment.preview().and_then(|(media_ref, _)| cx.media.image(&media_ref)).filter(|_| !held);
     let loaded = image.and_then(|image| image.size()).map(|[w, h]| (w, h));

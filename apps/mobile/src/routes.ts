@@ -120,10 +120,38 @@ export const routes = {
     pathname: '/edit-history',
     params: { account, roomId, eventId },
   }),
-  /** The sticker picker, sending into a room's or thread's timeline. */
-  stickers: (account: AccountId, roomId: string, thread?: string): Href => ({
-    pathname: '/stickers',
-    params: thread ? { account, roomId, thread } : { account, roomId },
+  /**
+   * The sticker and GIF picker, sending into a room's or thread's timeline; on its GIFs tab when
+   * `tab` says so.
+   */
+  stickers: (account: AccountId, roomId: string, thread?: string, tab?: 'gifs'): Href => {
+    const params: StickerParams = { account, roomId };
+
+    if (thread) params.thread = thread;
+
+    if (tab) params.tab = tab;
+
+    return { pathname: '/stickers', params };
+  },
+  /** The packs to manage: the user's own, and those of `roomId` when given. */
+  packs: (account: AccountId, roomId?: string): Href => ({
+    pathname: '/packs',
+    params: roomId ? { account, roomId } : { account },
+  }),
+  /** One pack (`ImagePack::id`), as listed for `roomId` (or anywhere). */
+  pack: (account: AccountId, packId: string, roomId?: string): Href => ({
+    pathname: '/pack',
+    params: roomId ? { account, packId, roomId } : { account, packId },
+  }),
+  /** One picture of a pack, to change or remove. */
+  packImage: (account: AccountId, packId: string, shortcode: string, roomId?: string): Href => ({
+    pathname: '/pack-image',
+    params: roomId ? { account, packId, shortcode, roomId } : { account, packId, shortcode },
+  }),
+  /** Making a pack in a room: its name. */
+  newPack: (account: AccountId, roomId: string): Href => ({
+    pathname: '/new-pack',
+    params: { account, roomId },
   }),
   /** Sharing a place: the phone's position or one found by name. */
   location: (account: AccountId, roomId: string, thread?: string): Href => ({
@@ -252,6 +280,8 @@ export const routes = {
   settingsInfo: (): Href => '/settings/info',
   /** This device's preferences: language, appearance, link previews and GIFs. */
   settingsPreferences: (): Href => '/settings/preferences',
+  /** The user's own GIPHY API key, for the GIF picker. */
+  settingsGiphy: (): Href => '/settings/giphy',
   /** Resetting the account's identity, when the recovery key and every other session are lost. */
   settingsReset: (account: AccountId): Href => ({
     pathname: '/settings/reset',
@@ -313,6 +343,9 @@ export function widgetTarget(params: {
 
   return null;
 }
+
+/** The sticker picker's params: where it sends, and the tab it opens on. */
+type StickerParams = { account: AccountId; roomId: string; thread?: string; tab?: 'gifs' };
 
 /** A new room's params: its space and its join rule, chosen ahead. */
 type NewRoomParams = { space?: string; join?: JoinRule };

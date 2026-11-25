@@ -313,7 +313,7 @@ impl State {
                     let wanted = self
                         .custom_emoji(&account, &room_id)
                         .into_iter()
-                        .map(|image| (image.media.clone(), super::PACK_IMAGE_SIZE, Some((128, 128))))
+                        .map(super::packs::wanted_pack_image)
                         .collect();
                     self.request_media(&account, wanted);
                 }

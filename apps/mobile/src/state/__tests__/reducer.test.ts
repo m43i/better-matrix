@@ -564,10 +564,19 @@ describe('apply for composer extras', () => {
   it('should keep image packs by the room they were listed for', () => {
     const state = apply(signedIn(ADA), {
       type: 'ImagePacks',
-      data: { account: ADA, room_id: '!r', packs: [] },
+      data: { account: ADA, room_id: '!r', packs: [], may_add: true },
     });
 
     expect(state.accounts[0]?.packs).toEqual({ '!r': [] });
+  });
+
+  it('should keep whether the account may add packs to the room they were listed for', () => {
+    const state = apply(signedIn(ADA), {
+      type: 'ImagePacks',
+      data: { account: ADA, room_id: '!r', packs: [], may_add: true },
+    });
+
+    expect(state.accounts[0]?.packsMayAdd).toEqual({ '!r': true });
   });
 
   it('should keep the scheduled messages the server reported', () => {

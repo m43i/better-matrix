@@ -313,8 +313,11 @@ see who is typing there.
   as ended, or declined in a direct chat. Call cards take no reactions, and a reply quotes the
   call's kind (`Quote::call`; a one-to-one call is just "Call" there, its offer not embedded).
   Call memberships stay hidden.
-- **Stickers** show as images (`convert::sticker`); sending them is in
-  [0007](0007-composer-and-media.md).
+- **Stickers** are image attachments marked `Attachment::sticker` (`convert::sticker`), drawn on
+  their own at most 160 points a side with no frame, their description on hover; their file is
+  fetched as sent (`Attachment::preview`), not a server thumbnail, so animated ones move. The
+  message menu's "Add to my stickers" (on stickers and pictures) adds one to the user's pack.
+  Sending them is in [0007](0007-composer-and-media.md).
 - **Emotes** are their own content (`MessageContent::Emote`), drawn in italics after the
   sender's name ("* Ada waves"), formatting and pills kept.
 - **Locations** (`MessageContent::Location`): a card with the place's map, name and
@@ -530,5 +533,6 @@ see who is typing there.
 - Receipts go out on every change in a focused timeline; the SDK skips those already sent.
 - Any `timeline_mut` moves the revision: a no-op costs a replan, never a stale plan.
 - Typing notices have no off switch; adding one is one check in `send_typing`.
-- No GIF picker: Giphy and Tenor search needs an API key issued to the project.
+- GIF search needs each user's own GIPHY key ([0007](0007-composer-and-media.md)): an open-source
+  app's shared key would be paid for by its maintainers.
 - Emoji render through the system's colour emoji font.

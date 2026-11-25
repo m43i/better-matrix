@@ -31,8 +31,10 @@ mod location;
 mod media;
 mod message_actions;
 mod navigation;
+mod pack_manager;
 mod packs;
 mod panes;
+mod picker;
 mod poll;
 mod preview;
 mod profile;
@@ -89,8 +91,10 @@ pub use location::{LocationForm, MAP_PIXELS, MAP_SIZE};
 pub use media::{MediaCache, THUMBNAIL_SIZE, UploadThumbnails};
 pub use message_actions::{MessageAt, MessageHover};
 pub use navigation::{navigate, navigate_now};
-pub use packs::PACK_IMAGE_SIZE;
+pub use pack_manager::{ImageForm, PackField, PackManager};
+pub use packs::{PACK_IMAGE_SIZE, RecentStickers};
 pub use panes::{Pane, PaneLayout, PaneSize, PaneWidths};
+pub use picker::{GIPHY_MARK_SIZE, GifKey, PickerTab, giphy_mark};
 pub use poll::{MAX_ANSWERS, PollForm};
 pub use preview::{
     DocumentStatus, ImageStatus, Opens, Preview, PreviewContent, PreviewItem, VideoStatus, render_document,
@@ -179,7 +183,8 @@ pub enum Popover {
     CallLayout,
     /// The options of a select in settings.
     Select(SelectFor),
-    /// The stickers of the room's image packs, for a composer.
+    /// The sticker and GIF picker, for a composer: the room's packs' stickers, or GIFs from
+    /// GIPHY (`State::picker`).
     Stickers(ComposerTarget),
     /// When to send a composer's message later, from beside its send button.
     Schedule(ComposerTarget),
@@ -283,6 +288,8 @@ pub enum PickFor {
     /// A new picture for a room or space: the one whose settings it was asked from, whatever
     /// shows by the time the dialog answers.
     RoomAvatar { account: AccountId, room_id: String },
+    /// Pictures to add to an image pack, from the sticker manager.
+    PackImages { account: AccountId, pack: matrix_core::PackPlace },
 }
 
 /// Something dragged in the sidebar or on the rail: a room, a whole section, or a space.
@@ -456,6 +463,8 @@ pub enum Modal {
     Poll,
     /// Sharing a place (`State::location`).
     Location,
+    /// The sticker manager (`State::pack_manager`).
+    Packs,
     /// The versions an edited message went through.
     EditHistory(Box<EditHistory>),
     /// "Are you sure?" before something that can't be undone.
@@ -637,6 +646,13 @@ pub enum Confirm {
     Deactivate {
         account: AccountId,
         erase: bool,
+    },
+    /// Add a picture from an encrypted message to the user's stickers, which uploads a copy
+    /// the homeserver can see: image packs aren't encrypted.
+    CopyToStickers {
+        media: MediaRef,
+        name: String,
+        dimensions: Option<(u32, u32)>,
     },
 }
 
@@ -898,6 +914,15 @@ enum Purpose {
     },
     React,
     Gif(String),
+    /// A GIF picker preview's file.
+    PickerGif(String),
+    /// A GIF search from the sticker and GIF picker.
+    GifSearch,
+    /// Changing an image pack; `added`: a picture someone sent, added from the message menu.
+    PackEdit {
+        account: AccountId,
+        added: bool,
+    },
     /// A link's preview card, from an account's homeserver.
     LinkPreview(link_previews::LinkKey),
     /// Looking up or joining what a permalink names; the link dialog's step holds the request.
@@ -943,6 +968,12 @@ pub struct State {
     locating: Option<(RequestId, AccountId, String)>,
     /// Rooms' custom emoji and sticker packs.
     pub packs: packs::Packs,
+    /// The stickers sent lately on this device.
+    pub recent_stickers: RecentStickers,
+    /// The sticker and GIF picker's tabs and searches.
+    pub picker: picker::Picker,
+    /// The sticker manager, while [`Modal::Packs`] shows.
+    pub pack_manager: Option<PackManager>,
     /// The location dialog, while [`Modal::Location`] shows.
     pub location: LocationForm,
     /// Each account's scheduled messages.
@@ -1115,6 +1146,9 @@ impl State {
             log_shown: 0..0,
             locating: None,
             packs: packs::Packs::default(),
+            recent_stickers: shell.recent_stickers(),
+            picker: picker::Picker::default(),
+            pack_manager: None,
             location: LocationForm::default(),
             scheduled: scheduled::Scheduled::default(),
             revealed: HashSet::new(),
@@ -1198,6 +1232,8 @@ impl State {
                 state.dispatch(command, Purpose::CallVideo);
             }
         }
+        // The GIPHY key comes from the keychain, off this thread; without one to ask, none.
+        state.picker.giphy = if state.shell.load_gif_key() { GifKey::Loading } else { GifKey::Missing };
         state
     }
 
@@ -1596,6 +1632,8 @@ impl State {
             // The room was closed meanwhile: nothing shows its typing.
             Event::Typing { .. } => {}
             Event::GifLoaded { url, bytes } => {
+                // Each cache takes it only if it was waiting for it.
+                self.picker.players.loaded(url.clone(), std::sync::Arc::clone(&bytes));
                 self.gifs.loaded(url, bytes);
                 // It may have scrolled away while downloading: it plays only if still shown.
                 self.fetch_linked(std::time::Instant::now());
@@ -1867,13 +1905,14 @@ impl State {
                     self.notice = Some(tf!("schedule.failed_notice", reason = scheduled::failure_reason(&reason)));
                 }
             }
-            Event::ImagePacks { account, room_id, packs } => {
-                if let Some(room_id) = room_id {
-                    self.packs.listed(account, room_id, packs);
-                }
+            Event::ImagePacks { account, room_id, packs, may_add } => {
+                self.packs.listed(account, room_id.unwrap_or_default(), packs, may_add);
+                self.packs_relisted();
                 self.request_pack_images();
                 self.request_timeline_media();
             }
+            Event::GifsFound { request, offset, page, .. } => self.gifs_found(request, offset, page),
+            Event::ImagePackEdited { request, pack, .. } => self.pack_made(request, &pack),
             Event::PlacesFound { request, places } => self.places_found(request, places),
         }
         self.settle_widget_prompts();
@@ -2111,6 +2150,10 @@ impl State {
                     self.open_video(&media, path);
                 }
                 Purpose::Avatar => self.profile.saving_avatar = false,
+                Purpose::PackEdit { account, added } => {
+                    let (account, added) = (account.clone(), *added);
+                    self.pack_edited(request, account, added, None);
+                }
                 Purpose::OpenFile(path) => self.shell.open_file(path.clone()),
                 Purpose::Layout(account) => self.save_layout_again(account.clone()),
                 // Something saved while this list was on its way is listed now.
@@ -2159,6 +2202,8 @@ impl State {
             Purpose::MessageAction => self.notice = Some(tf!("notice.message_action", error = error)),
             Purpose::Command => self.notice = Some(tf!("notice.command", error = error)),
             Purpose::Packs | Purpose::ListScheduled => {}
+            Purpose::PackEdit { account, added } => self.pack_edited(request, account, added, Some(error)),
+            Purpose::GifSearch => self.picker.gifs.failed(request, error),
             Purpose::Places => self.places_failed(request, error),
             // Only the latest jump says it found nothing, and only while its room shows.
             Purpose::Locate if self.locating.as_ref().is_some_and(|(asked, _, _)| *asked == request) => {
@@ -2291,6 +2336,10 @@ impl State {
             }
             Purpose::Gif(url) => {
                 self.gifs.failed(&url, std::time::Instant::now());
+                self.schedule_retry();
+            }
+            Purpose::PickerGif(url) => {
+                self.picker.players.failed(&url, std::time::Instant::now());
                 self.schedule_retry();
             }
             Purpose::LinkPreview(key) => {
@@ -2530,6 +2579,11 @@ impl State {
         changed |= self.call.as_mut().is_some_and(Call::measure_videos);
         self.retry_due(now, tx);
         self.search_people(now);
+        self.search_gifs(now);
+        // The GIF tab's typed text is searched once typing pauses.
+        if let Some(wait) = self.picking_gifs().then(|| self.picker.gifs.wait(now)).flatten() {
+            tx.wake_after(wait);
+        }
         changed |= self.position_message(tx);
         changed |= self.expire_flash(now, tx);
         self.resume_refused();
@@ -2818,6 +2872,9 @@ impl State {
             HashSet::new()
         };
         self.gifs.keep_only(&kept);
+        // The GIF picker's previews stay while it shows them.
+        let previews: HashSet<String> = self.picker_gif_previews().map(str::to_owned).collect();
+        self.picker.players.keep_only(&previews);
         self.fetch_linked(std::time::Instant::now());
     }
 
@@ -2826,23 +2883,48 @@ impl State {
     /// hold their frame.
     fn fetch_linked(&mut self, now: std::time::Instant) {
         self.fetch_link_previews(now);
-        if !self.settings.show_link_gifs {
-            return;
-        }
-        let shown: HashSet<String> = self
-            .entries_on_screen()
-            .filter(|((account, key), entry)| {
-                entry.message().is_none_or(|message| !self.hides_media(account, &key.room_id, message))
-            })
-            .filter_map(|(_, entry)| entry.gif_link())
-            .map(str::to_owned)
-            .collect();
+        let shown: HashSet<String> = if self.settings.show_link_gifs {
+            self.entries_on_screen()
+                .filter(|((account, key), entry)| {
+                    entry.message().is_none_or(|message| !self.hides_media(account, &key.room_id, message))
+                })
+                .filter_map(|(_, entry)| entry.gif_link())
+                .map(str::to_owned)
+                .collect()
+        } else {
+            HashSet::new()
+        };
         let mut wanted: Vec<String> = shown.iter().filter(|url| self.gifs.wants(url, now)).cloned().collect();
         self.gifs.show(shown, self.window_focused);
         wanted.sort_unstable();
         for url in wanted {
             self.gifs.loading(&url);
             self.dispatch(Command::FetchGif { url: url.clone() }, Purpose::Gif(url));
+        }
+        // The GIF picker's previews load whatever the setting for GIFs in messages says, into
+        // players of their own, still until the pointer is over one.
+        let previews: HashSet<String> = self.picker_gif_previews().map(str::to_owned).collect();
+        // Previews the picker no longer shows (closed, another tab) are let go, not kept.
+        self.picker.players.keep_only(&previews);
+        let mut wanted: Vec<String> =
+            previews.iter().filter(|url| self.picker.players.wants(url, now)).cloned().collect();
+        self.picker.players.keep_still(previews.clone());
+        self.picker.players.show(previews, self.window_focused);
+        wanted.sort_unstable();
+        for url in wanted {
+            self.picker.players.loading(&url);
+            self.dispatch(Command::FetchGif { url: url.clone() }, Purpose::PickerGif(url));
+        }
+    }
+
+    /// The pointer came over a GIF picker preview (`inside`) or left it: it plays while the
+    /// pointer is there.
+    pub fn hover_gif(&mut self, url: &str, inside: bool) {
+        let players = &mut self.picker.players;
+        if inside {
+            players.hover(Some(url.to_owned()));
+        } else if players.hovered() == Some(url) {
+            players.hover(None);
         }
     }
 
@@ -2970,10 +3052,15 @@ impl State {
     }
 
     fn schedule_retry_after(&mut self, now: std::time::Instant) {
-        self.retry_at = [self.media.next_retry(now), self.gifs.next_retry(now), self.link_previews.next_retry(now)]
-            .into_iter()
-            .flatten()
-            .min();
+        self.retry_at = [
+            self.media.next_retry(now),
+            self.gifs.next_retry(now),
+            self.picker.players.next_retry(now),
+            self.link_previews.next_retry(now),
+        ]
+        .into_iter()
+        .flatten()
+        .min();
     }
 
     /// Fetches the pictures on screen that aren't loaded yet, but for the timelines' (see
@@ -4395,7 +4482,12 @@ impl State {
     }
 
     pub fn close_popover(&mut self) {
+        let picking = matches!(self.popover, Some(Popover::Stickers(_)));
         self.popover = None;
+        // The sticker and GIF picker's previews go with it.
+        if picking {
+            self.request_gifs();
+        }
     }
 
     /// Whether something floats over the timeline that `target`'s composer writes to, which its
@@ -4455,6 +4547,10 @@ impl State {
                 self.guarded(account, Guarded::Deactivate { erase });
                 return;
             }
+            Confirm::CopyToStickers { media, name, dimensions } => {
+                self.copy_to_my_stickers(media, name, dimensions);
+                return;
+            }
             other => other,
         };
         let (command, purpose) = match confirm {
@@ -4481,7 +4577,7 @@ impl State {
                 self.change_safety(&account, matrix_core::SafetyChange::Ignore { user_id, ignored: true }, decline);
                 return;
             }
-            Confirm::Deactivate { .. } => return,
+            Confirm::Deactivate { .. } | Confirm::CopyToStickers { .. } => return,
         };
         self.dispatch(command, purpose);
     }
@@ -5054,6 +5150,7 @@ impl State {
                     *busy = false;
                 }
             }
+            Some(Modal::Packs) => self.pack_manager = None,
             _ => {}
         }
         // A widget's question waiting behind the dialog shows now.
@@ -5597,6 +5694,11 @@ impl State {
                 if let Some(path) = paths.first() {
                     let setting = matrix_core::RoomSetting::Avatar(Some(path.clone()));
                     self.dispatch(Command::ChangeRoom { account, room_id, setting }, Purpose::RoomSettings);
+                }
+            }
+            PickFor::PackImages { account, pack } => {
+                if self.pack_manager.as_ref().is_some_and(|manager| manager.account == account) {
+                    self.add_pack_images(pack, paths);
                 }
             }
         }

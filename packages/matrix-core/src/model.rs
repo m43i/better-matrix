@@ -798,12 +798,118 @@ pub struct Mentions {
 pub struct ImagePack {
     /// Stable for the pack: `user`, or the room ID and state key it was read from.
     pub id: String,
-    /// What the pack calls itself, or the room's name.
+    /// What the pack calls itself; empty for the user's own pack when it says nothing, else the
+    /// room's name.
     pub name: String,
     /// The pack's picture, if it has one.
     pub avatar: Option<MediaRef>,
+    /// The `mxc://` URI of the pack's picture, as its images' are, to tell which one it is.
+    #[cfg_attr(feature = "ffi", serde(default))]
+    pub avatar_url: Option<String>,
     /// Its images, in the pack's order.
     pub images: Vec<PackImage>,
+    /// Where it is kept, for [`Command::EditImagePack`](crate::Command::EditImagePack).
+    pub place: PackPlace,
+    /// Whether the account may change it: its own pack always, a room's with the right to
+    /// change the room's packs.
+    pub editable: bool,
+    /// For a room's pack: whether the user uses it in all their rooms.
+    pub everywhere: bool,
+}
+
+/// Where an [`ImagePack`] is kept.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
+pub enum PackPlace {
+    /// The user's own pack, in their account data: theirs in every room.
+    User,
+    /// One of a room's packs, in its state: everyone's in that room.
+    Room {
+        /// The room.
+        room_id: String,
+        /// The pack's state key; a room's first pack has the empty one.
+        state_key: String,
+    },
+}
+
+/// A change to an [`ImagePack`], for [`Command::EditImagePack`](crate::Command::EditImagePack).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
+pub enum PackEdit {
+    /// Name the pack; blank clears the name.
+    Rename(String),
+    /// Make a new pack in the room [`PackPlace::Room`] names (its state key is ignored: the
+    /// engine picks one never used), named so; the new pack's place comes back in
+    /// [`Event::ImagePackEdited`](crate::Event::ImagePackEdited).
+    Create(String),
+    /// Show one of its images (by `mxc://` URI) as the pack's picture, or none.
+    SetAvatar(Option<String>),
+    /// Add images, each under a short code of its own: one already taken gets a number.
+    AddImages(Vec<NewPackImage>),
+    /// Change an image's short code, description or use. Its picture stays.
+    ChangeImage {
+        /// The short code it has now.
+        shortcode: String,
+        /// What it becomes.
+        image: PackImageChange,
+    },
+    /// Take an image out of the pack.
+    RemoveImage(String),
+    /// Delete a room's pack, for everyone in the room.
+    Delete,
+    /// Use a room's pack in all the user's rooms, or stop.
+    UseEverywhere(bool),
+}
+
+/// An image to add to a pack.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct NewPackImage {
+    /// Where the picture comes from.
+    pub source: NewPackImageSource,
+    /// Its short code; `None` makes one from its name.
+    pub shortcode: Option<String>,
+    /// What it shows; `None` leaves it to the short code.
+    pub body: Option<String>,
+    /// Usable as a custom emoji in text.
+    pub emoticon: bool,
+    /// Usable as a sticker.
+    pub sticker: bool,
+}
+
+/// Where a [`NewPackImage`]'s picture comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
+pub enum NewPackImageSource {
+    /// An image file on this device, uploaded first.
+    File(PathBuf),
+    /// Media already on the server (a sticker or picture someone sent): an encrypted file is
+    /// downloaded and uploaded again unencrypted, as packs need.
+    Media {
+        /// The media.
+        media: MediaRef,
+        /// What it was called (a sticker's description, a file's name).
+        name: String,
+        /// Its width and height in pixels, when known.
+        dimensions: Option<(u32, u32)>,
+    },
+}
+
+/// What a pack image becomes, for [`PackEdit::ChangeImage`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct PackImageChange {
+    /// Its short code: 1 to 100 ASCII letters, digits, `-` and `_`.
+    pub shortcode: String,
+    /// What it shows; blank leaves it to the short code.
+    pub body: String,
+    /// Usable as a custom emoji in text.
+    pub emoticon: bool,
+    /// Usable as a sticker.
+    pub sticker: bool,
 }
 
 /// One image of an [`ImagePack`].
@@ -826,6 +932,34 @@ pub struct PackImage {
     pub dimensions: Option<(u32, u32)>,
     /// Its media type, when the pack says.
     pub mimetype: Option<String>,
+}
+
+/// A GIF found on GIPHY, for the GIF picker.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct FoundGif {
+    /// GIPHY's ID for it.
+    pub id: String,
+    /// What it shows (GIPHY's description, else its title), for screen readers and tooltips.
+    pub title: String,
+    /// Its page on GIPHY, which a message sending it carries.
+    pub url: String,
+    /// A small moving rendition for the picker, 200 pixels wide, exactly as GIPHY gives it.
+    pub preview: String,
+    /// The preview's width and height in pixels.
+    pub preview_size: Option<(u32, u32)>,
+    /// Where to tell GIPHY it was sent, as GIPHY asks.
+    pub sent_ping: Option<String>,
+}
+
+/// One page of GIFs found, for [`Event::GifsFound`](crate::Event::GifsFound).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct GifPage {
+    /// The GIFs, in GIPHY's order.
+    pub gifs: Vec<FoundGif>,
+    /// Where the next page starts, when there is one.
+    pub next: Option<u32>,
 }
 
 /// One version of an edited message, for its edit history.
@@ -971,6 +1105,9 @@ pub struct Attachment {
     /// What the sender said about an audio clip: whether it is a voice memo, its length and its
     /// waveform. `None` for other kinds, and for audio sent without any of it.
     pub audio: Option<AudioDetails>,
+    /// Sent as a sticker (`m.sticker`): an image shown on its own, without a frame.
+    #[cfg_attr(feature = "ffi", serde(default))]
+    pub sticker: bool,
 }
 
 /// What the sender said about an audio clip (`m.audio` with MSC3245's voice and MSC1767's audio
@@ -1001,6 +1138,9 @@ impl Attachment {
             (AttachmentKind::Image | AttachmentKind::Video, Some(thumbnail), _) => {
                 Some((thumbnail.clone(), MediaSize::Original))
             }
+            // A sticker is small and may move: its file as sent, which a server thumbnail
+            // would freeze.
+            (AttachmentKind::Image, None, Some(media)) if self.sticker => Some((media.clone(), MediaSize::Original)),
             (AttachmentKind::Image, None, Some(media)) => Some((media.clone(), MediaSize::PREVIEW)),
             _ => None,
         }
@@ -1082,6 +1222,9 @@ pub enum Outgoing {
     },
     /// A sticker from an image pack.
     Sticker(PackImage),
+    /// A GIF found on GIPHY ([`Command::SearchGifs`](crate::Command::SearchGifs)): its link
+    /// as the text, which this app plays and others show as a link; GIPHY hears it was sent.
+    Gif(FoundGif),
     /// A place on a map.
     Location {
         /// Where, as a `geo:` URI ([`geo::uri`](crate::geo::uri) makes one).

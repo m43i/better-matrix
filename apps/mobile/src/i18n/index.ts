@@ -40,6 +40,9 @@ import adminFr from './mobile/admin.fr.json';
 import widgetsEn from './mobile/widgets.en.json';
 import widgetsDe from './mobile/widgets.de.json';
 import widgetsFr from './mobile/widgets.fr.json';
+import stickersEn from './mobile/stickers.en.json';
+import stickersDe from './mobile/stickers.de.json';
+import stickersFr from './mobile/stickers.fr.json';
 
 export type Locale = 'en' | 'de' | 'fr';
 
@@ -69,6 +72,7 @@ const mobileEn = {
   ...safetyEn,
   ...adminEn,
   ...widgetsEn,
+  ...stickersEn,
 };
 
 const mobileDe = {
@@ -83,6 +87,7 @@ const mobileDe = {
   ...safetyDe,
   ...adminDe,
   ...widgetsDe,
+  ...stickersDe,
 };
 
 const mobileFr = {
@@ -97,6 +102,7 @@ const mobileFr = {
   ...safetyFr,
   ...adminFr,
   ...widgetsFr,
+  ...stickersFr,
 };
 
 export const catalogs: Record<Locale, Catalog> = {

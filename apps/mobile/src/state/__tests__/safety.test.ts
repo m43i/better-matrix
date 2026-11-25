@@ -259,6 +259,7 @@ describe('the attachment preview', () => {
     thumbnail: null,
     dimensions: null,
     audio: null,
+    sticker: false,
   };
 
   /** Grace posted two pictures together in the public room; media shows in private rooms only. */
@@ -325,6 +326,7 @@ describe('the preview’s thumbnails and listed files', () => {
     thumbnail: null,
     dimensions: null,
     audio: null,
+    sticker: false,
   });
 
   it('a hidden item should fetch no thumbnail while a shown sibling does', () => {
@@ -383,6 +385,7 @@ describe('a listed file whose message a timeline holds', () => {
     thumbnail: null,
     dimensions: null,
     audio: null,
+    sticker: false,
   };
 
   /** Room Info listed Grace's photo `$file`; the room's timeline holds `$file` as `entries`. */
@@ -458,6 +461,7 @@ describe('Room Info’s files', () => {
     thumbnail: null,
     dimensions: null,
     audio: null,
+    sticker: false,
   };
 
   const file = (event_id: string, sender_id: string) => ({
@@ -552,6 +556,7 @@ describe('round five', () => {
     thumbnail: null,
     dimensions: null,
     audio: null,
+    sticker: false,
   };
 
   const preview = (event_id: string, sender_id: string) => ({
@@ -698,6 +703,7 @@ describe('round six', () => {
     thumbnail: null,
     dimensions: null,
     audio: null,
+    sticker: false,
   };
 
   it('the item on screen should stay in the gallery when its media becomes held', () => {
@@ -825,6 +831,7 @@ describe('an open preview of an ignored person’s media', () => {
     thumbnail: null,
     dimensions: null,
     audio: null,
+    sticker: false,
   };
 
   /** Two pictures Grace sent together; with `ignoredNow`, the user is ignoring her. */

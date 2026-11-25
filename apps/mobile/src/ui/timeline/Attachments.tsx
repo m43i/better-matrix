@@ -40,6 +40,9 @@ export function AttachmentView({
 }) {
   switch (attachment.kind) {
     case 'Image':
+      if (attachment.sticker && attachment.media)
+        return <StickerAttachment message={message} attachment={attachment} />;
+
       return attachmentPreview(attachment) ? (
         <ImageAttachment message={message} attachment={attachment} />
       ) : (
@@ -129,6 +132,67 @@ function ImageAttachment({ message, attachment }: { message: Message; attachment
           <Icon name="image" size={24} color={palette.textMuted} />
         </View>
       )}
+    </Pressable>
+  );
+}
+
+/** The largest a sticker shows, a side: the desktop's sticker size. */
+export const STICKER_SIDE = 160;
+
+/**
+ * A sticker: its picture on its own, no frame or rounding, fitted into `STICKER_SIDE` from the
+ * sender's dimensions (a square while unknown), moving if it moves. A long press offers the
+ * message's actions; it opens nothing.
+ */
+function StickerAttachment({ message, attachment }: { message: Message; attachment: Attachment }) {
+  const { account, openActions } = useTimelineContext();
+  const preview = attachmentPreview(attachment);
+  const { hidden, reveal } = useHiddenMedia(message);
+
+  const uri = useMedia(
+    account,
+    hidden ? null : (preview?.media ?? null),
+    preview?.size ?? ORIGINAL,
+  );
+
+  const size = previewSize(attachment.dimensions ?? [STICKER_SIDE, STICKER_SIDE], {
+    width: STICKER_SIDE,
+    height: STICKER_SIDE,
+  });
+
+  const side = useMessageSide();
+
+  if (hidden)
+    return (
+      <HiddenMedia
+        label={t('mobile.safety.hidden_picture')}
+        onShow={reveal}
+        style={[size, styles.media]}
+        width={size.width}
+        height={size.height}
+        onLongPress={() => openActions(message)}
+      />
+    );
+
+  return (
+    <Pressable
+      testID={`sticker-${message.event_id}`}
+      onLongPress={() => openActions(message)}
+      delayLongPress={350}
+      accessibilityRole="image"
+      accessibilityLabel={attachment.name}
+      style={[styles.media, size, { alignSelf: side }]}
+    >
+      {uri ? (
+        <Image
+          source={{ uri }}
+          style={size}
+          contentFit="contain"
+          autoplay
+          transition={120}
+          recyclingKey={uri}
+        />
+      ) : null}
     </Pressable>
   );
 }

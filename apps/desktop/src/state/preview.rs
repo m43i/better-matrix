@@ -240,7 +240,16 @@ mod tests {
     use super::*;
 
     fn file(name: &str, kind: AttachmentKind) -> Attachment {
-        Attachment { kind, name: name.into(), size: None, media: None, thumbnail: None, dimensions: None, audio: None }
+        Attachment {
+            kind,
+            name: name.into(),
+            size: None,
+            media: None,
+            thumbnail: None,
+            dimensions: None,
+            audio: None,
+            sticker: false,
+        }
     }
 
     #[test]

@@ -35,4 +35,8 @@ dimensions: [number, number] | null,
  * What the sender said about an audio clip: whether it is a voice memo, its length and its
  * waveform. `None` for other kinds, and for audio sent without any of it.
  */
-audio: AudioDetails | null, };
+audio: AudioDetails | null, 
+/**
+ * Sent as a sticker (`m.sticker`): an image shown on its own, without a frame.
+ */
+sticker: boolean, };

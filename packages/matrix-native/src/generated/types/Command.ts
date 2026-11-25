@@ -16,6 +16,8 @@ import type { Moderation } from "./Moderation";
 import type { NewRoom } from "./NewRoom";
 import type { NotificationMode } from "./NotificationMode";
 import type { Outgoing } from "./Outgoing";
+import type { PackEdit } from "./PackEdit";
+import type { PackPlace } from "./PackPlace";
 import type { Password } from "./Password";
 import type { PendingContact } from "./PendingContact";
 import type { Pusher } from "./Pusher";
@@ -205,7 +207,35 @@ account: AccountId,
 /**
  * The room the packs are for, adding its own packs to the user's.
  */
-room_id: string | null, } } | { "type": "SearchPlaces", "data": { 
+room_id: string | null, } } | { "type": "EditImagePack", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * Which pack.
+ */
+pack: PackPlace, 
+/**
+ * What to change.
+ */
+edit: PackEdit, } } | { "type": "SearchGifs", "data": { 
+/**
+ * The user's GIPHY API key.
+ */
+key: string, 
+/**
+ * What to look for; blank for what's trending.
+ */
+query: string, 
+/**
+ * Where the page starts ([`GifPage::next`](crate::GifPage::next) of the one before).
+ */
+offset: number, 
+/**
+ * The app's language (a BCP 47 tag), to read the query in.
+ */
+language: string | null, } } | { "type": "SearchPlaces", "data": { 
 /**
  * What to look for.
  */

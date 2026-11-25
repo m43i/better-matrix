@@ -200,6 +200,28 @@ pub enum Command {
         /// The room the packs are for, adding its own packs to the user's.
         room_id: Option<String>,
     },
+    /// Change an image pack: the user's own, or a room's (with the right to); answered by
+    /// [`Event::ImagePackEdited`]. Lists of packs asked for after it show the change.
+    EditImagePack {
+        /// Whose.
+        account: AccountId,
+        /// Which pack.
+        pack: crate::PackPlace,
+        /// What to change.
+        edit: crate::PackEdit,
+    },
+    /// Find GIFs on GIPHY, or those trending for a blank query; answered by
+    /// [`Event::GifsFound`]. Fails with [`Error::NoGifKey`](crate::Error::NoGifKey) without a key.
+    SearchGifs {
+        /// The user's GIPHY API key.
+        key: String,
+        /// What to look for; blank for what's trending.
+        query: String,
+        /// Where the page starts ([`GifPage::next`](crate::GifPage::next) of the one before).
+        offset: u32,
+        /// The app's language (a BCP 47 tag), to read the query in.
+        language: Option<String>,
+    },
     /// Find places by name on OpenStreetMap, for sharing a location; answered by
     /// [`Event::PlacesFound`]. Send it when the user asks, never as they type.
     SearchPlaces {
@@ -1645,8 +1667,33 @@ pub enum Event {
         account: AccountId,
         /// The room they were listed for.
         room_id: Option<String>,
-        /// The packs: the user's own first.
+        /// The packs: the user's own first (always, empty or not), then the room's, then those
+        /// the user uses everywhere.
         packs: Vec<crate::ImagePack>,
+        /// Whether the account may add packs to the room.
+        #[cfg_attr(feature = "ffi", serde(default))]
+        may_add: bool,
+    },
+    /// An image pack changed for [`Command::EditImagePack`]: lists of packs asked for from now
+    /// on show it.
+    ImagePackEdited {
+        /// The change.
+        request: RequestId,
+        /// Whose.
+        account: AccountId,
+        /// The pack changed: a new room pack's place, for [`PackEdit::Create`](crate::PackEdit::Create).
+        pack: crate::PackPlace,
+    },
+    /// GIFs found for [`Command::SearchGifs`].
+    GifsFound {
+        /// The search.
+        request: RequestId,
+        /// What was searched for, as asked.
+        query: String,
+        /// Where the page starts, as asked.
+        offset: u32,
+        /// The GIFs.
+        page: crate::GifPage,
     },
     /// Places found for [`Command::SearchPlaces`].
     PlacesFound {
@@ -2683,8 +2730,25 @@ impl State {
             Command::ListImagePacks { account: id, room_id } => {
                 let account = self.account(&id);
                 Box::pin(async move {
-                    let packs = account?.image_packs(room_id.as_deref()).await?;
-                    sink.emit(Event::ImagePacks { account: id, room_id, packs });
+                    let listed = account?.image_packs(room_id.as_deref()).await?;
+                    sink.emit(Event::ImagePacks { account: id, room_id, packs: listed.packs, may_add: listed.may_add });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::EditImagePack { account: id, pack, edit } => {
+                let account = self.account(&id);
+                Box::pin(async move {
+                    let pack = account?.edit_image_pack(&pack, edit).await?;
+                    sink.emit(Event::ImagePackEdited { request, account: id, pack });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::SearchGifs { key, query, offset, language } => {
+                let http = self.http.clone();
+                Box::pin(async move {
+                    let http = http.map_err(Error::GifSearch)?;
+                    let page = crate::gif_search::search(&http, &key, &query, offset, language.as_deref()).await?;
+                    sink.emit(Event::GifsFound { request, query, offset, page });
                     Ok(Outcome::Done)
                 })
             }
@@ -3565,6 +3629,7 @@ impl State {
             Command::Send { account, key, reply_to, message } => {
                 let usage = self.accounts.get(&account).map(|running| running.usage.clone());
                 let (account, timeline) = (self.account(&account), self.open_timeline(&account, &key));
+                let http = self.http.clone().ok();
                 Box::pin(async move {
                     let account = account?;
                     let replied_to = reply_to.clone();
@@ -3579,6 +3644,9 @@ impl State {
                     }
                     if let Some(usage) = usage {
                         usage.room(&account, &key.room_id, 3, replied_to);
+                    }
+                    if let (Outgoing::Gif(gif), Some(http)) = (&message, http) {
+                        crate::gif_search::report_sent(&http, gif).await;
                     }
                     Ok(Outcome::Done)
                 })
@@ -5084,7 +5152,7 @@ async fn send_in(
                 timeline.send(related(content, thread, reply_to.as_deref(), latest.as_deref())?).await?;
             }
         }
-        Outgoing::Text { .. } | Outgoing::Emote { .. } | Outgoing::Location { .. } => {}
+        Outgoing::Text { .. } | Outgoing::Emote { .. } | Outgoing::Location { .. } | Outgoing::Gif(_) => {}
         Outgoing::File(upload) | Outgoing::Voice { upload, .. } => {
             use matrix_sdk_ui::timeline::AttachmentSource;
             let source = match upload {

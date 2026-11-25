@@ -45,6 +45,7 @@ pub fn demo_attachment() -> Attachment {
         thumbnail: None,
         dimensions: Some((256, 256)),
         audio: None,
+        sticker: false,
     }
 }
 
@@ -109,6 +110,7 @@ pub fn batch_attachments() -> Vec<Attachment> {
         thumbnail: None,
         dimensions,
         audio: None,
+        sticker: false,
     };
     let mut recording = file(AttachmentKind::Audio, "standup.ogg", None);
     recording.audio = Some(matrix_core::AudioDetails {
@@ -612,6 +614,7 @@ pub fn room_history(s: &mut State) {
             thumbnail: None,
             dimensions: None,
             audio: None,
+            sticker: false,
         },
     };
     let files = vec![
@@ -1031,6 +1034,7 @@ fn voice_memo() -> MessageContent {
         thumbnail: None,
         dimensions: None,
         audio: Some(matrix_core::AudioDetails { voice: true, duration_ms: Some(14_000), waveform }),
+        sticker: false,
     })
 }
 
@@ -1079,6 +1083,7 @@ fn work() -> Fixture {
                 thumbnail: None,
                 dimensions: None,
                 audio: None,
+                sticker: false,
             }),
             14,
         ),
@@ -1625,19 +1630,34 @@ pub fn image_packs(s: &mut State) {
         dimensions: Some((256, 256)),
         mimetype: Some("image/png".into()),
     };
-    let pack = matrix_core::ImagePack {
+    let own = matrix_core::ImagePack {
+        id: "user".into(),
+        name: String::new(),
+        avatar: None,
+        avatar_url: None,
+        images: vec![image("wave", "mxc://example.org/wave", false, true)],
+        place: matrix_core::PackPlace::User,
+        editable: true,
+        everywhere: false,
+    };
+    let room = matrix_core::ImagePack {
         id: format!("{}/", DEMO_THREAD.0),
         name: "Better Matrix".into(),
         avatar: None,
-        images: vec![
-            image("party", DEMO_EMOJI, true, false),
-            image("wave", "mxc://example.org/wave", false, true),
-            image("ship_it", "mxc://example.org/ship", false, true),
-        ],
+        avatar_url: None,
+        images: vec![image("party", DEMO_EMOJI, true, false), image("ship_it", "mxc://example.org/ship", false, true)],
+        place: matrix_core::PackPlace::Room { room_id: DEMO_THREAD.0.into(), state_key: String::new() },
+        editable: true,
+        everywhere: false,
     };
     apply(
         s,
-        Event::ImagePacks { account: AccountId::new(ADA), room_id: Some(DEMO_THREAD.0.into()), packs: vec![pack] },
+        Event::ImagePacks {
+            account: AccountId::new(ADA),
+            room_id: Some(DEMO_THREAD.0.into()),
+            packs: vec![own, room],
+            may_add: true,
+        },
     );
     demo_pack_pictures(s);
 }
@@ -2043,4 +2063,65 @@ pub fn tombstone(s: &mut State) {
         });
     });
     s.select_room("!lab:example.org");
+}
+
+/// The picker's GIF tab with GIFs found (their previews not loaded: the demo goes nowhere).
+pub fn gif_picker(s: &mut State) {
+    typing(s, "");
+    s.picker.giphy = crate::state::GifKey::Kept("demo".into());
+    s.picker.tab = crate::state::PickerTab::Gifs;
+    s.popover = Some(crate::state::Popover::Stickers(crate::state::ComposerTarget::Room));
+    // What's trending counts as searched for, so the view asks GIPHY for nothing.
+    s.picker.gifs.due(std::time::Instant::now());
+    let sizes = [(200, 150), (200, 112), (200, 200), (200, 260), (200, 140), (200, 180)];
+    s.picker.gifs.gifs = sizes
+        .iter()
+        .enumerate()
+        .map(|(i, size)| matrix_core::FoundGif {
+            id: format!("demo{i}"),
+            title: format!("Demo GIF {i}"),
+            url: format!("https://giphy.com/gifs/demo{i}"),
+            preview: format!("https://media.giphy.com/media/demo{i}/200w.gif"),
+            preview_size: Some(*size),
+            sent_ping: None,
+        })
+        .collect();
+    s.picker.gifs.next = Some(24);
+    s.load_giphy_mark();
+}
+
+/// The picker's GIF tab before the user gave a GIPHY key.
+pub fn gif_key(s: &mut State) {
+    typing(s, "");
+    s.picker.giphy = crate::state::GifKey::Missing;
+    s.picker.tab = crate::state::PickerTab::Gifs;
+    s.popover = Some(crate::state::Popover::Stickers(crate::state::ComposerTarget::Room));
+}
+
+/// The sticker manager on the room's pack, a sticker's details open when `open`.
+pub fn pack_manager(s: &mut State, open: bool) {
+    typing(s, "");
+    s.open_pack_manager();
+    s.select_pack(&format!("{}/", DEMO_THREAD.0));
+    if open {
+        s.open_pack_image("ship_it");
+    }
+}
+
+/// A sticker Grace sent.
+pub fn sticker_message(s: &mut State) {
+    post_batch(
+        s,
+        vec![Attachment {
+            kind: matrix_core::AttachmentKind::Image,
+            name: "ship it".into(),
+            size: None,
+            media: matrix_core::MediaRef::from_mxc("mxc://example.org/ship"),
+            thumbnail: None,
+            dimensions: Some((256, 256)),
+            audio: None,
+            sticker: true,
+        }],
+    );
+    demo_pack_pictures(s);
 }

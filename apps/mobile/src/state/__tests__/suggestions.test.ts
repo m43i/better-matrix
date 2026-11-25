@@ -13,6 +13,10 @@ function pack(id: string, codes: string[], sticker = false): ImagePack {
     id,
     name: id,
     avatar: null,
+    avatar_url: null,
+    place: { type: 'User' },
+    editable: true,
+    everywhere: false,
     images: codes.map((code) => ({
       shortcode: code,
       body: code,
@@ -72,6 +76,7 @@ function state(kind: 'Group' | 'Direct' = 'Group'): State {
         account: ADA,
         room_id: ROOM,
         packs: [pack('user', ['party']), pack('room', ['panda'])],
+        may_add: false,
       },
     },
   ];

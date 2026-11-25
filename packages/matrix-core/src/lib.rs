@@ -19,6 +19,7 @@ pub mod discovery;
 pub mod emoticons;
 pub mod engine;
 pub mod geo;
+pub mod gif_search;
 pub mod html;
 pub mod markdown;
 pub mod math;
@@ -46,7 +47,7 @@ mod history;
 mod note_to_self;
 mod offline_device;
 mod outgoing;
-mod packs;
+pub mod packs;
 mod polls;
 mod saved;
 mod scheduled;
@@ -75,12 +76,13 @@ pub use engine::{
     StoreSharing,
 };
 pub use model::{
-    AccountId, AccountSummary, Attachment, AttachmentKind, AudioDetails, CallCard, EditVersion, EntryKind, HiddenEvent,
-    HistoryVisibility, ImagePack, Invitation, Location, LoginMethods, MediaRef, MediaSize, Mentions, Message,
-    MessageContent, Notification, NotificationMode, Outgoing, PackImage, Password, Person, Place, Poll, PollAnswer,
-    PublicRoom, PushContent, PushTarget, Pusher, Quote, Reaction, ReadReceipt, RoomChange, RoomEvent, RoomKind,
-    RoomList, RoomPriority, RoomSummary, ScheduledAction, ScheduledMessage, SignInMethod, SpaceSummary, Successor,
-    ThreadSummary, TimelineDiff, TimelineEntry, TimelineKey, Upload,
+    AccountId, AccountSummary, Attachment, AttachmentKind, AudioDetails, CallCard, EditVersion, EntryKind, FoundGif,
+    GifPage, HiddenEvent, HistoryVisibility, ImagePack, Invitation, Location, LoginMethods, MediaRef, MediaSize,
+    Mentions, Message, MessageContent, NewPackImage, NewPackImageSource, Notification, NotificationMode, Outgoing,
+    PackEdit, PackImage, PackImageChange, PackPlace, Password, Person, Place, Poll, PollAnswer, PublicRoom,
+    PushContent, PushTarget, Pusher, Quote, Reaction, ReadReceipt, RoomChange, RoomEvent, RoomKind, RoomList,
+    RoomPriority, RoomSummary, ScheduledAction, ScheduledMessage, SignInMethod, SpaceSummary, Successor, ThreadSummary,
+    TimelineDiff, TimelineEntry, TimelineKey, Upload,
 };
 
 /// How many messages a timeline page holds: what a room shows when it opens, and what each
@@ -142,6 +144,22 @@ pub enum Error {
     /// The integration manager couldn't be reached or refused the account.
     #[error("could not open the integration manager: {0}")]
     Integrations(String),
+    /// A pack image's short code must be something without spaces or colons.
+    #[error("\"{0}\" can't be a short code: use no spaces or colons")]
+    InvalidShortcode(String),
+    /// Another image in the pack has that short code.
+    #[error("another image in the pack is called \"{0}\"")]
+    ShortcodeTaken(String),
+    /// GIF search needs the user's GIPHY API key. (The phone app tells this and
+    /// [`Error::GifKeyRefused`] apart by their text: change both together.)
+    #[error("GIF search needs a GIPHY API key")]
+    NoGifKey,
+    /// GIPHY refused the key.
+    #[error("GIPHY refused the API key")]
+    GifKeyRefused,
+    /// GIPHY couldn't be asked, or answered with an error.
+    #[error("GIPHY didn't answer: {0}")]
+    GifSearch(String),
     /// A poll needs a question and two to twenty answers.
     #[error("a poll needs two to twenty answers")]
     InvalidPoll,

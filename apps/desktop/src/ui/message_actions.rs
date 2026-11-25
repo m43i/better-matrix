@@ -43,7 +43,17 @@ pub fn menu(
     if let MessageContent::Attachment(file) = &message.content
         && !account.hides_listed_media(&key.room_id, event_id, file, &s.revealed_media)
     {
-        let actions = super::attachments::actions(&account.summary.id, file, Some((&key.room_id, event_id)), p);
+        let mut actions = super::attachments::actions(&account.summary.id, file, Some((&key.room_id, event_id)), p);
+        // A sticker or picture someone sent can join the user's own stickers.
+        if file.kind == matrix_core::AttachmentKind::Image
+            && let Some(media) = file.media.clone()
+        {
+            let (name, dimensions) = (file.name.clone(), file.dimensions);
+            actions.push(
+                action(&icons::STICKER, t!("actions.add_to_stickers"), "message-add-sticker")
+                    .on_press(move |s: &mut State| s.add_to_my_stickers(media.clone(), name.clone(), dimensions)),
+            );
+        }
         if !actions.is_empty() {
             panel = panel.children(actions).child(divider(p));
         }

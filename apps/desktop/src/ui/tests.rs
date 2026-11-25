@@ -842,6 +842,7 @@ fn an_executable_attachment_menu_should_offer_download_without_open() {
         thumbnail: None,
         dimensions: None,
         audio: None,
+        sticker: false,
         size: None,
     };
     let mut rt = Runtime::new(
@@ -1139,6 +1140,7 @@ fn a_read_indicator_should_not_make_content_shorter_than_a_line_taller() {
             thumbnail: None,
             dimensions: Some((8, 8)),
             audio: None,
+            sticker: false,
         })
     };
     let unread = set_continued_message(&mut rt, tiny(), 0);
@@ -1587,6 +1589,7 @@ fn escape_should_close_an_attachment_preview_before_the_dialog_beneath_it() {
                     thumbnail: None,
                     dimensions: None,
                     audio: None,
+                    sticker: false,
                 },
                 media: MediaRef::opaque("preview"),
                 batch: Vec::new(),
@@ -3045,6 +3048,7 @@ fn a_held_back_video_without_a_poster_should_offer_show_on_its_file_card() {
         thumbnail: None,
         dimensions: None,
         audio: None,
+        sticker: false,
     };
     let mut rt = runtime(move |s| {
         demo::image_message(s, video);
@@ -3725,6 +3729,7 @@ fn in_bubbles_the_users_own_voice_message_should_sit_at_the_right() {
                 thumbnail: None,
                 dimensions: None,
                 audio: Some(AudioDetails { voice: true, duration_ms: Some(4_000), waveform: vec![500; 40] }),
+                sticker: false,
             });
         }
         s.apply(
@@ -4899,4 +4904,86 @@ fn pressing_more_above_its_row_should_open_that_messages_menu() {
             rt.state.popover
         );
     }
+}
+
+#[test]
+fn the_sticker_button_should_open_stickers_and_the_gif_tab_ask_for_a_key() {
+    let mut rt = runtime(|s| demo::typing(s, ""));
+    rt.state.picker.giphy = crate::state::GifKey::Missing;
+    press(&mut rt, &super::composer::sticker_button(crate::state::ComposerTarget::Room));
+    assert!(rt.find("sticker-filter").is_some() && rt.find("sticker-user-wave").is_some());
+    press(&mut rt, "picker-tab-gifs");
+    assert!(rt.find("picker-gif-key").is_some() && rt.find("gif-search").is_none());
+}
+
+#[test]
+fn typing_in_the_sticker_search_should_leave_only_matching_stickers() {
+    let mut rt = runtime(|s| {
+        demo::typing(s, "");
+        s.popover = Some(crate::state::Popover::Stickers(crate::state::ComposerTarget::Room));
+        s.picker.filter = rune::TextEdit::new("ship");
+    });
+    rt.frame(1.0 / 60.0);
+    let pack = format!("sticker-{}/-ship_it", demo::DEMO_THREAD.0);
+    assert!(rt.find(&pack).is_some() && rt.find("sticker-user-wave").is_none());
+}
+
+#[test]
+fn the_sticker_manager_should_open_from_the_picker() {
+    let mut rt = runtime(|s| {
+        demo::typing(s, "");
+        s.popover = Some(crate::state::Popover::Stickers(crate::state::ComposerTarget::Room));
+    });
+    press(&mut rt, "picker-manage");
+    assert!(matches!(rt.state.modal, Some(crate::state::Modal::Packs)));
+    assert!(rt.find("pack-user").is_some() && rt.find("pack-new").is_some());
+}
+
+#[test]
+fn a_sticker_should_draw_without_a_frame_at_sticker_size() {
+    let rt = runtime(demo::sticker_message);
+    let (rect, _) = rt.presented("sticker-$batch-0").expect("the sticker");
+    assert!(rect[2] <= 160.0 && rect[3] <= 160.0);
+}
+
+/// A window tall enough for the whole General settings page.
+fn tall(rt: &mut Runtime<State>) {
+    rt.set_viewport((1200.0, 2400.0), 1.0);
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+}
+
+/// Whether any element shows `needle` in its text or label.
+fn shows_text(rt: &Runtime<State>, needle: &str) -> bool {
+    rt.elements().iter().any(|e| {
+        e.text.as_deref().is_some_and(|text| text.contains(needle))
+            || e.label.as_deref().is_some_and(|label| label.contains(needle))
+    })
+}
+
+#[test]
+fn a_kept_gif_key_should_be_offered_only_to_replace_or_remove_never_shown() {
+    let secret = "sekret-giphy-key-zq9x";
+    let mut rt = runtime(|s| {
+        s.picker.giphy = crate::state::GifKey::Kept(secret.into());
+        s.open_settings();
+    });
+    tall(&mut rt);
+    assert!(rt.find("settings-giphy-replace").is_some() && rt.find("settings-giphy-remove").is_some());
+    assert!(rt.find("settings-giphy-key").is_none() && !shows_text(&rt, "zq9x"));
+    press(&mut rt, "settings-giphy-replace");
+    assert!(rt.find("settings-giphy-key").is_some() && rt.find("settings-giphy-key-cancel").is_some());
+    assert!(rt.state.picker.key.text.is_empty() && !shows_text(&rt, "zq9x"));
+}
+
+#[test]
+fn removing_the_gif_key_in_settings_should_ask_for_a_new_one() {
+    let mut rt = runtime(|s| {
+        s.picker.giphy = crate::state::GifKey::Kept("k".into());
+        s.open_settings();
+    });
+    tall(&mut rt);
+    press(&mut rt, "settings-giphy-remove");
+    assert_eq!(rt.state.picker.giphy, crate::state::GifKey::Missing);
+    assert!(rt.find("settings-giphy-key").is_some() && rt.find("settings-giphy-key-cancel").is_none());
 }

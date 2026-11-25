@@ -21,6 +21,7 @@ mod members;
 mod message_actions;
 mod message_text;
 mod overview;
+mod pack_manager;
 mod panes;
 mod people;
 mod poll;
@@ -211,6 +212,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         }
         Some(Modal::Poll) => Some(poll::form(s, &p)),
         Some(Modal::Location) => Some(location::dialog_for(s, &p)),
+        Some(Modal::Packs) => pack_manager::dialog_for(s, &p),
         Some(Modal::EditHistory(history)) => Some(edit_history::dialog_for(s, history, &p)),
         Some(Modal::Link(dialog)) => Some(link::link_dialog(s, dialog, &p)),
         Some(Modal::Invite { room_id, invited, .. }) => {

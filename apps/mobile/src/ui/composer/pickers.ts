@@ -73,6 +73,19 @@ export async function pickFromLibrary(): Promise<PendingAttachment[]> {
   return result.canceled ? [] : fromAssets(result.assets);
 }
 
+/** Pictures from the library, several at once, kept as they are (stickers keep their size). */
+export async function pickPictures(): Promise<PendingAttachment[]> {
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsMultipleSelection: true,
+    orderedSelection: true,
+    selectionLimit: 0,
+    quality: 1,
+  });
+
+  return result.canceled ? [] : fromAssets(result.assets);
+}
+
 /** A photo or video taken now; `DENIED` when the camera isn't allowed. */
 export async function takeWithCamera(): Promise<PendingAttachment[] | typeof DENIED> {
   const permission = await ImagePicker.requestCameraPermissionsAsync();

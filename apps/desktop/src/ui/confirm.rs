@@ -57,6 +57,11 @@ fn wording(confirm: &Confirm) -> (String, String, &'static str) {
         Confirm::Deactivate { account, .. } => {
             (t!("deactivate.title").to_owned(), tf!("deactivate.body", account = account), t!("deactivate.confirm"))
         }
+        Confirm::CopyToStickers { .. } => (
+            t!("confirm.copy_sticker_title").to_owned(),
+            t!("confirm.copy_sticker_body").to_owned(),
+            t!("confirm.copy_sticker"),
+        ),
     }
 }
 

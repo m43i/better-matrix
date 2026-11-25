@@ -62,3 +62,48 @@ fn the_rooms_opened_should_read_back_as_saved() {
 
     assert_eq!(shell.visits(), visits);
 }
+
+/// Waits up to two seconds for `secrets` to hold `expected` as the GIPHY key.
+fn wait_for_key(secrets: &dyn matrix_core::SecretStore, expected: Option<&str>) -> Option<String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let kept = secrets.get(GIPHY_SECRET).unwrap();
+        if kept.as_deref() == expected || std::time::Instant::now() > deadline {
+            return kept;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn a_gif_key_should_be_kept_in_the_secret_store_and_removed_from_it() {
+    let secrets: Arc<dyn matrix_core::SecretStore> = Arc::new(matrix_core::MemorySecrets::default());
+    let shell = Shell::headless().with_secrets(Arc::clone(&secrets));
+    shell.save_gif_key(Some("first".into()), None);
+    assert_eq!(wait_for_key(secrets.as_ref(), Some("first")).as_deref(), Some("first"));
+    shell.save_gif_key(Some("second".into()), Some("first".into()));
+    assert_eq!(wait_for_key(secrets.as_ref(), Some("second")).as_deref(), Some("second"));
+    shell.save_gif_key(None, Some("second".into()));
+    assert_eq!(wait_for_key(secrets.as_ref(), None), None);
+}
+
+#[test]
+fn a_gif_key_should_stay_out_of_the_saved_settings() {
+    let mut prefs = Prefs::memory();
+    write_settings(&mut prefs, &Settings::fixed_english()).unwrap();
+    assert!(prefs.get::<String>("giphy_key").is_none());
+}
+
+/// Keeps a key like the GIPHY key in this machine's real keychain (the Secret Service, Keychain
+/// or the Credential Manager) and takes it out again, under a test name: the user's own key
+/// stays untouched.
+#[test]
+#[ignore = "touches the system keychain"]
+fn a_key_should_round_trip_through_the_system_keychain() {
+    let secrets = system_keychain();
+    let name = format!("{GIPHY_SECRET}-test");
+    secrets.set(&name, "keychain-test").unwrap();
+    assert_eq!(secrets.get(&name).unwrap().as_deref(), Some("keychain-test"));
+    secrets.delete(&name).unwrap();
+    assert_eq!(secrets.get(&name).unwrap(), None);
+}
