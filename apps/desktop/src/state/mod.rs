@@ -21,6 +21,8 @@ mod developer;
 pub use developer::SourceView;
 mod drafts;
 mod edit_history;
+mod frequent;
+pub use frequent::Visits;
 mod gifs;
 mod jump;
 mod link_previews;
@@ -1816,6 +1818,7 @@ impl State {
             Event::PlacesFound { request, places } => self.places_found(request, places),
         }
         self.remember_account();
+        self.show_taskbar();
         if !location.is_current(self) {
             tx.settle();
         }
@@ -2427,6 +2430,7 @@ impl State {
                 self.mark_timeline_read(account, key);
             }
         }
+        self.show_taskbar();
     }
 
     /// Called every frame: loads the page of history before the oldest message of a timeline
@@ -3958,6 +3962,15 @@ impl State {
 
     // ----- navigation ----------------------------------------------------------------------
 
+    /// Shows the taskbar what wants attention in every account (the badge) and the rooms
+    /// opened most (the jump list): after every engine event, and after each local change to
+    /// what is read, marked, notifies or was opened. The shell passes on only changes.
+    fn show_taskbar(&self) {
+        let count: u64 = self.accounts.iter().map(AccountData::attention).sum();
+        self.shell.show_badge(u32::try_from(count).unwrap_or(u32::MAX));
+        self.shell.show_jump_list(self.jump_list());
+    }
+
     fn remember_account(&mut self) {
         // A remembered account may still be restoring. Other accounts arriving first must
         // neither replace it on screen nor overwrite the saved choice.
@@ -4060,6 +4073,9 @@ impl State {
         let Some(account) = self.nav.account.clone() else { return };
         self.unmark(&account, room_id);
         self.accounts.mark_read(&account, room_id);
+        self.settings.visits.visit(&account, room_id);
+        self.shell.save_settings(self.settings.clone());
+        self.show_taskbar();
         if self.nav.rooms.get(&account).map(String::as_str) != Some(room_id) {
             self.nav.threads.remove(&account);
         }
@@ -4345,6 +4361,7 @@ impl State {
         self.popover = None;
         let Some(account) = self.nav.account.clone() else { return };
         self.accounts.set_notifications(&account, room_id, mode);
+        self.show_taskbar();
         let command = Command::SetNotificationMode { account, room_id: room_id.to_owned(), mode };
         self.dispatch(command, Purpose::NotificationMode);
     }
@@ -4352,6 +4369,7 @@ impl State {
     /// Sets when an account's rooms notify unless they set their own mode.
     pub fn set_default_notifications(&mut self, account: &AccountId, mode: NotificationMode) {
         self.accounts.set_default_notifications(account, mode);
+        self.show_taskbar();
         let command = Command::SetDefaultNotificationMode { account: account.clone(), mode };
         self.dispatch(command, Purpose::NotificationMode);
     }
@@ -4364,6 +4382,7 @@ impl State {
             return;
         }
         self.accounts.set_marked(account, room_id, false);
+        self.show_taskbar();
         let command = Command::SetUnread { account: account.clone(), room_id: room_id.to_owned(), unread: false };
         let undo = accounts::RoomUndo::Mark(true);
         self.dispatch(command, Purpose::RoomMark { account: account.clone(), room_id: room_id.to_owned(), undo });
@@ -4397,6 +4416,7 @@ impl State {
                 accounts::RoomUndo::Mark(before.marked_unread),
             )
         };
+        self.show_taskbar();
         self.dispatch(command, Purpose::RoomMark { account, room_id: id, undo });
     }
 

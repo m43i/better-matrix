@@ -181,6 +181,22 @@ Date: 2026-11-22
   - In the sidebar a room that wants attention gets a tinted background (`sidebar_unread`) and
     a bold name; rows carry no counts. A section's header turns bold when any of its rooms
     wants attention and counts their mentions, so both show while it is collapsed.
+- **Taskbar (desktop):** Rune's taskbar calls; Linux shows none of it (Unity's `LauncherEntry`
+  isn't built in Rune).
+  - The badge counts the messages that want attention over every account (`attention_count`:
+    unread ones, or only mentions for mentions-only and muted rooms; at least one for a room
+    marked unread) plus the invitations shown, so it agrees with the dots. It is worked out
+    after every engine event and every local read, mark or mode change; the shell tells the
+    window only when the count changes, and again whenever the native window is made.
+  - Every notification also flashes the taskbar button (Windows), which stays lit until the
+    window comes forward; a window in front doesn't flash.
+  - The jump list offers the five rooms and five direct chats opened most on this device,
+    still joined, latest first among equals, under the sidebar's section names, with the
+    account's name when several are signed in. Opens are counted in `select_room` and kept
+    with the device settings (the 64 latest-opened rooms by count; the least opened goes, never
+    the one just opened). An entry is the room's matrix.to link, so a pick reaches the running
+    app as any link does (`on_open_url`). The list is replaced at the first call of each run, so
+    a signed-out account's rooms don't linger from an earlier run.
 - **Settings:** a modal in sections (`SettingsSection`). Device settings go to a prefs file off
   the UI thread; account settings live on the homeserver.
   - Every desktop dialog uses the shared modal layer's Rune focus trap and Escape dismissal.

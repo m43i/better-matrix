@@ -411,6 +411,17 @@ size. See [ADR 0005](adr/0005-navigation-and-settings.md).
 : A room drawing the eye (bold name, rail and account dots): unread messages, or only mentions
 when it notifies for mentions only or is muted; and any room marked unread.
 
+**Taskbar badge**
+: The count on the app's taskbar button (Windows) or Dock icon (macOS): the messages that want
+attention in every account (at least one per room marked unread) and the invitations shown. A
+notification also flashes the taskbar button on Windows. See
+[ADR 0005](adr/0005-navigation-and-settings.md).
+
+**Jump list**
+: What a right-click on the taskbar button (Windows) or the Dock icon's menu (macOS) offers: the
+rooms and the direct chats opened most on this device (**frequent rooms**, `Visits`), five of
+each, each opening through its room link. See [ADR 0005](adr/0005-navigation-and-settings.md).
+
 **Popover**
 : A floating panel over the window (account menu, room menu, emoji picker). One at a time; the
 timelines under it take no hover while it is open.

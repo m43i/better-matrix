@@ -1,5 +1,5 @@
 //! Everything that talks to the operating system on the app's behalf: picking files, posting
-//! notifications, and the keychain. State code calls [`Shell`]; it never touches the OS itself,
+//! notifications, the taskbar badge, and the keychain. State code calls [`Shell`]; it never touches the OS itself,
 //! so tests run it headless.
 
 mod attachments;
@@ -8,6 +8,7 @@ pub mod launch;
 mod notify;
 mod secrets;
 pub mod sound;
+mod taskbar;
 pub mod updates;
 pub mod video;
 
@@ -21,6 +22,7 @@ use rune::prefs::Prefs;
 
 pub use notify::Toast;
 pub use secrets::system_secrets;
+pub use taskbar::Taskbar;
 
 use crate::i18n::Language;
 use crate::state::{Appearance, Emoticons, MessageLayout, PlaybackSpeed, Settings, State, Zoom};
@@ -30,6 +32,7 @@ pub struct Shell {
     app: Option<AppHandle<State>>,
     updates: Option<std::sync::mpsc::Sender<updates::Release>>,
     notifier: Box<dyn notify::Notifier>,
+    taskbar: Taskbar,
     prefs: Arc<Mutex<Prefs>>,
     /// Counts document renders: a render keeps going while it is the latest and not stopped.
     document: Arc<std::sync::atomic::AtomicU64>,
@@ -51,13 +54,15 @@ impl std::fmt::Debug for Shell {
 
 impl Shell {
     /// The real services, delivering results to the app through `app`.
-    pub fn native(app: AppHandle<State>, prefs: Prefs, scratch: std::path::PathBuf) -> Self {
+    /// `taskbar` is the one `main` attaches the window to.
+    pub fn native(app: AppHandle<State>, prefs: Prefs, scratch: std::path::PathBuf, taskbar: Taskbar) -> Self {
         video::prepare();
         let notifier = notify::system(app.clone());
         Self {
             updates: updates::start(app.clone(), scratch.with_file_name("updates")),
             app: Some(app),
             notifier,
+            taskbar,
             prefs: Arc::new(Mutex::new(prefs)),
             document: Arc::default(),
             saves: Arc::default(),
@@ -72,6 +77,7 @@ impl Shell {
             app: None,
             updates: None,
             notifier: Box::new(notify::Silent),
+            taskbar: Taskbar::default(),
             prefs: Arc::new(Mutex::new(Prefs::memory())),
             document: Arc::default(),
             saves: Arc::default(),
@@ -90,6 +96,7 @@ impl Shell {
                 app: None,
                 updates: None,
                 notifier: Box::new(notify::Recording(posted.clone())),
+                taskbar: Taskbar::default(),
                 prefs,
                 document: Arc::default(),
                 saves: Arc::default(),
@@ -274,9 +281,33 @@ impl Shell {
         self.app.is_some().then(|| sound::Ring::start(speaker))
     }
 
-    /// Shows a notification. A click opens its room.
+    /// Shows a notification, and flashes the taskbar button. A click opens its room.
     pub fn notify(&self, toast: &Toast) {
         self.notifier.post(toast);
+        self.taskbar.flash();
+    }
+
+    /// Shows `count` on the taskbar badge; 0 hides it.
+    pub fn show_badge(&self, count: u32) {
+        self.taskbar.show(count);
+    }
+
+    /// The count the taskbar badge shows.
+    #[cfg(test)]
+    pub fn badge(&self) -> u32 {
+        self.taskbar.count()
+    }
+
+    /// Offers `list` on a right-click on the taskbar button (Windows) or in the Dock icon's
+    /// menu (macOS); a pick opens its link. Headless, it is only kept.
+    pub fn show_jump_list(&self, list: rune::JumpList) {
+        self.taskbar.jump_list(list, self.app.is_some());
+    }
+
+    /// The jump list last offered.
+    #[cfg(test)]
+    pub fn jump_list(&self) -> rune::JumpList {
+        self.taskbar.shown_jump_list()
     }
 }
 
@@ -295,6 +326,7 @@ const SPEAKER: &str = "speaker";
 const CAMERA: &str = "camera";
 const LAST_ACCOUNT: &str = "last_account";
 const HIDDEN_EVENTS: &str = "hidden_events";
+const VISITS: &str = "visits";
 
 fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::prefs::PrefsError> {
     prefs.set(LANGUAGE, &settings.language.id())?;
@@ -311,6 +343,7 @@ fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::pr
     prefs.set(SPEAKER, &settings.devices.speaker)?;
     prefs.set(CAMERA, &settings.devices.camera)?;
     prefs.set(HIDDEN_EVENTS, &settings.show_hidden_events)?;
+    prefs.set(VISITS, &settings.visits)?;
     prefs.set(LAST_ACCOUNT, &settings.last_account.as_ref().map(matrix_core::AccountId::as_str))
 }
 
@@ -336,6 +369,7 @@ pub fn load_settings(prefs: &Prefs) -> Settings {
         ring_sound: prefs.get::<bool>(RING_SOUND).unwrap_or(true),
         playback_speed: prefs.get::<u16>(PLAYBACK_SPEED).map_or_else(Default::default, PlaybackSpeed::from_percent),
         show_hidden_events: prefs.get::<bool>(HIDDEN_EVENTS).unwrap_or(false),
+        visits: prefs.get::<crate::state::Visits>(VISITS).unwrap_or_default(),
     }
 }
 

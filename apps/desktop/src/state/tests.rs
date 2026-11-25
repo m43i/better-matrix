@@ -504,6 +504,47 @@ fn a_notification_for_the_open_room_should_be_shown_when_the_window_is_in_the_ba
 }
 
 #[test]
+fn the_taskbar_badge_should_count_unread_messages_in_every_account() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x", "!two:x"], Vec::new());
+    with_rooms(&mut s, &AccountId::new("@b:example.org"), &["!three:x"], Vec::new());
+    assert_eq!(s.shell.badge(), 6);
+}
+
+#[test]
+fn opening_a_room_should_take_its_messages_off_the_taskbar_badge() {
+    let (s, _) = recording_state();
+    assert_eq!(s.shell.badge(), 2);
+}
+
+#[test]
+fn a_muted_room_should_leave_the_taskbar_badge_alone() {
+    let (mut s, _) = recording_state();
+    s.set_notification_mode("!two:x", Some(NotificationMode::Mute));
+    assert_eq!(s.shell.badge(), 0);
+}
+
+#[test]
+fn the_jump_list_should_offer_the_rooms_opened_most() {
+    let (mut s, _) = recording_state();
+    s.select_room("!two:x");
+    s.select_room("!two:x");
+    let item = |room: &str| {
+        rune::JumpItem::new(room, matrix_core::permalinks::room_link(room, "@a:example.org"))
+            .description("@a:example.org")
+    };
+    let expected = rune::JumpList::new().category("Rooms", vec![item("!two:x"), item("!one:x")]);
+    assert_eq!(s.shell.jump_list(), expected);
+}
+
+#[test]
+fn the_jump_list_should_leave_out_rooms_no_longer_joined() {
+    let (mut s, _) = recording_state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!two:x"], Vec::new());
+    assert_eq!(s.shell.jump_list(), rune::JumpList::new());
+}
+
+#[test]
 fn resetting_a_room_should_make_it_follow_the_account_default() {
     let (mut s, _) = state();
     let id = AccountId::new("@a:example.org");

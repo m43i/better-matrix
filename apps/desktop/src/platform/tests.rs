@@ -52,3 +52,13 @@ fn the_message_layout_should_survive_saving_and_loading_settings() {
 
     assert_eq!(load_settings(&prefs).message_layout, MessageLayout::Bubbles);
 }
+
+#[test]
+fn the_rooms_opened_should_survive_saving_and_loading_settings() {
+    let mut settings = Settings::fixed_english();
+    settings.visits.visit(&AccountId::new("@ada:example.org"), "!room:example.org");
+    let mut prefs = Prefs::memory();
+    write_settings(&mut prefs, &settings).unwrap();
+
+    assert_eq!(load_settings(&prefs).visits, settings.visits);
+}

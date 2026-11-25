@@ -590,6 +590,8 @@
   "status_message.meeting": "In einem Meeting",
   "status_message.sick": "Krank",
   "status_message.remote": "Im Homeoffice",
+  "taskbar.badge.one": "{{count}} ungelesene Benachrichtigung",
+  "taskbar.badge.other": "{{count}} ungelesene Benachrichtigungen",
   "thread.close": "Thread schließen",
   "thread.last_reply": "Letzte Antwort am {{date}} um {{time}}",
   "thread.last_reply_today": "Letzte Antwort heute um {{time}}",

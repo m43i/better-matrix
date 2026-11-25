@@ -136,8 +136,9 @@ Date: 2026-11-14
     `State::confirm`.
   - Escape or a click outside closes either. A new kind is a new variant.
 - **The OS goes through `platform::Shell`:**
-  - It does file picking, notifications and saving `Settings` (`rune::prefs`, on a worker
-    thread); opening a URL goes through `Tx`.
+  - It does file picking, notifications, the taskbar (`platform::Taskbar`: the badge, the
+    flash and the jump list, passed to Rune only when they change) and saving `Settings`
+    (`rune::prefs`, on a worker thread); opening a URL goes through `Tx`.
   - `Shell::headless()` and `Shell::recording()` replace it in tests.
   - Played audio and voice memos go to a private scratch folder under the cache, emptied at
     launch and exit.
