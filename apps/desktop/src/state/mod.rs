@@ -2368,16 +2368,16 @@ impl State {
             }
         }
         let visiting = shown.first().map(|(account, key)| (account.clone(), key.room_id.clone()));
+        // Another room (or none) closes the side panel; the same room's timeline opening again
+        // after it failed to keeps it.
         if self.nav.visited != visiting {
             self.nav.visited = visiting.clone();
-            if let Some((account, room_id)) = visiting {
-                self.engine.send(Command::VisitRoom { account, room_id });
-            }
-        }
-        if self.open_timelines.first() != shown.first() {
             self.side = None;
             self.side_loaded = None;
             self.member_search = TextEdit::default();
+            if let Some((account, room_id)) = visiting {
+                self.engine.send(Command::VisitRoom { account, room_id });
+            }
         }
         // A memo recording for a timeline no longer shown would go on unseen, the microphone
         // open: closing the thread, another room and the overview all drop it. An edit of a
@@ -2984,19 +2984,23 @@ impl State {
                 .and_then(|room| account.pinned_messages(room))
                 .into_iter()
                 .flat_map(|pins| pins.take(MEMBER_PICTURES).filter_map(|pin| pin.sender_avatar.clone()));
-            // The room log's people, as it lists them: none the user ignores.
-            let log = self
+            // The room log's people, as it lists them (none the user ignores), each once: rooms
+            // have few, however long their log.
+            let mut log: Vec<MediaRef> = Vec::new();
+            if let Some(timeline) = self
                 .active_room_id()
                 .filter(|_| self.side == Some(SidePanel::Log))
                 .and_then(|room_id| account.timeline(&TimelineKey::room(room_id)))
-                .into_iter()
-                .flat_map(|timeline| {
-                    timeline
-                        .room_log()
-                        .filter(|(_, event)| !account.ignores(&event.sender.id))
-                        .take(MEMBER_PICTURES)
-                        .filter_map(|(_, event)| event.sender.avatar.clone())
-                });
+            {
+                for (_, event) in timeline.room_log().filter(|(_, event)| !account.ignores(&event.sender.id)) {
+                    if let Some(avatar) = event.sender.avatar.as_ref().filter(|avatar| !log.contains(avatar)) {
+                        if log.len() == MEMBER_PICTURES {
+                            break;
+                        }
+                        log.push(avatar.clone());
+                    }
+                }
+            }
             // The open person panel's picture: the member list's, else the message's.
             let person = match (&self.side, self.active_room_id()) {
                 (Some(SidePanel::Person(shown_as)), Some(room_id)) => account

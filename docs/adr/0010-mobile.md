@@ -265,7 +265,8 @@ Date: 2026-11-16
   data (`state/outgoing.ts`): text with the reply first, then each attachment as
   `Upload::Path`. A picked picture waits in the composer as a thumbnail, any other file as a
   chip; what is a picture is decided by the picker's media type, then the file name's extension
-  (`attachmentKind`), so a picture handed over without a type still shows as one; voice memos are AAC `.m4a` from expo-audio, sent with a 100-point waveform
+  (`attachmentKind`), so a picture handed over without a type still shows as one, and one that
+  then fails to decode turns back into the chip; voice memos are AAC `.m4a` from expo-audio, sent with a 100-point waveform
   from the recorder's metering (read 20 times a second, `waveformFromLevels`, on the desktop's
   scale).
 - **Voice memos** look and behave as the desktop's voice card (ADR 0007), with the same pure

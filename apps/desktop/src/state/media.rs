@@ -383,38 +383,46 @@ impl MediaCache {
 
 /// The size an upload thumbnail draws at, in points.
 pub const THUMBNAIL_SIZE: f32 = 64.0;
-/// The pixels a thumbnail keeps a side: twice its size, sharp on a 2× display.
-const THUMBNAIL_PIXELS: u32 = 128;
 
 /// Whether an upload is a picture, by its name: it shows as a thumbnail in the composer.
 pub fn is_image(upload: &Upload) -> bool {
     upload.mime().type_() == "image"
 }
 
+/// The largest file read for a thumbnail: a bigger one shows as a file.
+const THUMBNAIL_READ: u64 = 64 << 20;
+
 /// The composers' upload thumbnails: one small picture per image upload waiting to be sent,
-/// let go once the upload is sent, removed or set aside with its draft. A photo is read,
-/// decoded and cut to a 128-pixel square on a thread of its own, so only that square is kept,
-/// never the whole photo; an SVG is rasterized at the thumbnail's size by Rune's worker.
+/// let go once the upload is sent, removed or set aside with its draft. Photos are read,
+/// decoded and cut to a 128-pixel square (`matrix_core::upload_thumbnail`: upright, bounded)
+/// one at a time on a worker of their own, so only that square is kept, never the whole photo,
+/// and a batch of photos doesn't decode all at once. A job whose upload went before its turn is
+/// skipped. An SVG is rasterized at the thumbnail's size by Rune's worker.
 #[derive(Debug)]
 pub struct UploadThumbnails {
     shown: Vec<Thumbnail>,
-    done: std::sync::mpsc::Receiver<(Upload, Option<Square>)>,
-    finish: std::sync::mpsc::Sender<(Upload, Option<Square>)>,
+    /// The worker's queue, once it has started.
+    jobs: Option<std::sync::mpsc::Sender<Job>>,
+    done: std::sync::mpsc::Receiver<(u64, Option<image::RgbaImage>)>,
+    finish: std::sync::mpsc::Sender<(u64, Option<image::RgbaImage>)>,
+    /// The next job's ID: a picture removed and attached again is a new job, so the old one's
+    /// square never lands in its place.
+    next: u64,
 }
 
 impl Default for UploadThumbnails {
     fn default() -> Self {
         let (finish, done) = std::sync::mpsc::channel();
-        Self { shown: Vec::new(), done, finish }
+        Self { shown: Vec::new(), jobs: None, done, finish, next: 0 }
     }
 }
-
-/// A thumbnail's RGBA pixels, `THUMBNAIL_PIXELS` a side.
-type Square = Vec<u8>;
 
 #[derive(Debug)]
 struct Thumbnail {
     upload: Upload,
+    job: u64,
+    /// Cleared when the upload goes: the worker then skips the job.
+    wanted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     look: Look,
 }
 
@@ -426,37 +434,51 @@ enum Look {
     Failed,
 }
 
-/// `upload` read and cut to the thumbnail's square, cropping its longer side; `None` if it
-/// can't be read or decoded.
-fn shrink(upload: &Upload) -> Option<Square> {
-    let read;
-    let bytes: &[u8] = match upload {
+struct Job {
+    id: u64,
+    upload: Upload,
+    wanted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// An upload's thumbnail square: a file read only if it is a regular one, up to
+/// [`THUMBNAIL_READ`] (not a pipe, which could block the worker for good).
+fn shrink(upload: &Upload) -> Option<image::RgbaImage> {
+    let side = (THUMBNAIL_SIZE * 2.0) as u32;
+    match upload {
         Upload::Path(path) => {
-            read = std::fs::read(path).ok()?;
-            &read
+            let file = std::fs::File::open(path).ok()?;
+            let metadata = file.metadata().ok()?;
+            if !metadata.is_file() || metadata.len() > THUMBNAIL_READ {
+                return None;
+            }
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::Read::take(file, THUMBNAIL_READ), &mut bytes).ok()?;
+            matrix_core::upload_thumbnail(&bytes, side)
         }
-        Upload::Bytes { bytes, .. } => bytes,
-    };
-    let picture = image::load_from_memory(bytes).ok()?;
-    let square = picture.resize_to_fill(THUMBNAIL_PIXELS, THUMBNAIL_PIXELS, image::imageops::FilterType::Triangle);
-    Some(square.to_rgba8().into_raw())
+        Upload::Bytes { bytes, .. } => matrix_core::upload_thumbnail(bytes, side),
+    }
 }
 
 impl UploadThumbnails {
-    /// Keeps a thumbnail for each image in `uploads` and none other, starting the new ones, and
+    /// Keeps a thumbnail for each image in `uploads` and none other, queueing the new ones, and
     /// takes in those finished. True when what shows changed. Without a decoder (headless)
     /// there are none: uploads show as files.
     pub fn sync<'a>(&mut self, media: &MediaCache, uploads: impl Iterator<Item = &'a Upload>) -> bool {
+        use std::sync::atomic::Ordering;
         let wanted: Vec<&Upload> = uploads.filter(|upload| is_image(upload)).collect();
         let before = self.shown.len();
-        self.shown.retain(|thumbnail| wanted.contains(&&thumbnail.upload));
+        self.shown.retain(|thumbnail| {
+            let keep = wanted.contains(&&thumbnail.upload);
+            thumbnail.wanted.store(keep, Ordering::Relaxed);
+            keep
+        });
         let mut changed = self.shown.len() != before;
         for upload in wanted {
             if self.shown.iter().any(|thumbnail| &thumbnail.upload == upload) {
                 continue;
             }
-            let Some(look) = self.start(media, upload) else { continue };
-            self.shown.push(Thumbnail { upload: upload.clone(), look });
+            let Some(thumbnail) = self.start(media, upload) else { continue };
+            self.shown.push(thumbnail);
             changed = true;
         }
         while let Ok(finished) = self.done.try_recv() {
@@ -465,36 +487,60 @@ impl UploadThumbnails {
         changed
     }
 
-    fn start(&self, media: &MediaCache, upload: &Upload) -> Option<Look> {
-        let (decoder, waker) = (media.decoder.as_ref()?, media.waker.clone()?);
-        if upload.mime().essence_str() == "image/svg+xml" {
-            let image = match upload {
+    fn start(&mut self, media: &MediaCache, upload: &Upload) -> Option<Thumbnail> {
+        let decoder = media.decoder.as_ref()?;
+        self.next += 1;
+        let (id, wanted) = (self.next, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)));
+        let look = if upload.mime().essence_str() == "image/svg+xml" {
+            Look::Ready(match upload {
                 Upload::Path(path) => decoder.file(path, THUMBNAIL_SIZE, 2.0),
                 Upload::Bytes { bytes, .. } => decoder.svg(std::sync::Arc::clone(bytes), THUMBNAIL_SIZE, 2.0),
+            })
+        } else {
+            let queue = match &self.jobs {
+                Some(queue) => queue.clone(),
+                None => self.start_worker(media.waker.clone()?)?,
             };
-            return Some(Look::Ready(image));
-        }
-        let (upload, finish) = (upload.clone(), self.finish.clone());
-        std::thread::spawn(move || {
-            let square = shrink(&upload);
-            if finish.send((upload, square)).is_ok() {
-                waker();
-            }
-        });
-        Some(Look::Shrinking)
+            let job = Job { id, upload: upload.clone(), wanted: std::sync::Arc::clone(&wanted) };
+            queue.send(job).ok()?;
+            Look::Shrinking
+        };
+        Some(Thumbnail { upload: upload.clone(), job: id, wanted, look })
     }
 
-    /// A thumbnail finished shrinking; one whose upload has gone is dropped.
-    fn land(&mut self, media: &MediaCache, (upload, square): (Upload, Option<Square>)) -> bool {
-        let Some(thumbnail) = self
-            .shown
-            .iter_mut()
-            .find(|thumbnail| thumbnail.upload == upload && matches!(thumbnail.look, Look::Shrinking))
+    /// Starts the worker, which runs until these thumbnails are dropped.
+    fn start_worker(&mut self, waker: Waker) -> Option<std::sync::mpsc::Sender<Job>> {
+        let (queue, jobs) = std::sync::mpsc::channel::<Job>();
+        let finish = self.finish.clone();
+        std::thread::Builder::new()
+            .name("upload-thumbnails".into())
+            .spawn(move || {
+                for job in jobs {
+                    if !job.wanted.load(std::sync::atomic::Ordering::Relaxed) {
+                        continue;
+                    }
+                    if finish.send((job.id, shrink(&job.upload))).is_err() {
+                        return;
+                    }
+                    waker();
+                }
+            })
+            .ok()?;
+        self.jobs = Some(queue.clone());
+        Some(queue)
+    }
+
+    /// A job finished; one whose thumbnail has gone (or was made again since) is dropped.
+    fn land(&mut self, media: &MediaCache, (job, square): (u64, Option<image::RgbaImage>)) -> bool {
+        let Some(thumbnail) =
+            self.shown.iter_mut().find(|thumbnail| thumbnail.job == job && matches!(thumbnail.look, Look::Shrinking))
         else {
             return false;
         };
         thumbnail.look = match (square, media.decoder.as_ref()) {
-            (Some(square), Some(decoder)) => Look::Ready(decoder.rgba(THUMBNAIL_PIXELS, THUMBNAIL_PIXELS, square)),
+            (Some(square), Some(decoder)) => {
+                Look::Ready(decoder.rgba(square.width(), square.height(), square.into_raw()))
+            }
             _ => Look::Failed,
         };
         true
@@ -550,7 +596,7 @@ mod tests {
         thumbnails.sync(&media, [&picture].into_iter());
         thumbnails.wait(&media);
         let size = thumbnails.get(&picture).flatten().and_then(Image::size);
-        assert_eq!(size, Some([THUMBNAIL_PIXELS, THUMBNAIL_PIXELS]));
+        assert_eq!(size, Some([128, 128]));
     }
 
     #[test]
@@ -584,12 +630,29 @@ mod tests {
     }
 
     #[test]
-    fn a_thumbnail_finished_after_its_upload_went_should_be_dropped() {
+    fn a_square_finished_for_a_picture_removed_and_attached_again_should_not_land() {
         let (media, mut thumbnails, picture) = (cache(), UploadThumbnails::default(), upload("shot.png", PNG));
         thumbnails.sync(&media, [&picture].into_iter());
+        let first = thumbnails.shown[0].job;
         thumbnails.sync(&media, std::iter::empty());
-        thumbnails.wait(&media);
-        assert!(!thumbnails.sync(&media, std::iter::empty()));
+        thumbnails.sync(&media, [&picture].into_iter());
+        let stale = image::RgbaImage::new(2, 2);
+        assert!(!thumbnails.land(&media, (first, Some(stale))));
+        assert!(matches!(thumbnails.get(&picture), Some(None)), "still being made, by its own job");
+    }
+
+    #[test]
+    fn a_removed_upload_should_tell_the_worker_to_skip_it() {
+        let (media, mut thumbnails, picture) = (cache(), UploadThumbnails::default(), upload("shot.png", PNG));
+        thumbnails.sync(&media, [&picture].into_iter());
+        let wanted = std::sync::Arc::clone(&thumbnails.shown[0].wanted);
+        thumbnails.sync(&media, std::iter::empty());
+        assert!(!wanted.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_regular_one_should_get_no_square() {
+        assert!(shrink(&Upload::Path(std::env::temp_dir())).is_none());
     }
 
     #[test]

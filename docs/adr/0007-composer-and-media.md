@@ -270,10 +270,14 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     the picture alone cropped square with rounded corners and its remove button over its corner
     (no chip around it); other files, and pictures that can't be decoded, keep the chip with
     their name. On the desktop `State::upload_thumbnails` keeps one per image upload of the two
-    composers, synced in `poll`: a photo is read, decoded and cut to a 128-pixel square on a
-    thread of its own, which wakes the window when done, so only that square is kept, never the
-    whole photo, and no file is read on the UI thread; an SVG is rasterized at the thumbnail's
-    size by Rune's worker. A thumbnail goes once its upload is sent, removed or set aside with
+    composers, synced in `poll`: photos are read, decoded and cut to a 128-pixel square one at a
+    time on a worker of their own, which wakes the window after each, so only that square is
+    kept, never the whole photo, a batch never decodes at once, and no file is read on the UI
+    thread. The square comes from `matrix_core::upload_thumbnail`: turned upright by its EXIF
+    orientation, decoding bounded as the engine's thumbnails are (8192 pixels a side, 256 MiB).
+    Only regular files up to 64 MiB are read; a job whose upload went before its turn is skipped,
+    and one finished for an upload removed and attached again since is dropped (jobs have IDs).
+    An SVG is rasterized at the thumbnail's size by Rune's worker. A thumbnail goes once its upload is sent, removed or set aside with
     its draft, and is made again when the draft comes back. Headless runs without a decoder show
     chips.
   - Pastes reach the field through `on_input_paste`. A pasted image joins the draft as

@@ -55,6 +55,7 @@ mod source;
 #[cfg(test)]
 mod test_server;
 mod thumbnail;
+pub use thumbnail::upload_thumbnail;
 mod timeline;
 mod timeline_bootstrap;
 mod tls;
