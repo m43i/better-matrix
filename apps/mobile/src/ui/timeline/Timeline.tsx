@@ -339,8 +339,9 @@ export function Timeline({
   }, [store, account, timelineKey, thread]);
 
   // While the reader stays at the start (or nothing draws), the list doesn't say so again: ask
-  // for the page before it until one moves the start off screen.
-  const pageOlder = wantsOlder(rows, timeline, thread, top);
+  // for the page before it until one moves the start off screen. Not from behind another screen
+  // (room info, the room log): it goes on once the conversation is back.
+  const pageOlder = onScreen && wantsOlder(rows, timeline, thread, top);
   useEffect(() => {
     if (pageOlder) loadMore();
   }, [pageOlder, rows, loadMore]);
