@@ -49,6 +49,7 @@ pub fn dialog_for(modal: &Modal, p: &Palette) -> Option<El> {
         | Modal::EditHistory(_)
         | Modal::Report(_)
         | Modal::Source(_)
+        | Modal::WidgetPrompt(_)
         | Modal::Link(_) => return None,
     })
 }

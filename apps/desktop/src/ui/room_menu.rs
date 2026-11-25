@@ -1,6 +1,6 @@
 //! A room's context menu: marking it unread or read, putting it among the favourites or the low
-//! priority rooms, a notifications submenu, then leaving the room (or, for a direct chat,
-//! deleting it), which asks for confirmation first.
+//! priority rooms, a notifications submenu, starting a meeting where the homeserver offers them,
+//! then leaving the room (or, for a direct chat, deleting it), which asks for confirmation first.
 
 use matrix_core::{NotificationMode, RoomKind, RoomPriority, RoomSummary};
 use rune::{Align, El, Side, col, icon, text};
@@ -95,6 +95,12 @@ pub fn room_menu(account: &AccountData, room_id: &str, notifications_open: bool,
                     }
                 }),
         )
+        .children(room.can_start_meeting.then(|| {
+            let id = room.room_id.clone();
+            menu_action(&icons::MEETING, t!("widgets.start_meeting"), Tone::Normal, p)
+                .key("room-menu-start-meeting")
+                .on_press(move |s: &mut State| s.start_meeting_in(&id))
+        }))
         .children(room.can_change_settings.then(|| {
             let id = room.room_id.clone();
             menu_action(&icons::SETTINGS, t!("room_settings.title"), Tone::Normal, p)

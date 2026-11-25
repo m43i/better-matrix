@@ -19,6 +19,8 @@ matrix-sdk = { version = "0.19.1", features = [
   "bundled-sqlite",
   "local-server",
   "experimental-send-custom-to-device",
+  # Widgets that talk to the app (MSC2762): the SDK's widget driver (matrix_core::widgets).
+  "experimental-widgets",
   "qrcode",
 ] }
 matrix-sdk-ui = "0.19.1"

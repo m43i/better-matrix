@@ -795,6 +795,11 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'PlacesFound':
     case 'MessageLocated':
     case 'EventSource':
+    // A widget's run (`state/actions/widgets.ts`): its page, messages and questions.
+    case 'WidgetPage':
+    case 'WidgetMessage':
+    case 'WidgetPermissions':
+    case 'IntegrationTerms':
     // Answers the composer's own read (`state/actions/drafts.ts`).
     case 'DraftLoaded':
     case 'DirectoryFound':

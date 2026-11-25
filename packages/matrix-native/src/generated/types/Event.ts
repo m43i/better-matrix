@@ -27,6 +27,7 @@ import type { PendingContact } from "./PendingContact";
 import type { Person } from "./Person";
 import type { PersonPresence } from "./PersonPresence";
 import type { Place } from "./Place";
+import type { Policy } from "./Policy";
 import type { PublicRoom } from "./PublicRoom";
 import type { PushContent } from "./PushContent";
 import type { QrLoginStep } from "./QrLoginStep";
@@ -48,6 +49,8 @@ import type { ThreadInfo } from "./ThreadInfo";
 import type { TimelineDiff } from "./TimelineDiff";
 import type { TimelineKey } from "./TimelineKey";
 import type { VerificationStep } from "./VerificationStep";
+import type { WidgetPage } from "./WidgetPage";
+import type { WidgetPermission } from "./WidgetPermission";
 import type { Widgets } from "./Widgets";
 
 /**
@@ -273,7 +276,47 @@ room_id: string,
 /**
  * Its widgets.
  */
-widgets: Widgets, } } | { "type": "PeopleFound", "data": { 
+widgets: Widgets, } } | { "type": "WidgetPage", "data": { 
+/**
+ * The run.
+ */
+request: RequestId, 
+/**
+ * The page.
+ */
+page: WidgetPage, } } | { "type": "WidgetMessage", "data": { 
+/**
+ * The run.
+ */
+request: RequestId, 
+/**
+ * The message, as JSON.
+ */
+message: string, } } | { "type": "WidgetPermissions", "data": { 
+/**
+ * The run.
+ */
+request: RequestId, 
+/**
+ * The question's number within the run, which the answer names.
+ */
+question: number, 
+/**
+ * The widget's name.
+ */
+widget: string, 
+/**
+ * What it asks for.
+ */
+permissions: Array<WidgetPermission>, } } | { "type": "IntegrationTerms", "data": { 
+/**
+ * The run.
+ */
+request: RequestId, 
+/**
+ * Its policies.
+ */
+policies: Array<Policy>, } } | { "type": "PeopleFound", "data": { 
 /**
  * The search it answers.
  */

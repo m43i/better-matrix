@@ -44,6 +44,7 @@ mod suggestions;
 mod theme;
 mod thread;
 mod timeline;
+mod widgets;
 
 #[cfg(test)]
 mod tests;
@@ -51,7 +52,7 @@ mod tests;
 use crate::i18n::t;
 use rune::{Color, Cx, El, col, el, row, text};
 
-use crate::state::{EmojiFor, Modal, Pane, Popover, Screen, SidePanel, State};
+use crate::state::{EmojiFor, Modal, Pane, Popover, Screen, SidePanel, State, WidgetPrompt};
 use theme::{Palette, font, palette};
 
 const UNVERIFIED_BAR: &str = "unverified-bar";
@@ -155,6 +156,13 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         (Some(Popover::Schedule(target)), _) => vec![schedule::menu(*target, &p)],
         (Some(Popover::Scheduled), _) if !s.scheduled_here().is_empty() => vec![schedule::list(s, &p)],
         (Some(Popover::Update), _) => rail::update_panel(s, &p).into_iter().collect(),
+        (Some(Popover::VideoOptions), _) => vec![call::video_options_menu(s, &p)],
+        (Some(Popover::WidgetsMenu), Some(account)) => s
+            .active_room_id()
+            .and_then(|room_id| account.room(room_id))
+            .map(|room| developer::widgets_menu(account, room, &p))
+            .into_iter()
+            .collect(),
         _ => Vec::new(),
     };
     // A select's list and the saved messages' filter menu belong to their dialogs, so they go
@@ -192,6 +200,10 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         Some(Modal::Confirm(action)) => Some(confirm::confirm(action, &p)),
         Some(Modal::Report(form)) => Some(safety::report(form, &p)),
         Some(Modal::Source(view)) => Some(developer::source(view, &p)),
+        Some(Modal::WidgetPrompt(_)) => s.widget_prompt().map(|prompt| match prompt {
+            WidgetPrompt::Permissions(asked) => widgets::permissions(asked, &p),
+            terms @ WidgetPrompt::Terms { policies, .. } => widgets::terms(terms.key(), policies, &p),
+        }),
         Some(Modal::Forward { .. } | Modal::Translate(_)) => message_actions::dialog(s, &p),
         Some(Modal::Saved(list)) => {
             let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);

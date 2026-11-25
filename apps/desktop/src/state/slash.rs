@@ -23,10 +23,12 @@ pub enum SlashCommand {
     Leave,
     Topic,
     Nick,
+    /// Starting a video meeting, where the homeserver offers them.
+    Meet,
 }
 
 impl SlashCommand {
-    pub const ALL: [SlashCommand; 12] = [
+    pub const ALL: [SlashCommand; 13] = [
         Self::Me,
         Self::Shrug,
         Self::TableFlip,
@@ -39,6 +41,7 @@ impl SlashCommand {
         Self::Leave,
         Self::Topic,
         Self::Nick,
+        Self::Meet,
     ];
 
     /// What is typed after the slash; the same in every language.
@@ -56,6 +59,7 @@ impl SlashCommand {
             Self::Leave => "leave",
             Self::Topic => "topic",
             Self::Nick => "nick",
+            Self::Meet => "meet",
         }
     }
 
@@ -74,6 +78,7 @@ impl SlashCommand {
             Self::Leave => t!("slash.leave"),
             Self::Topic => t!("slash.topic"),
             Self::Nick => t!("slash.nick"),
+            Self::Meet => t!("slash.meet"),
         }
     }
 
@@ -86,7 +91,7 @@ impl SlashCommand {
             Self::Join => t!("slash.args.room"),
             Self::Topic => t!("slash.args.topic"),
             Self::Nick => t!("slash.args.name"),
-            Self::Leave => "",
+            Self::Leave | Self::Meet => "",
         }
     }
 
@@ -267,6 +272,16 @@ impl State {
                     self.open_typed_link(&link);
                 } else {
                     self.notice = Some(tf!("slash.usage", command = command.name(), arguments = command.arguments()));
+                }
+                Some(Vec::new())
+            }
+            SlashCommand::Meet => {
+                let offered = self.accounts.get(&account).and_then(|data| data.room(&room_id));
+                if offered.is_some_and(|room| room.can_start_meeting) {
+                    self.composer_mut(target).clear();
+                    self.start_meeting_in(&room_id);
+                } else {
+                    self.notice = Some(t!("slash.meet_unavailable").to_owned());
                 }
                 Some(Vec::new())
             }

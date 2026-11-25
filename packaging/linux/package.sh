@@ -43,7 +43,9 @@ zstd -dc dist/arch.pkg.tar.zst | xz -T0 -9 > "$out/$name.pkg.tar.xz"
 # bundles GStreamer whole, the core the binary links with the plugins installed here (playbin,
 # the codecs) and a hook that points GStreamer at them alone, so the AppImage plays video on a
 # system without GStreamer, and never mixes this core with a system's plugins built for another.
-# linuxdeploy finds its plugins on PATH.
+# linuxdeploy finds its plugins on PATH. WebKitGTK and the GTK it draws with stay the system's:
+# WebKit starts helper processes from where the system installed it, which a bundled copy can't
+# reach, so the widget window uses the system's WebKitGTK 4.1 and GTK 3 (both must be installed).
 curl -fsSL -o dist/linuxdeploy "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$arch.AppImage"
 curl -fsSL -o dist/linuxdeploy-plugin-gstreamer.sh \
   "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh"
@@ -55,6 +57,11 @@ PATH="$PWD/dist:$PATH" APPIMAGE_EXTRACT_AND_RUN=1 LDAI_OUTPUT="$out/$name.AppIma
   --desktop-file "$PWD/packaging/linux/chat.bettermatrix.desktop.desktop" \
   --icon-file "$PWD/dist/better-matrix.png" \
   --plugin gstreamer \
+  --exclude-library 'libwebkit2gtk-4.1.so*' \
+  --exclude-library 'libjavascriptcoregtk-4.1.so*' \
+  --exclude-library 'libsoup-3.0.so*' \
+  --exclude-library 'libgtk-3.so*' \
+  --exclude-library 'libgdk-3.so*' \
   --output appimage
 
 ls -la "$out"

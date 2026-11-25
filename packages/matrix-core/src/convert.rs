@@ -46,6 +46,7 @@ pub(crate) async fn room_summary(
     settings: &NotificationSettings,
     note_to_self: Option<&matrix_sdk::ruma::RoomId>,
     rtc_service: bool,
+    meetings: bool,
     sticky: &crate::calls::StickyMembers,
 ) -> RoomSummary {
     let name = display_name(room).await;
@@ -115,6 +116,10 @@ pub(crate) async fn room_summary(
         pinned: room.pinned_event_ids().unwrap_or_default().iter().map(ToString::to_string).collect(),
         saved: crate::saved::saved_ids(room).await,
         can_pin: may_send_state(StateEventType::RoomPinnedEvents),
+        // Where the homeserver names a Jitsi server and the user may pin widgets.
+        can_start_meeting: meetings
+            && !note_to_self
+            && may_send_state(StateEventType::from(crate::widgets::LEGACY_TYPE)),
         priority: if room.is_favourite() {
             RoomPriority::Favourite
         } else if room.is_low_priority() {

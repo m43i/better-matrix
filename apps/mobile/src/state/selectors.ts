@@ -15,6 +15,7 @@ import type {
   ThreadInfo,
   TimelineEntry,
   TimelineKey,
+  Widget,
 } from '@better-matrix/matrix-native/types';
 
 import { galleryAround, thumbnailOf } from './gallery';
@@ -24,6 +25,7 @@ import { hiddenEntry, revealKey, showsMedia, shownInvitations } from './safety';
 import { newestMessages, type NewestMessages } from './sections';
 import { timelineId } from './timeline';
 import type { AccountData, State, Timeline } from './types';
+import { meetingsOf } from './widgets';
 
 export function account(state: State, id: AccountId | null): AccountData | undefined {
   return id === null ? undefined : state.accounts.find((a) => a.summary.id === id);
@@ -180,6 +182,27 @@ export function messageSender(state: State, id: AccountId, eventId: string): str
 
 export function room(state: State, id: AccountId, roomId: string) {
   return account(state, id)?.rooms.find((r) => r.room_id === roomId);
+}
+
+/**
+ * The video meetings pinned to a room, as far as its widgets are known (they come when its
+ * timeline opens and whenever sync changes them). A new array: compare with `shallow`.
+ */
+export function roomMeetings(state: State, id: AccountId, roomId: string): Widget[] {
+  return meetingsOf(account(state, id)?.widgets[roomId]);
+}
+
+/** How many widgets a room has, once its widgets are known. */
+export function roomWidgetCount(state: State, id: AccountId, roomId: string): number | undefined {
+  return account(state, id)?.widgets[roomId]?.widgets.length;
+}
+
+/**
+ * Whether a meeting can be started in a room: its homeserver names a Jitsi server and the user
+ * may pin widgets (`RoomSummary::can_start_meeting`).
+ */
+export function canStartMeeting(state: State, id: AccountId, roomId: string): boolean {
+  return room(state, id, roomId)?.can_start_meeting ?? false;
 }
 
 /** A space of an account. */

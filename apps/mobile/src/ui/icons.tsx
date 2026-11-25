@@ -144,6 +144,7 @@ export const icons = {
   history: { ios: 'clock.arrow.circlepath', android: 'history' },
   command: { ios: 'command', android: 'keyboard_command_key' },
   calendar: { ios: 'calendar', android: 'calendar_today' },
+  meeting: { ios: 'video.badge.plus', android: 'video_call' },
   safety: { ios: 'hand.raised', android: 'back_hand' },
 } as const satisfies Record<string, { ios: SFSymbol; android: AndroidSymbol }>;
 

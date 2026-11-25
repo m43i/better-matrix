@@ -15,7 +15,7 @@ use super::message_text::Look;
 use super::theme::{Palette, font};
 use super::thread::thread_panel;
 use super::timeline::{Context, timeline};
-use crate::i18n::{t, tf};
+use crate::i18n::{t, tf, tp};
 use crate::state::{AccountData, ComposerTarget, EmojiFor, PaneLayout, Popover, RichText, SidePanel, State};
 
 pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<State>, layout: &PaneLayout) -> El {
@@ -95,7 +95,7 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
         Some(SidePanel::Threads) => Some(super::info::threads(account, room, p)),
         Some(SidePanel::Pins) => Some(super::info::pins(s, account, room, p)),
         Some(SidePanel::Files) => Some(super::info::files(s, account, room, p)),
-        Some(SidePanel::Widgets) => Some(super::developer::widgets(account, room, p)),
+        Some(SidePanel::Widgets) => Some(super::developer::widgets(s, account, room, p)),
         None => s.active_thread().map(|root| thread_panel(s, account, room, root, p, ui)),
     };
     pane.children(panel.zip(layout.right).map(|(panel, (which, size))| super::panes::resizable(panel, which, size, p)))
@@ -176,6 +176,14 @@ fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, lay
             .help(t!("info.pins"))
             .on_press(|s: &mut State| s.toggle_side(SidePanel::Pins))
     });
+    // The room's widgets, while it has any (a meeting's Join pill aside).
+    let widgets = widget_count(account, room).filter(|count| *count > 0).map(|count| {
+        let open = s.side == Some(SidePanel::Widgets);
+        icon_button(&icons::LAYOUT, t!("widgets.title"), open, p.text_muted, p)
+            .key(WIDGETS)
+            .help(tp!("widgets.count", count))
+            .on_press(|s: &mut State| s.toggle_side(SidePanel::Widgets))
+    });
     row()
         .key("room-header")
         .w_full()
@@ -191,6 +199,7 @@ fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, lay
         .children(super::call::header_buttons(s, room, p))
         .children((room.kind == RoomKind::Group).then(|| super::people::members_button(s, account, room, p)))
         .children(pins)
+        .children(widgets)
         .child(
             icon_button(&icons::INFO, t!("room.info"), info_open, p.text_muted, p)
                 .key(super::people::INFO)
@@ -200,6 +209,13 @@ fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, lay
 
 /// The header's pinned-messages button, shown while the room has pins.
 pub const PINS: &str = "room-pins";
+/// The header's widgets button.
+pub const WIDGETS: &str = "room-widgets";
+
+/// How many widgets the room has, once known.
+pub fn widget_count(account: &AccountData, room: &RoomSummary) -> Option<usize> {
+    account.widgets.get(&room.room_id).map(|listed| listed.widgets.len())
+}
 
 /// The topic's first non-blank line, which the header shows beside the room's name.
 pub fn topic_line(topic: &str) -> Option<&str> {

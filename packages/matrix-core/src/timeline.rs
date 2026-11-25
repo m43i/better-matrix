@@ -321,6 +321,10 @@ fn room_event(event: &EventTimelineItem) -> Option<RoomEvent> {
             Other::PolicyRuleRoom(_) | Other::PolicyRuleServer(_) | Other::PolicyRuleUser(_) => {
                 RoomChange::ModerationRules
             }
+            Other::_Custom { event_type } if crate::widgets::TYPES.contains(&event_type.as_str()) => {
+                let json: serde_json::Value = event.latest_json()?.deserialize_as_unchecked().ok()?;
+                crate::widgets::change(&json["content"])
+            }
             _ => return None,
         },
         TimelineItemContent::MsgLike(MsgLikeContent { kind: MsgLikeKind::LiveLocation(_), .. }) => {

@@ -279,6 +279,11 @@ fn room_event_text(event: &RoomEvent) -> String {
         RoomChange::InvitedByContact(target) => tf!("event.invited", name = name, target = target),
         RoomChange::ModerationRules => tf!("event.moderation_rules", name = name),
         RoomChange::LiveLocation => tf!("event.live_location", name = name),
+        RoomChange::WidgetAdded { meeting: Some(_), .. } => tf!("event.meeting_started", name = name),
+        RoomChange::WidgetAdded { name: widget, meeting: None } => {
+            tf!("event.widget_added", name = name, widget = widget)
+        }
+        RoomChange::WidgetRemoved => tf!("event.widget_removed", name = name),
     }
 }
 

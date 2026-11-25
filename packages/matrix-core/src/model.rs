@@ -105,6 +105,9 @@ pub struct RoomSummary {
     pub custom_notifications: bool,
     /// How a call would start here and who is in its call now.
     pub call: crate::calls::RoomCall,
+    /// Whether the user can start a meeting here ([`Command::StartMeeting`](crate::Command::StartMeeting)):
+    /// the homeserver names a Jitsi server and the user may pin widgets.
+    pub can_start_meeting: bool,
     /// When the room's latest event came, in milliseconds since the epoch, as the store keeps
     /// it across restarts (the room list's order, before any timeline opens). `None` until the
     /// SDK has worked it out.
@@ -609,6 +612,15 @@ pub enum RoomChange {
     ModerationRules,
     /// The sender started sharing their live location.
     LiveLocation,
+    /// The sender pinned a widget to the room, or changed one.
+    WidgetAdded {
+        /// Its name, or its kind when it has none.
+        name: String,
+        /// The video meeting it holds.
+        meeting: Option<crate::Meeting>,
+    },
+    /// The sender took a widget off the room.
+    WidgetRemoved,
 }
 
 impl RoomChange {

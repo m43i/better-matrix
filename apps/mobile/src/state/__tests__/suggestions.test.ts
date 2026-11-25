@@ -121,3 +121,30 @@ describe('packImages', () => {
     expect(packImages(packs, 'emoticon').map(({ image }) => image.shortcode)).toEqual(['x', 'y']);
   });
 });
+
+describe('/meet among the suggestions', () => {
+  const meet = { kind: 'command' as const, query: 'mee', start: 0, end: 4 };
+
+  const startable = (can: boolean) =>
+    apply(state(), {
+      type: 'RoomsUpdated',
+      data: {
+        account: ADA,
+        list: {
+          rooms: [{ ...roomSummary(ROOM, 'general'), can_start_meeting: can }],
+          spaces: [],
+          invitations: [],
+        },
+      },
+    });
+
+  it('should suggest /meet where the room can start a meeting', () => {
+    expect(suggestionsFor(startable(true), ADA, ROOM, meet).map((s) => s.key)).toEqual([
+      'command:meet',
+    ]);
+  });
+
+  it('should not suggest /meet where the room can’t', () => {
+    expect(suggestionsFor(startable(false), ADA, ROOM, meet)).toEqual([]);
+  });
+});

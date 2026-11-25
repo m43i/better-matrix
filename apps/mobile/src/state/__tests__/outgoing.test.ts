@@ -440,3 +440,24 @@ describe('excerpt of other kinds', () => {
     expect(excerpt(place)).toBe('Home');
   });
 });
+
+describe('/meet', () => {
+  const meet = { ...EMPTY_COMPOSER, draft: '/meet' };
+
+  it('should open a meeting in the draft’s place where the room can start one', () => {
+    const plan = planSend(meet, ADA, KEY, true);
+    expect([plan.commands, plan.after, plan.composer.draft]).toEqual([[], 'meeting', '']);
+  });
+
+  it('should keep the draft and say why where the room can’t start one', () => {
+    expect(planSend(meet, ADA, KEY)).toEqual({
+      commands: [],
+      composer: meet,
+      problem: { type: 'no_meetings' },
+    });
+  });
+
+  it('should not be scheduled', () => {
+    expect(scheduleProblem(meet, ADA, KEY)).toEqual({ type: 'command' });
+  });
+});

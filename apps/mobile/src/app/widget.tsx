@@ -1,0 +1,234 @@
+// A widget running in the app (full screen, from a room's widgets, the room header's video button,
+// the room menu or `/meet`): its page in a web view, under a header with its name, Close and, for
+// one of the room's widgets, Open in browser. The integration manager's terms come first when
+// they weren't agreed to; a widget asking for permissions gets a sheet over its page; on Android a
+// meeting that moves to another host asks once for the camera and microphone there (iOS's web
+// view asks for each site itself). Closing the screen stops the run; a run that ends by itself,
+// or whose page fails to load, says so or closes. Only the app opens this screen: every run needs
+// its one-time launch (`openWidget`), so a link opens nothing.
+
+import type { AccountId, Policy } from '@better-matrix/matrix-native/types';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import { t } from '../i18n';
+import { widgetTarget } from '../routes';
+import { WidgetRun } from '../state/actions/widgets';
+import { useAppStore, useStore } from '../state/react';
+import { account as accountOf } from '../state/selectors';
+import type { WidgetTarget } from '../state/widgets';
+import { font } from '../theme/palette';
+import { openInBrowser } from '../ui/accounts/browser';
+import { Button, EmptyState, IconButton, ListRow, ListSection } from '../ui/components';
+import { HeaderClose } from '../ui/HeaderButtons';
+import { usePalette } from '../ui/theme';
+import { openOutside, openWidgetInSystemBrowser } from '../ui/widgets/browser';
+import { bridgeToken, widgetLaunches } from '../ui/widgets/launch';
+import { PermissionSheet } from '../ui/widgets/PermissionSheet';
+import { WidgetPageView } from '../ui/widgets/WidgetPageView';
+
+export default function WidgetScreen() {
+  const params = useLocalSearchParams<{
+    account: AccountId;
+    roomId: string;
+    widgetId?: string;
+    meeting?: string;
+    integrations?: string;
+    launch?: string;
+  }>();
+
+  const target = widgetTarget(params);
+
+  // Used up as the screen opens: the same launch can't start a second run, and a link has none.
+  const [launched] = useState(() => widgetLaunches.consume(params.launch));
+
+  if (!target) return <EmptyState icon="widgets" title={t('widgets.none')} />;
+
+  if (!launched) return <EmptyState icon="widgets" title={t('mobile.widgets.open_from_room')} />;
+
+  return <Running account={params.account} roomId={params.roomId} target={target} />;
+}
+
+function Running({
+  account,
+  roomId,
+  target,
+}: {
+  account: AccountId;
+  roomId: string;
+  target: WidgetTarget;
+}) {
+  const store = useAppStore();
+  const router = useRouter();
+  const palette = usePalette();
+
+  // Android's web view grants the camera by host, so a meeting on a new host asks; iOS asks itself.
+  const [run] = useState(
+    () => new WidgetRun(store, account, roomId, target, bridgeToken(), Platform.OS === 'android'),
+  );
+
+  const { view, asking, captureHost, askingCapture } = useSyncExternalStore(
+    run.subscribe,
+    run.snapshot,
+    run.snapshot,
+  );
+
+  const widgetId = target.type === 'widget' ? target.widgetId : null;
+
+  const name = useStore((s) =>
+    widgetId === null
+      ? undefined
+      : accountOf(s, account)?.widgets[roomId]?.widgets.find((w) => w.id === widgetId)?.name,
+  );
+
+  useEffect(() => {
+    run.start();
+
+    return () => run.cancel();
+  }, [run]);
+
+  // A meeting on a host it wasn't opened on asks once for the camera and microphone there.
+  useEffect(() => {
+    if (askingCapture === null) return;
+
+    Alert.alert(
+      t('mobile.widgets.capture_title', { host: askingCapture }),
+      undefined,
+      [
+        {
+          text: t('mobile.widgets.deny'),
+          style: 'cancel',
+          onPress: () => run.answerCapture(askingCapture, false),
+        },
+        {
+          text: t('mobile.widgets.allow'),
+          onPress: () => run.answerCapture(askingCapture, true),
+        },
+      ],
+      { cancelable: true, onDismiss: () => run.answerCapture(askingCapture, false) },
+    );
+  }, [askingCapture, run]);
+
+  // A run that ended by itself (the widget or the manager closed) takes the screen with it; one
+  // the engine opens in the browser instead (a page on plain HTTP) opens there and goes too.
+  const browserUrl = view.type === 'browser' ? view.url : null;
+
+  useEffect(() => {
+    if (browserUrl !== null) openOutside(store, browserUrl);
+
+    if ((view.type === 'ended' || browserUrl !== null) && router.canGoBack()) router.back();
+  }, [view.type, browserUrl, router, store]);
+
+  const title =
+    view.type === 'page'
+      ? view.page.title
+      : target.type === 'integrations'
+        ? t('mobile.widgets.integrations_title')
+        : target.type === 'meeting'
+          ? t('mobile.widgets.start_meeting')
+          : (name ?? '');
+
+  // In the browser instead: this run stops, so the widget doesn't run twice.
+  const inBrowser = () => {
+    if (widgetId === null) return;
+    run.cancel();
+    router.back();
+    openWidgetInSystemBrowser(store, account, roomId, widgetId);
+  };
+
+  return (
+    <>
+      <Stack.Screen
+        options={{
+          title,
+          headerLeft: () => <HeaderClose onPress={() => router.back()} testID="widget-close" />,
+          headerRight:
+            widgetId === null
+              ? undefined
+              : () => (
+                  <IconButton
+                    testID="widget-browser"
+                    icon="external"
+                    label={t('mobile.widgets.open_browser')}
+                    color={palette.textMuted}
+                    onPress={inBrowser}
+                  />
+                ),
+        }}
+      />
+      <View style={[styles.screen, { backgroundColor: palette.bg }]} testID="widget">
+        {view.type === 'page' ? (
+          <WidgetPageView key={view.load} run={run} page={view.page} captureHost={captureHost} />
+        ) : view.type === 'terms' ? (
+          <Terms policies={view.policies} onAgree={() => run.agree()} />
+        ) : view.type === 'failed' ? (
+          <View style={styles.failed}>
+            <EmptyState
+              icon="alert"
+              title={title}
+              body={t('mobile.widgets.failed', { error: view.error })}
+            />
+            {/* Starting a meeting again would pin another one. */}
+            {target.type === 'meeting' ? null : (
+              <Button
+                testID="widget-retry"
+                title={t('common.try_again')}
+                kind="secondary"
+                onPress={() => run.start()}
+              />
+            )}
+          </View>
+        ) : (
+          <EmptyState loading title={t('info.loading')} />
+        )}
+      </View>
+      {asking ? (
+        <PermissionSheet
+          key={`${asking.request}:${asking.question}`}
+          ask={asking}
+          onAnswer={(granted) => run.grant(asking, granted)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** The integration manager's policies, each opening in the browser, and Agree. */
+function Terms({ policies, onAgree }: { policies: Policy[]; onAgree: () => void }) {
+  const store = useAppStore();
+  const palette = usePalette();
+
+  return (
+    <ScrollView contentContainerStyle={styles.terms} testID="widget-terms">
+      <Text style={[font.header, styles.padded, { color: palette.text }]}>
+        {t('mobile.widgets.terms_title')}
+      </Text>
+      <Text style={[font.body, styles.padded, { color: palette.textMuted }]}>
+        {t('mobile.widgets.terms_hint')}
+      </Text>
+      <ListSection>
+        {policies.map((policy) => (
+          <ListRow
+            key={policy.url}
+            testID={`widget-policy-${policy.url}`}
+            icon="external"
+            title={policy.name}
+            chevron={false}
+            onPress={() => openInBrowser(store, policy.url)}
+          />
+        ))}
+      </ListSection>
+      <View style={styles.padded}>
+        <Button testID="widget-agree" title={t('mobile.widgets.agree')} onPress={onAgree} />
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1 },
+  failed: { flex: 1, paddingHorizontal: 24, paddingBottom: 32 },
+  terms: { paddingVertical: 24, gap: 12 },
+  padded: { paddingHorizontal: 16 },
+});

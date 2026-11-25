@@ -3186,6 +3186,7 @@ fn the_message_menu_should_offer_the_messages_source() {
 #[test]
 fn adding_a_widget_should_ask_for_its_name_and_address() {
     let mut rt = runtime(demo::widgets);
+    press(&mut rt, crate::ui::developer::WIDGETS_MENU);
     press(&mut rt, "widget-add");
     assert!(rt.find("widget-form-name").is_some() && rt.find("widget-form-url").is_some());
 }
@@ -3194,7 +3195,7 @@ fn adding_a_widget_should_ask_for_its_name_and_address() {
 fn the_widgets_panel_should_list_widgets_and_ask_before_removing_one() {
     let mut rt = runtime(demo::widgets);
     assert!(rt.find("widget-open-board").is_some());
-    assert!(rt.find("widget-open-standup").is_some());
+    assert!(rt.find("widget-join-standup").is_some());
     press(&mut rt, "widget-remove-board");
     assert!(matches!(rt.state.modal, Some(crate::state::Modal::Confirm(crate::state::Confirm::RemoveWidget { .. }))));
 }

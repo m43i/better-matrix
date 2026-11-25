@@ -42,7 +42,7 @@ async fn synced(server: &crate::test_server::Server) -> Account {
 async fn summary(account: &Account) -> crate::RoomSummary {
     let room = account.joined_room(ROOM).expect("room");
     let settings = account.client().notification_settings().await;
-    crate::convert::room_summary(&room, &settings, None, false, &account.sticky).await
+    crate::convert::room_summary(&room, &settings, None, false, false, &account.sticky).await
 }
 
 fn tags(names: &[&str]) -> Value {
@@ -373,4 +373,32 @@ async fn a_blank_keyword_should_change_nothing() {
     let account = synced(&server).await;
     account.set_keyword("   ", true).await.expect("blank keyword");
     assert!(!requests(&sent).iter().any(|r| r.starts_with("PUT") || r.starts_with("DELETE")));
+}
+
+#[tokio::test]
+async fn a_room_should_offer_meetings_where_the_server_names_a_jitsi_server() {
+    // The user may change the room's state.
+    let server = crate::test_server::Server::new(|request| {
+        let mut response = crate::test_server::thread_response(request);
+        if request.contains("/sync?") {
+            let levels = json!({"type": "m.room.power_levels", "state_key": "", "sender": "@a:example.org",
+                "event_id": "$levels", "origin_server_ts": 0, "content": {"users": {"@a:example.org": 100}}});
+            if let Some(events) = response["rooms"]["join"][ROOM]["state"]["events"].as_array_mut() {
+                events.push(levels);
+            }
+        }
+        response
+    });
+    let account = synced(&server).await;
+    let room = account.joined_room(ROOM).expect("room");
+    let settings = account.client().notification_settings().await;
+    let summary = crate::convert::room_summary(&room, &settings, None, false, true, &account.sticky).await;
+    assert!(summary.can_start_meeting);
+}
+
+#[tokio::test]
+async fn a_room_should_offer_no_meetings_where_the_server_names_no_jitsi_server() {
+    let (server, _) = server(json!([]), json!([]));
+    let account = synced(&server).await;
+    assert!(!summary(&account).await.can_start_meeting);
 }

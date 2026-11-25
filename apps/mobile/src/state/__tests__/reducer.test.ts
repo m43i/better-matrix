@@ -613,4 +613,22 @@ describe('apply for composer extras', () => {
 
     expect(apply(state, { type: 'PlacesFound', data: { request: 1, places: [] } })).toBe(state);
   });
+
+  it('should leave a widget run’s page to the screen that runs it', () => {
+    const state = signedIn(ADA);
+    const page = { url: 'https://w.example/', title: 'Board', bridge: 'WidgetApi' as const };
+
+    expect(apply(state, { type: 'WidgetPage', data: { request: 1, page } })).toBe(state);
+  });
+
+  it('should keep the widgets the engine reports for a room', () => {
+    const widgets = { widgets: [], can_add: true };
+
+    const state = apply(signedIn(ADA), {
+      type: 'Widgets',
+      data: { account: ADA, room_id: '!r:x', widgets },
+    });
+
+    expect(state.accounts[0]?.widgets['!r:x']).toBe(widgets);
+  });
 });

@@ -75,6 +75,8 @@ pub struct Account {
     session_changes: Arc<Mutex<Option<broadcast::Receiver<SessionChange>>>>,
     /// The LiveKit service the homeserver names for calls, once looked up.
     rtc: Arc<Mutex<Option<String>>>,
+    /// The Jitsi server the homeserver names for meetings, once looked up (`crate::widgets::meetings`).
+    pub(crate) meeting_server: Arc<Mutex<Option<String>>>,
     /// The user's status as this session knows it (`crate::status`).
     pub(crate) status: Arc<tokio::sync::Mutex<crate::status::Known>>,
     /// Held while a status is saved: one save at a time, apart from the lock syncs take.
@@ -95,9 +97,9 @@ pub struct Account {
     pub(crate) drafts: crate::drafts::DraftQueue,
     /// The room list's sliding sync, while it runs (servers with MSC4186; ADR 0002).
     room_list: Arc<Mutex<Option<Arc<matrix_sdk_ui::RoomListService>>>>,
-    /// Rooms' image pack state as read from the server, by room, once a run: the room list's
-    /// sliding sync doesn't bring it (`crate::packs`).
-    pub(crate) pack_state: Arc<Mutex<std::collections::HashMap<String, Vec<serde_json::Value>>>>,
+    /// Rooms' state the room list's sliding sync doesn't bring (image packs, widgets), as read
+    /// from the server, by room, once a run (`crate::widgets::EXTRA_STATE`).
+    pub(crate) extra_state: Arc<Mutex<crate::widgets::ExtraState>>,
     /// The rooms open timelines show, which the room list's sliding sync subscribes to.
     followed: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Held while the room list's subscriptions are updated (`Account::subscribe_followed`).
@@ -432,6 +434,7 @@ impl Account {
             client,
             session_changes: Arc::new(Mutex::new(None)),
             rtc: Arc::new(Mutex::new(None)),
+            meeting_server: Arc::default(),
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
@@ -440,7 +443,7 @@ impl Account {
             admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
-            pack_state: Arc::default(),
+            extra_state: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
@@ -474,6 +477,7 @@ impl Account {
             client,
             session_changes: Arc::new(Mutex::new(None)),
             rtc: Arc::new(Mutex::new(None)),
+            meeting_server: Arc::default(),
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
@@ -482,7 +486,7 @@ impl Account {
             admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
-            pack_state: Arc::default(),
+            extra_state: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
@@ -612,6 +616,7 @@ impl Account {
             client,
             session_changes: Arc::new(Mutex::new(Some(changes))),
             rtc: Arc::default(),
+            meeting_server: Arc::default(),
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
@@ -620,7 +625,7 @@ impl Account {
             admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
-            pack_state: Arc::default(),
+            extra_state: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),
@@ -740,6 +745,24 @@ impl Account {
     /// The LiveKit service the homeserver names for calls, if it named one yet.
     pub(crate) fn rtc_service(&self) -> Option<String> {
         self.rtc.lock().ok().and_then(|rtc| rtc.clone())
+    }
+
+    /// The Jitsi server the homeserver names for meetings, if it named one yet.
+    pub(crate) fn meeting_server(&self) -> Option<String> {
+        self.meeting_server.lock().ok().and_then(|server| server.clone())
+    }
+
+    /// Looks up the Jitsi server the homeserver names for meetings (its well-known file). True
+    /// when it names one.
+    pub(crate) async fn discover_meetings(&self) -> bool {
+        let http = self.client.http_client().clone();
+        let Ok(me) = self.user_id() else { return false };
+        let found = crate::widgets::meetings::named_server(&http, me.server_name().as_str()).await;
+        let named = found.is_some();
+        if let Ok(mut server) = self.meeting_server.lock() {
+            *server = found;
+        }
+        named
     }
 
     /// Looks up the homeserver's call service (its RTC transports, else its well-known file).
@@ -883,7 +906,8 @@ impl Account {
                 }
                 if let Some(settings) = &settings {
                     let (rtc, marked) = (self.rtc_service().is_some(), note_to_self.as_deref());
-                    let summary = convert::room_summary(room, settings, marked, rtc, &self.sticky).await;
+                    let meetings = self.meeting_server().is_some();
+                    let summary = convert::room_summary(room, settings, marked, rtc, meetings, &self.sticky).await;
                     moved |= self::changed(&mut cache.rooms, id, summary);
                 }
             }
@@ -1424,6 +1448,7 @@ mod tests {
             client,
             session_changes: Arc::new(Mutex::new(None)),
             rtc: Arc::new(Mutex::new(None)),
+            meeting_server: Arc::default(),
             status: Arc::default(),
             status_saves: Arc::default(),
             saved_changes: Arc::default(),
@@ -1432,7 +1457,7 @@ mod tests {
             admin_changes: crate::drafts::DraftQueue::default(),
             drafts: crate::drafts::DraftQueue::default(),
             room_list: Arc::default(),
-            pack_state: Arc::default(),
+            extra_state: Arc::default(),
             followed: Arc::default(),
             subscribing: Arc::default(),
             sticky: crate::calls::StickyMembers::default(),

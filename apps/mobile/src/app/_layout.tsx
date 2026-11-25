@@ -1,6 +1,7 @@
 // The root: the store, the theme and every route with how it is presented. Screens push on a
 // native stack; actions open as native sheets (iOS form sheets, Android bottom sheets), and the
-// call and attachment preview cover the screen. Signed out, only sign-in is reachable.
+// call, a running widget and the attachment preview cover the screen. Signed out, only sign-in
+// is reachable.
 
 import {
   DarkTheme,
@@ -103,6 +104,7 @@ function Routes({ scene }: { scene: SceneName | null }) {
           <Stack.Screen name="pinned-messages" />
           <Stack.Screen name="saved-messages" />
           <Stack.Screen name="widgets" />
+          <Stack.Screen name="widget" options={{ presentation: 'fullScreenModal' }} />
           <Stack.Screen name="add-widget" options={{ presentation: 'modal' }} />
           <Stack.Screen name="event-source" options={sheet} />
           <Stack.Screen name="emoji" options={sheet} />

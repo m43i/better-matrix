@@ -31,6 +31,7 @@ import { useAppStore, useStore } from '../../../state/react';
 import {
   account as accountOf,
   room as roomOf,
+  roomWidgetCount,
   shownFiles,
   shownThreads,
 } from '../../../state/selectors';
@@ -67,6 +68,7 @@ export default function RoomInfoScreen() {
   const palette = usePalette();
   const room = useStore((s) => roomOf(s, account, roomId));
   const members = useStore((s) => accountOf(s, account)?.members[roomId]);
+  const widgetCount = useStore((s) => roomWidgetCount(s, account, roomId));
   // Threads people the user ignores started stay out of the list (ADR 0011).
   const threads = useStore((s) => shownThreads(s, account, roomId));
   // What people the user ignores shared stays out of the list (ADR 0011).
@@ -311,6 +313,7 @@ export default function RoomInfoScreen() {
         <ListRow
           icon="widgets"
           title={t('widgets.title')}
+          value={widgetCount === undefined ? undefined : String(widgetCount)}
           testID="info-widgets"
           onPress={() => router.push(routes.widgets(account, roomId))}
         />

@@ -2,13 +2,24 @@ import { previewGallery } from '../../state/gallery';
 import { activeAccount, activeRoomList } from '../../state/selectors';
 import { timelineId } from '../../state/timeline';
 import { bootDemo } from '../boot';
-import { answer, demoEngine, nextAsked } from '../engine';
+import { canStartMeeting, room, roomMeetings } from '../../state/selectors';
+import { suggestionsFor } from '../../state/suggestions';
+import { videoOptions, widgetSections } from '../../state/widgets';
+import {
+  answer,
+  DEMO_WIDGET_PAGE,
+  demoEngine,
+  nextAsked,
+  widgetAnswered,
+  widgetRun,
+} from '../engine';
 import {
   ADA,
   ADA_HOBBY,
   DEMO_BATCH,
   DEMO_THREAD,
   DESIGN,
+  demoWidgets,
   GENERAL,
   GRACE,
   KAI,
@@ -507,5 +518,124 @@ describe('the demo engine as a homeserver for administration', () => {
       .accounts[0]?.rooms.find((r) => r.room_id === LAB);
 
     expect(lab?.successor?.room_id).toBe(LAB_V2);
+  });
+});
+
+describe('widgets in the demo', () => {
+  const run = (widgetId: string, browser = false) =>
+    widgetRun(
+      { type: 'RunWidget', data: { account: ADA, room_id: GENERAL, widget_id: widgetId, browser } },
+      8,
+    );
+
+  it('should pin a Jitsi meeting to #general for the meeting scene', () => {
+    const state = bootDemo('meeting', noMedia).getState();
+    expect(roomMeetings(state, ADA, GENERAL).map((w) => w.name)).toEqual(['Standup']);
+  });
+
+  it('should list #general’s meeting before its other widgets', () => {
+    const { meetings, others } = widgetSections(demoWidgets());
+    expect([...meetings, ...others].map((w) => w.id)).toEqual(['standup', 'board', 'grafana']);
+  });
+
+  it('should offer the video call, the pinned meeting and a new one from #general’s video button', () => {
+    const state = bootDemo('meeting', noMedia).getState();
+
+    expect(
+      videoOptions(room(state, ADA, GENERAL), roomMeetings(state, ADA, GENERAL)).map((o) => o.kind),
+    ).toEqual(['call', 'meeting', 'start']);
+  });
+
+  it('should offer the video call and a new meeting from #design’s video button', () => {
+    const state = bootDemo('meeting-start', noMedia).getState();
+
+    expect(
+      videoOptions(room(state, ADA, DESIGN), roomMeetings(state, ADA, DESIGN)).map((o) => o.kind),
+    ).toEqual(['call', 'start']);
+  });
+
+  it('should offer Start a meeting in the room menu scene’s room', () => {
+    expect(canStartMeeting(bootDemo('room-menu', noMedia).getState(), ADA, GENERAL)).toBe(true);
+  });
+
+  it('should offer to start a meeting in #design, where none is pinned', () => {
+    const state = bootDemo('meeting-start', noMedia).getState();
+    expect([canStartMeeting(state, ADA, DESIGN), roomMeetings(state, ADA, DESIGN)]).toEqual([
+      true,
+      [],
+    ]);
+  });
+
+  it('should suggest /meet in #general for the meeting command scene', () => {
+    const state = bootDemo('meeting-command', noMedia).getState();
+    const trigger = { kind: 'command' as const, query: 'mee', start: 0, end: 4 };
+    expect(suggestionsFor(state, ADA, GENERAL, trigger).map((s) => s.key)).toEqual([
+      'command:meet',
+    ]);
+  });
+
+  it('should show #general’s widgets once its timeline opens', () => {
+    const events = answer(
+      { type: 'OpenTimeline', data: { account: ADA, key: { room_id: GENERAL, thread: null } } },
+      3,
+    );
+
+    expect(events.map((e) => e.type)).toEqual(['Widgets']);
+  });
+
+  it('should run a widget on its page, asking for permissions', () => {
+    expect(run('board')?.events.map((e) => e.type)).toEqual(['WidgetPage', 'WidgetPermissions']);
+  });
+
+  it('should run a meeting as itself, with nothing to pass', () => {
+    const [page] = run('standup')?.events ?? [];
+    expect(page).toEqual({
+      type: 'WidgetPage',
+      data: { request: 8, page: { url: DEMO_WIDGET_PAGE, title: 'Standup', bridge: 'None' } },
+    });
+  });
+
+  it('should open a widget in the browser and finish', () => {
+    expect(run('board', true)).toEqual({
+      events: [{ type: 'OpenUrl', data: { request: 8, url: 'https://board.example.org/team' } }],
+      waits: false,
+    });
+  });
+
+  it('should open the integration manager after its terms', () => {
+    const start = widgetRun(
+      { type: 'OpenIntegrations', data: { account: ADA, room_id: GENERAL } },
+      9,
+    );
+
+    const agreed = widgetAnswered({ type: 'Agree' }, 9);
+
+    expect([start?.events.map((e) => e.type), agreed.map((e) => e.type)]).toEqual([
+      ['IntegrationTerms'],
+      ['WidgetPage'],
+    ]);
+  });
+
+  it('should run a widget until it is cancelled', async () => {
+    const engine = demoEngine(noMedia);
+    const finished: Array<[number, string]> = [];
+    engine.subscribe((e) => {
+      if (e.type === 'Finished')
+        finished.push([e.data.request, 'Err' in e.data.result ? e.data.result.Err : 'ok']);
+    });
+
+    const request = engine.send({
+      type: 'RunWidget',
+      data: { account: ADA, room_id: GENERAL, widget_id: 'standup', browser: false },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(finished).toEqual([]);
+    const cancel = engine.send({ type: 'Cancel', data: request });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(finished).toEqual([
+      [request, 'cancelled'],
+      [cancel, 'ok'],
+    ]);
   });
 });

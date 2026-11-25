@@ -6,7 +6,10 @@ import {
   activeRoomList,
   identityOf,
   knownPerson,
+  canStartMeeting,
   rightsKey,
+  roomMeetings,
+  roomWidgetCount,
   roomSettings as settingsOf,
   savedMessages,
   savedSignature,
@@ -247,5 +250,83 @@ describe('administration', () => {
     const state = apply(withSpace(), { type: 'RoomSettings', data: { account: ADA, settings } });
 
     expect(settingsOf(state, ADA, '!s:x')).toBe(settings);
+  });
+});
+
+describe('roomMeetings', () => {
+  const widget = (id: string, meeting: 'Jitsi' | null) => ({
+    id,
+    name: id,
+    kind: 'jitsi',
+    url: `https://meet.example/${id}`,
+    host: 'meet.example',
+    creator: null,
+    can_remove: false,
+    meeting,
+  });
+
+  it('should list the meetings pinned to a room', () => {
+    const state = apply(apply(initialState(), { type: 'AccountAdded', data: summary(ADA) }), {
+      type: 'Widgets',
+      data: {
+        account: ADA,
+        room_id: '!r:x',
+        widgets: { widgets: [widget('board', null), widget('standup', 'Jitsi')], can_add: false },
+      },
+    });
+
+    expect(roomMeetings(state, ADA, '!r:x').map((w) => w.id)).toEqual(['standup']);
+  });
+
+  it('should count every widget pinned to a room', () => {
+    const state = apply(apply(initialState(), { type: 'AccountAdded', data: summary(ADA) }), {
+      type: 'Widgets',
+      data: {
+        account: ADA,
+        room_id: '!r:x',
+        widgets: { widgets: [widget('board', null), widget('standup', 'Jitsi')], can_add: false },
+      },
+    });
+
+    expect(roomWidgetCount(state, ADA, '!r:x')).toBe(2);
+  });
+
+  it('should count no widgets for a room whose widgets are unknown', () => {
+    const state = apply(initialState(), { type: 'AccountAdded', data: summary(ADA) });
+
+    expect(roomWidgetCount(state, ADA, '!r:x')).toBeUndefined();
+  });
+
+  it('should list no meetings for a room whose widgets are unknown', () => {
+    const state = apply(initialState(), { type: 'AccountAdded', data: summary(ADA) });
+
+    expect(roomMeetings(state, ADA, '!r:x')).toEqual([]);
+  });
+});
+
+describe('canStartMeeting', () => {
+  const withRoom = (can: boolean) =>
+    apply(apply(initialState(), { type: 'AccountAdded', data: summary(ADA) }), {
+      type: 'RoomsUpdated',
+      data: {
+        account: ADA,
+        list: {
+          rooms: [{ ...roomSummary('!r:x'), can_start_meeting: can }],
+          spaces: [],
+          invitations: [],
+        },
+      },
+    });
+
+  it('should let a meeting start where the room says it can', () => {
+    expect(canStartMeeting(withRoom(true), ADA, '!r:x')).toBe(true);
+  });
+
+  it('should not let a meeting start where the room says it can’t', () => {
+    expect(canStartMeeting(withRoom(false), ADA, '!r:x')).toBe(false);
+  });
+
+  it('should not let a meeting start in a room the account doesn’t know', () => {
+    expect(canStartMeeting(withRoom(true), ADA, '!other:x')).toBe(false);
   });
 });

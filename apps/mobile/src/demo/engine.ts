@@ -43,6 +43,7 @@ import {
   demoSessions,
   demoSource,
   demoThreads,
+  demoWidgetPermissions,
   demoWidgets,
   seedEvents,
   GENERAL,
@@ -152,17 +153,12 @@ export function answer(
         },
       ];
     case 'ListWidgets':
-      return [
-        {
-          type: 'Widgets',
-          data: {
-            account: command.data.account,
-            room_id: command.data.room_id,
-            widgets:
-              command.data.room_id === GENERAL ? demoWidgets() : { widgets: [], can_add: true },
-          },
-        },
-      ];
+      return [roomWidgets(command.data.account, command.data.room_id)];
+    // A room's widgets come with its timeline, as the engine sends them.
+    case 'OpenTimeline':
+      return command.data.key.thread === null
+        ? [roomWidgets(command.data.account, command.data.key.room_id)]
+        : [];
     case 'ViewSource':
       return [
         {
@@ -451,6 +447,92 @@ export function answer(
   }
 }
 
+/** A room's widgets as the engine reports them: #general's three, none elsewhere. */
+function roomWidgets(account: string, roomId: string): EngineEvent {
+  return {
+    type: 'Widgets',
+    data: {
+      account,
+      room_id: roomId,
+      widgets: roomId === GENERAL ? demoWidgets() : { widgets: [], can_add: true },
+    },
+  };
+}
+
+/** The harmless page every demo widget shows: the demo has no widget servers. */
+export const DEMO_WIDGET_PAGE = 'https://example.org/';
+
+/** A widget run's start in the demo: what it reports, and whether it then waits. */
+export interface WidgetRunStart {
+  events: EngineEvent[];
+  /** Runs until answered to the end or cancelled; else it finishes, with `error` if given. */
+  waits: boolean;
+  error?: string;
+}
+
+/**
+ * How the demo starts a widget run (`RunWidget`, `StartMeeting`, `OpenIntegrations`); `null` for
+ * any other command. In the browser it opens the widget's address; in the app it shows the
+ * demo's page: a meeting as itself, another widget over the widget API asking for permissions
+ * (`demoWidgetPermissions`), the integration manager after its terms.
+ */
+export function widgetRun(command: Command, request: RequestId): WidgetRunStart | null {
+  switch (command.type) {
+    case 'RunWidget': {
+      const widget = demoWidgets().widgets.find((w) => w.id === command.data.widget_id);
+
+      if (command.data.room_id !== GENERAL || !widget)
+        return { events: [], waits: false, error: 'no such widget' };
+
+      if (command.data.browser)
+        return { events: [{ type: 'OpenUrl', data: { request, url: widget.url } }], waits: false };
+      const bridge = widget.meeting === null ? 'WidgetApi' : 'None';
+      const page = { url: DEMO_WIDGET_PAGE, title: widget.name, bridge } as const;
+      const events: EngineEvent[] = [{ type: 'WidgetPage', data: { request, page } }];
+
+      if (widget.meeting === null)
+        events.push({
+          type: 'WidgetPermissions',
+          data: { request, question: 1, widget: widget.name, permissions: demoWidgetPermissions() },
+        });
+
+      return { events, waits: true };
+    }
+
+    case 'StartMeeting':
+      if (command.data.browser)
+        return {
+          events: [{ type: 'OpenUrl', data: { request, url: DEMO_WIDGET_PAGE } }],
+          waits: false,
+        };
+
+      return {
+        events: [
+          {
+            type: 'WidgetPage',
+            data: { request, page: { url: DEMO_WIDGET_PAGE, title: 'Jitsi', bridge: 'None' } },
+          },
+        ],
+        waits: true,
+      };
+    case 'OpenIntegrations':
+      return {
+        events: [{ type: 'IntegrationTerms', data: { request, policies: POLICIES } }],
+        waits: true,
+      };
+    default:
+      return null;
+  }
+}
+
+/** What a demo widget run reports after `answer`: the integration manager once agreed to. */
+export function widgetAnswered(answer: Answer, request: RequestId): EngineEvent[] {
+  if (answer.type !== 'Agree') return [];
+  const page = { url: DEMO_WIDGET_PAGE, title: 'Integrations', bridge: 'Integrations' } as const;
+
+  return [{ type: 'WidgetPage', data: { request, page } }];
+}
+
 /**
  * The steps a long-running sign-in command reports first, in the demo, before it waits for an
  * answer (or a cancel): what its screen shows at the start.
@@ -515,6 +597,11 @@ export function nextAsked(answer: Answer, request: RequestId): EngineEvent[] {
         },
       ];
     case 'Continue':
+    // Widget runs' answers (`widgetAnswered`).
+    case 'WidgetMessage':
+    case 'WidgetPermissions':
+    case 'WidgetLoading':
+    case 'WidgetLoaded':
       return [];
   }
 }
@@ -666,6 +753,8 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
   const lists = new Map<string, RoomList>();
   /** Sign-ins waiting for an answer or a cancel. */
   const waiting = new Set<RequestId>();
+  /** Widget runs showing their page, until cancelled. */
+  const widgetRuns = new Set<RequestId>();
   /** Drafts kept as the engine's store keeps them, for the run of the demo. */
   const drafts = new Map<string, Draft>();
   /** What the server holds to send later, by account (a scene's own list included). */
@@ -753,6 +842,7 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
     pinned: [],
     can_pin: true,
     saved: [],
+    can_start_meeting: false,
     can_rename: true,
     can_change_settings: true,
     knocks: 0,
@@ -1316,6 +1406,33 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
 
     if (command.type === 'FetchGif') {
       finish(request, 'not in the demo');
+
+      return;
+    }
+
+    // Widget runs show their page until the app cancels them.
+    const run = widgetRun(command, request);
+
+    if (run !== null) {
+      for (const event of run.events) engine.emit(event);
+
+      if (run.waits) widgetRuns.add(request);
+      else finish(request, run.error);
+
+      return;
+    }
+
+    if (command.type === 'Answer' && widgetRuns.has(command.data.request)) {
+      for (const event of widgetAnswered(command.data.answer, command.data.request))
+        engine.emit(event);
+      finish(request);
+
+      return;
+    }
+
+    if (command.type === 'Cancel' && widgetRuns.delete(command.data)) {
+      finish(command.data, 'cancelled');
+      finish(request);
 
       return;
     }

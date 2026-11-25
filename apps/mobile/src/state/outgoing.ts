@@ -22,8 +22,11 @@ export interface SendPlan {
   composer: ComposerState;
   /** What to tell the user instead, when the draft was a command that can't be done. */
   problem?: SendProblem;
-  /** Where the app goes once the commands worked (a room joined, a room left). */
-  after?: 'stay' | 'joined' | 'left';
+  /**
+   * Where the app goes once the commands worked (a room joined, a room left), or what it opens
+   * (`meeting`: the widget screen starting a meeting, with no command of its own).
+   */
+  after?: 'stay' | 'joined' | 'left' | 'meeting';
 }
 
 /**
@@ -35,12 +38,15 @@ export type SendProblem =
   | { type: 'unknown'; name: string }
   | { type: 'usage'; name: string; args: Key }
   | { type: 'spoiler'; name: string }
-  | { type: 'pills' };
+  | { type: 'pills' }
+  /** `/meet` where the room can't start a meeting. */
+  | { type: 'no_meetings' };
 
 /** The text message a draft sends: its own text, or what its command makes of it. */
 type DraftMessage =
   | { type: 'message'; message: Outgoing | null }
   | { type: 'command'; command: Command; after: 'stay' | 'joined' | 'left' }
+  | { type: 'meet' }
   | { type: 'problem'; problem: SendProblem };
 
 function draftMessage(composer: ComposerState, account: AccountId, key: TimelineKey): DraftMessage {
@@ -60,6 +66,8 @@ function draftMessage(composer: ComposerState, account: AccountId, key: Timeline
       return { type: 'message', message: slash.message };
     case 'command':
       return { type: 'command', command: slash.command, after: slash.after };
+    case 'meet':
+      return slash;
     case 'unknown':
     case 'usage':
     case 'spoiler':
@@ -76,7 +84,13 @@ function draftMessage(composer: ComposerState, account: AccountId, key: Timeline
  * An edit sends `Edit` instead, unless the text is empty or unchanged; either way the draft set
  * aside for it comes back.
  */
-export function planSend(composer: ComposerState, account: AccountId, key: TimelineKey): SendPlan {
+export function planSend(
+  composer: ComposerState,
+  account: AccountId,
+  key: TimelineKey,
+  /** Whether the room can start a meeting (`RoomSummary::can_start_meeting`), for `/meet`. */
+  canStartMeeting = false,
+): SendPlan {
   if (composer.editing) {
     const text = outgoingText(composer.draft, composer.pills ?? []);
 
@@ -112,6 +126,17 @@ export function planSend(composer: ComposerState, account: AccountId, key: Timel
   const drafted = draftMessage(composer, account, key);
 
   if (drafted.type === 'problem') return { commands: [], composer, problem: drafted.problem };
+
+  if (drafted.type === 'meet') {
+    // The meeting opens in the draft's place; where none can start, the draft stays.
+    if (!canStartMeeting) return { commands: [], composer, problem: { type: 'no_meetings' } };
+
+    return {
+      commands: [],
+      composer: { ...composer, draft: '', pills: [], selection: undefined },
+      after: 'meeting',
+    };
+  }
 
   if (drafted.type === 'command') {
     // The command acts in the draft's place; the reply and attachments wait for the next send.
@@ -173,6 +198,7 @@ export function scheduleProblem(
     case 'problem':
       return drafted.problem;
     case 'command':
+    case 'meet':
       return { type: 'command' };
     case 'message':
       return drafted.message ? null : { type: 'nothing' };

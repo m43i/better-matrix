@@ -195,27 +195,9 @@ Date: 2026-11-22
     server filtering by URL in the clear, the device searching six pages in encrypted rooms.
     An open Threads or Files panel follows the room shown (`State::sync_side`, once per room);
     a list that fails to load shows as empty, with a notice.
-- **Widgets:** web apps pinned to a room as state, keyed by widget ID: `im.vector.modular.widgets`
-  (what Element writes, and this app) and `m.widget` (`matrix_core::widgets`), read from the
-  server's room state each time the list is asked for (the room list's sliding sync doesn't
-  bring widget state, and a change just sent may not have come back through sync). Listed by name
-  (`Command::ListWidgets`, `Event::Widgets`): `can_add` when the user's power level allows the
-  type adding writes, each widget's `can_remove` when it allows every type that widget is pinned
-  as. A write that succeeded counts even when reading the list again fails (it is tried three
-  times, a second apart), so a retry doesn't add a second widget. Rune has no web view and phones keep to the platform's own views, so a widget opens in
-  the browser (desktop: `Tx::open_url`; phones: `Linking.openURL`), its URL's template variables
-  filled in for the user and room (`$matrix_user_id`, `$matrix_room_id`, `$matrix_display_name`,
-  `$matrix_avatar_url`, `$matrix_widget_id`, the MSC2873 client ID, theme and language, the
-  device ID, the homeserver, then the widget's own `data`), each URL-encoded as Element does.
-  The panel says the browser learns the user ID and display name. A Jitsi widget opens its
-  meeting (`https://{domain}/{conferenceId}`) rather than Element's wrapper page, which works
-  only inside Element. A widget whose URL isn't `http` or `https` isn't listed.
-  - Adding (`Command::AddWidget`, an `m.custom` widget with a name, the host when blank) and
-    removing (`Command::RemoveWidget`, an empty state event under every type it is pinned as,
-    after a confirmation) answer with the room's widgets, read again from the server. The desktop adds through the room form (`RoomForm::AddWidget`); phones
-    through `app/add-widget.tsx`.
-  - Not supported: the widget API (MSC2762) and integration managers (bots, stickers), which
-    need an embedded web view.
+- **Widgets:** web apps pinned to a room as state, listed from its Info panel
+  (`SidePanel::Widgets`): listing, adding, removing, running them, meetings and integration
+  managers are in [0012](0012-widgets-and-integrations.md).
 - **Members:**
   - The room header shows the name, then the topic's first non-blank line (its Markdown
     formatted, links pressable; nothing without a topic), small and truncated

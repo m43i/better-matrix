@@ -37,5 +37,8 @@
     "oxlint": "1.94.0",
     "turbo": "2.11.11"
   },
-  "packageManager": "bun@1.4.4"
+  "packageManager": "bun@1.4.4",
+  "patchedDependencies": {
+    "react-native-webview@14.0.1": "patches/react-native-webview@14.0.1.patch"
+  }
 }

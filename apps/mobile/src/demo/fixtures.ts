@@ -34,6 +34,9 @@ import type {
   SpaceSummary,
   ThreadInfo,
   TimelineEntry,
+  Meeting,
+  Widget,
+  WidgetPermission,
   Widgets,
 } from '@better-matrix/matrix-native/types';
 
@@ -395,6 +398,8 @@ function room(
     pinned: id === GENERAL ? [DEMO_THREAD.root, TEST_PLAN] : [],
     can_pin: true,
     saved: id === GENERAL ? [TEST_PLAN] : [],
+    // The demo's homeserver names a Jitsi server; #general has a meeting pinned, #design none.
+    can_start_meeting: id === GENERAL || id === DESIGN,
     can_rename: true,
     priority: 'Normal',
     marked_unread: false,
@@ -1405,7 +1410,14 @@ export function typingPeople(): Person[] {
 
 /** The widgets pinned to #general: a board, a dashboard and a Jitsi meeting. */
 export function demoWidgets(): Widgets {
-  const widget = (id: string, name: string, kind: string, host: string, path: string) => ({
+  const widget = (
+    id: string,
+    name: string,
+    kind: string,
+    host: string,
+    path: string,
+    meeting: Meeting | null = null,
+  ): Widget => ({
     id,
     name,
     kind,
@@ -1413,16 +1425,41 @@ export function demoWidgets(): Widgets {
     host,
     creator: GRACE,
     can_remove: true,
+    meeting,
   });
 
   return {
     widgets: [
       widget('board', 'Sprint board', 'm.custom', 'board.example.org', '/team'),
       widget('grafana', 'Server dashboard', 'm.grafana', 'grafana.example.org', '/d/1'),
-      widget('standup', 'Standup', 'jitsi', 'meet.example.org', '/TeamStandup'),
+      widget('standup', 'Standup', 'jitsi', 'meet.example.org', '/TeamStandup', 'Jitsi'),
     ],
     can_add: true,
   };
+}
+
+/** What the demo's sprint board asks to do when it runs: one of each kind it can name. */
+export function demoWidgetPermissions(): WidgetPermission[] {
+  return [
+    {
+      capability: 'org.matrix.msc2762.receive.event:m.room.message',
+      kind: 'ReadEvents',
+      subject: 'm.room.message',
+    },
+    {
+      capability: 'org.matrix.msc2762.send.event:m.room.message#m.text',
+      kind: 'SendEvents',
+      subject: 'm.room.message#m.text',
+    },
+    {
+      capability: 'org.matrix.msc2762.receive.state_event:m.room.member',
+      kind: 'ReadState',
+      subject: 'm.room.member',
+    },
+    { capability: 'org.matrix.msc4039.download_file', kind: 'DownloadFiles', subject: null },
+    { capability: 'io.element.requires_client', kind: 'StayInApp', subject: null },
+    { capability: 'town.robin.msc3846.turn_servers', kind: 'Other', subject: null },
+  ];
 }
 
 /** A message's source, as an encrypted room's event reads decrypted and as it was sent. */

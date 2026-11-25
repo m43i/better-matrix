@@ -30,8 +30,9 @@ contents:
   - src: LICENSE
     dst: /usr/share/licenses/better-matrix/LICENSE
 
-# What the binary links (ALSA, GLib, GStreamer for video), and what it loads when there (keyboard
-# maps, Wayland, the GPU through Vulkan, PipeWire for screen sharing, GStreamer's codecs).
+# What the binary links (ALSA, GLib, GStreamer for video, WebKitGTK and GTK 3 for the widget
+# window), and what it loads when there (keyboard maps, Wayland, the GPU through Vulkan, PipeWire
+# for screen sharing, GStreamer's codecs).
 overrides:
   # Built on Ubuntu 22.04: glibc 2.35 or later (RHEL 9's 2.34 is too old).
   deb:
@@ -44,6 +45,8 @@ overrides:
       # playbin, the player itself, and MP4, WebM and VP8/VP9.
       - gstreamer1.0-plugins-base
       - gstreamer1.0-plugins-good
+      - libwebkit2gtk-4.1-0
+      - libgtk-3-0t64 | libgtk-3-0
     recommends:
       # H.264 and HEVC, which phones record.
       - gstreamer1.0-libav
@@ -64,6 +67,9 @@ overrides:
       - libgstvideo-1.0.so.0()(64bit)
       - (gstreamer1-plugins-base or gstreamer-plugins-base)
       - (gstreamer1-plugins-good or gstreamer-plugins-good)
+      # WebKitGTK and GTK 3 by their libraries: Fedora and openSUSE name the packages apart.
+      - libwebkit2gtk-4.1.so.0()(64bit)
+      - libgtk-3.so.0()(64bit)
     recommends:
       # H.264 and AAC, which phones record, by the GStreamer elements both distributions'
       # packages provide; a weak dependency nothing provides is skipped.
@@ -85,5 +91,7 @@ overrides:
       - libxkbcommon
       - wayland
       - vulkan-icd-loader
+      - webkit2gtk-4.1
+      - gtk3
     suggests:
       - pipewire

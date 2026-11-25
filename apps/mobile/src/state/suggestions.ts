@@ -133,11 +133,15 @@ export function suggestionsFor(
       return [...custom, ...standard].slice(0, SUGGESTIONS);
     }
 
-    case 'command':
-      return commandSuggestions(query).map((command) => ({
+    case 'command': {
+      const canStartMeeting =
+        data.rooms.find((r) => r.room_id === roomId)?.can_start_meeting ?? false;
+
+      return commandSuggestions(query, canStartMeeting).map((command) => ({
         type: 'command',
         key: `command:${command.name}`,
         command,
       }));
+    }
   }
 }

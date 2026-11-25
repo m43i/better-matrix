@@ -76,6 +76,11 @@ custom_notifications: boolean,
  */
 call: RoomCall, 
 /**
+ * Whether the user can start a meeting here ([`Command::StartMeeting`](crate::Command::StartMeeting)):
+ * the homeserver names a Jitsi server and the user may pin widgets.
+ */
+can_start_meeting: boolean, 
+/**
  * When the room's latest event came, in milliseconds since the epoch, as the store keeps
  * it across restarts (the room list's order, before any timeline opens). `None` until the
  * SDK has worked it out.

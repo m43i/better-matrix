@@ -13,7 +13,8 @@ export function DemoNavigation({ scene }: { scene: SceneName }) {
   useEffect(() => {
     if (!ready) return;
     const definition: Scene = scenes[scene];
-    const steps = definition.routes ?? [];
+    const routes = definition.routes;
+    const steps = Array.isArray(routes) ? routes : (routes?.() ?? []);
     let cancelled = false;
     void (async () => {
       // Every scene starts from Home, whatever the last one left open.

@@ -2,7 +2,8 @@
 // its text, as Element's and the desktop's composers do. Some send a message of another kind
 // (`/me` an emote, `/shrug` text after a shrug, `/plain` text without formatting, `/spoiler`
 // hidden text); the rest act on the room or account (`/invite`, `/join`, `/leave`, `/topic`,
-// `/nick`). `//text` sends `/text`. A command that acts reads its arguments as plain words, so
+// `/nick`), or start a meeting in the app (`/meet`, only where the room can start one). `//text`
+// sends `/text`. A command that acts reads its arguments as plain words, so
 // it refuses a spoiler among them: what it sets is shown to everyone. A slash inside a pill (a
 // spoiler's words) is no command. Decided as data here, sent by `state/actions/composer.ts`.
 
@@ -87,6 +88,7 @@ export const COMMANDS: readonly SlashCommandInfo[] = [
     args: 'mobile.composer.command_args_name',
     about: 'mobile.composer.command_nick',
   },
+  { name: 'meet', args: null, about: 'mobile.widgets.command_meet' },
 ];
 
 /** The faces the text commands put before the message. */
@@ -100,11 +102,16 @@ const FACES = new Map([
 /** The commands that send a message (the faces too); the rest act on the room or account. */
 const SENDS_MESSAGE = new Set(['me', 'plain', 'spoiler', ...FACES.keys()]);
 
-/** The commands that start with what was typed after `/`. */
-export function commandSuggestions(query: string): SlashCommandInfo[] {
+/**
+ * The commands that start with what was typed after `/`; `/meet` only where the room can start
+ * a meeting (`RoomSummary::can_start_meeting`).
+ */
+export function commandSuggestions(query: string, canStartMeeting = false): SlashCommandInfo[] {
   const lower = query.toLowerCase();
 
-  return COMMANDS.filter((command) => command.name.startsWith(lower));
+  return COMMANDS.filter(
+    (command) => command.name.startsWith(lower) && (canStartMeeting || command.name !== 'meet'),
+  );
 }
 
 /** What a draft starting with a command does. */
@@ -113,6 +120,8 @@ export type Slash =
   | { type: 'message'; message: Outgoing }
   /** Send this command; `after` says where the app goes once it worked. */
   | { type: 'command'; command: Command; after: 'stay' | 'joined' | 'left' }
+  /** Start a meeting in the app (`/meet`), where the room can. */
+  | { type: 'meet' }
   /** No such command. */
   | { type: 'unknown'; name: string }
   /** The command needs something it wasn't given (`/invite` without a person). */
@@ -260,6 +269,8 @@ export function slashOf(
             after: 'stay',
           }
         : usage();
+    case 'meet':
+      return { type: 'meet' };
     default:
       return { type: 'unknown', name };
   }
