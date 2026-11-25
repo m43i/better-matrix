@@ -869,11 +869,18 @@ fn main() {
     // taskbar and Alt+Tab, loaded at the size it shows.
     #[cfg(target_os = "windows")]
     rune::set_app_icon_resource(APP_ICON);
+    // The taskbar button (Windows) or Dock icon (macOS) counts what wants attention; each
+    // native window made shows the count again.
+    let taskbar = platform::Taskbar::default();
     let app = App::new(spec())
         .on_focus(|s, focused, _| s.focus_changed(focused))
+        .on_window({
+            let taskbar = taskbar.clone();
+            move |window| taskbar.attach(window)
+        })
         // Permalinks the system opens with the app: every link on macOS, `scheme://` ones from a
         // later launch on Linux and Windows.
-        .on_open_url(|s, url, tx| state::navigate_now(s, tx, |s| s.open_permalink(url)))
+        .on_open_url(|s, url, tx| state::navigate_now(s, tx, |s| s.open_system_link(url)))
         // A later launch on Linux or Windows: the links it handed on open, and Rune brings the
         // window forward.
         .on_reopen(|s, _, tx| {
@@ -953,7 +960,7 @@ fn main() {
             let shell_scratch = scratch.clone();
             let stopped = engine.stopped();
             app.init(move || {
-                let shell = Shell::native(handle, prefs, shell_scratch).with_handoff(handoff);
+                let shell = Shell::native(handle, prefs, shell_scratch, taskbar).with_handoff(handoff);
                 let mut state = State::new(engine, shell, settings);
                 // They wait for the first account's rooms.
                 links.iter().for_each(|link| state.open_permalink(link));

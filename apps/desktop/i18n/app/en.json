@@ -590,6 +590,8 @@
   "status_message.meeting": "In a meeting",
   "status_message.sick": "Out sick",
   "status_message.remote": "Working remotely",
+  "taskbar.badge.one": "{{count}} unread notification",
+  "taskbar.badge.other": "{{count}} unread notifications",
   "thread.close": "Close thread",
   "thread.last_reply": "Last reply on {{date}} at {{time}}",
   "thread.last_reply_today": "Last reply today at {{time}}",

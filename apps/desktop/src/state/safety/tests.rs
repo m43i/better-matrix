@@ -926,6 +926,16 @@ fn invitations_from_someone_ignored_should_leave_every_list_without_being_declin
 }
 
 #[test]
+fn an_invitation_from_someone_ignored_should_leave_the_taskbar_badge_at_once() {
+    let (mut s, mut commands) = state();
+    crate::demo::invitation(&mut s);
+    drain(&mut commands);
+    let before = s.shell.badge();
+    s.set_safety(&ada(), SafetyChange::Ignore { user_id: "@grace:example.org".into(), ignored: true });
+    assert_eq!(s.shell.badge() + 1, before);
+}
+
+#[test]
 fn a_clip_should_stop_once_its_sender_is_ignored() {
     let (mut s, _) = state();
     let clip = matrix_core::Attachment {

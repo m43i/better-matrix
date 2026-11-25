@@ -227,9 +227,21 @@ fn strip_prefix_ignoring_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str
 
 /// A shareable message link, with a joined member's server as a routing hint (also for v12 IDs).
 pub fn message_link(room_id: &str, event_id: &str, account: &str) -> String {
-    let encode = |text: &str| url::form_urlencoded::byte_serialize(text.as_bytes()).collect::<String>();
-    let via = account.split_once(':').map(|(_, server)| format!("?via={}", encode(server))).unwrap_or_default();
-    format!("https://matrix.to/#/{}/{}{via}", encode(room_id), encode(event_id))
+    format!("https://matrix.to/#/{}/{}{}", encode(room_id), encode(event_id), via(account))
+}
+
+/// A link to a room by its ID, with a joined member's server as a routing hint.
+pub fn room_link(room_id: &str, account: &str) -> String {
+    format!("https://matrix.to/#/{}{}", encode(room_id), via(account))
+}
+
+fn encode(text: &str) -> String {
+    url::form_urlencoded::byte_serialize(text.as_bytes()).collect()
+}
+
+/// `?via=` the server of `account`, a member's user ID; nothing for one without a server.
+fn via(account: &str) -> String {
+    account.split_once(':').map(|(_, server)| format!("?via={}", encode(server))).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -272,6 +284,13 @@ mod tests {
                 vector["translation"]
             );
         }
+    }
+
+    #[test]
+    fn a_room_link_should_read_back_as_its_room() {
+        let link = Permalink::parse(&room_link("!abc:example.org", "@me:example.org"));
+        let target = LinkTarget::Room { room: "!abc:example.org".into(), event: None };
+        assert_eq!(link.map(|link| (link.target, link.via)), Some((target, vec!["example.org".to_owned()])));
     }
 
     #[test]

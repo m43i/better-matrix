@@ -29,6 +29,17 @@ pub fn wants_attention(room: &RoomSummary) -> bool {
         }
 }
 
+/// How many messages in a room count towards the taskbar badge: those that want attention
+/// (every unread one, or only mentions when the room notifies for mentions only or is muted),
+/// and at least one for a room marked unread.
+pub fn attention_count(room: &RoomSummary) -> u64 {
+    let messages = match room.notifications {
+        NotificationMode::AllMessages => room.unread.max(room.mentions),
+        NotificationMode::MentionsOnly | NotificationMode::Mute => room.mentions,
+    };
+    if room.marked_unread { messages.max(1) } else { messages }
+}
+
 /// What a room showed before a change sent to the server, to show again if it is refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RoomUndo {
@@ -1144,6 +1155,13 @@ impl AccountData {
             || [RoomKind::Group, RoomKind::Direct]
                 .into_iter()
                 .any(|kind| self.rooms_in(scope, kind).any(wants_attention))
+    }
+
+    /// What this account adds to the taskbar badge: its rooms' [`attention_count`], and one for
+    /// each invitation shown.
+    pub fn attention(&self) -> u64 {
+        let rooms: u64 = self.rooms.iter().map(attention_count).sum();
+        rooms + self.shown_invitations().count() as u64
     }
 
     pub fn timeline(&self, key: &TimelineKey) -> Option<&RoomTimeline> {
@@ -2284,6 +2302,29 @@ mod tests {
     fn a_mention_should_draw_attention_even_without_unread_messages() {
         let room = RoomSummary { unread: 0, mentions: 1, ..room("!m") };
         assert!(wants_attention(&room));
+    }
+
+    #[test]
+    fn a_room_should_count_its_unread_messages_towards_the_badge() {
+        assert_eq!(attention_count(&RoomSummary { unread: 3, ..room("!r") }), 3);
+    }
+
+    #[test]
+    fn a_mentions_only_room_should_count_only_its_mentions_towards_the_badge() {
+        let room = RoomSummary { unread: 5, mentions: 1, notifications: NotificationMode::MentionsOnly, ..room("!m") };
+        assert_eq!(attention_count(&room), 1);
+    }
+
+    #[test]
+    fn a_muted_room_without_mentions_should_count_nothing_towards_the_badge() {
+        let muted = RoomSummary { unread: 5, notifications: NotificationMode::Mute, ..room("!m") };
+        assert_eq!(attention_count(&muted), 0);
+    }
+
+    #[test]
+    fn a_room_marked_unread_should_count_at_least_one_towards_the_badge() {
+        let room = RoomSummary { unread: 0, marked_unread: true, notifications: NotificationMode::Mute, ..room("!m") };
+        assert_eq!(attention_count(&room), 1);
     }
 
     #[test]

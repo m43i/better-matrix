@@ -21,6 +21,8 @@ mod developer;
 pub use developer::SourceView;
 mod drafts;
 mod edit_history;
+mod frequent;
+pub use frequent::Visits;
 mod gifs;
 mod jump;
 mod link_previews;
@@ -942,6 +944,8 @@ pub struct State {
     last_audio_id: u64,
     /// The [`Preview::visit`] of the item shown last.
     preview_visits: u64,
+    /// How often each room was opened on this device, for the jump list.
+    visits: Visits,
     /// The preview's item changed: the next `poll` scrolls the strip to its thumbnail.
     reveal_thumbnail: bool,
     /// Accounts whose sidebar layout changed while a save was under way.
@@ -1091,6 +1095,7 @@ impl State {
             scratch_files: HashMap::new(),
             last_audio_id: 0,
             preview_visits: 0,
+            visits: shell.visits(),
             reveal_thumbnail: false,
             layout_unsaved: HashSet::new(),
             clock_shown: None,
@@ -1382,6 +1387,10 @@ impl State {
                 self.drafts.retain(|(account, _), _| *account != id);
                 self.drafts_asked.retain(|(account, _)| *account != id);
                 self.kept_drafts.forget(&id);
+                // Signed out, its rooms leave the jump list's history; suspended, its data stays.
+                if !self.suspended.contains(&id) && self.visits.forget(&id) {
+                    self.shell.save_visits(self.visits.clone());
+                }
                 if matches!(&self.modal, Some(Modal::Saved(account)) if *account == id) {
                     self.modal = None;
                 }
@@ -1816,6 +1825,7 @@ impl State {
             Event::PlacesFound { request, places } => self.places_found(request, places),
         }
         self.remember_account();
+        self.show_taskbar();
         if !location.is_current(self) {
             tx.settle();
         }
@@ -1900,6 +1910,7 @@ impl State {
     pub fn answer_call(&mut self, account: &AccountId, room_id: &str, video: bool) {
         self.rings.retain(|ring| !(ring.account == *account && ring.room_id == room_id));
         self.sound_ring();
+        self.show_taskbar();
         self.open_room(account, room_id);
         let command = Command::AnswerCall { account: account.clone(), room_id: room_id.to_owned(), video };
         self.dispatch(command, Purpose::Call);
@@ -1908,6 +1919,7 @@ impl State {
     pub fn decline_call(&mut self, account: &AccountId, room_id: &str) {
         self.rings.retain(|ring| !(ring.account == *account && ring.room_id == room_id));
         self.sound_ring();
+        self.show_taskbar();
         self.dispatch(Command::DeclineCall { account: account.clone(), room_id: room_id.to_owned() }, Purpose::Call);
     }
 
@@ -2427,6 +2439,7 @@ impl State {
                 self.mark_timeline_read(account, key);
             }
         }
+        self.show_taskbar();
     }
 
     /// Called every frame: loads the page of history before the oldest message of a timeline
@@ -3958,6 +3971,18 @@ impl State {
 
     // ----- navigation ----------------------------------------------------------------------
 
+    /// Shows the taskbar what wants attention in every account and the calls ringing (the
+    /// badge), and the rooms opened most (the jump list): after every engine event, and after
+    /// each local change to what is read, marked, notifies or was opened. The shell passes on
+    /// only changes.
+    fn show_taskbar(&self) {
+        let count = self.accounts.iter().map(AccountData::attention).sum::<u64>() + self.rings.len() as u64;
+        self.shell.show_badge(u32::try_from(count).unwrap_or(u32::MAX));
+        if self.shell.offers_jump_list() {
+            self.shell.show_jump_list(self.jump_list());
+        }
+    }
+
     fn remember_account(&mut self) {
         // A remembered account may still be restoring. Other accounts arriving first must
         // neither replace it on screen nor overwrite the saved choice.
@@ -4060,6 +4085,18 @@ impl State {
         let Some(account) = self.nav.account.clone() else { return };
         self.unmark(&account, room_id);
         self.accounts.mark_read(&account, room_id);
+        let direct = self
+            .accounts
+            .get(&account)
+            .and_then(|data| data.room(room_id))
+            .map(|room| room.kind == matrix_core::RoomKind::Direct);
+        if self.shell.offers_jump_list()
+            && let Some(direct) = direct
+        {
+            self.visits.visit(&account, room_id, direct);
+            self.shell.save_visits(self.visits.clone());
+        }
+        self.show_taskbar();
         if self.nav.rooms.get(&account).map(String::as_str) != Some(room_id) {
             self.nav.threads.remove(&account);
         }
@@ -4345,6 +4382,7 @@ impl State {
         self.popover = None;
         let Some(account) = self.nav.account.clone() else { return };
         self.accounts.set_notifications(&account, room_id, mode);
+        self.show_taskbar();
         let command = Command::SetNotificationMode { account, room_id: room_id.to_owned(), mode };
         self.dispatch(command, Purpose::NotificationMode);
     }
@@ -4352,6 +4390,7 @@ impl State {
     /// Sets when an account's rooms notify unless they set their own mode.
     pub fn set_default_notifications(&mut self, account: &AccountId, mode: NotificationMode) {
         self.accounts.set_default_notifications(account, mode);
+        self.show_taskbar();
         let command = Command::SetDefaultNotificationMode { account: account.clone(), mode };
         self.dispatch(command, Purpose::NotificationMode);
     }
@@ -4364,6 +4403,7 @@ impl State {
             return;
         }
         self.accounts.set_marked(account, room_id, false);
+        self.show_taskbar();
         let command = Command::SetUnread { account: account.clone(), room_id: room_id.to_owned(), unread: false };
         let undo = accounts::RoomUndo::Mark(true);
         self.dispatch(command, Purpose::RoomMark { account: account.clone(), room_id: room_id.to_owned(), undo });
@@ -4397,6 +4437,7 @@ impl State {
                 accounts::RoomUndo::Mark(before.marked_unread),
             )
         };
+        self.show_taskbar();
         self.dispatch(command, Purpose::RoomMark { account, room_id: id, undo });
     }
 

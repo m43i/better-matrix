@@ -504,6 +504,63 @@ fn a_notification_for_the_open_room_should_be_shown_when_the_window_is_in_the_ba
 }
 
 #[test]
+fn the_taskbar_badge_should_count_unread_messages_in_every_account() {
+    let (mut s, _) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x", "!two:x"], Vec::new());
+    with_rooms(&mut s, &AccountId::new("@b:example.org"), &["!three:x"], Vec::new());
+    assert_eq!(s.shell.badge(), 6);
+}
+
+#[test]
+fn opening_a_room_should_take_its_messages_off_the_taskbar_badge() {
+    let (s, _) = recording_state();
+    assert_eq!(s.shell.badge(), 2);
+}
+
+#[test]
+fn a_muted_room_should_leave_the_taskbar_badge_alone() {
+    let (mut s, _) = recording_state();
+    s.set_notification_mode("!two:x", Some(NotificationMode::Mute));
+    assert_eq!(s.shell.badge(), 0);
+}
+
+#[test]
+fn the_jump_list_should_offer_the_rooms_opened_most() {
+    let (mut s, _) = recording_state();
+    s.select_room("!two:x");
+    s.select_room("!two:x");
+    let item = |room: &str| rune::JumpItem::new(room, matrix_core::permalinks::room_link(room, "@a:example.org"));
+    let expected = rune::JumpList::new().category("Rooms", vec![item("!two:x"), item("!one:x")]);
+    assert_eq!(s.shell.jump_list(), expected);
+}
+
+#[test]
+fn a_room_two_accounts_share_should_show_once_in_the_jump_list_naming_neither() {
+    let (mut s, _) = recording_state();
+    let other = AccountId::new("@b:example.org");
+    with_rooms(&mut s, &other, &["!one:x"], Vec::new());
+    s.switch_account(&other);
+    s.select_room("!one:x");
+    // Named for neither account: the link opens whichever has the room open first.
+    let item = rune::JumpItem::new("!one:x", matrix_core::permalinks::room_link("!one:x", "@b:example.org"));
+    assert_eq!(s.shell.jump_list(), rune::JumpList::new().category("Rooms", vec![item]));
+}
+
+#[test]
+fn signing_out_should_forget_the_rooms_opened_in_the_account() {
+    let (mut s, _) = recording_state();
+    apply(&mut s, Event::AccountRemoved(AccountId::new("@a:example.org")));
+    assert_eq!(s.visits, Visits::default());
+}
+
+#[test]
+fn the_jump_list_should_leave_out_rooms_no_longer_joined() {
+    let (mut s, _) = recording_state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!two:x"], Vec::new());
+    assert_eq!(s.shell.jump_list(), rune::JumpList::new());
+}
+
+#[test]
 fn resetting_a_room_should_make_it_follow_the_account_default() {
     let (mut s, _) = state();
     let id = AccountId::new("@a:example.org");
@@ -3990,6 +4047,17 @@ fn answering_a_ring_should_open_its_room_and_answer() {
     s.answer_call(&id, "!one:x", false);
     assert!(s.rings.is_empty() && s.active_room_id() == Some("!one:x"));
     assert!(all_commands(&mut commands).iter().any(|c| matches!(c, Command::AnswerCall { video: false, .. })));
+}
+
+#[test]
+fn a_ringing_call_should_count_on_the_taskbar_badge_until_declined() {
+    let (mut s, _commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    let before = s.shell.badge();
+    apply(&mut s, Event::IncomingCall(Box::new(ring(&id, "!one:x"))));
+    let ringing = s.shell.badge();
+    s.decline_call(&id, "!one:x");
+    assert_eq!((ringing, s.shell.badge()), (before + 1, before));
 }
 
 #[test]

@@ -590,6 +590,8 @@
   "status_message.meeting": "En réunion",
   "status_message.sick": "Malade",
   "status_message.remote": "En télétravail",
+  "taskbar.badge.one": "{{count}} notification non lue",
+  "taskbar.badge.other": "{{count}} notifications non lues",
   "thread.close": "Fermer le fil",
   "thread.last_reply": "Dernière réponse le {{date}} à {{time}}",
   "thread.last_reply_today": "Dernière réponse aujourd'hui à {{time}}",

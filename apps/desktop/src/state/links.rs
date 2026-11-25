@@ -92,6 +92,13 @@ impl State {
         self.look_up_link();
     }
 
+    /// Opens a link the system handed over (the browser, a jump-list pick, a later launch):
+    /// the window comes forward to show it.
+    pub fn open_system_link(&mut self, link: &str) {
+        self.shell.bring_forward();
+        self.open_permalink(link);
+    }
+
     /// The app was launched again while it runs: opens the permalinks that launch handed on.
     pub fn take_handed_links(&self) {
         self.shell.take_handed_links();
