@@ -57,11 +57,12 @@ impl State {
         self.dispatch(command, Purpose::MessageAction);
     }
 
-    /// Shows the messages the account on screen saved, listing them afresh.
+    /// Shows the messages the account on screen saved, listing them afresh, with no search or
+    /// filter.
     pub fn open_saved(&mut self) {
         self.popover = None;
         let Some(account) = self.nav.account.clone() else { return };
-        self.modal = Some(Modal::Saved(account.clone()));
+        self.modal = Some(Modal::Saved(Box::new(super::SavedList::new(account.clone()))));
         self.list_saved(account);
     }
 
@@ -74,8 +75,8 @@ impl State {
 
     /// Lists the saved messages again: after a failure.
     pub fn retry_saved(&mut self) {
-        if let Some(Modal::Saved(account)) = &self.modal {
-            self.list_saved(account.clone());
+        if let Some(list) = self.saved_list() {
+            self.list_saved(list.account.clone());
         }
     }
 
@@ -84,7 +85,7 @@ impl State {
     /// (`AccountData::saved_messages`). After a failure, only Try again lists them, so syncs
     /// don't ask a failing server again and again.
     pub(super) fn saved_changed(&mut self, account: &AccountId) {
-        if matches!(&self.modal, Some(Modal::Saved(shown)) if shown == account)
+        if self.saved_list().is_some_and(|list| list.account == *account)
             && self.accounts.get(account).is_some_and(|data| data.saved_error.is_none() && data.saved_unlisted())
         {
             self.list_saved(account.clone());
@@ -93,7 +94,7 @@ impl State {
 
     /// Opens a saved message of `account` where it was sent: its room, or its thread.
     pub fn open_saved_message(&mut self, account: &AccountId, room_id: &str, thread: Option<&str>, event_id: &str) {
-        self.modal = None;
+        self.close_modal();
         if self.nav.account.as_ref() != Some(account) {
             self.select_account(account);
         }

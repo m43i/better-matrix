@@ -1,6 +1,6 @@
 //! The top bar’s grouped search results, filters and fuzzy match highlights.
 
-use super::components::{media_avatar, popover_panel};
+use super::components::{filter_chip, media_avatar, popover_panel};
 use super::icons;
 use super::people::person_row;
 use super::room::display_name;
@@ -9,7 +9,7 @@ use crate::i18n::{t, tf, tp};
 use crate::state::{AccountData, SearchFilter, SearchStatus, State};
 use matrix_core::search::fuzzy_match;
 use matrix_core::{DirectoryKind, LinkTarget, Permalink, Person, RoomKind, RoomSummary};
-use rune::{Align, Color, El, ScrollSpec, Side, Span, col, el, icon, row, text};
+use rune::{Align, El, ScrollSpec, Side, Span, col, el, icon, row, text};
 
 const RESULTS: usize = 6;
 
@@ -353,23 +353,9 @@ fn filter_row(selected: SearchFilter, p: &Palette) -> El {
                 |filter| {
                     let (key, label) = filter_details(filter);
                     let active = selected == filter;
-                    row()
+                    filter_chip(label, active, p)
                         .key(format!("search-filter-{key}"))
-                        .h(30.0)
-                        .px(10.0)
-                        .gap(6.0)
-                        .center_y()
-                        .radius(6.0)
-                        .fill(if active { p.accent.alpha(0.16) } else { Color::TRANSPARENT })
-                        .border(1.0, if active { p.accent } else { p.divider })
-                        .hover(p.hover)
-                        .role("button")
-                        .focusable(true)
-                        .label(label)
                         .focus_selected(active)
-                        .cursor(rune::Cursor::Pointer)
-                        .child(text(label).font(font::BODY).color(if active { p.accent } else { p.text_muted }))
-                        .children(active.then(|| icon(&icons::CLOSE, 12.0).color(p.accent)))
                         .on_press(move |s: &mut State| s.select_search_filter(filter))
                 },
             ),

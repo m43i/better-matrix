@@ -157,9 +157,13 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         (Some(Popover::Update), _) => rail::update_panel(s, &p).into_iter().collect(),
         _ => Vec::new(),
     };
-    // A select's list belongs to the settings modal, so it goes over the modal, below.
-    let select = match &s.popover {
-        Some(Popover::Select(of)) => Some(settings::select_options(s, of, &p)),
+    // A select's list and the saved messages' filter menu belong to their dialogs, so they go
+    // over the modal, below.
+    let select = match (&s.popover, &s.modal) {
+        (Some(Popover::Select(of)), _) => Some(settings::select_options(s, of, &p).modal(true, State::close_popover)),
+        (_, Some(Modal::Saved(list))) if list.filters_open => {
+            saved::filters(s, list, cx.layout_size("root").unwrap_or([1200.0, 760.0]), &p)
+        }
         _ => None,
     };
     // What a composer suggests for the word being typed sits over it; the field keeps the keys.
@@ -189,7 +193,10 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         Some(Modal::Report(form)) => Some(safety::report(form, &p)),
         Some(Modal::Source(view)) => Some(developer::source(view, &p)),
         Some(Modal::Forward { .. } | Modal::Translate(_)) => message_actions::dialog(s, &p),
-        Some(Modal::Saved(id)) => s.accounts.get(id).map(|account| saved::saved(s, account, &p)),
+        Some(Modal::Saved(list)) => {
+            let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
+            s.accounts.get(&list.account).map(|account| saved::saved(s, list, account, window, &p))
+        }
         Some(Modal::Poll) => Some(poll::form(s, &p)),
         Some(Modal::Location) => Some(location::dialog_for(s, &p)),
         Some(Modal::EditHistory(history)) => Some(edit_history::dialog_for(s, history, &p)),
@@ -234,7 +241,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         );
     }
     if let Some(select) = select {
-        root = root.child(scrim()).child(select.modal(true, State::close_popover));
+        root = root.child(scrim()).child(select);
     }
     if let Some(preview) = preview {
         root = root.child(preview);
