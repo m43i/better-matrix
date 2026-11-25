@@ -529,23 +529,21 @@ fn the_jump_list_should_offer_the_rooms_opened_most() {
     let (mut s, _) = recording_state();
     s.select_room("!two:x");
     s.select_room("!two:x");
-    let item = |room: &str| {
-        rune::JumpItem::new(room, matrix_core::permalinks::room_link(room, "@a:example.org"))
-            .description("@a:example.org")
-    };
+    let item = |room: &str| rune::JumpItem::new(room, matrix_core::permalinks::room_link(room, "@a:example.org"));
     let expected = rune::JumpList::new().category("Rooms", vec![item("!two:x"), item("!one:x")]);
     assert_eq!(s.shell.jump_list(), expected);
 }
 
 #[test]
-fn a_room_two_accounts_share_should_show_once_in_the_jump_list() {
+fn a_room_two_accounts_share_should_show_once_in_the_jump_list_naming_neither() {
     let (mut s, _) = recording_state();
     let other = AccountId::new("@b:example.org");
     with_rooms(&mut s, &other, &["!one:x"], Vec::new());
     s.switch_account(&other);
     s.select_room("!one:x");
-    let titles = format!("{:?}", s.shell.jump_list());
-    assert_eq!(titles.matches("!one:x · ").count(), 1);
+    // Named for neither account: the link opens whichever has the room open first.
+    let item = rune::JumpItem::new("!one:x", matrix_core::permalinks::room_link("!one:x", "@b:example.org"));
+    assert_eq!(s.shell.jump_list(), rune::JumpList::new().category("Rooms", vec![item]));
 }
 
 #[test]

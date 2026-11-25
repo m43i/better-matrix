@@ -190,16 +190,20 @@ Date: 2026-11-22
     window only when the count changes, and again whenever the native window is made.
   - Every notification also flashes the taskbar button (Windows), which stays lit until the
     window comes forward; a window in front doesn't flash.
-  - The jump list offers the five rooms and five direct chats opened most on this device,
-    still joined, under the sidebar's section names, with the account's name when several are
-    signed in. Opens are scored in `select_room` and kept with the device settings: each open
-    adds 1000 to its room and every other room keeps 97% of its score, so rooms used lately and
-    often lead and rooms no longer opened make way (plain counts let old rooms crowd out new
-    ones for good). The 64 highest are kept, never dropping the room just opened. An entry is the
-    room's matrix.to link, so a pick reaches the running app as any link does (`on_open_url`),
-    which brings the window forward. A link names no account, so a room two accounts share
-    shows once and opens like any link to it. The list is replaced at the first call of each
-    run, so a signed-out account's rooms don't linger from an earlier run.
+  - The jump list, the Dock icon's menu on macOS, offers the five rooms and five direct chats
+    opened most on this device, still joined, under the sidebar's section names, with the
+    account's name when several are signed in. Opens are scored in `select_room`: each open adds
+    1000 to its room and every other room keeps 97% of its score, so rooms used lately and often
+    lead and rooms no longer opened make way (plain counts let old rooms crowd out new ones for
+    good). 32 rooms and 32 direct chats are kept apart, so rooms can't push every direct chat
+    out, never dropping the room just opened. They are saved under a prefs key of their own
+    (`Shell::save_visits`), not with `Settings`: a room switch writes one key, not every setting.
+    An entry is the room's matrix.to link, so a pick reaches the app as any link does
+    (`on_open_url`), which brings the window forward. A link names no account, so a room two
+    accounts share shows once, naming neither.
+  - Windows gets no jump list. The app has an explicit AppUserModelID (`rune-notify`), and then
+    Windows requires `ICustomDestinationList::SetAppID` before `BeginList`; Rune's jump list
+    doesn't call it, and changing Rune is out of this app's hands.
 - **Settings:** a modal in sections (`SettingsSection`). Device settings go to a prefs file off
   the UI thread; account settings live on the homeserver.
   - Every desktop dialog uses the shared modal layer's Rune focus trap and Escape dismissal.

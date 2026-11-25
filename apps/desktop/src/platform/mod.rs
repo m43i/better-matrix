@@ -25,7 +25,7 @@ pub use secrets::system_secrets;
 pub use taskbar::Taskbar;
 
 use crate::i18n::Language;
-use crate::state::{Appearance, Emoticons, MessageLayout, PlaybackSpeed, Settings, State, Zoom};
+use crate::state::{Appearance, Emoticons, MessageLayout, PlaybackSpeed, Settings, State, Visits, Zoom};
 
 /// The OS services the app uses, or inert stand-ins when headless.
 pub struct Shell {
@@ -38,6 +38,8 @@ pub struct Shell {
     document: Arc<std::sync::atomic::AtomicU64>,
     /// Counts settings saves: only the latest writes, so quick changes can't land out of order.
     saves: Arc<std::sync::atomic::AtomicU64>,
+    /// Counts saves of the rooms opened, which go apart from the settings.
+    visit_saves: Arc<std::sync::atomic::AtomicU64>,
     /// Where files made for a moment go (audio to play, voice memos being recorded): private to
     /// the user, and emptied at launch and exit.
     scratch: std::path::PathBuf,
@@ -66,6 +68,7 @@ impl Shell {
             prefs: Arc::new(Mutex::new(prefs)),
             document: Arc::default(),
             saves: Arc::default(),
+            visit_saves: Arc::default(),
             scratch,
             handoff: None,
         }
@@ -81,6 +84,7 @@ impl Shell {
             prefs: Arc::new(Mutex::new(Prefs::memory())),
             document: Arc::default(),
             saves: Arc::default(),
+            visit_saves: Arc::default(),
             scratch: std::env::temp_dir(),
             handoff: None,
         }
@@ -100,6 +104,7 @@ impl Shell {
                 prefs,
                 document: Arc::default(),
                 saves: Arc::default(),
+                visit_saves: Arc::default(),
                 scratch: std::env::temp_dir(),
                 handoff: None,
             },
@@ -177,19 +182,17 @@ impl Shell {
 
     /// Saves this device's settings, off the UI thread (the prefs file is rewritten whole).
     pub fn save_settings(&self, settings: Settings) {
-        use std::sync::atomic::Ordering;
-        let (prefs, saves) = (Arc::clone(&self.prefs), Arc::clone(&self.saves));
-        let save = saves.fetch_add(1, Ordering::Relaxed) + 1;
-        let _ = std::thread::Builder::new().name("save-settings".into()).spawn(move || {
-            let Ok(mut prefs) = prefs.lock() else { return };
-            // A newer save is on its way: it writes instead.
-            if saves.load(Ordering::Relaxed) != save {
-                return;
-            }
-            if let Err(error) = write_settings(&mut prefs, &settings) {
-                eprintln!("better-matrix: could not save settings: {error}");
-            }
-        });
+        save(&self.prefs, &self.saves, "settings", move |prefs| write_settings(prefs, &settings));
+    }
+
+    /// The rooms opened on this device, as last saved: read from the prefs already loaded.
+    pub fn visits(&self) -> Visits {
+        self.prefs.lock().ok().and_then(|prefs| prefs.get(VISITS)).unwrap_or_default()
+    }
+
+    /// Saves the rooms opened, off the UI thread, apart from the settings: one write per open.
+    pub fn save_visits(&self, visits: Visits) {
+        save(&self.prefs, &self.visit_saves, "visits", move |prefs| prefs.set(VISITS, &visits));
     }
 
     /// A player for `media`'s file on the picked speaker; the view runs again once it is
@@ -306,8 +309,8 @@ impl Shell {
         self.taskbar.count()
     }
 
-    /// Offers `list` on a right-click on the taskbar button (Windows) or in the Dock icon's
-    /// menu (macOS); a pick opens its link. Headless, it is only kept.
+    /// Offers `list` in the Dock icon's menu (macOS); a pick opens its link. Headless, and on
+    /// other systems, it is only kept.
     pub fn show_jump_list(&self, list: rune::JumpList) {
         self.taskbar.jump_list(list, self.app.is_some());
     }
@@ -336,6 +339,29 @@ const LAST_ACCOUNT: &str = "last_account";
 const HIDDEN_EVENTS: &str = "hidden_events";
 const VISITS: &str = "visits";
 
+/// Runs `write` on the prefs on a worker of its own, unless a newer save counted by `saves`
+/// comes first: that one writes instead, so quick changes can't land out of order.
+fn save(
+    prefs: &Arc<Mutex<Prefs>>,
+    saves: &Arc<std::sync::atomic::AtomicU64>,
+    what: &'static str,
+    write: impl FnOnce(&mut Prefs) -> Result<(), rune::prefs::PrefsError> + Send + 'static,
+) {
+    use std::sync::atomic::Ordering;
+    let (prefs, saves) = (Arc::clone(prefs), Arc::clone(saves));
+    let save = saves.fetch_add(1, Ordering::Relaxed) + 1;
+    let _ = std::thread::Builder::new().name(format!("save-{what}")).spawn(move || {
+        let Ok(mut prefs) = prefs.lock() else { return };
+        // A newer save is on its way: it writes instead.
+        if saves.load(Ordering::Relaxed) != save {
+            return;
+        }
+        if let Err(error) = write(&mut prefs) {
+            eprintln!("better-matrix: could not save {what}: {error}");
+        }
+    });
+}
+
 fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::prefs::PrefsError> {
     prefs.set(LANGUAGE, &settings.language.id())?;
     prefs.set(APPEARANCE, &settings.appearance.id())?;
@@ -351,7 +377,6 @@ fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::pr
     prefs.set(SPEAKER, &settings.devices.speaker)?;
     prefs.set(CAMERA, &settings.devices.camera)?;
     prefs.set(HIDDEN_EVENTS, &settings.show_hidden_events)?;
-    prefs.set(VISITS, &settings.visits)?;
     prefs.set(LAST_ACCOUNT, &settings.last_account.as_ref().map(matrix_core::AccountId::as_str))
 }
 
@@ -377,7 +402,6 @@ pub fn load_settings(prefs: &Prefs) -> Settings {
         ring_sound: prefs.get::<bool>(RING_SOUND).unwrap_or(true),
         playback_speed: prefs.get::<u16>(PLAYBACK_SPEED).map_or_else(Default::default, PlaybackSpeed::from_percent),
         show_hidden_events: prefs.get::<bool>(HIDDEN_EVENTS).unwrap_or(false),
-        visits: prefs.get::<crate::state::Visits>(VISITS).unwrap_or_default(),
     }
 }
 

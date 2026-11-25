@@ -54,11 +54,11 @@ fn the_message_layout_should_survive_saving_and_loading_settings() {
 }
 
 #[test]
-fn the_rooms_opened_should_survive_saving_and_loading_settings() {
-    let mut settings = Settings::fixed_english();
-    settings.visits.visit(&AccountId::new("@ada:example.org"), "!room:example.org");
-    let mut prefs = Prefs::memory();
-    write_settings(&mut prefs, &settings).unwrap();
+fn the_rooms_opened_should_read_back_as_saved() {
+    let mut visits = Visits::default();
+    visits.visit(&AccountId::new("@ada:example.org"), "!room:example.org", false);
+    let shell = Shell::headless();
+    shell.prefs.lock().unwrap().set(VISITS, &visits).unwrap();
 
-    assert_eq!(load_settings(&prefs).visits, settings.visits);
+    assert_eq!(shell.visits(), visits);
 }

@@ -418,9 +418,9 @@ notification also flashes the taskbar button on Windows. See
 [ADR 0005](adr/0005-navigation-and-settings.md).
 
 **Jump list**
-: What a right-click on the taskbar button (Windows) or the Dock icon's menu (macOS) offers: the
-rooms and the direct chats opened most, and lately, on this device (**frequent rooms**,
-`Visits`), five of each, each opening through its room link. See [ADR 0005](adr/0005-navigation-and-settings.md).
+: What the Dock icon's menu offers on macOS: the rooms and the direct chats opened most, and
+lately, on this device (**frequent rooms**, `Visits`), five of each, each opening through its
+room link. Windows has none (ADR 0005). See [ADR 0005](adr/0005-navigation-and-settings.md).
 
 **Popover**
 : A floating panel over the window (account menu, room menu, emoji picker). One at a time; the

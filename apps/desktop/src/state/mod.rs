@@ -944,6 +944,8 @@ pub struct State {
     last_audio_id: u64,
     /// The [`Preview::visit`] of the item shown last.
     preview_visits: u64,
+    /// How often each room was opened on this device, for the jump list.
+    visits: Visits,
     /// The preview's item changed: the next `poll` scrolls the strip to its thumbnail.
     reveal_thumbnail: bool,
     /// Accounts whose sidebar layout changed while a save was under way.
@@ -1093,6 +1095,7 @@ impl State {
             scratch_files: HashMap::new(),
             last_audio_id: 0,
             preview_visits: 0,
+            visits: shell.visits(),
             reveal_thumbnail: false,
             layout_unsaved: HashSet::new(),
             clock_shown: None,
@@ -4073,8 +4076,15 @@ impl State {
         let Some(account) = self.nav.account.clone() else { return };
         self.unmark(&account, room_id);
         self.accounts.mark_read(&account, room_id);
-        self.settings.visits.visit(&account, room_id);
-        self.shell.save_settings(self.settings.clone());
+        let direct = self
+            .accounts
+            .get(&account)
+            .and_then(|data| data.room(room_id))
+            .map(|room| room.kind == matrix_core::RoomKind::Direct);
+        if let Some(direct) = direct {
+            self.visits.visit(&account, room_id, direct);
+            self.shell.save_visits(self.visits.clone());
+        }
         self.show_taskbar();
         if self.nav.rooms.get(&account).map(String::as_str) != Some(room_id) {
             self.nav.threads.remove(&account);

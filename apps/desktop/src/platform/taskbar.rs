@@ -1,8 +1,11 @@
 //! The app's taskbar button (Windows) or Dock icon (macOS): its badge counts what wants the
-//! user's attention, a notification flashes it (Windows), and its jump list (a right-click on
-//! Windows, the Dock menu on macOS) offers the rooms opened most. Rune does all three
-//! ([`rune::WindowHandle::set_taskbar`], [`rune::WindowHandle::flash`], [`rune::set_jump_list`]);
-//! elsewhere they show nothing. Called on the UI thread, as Rune asks.
+//! user's attention, a notification flashes it (Windows), and the Dock icon's menu offers the
+//! rooms opened most (macOS). Rune does all three ([`rune::WindowHandle::set_taskbar`],
+//! [`rune::WindowHandle::flash`], [`rune::set_jump_list`]); elsewhere they show nothing. Called on
+//! the UI thread, as Rune asks.
+//!
+//! Windows gets no jump list: the app has an explicit AppUserModelID (`rune-notify`), and Rune's
+//! jump list doesn't name it (`ICustomDestinationList::SetAppID`), which Windows requires then.
 
 use std::sync::{Arc, Mutex};
 
@@ -51,14 +54,15 @@ impl Taskbar {
         }
     }
 
-    /// Offers `list` as the jump list when it changed, to the system only when `native`.
+    /// Offers `list` as the jump list when it changed, to the system only when `native` and on
+    /// macOS (see the module's notes on Windows).
     pub fn jump_list(&self, list: rune::JumpList, native: bool) {
         let Ok(mut shown) = self.0.lock() else { return };
         if shown.jump_list.as_ref() == Some(&list) {
             return;
         }
         shown.jump_list = Some(list.clone());
-        if native {
+        if native && cfg!(target_os = "macos") {
             rune::set_jump_list(list);
         }
     }
