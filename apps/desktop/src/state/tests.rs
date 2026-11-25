@@ -547,6 +547,13 @@ fn a_room_two_accounts_share_should_show_once_in_the_jump_list_naming_neither() 
 }
 
 #[test]
+fn signing_out_should_forget_the_rooms_opened_in_the_account() {
+    let (mut s, _) = recording_state();
+    apply(&mut s, Event::AccountRemoved(AccountId::new("@a:example.org")));
+    assert_eq!(s.visits, Visits::default());
+}
+
+#[test]
 fn the_jump_list_should_leave_out_rooms_no_longer_joined() {
     let (mut s, _) = recording_state();
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!two:x"], Vec::new());
@@ -4040,6 +4047,17 @@ fn answering_a_ring_should_open_its_room_and_answer() {
     s.answer_call(&id, "!one:x", false);
     assert!(s.rings.is_empty() && s.active_room_id() == Some("!one:x"));
     assert!(all_commands(&mut commands).iter().any(|c| matches!(c, Command::AnswerCall { video: false, .. })));
+}
+
+#[test]
+fn a_ringing_call_should_count_on_the_taskbar_badge_until_declined() {
+    let (mut s, _commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    let before = s.shell.badge();
+    apply(&mut s, Event::IncomingCall(Box::new(ring(&id, "!one:x"))));
+    let ringing = s.shell.badge();
+    s.decline_call(&id, "!one:x");
+    assert_eq!((ringing, s.shell.badge()), (before + 1, before));
 }
 
 #[test]

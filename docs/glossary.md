@@ -413,7 +413,8 @@ when it notifies for mentions only or is muted; and any room marked unread.
 
 **Taskbar badge**
 : The count on the app's taskbar button (Windows) or Dock icon (macOS): the messages that want
-attention in every account (at least one per room marked unread) and the invitations shown. A
+attention in every account (at least one per room marked unread), the invitations shown and the
+calls ringing. A
 notification also flashes the taskbar button on Windows. See
 [ADR 0005](adr/0005-navigation-and-settings.md).
 

@@ -60,6 +60,13 @@ impl Visits {
         }
     }
 
+    /// Forgets the rooms of an account signed out; true when it had any.
+    pub fn forget(&mut self, account: &AccountId) -> bool {
+        let before = self.0.len();
+        self.0.retain(|visit| visit.account != account.as_str());
+        self.0.len() != before
+    }
+
     /// The rooms scored highest, the latest first among equals.
     pub fn most(&self) -> impl Iterator<Item = &Visit> {
         let mut most: Vec<&Visit> = self.0.iter().collect();
@@ -170,6 +177,15 @@ mod tests {
             rooms(&visits).iter().position(|room| *room == "!new")
                 < rooms(&visits).iter().position(|room| *room == "!old")
         );
+    }
+
+    #[test]
+    fn forgetting_an_account_should_keep_the_other_accounts_rooms() {
+        let mut visits = Visits::default();
+        visits.visit(&AccountId::new("@a:x"), "!r", false);
+        visits.visit(&AccountId::new("@b:x"), "!s", false);
+        assert!(visits.forget(&AccountId::new("@a:x")));
+        assert_eq!(rooms(&visits), ["!s"]);
     }
 
     #[test]

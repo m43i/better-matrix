@@ -185,7 +185,8 @@ Date: 2026-11-22
   isn't built in Rune).
   - The badge counts the messages that want attention over every account (`attention_count`:
     unread ones, or only mentions for mentions-only and muted rooms; at least one for a room
-    marked unread) plus the invitations shown, so it agrees with the dots. It is worked out
+    marked unread) plus the invitations shown, so it agrees with the dots, plus the calls
+    ringing: Rune has no Dock bounce, so on macOS the badge is what tells of a call. It is worked out
     after every engine event and every local read, mark or mode change; the shell tells the
     window only when the count changes, and again whenever the native window is made.
   - Every notification also flashes the taskbar button (Windows), which stays lit until the
@@ -198,6 +199,7 @@ Date: 2026-11-22
     good). 32 rooms and 32 direct chats are kept apart, so rooms can't push every direct chat
     out, never dropping the room just opened. They are saved under a prefs key of their own
     (`Shell::save_visits`), not with `Settings`: a room switch writes one key, not every setting.
+    Signing out forgets the account's rooms there; a suspended account keeps them with its data.
     An entry is the room's matrix.to link, so a pick reaches the app as any link does
     (`on_open_url`), which brings the window forward. A link names no account, so a room two
     accounts share shows once, naming neither.

@@ -1387,6 +1387,10 @@ impl State {
                 self.drafts.retain(|(account, _), _| *account != id);
                 self.drafts_asked.retain(|(account, _)| *account != id);
                 self.kept_drafts.forget(&id);
+                // Signed out, its rooms leave the jump list's history; suspended, its data stays.
+                if !self.suspended.contains(&id) && self.visits.forget(&id) {
+                    self.shell.save_visits(self.visits.clone());
+                }
                 if matches!(&self.modal, Some(Modal::Saved(account)) if *account == id) {
                     self.modal = None;
                 }
@@ -1906,6 +1910,7 @@ impl State {
     pub fn answer_call(&mut self, account: &AccountId, room_id: &str, video: bool) {
         self.rings.retain(|ring| !(ring.account == *account && ring.room_id == room_id));
         self.sound_ring();
+        self.show_taskbar();
         self.open_room(account, room_id);
         let command = Command::AnswerCall { account: account.clone(), room_id: room_id.to_owned(), video };
         self.dispatch(command, Purpose::Call);
@@ -1914,6 +1919,7 @@ impl State {
     pub fn decline_call(&mut self, account: &AccountId, room_id: &str) {
         self.rings.retain(|ring| !(ring.account == *account && ring.room_id == room_id));
         self.sound_ring();
+        self.show_taskbar();
         self.dispatch(Command::DeclineCall { account: account.clone(), room_id: room_id.to_owned() }, Purpose::Call);
     }
 
@@ -3965,11 +3971,12 @@ impl State {
 
     // ----- navigation ----------------------------------------------------------------------
 
-    /// Shows the taskbar what wants attention in every account (the badge) and the rooms
-    /// opened most (the jump list): after every engine event, and after each local change to
-    /// what is read, marked, notifies or was opened. The shell passes on only changes.
+    /// Shows the taskbar what wants attention in every account and the calls ringing (the
+    /// badge), and the rooms opened most (the jump list): after every engine event, and after
+    /// each local change to what is read, marked, notifies or was opened. The shell passes on
+    /// only changes.
     fn show_taskbar(&self) {
-        let count: u64 = self.accounts.iter().map(AccountData::attention).sum();
+        let count = self.accounts.iter().map(AccountData::attention).sum::<u64>() + self.rings.len() as u64;
         self.shell.show_badge(u32::try_from(count).unwrap_or(u32::MAX));
         self.shell.show_jump_list(self.jump_list());
     }
