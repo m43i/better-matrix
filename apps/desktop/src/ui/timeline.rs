@@ -1229,7 +1229,7 @@ fn toolbar_pins(cx: &Context<'_>, message: &Message, at: ToolbarAt, width: f32) 
 }
 
 /// Whether `message` is the user's own text and can be edited (`State::start_edit`): its toolbar
-/// offers Edit (`toolbar`), and More's menu then leaves it out (`message_actions::menu`).
+/// and its menu (`message_actions::menu`) offer Edit.
 pub(super) fn editable(message: &Message, own: &str) -> bool {
     message.editable && message.sender_id == own && matches!(message.content, MessageContent::Text { .. })
 }

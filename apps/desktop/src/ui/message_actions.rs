@@ -1,4 +1,5 @@
-//! Message menus and the destination picker. More and right-click share the same actions.
+//! Message menus and the destination picker. More and right-click open the same menu, with every
+//! action, the toolbar's included: only where it opens differs.
 
 use matrix_core::{MessageContent, RoomKind, TimelineKey};
 use rune::{El, col, row, text};
@@ -20,7 +21,6 @@ pub fn menu(
     key: &TimelineKey,
     event_id: &str,
     at: Option<(i32, i32)>,
-    skip_edit: bool,
     window: [f32; 2],
     p: &Palette,
 ) -> Vec<El> {
@@ -78,7 +78,7 @@ pub fn menu(
                     .on_press(move |s: &mut State| s.start_forward(key.clone(), id.clone())),
             );
         }
-        if super::timeline::editable(message, account.summary.id.as_str()) && !skip_edit {
+        if super::timeline::editable(message, account.summary.id.as_str()) {
             let edited = message.clone();
             panel = panel.child(
                 action(&icons::PENCIL, t!("actions.edit"), "message-edit")
