@@ -191,12 +191,15 @@ Date: 2026-11-22
   - Every notification also flashes the taskbar button (Windows), which stays lit until the
     window comes forward; a window in front doesn't flash.
   - The jump list offers the five rooms and five direct chats opened most on this device,
-    still joined, latest first among equals, under the sidebar's section names, with the
-    account's name when several are signed in. Opens are counted in `select_room` and kept
-    with the device settings (the 64 latest-opened rooms by count; the least opened goes, never
-    the one just opened). An entry is the room's matrix.to link, so a pick reaches the running
-    app as any link does (`on_open_url`). The list is replaced at the first call of each run, so
-    a signed-out account's rooms don't linger from an earlier run.
+    still joined, under the sidebar's section names, with the account's name when several are
+    signed in. Opens are scored in `select_room` and kept with the device settings: each open
+    adds 1000 to its room and every other room keeps 97% of its score, so rooms used lately and
+    often lead and rooms no longer opened make way (plain counts let old rooms crowd out new
+    ones for good). The 64 highest are kept, never dropping the room just opened. An entry is the
+    room's matrix.to link, so a pick reaches the running app as any link does (`on_open_url`),
+    which brings the window forward. A link names no account, so a room two accounts share
+    shows once and opens like any link to it. The list is replaced at the first call of each
+    run, so a signed-out account's rooms don't linger from an earlier run.
 - **Settings:** a modal in sections (`SettingsSection`). Device settings go to a prefs file off
   the UI thread; account settings live on the homeserver.
   - Every desktop dialog uses the shared modal layer's Rune focus trap and Escape dismissal.

@@ -1,23 +1,31 @@
 //! Frequent rooms: how often the user opens each room on this device, so the jump list (a
 //! right-click on the taskbar button on Windows, the Dock icon's menu on macOS) offers the rooms
-//! and direct chats used most. Kept with this device's [`super::Settings`].
+//! and direct chats used most. Each open adds to a room's score and every other's fades a
+//! little, so rooms used lately and often come first, and rooms no longer opened make way. Kept
+//! with this device's [`super::Settings`].
+
+use std::collections::HashSet;
 
 use matrix_core::{AccountId, RoomKind};
 
 use super::State;
 use crate::i18n::t;
 
-/// How many rooms are remembered; past it, the least opened is forgotten.
+/// How many rooms are remembered; past it, the lowest scored is forgotten.
 const REMEMBERED: usize = 64;
+/// What one open adds to a room's score.
+const OPEN: u32 = 1000;
+/// The percentage of its score every other room keeps at each open.
+const KEPT: u32 = 97;
 /// How many rooms, and how many direct chats, the jump list offers.
 const SHOWN: usize = 5;
 
-/// One room's opens.
+/// One room's opens, as a score that fades as other rooms are opened.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Visit {
     pub account: String,
     pub room_id: String,
-    pub count: u32,
+    pub score: u32,
 }
 
 /// The rooms opened on this device, the latest first.
@@ -26,41 +34,48 @@ pub struct Visit {
 pub struct Visits(Vec<Visit>);
 
 impl Visits {
-    /// Counts one more open of a room, which becomes the latest.
+    /// Counts one more open of a room, which becomes the latest; every other room's score fades.
     pub fn visit(&mut self, account: &AccountId, room_id: &str) {
         let at = self.0.iter().position(|visit| visit.account == account.as_str() && visit.room_id == room_id);
         let mut visit = match at {
             Some(at) => self.0.remove(at),
-            None => Visit { account: account.as_str().to_owned(), room_id: room_id.to_owned(), count: 0 },
+            None => Visit { account: account.as_str().to_owned(), room_id: room_id.to_owned(), score: 0 },
         };
-        visit.count = visit.count.saturating_add(1);
+        for other in &mut self.0 {
+            other.score = other.score / 100 * KEPT + other.score % 100 * KEPT / 100;
+        }
+        visit.score = visit.score.saturating_add(OPEN);
         self.0.insert(0, visit);
         if self.0.len() > REMEMBERED
             // The room just opened stays, so a new room can always come in.
-            && let Some(least) = self.0.iter().enumerate().skip(1).rev().min_by_key(|(_, visit)| visit.count).map(|(at, _)| at)
+            && let Some(least) = self.0.iter().enumerate().skip(1).rev().min_by_key(|(_, visit)| visit.score).map(|(at, _)| at)
         {
             self.0.remove(least);
         }
     }
 
-    /// The rooms opened most, the latest first among equals.
+    /// The rooms scored highest, the latest first among equals.
     pub fn most(&self) -> impl Iterator<Item = &Visit> {
         let mut most: Vec<&Visit> = self.0.iter().collect();
-        most.sort_by_key(|visit| std::cmp::Reverse(visit.count));
+        most.sort_by_key(|visit| std::cmp::Reverse(visit.score));
         most.into_iter()
     }
 }
 
 impl State {
     /// The jump list: the rooms and the direct chats opened most that are still joined, each
-    /// opening through its link. With more than one account, each says whose it is.
+    /// opening through its link. With more than one account, each says whose it is. A room two
+    /// accounts share shows once, for the account that opened it most: its link names no account.
     pub fn jump_list(&self) -> rune::JumpList {
         let several = self.accounts.iter().nth(1).is_some();
-        let (mut rooms, mut direct) = (Vec::new(), Vec::new());
+        let (mut rooms, mut direct, mut listed) = (Vec::new(), Vec::new(), HashSet::new());
         for visit in self.settings.visits.most() {
             let account = AccountId::new(visit.account.as_str());
             let Some(data) = self.accounts.get(&account) else { continue };
             let Some(room) = data.room(&visit.room_id) else { continue };
+            if !listed.insert(room.room_id.as_str()) {
+                continue;
+            }
             let list = if room.kind == RoomKind::Direct { &mut direct } else { &mut rooms };
             if list.len() == SHOWN {
                 continue;
@@ -109,6 +124,33 @@ mod tests {
         }
         visits.visit(&AccountId::new("@a:x"), "!new");
         assert!(rooms(&visits).contains(&"!new"));
+    }
+
+    #[test]
+    fn rooms_opened_lately_should_make_way_for_each_other_over_rooms_no_longer_opened() {
+        let mut visits = Visits::default();
+        for i in 0..REMEMBERED {
+            visits.visit(&AccountId::new("@a:x"), &format!("!{i}"));
+            visits.visit(&AccountId::new("@a:x"), &format!("!{i}"));
+        }
+        for _ in 0..10 {
+            visits.visit(&AccountId::new("@a:x"), "!dm-one");
+            visits.visit(&AccountId::new("@a:x"), "!dm-two");
+        }
+        assert_eq!(rooms(&visits)[..2], ["!dm-two", "!dm-one"]);
+    }
+
+    #[test]
+    fn a_room_used_long_ago_should_fall_behind_one_used_lately() {
+        let mut visits = visits(&["!old", "!old", "!old"]);
+        for i in 0..60 {
+            visits.visit(&AccountId::new("@a:x"), &format!("!{i}"));
+        }
+        visits.visit(&AccountId::new("@a:x"), "!new");
+        assert!(
+            rooms(&visits).iter().position(|room| *room == "!new")
+                < rooms(&visits).iter().position(|room| *room == "!old")
+        );
     }
 
     #[test]

@@ -287,6 +287,14 @@ impl Shell {
         self.taskbar.flash();
     }
 
+    /// Brings the window forward, restoring it if minimised: a link from the system opened
+    /// something in it.
+    pub fn bring_forward(&self) {
+        if let Some(app) = &self.app {
+            app.open();
+        }
+    }
+
     /// Shows `count` on the taskbar badge; 0 hides it.
     pub fn show_badge(&self, count: u32) {
         self.taskbar.show(count);

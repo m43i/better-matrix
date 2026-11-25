@@ -880,7 +880,7 @@ fn main() {
         })
         // Permalinks the system opens with the app: every link on macOS, `scheme://` ones from a
         // later launch on Linux and Windows.
-        .on_open_url(|s, url, tx| state::navigate_now(s, tx, |s| s.open_permalink(url)))
+        .on_open_url(|s, url, tx| state::navigate_now(s, tx, |s| s.open_system_link(url)))
         // A later launch on Linux or Windows: the links it handed on open, and Rune brings the
         // window forward.
         .on_reopen(|s, _, tx| {

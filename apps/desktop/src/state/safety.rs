@@ -64,6 +64,8 @@ impl State {
         self.request_timeline_media();
         self.fetch_linked(std::time::Instant::now());
         self.request_avatars();
+        // An invitation hidden or shown again changes the badge.
+        self.show_taskbar();
     }
 
     /// Asks before ignoring someone on the active account.

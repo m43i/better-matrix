@@ -538,6 +538,17 @@ fn the_jump_list_should_offer_the_rooms_opened_most() {
 }
 
 #[test]
+fn a_room_two_accounts_share_should_show_once_in_the_jump_list() {
+    let (mut s, _) = recording_state();
+    let other = AccountId::new("@b:example.org");
+    with_rooms(&mut s, &other, &["!one:x"], Vec::new());
+    s.switch_account(&other);
+    s.select_room("!one:x");
+    let titles = format!("{:?}", s.shell.jump_list());
+    assert_eq!(titles.matches("!one:x · ").count(), 1);
+}
+
+#[test]
 fn the_jump_list_should_leave_out_rooms_no_longer_joined() {
     let (mut s, _) = recording_state();
     with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!two:x"], Vec::new());
