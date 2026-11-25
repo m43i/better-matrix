@@ -491,6 +491,17 @@ fn row_context<'a>(s: &'a State, account: &AccountId, key: &'a TimelineKey) -> O
     Some((Context::new(s, data, data.room(&key.room_id)?, key), data.timeline(key)?))
 }
 
+/// The room events a run of entries shows: its first event and the others of the same kind. What
+/// the run passed over (hidden events, room changes the room log keeps) isn't part of it.
+fn run_of(entries: &[crate::state::Entry]) -> Vec<&RoomEvent> {
+    let mut events = entries.iter().filter_map(|entry| match &entry.kind {
+        EntryView::RoomEvent(event) => Some(event.as_ref()),
+        _ => None,
+    });
+    let Some(first) = events.next() else { return Vec::new() };
+    std::iter::once(first).chain(events.filter(|event| event.change == first.change)).collect()
+}
+
 /// Builds one planned row.
 fn build_row(cx: &Context<'_>, timeline: &RoomTimeline, key: &str, row: &Row, p: &Palette) -> El {
     let entries = &timeline.entries;
@@ -524,13 +535,7 @@ fn build_row(cx: &Context<'_>, timeline: &RoomTimeline, key: &str, row: &Row, p:
             _ => el().key(key.to_owned()),
         },
         Row::Events { start: from, end } => {
-            let run: Vec<&RoomEvent> = entries[*from..(*end).min(entries.len())]
-                .iter()
-                .filter_map(|entry| match &entry.kind {
-                    EntryView::RoomEvent(event) => Some(event.as_ref()),
-                    _ => None,
-                })
-                .collect();
+            let run = run_of(&entries[(*from).min(entries.len())..(*end).min(entries.len())]);
             if run.is_empty() { el().key(key.to_owned()) } else { room_event_line(key, &run, cx.media, p) }
         }
         Row::Hidden(entry) => match entries.get(*entry).map(|e| &e.kind) {
@@ -2315,6 +2320,22 @@ mod tests {
         let rows = planned(false);
         let joins = rows.iter().filter(|key| key.starts_with("ev-joined-")).count();
         assert_eq!(joins, 1, "{rows:?}");
+    }
+
+    #[test]
+    fn a_run_of_joins_should_not_name_whoever_made_a_change_it_passed_over() {
+        let person = |id: &str| Person { id: id.into(), name: id.into(), avatar: None };
+        let event = |id: &str, change: RoomChange| crate::state::Entry {
+            id: id.into(),
+            kind: EntryView::RoomEvent(Box::new(RoomEvent { sender: person(id), change, timestamp_ms: 0 })),
+        };
+        let entries = [
+            event("alice", RoomChange::Joined),
+            event("bob", RoomChange::RoomTopic("News".into())),
+            event("carol", RoomChange::Joined),
+        ];
+        let named: Vec<&str> = run_of(&entries).iter().map(|event| event.sender.id.as_str()).collect();
+        assert_eq!(named, ["alice", "carol"]);
     }
 
     #[test]

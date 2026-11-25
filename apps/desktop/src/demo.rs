@@ -1661,7 +1661,7 @@ pub fn upload_thumbnails(s: &mut State) {
     composer.attach_pasted_image(include_bytes!("../../../packaging/icons/better-matrix-256.png"));
     composer.attach([std::path::PathBuf::from(icon), std::path::PathBuf::from("Release notes.pdf")]);
     s.upload_thumbnails.sync(&s.media, s.composer.attachments.iter());
-    s.upload_thumbnails.wait();
+    s.upload_thumbnails.wait(&s.media);
 }
 
 /// A draft holding a mention, a spoiler and a formula as pills.

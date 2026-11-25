@@ -267,13 +267,15 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   as a message's. The desktop keeps text and HTML.
 - **Uploads:** `Outgoing::File` carries an `Upload`, a path on disk or bytes with a name.
   - An upload whose name says it is a picture shows in the composer as a 64-point thumbnail,
-    cropped square, with its remove button over its corner; other files, and pictures that
-    can't be decoded, keep the chip with their name. The desktop decodes through the media
-    cache's `ImageCache` (`MediaCache::upload`: a file is read on Rune's worker, never the UI
-    thread), and `State::upload_thumbnails` keeps one handle per image upload of the two
-    composers, synced in `poll`: it lets go of a thumbnail once its upload is sent, removed or
-    set aside with its draft, and decodes it again when the draft comes back. Headless runs
-    without a decoder show chips.
+    the picture alone cropped square with rounded corners and its remove button over its corner
+    (no chip around it); other files, and pictures that can't be decoded, keep the chip with
+    their name. On the desktop `State::upload_thumbnails` keeps one per image upload of the two
+    composers, synced in `poll`: a photo is read, decoded and cut to a 128-pixel square on a
+    thread of its own, which wakes the window when done, so only that square is kept, never the
+    whole photo, and no file is read on the UI thread; an SVG is rasterized at the thumbnail's
+    size by Rune's worker. A thumbnail goes once its upload is sent, removed or set aside with
+    its draft, and is made again when the draft comes back. Headless runs without a decoder show
+    chips.
   - Pastes reach the field through `on_input_paste`. A pasted image joins the draft as
     `image.png`, `image-2.png` and so on; pasted files are attached; text pastes as text.
 - **Voice and audio:**

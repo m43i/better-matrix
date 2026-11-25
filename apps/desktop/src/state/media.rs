@@ -39,6 +39,8 @@ enum Entry {
 #[derive(Default)]
 pub struct MediaCache {
     decoder: Option<ImageCache>,
+    /// Wakes the window: for work finished off the UI thread, such as upload thumbnails.
+    waker: Option<Waker>,
     entries: HashMap<MediaRef, Entry>,
     /// Ready entries by when they were last used, least recently first, for eviction.
     used: BTreeMap<u64, MediaRef>,
@@ -189,7 +191,8 @@ pub fn preview_size(size: matrix_core::MediaSize, dimensions: Option<(u32, u32)>
 impl MediaCache {
     /// Gives the cache a decoder that wakes the window; without one (headless) nothing loads.
     pub fn attach(&mut self, waker: Waker) {
-        self.decoder = Some(ImageCache::new(waker));
+        self.decoder = Some(ImageCache::new(waker.clone()));
+        self.waker = Some(waker);
     }
 
     /// Whether images can load at all: there is a decoder (none headless).
@@ -329,16 +332,6 @@ impl MediaCache {
         self.decoder.as_ref().map(|decoder| decoder.load(encoded))
     }
 
-    /// An image upload, read and decoded on Rune's worker: a file is read there, never here.
-    /// `None` without a decoder (headless) or for an upload that isn't an image.
-    pub fn upload(&self, upload: &Upload) -> Option<Image> {
-        let decoder = self.decoder.as_ref().filter(|_| is_image(upload))?;
-        Some(match upload {
-            Upload::Path(path) => decoder.file(path, THUMBNAIL_SIZE, 2.0),
-            Upload::Bytes { bytes, .. } => decoder.load(std::sync::Arc::clone(bytes)),
-        })
-    }
-
     /// The image, once decoded.
     pub fn image(&self, media: &MediaRef) -> Option<&Image> {
         match self.entries.get(media)? {
@@ -388,32 +381,71 @@ impl MediaCache {
     }
 }
 
-/// The size an upload thumbnail draws at, in points: SVGs rasterize for it.
+/// The size an upload thumbnail draws at, in points.
 pub const THUMBNAIL_SIZE: f32 = 64.0;
+/// The pixels a thumbnail keeps a side: twice its size, sharp on a 2× display.
+const THUMBNAIL_PIXELS: u32 = 128;
 
 /// Whether an upload is a picture, by its name: it shows as a thumbnail in the composer.
 pub fn is_image(upload: &Upload) -> bool {
     upload.mime().type_() == "image"
 }
 
-/// The composers' upload thumbnails: one decoded picture per image upload waiting to be sent,
-/// let go once the upload is sent, removed or set aside with its draft.
-#[derive(Debug, Default)]
+/// The composers' upload thumbnails: one small picture per image upload waiting to be sent,
+/// let go once the upload is sent, removed or set aside with its draft. A photo is read,
+/// decoded and cut to a 128-pixel square on a thread of its own, so only that square is kept,
+/// never the whole photo; an SVG is rasterized at the thumbnail's size by Rune's worker.
+#[derive(Debug)]
 pub struct UploadThumbnails {
     shown: Vec<Thumbnail>,
+    done: std::sync::mpsc::Receiver<(Upload, Option<Square>)>,
+    finish: std::sync::mpsc::Sender<(Upload, Option<Square>)>,
 }
+
+impl Default for UploadThumbnails {
+    fn default() -> Self {
+        let (finish, done) = std::sync::mpsc::channel();
+        Self { shown: Vec::new(), done, finish }
+    }
+}
+
+/// A thumbnail's RGBA pixels, `THUMBNAIL_PIXELS` a side.
+type Square = Vec<u8>;
 
 #[derive(Debug)]
 struct Thumbnail {
     upload: Upload,
-    image: Image,
-    /// Whether the view has drawn it since it decoded (or failed to).
-    settled: bool,
+    look: Look,
+}
+
+#[derive(Debug)]
+enum Look {
+    Shrinking,
+    Ready(Image),
+    /// Not a picture the app can read: it shows as a file.
+    Failed,
+}
+
+/// `upload` read and cut to the thumbnail's square, cropping its longer side; `None` if it
+/// can't be read or decoded.
+fn shrink(upload: &Upload) -> Option<Square> {
+    let read;
+    let bytes: &[u8] = match upload {
+        Upload::Path(path) => {
+            read = std::fs::read(path).ok()?;
+            &read
+        }
+        Upload::Bytes { bytes, .. } => bytes,
+    };
+    let picture = image::load_from_memory(bytes).ok()?;
+    let square = picture.resize_to_fill(THUMBNAIL_PIXELS, THUMBNAIL_PIXELS, image::imageops::FilterType::Triangle);
+    Some(square.to_rgba8().into_raw())
 }
 
 impl UploadThumbnails {
-    /// Keeps a thumbnail for each image in `uploads` and none other, starting the new ones'
-    /// decoding. True when what shows changed: a thumbnail came, went, decoded or failed.
+    /// Keeps a thumbnail for each image in `uploads` and none other, starting the new ones, and
+    /// takes in those finished. True when what shows changed. Without a decoder (headless)
+    /// there are none: uploads show as files.
     pub fn sync<'a>(&mut self, media: &MediaCache, uploads: impl Iterator<Item = &'a Upload>) -> bool {
         let wanted: Vec<&Upload> = uploads.filter(|upload| is_image(upload)).collect();
         let before = self.shown.len();
@@ -423,35 +455,72 @@ impl UploadThumbnails {
             if self.shown.iter().any(|thumbnail| &thumbnail.upload == upload) {
                 continue;
             }
-            if let Some(image) = media.upload(upload) {
-                self.shown.push(Thumbnail { upload: upload.clone(), image, settled: false });
-                changed = true;
-            }
+            let Some(look) = self.start(media, upload) else { continue };
+            self.shown.push(Thumbnail { upload: upload.clone(), look });
+            changed = true;
         }
-        for thumbnail in &mut self.shown {
-            if !thumbnail.settled && thumbnail.image.is_ready() {
-                thumbnail.settled = true;
-                changed = true;
-            }
+        while let Ok(finished) = self.done.try_recv() {
+            changed |= self.land(media, finished);
         }
         changed
     }
 
-    /// Blocks until every thumbnail has decoded or failed: for headless scenes, which draw once.
-    pub fn wait(&self) {
+    fn start(&self, media: &MediaCache, upload: &Upload) -> Option<Look> {
+        let (decoder, waker) = (media.decoder.as_ref()?, media.waker.clone()?);
+        if upload.mime().essence_str() == "image/svg+xml" {
+            let image = match upload {
+                Upload::Path(path) => decoder.file(path, THUMBNAIL_SIZE, 2.0),
+                Upload::Bytes { bytes, .. } => decoder.svg(std::sync::Arc::clone(bytes), THUMBNAIL_SIZE, 2.0),
+            };
+            return Some(Look::Ready(image));
+        }
+        let (upload, finish) = (upload.clone(), self.finish.clone());
+        std::thread::spawn(move || {
+            let square = shrink(&upload);
+            if finish.send((upload, square)).is_ok() {
+                waker();
+            }
+        });
+        Some(Look::Shrinking)
+    }
+
+    /// A thumbnail finished shrinking; one whose upload has gone is dropped.
+    fn land(&mut self, media: &MediaCache, (upload, square): (Upload, Option<Square>)) -> bool {
+        let Some(thumbnail) = self
+            .shown
+            .iter_mut()
+            .find(|thumbnail| thumbnail.upload == upload && matches!(thumbnail.look, Look::Shrinking))
+        else {
+            return false;
+        };
+        thumbnail.look = match (square, media.decoder.as_ref()) {
+            (Some(square), Some(decoder)) => Look::Ready(decoder.rgba(THUMBNAIL_PIXELS, THUMBNAIL_PIXELS, square)),
+            _ => Look::Failed,
+        };
+        true
+    }
+
+    /// Blocks until every thumbnail has finished: for headless scenes and tests, which draw once.
+    pub fn wait(&mut self, media: &MediaCache) {
+        while self.shown.iter().any(|thumbnail| matches!(thumbnail.look, Look::Shrinking)) {
+            let Ok(finished) = self.done.recv_timeout(std::time::Duration::from_secs(10)) else { break };
+            self.land(media, finished);
+        }
         for thumbnail in &self.shown {
-            let _ = thumbnail.image.wait();
+            if let Look::Ready(image) = &thumbnail.look {
+                let _ = image.wait();
+            }
         }
     }
 
-    /// The thumbnail of `upload`: decoding (drawn empty until it is) or decoded. `None` for a
-    /// file that isn't an image, or one that couldn't be decoded: it shows as a file.
-    pub fn get(&self, upload: &Upload) -> Option<&Image> {
-        self.shown
-            .iter()
-            .find(|thumbnail| &thumbnail.upload == upload)
-            .map(|thumbnail| &thumbnail.image)
-            .filter(|image| image.error().is_none())
+    /// The thumbnail of `upload`: `Some(None)` while it is being made (drawn empty), `None` for
+    /// a file that isn't a picture the app can read, which shows as a file.
+    pub fn get(&self, upload: &Upload) -> Option<Option<&Image>> {
+        match &self.shown.iter().find(|thumbnail| &thumbnail.upload == upload)?.look {
+            Look::Shrinking => Some(None),
+            Look::Ready(image) if image.error().is_none() => Some(Some(image)),
+            Look::Ready(_) | Look::Failed => None,
+        }
     }
 }
 
@@ -471,6 +540,23 @@ mod tests {
     fn a_picture_upload_should_get_a_thumbnail() {
         let (media, mut thumbnails, picture) = (cache(), UploadThumbnails::default(), upload("shot.png", PNG));
         thumbnails.sync(&media, [&picture].into_iter());
+        thumbnails.wait(&media);
+        assert!(matches!(thumbnails.get(&picture), Some(Some(_))));
+    }
+
+    #[test]
+    fn a_thumbnail_should_keep_a_small_square_not_the_whole_picture() {
+        let (media, mut thumbnails, picture) = (cache(), UploadThumbnails::default(), upload("shot.png", PNG));
+        thumbnails.sync(&media, [&picture].into_iter());
+        thumbnails.wait(&media);
+        let size = thumbnails.get(&picture).flatten().and_then(Image::size);
+        assert_eq!(size, Some([THUMBNAIL_PIXELS, THUMBNAIL_PIXELS]));
+    }
+
+    #[test]
+    fn a_picture_should_draw_empty_while_its_thumbnail_is_made() {
+        let (media, mut thumbnails, picture) = (cache(), UploadThumbnails::default(), upload("shot.png", PNG));
+        thumbnails.sync(&media, [&picture].into_iter());
         assert!(thumbnails.get(&picture).is_some());
     }
 
@@ -485,7 +571,7 @@ mod tests {
     fn a_picture_that_cannot_be_decoded_should_show_as_a_file() {
         let (media, mut thumbnails, broken) = (cache(), UploadThumbnails::default(), upload("shot.png", b"nope"));
         thumbnails.sync(&media, [&broken].into_iter());
-        thumbnails.wait();
+        thumbnails.wait(&media);
         assert!(thumbnails.get(&broken).is_none());
     }
 
@@ -498,12 +584,12 @@ mod tests {
     }
 
     #[test]
-    fn a_thumbnail_decoding_should_ask_for_a_redraw_once() {
+    fn a_thumbnail_finished_after_its_upload_went_should_be_dropped() {
         let (media, mut thumbnails, picture) = (cache(), UploadThumbnails::default(), upload("shot.png", PNG));
         thumbnails.sync(&media, [&picture].into_iter());
-        thumbnails.wait();
-        assert!(thumbnails.sync(&media, [&picture].into_iter()));
-        assert!(!thumbnails.sync(&media, [&picture].into_iter()));
+        thumbnails.sync(&media, std::iter::empty());
+        thumbnails.wait(&media);
+        assert!(!thumbnails.sync(&media, std::iter::empty()));
     }
 
     #[test]

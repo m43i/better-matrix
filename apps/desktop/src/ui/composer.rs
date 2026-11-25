@@ -435,26 +435,26 @@ fn attachments(s: &State, target: ComposerTarget, p: &Palette) -> El {
 }
 
 /// An image upload as its picture, cropped square, with its remove button over its corner.
-fn upload_thumbnail(target: ComposerTarget, index: usize, name: &str, image: &rune::Image, p: &Palette) -> El {
+/// Empty while the thumbnail is being made (`image` `None`).
+fn upload_thumbnail(target: ComposerTarget, index: usize, name: &str, image: Option<&rune::Image>, p: &Palette) -> El {
     const SIZE: f32 = crate::state::THUMBNAIL_SIZE;
     const REMOVE: f32 = 22.0;
-    el().key(key(target, &format!("attachment-{index}")))
-        .size(SIZE, SIZE)
-        .radius(8.0)
-        .fill(p.bg)
-        .border(1.0, p.divider)
-        .pixels_fit(image.pixels(), rune::SurfaceFit::Fill)
-        .help(name.to_owned())
-        .child(
-            icon_button(&icons::CLOSE, &tf!("composer.remove", name = name), false, p.text, p)
-                .key(key(target, &format!("attachment-{index}-remove")))
-                .size(REMOVE, REMOVE)
-                .radius(REMOVE / 2.0)
-                .fill(p.surface)
-                .border(1.0, p.divider)
-                .absolute(SIZE - REMOVE - 3.0, 3.0)
-                .on_press(move |s: &mut State| s.composer_mut(target).remove_attachment(index)),
-        )
+    let tile = el().key(key(target, &format!("attachment-{index}"))).size(SIZE, SIZE).radius(8.0).help(name.to_owned());
+    // The picture alone, no chip around it; a placeholder only while it is being made.
+    let tile = match image {
+        Some(image) => tile.pixels_fit(image.pixels(), rune::SurfaceFit::Fill),
+        None => tile.fill(p.surface),
+    };
+    tile.child(
+        icon_button(&icons::CLOSE, &tf!("composer.remove", name = name), false, p.text, p)
+            .key(key(target, &format!("attachment-{index}-remove")))
+            .size(REMOVE, REMOVE)
+            .radius(REMOVE / 2.0)
+            .fill(p.surface)
+            .border(1.0, p.divider)
+            .absolute(SIZE - REMOVE - 3.0, 3.0)
+            .on_press(move |s: &mut State| s.composer_mut(target).remove_attachment(index)),
+    )
 }
 
 /// The element key of a composer's emoji button, which its picker anchors to.

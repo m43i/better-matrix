@@ -7,7 +7,7 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../i18n';
 import { loadOlder } from '../state/actions/core';
-import { releaseTimeline, retainTimeline } from '../state/actions/timeline';
+import { releaseTimeline, retainTimeline, retryHistory } from '../state/actions/timeline';
 import { atStart } from '../state/plan';
 import { useAppStore, useStore } from '../state/react';
 import { roomLogOf, timeline as timelineOf } from '../state/selectors';
@@ -52,12 +52,17 @@ export default function RoomLogScreen() {
               {error !== null ? (
                 <Text style={[font.meta, styles.error, { color: palette.danger }]}>{error}</Text>
               ) : null}
+              {/* A failed page, or a timeline that didn't open, is tried again as the timeline's is. */}
               <Button
-                testID="log-earlier"
+                testID={error !== null ? 'log-retry' : 'log-earlier'}
                 kind="secondary"
-                title={t('info.log_earlier')}
+                title={error !== null ? t('common.try_again') : t('info.log_earlier')}
                 busy={loading}
-                onPress={() => loadOlder(store, account, key)}
+                onPress={() =>
+                  error !== null
+                    ? retryHistory(store, account, key)
+                    : loadOlder(store, account, key)
+                }
               />
             </View>
           )

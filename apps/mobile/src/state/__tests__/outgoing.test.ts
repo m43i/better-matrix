@@ -242,6 +242,10 @@ describe('attachmentKind', () => {
     expect(attachmentKind('application/octet-stream', 'Photo.JPG')).toBe('image');
   });
 
+  it('should preview an SVG by its extension when the type says nothing', () => {
+    expect(attachmentKind('application/octet-stream', 'diagram.svg')).toBe('image');
+  });
+
   it('should preview a video by its extension without a type', () => {
     expect(attachmentKind(null, 'party.mov')).toBe('video');
   });

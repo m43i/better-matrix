@@ -70,7 +70,7 @@ use rune::{TextEdit, Tx};
 pub use account_actions::{KeyFile, KeyFileStep, KeyTransfer, PasswordForm, RecoveryKeyFor};
 pub use accounts::READ_MARKER_FADE;
 pub use accounts::{
-    AccountData, Accounts, EntryView, Landing, PlacedCode, RichText, RoomTimeline, Scope, TimelineItem,
+    AccountData, Accounts, Entry, EntryView, Landing, PlacedCode, RichText, RoomTimeline, Scope, TimelineItem,
     continues_group, now_ms, place_code, rich_body, visual, wants_attention,
 };
 pub use admin::{
@@ -2984,6 +2984,19 @@ impl State {
                 .and_then(|room| account.pinned_messages(room))
                 .into_iter()
                 .flat_map(|pins| pins.take(MEMBER_PICTURES).filter_map(|pin| pin.sender_avatar.clone()));
+            // The room log's people, as it lists them: none the user ignores.
+            let log = self
+                .active_room_id()
+                .filter(|_| self.side == Some(SidePanel::Log))
+                .and_then(|room_id| account.timeline(&TimelineKey::room(room_id)))
+                .into_iter()
+                .flat_map(|timeline| {
+                    timeline
+                        .room_log()
+                        .filter(|(_, event)| !account.ignores(&event.sender.id))
+                        .take(MEMBER_PICTURES)
+                        .filter_map(|(_, event)| event.sender.avatar.clone())
+                });
             // The open person panel's picture: the member list's, else the message's.
             let person = match (&self.side, self.active_room_id()) {
                 (Some(SidePanel::Person(shown_as)), Some(room_id)) => account
@@ -3014,6 +3027,7 @@ impl State {
                 members
                     .chain(person)
                     .chain(pins)
+                    .chain(log)
                     .chain(typing)
                     .chain(found)
                     .chain(public)
@@ -4258,7 +4272,9 @@ impl State {
                 self.request_avatars();
                 self.load_identity(&user_id);
             }
-            Some(SidePanel::Info | SidePanel::Log) | None => {}
+            // History older than the timeline drew may bring senders no row fetched.
+            Some(SidePanel::Log) => self.request_avatars(),
+            Some(SidePanel::Info) | None => {}
         }
     }
 

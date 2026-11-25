@@ -317,7 +317,18 @@ export function uploadName(path: string, given: string | null | undefined): stri
   return stem === '' ? own : stem + extension;
 }
 
-const IMAGE_EXTENSIONS = ['avif', 'bmp', 'gif', 'heic', 'heif', 'jpeg', 'jpg', 'png', 'webp'];
+const IMAGE_EXTENSIONS = [
+  'avif',
+  'bmp',
+  'gif',
+  'heic',
+  'heif',
+  'jpeg',
+  'jpg',
+  'png',
+  'svg',
+  'webp',
+];
 
 const VIDEO_EXTENSIONS = ['3gp', 'm4v', 'mkv', 'mov', 'mp4', 'webm'];
 
