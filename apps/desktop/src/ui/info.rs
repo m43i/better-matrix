@@ -361,14 +361,18 @@ pub fn pins(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -
 /// changes, which the timeline leaves out by default, and who came and went), newest first, with
 /// when each happened. Its foot loads the history before.
 pub fn log(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
-    let timeline = account.timeline(&matrix_core::TimelineKey::room(&room.room_id));
-    let count = account.room_log(&room.room_id).len();
-    let list = if count == 0 {
+    let key = matrix_core::TimelineKey::room(&room.room_id);
+    let timeline = account.timeline(&key);
+    // Worked out once a build: the rows then find their entries by index.
+    let rows: std::rc::Rc<Vec<usize>> =
+        std::rc::Rc::new(account.room_log(&room.room_id).iter().map(|(at, _)| *at).collect());
+    let list = if rows.is_empty() {
         let empty = if timeline.is_some() { t!("info.no_log") } else { t!("info.loading") };
         col().w_full().py(8.0).child(text(empty).font(font::BODY).color(p.text_muted).px(16.0).py(12.0).wrap())
     } else {
         // Only the rows in view are built: a busy room's log runs to thousands.
-        let (keyed, built, palette) = (room.room_id.clone(), room.room_id.clone(), *p);
+        let (keyed, built, palette) = (std::rc::Rc::clone(&rows), std::rc::Rc::clone(&rows), *p);
+        let (key_of, row_of) = (key.clone(), key);
         let version = {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -381,20 +385,15 @@ pub fn log(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
             .py(8.0)
             .growth(rune::GrowthSpec::default())
             .virtual_rows(
-                count,
+                rows.len(),
                 LOG_ROW,
                 move |s: &State, index| {
-                    let id = s
-                        .active_account()
-                        .and_then(|account| account.room_log(&keyed).get(index).map(|(id, _)| format!("log-{id}")));
-                    std::borrow::Cow::Owned(id.unwrap_or_default())
+                    let entry = keyed.get(index).and_then(|at| log_entry(s, &key_of, *at));
+                    std::borrow::Cow::Owned(entry.map(|(id, _)| format!("log-{id}")).unwrap_or_default())
                 },
-                move |s: &State, index| {
-                    let Some((id, event)) = s.active_account().and_then(|a| a.room_log(&built).get(index).copied())
-                    else {
-                        return el();
-                    };
-                    log_row(s, id, event, &palette)
+                move |s: &State, index| match built.get(index).and_then(|at| log_entry(s, &row_of, *at)) {
+                    Some((id, event)) => log_row(s, id, event, &palette),
+                    None => el(),
                 },
             )
             .virtual_rows_version(version)
@@ -423,6 +422,19 @@ pub fn log(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
         }
     });
     frame("log-panel", t!("info.log"), list, footer, p)
+}
+
+/// The room event at `at` in the timeline `key` of the active account, with its entry's ID.
+fn log_entry<'a>(
+    s: &'a State,
+    key: &matrix_core::TimelineKey,
+    at: usize,
+) -> Option<(&'a str, &'a matrix_core::RoomEvent)> {
+    let entry = s.active_account()?.timeline(key)?.entries.get(at)?;
+    match &entry.kind {
+        crate::state::EntryView::RoomEvent(event) => Some((entry.id.as_str(), event)),
+        _ => None,
+    }
 }
 
 /// The estimated height of a room log row: one line of text and its time.

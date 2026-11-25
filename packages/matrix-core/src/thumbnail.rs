@@ -146,12 +146,55 @@ fn upload_square(bytes: &[u8], side: u32) -> Option<image::RgbaImage> {
     let (w, h) = (image.width(), image.height());
     let cut = w.min(h);
     let middle = imageops::crop_imm(&image, (w - cut) / 2, (h - cut) / 2, cut, cut);
-    let square =
-        if cut > side { imageops::resize(&*middle, side, side, FilterType::Triangle) } else { middle.to_image() };
+    let square = if cut > side {
+        let mut square = imageops::resize(&Premultiplied(&*middle), side, side, FilterType::Triangle);
+        unpremultiply(&mut square);
+        square
+    } else {
+        middle.to_image()
+    };
     drop(image);
     let mut square = DynamicImage::ImageRgba8(square);
     square.apply_orientation(orientation);
     Some(square.into_rgba8())
+}
+
+/// A view whose pixels read premultiplied by their alpha, for scaling without a copy: transparent
+/// pixels then don't darken the edges of what shows.
+struct Premultiplied<'a, I>(&'a I);
+
+impl<I: image::GenericImageView<Pixel = Rgba<u8>>> image::GenericImageView for Premultiplied<'_, I> {
+    type Pixel = Rgba<u8>;
+
+    fn dimensions(&self) -> (u32, u32) {
+        self.0.dimensions()
+    }
+
+    fn get_pixel(&self, x: u32, y: u32) -> Rgba<u8> {
+        let mut pixel = self.0.get_pixel(x, y);
+        premultiply(&mut pixel);
+        pixel
+    }
+}
+
+fn premultiply(pixel: &mut Rgba<u8>) {
+    let alpha = u16::from(pixel[3]);
+    for channel in &mut pixel.0[..3] {
+        *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
+    }
+}
+
+/// Undoes [`premultiply`] on a scaled image.
+fn unpremultiply(image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
+    for pixel in image.pixels_mut() {
+        let alpha = u16::from(pixel[3]);
+        if alpha == 0 {
+            continue;
+        }
+        for channel in &mut pixel.0[..3] {
+            *channel = ((u16::from(*channel) * 255 + alpha / 2) / alpha).min(255) as u8;
+        }
+    }
 }
 
 /// `image` at `width`×`height`. One with alpha is scaled premultiplied, so its transparent
@@ -161,22 +204,9 @@ fn resized(image: DynamicImage, width: u32, height: u32) -> DynamicImage {
         return image.resize_exact(width, height, FilterType::Triangle);
     }
     let mut rgba = image.into_rgba8();
-    for pixel in rgba.pixels_mut() {
-        let alpha = u16::from(pixel[3]);
-        for channel in &mut pixel.0[..3] {
-            *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
-        }
-    }
+    rgba.pixels_mut().for_each(premultiply);
     let mut scaled: ImageBuffer<Rgba<u8>, Vec<u8>> = imageops::resize(&rgba, width, height, FilterType::Triangle);
-    for pixel in scaled.pixels_mut() {
-        let alpha = u16::from(pixel[3]);
-        if alpha == 0 {
-            continue;
-        }
-        for channel in &mut pixel.0[..3] {
-            *channel = ((u16::from(*channel) * 255 + alpha / 2) / alpha).min(255) as u8;
-        }
-    }
+    unpremultiply(&mut scaled);
     DynamicImage::ImageRgba8(scaled)
 }
 
@@ -222,6 +252,22 @@ mod tests {
     fn an_upload_thumbnail_should_be_a_square_of_the_side_asked_for() {
         let square = upload_thumbnail(&png(400, 200), 128).expect("a thumbnail");
         assert_eq!(square.dimensions(), (128, 128));
+    }
+
+    #[test]
+    fn an_upload_thumbnails_edges_should_not_darken_toward_transparent_pixels() {
+        // White on its left half, transparent black on its right.
+        let image =
+            ImageBuffer::from_fn(
+                400,
+                400,
+                |x, _| if x < 200 { Rgba([255, 255, 255, 255]) } else { Rgba([0, 0, 0, 0]) },
+            );
+        let mut png = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image).write_to(&mut png, ImageFormat::Png).expect("encodes");
+        let square = upload_thumbnail(&png.into_inner(), 128).expect("a thumbnail");
+        let edge = square.get_pixel(64, 64);
+        assert!(edge[3] > 0 && edge[0] > 250, "the edge keeps its white: {edge:?}");
     }
 
     #[test]

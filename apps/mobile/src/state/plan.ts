@@ -281,6 +281,25 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
   return shown;
 }
 
+/**
+ * Whether to ask for older history though the list wasn't scrolled: it has no row to scroll to
+ * the start of (a page holding only room changes left out, or hidden events), and there is more,
+ * not already on its way, and the last page didn't fail.
+ */
+export function wantsOlder(
+  rows: readonly Row[],
+  timeline: Timeline,
+  thread: string | null,
+): boolean {
+  return (
+    rows.length === 0 &&
+    !atStart(timeline, thread) &&
+    !timeline.opening &&
+    !timeline.loadingOlder &&
+    timeline.historyError === null
+  );
+}
+
 /** The row showing the message with this event ID. */
 export function rowOf(rows: readonly Row[], eventId: string): number {
   return rows.findIndex((row) => row.kind === 'message' && row.message.event_id === eventId);

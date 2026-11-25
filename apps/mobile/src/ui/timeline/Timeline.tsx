@@ -50,6 +50,7 @@ import {
   type Row,
   rowOf,
   shouldMarkRead,
+  wantsOlder,
 } from '../../state/plan';
 import { shallow, useAppStore, useStore } from '../../state/react';
 import {
@@ -313,6 +314,12 @@ export function Timeline({
 
     if (!atStart(now, thread) && now.historyError === null) loadOlder(store, account, timelineKey);
   }, [store, account, timelineKey, thread]);
+
+  // A page with nothing to draw gives the list no start to reach: ask for the page before it.
+  const nothingDrawn = wantsOlder(rows, timeline, thread);
+  useEffect(() => {
+    if (nothingDrawn) loadMore();
+  }, [nothingDrawn, loadMore]);
 
   const rowsRef = useRef(rows);
   useLayoutEffect(() => {

@@ -1,6 +1,14 @@
 import type { TimelineEntry } from '@better-matrix/matrix-native/types';
 
-import { atStart, GROUP_WINDOW_MS, newestSent, planTimeline, rowOf, shouldMarkRead } from '../plan';
+import {
+  atStart,
+  GROUP_WINDOW_MS,
+  newestSent,
+  planTimeline,
+  rowOf,
+  shouldMarkRead,
+  wantsOlder,
+} from '../plan';
 import { hiddenEntry as hiddenStandIn } from '../safety';
 import {
   ADA,
@@ -382,6 +390,30 @@ describe('atStart', () => {
 
   it('should not be at the start before either', () => {
     expect(atStart(timelineOf([entry('a')]), 'root')).toBe(false);
+  });
+});
+
+describe('wantsOlder', () => {
+  const topic = () => roomEventEntry('topic', ada, { type: 'RoomTopic', data: 'News' });
+
+  it('should ask for older history when a page holds only changes left out', () => {
+    const timeline = timelineOf([topic()]);
+    expect(wantsOlder(planTimeline(timeline, room), timeline, null)).toBe(true);
+  });
+
+  it('should not ask while a page is on its way', () => {
+    const timeline = timelineOf([topic()], { loadingOlder: true });
+    expect(wantsOlder([], timeline, null)).toBe(false);
+  });
+
+  it('should not ask once the start is in', () => {
+    const timeline = timelineOf([topic()], { reachedStart: true });
+    expect(wantsOlder([], timeline, null)).toBe(false);
+  });
+
+  it('should not ask while there are rows to scroll', () => {
+    const timeline = timelineOf([entry('a')]);
+    expect(wantsOlder(planTimeline(timeline, room), timeline, null)).toBe(false);
   });
 });
 
