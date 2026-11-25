@@ -287,14 +287,6 @@ fn next_revision() -> u64 {
 }
 
 impl RoomTimeline {
-    /// The room log: every room event loaded so far, newest first, with its entry's ID.
-    pub fn room_log(&self) -> impl Iterator<Item = (&str, &matrix_core::RoomEvent)> {
-        self.entries.iter().rev().filter_map(|entry| match &entry.kind {
-            EntryView::RoomEvent(event) => Some((entry.id.as_str(), event.as_ref())),
-            _ => None,
-        })
-    }
-
     /// The fading divider and its insertion point in the current entries.
     pub fn fading_read_marker(&self) -> Option<(&str, usize)> {
         let marker = self.read_marker_fade.as_ref()?.marker();
@@ -1097,6 +1089,22 @@ impl AccountData {
 
     /// A fingerprint of everyone [`AccountData::ignores`] counts: what views built from it (a
     /// timeline's rows) are made again for when it changes.
+    /// The room log of `room_id` as it lists: the room events of its main timeline, newest
+    /// first, with their entry IDs, none the user ignores sent.
+    pub fn room_log(&self, room_id: &str) -> Vec<(&str, &matrix_core::RoomEvent)> {
+        let entries = self.timeline(&TimelineKey::room(room_id)).map_or(&[][..], |t| t.entries.as_slice());
+        entries
+            .iter()
+            .rev()
+            .filter_map(|entry| match &entry.kind {
+                EntryView::RoomEvent(event) if !self.ignores(&event.sender.id) => {
+                    Some((entry.id.as_str(), event.as_ref()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn ignores_fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();

@@ -679,6 +679,8 @@ pub enum ResetStep {
 
 /// How many members' pictures the open member list loads.
 const MEMBER_PICTURES: usize = 60;
+/// Room log rows either side of those in view whose pictures load.
+const LOG_MARGIN: usize = 10;
 
 /// Why a command was sent, so its [`Event::Finished`] lands in the right place.
 #[derive(Debug, Clone, PartialEq)]
@@ -934,6 +936,8 @@ pub struct State {
     pub message_jump: Option<search::MessageJump>,
     /// The message just jumped to, lit a moment.
     pub flash: Option<jump::Flash>,
+    /// The room log's rows in view, whose pictures load.
+    pub log_shown: std::ops::Range<usize>,
     /// The latest jump waiting for the engine to find its message, and its account and room:
     /// only its answer goes.
     locating: Option<(RequestId, AccountId, String)>,
@@ -1108,6 +1112,7 @@ impl State {
             search: PeopleSearch::default(),
             message_jump: None,
             flash: None,
+            log_shown: 0..0,
             locating: None,
             packs: packs::Packs::default(),
             location: LocationForm::default(),
@@ -2593,6 +2598,16 @@ impl State {
         true
     }
 
+    /// The room log's rows in view changed: their pictures load.
+    pub fn log_shown(&mut self, range: std::ops::Range<usize>) -> bool {
+        if self.log_shown == range {
+            return false;
+        }
+        self.log_shown = range;
+        self.request_avatars();
+        true
+    }
+
     /// The room log's "Load earlier": the page of the room's history before what it holds.
     pub fn load_earlier_log(&mut self) {
         let (Some(account), Some(room_id)) = (self.nav.account.clone(), self.active_room_id()) else { return };
@@ -2984,23 +2999,20 @@ impl State {
                 .and_then(|room| account.pinned_messages(room))
                 .into_iter()
                 .flat_map(|pins| pins.take(MEMBER_PICTURES).filter_map(|pin| pin.sender_avatar.clone()));
-            // The room log's people, as it lists them (none the user ignores), each once: rooms
-            // have few, however long their log.
-            let mut log: Vec<MediaRef> = Vec::new();
-            if let Some(timeline) = self
-                .active_room_id()
-                .filter(|_| self.side == Some(SidePanel::Log))
-                .and_then(|room_id| account.timeline(&TimelineKey::room(room_id)))
-            {
-                for (_, event) in timeline.room_log().filter(|(_, event)| !account.ignores(&event.sender.id)) {
-                    if let Some(avatar) = event.sender.avatar.as_ref().filter(|avatar| !log.contains(avatar)) {
-                        if log.len() == MEMBER_PICTURES {
-                            break;
-                        }
-                        log.push(avatar.clone());
-                    }
+            // The room log's rows in view and a few either side, as it lists them.
+            let log: Vec<MediaRef> = match (self.active_room_id(), &self.side) {
+                (Some(room_id), Some(SidePanel::Log)) => {
+                    let from = self.log_shown.start.saturating_sub(LOG_MARGIN);
+                    let to = self.log_shown.end + LOG_MARGIN;
+                    let log = account.room_log(room_id);
+                    log.get(from..to.min(log.len()))
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(|(_, event)| event.sender.avatar.clone())
+                        .collect()
                 }
-            }
+                _ => Vec::new(),
+            };
             // The open person panel's picture: the member list's, else the message's.
             let person = match (&self.side, self.active_room_id()) {
                 (Some(SidePanel::Person(shown_as)), Some(room_id)) => account
@@ -4277,7 +4289,10 @@ impl State {
                 self.load_identity(&user_id);
             }
             // History older than the timeline drew may bring senders no row fetched.
-            Some(SidePanel::Log) => self.request_avatars(),
+            Some(SidePanel::Log) => {
+                self.log_shown = 0..0;
+                self.request_avatars();
+            }
             Some(SidePanel::Info) | None => {}
         }
     }

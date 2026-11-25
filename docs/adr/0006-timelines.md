@@ -363,7 +363,10 @@ see who is typing there.
     senders are left out. It reads the open timeline rather than asking the server for state, so
     it holds what history is loaded: "Load earlier" at its foot pages the room's timeline back
     through the same path scrolling up takes (`State::load_earlier_log`, `load_older`), and a
-    failed page offers Try again there. It ends where the timeline reaches its start.
+    failed page offers Try again there. It ends where the timeline reaches its start. The desktop
+    builds only the log rows in view (`virtual_rows`) and loads the pictures of those and ten
+    either side (`State::log_shown`). Retrying a timeline that failed to open keeps the panel:
+    the side panel closes only when the room shown changes (`nav.visited`).
   - A date divider whose day draws nothing (only changes the log keeps, hidden events, people
     the user ignores) has no row, so no empty day shows; a "New" marker under it doesn't count
     as something to show.

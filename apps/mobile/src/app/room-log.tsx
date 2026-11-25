@@ -50,7 +50,9 @@ export default function RoomLogScreen() {
           reachedStart ? undefined : (
             <View style={styles.footer}>
               {error !== null ? (
-                <Text style={[font.meta, styles.error, { color: palette.danger }]}>{error}</Text>
+                <Text style={[font.meta, styles.error, { color: palette.danger }]}>
+                  {t('timeline.history_failed')}
+                </Text>
               ) : null}
               {/* A failed page, or a timeline that didn't open, is tried again as the timeline's is. */}
               <Button

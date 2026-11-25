@@ -139,12 +139,18 @@ fn upload_square(bytes: &[u8], side: u32) -> Option<image::RgbaImage> {
     limits.reserve(decoder.total_bytes()).ok()?;
     decoder.set_limits(limits).ok()?;
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
-    let mut image = DynamicImage::from_decoder(decoder).ok()?;
-    image.apply_orientation(orientation);
+    let image = DynamicImage::from_decoder(decoder).ok()?;
+    // The middle square, read in place and scaled from there: the decoded picture is never
+    // copied whole. Turning it upright after is the same as before: EXIF turns and flips keep
+    // the middle square in the middle.
     let (w, h) = (image.width(), image.height());
     let cut = w.min(h);
-    let square = image.crop_imm((w - cut) / 2, (h - cut) / 2, cut, cut);
-    let square = if cut > side { resized(square, side, side) } else { square };
+    let middle = imageops::crop_imm(&image, (w - cut) / 2, (h - cut) / 2, cut, cut);
+    let square =
+        if cut > side { imageops::resize(&*middle, side, side, FilterType::Triangle) } else { middle.to_image() };
+    drop(image);
+    let mut square = DynamicImage::ImageRgba8(square);
+    square.apply_orientation(orientation);
     Some(square.into_rgba8())
 }
 

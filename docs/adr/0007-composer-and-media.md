@@ -275,9 +275,11 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     kept, never the whole photo, a batch never decodes at once, and no file is read on the UI
     thread. The square comes from `matrix_core::upload_thumbnail`: turned upright by its EXIF
     orientation, decoding bounded as the engine's thumbnails are (8192 pixels a side, 256 MiB).
-    Only regular files up to 64 MiB are read; a job whose upload went before its turn is skipped,
-    and one finished for an upload removed and attached again since is dropped (jobs have IDs).
-    An SVG is rasterized at the thumbnail's size by Rune's worker. A thumbnail goes once its upload is sent, removed or set aside with
+    The middle square is scaled from the decoded picture in place and turned upright after, so
+    the picture is never copied whole. Only regular files up to 64 MiB are read, looked at before
+    they are opened (a pipe would block the worker); a job whose upload went before its turn is
+    skipped, and one finished for an upload removed and attached again since is dropped (jobs
+    have IDs). An SVG is read by the worker too and rasterized at the thumbnail's size by Rune. A thumbnail goes once its upload is sent, removed or set aside with
     its draft, and is made again when the draft comes back. Headless runs without a decoder show
     chips.
   - Pastes reach the field through `on_input_paste`. A pasted image joins the draft as

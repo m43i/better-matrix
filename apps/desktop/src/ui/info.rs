@@ -360,47 +360,46 @@ pub fn pins(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -
 /// The room log: every room event in the room's history loaded so far (profile and room-setting
 /// changes, which the timeline leaves out by default, and who came and went), newest first, with
 /// when each happened. Its foot loads the history before.
-pub fn log(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
+pub fn log(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
     let timeline = account.timeline(&matrix_core::TimelineKey::room(&room.room_id));
-    let mut list = col().w_full().py(8.0);
-    let mut listed = 0;
-    for (id, event) in timeline.into_iter().flat_map(|t| t.room_log()) {
-        if account.ignores(&event.sender.id) {
-            continue;
-        }
-        listed += 1;
-        list = list.child(
-            row()
-                .key(format!("log-{id}"))
-                .w_full()
-                .px(16.0)
-                .py(8.0)
-                .gap(10.0)
-                .items_start()
-                .child(
-                    media_avatar(&event.sender.id, &event.sender.name, event.sender.avatar.as_ref(), &s.media, 28.0)
-                        .mt(2.0),
-                )
-                .child(
-                    col()
-                        .grow(1.0)
-                        .min_w(0.0)
-                        .gap(2.0)
-                        .child(
-                            text(super::timeline::room_event_text(event))
-                                .font(font::BODY)
-                                .color(p.text)
-                                .wrap()
-                                .selectable(true),
-                        )
-                        .child(text(when(event.timestamp_ms)).font(font::META).color(p.text_muted)),
-                ),
-        );
-    }
-    if listed == 0 {
+    let count = account.room_log(&room.room_id).len();
+    let list = if count == 0 {
         let empty = if timeline.is_some() { t!("info.no_log") } else { t!("info.loading") };
-        list = list.child(text(empty).font(font::BODY).color(p.text_muted).px(16.0).py(12.0).wrap());
-    }
+        col().w_full().py(8.0).child(text(empty).font(font::BODY).color(p.text_muted).px(16.0).py(12.0).wrap())
+    } else {
+        // Only the rows in view are built: a busy room's log runs to thousands.
+        let (keyed, built, palette) = (room.room_id.clone(), room.room_id.clone(), *p);
+        let version = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (timeline.map_or(0, |t| t.revision), account.ignores_fingerprint()).hash(&mut hasher);
+            hasher.finish()
+        };
+        col()
+            .key("log-list")
+            .w_full()
+            .py(8.0)
+            .growth(rune::GrowthSpec::default())
+            .virtual_rows(
+                count,
+                LOG_ROW,
+                move |s: &State, index| {
+                    let id = s
+                        .active_account()
+                        .and_then(|account| account.room_log(&keyed).get(index).map(|(id, _)| format!("log-{id}")));
+                    std::borrow::Cow::Owned(id.unwrap_or_default())
+                },
+                move |s: &State, index| {
+                    let Some((id, event)) = s.active_account().and_then(|a| a.room_log(&built).get(index).copied())
+                    else {
+                        return el();
+                    };
+                    log_row(s, id, event, &palette)
+                },
+            )
+            .virtual_rows_version(version)
+            .on_visible_rows(|s: &mut State, range| s.log_shown(range))
+    };
     let footer = timeline.filter(|t| !t.reached_start).map(|t| {
         let foot = col().w_full().px(16.0).py(10.0).gap(8.0).border_sides([1.0, 0.0, 0.0, 0.0], p.divider);
         match &t.history_error {
@@ -424,4 +423,33 @@ pub fn log(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) ->
         }
     });
     frame("log-panel", t!("info.log"), list, footer, p)
+}
+
+/// The estimated height of a room log row: one line of text and its time.
+const LOG_ROW: f32 = 56.0;
+
+/// One room event in the room log: who, what the timeline says of it, and when.
+fn log_row(s: &State, id: &str, event: &matrix_core::RoomEvent, p: &Palette) -> El {
+    row()
+        .key(format!("log-{id}"))
+        .w_full()
+        .px(16.0)
+        .py(8.0)
+        .gap(10.0)
+        .items_start()
+        .child(media_avatar(&event.sender.id, &event.sender.name, event.sender.avatar.as_ref(), &s.media, 28.0).mt(2.0))
+        .child(
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(2.0)
+                .child(
+                    text(super::timeline::room_event_text(event))
+                        .font(font::BODY)
+                        .color(p.text)
+                        .wrap()
+                        .selectable(true),
+                )
+                .child(text(when(event.timestamp_ms)).font(font::META).color(p.text_muted)),
+        )
 }
