@@ -6,7 +6,8 @@ import type { RoomChange, RoomEvent, TimelineEntry } from '@better-matrix/matrix
 
 /**
  * Whether only the room log lists this change by default, as `RoomChange::log_only` has it:
- * profile and room setup changes. Membership, upgrades and live locations stay in the timeline.
+ * profile and room setup changes, widgets among them. Membership, upgrades, live locations and
+ * meetings started stay in the timeline.
  */
 export function logOnly(change: RoomChange): boolean {
   switch (change.type) {
@@ -27,7 +28,11 @@ export function logOnly(change: RoomChange): boolean {
     case 'SpaceRooms':
     case 'Spaces':
     case 'ModerationRules':
+    case 'WidgetRemoved':
       return true;
+    case 'WidgetAdded':
+      // A meeting started is something to join: it stays.
+      return change.data.meeting === null;
     case 'Joined':
     case 'Left':
     case 'Invited':

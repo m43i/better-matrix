@@ -26,6 +26,8 @@ describe('logOnly', () => {
     { type: 'SpaceRooms' },
     { type: 'Spaces' },
     { type: 'ModerationRules' },
+    { type: 'WidgetAdded', data: { name: 'Board', meeting: null } },
+    { type: 'WidgetRemoved' },
   ])('should leave $type to the room log', (change) => {
     expect(logOnly(change)).toBe(true);
   });
@@ -43,6 +45,7 @@ describe('logOnly', () => {
     { type: 'Upgraded' },
     { type: 'InvitedByContact', data: 'grace@example.org' },
     { type: 'LiveLocation' },
+    { type: 'WidgetAdded', data: { name: 'Standup', meeting: 'Jitsi' } },
   ])('should keep $type in the timeline', (change) => {
     expect(logOnly(change)).toBe(false);
   });

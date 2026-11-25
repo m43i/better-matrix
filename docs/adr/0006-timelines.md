@@ -348,10 +348,11 @@ see who is typing there.
     and 2 more joined", with up to four stacked pictures; hovering "and 2 more" shows everyone.
     Merging is in the view, so entries stay one per event and diff indices stay true.
   - Only who came, went or was moderated stays in the timeline: joins, leaves, invites (and
-    withdrawn or declined ones), removals, bans, unbans, requests to join, upgrades and shared
-    live locations. Profile and room-setting changes (created, display name, profile picture,
+    withdrawn or declined ones), removals, bans, unbans, requests to join, upgrades, shared
+    live locations and meetings started (a widget holding one, to join). Profile and room-setting changes (created, display name, profile picture,
     room name, topic, picture, encryption, history visibility, join rules, permissions, pins,
-    addresses, guest and server access, a space's rooms and spaces, moderation rules) are
+    addresses, guest and server access, a space's rooms and spaces, moderation rules, other
+    widgets pinned or taken off) are
     `RoomChange::log_only` and go to the room log. A device setting brings them back into
     timelines ("Room changes", `Settings::show_room_changes` on the desktop's General settings,
     `showRoomChanges` in the phone's Preferences; off by default), replanning them like hidden

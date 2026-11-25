@@ -631,8 +631,9 @@ impl RoomChange {
         matches!(self, Self::Joined | Self::Left)
     }
 
-    /// Whether only the room log lists it by default: profile and room-setting changes. Who came,
-    /// went or was moderated (and an upgrade, a shared live location) stays in the timeline.
+    /// Whether only the room log lists it by default: profile and room-setting changes, widgets
+    /// among them. Who came, went or was moderated (and an upgrade, a shared live location, a
+    /// meeting started, which people join) stays in the timeline.
     pub fn log_only(&self) -> bool {
         match self {
             Self::Created
@@ -651,7 +652,9 @@ impl RoomChange {
             | Self::ServerAccess
             | Self::SpaceRooms
             | Self::Spaces
-            | Self::ModerationRules => true,
+            | Self::ModerationRules
+            | Self::WidgetAdded { meeting: None, .. }
+            | Self::WidgetRemoved => true,
             Self::Joined
             | Self::Left
             | Self::Invited(_)
@@ -663,7 +666,8 @@ impl RoomChange {
             | Self::Knocked
             | Self::Upgraded
             | Self::InvitedByContact(_)
-            | Self::LiveLocation => false,
+            | Self::LiveLocation
+            | Self::WidgetAdded { meeting: Some(_), .. } => false,
         }
     }
 }
@@ -1194,6 +1198,17 @@ mod tests {
     fn a_ban_should_stay_in_the_timeline() {
         let banned = Person { id: "@k:x".into(), name: "K".into(), avatar: None };
         assert!(!RoomChange::Banned(banned).log_only());
+    }
+
+    #[test]
+    fn a_widget_pinned_to_the_room_should_be_left_to_the_room_log() {
+        assert!(RoomChange::WidgetAdded { name: "Board".into(), meeting: None }.log_only());
+    }
+
+    #[test]
+    fn a_meeting_started_should_stay_in_the_timeline() {
+        let meeting = RoomChange::WidgetAdded { name: "Standup".into(), meeting: Some(crate::Meeting::Jitsi) };
+        assert!(!meeting.log_only());
     }
 
     #[test]

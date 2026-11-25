@@ -1834,6 +1834,7 @@ pub fn meeting(s: &mut State) {
         kind: EntryKind::RoomEvent(Box::new(RoomEvent {
             sender: Person { id: "@grace:example.org".into(), name: "Grace Hopper".into(), avatar: None },
             change: RoomChange::WidgetAdded { name: "Standup".into(), meeting: Some(matrix_core::Meeting::Jitsi) },
+            timestamp_ms: DEMO_DAY_MS,
         })),
     };
     seed_timeline(s, &account, &TimelineKey::room(DEMO_THREAD.0), TimelineDiff::PushBack(started));
