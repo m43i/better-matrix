@@ -345,6 +345,12 @@ export function Timeline({
   useEffect(() => {
     if (pageOlder) loadMore();
   }, [pageOlder, rows, loadMore]);
+
+  // The list reports its start on layout too, as when another screen covers it: not from there.
+  const startReached = useCallback(() => {
+    if (onScreen) loadMore();
+  }, [onScreen, loadMore]);
+
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollTo = useCallback((eventId: string, animated = true): boolean => {
@@ -571,7 +577,7 @@ export function Timeline({
               onScroll={onScroll}
               onViewableItemsChanged={onViewableItemsChanged}
               scrollEventThrottle={32}
-              onStartReached={loadMore}
+              onStartReached={startReached}
               onStartReachedThreshold={1}
               maintainVisibleContentPosition={{
                 autoscrollToBottomThreshold: 0.2,
