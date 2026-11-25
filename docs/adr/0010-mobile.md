@@ -461,7 +461,9 @@ Date: 2026-11-16
   them. `planTimeline` drops a date divider when nothing drawn (a message, a room event line, a
   hidden event, the start or a thread's reply count) follows it before the next divider; the
   "New" marker doesn't count. A page that leaves nothing to draw gives the list no start to
-  scroll to, so the timeline asks for the page before it by itself (`wantsOlder`). Room info
+  scroll to, and one asked for at the start that adds nothing to see leaves the list there
+  without telling again, so the timeline asks for the page before it by itself until one adds
+  something (`wantsOlder`, `drawnRows`). Room info
   opens the room log (`app/room-log.tsx`, pushed): every
   room event of the room's main timeline, newest first, without what ignored people did
   (`roomLogOf`), each with the sender's picture, the timeline's sentence and its date and time.

@@ -50,6 +50,7 @@ import {
   type Row,
   rowOf,
   shouldMarkRead,
+  drawnRows,
   wantsOlder,
 } from '../../state/plan';
 import { shallow, useAppStore, useStore } from '../../state/react';
@@ -309,22 +310,28 @@ export function Timeline({
 
   const reachedStart = atStart(timeline, thread);
 
-  const loadMore = useCallback(() => {
-    const now = timelineOf(store.getState(), account, timelineKey);
-
-    if (!atStart(now, thread) && now.historyError === null) loadOlder(store, account, timelineKey);
-  }, [store, account, timelineKey, thread]);
-
-  // A page with nothing to draw gives the list no start to reach: ask for the page before it.
-  const nothingDrawn = wantsOlder(rows, timeline, thread);
-  useEffect(() => {
-    if (nothingDrawn) loadMore();
-  }, [nothingDrawn, loadMore]);
-
   const rowsRef = useRef(rows);
   useLayoutEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
+  // The rows drawn when a page was last asked for at the start; null once one added some.
+  const pagedAt = useRef<number | null>(null);
+
+  const loadMore = useCallback(() => {
+    const now = timelineOf(store.getState(), account, timelineKey);
+
+    if (!atStart(now, thread) && now.historyError === null) {
+      pagedAt.current = drawnRows(rowsRef.current);
+      loadOlder(store, account, timelineKey);
+    }
+  }, [store, account, timelineKey, thread]);
+
+  // A page that adds nothing to see leaves the list at its start without telling again (or
+  // with no start at all): ask for the page before it, until one does.
+  useEffect(() => {
+    if (wantsOlder(rows, timeline, thread, pagedAt.current)) loadMore();
+    else if (!timeline.loadingOlder && drawnRows(rows) !== pagedAt.current) pagedAt.current = null;
+  }, [rows, timeline, thread, loadMore]);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollTo = useCallback((eventId: string, animated = true): boolean => {

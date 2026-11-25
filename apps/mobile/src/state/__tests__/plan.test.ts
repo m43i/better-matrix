@@ -6,6 +6,7 @@ import {
   newestSent,
   planTimeline,
   rowOf,
+  drawnRows,
   shouldMarkRead,
   wantsOlder,
 } from '../plan';
@@ -404,6 +405,17 @@ describe('wantsOlder', () => {
   it('should ask though the New marker stands over changes left out', () => {
     const timeline = timelineOf([{ id: 'marker', kind: { type: 'ReadMarker' } }, topic()]);
     expect(wantsOlder(planTimeline(timeline, room), timeline, null)).toBe(true);
+  });
+
+  it('should ask again when the page asked for at the start added nothing to see', () => {
+    const timeline = timelineOf([topic(), entry('a')]);
+    const rows = planTimeline(timeline, room);
+    expect(wantsOlder(rows, timeline, null, drawnRows(rows))).toBe(true);
+  });
+
+  it('should not ask again once the page asked for at the start added something', () => {
+    const timeline = timelineOf([entry('older'), entry('a')]);
+    expect(wantsOlder(planTimeline(timeline, room), timeline, null, 1)).toBe(false);
   });
 
   it('should not ask while a page is on its way', () => {

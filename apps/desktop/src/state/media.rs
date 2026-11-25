@@ -429,6 +429,8 @@ struct Thumbnail {
 #[derive(Debug)]
 enum Look {
     Shrinking,
+    /// Handed to Rune, which may still refuse it (an SVG it can't draw): drawn meanwhile.
+    Rasterizing(Image),
     Ready(Image),
     /// Not a picture the app can read: it shows as a file.
     Failed,
@@ -498,6 +500,21 @@ impl UploadThumbnails {
         while let Ok(finished) = self.done.try_recv() {
             changed |= self.land(media, finished);
         }
+        changed | self.settle()
+    }
+
+    /// Takes in what Rune finished: drawn, or refused and shown as a file. True when one did.
+    fn settle(&mut self) -> bool {
+        let mut changed = false;
+        for thumbnail in &mut self.shown {
+            if let Look::Rasterizing(image) = &thumbnail.look
+                && image.is_ready()
+            {
+                let image = image.clone();
+                thumbnail.look = if image.error().is_some() { Look::Failed } else { Look::Ready(image) };
+                changed = true;
+            }
+        }
         changed
     }
 
@@ -546,9 +563,9 @@ impl UploadThumbnails {
         };
         thumbnail.look = match (made, media.decoder.as_ref()) {
             (Some(Made::Square(square)), Some(decoder)) => {
-                Look::Ready(decoder.rgba(square.width(), square.height(), square.into_raw()))
+                Look::Rasterizing(decoder.rgba(square.width(), square.height(), square.into_raw()))
             }
-            (Some(Made::Svg(bytes)), Some(decoder)) => Look::Ready(decoder.svg(bytes, THUMBNAIL_SIZE, 2.0)),
+            (Some(Made::Svg(bytes)), Some(decoder)) => Look::Rasterizing(decoder.svg(bytes, THUMBNAIL_SIZE, 2.0)),
             _ => Look::Failed,
         };
         true
@@ -561,10 +578,11 @@ impl UploadThumbnails {
             self.land(media, finished);
         }
         for thumbnail in &self.shown {
-            if let Look::Ready(image) = &thumbnail.look {
+            if let Look::Rasterizing(image) = &thumbnail.look {
                 let _ = image.wait();
             }
         }
+        self.settle();
     }
 
     /// The thumbnail of `upload`: `Some(None)` while it is being made (drawn empty), `None` for
@@ -572,8 +590,8 @@ impl UploadThumbnails {
     pub fn get(&self, upload: &Upload) -> Option<Option<&Image>> {
         match &self.shown.iter().find(|thumbnail| &thumbnail.upload == upload)?.look {
             Look::Shrinking => Some(None),
-            Look::Ready(image) if image.error().is_none() => Some(Some(image)),
-            Look::Ready(_) | Look::Failed => None,
+            Look::Rasterizing(image) | Look::Ready(image) => Some(Some(image)),
+            Look::Failed => None,
         }
     }
 }
@@ -675,6 +693,19 @@ mod tests {
         let read = read(&pipe);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(read.is_none());
+    }
+
+    #[test]
+    fn an_svg_rune_cannot_draw_should_turn_into_a_file() {
+        let (media, mut thumbnails, broken) = (cache(), UploadThumbnails::default(), upload("shape.svg", b"<svg"));
+        thumbnails.sync(&media, [&broken].into_iter());
+        let finished = thumbnails.done.recv_timeout(std::time::Duration::from_secs(10)).expect("the worker read it");
+        thumbnails.land(&media, finished);
+        if let Look::Rasterizing(image) = &thumbnails.shown[0].look {
+            let _ = image.wait();
+        }
+        assert!(thumbnails.sync(&media, [&broken].into_iter()), "Rune refusing it is a change to draw");
+        assert!(thumbnails.get(&broken).is_none());
     }
 
     #[test]

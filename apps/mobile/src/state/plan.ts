@@ -281,24 +281,33 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
   return shown;
 }
 
+/** How many rows draw something: what a page of history must add for the reader to see it. */
+export function drawnRows(rows: readonly Row[]): number {
+  return rows.filter(drawn).length;
+}
+
 /**
- * Whether to ask for older history though the list wasn't scrolled: it draws nothing to scroll to
- * the start of (a page holding only room changes left out, or hidden events, maybe under the "New"
- * marker), and there is more,
- * not already on its way, and the last page didn't fail.
+ * Whether to ask for older history though the list wasn't scrolled: the timeline is idle with
+ * more to load, and either nothing draws (a page holding only room changes left out, or hidden
+ * events, maybe under the "New" marker: the list has no start to scroll to), or the page asked
+ * for at the start (`drawnBefore`, the rows drawn then) added nothing to see, so the list stays
+ * at its start without telling again.
  */
 export function wantsOlder(
   rows: readonly Row[],
   timeline: Timeline,
   thread: string | null,
+  drawnBefore: number | null = null,
 ): boolean {
-  return (
-    !rows.some(drawn) &&
+  const idle =
     !atStart(timeline, thread) &&
     !timeline.opening &&
     !timeline.loadingOlder &&
-    timeline.historyError === null
-  );
+    timeline.historyError === null;
+
+  const drawnNow = drawnRows(rows);
+
+  return idle && (drawnNow === 0 || drawnNow === drawnBefore);
 }
 
 /** The row showing the message with this event ID. */
