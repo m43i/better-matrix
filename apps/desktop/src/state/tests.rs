@@ -5382,7 +5382,7 @@ fn saving_a_message_should_ask_the_engine_to_save_it() {
 fn opening_saved_messages_should_list_them() {
     let (mut s, mut commands, id) = two_rooms();
     s.open_saved();
-    assert_eq!(s.modal, Some(Modal::Saved(id.clone())));
+    assert!(matches!(&s.modal, Some(Modal::Saved(list)) if list.account == id));
     assert!(
         all_commands(&mut commands)
             .iter()

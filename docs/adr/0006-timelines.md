@@ -177,6 +177,19 @@ see who is typing there.
   a list request finishes; phones run list requests one at a time). Opening a row uses the shared
   message jump; its bookmark button stops saving it. The desktop's rows act on the dialog's
   account, which need not be the one on screen.
+  The desktop's dialog is large (720 by 680 points, shrinking with the window) and keeps a
+  search and a filter button above the scrolling list (`dialog_with_bar`); in a very short
+  window they scroll with the list, so the list keeps room. The search matches each word
+  against the starts of words in the sender, the room (`#name`) or direct chat, and the text,
+  splitting the query at punctuation as it splits those (symbols alone match nothing). The filter menu is drawn over
+  the dialog like a select and fits the window, scrolling its choices; it picks a time span by
+  send time (today by the user's calendar date, or the last 7, 30 or 365 days; messages without
+  a send time drop out) and a place (rooms, direct chats, or one conversation that has saved
+  messages), each a group the arrow keys move through. A choice applies at once and the menu
+  stays open; each filter in effect shows as a chip under the search that removes it. Search,
+  filters and whether the menu is open live in the dialog's own state (`SavedList`), so they
+  go with it however it closes or is replaced, filter the listed messages locally, and start
+  empty each time it opens.
 - **Message layout:** a device setting (`Settings::message_layout`, `messageLayout` on phones),
   classic rows by default. Both layouts are built from the same plan and the same parts
   (`message_parts`: what a message says, then what hangs off it), so a feature added to a

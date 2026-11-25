@@ -162,7 +162,14 @@ pinned list, including older messages.
 following them to every session: MSC2437 tagged events (`m.favourite`) in the room's account data.
 The bookmark beside the top bar's search lists them across the account's rooms (on phones, the
 account menu). `SavedMessage` in code; pinned and saved
-messages show as a `MessagePreview` outside their timeline.
+messages show as a `MessagePreview` outside their timeline. On desktop the list has a search and
+saved filters.
+
+**Saved filter**
+: A quick filter over the desktop's saved messages, from the filter button beside their search:
+when a message was sent (`SavedSince`: today, the last 7, 30 or 365 days) and where it was saved
+(`SavedIn`: rooms, direct chats, or one conversation). Each one in effect shows as a chip that
+removes it. `SavedFilter` in code.
 
 **Forward**
 : Send a copy of a text or attachment message into a chosen conversation on the same account,

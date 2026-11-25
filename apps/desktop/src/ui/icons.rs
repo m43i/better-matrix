@@ -88,6 +88,7 @@ icons! {
     SCREEN_SHARE = "screen-share": r#"<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4M12 13.5V8M9.5 10.5 12 8l2.5 2.5"/>"#;
     CALL = "call": r#"<path d="M5 3.5h3.2l1.8 4.6-2.3 1.5a11 11 0 0 0 6.7 6.7l1.5-2.3 4.6 1.8V19a2 2 0 0 1-2 2A16.5 16.5 0 0 1 3 5.5a2 2 0 0 1 2-2z"/>"#;
     HANG_UP = "hang-up": r#"<g transform="rotate(135 12 12)"><path d="M5 3.5h3.2l1.8 4.6-2.3 1.5a11 11 0 0 0 6.7 6.7l1.5-2.3 4.6 1.8V19a2 2 0 0 1-2 2A16.5 16.5 0 0 1 3 5.5a2 2 0 0 1 2-2z"/></g>"#;
+    FILTER = "filter": r#"<path d="M3 6h18M7 12h10M10 18h4"/>"#;
     SEARCH = "search": r#"<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>"#;
     INFO = "info": r#"<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>"#;
     CHEVRON_DOWN = "chevron-down": r#"<path d="m6 9 6 6 6-6"/>"#;

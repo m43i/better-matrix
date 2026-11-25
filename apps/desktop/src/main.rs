@@ -68,6 +68,11 @@ fn spec() -> AppSpec<State> {
                 });
             }),
             ("demo-saved", demo::saved_messages),
+            ("demo-saved-filters", |s| {
+                demo::saved_messages(s);
+                s.filter_saved_since(state::SavedSince::Year);
+                s.toggle_saved_filters();
+            }),
             ("demo-messages", demo::message_features),
             ("demo-mentions", |s| demo::typing(s, "Thanks @gr")),
             ("demo-commands", |s| demo::typing(s, "/")),
@@ -829,6 +834,9 @@ fn on_key(s: &mut State, key: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     match key.key {
+        // One press closes one layer: a held Escape's repeats close nothing more, as Rune's own
+        // modals ignore them.
+        Key::Escape if tx.key_repeat() => true,
         Key::Escape if matches!(s.popover, Some(Popover::Select(_) | Popover::AttachmentMenu { .. })) => {
             s.close_popover();
             true
@@ -844,6 +852,11 @@ fn on_key(s: &mut State, key: &KeyEvent, tx: &mut Tx) -> bool {
         }
         Key::Text(ref typed) if typed == " " && s.popover.is_none() && s.preview.is_some() => {
             s.toggle_preview_playback();
+            true
+        }
+        // The saved messages' filter menu goes before its dialog, whatever keys are held.
+        Key::Escape if s.saved_list().is_some_and(|list| list.filters_open) => {
+            s.close_saved_filters();
             true
         }
         Key::Escape if s.modal.is_some() => {

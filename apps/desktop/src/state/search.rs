@@ -375,12 +375,33 @@ impl super::State {
 pub fn matches(name: &str, query: &str) -> bool {
     let name = name.to_lowercase();
     let words: Vec<&str> = name.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
-    query.to_lowercase().split_whitespace().all(|part| words.iter().any(|word| word.starts_with(part)))
+    // The query splits as the name does, so `#general` or `release-notes` find what they name.
+    let query = query.to_lowercase();
+    let mut parts = query.split(|c: char| !c.is_alphanumeric()).filter(|part| !part.is_empty()).peekable();
+    // Symbols alone (`💬`) name no word: they find nothing, rather than everything.
+    if parts.peek().is_none() {
+        return query.trim().is_empty();
+    }
+    parts.all(|part| words.iter().any(|word| word.starts_with(part)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_query_of_symbols_alone_should_match_nothing() {
+        assert!(!matches("#general", "💬"));
+        assert!(!matches("#general", "#"));
+        assert!(matches("#general", " "));
+    }
+
+    #[test]
+    fn a_query_should_split_at_punctuation_as_the_name_does() {
+        assert!(matches("#release-notes", "#release-notes"));
+        assert!(matches("#general", "#gen"));
+        assert!(!matches("#general", "#random"));
+    }
 
     #[test]
     fn a_query_should_match_the_starts_of_words() {

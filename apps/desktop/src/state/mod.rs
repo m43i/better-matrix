@@ -42,6 +42,7 @@ mod receipts;
 mod retry;
 mod room_discovery;
 mod safety;
+mod saved;
 mod scheduled;
 mod search;
 mod sections;
@@ -97,6 +98,7 @@ pub use profile::{ContactStep, ProfileForm};
 pub use qr_login::QrLogin;
 pub use readers::{READER_FACES, ReaderMenu};
 pub use room_discovery::Directory;
+pub use saved::{SavedIn, SavedList, SavedSince, saved_room_label, saved_rooms};
 pub use scheduled::{When, failure_reason, local_offset};
 pub use search::{PeopleSearch, SEARCH_PAUSE, SearchFilter, SearchStatus, matches};
 pub use sections::{
@@ -418,8 +420,8 @@ fn verification_ended(step: &VerificationStep) -> bool {
 /// variants.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Modal {
-    /// The messages an account saved, from the account menu.
-    Saved(AccountId),
+    /// The messages an account saved, from the top bar, with their search and filters.
+    Saved(Box<SavedList>),
     /// Choose a destination room for a forwarded message.
     Forward {
         account: AccountId,
@@ -1391,8 +1393,8 @@ impl State {
                 if !self.suspended.contains(&id) && self.visits.forget(&id) {
                     self.shell.save_visits(self.visits.clone());
                 }
-                if matches!(&self.modal, Some(Modal::Saved(account)) if *account == id) {
-                    self.modal = None;
+                if matches!(&self.modal, Some(Modal::Saved(list)) if list.account == id) {
+                    self.close_modal();
                 }
                 self.pending.retain(|_, purpose| !matches!(purpose, Purpose::Edit(edit) if edit.target.account == id));
             }
@@ -4617,6 +4619,7 @@ impl State {
                 | Modal::SectionName { edit, .. },
             ) => edit,
             Some(Modal::Report(form)) => &mut form.reason,
+            Some(Modal::Saved(list)) => &mut list.search,
             Some(Modal::LinkDevice { flow, .. }) => &mut flow.code,
             _ => &mut self.scratch,
         }

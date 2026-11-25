@@ -1540,6 +1540,8 @@ fn every_demo_dialog_should_close_on_escape_even_when_a_field_is_focused() {
         }
         state.popover = None;
         state.preview = None;
+        // A menu the dialog holds itself closes on the first Escape (tested on its own).
+        state.close_saved_filters();
         let mut rt = Runtime::new(state, super::view, (1200.0, 760.0), Env::new(true, 1.0));
         rt.on_key = Some(crate::on_key);
         rt.frame(0.0);
@@ -2142,6 +2144,194 @@ fn the_bookmark_button_should_not_open_the_saved_message() {
     press(&mut rt, &format!("saved-remove-{room_id}-{event_id}"));
     assert!(rt.find("saved-dialog").is_some());
     assert!(rt.state.message_jump.is_none());
+}
+
+/// The saved messages the dialog shows, by room.
+fn saved_rows(rt: &Runtime<State>) -> Vec<String> {
+    let account = rt.state.active_account().expect("account");
+    account
+        .saved_messages()
+        .filter(|saved| rt.find(&format!("saved-open-{}-{}", saved.room_id, saved.preview.event_id)).is_some())
+        .map(|saved| saved.room_id.clone())
+        .collect()
+}
+
+#[test]
+fn saved_messages_should_open_in_a_large_dialog() {
+    let rt = runtime(demo::saved_messages);
+    let [_, _, width, height] = rt.presented("saved-dialog").expect("the dialog").0;
+    assert!(width >= 700.0, "wide enough to read messages: {width}");
+    assert!(height >= 600.0, "tall enough for a long list: {height}");
+}
+
+#[test]
+fn the_saved_search_should_narrow_the_list_to_matching_conversations() {
+    let mut rt = runtime(demo::saved_messages);
+    assert!(saved_rows(&rt).iter().any(|room| room == demo::DEMO_THREAD.0));
+    press(&mut rt, "saved-search");
+    rt.paste("general");
+    rt.frame(1.0 / 60.0);
+    let rows = saved_rows(&rt);
+    assert!(!rows.is_empty() && rows.iter().all(|room| room == demo::DEMO_THREAD.0), "{rows:?}");
+}
+
+#[test]
+fn a_saved_search_matching_nothing_should_offer_to_show_everything_again() {
+    let mut rt = runtime(demo::saved_messages);
+    let all = saved_rows(&rt);
+    press(&mut rt, "saved-search");
+    rt.paste("nothing like this");
+    rt.frame(1.0 / 60.0);
+    assert!(saved_rows(&rt).is_empty());
+    press(&mut rt, "saved-clear");
+    assert_eq!(saved_rows(&rt), all);
+}
+
+#[test]
+fn the_saved_filter_menu_should_narrow_the_list_and_stay_open() {
+    let mut rt = runtime(demo::saved_messages);
+    press(&mut rt, super::saved::FILTER);
+    assert!(rt.find("saved-filters").is_some());
+    press(&mut rt, "saved-in-direct");
+    assert!(rt.find("saved-filters").is_some(), "the menu stays open for another choice");
+    assert_eq!(saved_rows(&rt), ["!dm-grace:example.org"]);
+    press(&mut rt, &format!("saved-in-room-{}", demo::DEMO_THREAD.0));
+    assert!(saved_rows(&rt).iter().all(|room| room == demo::DEMO_THREAD.0));
+}
+
+#[test]
+fn a_filter_chip_should_remove_its_filter() {
+    let mut rt = runtime(|s| {
+        demo::saved_messages(s);
+        s.filter_saved_in(crate::state::SavedIn::Direct);
+    });
+    let all = rt.state.active_account().expect("account").saved_messages().count();
+    assert!(saved_rows(&rt).len() < all);
+    press(&mut rt, "saved-chip-in");
+    assert!(rt.find("saved-chip-in").is_none());
+    assert_eq!(saved_rows(&rt).len(), all);
+}
+
+/// The saved messages in a 720 by 480 window at 125% zoom, the filter menu open with a filter
+/// in effect, so its Clear filters shows.
+fn small_saved_window() -> Runtime<State> {
+    saved_window(125, true)
+}
+
+/// The saved messages in a 720 by 480 window at `zoom` percent, a filter in effect, the filter
+/// menu open or not.
+fn saved_window(zoom: u16, menu: bool) -> Runtime<State> {
+    saved_window_since(zoom, crate::state::SavedSince::Year, menu)
+}
+
+/// [`saved_window`] with the time span `since` chosen.
+fn saved_window_since(zoom: u16, since: crate::state::SavedSince, menu: bool) -> Runtime<State> {
+    let mut state = State::detached();
+    demo::seed(&mut state);
+    demo::saved_messages(&mut state);
+    state.settings.zoom = crate::state::Zoom::from_percent(zoom);
+    state.filter_saved_since(since);
+    if menu {
+        state.toggle_saved_filters();
+    }
+    let mut rt = Runtime::new(state, super::view, (720.0, 480.0), Env::new(true, 1.0));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    rt
+}
+
+fn inside(rect: [f32; 4], window: [f32; 4]) -> bool {
+    rect[0] >= window[0] && rect[1] >= window[1] && rect[0] + rect[2] <= window[2] && rect[1] + rect[3] <= window[3]
+}
+
+#[test]
+fn the_saved_dialog_should_stay_inside_a_small_zoomed_window() {
+    let rt = small_saved_window();
+    let [_, _, width, height] = element_rect(&rt, "root");
+    for key in [super::saved::FILTER, "saved-close", "saved-dialog"] {
+        assert!(inside(element_rect(&rt, key), [0.0, 0.0, width, height]), "{key} must fit the window");
+    }
+}
+
+#[test]
+fn the_saved_list_should_keep_room_to_show_messages_at_the_largest_zoom() {
+    let rt = saved_window(175, false);
+    let [_, _, _, height] = element_rect(&rt, "saved-dialog-content");
+    assert!(height >= 60.0, "the list needs room to scroll through: {height}");
+}
+
+#[test]
+fn ctrl_escape_should_close_the_saved_filter_menu_before_the_dialog() {
+    let mut rt = runtime(demo::saved_messages);
+    rt.on_key = Some(crate::on_key);
+    press(&mut rt, super::saved::FILTER);
+    let mods = rune::Mods { ctrl: true, ..rune::Mods::default() };
+    rt.key(rune::KeyEvent { key: rune::Key::Escape, mods });
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("saved-filters").is_none());
+    assert!(rt.find("saved-dialog").is_some());
+}
+
+#[test]
+fn the_saved_filter_menu_should_open_showing_the_chosen_time_span() {
+    let mut rt = saved_window(175, false);
+    press(&mut rt, super::saved::FILTER);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert_choice_shown(&rt, "saved-since-year");
+}
+
+/// Asserts the filter menu's scrolling choices show `key` whole.
+fn assert_choice_shown(rt: &Runtime<State>, key: &str) {
+    let [x, y, width, height] = element_rect(rt, super::saved::CHOICES);
+    let choice = rt.presented(key).unwrap_or_else(|| panic!("no {key}")).0;
+    assert!(inside(choice, [x, y, x + width, y + height]), "{key} {choice:?} in {:?}", [x, y, width, height]);
+}
+
+#[test]
+fn choosing_the_first_saved_filter_should_keep_the_choice_in_view() {
+    let mut rt = saved_window_since(175, crate::state::SavedSince::AnyTime, true);
+    press(&mut rt, "saved-since-week");
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("saved-clear-filters").is_some(), "the first filter adds Clear filters");
+    assert_choice_shown(&rt, "saved-since-week");
+}
+
+#[test]
+fn the_saved_filter_menu_should_fit_a_small_zoomed_window() {
+    let rt = small_saved_window();
+    let [_, _, width, height] = element_rect(&rt, "root");
+    for key in ["saved-filters", "saved-clear-filters"] {
+        assert!(inside(element_rect(&rt, key), [0.0, 0.0, width, height]), "{key} must fit the window");
+    }
+}
+
+#[test]
+fn the_arrow_keys_and_return_should_choose_a_saved_filter() {
+    let mut rt = runtime(demo::saved_messages);
+    press(&mut rt, super::saved::FILTER);
+    // The menu opens on the current choice, Any time: the first Down shows its highlight, the
+    // next moves it to Today.
+    for key in [rune::Key::Down, rune::Key::Down, rune::Key::Enter] {
+        rt.key(rune::KeyEvent { key, mods: rune::Mods::default() });
+        rt.frame(1.0 / 60.0);
+    }
+    let since = rt.state.saved_list().map(|list| list.filter.since);
+    assert_eq!(since, Some(crate::state::SavedSince::Today));
+}
+
+#[test]
+fn escape_should_close_the_saved_filter_menu_before_the_dialog() {
+    let mut rt = runtime(demo::saved_messages);
+    press(&mut rt, super::saved::FILTER);
+    rt.key(rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() });
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("saved-filters").is_none());
+    assert!(rt.find("saved-dialog").is_some());
 }
 
 #[test]
