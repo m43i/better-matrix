@@ -124,16 +124,17 @@ fn verification(step: &VerificationStep, with: Option<&Person>, p: &Palette) -> 
             ],
         ),
         VerificationStep::Compare(emojis) => {
-            let grid = emojis.iter().fold(row().w_full().gap(4.0).flex_wrap().justify_center(), |grid, emoji| {
-                grid.child(
+            let grid = col().w_full().gap(16.0).children(emojis.chunks(4).map(|emojis| {
+                row().w_full().children(emojis.iter().map(|emoji| {
                     col()
-                        .w(52.0)
+                        .grow(1.0)
+                        .min_w(0.0)
                         .gap(4.0)
                         .items_center()
                         .child(text(emoji.symbol.clone()).font(rune::TextStyle::new(30.0, 400.0)))
-                        .child(text(emoji.description.clone()).font(font::META).color(p.text_muted)),
-                )
-            });
+                        .child(text(emoji.description.clone()).font(font::META).color(p.text_muted))
+                }))
+            }));
             let hint = match with {
                 Some(person) => tf!("verify.compare_person", name = person.name),
                 None => t!("verify.compare").to_owned(),
