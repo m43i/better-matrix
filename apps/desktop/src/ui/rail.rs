@@ -109,7 +109,7 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
         let open = s.popover == Some(Popover::AccountSwitcher);
         let face = account_avatar(&account.summary, &s.media, TILE);
         me = me
-            .child(if open { glow(face, s.window_focused, p) } else { face })
+            .child(highlighted_tile(face, open, s.window_focused, p))
             .role("button")
             .cursor(rune::Cursor::Pointer)
             .label(tf!("rail.switch_account", name = account.summary.display_name))
@@ -170,21 +170,25 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
 /// over a soft glow of it, which breathes slowly while the window has focus: a detail for
 /// whoever looks, too slow to draw the eye. The glow is its own layer behind the tile, so the
 /// loop fades only its opacity and never commits.
-fn glow(tile: El, breathing: bool, p: &Palette) -> El {
+fn highlighted_tile(tile: El, highlighted: bool, breathing: bool, p: &Palette) -> El {
     // Starts and ends at full strength, as it rests (`state::breath`).
     const BREATH: &[(f32, f32)] = &[(0.0, 1.0), (0.5, 0.45), (1.0, 1.0)];
     let mut halo = el()
+        .key("rail-halo")
         .absolute(0.0, 0.0)
         .size(TILE, TILE)
         .radius(TILE * 0.22)
         .fill(p.rail_bg)
+        .opacity(if highlighted { 1.0 } else { 0.0 })
         .box_shadow(rune::Shadow { blur: 18.0, spread: 3.0, color: p.accent.alpha(0.6), ..rune::Shadow::default() });
-    if breathing {
+    if highlighted && breathing {
         #[expect(clippy::cast_possible_truncation, reason = "a period of a few seconds")]
         let period = crate::state::breath::PERIOD as f32;
         halo = halo.cycle(rune::Cycle { period, phase: 0.0, stops: BREATH, still: 0.8, fps: 20.0 });
     }
-    el().size(TILE, TILE).child(halo).child(tile.outline(1.0, 2.0, p.accent.alpha(0.55)))
+    // Keep the tile mounted in the same place so its contents never crossfade with the highlight.
+    let ring = if highlighted { p.accent.alpha(0.55) } else { rune::Color::TRANSPARENT };
+    el().size(TILE, TILE).child(halo).child(tile.key("rail-tile").outline(1.0, 2.0, ring))
 }
 
 /// One rail entry: the tile, a ring when selected, a dot for unread activity elsewhere.
@@ -203,8 +207,11 @@ fn scope_slot(
         Scope::Home => "scope-home".to_owned(),
         Scope::Space(id) => format!("scope-{id}"),
     };
-    let mut slot =
-        el().key(key).size(TILE, TILE).child(if selected { glow(tile, breathing, p) } else { tile.opacity(0.8) });
+    let mut slot = el().key(key).size(TILE, TILE).child(if selected {
+        highlighted_tile(tile, true, breathing, p)
+    } else {
+        tile.opacity(0.8)
+    });
     if !selected && account.has_unread(&scope) {
         slot = slot.child(unread_dot(TILE, p.rail_bg, p));
     }

@@ -1828,6 +1828,30 @@ fn an_update_failure_should_keep_the_rail_action_available() {
 }
 
 #[test]
+fn the_account_avatar_should_show_one_set_of_initials_after_a_double_click() {
+    let mut rt = window_runtime(|_| {});
+    press(&mut rt, "account-button");
+    assert!(rt.find("account-menu").is_some());
+    for _ in 0..7 {
+        rt.frame(1.0 / 60.0);
+    }
+    press(&mut rt, "account-button");
+    assert!(rt.find("account-menu").is_none());
+
+    for _ in 0..12 {
+        let visible_initials = rt
+            .elements()
+            .into_iter()
+            .filter(|element| {
+                element.path.contains("/account-button/") && element.text.is_some() && element.opacity > 0.0
+            })
+            .count();
+        assert_eq!(visible_initials, 1, "the avatar should show its initials once while the menu closes");
+        rt.frame(1.0 / 60.0);
+    }
+}
+
+#[test]
 fn pressing_the_status_message_should_open_its_field_with_suggestions() {
     let mut rt = runtime(|_| {});
     press(&mut rt, "account-button");
