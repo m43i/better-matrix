@@ -397,9 +397,14 @@ export function previewItems(
   opened: string,
 ): Message[] {
   const data = account(state, id);
-  const gallery = galleryAround(timeline(state, id, key).entries, current, opened, key.thread);
+  const shows = state.settings.showRoomChanges;
+  const entries = timeline(state, id, key).entries;
+
+  const gallery = galleryAround(entries, current, opened, key.thread, shows);
+
   // Opened from Room Info's files, the message may be held only by one of the room's threads.
-  const found = gallery.length > 0 || !data ? gallery : inThreads(data, key, current, opened);
+  const found =
+    gallery.length > 0 || !data ? gallery : inThreads(data, key, current, opened, shows);
 
   if (found.length === 0) {
     // Only an event no timeline holds in any form (deleted, or hidden as its sender is
@@ -431,7 +436,10 @@ export function previewIgnored(
 ): boolean {
   const data = account(state, id);
 
-  const shown = galleryAround(timeline(state, id, key).entries, eventId, eventId, key.thread).find(
+  const shows = state.settings.showRoomChanges;
+  const entries = timeline(state, id, key).entries;
+
+  const shown = galleryAround(entries, eventId, eventId, key.thread, shows).find(
     (m) => m.event_id === eventId,
   );
 
@@ -457,12 +465,13 @@ function inThreads(
   key: TimelineKey,
   current: string,
   opened: string,
+  showRoomChanges: boolean,
 ): Message[] {
   for (const [id, kept] of Object.entries(data.timelines)) {
     const root = id.startsWith(`${key.room_id}|`) ? id.slice(key.room_id.length + 1) : null;
 
     if (root === null || root === key.thread) continue;
-    const gallery = galleryAround(kept.entries, current, opened, root);
+    const gallery = galleryAround(kept.entries, current, opened, root, showRoomChanges);
 
     if (gallery.length > 0) return gallery;
   }

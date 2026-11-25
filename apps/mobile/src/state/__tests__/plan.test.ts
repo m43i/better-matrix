@@ -6,7 +6,6 @@ import {
   newestSent,
   planTimeline,
   rowOf,
-  drawnRows,
   shouldMarkRead,
   wantsOlder,
 } from '../plan';
@@ -407,15 +406,21 @@ describe('wantsOlder', () => {
     expect(wantsOlder(planTimeline(timeline, room), timeline, null)).toBe(true);
   });
 
-  it('should ask again when the page asked for at the start added nothing to see', () => {
-    const timeline = timelineOf([topic(), entry('a')]);
+  it('should ask while the reader stays at the start of what is loaded', () => {
+    const timeline = timelineOf([topic(), entry('a'), entry('b'), entry('c'), entry('d')]);
     const rows = planTimeline(timeline, room);
-    expect(wantsOlder(rows, timeline, null, drawnRows(rows))).toBe(true);
+    expect(wantsOlder(rows, timeline, null, rows[0]?.key ?? null)).toBe(true);
   });
 
-  it('should not ask again once the page asked for at the start added something', () => {
-    const timeline = timelineOf([entry('older'), entry('a')]);
-    expect(wantsOlder(planTimeline(timeline, room), timeline, null, 1)).toBe(false);
+  it('should not ask once a page moved the start off screen', () => {
+    const timeline = timelineOf([entry('a'), entry('b'), entry('c'), entry('d'), entry('e')]);
+    const rows = planTimeline(timeline, room);
+    expect(wantsOlder(rows, timeline, null, rows[4]?.key ?? null)).toBe(false);
+  });
+
+  it('should not ask while the reader is away from the start', () => {
+    const timeline = timelineOf([entry('a')]);
+    expect(wantsOlder(planTimeline(timeline, room), timeline, null)).toBe(false);
   });
 
   it('should not ask while a page is on its way', () => {
@@ -426,11 +431,6 @@ describe('wantsOlder', () => {
   it('should not ask once the start is in', () => {
     const timeline = timelineOf([topic()], { reachedStart: true });
     expect(wantsOlder([], timeline, null)).toBe(false);
-  });
-
-  it('should not ask while there are rows to scroll', () => {
-    const timeline = timelineOf([entry('a')]);
-    expect(wantsOlder(planTimeline(timeline, room), timeline, null)).toBe(false);
   });
 });
 

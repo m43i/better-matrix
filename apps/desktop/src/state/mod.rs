@@ -3708,7 +3708,7 @@ impl State {
         // The whole batch, audio and documents included: its pictures and videos the media
         // choice holds back wait for a press when stepped onto (`show_preview_item`).
         let entries = self.accounts.get(&account).and_then(|data| data.timeline(key)).map(|t| t.entries.as_slice());
-        let mut batch = preview::batch(entries.unwrap_or_default(), event_id);
+        let mut batch = preview::batch(entries.unwrap_or_default(), event_id, self.settings.show_room_changes);
         // Nothing of people the user ignores.
         if let Some(data) = self.accounts.get(&account) {
             batch.retain(|item| !data.ignores_sender_of(&key.room_id, &item.event_id));

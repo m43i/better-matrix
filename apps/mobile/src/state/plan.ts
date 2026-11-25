@@ -281,23 +281,23 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
   return shown;
 }
 
-/** How many rows draw something: what a page of history must add for the reader to see it. */
-export function drawnRows(rows: readonly Row[]): number {
-  return rows.filter(drawn).length;
-}
+/** The first rows of a plan, where the reader is at the start of the history loaded. */
+const START_ROWS = 3;
 
 /**
- * Whether to ask for older history though the list wasn't scrolled: the timeline is idle with
- * more to load, and either nothing draws (a page holding only room changes left out, or hidden
- * events, maybe under the "New" marker: the list has no start to scroll to), or the page asked
- * for at the start (`drawnBefore`, the rows drawn then) added nothing to see, so the list stays
- * at its start without telling again.
+ * Whether to ask for older history though the list didn't say its start was reached: the
+ * timeline is idle with more to load, and either nothing draws (a page holding only room changes
+ * left out, or hidden events, maybe under the "New" marker: the list has no start to reach), or
+ * the topmost row on screen (`topKey`) is still one of the first. The list says so only on
+ * reaching its start, not while it stays there, so a page that added little or nothing to see
+ * would otherwise be the last. A row found by its key stays where it was when a page lands
+ * above it, so an old `topKey` never asks for more than the reader sees.
  */
 export function wantsOlder(
   rows: readonly Row[],
   timeline: Timeline,
   thread: string | null,
-  drawnBefore: number | null = null,
+  topKey: string | null = null,
 ): boolean {
   const idle =
     !atStart(timeline, thread) &&
@@ -305,9 +305,11 @@ export function wantsOlder(
     !timeline.loadingOlder &&
     timeline.historyError === null;
 
-  const drawnNow = drawnRows(rows);
+  if (!idle) return false;
 
-  return idle && (drawnNow === 0 || drawnNow === drawnBefore);
+  const top = topKey === null ? -1 : rows.findIndex((row) => row.key === topKey);
+
+  return !rows.some(drawn) || (top >= 0 && top < START_ROWS);
 }
 
 /** The row showing the message with this event ID. */

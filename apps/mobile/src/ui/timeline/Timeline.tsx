@@ -50,7 +50,6 @@ import {
   type Row,
   rowOf,
   shouldMarkRead,
-  drawnRows,
   wantsOlder,
 } from '../../state/plan';
 import { shallow, useAppStore, useStore } from '../../state/react';
@@ -264,10 +263,26 @@ export function Timeline({
     sdkMarkerNow.current = sdkMarker;
   }, [sdkMarker]);
 
+  // The topmost row on screen, but the loading and failure rows, which come and go: whether the
+  // reader is at the start of the history loaded (`wantsOlder`).
+  const [topKey, setTopKey] = useState<string | null>(null);
+
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken<Row>[] }) => {
       if (viewableItems.some((token) => token.item?.kind === 'new'))
         setSeenMarker(sdkMarkerNow.current);
+
+      let top: ViewToken<Row> | null = null;
+
+      for (const token of viewableItems) {
+        const kind = token.item?.kind;
+
+        if (kind === undefined || kind === 'loading' || kind === 'historyFailed') continue;
+
+        if (top === null || (token.index ?? Infinity) < (top.index ?? Infinity)) top = token;
+      }
+
+      setTopKey(top?.item?.key ?? null);
     },
     [],
   );
@@ -314,24 +329,19 @@ export function Timeline({
   useLayoutEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
-  // The rows drawn when a page was last asked for at the start; null once one added some.
-  const pagedAt = useRef<number | null>(null);
 
   const loadMore = useCallback(() => {
     const now = timelineOf(store.getState(), account, timelineKey);
 
-    if (!atStart(now, thread) && now.historyError === null) {
-      pagedAt.current = drawnRows(rowsRef.current);
-      loadOlder(store, account, timelineKey);
-    }
+    if (!atStart(now, thread) && now.historyError === null) loadOlder(store, account, timelineKey);
   }, [store, account, timelineKey, thread]);
 
-  // A page that adds nothing to see leaves the list at its start without telling again (or
-  // with no start at all): ask for the page before it, until one does.
+  // While the reader stays at the start (or nothing draws), the list doesn't say so again: ask
+  // for the page before it until one moves the start off screen.
+  const pageOlder = wantsOlder(rows, timeline, thread, topKey);
   useEffect(() => {
-    if (wantsOlder(rows, timeline, thread, pagedAt.current)) loadMore();
-    else if (!timeline.loadingOlder && drawnRows(rows) !== pagedAt.current) pagedAt.current = null;
-  }, [rows, timeline, thread, loadMore]);
+    if (pageOlder) loadMore();
+  }, [pageOlder, rows, loadMore]);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollTo = useCallback((eventId: string, animated = true): boolean => {

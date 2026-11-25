@@ -450,8 +450,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     arrive as a run of messages. The batch of the opened one (`preview::batch`) is the run
     around it of attachment messages the timeline groups under one header
     (`continues_group`: one sender, each within 5 minutes of the one before, none a reply), with
-    nothing drawn between them (read markers and undrawn entries don't break it; any other
-    message, a room event or a date divider does), the previewable ones kept. Two or more get a
+    nothing drawn between them (read markers, undrawn entries and room changes the timeline
+    leaves to the room log don't break it; any other message, a room event it draws or a date
+    divider does), the previewable ones kept. Two or more get a
     strip of thumbnails along the bottom (the batch's previews, fetched like the timeline's
     rows on screen; else the kind's icon; it scrolls sideways when they don't fit, and whatever moves the
     preview, opening included, scrolls the current one into view on the next `poll`), arrows at the sides, and "2 of 4" beside the name. Left and Right (when nothing

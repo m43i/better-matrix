@@ -111,6 +111,26 @@ describe('attachmentBatch', () => {
     expect(ids(attachmentBatch(entries, 'b'))).toEqual(['b']);
   });
 
+  it('should run on past a room change left to the room log', () => {
+    const entries: TimelineEntry[] = [
+      sent('a', 0),
+      roomEventEntry('topic', person(ADA), { type: 'RoomTopic', data: 'News' }),
+      sent('b', 1),
+    ];
+
+    expect(ids(attachmentBatch(entries, 'a'))).toEqual(['a', 'b']);
+  });
+
+  it('should end the run at a room change while room changes show', () => {
+    const entries: TimelineEntry[] = [
+      sent('a', 0),
+      roomEventEntry('topic', person(ADA), { type: 'RoomTopic', data: 'News' }),
+      sent('b', 1),
+    ];
+
+    expect(ids(attachmentBatch(entries, 'a', null, true))).toEqual(['a']);
+  });
+
   it('should run on past entries the timeline does not draw', () => {
     const entries: TimelineEntry[] = [
       sent('a', 0),
