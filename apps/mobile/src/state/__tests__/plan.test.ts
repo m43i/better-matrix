@@ -409,13 +409,24 @@ describe('wantsOlder', () => {
   it('should ask while the reader stays at the start of what is loaded', () => {
     const timeline = timelineOf([topic(), entry('a'), entry('b'), entry('c'), entry('d')]);
     const rows = planTimeline(timeline, room);
-    expect(wantsOlder(rows, timeline, null, rows[0]?.key ?? null)).toBe(true);
+    expect(wantsOlder(rows, timeline, null, { key: rows[0]?.key ?? '', index: 0 })).toBe(true);
   });
 
   it('should not ask once a page moved the start off screen', () => {
     const timeline = timelineOf([entry('a'), entry('b'), entry('c'), entry('d'), entry('e')]);
     const rows = planTimeline(timeline, room);
-    expect(wantsOlder(rows, timeline, null, rows[4]?.key ?? null)).toBe(false);
+    expect(wantsOlder(rows, timeline, null, { key: rows[4]?.key ?? '', index: 0 })).toBe(false);
+  });
+
+  it("should keep the top row's place when the SDK replaced it with a new key", () => {
+    const timeline = timelineOf([
+      { id: 'day-2', kind: { type: 'DateDivider', data: T } },
+      entry('a'),
+      entry('b'),
+    ]);
+
+    const rows = planTimeline(timeline, room);
+    expect(wantsOlder(rows, timeline, null, { key: 'day-1', index: 0 })).toBe(true);
   });
 
   it('should not ask while the reader is away from the start', () => {

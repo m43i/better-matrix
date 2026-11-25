@@ -50,6 +50,7 @@ import {
   type Row,
   rowOf,
   shouldMarkRead,
+  type TopRow,
   wantsOlder,
 } from '../../state/plan';
 import { shallow, useAppStore, useStore } from '../../state/react';
@@ -265,24 +266,25 @@ export function Timeline({
 
   // The topmost row on screen, but the loading and failure rows, which come and go: whether the
   // reader is at the start of the history loaded (`wantsOlder`).
-  const [topKey, setTopKey] = useState<string | null>(null);
+  const [top, setTop] = useState<TopRow | null>(null);
 
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken<Row>[] }) => {
       if (viewableItems.some((token) => token.item?.kind === 'new'))
         setSeenMarker(sdkMarkerNow.current);
 
-      let top: ViewToken<Row> | null = null;
+      let first: ViewToken<Row> | null = null;
 
       for (const token of viewableItems) {
         const kind = token.item?.kind;
 
         if (kind === undefined || kind === 'loading' || kind === 'historyFailed') continue;
 
-        if (top === null || (token.index ?? Infinity) < (top.index ?? Infinity)) top = token;
+        if (first === null || (token.index ?? Infinity) < (first.index ?? Infinity)) first = token;
       }
 
-      setTopKey(top?.item?.key ?? null);
+      const key = first?.item?.key;
+      setTop(key === undefined || first?.index == null ? null : { key, index: first.index });
     },
     [],
   );
@@ -338,7 +340,7 @@ export function Timeline({
 
   // While the reader stays at the start (or nothing draws), the list doesn't say so again: ask
   // for the page before it until one moves the start off screen.
-  const pageOlder = wantsOlder(rows, timeline, thread, topKey);
+  const pageOlder = wantsOlder(rows, timeline, thread, top);
   useEffect(() => {
     if (pageOlder) loadMore();
   }, [pageOlder, rows, loadMore]);

@@ -463,8 +463,9 @@ Date: 2026-11-16
   "New" marker doesn't count. FlashList says its start was reached only on reaching it, not while
   the reader stays there, and a page that leaves nothing to draw gives it no start at all; so
   the timeline also asks for the page before by itself while nothing draws or the topmost row on
-  screen (by key, the loading and failure rows aside) is one of the plan's first three
-  (`wantsOlder`), until a page moves the start off screen or history begins. Room info
+  screen (found by its key, or at its last reported place when the SDK replaced it, as a date
+  divider; the loading and failure rows aside) is one of the plan's first three (`wantsOlder`),
+  until a page moves the start off screen or history begins. Room info
   opens the room log (`app/room-log.tsx`, pushed): every
   room event of the room's main timeline, newest first, without what ignored people did
   (`roomLogOf`), each with the sender's picture, the timeline's sentence and its date and time.

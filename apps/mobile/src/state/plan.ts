@@ -284,20 +284,27 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
 /** The first rows of a plan, where the reader is at the start of the history loaded. */
 const START_ROWS = 3;
 
+/** The topmost row on screen, as the list last reported it: its key and place. */
+export interface TopRow {
+  key: string;
+  index: number;
+}
+
 /**
  * Whether to ask for older history though the list didn't say its start was reached: the
  * timeline is idle with more to load, and either nothing draws (a page holding only room changes
  * left out, or hidden events, maybe under the "New" marker: the list has no start to reach), or
- * the topmost row on screen (`topKey`) is still one of the first. The list says so only on
+ * the topmost row on screen (`top`) is still one of the first. The list says so only on
  * reaching its start, not while it stays there, so a page that added little or nothing to see
- * would otherwise be the last. A row found by its key stays where it was when a page lands
- * above it, so an old `topKey` never asks for more than the reader sees.
+ * would otherwise be the last. The row is found by its key, which stays with it when a page
+ * lands above; a key no longer in the plan (a date divider the SDK replaced) means the rows on
+ * screen didn't move, or the list would have reported them, so its last place stands.
  */
 export function wantsOlder(
   rows: readonly Row[],
   timeline: Timeline,
   thread: string | null,
-  topKey: string | null = null,
+  top: TopRow | null = null,
 ): boolean {
   const idle =
     !atStart(timeline, thread) &&
@@ -307,9 +314,14 @@ export function wantsOlder(
 
   if (!idle) return false;
 
-  const top = topKey === null ? -1 : rows.findIndex((row) => row.key === topKey);
+  if (!rows.some(drawn)) return true;
 
-  return !rows.some(drawn) || (top >= 0 && top < START_ROWS);
+  if (top === null) return false;
+
+  const found = rows.findIndex((row) => row.key === top.key);
+  const at = found >= 0 ? found : top.index;
+
+  return at < START_ROWS;
 }
 
 /** The row showing the message with this event ID. */
