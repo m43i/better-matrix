@@ -282,8 +282,9 @@ export function planTimeline(timeline: Timeline, options: PlanOptions): Row[] {
 }
 
 /**
- * Whether to ask for older history though the list wasn't scrolled: it has no row to scroll to
- * the start of (a page holding only room changes left out, or hidden events), and there is more,
+ * Whether to ask for older history though the list wasn't scrolled: it draws nothing to scroll to
+ * the start of (a page holding only room changes left out, or hidden events, maybe under the "New"
+ * marker), and there is more,
  * not already on its way, and the last page didn't fail.
  */
 export function wantsOlder(
@@ -292,7 +293,7 @@ export function wantsOlder(
   thread: string | null,
 ): boolean {
   return (
-    rows.length === 0 &&
+    !rows.some(drawn) &&
     !atStart(timeline, thread) &&
     !timeline.opening &&
     !timeline.loadingOlder &&

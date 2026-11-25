@@ -401,6 +401,11 @@ describe('wantsOlder', () => {
     expect(wantsOlder(planTimeline(timeline, room), timeline, null)).toBe(true);
   });
 
+  it('should ask though the New marker stands over changes left out', () => {
+    const timeline = timelineOf([{ id: 'marker', kind: { type: 'ReadMarker' } }, topic()]);
+    expect(wantsOlder(planTimeline(timeline, room), timeline, null)).toBe(true);
+  });
+
   it('should not ask while a page is on its way', () => {
     const timeline = timelineOf([topic()], { loadingOlder: true });
     expect(wantsOlder([], timeline, null)).toBe(false);

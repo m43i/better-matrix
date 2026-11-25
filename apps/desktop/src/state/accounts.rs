@@ -1087,8 +1087,6 @@ impl AccountData {
             })
     }
 
-    /// A fingerprint of everyone [`AccountData::ignores`] counts: what views built from it (a
-    /// timeline's rows) are made again for when it changes.
     /// The room log of `room_id` as it lists: the room events of its main timeline, newest
     /// first, none the user ignores sent, each with its entry's index.
     pub fn room_log(&self, room_id: &str) -> Vec<(usize, &matrix_core::RoomEvent)> {
@@ -1104,6 +1102,8 @@ impl AccountData {
             .collect()
     }
 
+    /// A fingerprint of everyone [`AccountData::ignores`] counts: what views built from it (a
+    /// timeline's rows) are made again for when it changes.
     pub fn ignores_fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
