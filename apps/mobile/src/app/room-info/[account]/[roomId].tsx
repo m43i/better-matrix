@@ -1,7 +1,7 @@
 // A room's details (pushed from its header), as Slack's channel details: its picture, name,
-// topic and facts; quick actions (notifications, invite, settings or rename, leave); and its
-// people (with requests to join and those banned, for those who may act on them), threads and
-// files, one at a time under a segmented control.
+// topic and facts; quick actions (notifications, invite, settings or rename, leave); its pins,
+// room log and widgets; and its people (with requests to join and those banned, for those who may
+// act on them), threads and files, one at a time under a segmented control.
 
 import type {
   Moderation,
@@ -308,6 +308,13 @@ export default function RoomInfoScreen() {
           value={String(room.pinned.length)}
           testID="info-pins"
           onPress={() => router.push(routes.pins(account, roomId))}
+        />
+        <Divider inset={52} />
+        <ListRow
+          icon="history"
+          title={t('info.log')}
+          testID="info-log"
+          onPress={() => router.push(routes.roomLog(account, roomId))}
         />
         <Divider inset={52} />
         <ListRow

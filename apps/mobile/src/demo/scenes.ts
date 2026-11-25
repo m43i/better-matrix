@@ -11,6 +11,7 @@ import { routes } from '../routes';
 import { setCallLayout, showCallChat } from '../state/actions/calls';
 import { setActive, setScope } from '../state/actions/core';
 import { updateComposer } from '../state/composer';
+import { pathFromUri } from '../state/outgoing';
 import { pillAt, userPill } from '../state/pills';
 import type { Settings } from '../state/settings';
 import type { Store } from '../state/store';
@@ -79,6 +80,36 @@ const drafting = (draft: string) => (store: Store) => {
     draft,
     selection: { start: draft.length, end: draft.length },
   }));
+};
+
+/** The app's icon, standing in for a photo picked for sending. */
+const PHOTO: number = require('../../assets/images/icon.png');
+
+/**
+ * #general's composer holding a photo and a PDF to send. The photo is the bundled icon, copied out
+ * of the bundle first as a picked file would be; without it (in tests) the photo has no preview.
+ */
+const attaching = (store: Store) => {
+  general(store);
+
+  const put = (photo: string) =>
+    updateComposer(store, ADA, roomKey(GENERAL), (c) => ({
+      ...c,
+      attachments: [
+        { path: pathFromUri(photo), name: 'whiteboard.png', kind: 'image', uri: photo },
+        {
+          path: '/demo/release-notes.pdf',
+          name: 'release-notes.pdf',
+          kind: 'file',
+          uri: 'file:///demo/release-notes.pdf',
+        },
+      ],
+    }));
+
+  import('expo-asset')
+    .then(({ Asset }) => Asset.fromModule(PHOTO).downloadAsync())
+    .then((asset) => put(asset.localUri ?? ''))
+    .catch(() => put(''));
 };
 
 /** Two messages the server holds for #general: one this device wrote, one it can't read. */
@@ -259,6 +290,11 @@ export const scenes = {
     },
     routes: [routes.room(ADA, GENERAL)],
   },
+  'composer-images': {
+    about: 'A photo and a file waiting in the composer, the photo as a thumbnail',
+    setup: attaching,
+    routes: [routes.room(ADA, GENERAL)],
+  },
   reply: {
     about: 'Replying to a message',
     setup: (store) => {
@@ -356,6 +392,21 @@ export const scenes = {
   'room-info': {
     about: 'Room details and members',
     routes: [routes.room(ADA, GENERAL), routes.roomInfo(ADA, GENERAL)],
+  },
+  'room-log': {
+    about: 'A room’s log: its changes, newest first, from room info',
+    setup: general,
+    routes: [
+      routes.room(ADA, GENERAL),
+      routes.roomInfo(ADA, GENERAL),
+      routes.roomLog(ADA, GENERAL),
+    ],
+  },
+  'room-changes': {
+    about: 'Room changes shown in #general’s conversation',
+    settings: { showRoomChanges: true },
+    setup: general,
+    routes: [routes.room(ADA, GENERAL)],
   },
   widgets: {
     about: 'A room’s widgets in one list, its meeting first; the header’s + holds the rest',

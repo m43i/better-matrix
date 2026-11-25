@@ -50,6 +50,8 @@ import {
   type Row,
   rowOf,
   shouldMarkRead,
+  type TopRow,
+  wantsOlder,
 } from '../../state/plan';
 import { shallow, useAppStore, useStore } from '../../state/react';
 import {
@@ -208,13 +210,22 @@ export function Timeline({
   const shownMarker = marker.shown;
 
   const showHidden = useStore((s) => s.settings.showHiddenEvents);
+  const showRoomChanges = useStore((s) => s.settings.showRoomChanges);
   // What people the user ignores sent never draws, hidden events included, and nor does what
   // someone whose ignore is being undone sent until that is saved (ADR 0011).
   const ignored = useStore((s) => shownIgnored(accountOf(s, account)) ?? NO_ONE, shallow);
 
   const rows = useMemo(
-    () => planTimeline(timeline, { thread, root, marker: shownMarker, showHidden, ignored }),
-    [timeline, thread, root, shownMarker, showHidden, ignored],
+    () =>
+      planTimeline(timeline, {
+        thread,
+        root,
+        marker: shownMarker,
+        showHidden,
+        showRoomChanges,
+        ignored,
+      }),
+    [timeline, thread, root, shownMarker, showHidden, showRoomChanges, ignored],
   );
 
   const list = useRef<FlashListRef<Row>>(null);
@@ -253,10 +264,27 @@ export function Timeline({
     sdkMarkerNow.current = sdkMarker;
   }, [sdkMarker]);
 
+  // The topmost row on screen, but the loading and failure rows, which come and go: whether the
+  // reader is at the start of the history loaded (`wantsOlder`).
+  const [top, setTop] = useState<TopRow | null>(null);
+
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken<Row>[] }) => {
       if (viewableItems.some((token) => token.item?.kind === 'new'))
         setSeenMarker(sdkMarkerNow.current);
+
+      let first: ViewToken<Row> | null = null;
+
+      for (const token of viewableItems) {
+        const kind = token.item?.kind;
+
+        if (kind === undefined || kind === 'loading' || kind === 'historyFailed') continue;
+
+        if (first === null || (token.index ?? Infinity) < (first.index ?? Infinity)) first = token;
+      }
+
+      const key = first?.item?.key;
+      setTop(key === undefined || first?.index == null ? null : { key, index: first.index });
     },
     [],
   );
@@ -299,16 +327,30 @@ export function Timeline({
 
   const reachedStart = atStart(timeline, thread);
 
+  const rowsRef = useRef(rows);
+  useLayoutEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+
   const loadMore = useCallback(() => {
     const now = timelineOf(store.getState(), account, timelineKey);
 
     if (!atStart(now, thread) && now.historyError === null) loadOlder(store, account, timelineKey);
   }, [store, account, timelineKey, thread]);
 
-  const rowsRef = useRef(rows);
-  useLayoutEffect(() => {
-    rowsRef.current = rows;
-  }, [rows]);
+  // While the reader stays at the start (or nothing draws), the list doesn't say so again: ask
+  // for the page before it until one moves the start off screen. Not from behind another screen
+  // (room info, the room log): it goes on once the conversation is back.
+  const pageOlder = onScreen && wantsOlder(rows, timeline, thread, top);
+  useEffect(() => {
+    if (pageOlder) loadMore();
+  }, [pageOlder, rows, loadMore]);
+
+  // The list reports its start on layout too, as when another screen covers it: not from there.
+  const startReached = useCallback(() => {
+    if (onScreen) loadMore();
+  }, [onScreen, loadMore]);
+
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollTo = useCallback((eventId: string, animated = true): boolean => {
@@ -535,7 +577,7 @@ export function Timeline({
               onScroll={onScroll}
               onViewableItemsChanged={onViewableItemsChanged}
               scrollEventThrottle={32}
-              onStartReached={loadMore}
+              onStartReached={startReached}
               onStartReachedThreshold={1}
               maintainVisibleContentPosition={{
                 autoscrollToBottomThreshold: 0.2,

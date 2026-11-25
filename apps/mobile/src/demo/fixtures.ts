@@ -20,6 +20,7 @@ import type {
   Identity,
   Permission,
   Person,
+  RoomChange,
   Place,
   Presence,
   QrImage,
@@ -438,18 +439,13 @@ function space(id: string, name: string, children: string[], members: string[]):
   };
 }
 
-/** How a room begins: created, an invite, and a run of joins that reads as one line. */
-function roomEvents(): TimelineEntry[] {
+/**
+ * How a room begins: created and set up (changes only the room log lists by default), an invite,
+ * a run of joins that reads as one line, then a new topic and a new profile picture. Each a
+ * minute after the one before, the last a minute before `before`.
+ */
+function roomEvents(name: string, before: number): TimelineEntry[] {
   const ada = person(ADA, 'Ada Lovelace');
-
-  const event = (
-    id: string,
-    sender: Person,
-    change: Extract<TimelineEntry['kind'], { type: 'RoomEvent' }>['data']['change'],
-  ): TimelineEntry => ({
-    id,
-    kind: { type: 'RoomEvent', data: { sender, change } },
-  });
 
   const joined: Array<[string, string]> = [
     [GRACE, 'Grace Hopper'],
@@ -460,15 +456,31 @@ function roomEvents(): TimelineEntry[] {
     ['@barbara:example.org', 'Barbara Liskov'],
   ];
 
-  return [
-    event('ev-created', ada, { type: 'Created' }),
-    event('ev-invited', ada, { type: 'Invited', data: person(KAI, 'Kai') }),
-    ...joined.map(([id, name]) => event(`ev-joined-${id}`, person(id, name), { type: 'Joined' })),
+  const events: Array<[string, Person, RoomChange]> = [
+    ['ev-created', ada, { type: 'Created' }],
+    ['ev-name', ada, { type: 'RoomName', data: name }],
+    ['ev-encrypted', ada, { type: 'Encrypted' }],
+    ['ev-invited', ada, { type: 'Invited', data: person(KAI, 'Kai') }],
+    ...joined.map(([id, member]): [string, Person, RoomChange] => [
+      `ev-joined-${id}`,
+      person(id, member),
+      { type: 'Joined' },
+    ]),
+    ['ev-topic', ada, { type: 'RoomTopic', data: 'Where the team talks' }],
+    ['ev-picture', person(GRACE, 'Grace Hopper'), { type: 'ProfilePicture' }],
   ];
+
+  return events.map(([id, sender, change], index) => ({
+    id,
+    kind: {
+      type: 'RoomEvent',
+      data: { sender, change, timestamp_ms: before - (events.length - index) * 60_000 },
+    },
+  }));
 }
 
 /** A whole timeline: its start, the day's divider, the room's first events, then the messages. */
-export function timelineEntries(list: Message[], unread = 0): TimelineEntry[] {
+export function timelineEntries(name: string, list: Message[], unread = 0): TimelineEntry[] {
   const first = list[0]?.timestamp_ms ?? DEMO_DAY_MS;
 
   const messages = list.map((m): TimelineEntry => ({
@@ -485,7 +497,7 @@ export function timelineEntries(list: Message[], unread = 0): TimelineEntry[] {
   return [
     { id: 'start', kind: { type: 'Start' } },
     { id: 'day', kind: { type: 'DateDivider', data: first - (first % 86_400_000) } },
-    ...roomEvents(),
+    ...roomEvents(name, first),
     ...messages.slice(0, read),
     ...marker,
     ...messages.slice(read),
@@ -927,7 +939,7 @@ function accountEvents(
       data: {
         account: id,
         key: { room_id: summary.room_id, thread: null },
-        diffs: [{ type: 'Reset', data: timelineEntries(list, summary.unread) }],
+        diffs: [{ type: 'Reset', data: timelineEntries(summary.name, list, summary.unread) }],
       },
     });
   }

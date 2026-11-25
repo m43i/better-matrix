@@ -78,6 +78,7 @@ fn spec() -> AppSpec<State> {
             ("demo-commands", |s| demo::typing(s, "/")),
             ("demo-emoji-suggestions", |s| demo::typing(s, "Great :pa")),
             ("demo-pills", demo::pills_draft),
+            ("demo-upload-thumbnails", demo::upload_thumbnails),
             ("demo-location", demo::location),
             ("demo-edit-history", demo::edit_history),
             ("demo-stickers", |s| {
@@ -93,6 +94,15 @@ fn spec() -> AppSpec<State> {
                 s.popover = Some(Popover::Scheduled);
             }),
             ("demo-hidden-events", demo::hidden_events),
+            ("demo-room-changes", |s| {
+                demo::room_changes(s);
+                s.set_show_room_changes(true);
+            }),
+            ("demo-room-changes-off", demo::room_changes),
+            ("demo-room-log", |s| {
+                demo::room_changes(s);
+                s.show_side(state::SidePanel::Log);
+            }),
             ("demo-widgets", demo::widgets),
             ("demo-widgets-menu", |s| {
                 demo::widgets(s);

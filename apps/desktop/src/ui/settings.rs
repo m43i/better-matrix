@@ -242,6 +242,15 @@ fn general(s: &State, p: &Palette) -> El {
                 .on_press(move |s: &mut State| s.set_show_hidden_events(on)),
         )
     });
+    let room_changes = [(true, t!("settings.room_changes_on")), (false, t!("settings.room_changes_off"))]
+        .into_iter()
+        .fold(col().w_full().gap(8.0), |list, (on, title)| {
+            list.child(
+                choice_row(title, None, s.settings.show_room_changes == on, p)
+                    .key(format!("room-changes-{on}"))
+                    .on_press(move |s: &mut State| s.set_show_room_changes(on)),
+            )
+        });
     col()
         .w_full()
         .gap(32.0)
@@ -249,6 +258,13 @@ fn general(s: &State, p: &Palette) -> El {
         .child(setting_group(&icons::LINK, t!("settings.previews"), t!("settings.previews_hint"), previews, p))
         .child(setting_group(&icons::IMAGE, t!("settings.gifs"), t!("settings.gifs_hint"), gifs, p))
         .child(setting_group(&icons::MAP_PIN, t!("settings.maps"), t!("settings.maps_hint"), maps, p))
+        .child(setting_group(
+            &icons::HISTORY,
+            t!("settings.room_changes"),
+            t!("settings.room_changes_hint"),
+            room_changes,
+            p,
+        ))
         .child(setting_group(&icons::CODE, t!("settings.developer"), t!("settings.developer_hint"), hidden, p))
 }
 

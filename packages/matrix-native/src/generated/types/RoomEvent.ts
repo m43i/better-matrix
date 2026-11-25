@@ -4,7 +4,7 @@ import type { RoomChange } from "./RoomChange";
 
 /**
  * Something that happened to a room rather than something someone wrote: a member came or
- * went, the room's settings changed. Timelines show it as a small line.
+ * went, the room's settings changed. Timelines show it as a small line; the room log lists it.
  */
 export type RoomEvent = { 
 /**
@@ -14,4 +14,8 @@ sender: Person,
 /**
  * What changed.
  */
-change: RoomChange, };
+change: RoomChange, 
+/**
+ * When, in milliseconds since the Unix epoch.
+ */
+timestamp_ms: number, };

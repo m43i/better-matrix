@@ -1,6 +1,7 @@
 import { type ComposerState, EMPTY_COMPOSER, type PendingAttachment } from '../composer';
 import { pillAt, spoilerPill, userPill } from '../pills';
 import {
+  attachmentKind,
   canSend,
   excerpt,
   formatDuration,
@@ -225,6 +226,36 @@ describe('uploadName', () => {
 
   it('should fall back to the name on disk', () => {
     expect(uploadName('/cache/report.pdf', null)).toBe('report.pdf');
+  });
+});
+
+describe('attachmentKind', () => {
+  it('should preview a picture by its media type', () => {
+    expect(attachmentKind('image/png', 'scan')).toBe('image');
+  });
+
+  it('should preview a video by its media type', () => {
+    expect(attachmentKind('video/mp4', 'clip')).toBe('video');
+  });
+
+  it('should preview a picture by its extension when the type says nothing', () => {
+    expect(attachmentKind('application/octet-stream', 'Photo.JPG')).toBe('image');
+  });
+
+  it('should preview an SVG by its extension when the type says nothing', () => {
+    expect(attachmentKind('application/octet-stream', 'diagram.svg')).toBe('image');
+  });
+
+  it('should preview a video by its extension without a type', () => {
+    expect(attachmentKind(null, 'party.mov')).toBe('video');
+  });
+
+  it('should take anything else as a file', () => {
+    expect(attachmentKind('application/pdf', 'notes.pdf')).toBe('file');
+  });
+
+  it('should take the fallback when neither type nor name tell', () => {
+    expect(attachmentKind(undefined, 'IMG_0001', 'image')).toBe('image');
   });
 });
 

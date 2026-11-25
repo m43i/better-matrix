@@ -1,6 +1,14 @@
 import type { TimelineEntry } from '@better-matrix/matrix-native/types';
 
-import { atStart, GROUP_WINDOW_MS, newestSent, planTimeline, rowOf, shouldMarkRead } from '../plan';
+import {
+  atStart,
+  GROUP_WINDOW_MS,
+  newestSent,
+  planTimeline,
+  rowOf,
+  shouldMarkRead,
+  wantsOlder,
+} from '../plan';
 import { hiddenEntry as hiddenStandIn } from '../safety';
 import {
   ADA,
@@ -115,8 +123,8 @@ describe('planTimeline', () => {
 
   it('should not merge other room events', () => {
     const entries = [
-      roomEventEntry('1', ada, { type: 'RoomName', data: 'a' }),
-      roomEventEntry('2', ada, { type: 'RoomName', data: 'b' }),
+      roomEventEntry('1', ada, { type: 'Invited', data: grace }),
+      roomEventEntry('2', ada, { type: 'Invited', data: grace }),
     ];
 
     expect(kinds(entries)).toEqual(['events', 'events']);
@@ -219,6 +227,89 @@ describe('planTimeline', () => {
     expect(rows.map((r) => r.kind)).toEqual(['events', 'hidden', 'events']);
   });
 
+  it('should leave a room change only the room log lists out by default', () => {
+    expect(kinds([roomEventEntry('1', ada, { type: 'ProfilePicture' })])).toEqual([]);
+  });
+
+  it('should draw a room change only the room log lists while room changes show', () => {
+    const rows = planTimeline(timelineOf([roomEventEntry('1', ada, { type: 'ProfilePicture' })]), {
+      ...room,
+      showRoomChanges: true,
+    });
+
+    expect(rows.map((r) => r.kind)).toEqual(['events']);
+  });
+
+  it('should merge joins across a room change left out', () => {
+    const rows = planTimeline(
+      timelineOf([
+        roomEventEntry('1', ada, { type: 'Joined' }),
+        roomEventEntry('2', ada, { type: 'DisplayName', data: 'Ada L.' }),
+        roomEventEntry('3', grace, { type: 'Joined' }),
+      ]),
+      room,
+    );
+
+    expect(rows.map((r) => (r.kind === 'events' ? r.events.length : 0))).toEqual([2]);
+  });
+
+  it('should continue a message group across a room change left out', () => {
+    const rows = planTimeline(
+      timelineOf([
+        messageEntry('a'),
+        roomEventEntry('e', grace, { type: 'ProfilePicture' }),
+        messageEntry('b', { timestamp_ms: T + 60_000 }),
+      ]),
+      room,
+    );
+
+    expect(rows.map((r) => r.kind === 'message' && r.continues)).toEqual([false, true]);
+  });
+
+  it('should leave out a date divider over a day with nothing drawn', () => {
+    const entries: TimelineEntry[] = [
+      { id: 'd1', kind: { type: 'DateDivider', data: T } },
+      roomEventEntry('e', ada, { type: 'RoomTopic', data: 'Plans' }),
+      hiddenEntry('h'),
+      { id: 'd2', kind: { type: 'DateDivider', data: T + 86_400_000 } },
+      messageEntry('a'),
+    ];
+
+    expect(planTimeline(timelineOf(entries), room).map((r) => r.key)).toEqual(['d2', 'msg-a']);
+  });
+
+  it('should leave out a date divider over a day only an ignored person wrote in', () => {
+    const entries: TimelineEntry[] = [
+      messageEntry('a', { sender_id: ADA }),
+      { id: 'd', kind: { type: 'DateDivider', data: T } },
+      messageEntry('b', { sender_id: GRACE }),
+    ];
+
+    const rows = planTimeline(timelineOf(entries), { ...room, ignored: [GRACE] });
+
+    expect(rows.map((r) => r.key)).toEqual(['msg-a']);
+  });
+
+  it('should keep a date divider over a day with something drawn', () => {
+    const entries: TimelineEntry[] = [
+      { id: 'd', kind: { type: 'DateDivider', data: T } },
+      roomEventEntry('e', ada, { type: 'RoomTopic', data: 'Plans' }),
+      messageEntry('a'),
+    ];
+
+    expect(planTimeline(timelineOf(entries), room).map((r) => r.key)).toEqual(['d', 'msg-a']);
+  });
+
+  it('should not count the New divider as something drawn on its day', () => {
+    const entries: TimelineEntry[] = [
+      messageEntry('a'),
+      { id: 'd', kind: { type: 'DateDivider', data: T } },
+      { id: 'r', kind: { type: 'ReadMarker' } },
+    ];
+
+    expect(kinds(entries)).toEqual(['message', 'new']);
+  });
+
   it('should mark only the newest call card as the latest', () => {
     const call = { type: 'Call' as const, data: { video: true, direct: false, declined_by: [] } };
 
@@ -299,6 +390,58 @@ describe('atStart', () => {
 
   it('should not be at the start before either', () => {
     expect(atStart(timelineOf([entry('a')]), 'root')).toBe(false);
+  });
+});
+
+describe('wantsOlder', () => {
+  const topic = () => roomEventEntry('topic', ada, { type: 'RoomTopic', data: 'News' });
+
+  it('should ask for older history when a page holds only changes left out', () => {
+    const timeline = timelineOf([topic()]);
+    expect(wantsOlder(planTimeline(timeline, room), timeline, null)).toBe(true);
+  });
+
+  it('should ask though the New marker stands over changes left out', () => {
+    const timeline = timelineOf([{ id: 'marker', kind: { type: 'ReadMarker' } }, topic()]);
+    expect(wantsOlder(planTimeline(timeline, room), timeline, null)).toBe(true);
+  });
+
+  it('should ask while the reader stays at the start of what is loaded', () => {
+    const timeline = timelineOf([topic(), entry('a'), entry('b'), entry('c'), entry('d')]);
+    const rows = planTimeline(timeline, room);
+    expect(wantsOlder(rows, timeline, null, { key: rows[0]?.key ?? '', index: 0 })).toBe(true);
+  });
+
+  it('should not ask once a page moved the start off screen', () => {
+    const timeline = timelineOf([entry('a'), entry('b'), entry('c'), entry('d'), entry('e')]);
+    const rows = planTimeline(timeline, room);
+    expect(wantsOlder(rows, timeline, null, { key: rows[4]?.key ?? '', index: 0 })).toBe(false);
+  });
+
+  it("should keep the top row's place when the SDK replaced it with a new key", () => {
+    const timeline = timelineOf([
+      { id: 'day-2', kind: { type: 'DateDivider', data: T } },
+      entry('a'),
+      entry('b'),
+    ]);
+
+    const rows = planTimeline(timeline, room);
+    expect(wantsOlder(rows, timeline, null, { key: 'day-1', index: 0 })).toBe(true);
+  });
+
+  it('should not ask while the reader is away from the start', () => {
+    const timeline = timelineOf([entry('a')]);
+    expect(wantsOlder(planTimeline(timeline, room), timeline, null)).toBe(false);
+  });
+
+  it('should not ask while a page is on its way', () => {
+    const timeline = timelineOf([topic()], { loadingOlder: true });
+    expect(wantsOlder([], timeline, null)).toBe(false);
+  });
+
+  it('should not ask once the start is in', () => {
+    const timeline = timelineOf([topic()], { reachedStart: true });
+    expect(wantsOlder([], timeline, null)).toBe(false);
   });
 });
 

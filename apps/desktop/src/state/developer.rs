@@ -44,6 +44,13 @@ impl State {
         self.accounts.replan_timelines();
     }
 
+    /// Shows profile and room-setting changes in the timelines too, or only in the room log.
+    pub fn set_show_room_changes(&mut self, show: bool) {
+        self.settings.show_room_changes = show;
+        self.shell.save_settings(self.settings.clone());
+        self.accounts.replan_timelines();
+    }
+
     /// Asks for a web page to pin to the room shown.
     pub fn start_add_widget(&mut self, room_id: &str) {
         self.popover = None;

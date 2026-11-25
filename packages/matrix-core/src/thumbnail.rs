@@ -115,21 +115,78 @@ fn scaled(bytes: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// `image` at `width`×`height`. One with alpha is scaled premultiplied, so its transparent
-/// pixels don't darken the edges of what shows.
-fn resized(image: DynamicImage, width: u32, height: u32) -> DynamicImage {
-    if !image.color().has_alpha() {
-        return image.resize_exact(width, height, FilterType::Triangle);
+/// A picture waiting to be sent, as a `side`×`side` square for the composer: turned upright by
+/// its EXIF orientation, its longer side cropped evenly, then scaled down (a smaller one keeps
+/// its size). Decoding is bounded as for thumbnails ([`MAX_SIDE`] a side, [`MAX_ALLOC`] in all,
+/// formats the app's `image` build reads); `None` past that, or for anything that fails, a
+/// malformed file panicking its codec included. Blocking: call it off the UI thread.
+pub fn upload_thumbnail(bytes: &[u8], side: u32) -> Option<image::RgbaImage> {
+    std::panic::catch_unwind(|| upload_square(bytes, side)).ok().flatten()
+}
+
+fn upload_square(bytes: &[u8], side: u32) -> Option<image::RgbaImage> {
+    let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?;
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_SIDE);
+    limits.max_image_height = Some(MAX_SIDE);
+    limits.max_alloc = Some(DECODER_ALLOC);
+    reader.limits(limits);
+    let mut decoder = reader.into_decoder().ok()?;
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_SIDE);
+    limits.max_image_height = Some(MAX_SIDE);
+    limits.max_alloc = Some(MAX_ALLOC);
+    limits.reserve(decoder.total_bytes()).ok()?;
+    decoder.set_limits(limits).ok()?;
+    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    let image = DynamicImage::from_decoder(decoder).ok()?;
+    // The middle square, read in place and scaled from there: the decoded picture is never
+    // copied whole. Turning it upright after is the same as before: EXIF turns and flips keep
+    // the middle square in the middle.
+    let (w, h) = (image.width(), image.height());
+    let cut = w.min(h);
+    let middle = imageops::crop_imm(&image, (w - cut) / 2, (h - cut) / 2, cut, cut);
+    let square = if cut > side {
+        let mut square = imageops::resize(&Premultiplied(&*middle), side, side, FilterType::Triangle);
+        unpremultiply(&mut square);
+        square
+    } else {
+        middle.to_image()
+    };
+    drop(image);
+    let mut square = DynamicImage::ImageRgba8(square);
+    square.apply_orientation(orientation);
+    Some(square.into_rgba8())
+}
+
+/// A view whose pixels read premultiplied by their alpha, for scaling without a copy: transparent
+/// pixels then don't darken the edges of what shows.
+struct Premultiplied<'a, I>(&'a I);
+
+impl<I: image::GenericImageView<Pixel = Rgba<u8>>> image::GenericImageView for Premultiplied<'_, I> {
+    type Pixel = Rgba<u8>;
+
+    fn dimensions(&self) -> (u32, u32) {
+        self.0.dimensions()
     }
-    let mut rgba = image.into_rgba8();
-    for pixel in rgba.pixels_mut() {
-        let alpha = u16::from(pixel[3]);
-        for channel in &mut pixel.0[..3] {
-            *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
-        }
+
+    fn get_pixel(&self, x: u32, y: u32) -> Rgba<u8> {
+        let mut pixel = self.0.get_pixel(x, y);
+        premultiply(&mut pixel);
+        pixel
     }
-    let mut scaled: ImageBuffer<Rgba<u8>, Vec<u8>> = imageops::resize(&rgba, width, height, FilterType::Triangle);
-    for pixel in scaled.pixels_mut() {
+}
+
+fn premultiply(pixel: &mut Rgba<u8>) {
+    let alpha = u16::from(pixel[3]);
+    for channel in &mut pixel.0[..3] {
+        *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
+    }
+}
+
+/// Undoes [`premultiply`] on a scaled image.
+fn unpremultiply(image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
+    for pixel in image.pixels_mut() {
         let alpha = u16::from(pixel[3]);
         if alpha == 0 {
             continue;
@@ -138,6 +195,18 @@ fn resized(image: DynamicImage, width: u32, height: u32) -> DynamicImage {
             *channel = ((u16::from(*channel) * 255 + alpha / 2) / alpha).min(255) as u8;
         }
     }
+}
+
+/// `image` at `width`×`height`. One with alpha is scaled premultiplied, so its transparent
+/// pixels don't darken the edges of what shows.
+fn resized(image: DynamicImage, width: u32, height: u32) -> DynamicImage {
+    if !image.color().has_alpha() {
+        return image.resize_exact(width, height, FilterType::Triangle);
+    }
+    let mut rgba = image.into_rgba8();
+    rgba.pixels_mut().for_each(premultiply);
+    let mut scaled: ImageBuffer<Rgba<u8>, Vec<u8>> = imageops::resize(&rgba, width, height, FilterType::Triangle);
+    unpremultiply(&mut scaled);
     DynamicImage::ImageRgba8(scaled)
 }
 
@@ -178,6 +247,67 @@ fn swaps_sides(orientation: Orientation) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_upload_thumbnail_should_be_a_square_of_the_side_asked_for() {
+        let square = upload_thumbnail(&png(400, 200), 128).expect("a thumbnail");
+        assert_eq!(square.dimensions(), (128, 128));
+    }
+
+    #[test]
+    fn an_upload_thumbnails_edges_should_not_darken_toward_transparent_pixels() {
+        // White on its left half, transparent black on its right.
+        let image =
+            ImageBuffer::from_fn(
+                400,
+                400,
+                |x, _| if x < 200 { Rgba([255, 255, 255, 255]) } else { Rgba([0, 0, 0, 0]) },
+            );
+        let mut png = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image).write_to(&mut png, ImageFormat::Png).expect("encodes");
+        let square = upload_thumbnail(&png.into_inner(), 128).expect("a thumbnail");
+        let edge = square.get_pixel(64, 64);
+        assert!(edge[3] > 0 && edge[0] > 250, "the edge keeps its white: {edge:?}");
+    }
+
+    #[test]
+    fn a_small_upload_thumbnail_should_keep_its_size() {
+        let square = upload_thumbnail(&png(40, 90), 128).expect("a thumbnail");
+        assert_eq!(square.dimensions(), (40, 40));
+    }
+
+    #[test]
+    fn an_upload_too_long_a_side_should_get_no_thumbnail() {
+        assert!(upload_thumbnail(&png(1, MAX_SIDE + 1), 128).is_none());
+    }
+
+    /// A 40×20 JPEG, red on its left half and blue on its right, whose EXIF says to show it
+    /// turned a quarter clockwise (orientation 6): upright, red above blue.
+    fn turned_jpeg() -> Vec<u8> {
+        let image =
+            ImageBuffer::from_fn(40, 20, |x, _| if x < 20 { image::Rgb([255, 0, 0]) } else { image::Rgb([0, 0, 255]) });
+        let mut jpeg = Cursor::new(Vec::new());
+        DynamicImage::ImageRgb8(image).write_to(&mut jpeg, ImageFormat::Jpeg).expect("encodes");
+        let jpeg = jpeg.into_inner();
+        // TIFF, little-endian: one IFD entry, Orientation (0x0112), a SHORT, 6.
+        let tiff =
+            [b"II*\0".as_slice(), &[8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0]].concat();
+        let exif = [b"Exif\0\0".as_slice(), &tiff].concat();
+        let length = u16::try_from(exif.len() + 2).expect("short").to_be_bytes();
+        [&jpeg[..2], &[0xFF, 0xE1], &length, &exif, &jpeg[2..]].concat()
+    }
+
+    #[test]
+    fn an_upload_thumbnail_should_be_upright_by_its_exif_orientation() {
+        let square = upload_thumbnail(&turned_jpeg(), 128).expect("a thumbnail");
+        let (top, bottom) = (square.get_pixel(10, 2), square.get_pixel(10, 17));
+        assert!(top[0] > 200 && bottom[2] > 200, "red above blue: {top:?} over {bottom:?}");
+    }
+
+    #[test]
+    fn an_upload_that_is_not_a_picture_should_get_no_thumbnail() {
+        assert!(upload_thumbnail(b"%PDF-1.7", 128).is_none());
+    }
 
     fn png(width: u32, height: u32) -> Vec<u8> {
         let mut out = Cursor::new(Vec::new());

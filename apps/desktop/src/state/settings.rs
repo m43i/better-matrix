@@ -181,6 +181,9 @@ pub struct Settings {
     pub playback_speed: PlaybackSpeed,
     /// Timelines draw the events they otherwise leave out (developer tools).
     pub show_hidden_events: bool,
+    /// Timelines draw profile and room-setting changes too, not only the room log
+    /// (`RoomChange::log_only`).
+    pub show_room_changes: bool,
 }
 
 /// How fast voice memos and audio clips play, at their own pitch. The speed button on a clip
@@ -240,6 +243,7 @@ impl Default for Settings {
             ring_sound: true,
             playback_speed: PlaybackSpeed::default(),
             show_hidden_events: false,
+            show_room_changes: false,
         }
     }
 }

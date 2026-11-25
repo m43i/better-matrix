@@ -1087,6 +1087,21 @@ impl AccountData {
             })
     }
 
+    /// The room log of `room_id` as it lists: the room events of its main timeline, newest
+    /// first, none the user ignores sent, each with its entry's index.
+    pub fn room_log(&self, room_id: &str) -> Vec<(usize, &matrix_core::RoomEvent)> {
+        let entries = self.timeline(&TimelineKey::room(room_id)).map_or(&[][..], |t| t.entries.as_slice());
+        entries
+            .iter()
+            .enumerate()
+            .rev()
+            .filter_map(|(at, entry)| match &entry.kind {
+                EntryView::RoomEvent(event) if !self.ignores(&event.sender.id) => Some((at, event.as_ref())),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// A fingerprint of everyone [`AccountData::ignores`] counts: what views built from it (a
     /// timeline's rows) are made again for when it changes.
     pub fn ignores_fingerprint(&self) -> u64 {

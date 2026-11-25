@@ -70,7 +70,7 @@ use rune::{TextEdit, Tx};
 pub use account_actions::{KeyFile, KeyFileStep, KeyTransfer, PasswordForm, RecoveryKeyFor};
 pub use accounts::READ_MARKER_FADE;
 pub use accounts::{
-    AccountData, Accounts, EntryView, Landing, PlacedCode, RichText, RoomTimeline, Scope, TimelineItem,
+    AccountData, Accounts, Entry, EntryView, Landing, PlacedCode, RichText, RoomTimeline, Scope, TimelineItem,
     continues_group, now_ms, place_code, rich_body, visual, wants_attention,
 };
 pub use admin::{
@@ -86,7 +86,7 @@ pub use gifs::GifCache;
 pub use link_previews::LinkPreviews;
 pub use links::{LinkDialog, LinkStep};
 pub use location::{LocationForm, MAP_PIXELS, MAP_SIZE};
-pub use media::MediaCache;
+pub use media::{MediaCache, THUMBNAIL_SIZE, UploadThumbnails};
 pub use message_actions::{MessageAt, MessageHover};
 pub use navigation::{navigate, navigate_now};
 pub use packs::PACK_IMAGE_SIZE;
@@ -218,6 +218,8 @@ pub enum SidePanel {
     Threads,
     Files,
     Pins,
+    /// The room log: the room events of the history loaded, newest first, with their times.
+    Log,
     /// The room's widgets: web apps pinned to it, opened in the browser.
     Widgets,
     /// Someone's profile, from their name or picture on a message: as the message shows them,
@@ -677,6 +679,8 @@ pub enum ResetStep {
 
 /// How many members' pictures the open member list loads.
 const MEMBER_PICTURES: usize = 60;
+/// Room log rows either side of those in view whose pictures load.
+const LOG_MARGIN: usize = 10;
 
 /// Why a command was sent, so its [`Event::Finished`] lands in the right place.
 #[derive(Debug, Clone, PartialEq)]
@@ -932,6 +936,8 @@ pub struct State {
     pub message_jump: Option<search::MessageJump>,
     /// The message just jumped to, lit a moment.
     pub flash: Option<jump::Flash>,
+    /// The room log's rows in view, whose pictures load.
+    pub log_shown: std::ops::Range<usize>,
     /// The latest jump waiting for the engine to find its message, and its account and room:
     /// only its answer goes.
     locating: Option<(RequestId, AccountId, String)>,
@@ -1002,6 +1008,8 @@ pub struct State {
     /// Where the rail's space tiles are, by room ID, for the place a dropped space takes.
     space_zones: HashMap<String, [f32; 4]>,
     pub media: MediaCache,
+    /// The composers' image uploads, as thumbnails.
+    pub upload_thumbnails: UploadThumbnails,
     pub gifs: GifCache,
     /// Links' preview cards.
     pub link_previews: LinkPreviews,
@@ -1104,6 +1112,7 @@ impl State {
             search: PeopleSearch::default(),
             message_jump: None,
             flash: None,
+            log_shown: 0..0,
             locating: None,
             packs: packs::Packs::default(),
             location: LocationForm::default(),
@@ -1135,6 +1144,7 @@ impl State {
             space_zones: HashMap::new(),
             row_zones: HashMap::new(),
             media: MediaCache::default(),
+            upload_thumbnails: UploadThumbnails::default(),
             gifs: GifCache::default(),
             link_previews: LinkPreviews::default(),
             revealed_media: HashSet::new(),
@@ -2336,7 +2346,7 @@ impl State {
                     SidePanel::Pins => {
                         self.accounts.pins_failed(&account, room_id, error.clone());
                     }
-                    SidePanel::Info | SidePanel::Members | SidePanel::Person(_) => {}
+                    SidePanel::Info | SidePanel::Members | SidePanel::Log | SidePanel::Person(_) => {}
                 }
                 if panel != SidePanel::Pins {
                     self.notice = Some(tf!("notice.side", error = error));
@@ -2363,16 +2373,16 @@ impl State {
             }
         }
         let visiting = shown.first().map(|(account, key)| (account.clone(), key.room_id.clone()));
+        // Another room (or none) closes the side panel; the same room's timeline opening again
+        // after it failed to keeps it.
         if self.nav.visited != visiting {
             self.nav.visited = visiting.clone();
-            if let Some((account, room_id)) = visiting {
-                self.engine.send(Command::VisitRoom { account, room_id });
-            }
-        }
-        if self.open_timelines.first() != shown.first() {
             self.side = None;
             self.side_loaded = None;
             self.member_search = TextEdit::default();
+            if let Some((account, room_id)) = visiting {
+                self.engine.send(Command::VisitRoom { account, room_id });
+            }
         }
         // A memo recording for a timeline no longer shown would go on unseen, the microphone
         // open: closing the thread, another room and the overview all drop it. An edit of a
@@ -2507,6 +2517,9 @@ impl State {
         }
         // Images decoded since the last frame count at their exact size from now on.
         changed |= self.media.measure();
+        changed |= self
+            .upload_thumbnails
+            .sync(&self.media, self.composer.attachments.iter().chain(&self.thread_composer.attachments));
         changed |= self.preview.as_mut().is_some_and(|preview| preview.content.poll());
         // However the preview moved (a key, an arrow, a thumbnail, opening), its thumbnail shows.
         if std::mem::take(&mut self.reveal_thumbnail)
@@ -2556,27 +2569,52 @@ impl State {
             if !flag.swap(false, Ordering::Relaxed) {
                 continue;
             }
-            let Some((account, key)) =
+            if let Some((account, key)) =
                 self.open_timelines.iter().find(|(_, key)| key.thread.is_some() == thread).cloned()
-            else {
-                continue;
-            };
-            // Checked before asking to change it: a change moves the revision and replans rows.
-            let idle = self
-                .accounts
-                .get(&account)
-                .and_then(|data| data.timeline(&key))
-                .is_some_and(|t| !t.loading && !t.reached_start && t.history_error.is_none());
-            if !idle {
-                continue;
+            {
+                changed |= self.load_older(account, key);
             }
-            let Some(timeline) = self.accounts.kept_timeline_mut(&account, &key) else { continue };
-            timeline.loading = true;
-            let purpose = Purpose::History { account: account.clone(), key: key.clone() };
-            self.dispatch(Command::LoadOlder { account, key }, purpose);
-            changed = true;
         }
         changed
+    }
+
+    /// Asks for the page of history before what the open timeline `key` holds, unless one is on
+    /// its way, its start is in, or the last page failed (that waits for a retry). True when it
+    /// asked.
+    fn load_older(&mut self, account: AccountId, key: TimelineKey) -> bool {
+        // Checked before asking to change it: a change moves the revision and replans rows.
+        let idle = self
+            .accounts
+            .get(&account)
+            .and_then(|data| data.timeline(&key))
+            .is_some_and(|t| !t.loading && !t.reached_start && t.history_error.is_none());
+        if !idle {
+            return false;
+        }
+        let Some(timeline) = self.accounts.kept_timeline_mut(&account, &key) else { return false };
+        timeline.loading = true;
+        let purpose = Purpose::History { account: account.clone(), key: key.clone() };
+        self.dispatch(Command::LoadOlder { account, key }, purpose);
+        true
+    }
+
+    /// The room log's rows in view changed: their pictures load.
+    pub fn log_shown(&mut self, range: std::ops::Range<usize>) -> bool {
+        if self.log_shown == range {
+            return false;
+        }
+        self.log_shown = range;
+        self.request_avatars();
+        true
+    }
+
+    /// The room log's "Load earlier": the page of the room's history before what it holds.
+    pub fn load_earlier_log(&mut self) {
+        let (Some(account), Some(room_id)) = (self.nav.account.clone(), self.active_room_id()) else { return };
+        let key = TimelineKey::room(room_id);
+        if self.open_timelines.contains(&(account.clone(), key.clone())) {
+            self.load_older(account, key);
+        }
     }
 
     /// Moves animations driven by the clock (seconds since start, virtual when headless) on:
@@ -2961,6 +2999,20 @@ impl State {
                 .and_then(|room| account.pinned_messages(room))
                 .into_iter()
                 .flat_map(|pins| pins.take(MEMBER_PICTURES).filter_map(|pin| pin.sender_avatar.clone()));
+            // The room log's rows in view and a few either side, as it lists them.
+            let log: Vec<MediaRef> = match (self.active_room_id(), &self.side) {
+                (Some(room_id), Some(SidePanel::Log)) => {
+                    let from = self.log_shown.start.saturating_sub(LOG_MARGIN);
+                    let to = self.log_shown.end + LOG_MARGIN;
+                    let log = account.room_log(room_id);
+                    log.get(from..to.min(log.len()))
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(|(_, event)| event.sender.avatar.clone())
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
             // The open person panel's picture: the member list's, else the message's.
             let person = match (&self.side, self.active_room_id()) {
                 (Some(SidePanel::Person(shown_as)), Some(room_id)) => account
@@ -2991,6 +3043,7 @@ impl State {
                 members
                     .chain(person)
                     .chain(pins)
+                    .chain(log)
                     .chain(typing)
                     .chain(found)
                     .chain(public)
@@ -3655,7 +3708,7 @@ impl State {
         // The whole batch, audio and documents included: its pictures and videos the media
         // choice holds back wait for a press when stepped onto (`show_preview_item`).
         let entries = self.accounts.get(&account).and_then(|data| data.timeline(key)).map(|t| t.entries.as_slice());
-        let mut batch = preview::batch(entries.unwrap_or_default(), event_id);
+        let mut batch = preview::batch(entries.unwrap_or_default(), event_id, self.settings.show_room_changes);
         // Nothing of people the user ignores.
         if let Some(data) = self.accounts.get(&account) {
             batch.retain(|item| !data.ignores_sender_of(&key.room_id, &item.event_id));
@@ -4234,6 +4287,11 @@ impl State {
                 self.list_all_members();
                 self.request_avatars();
                 self.load_identity(&user_id);
+            }
+            // History older than the timeline drew may bring senders no row fetched.
+            Some(SidePanel::Log) => {
+                self.log_shown = 0..0;
+                self.request_avatars();
             }
             Some(SidePanel::Info) | None => {}
         }

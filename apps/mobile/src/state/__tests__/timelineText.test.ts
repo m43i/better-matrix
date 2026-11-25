@@ -18,7 +18,7 @@ const at = (y: number, m: number, d: number, h = 12, min = 0) =>
 
 const ada = person('@ada:x', 'Ada');
 
-const event = (change: RoomChange, sender = ada) => ({ sender, change });
+const event = (change: RoomChange, sender = ada) => ({ sender, change, timestamp_ms: 0 });
 
 describe('dates and times', () => {
   it('should format the time as hours and minutes', () => {

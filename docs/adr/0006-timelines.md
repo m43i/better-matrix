@@ -334,8 +334,8 @@ see who is typing there.
   message then flashes in the accent colour for 2.4 s (`State::flash`, `FLASH`). Opening at the
   message without the history before it (an event-focused timeline) is not done: the timeline
   model is the room's or a thread's, and paging back keeps one history per timeline.
-- **Room events:** `EntryKind::RoomEvent` holds the sender (a `Person`) and a `RoomChange`,
-  converted from matrix-sdk-ui's membership, profile and state items.
+- **Room events:** `EntryKind::RoomEvent` holds the sender (a `Person`), a `RoomChange` and when
+  it happened (`timestamp_ms`), converted from matrix-sdk-ui's membership, profile and state items.
   - Kinds: created; joined, left; invited, invite withdrawn or declined; removed, banned,
     unbanned; asked to join; display name, profile picture; room name, topic, picture;
     encryption, history visibility, join rules, permissions, pinned messages; upgraded,
@@ -347,6 +347,30 @@ see who is typing there.
   - Runs of a kind that `groups()` (joined, left) merge into one line, "Grace, Alan, Kai, Mira
     and 2 more joined", with up to four stacked pictures; hovering "and 2 more" shows everyone.
     Merging is in the view, so entries stay one per event and diff indices stay true.
+  - Only who came, went or was moderated stays in the timeline: joins, leaves, invites (and
+    withdrawn or declined ones), removals, bans, unbans, requests to join, upgrades, shared
+    live locations and meetings started (a widget holding one, to join). Profile and room-setting changes (created, display name, profile picture,
+    room name, topic, picture, encryption, history visibility, join rules, permissions, pins,
+    addresses, guest and server access, a space's rooms and spaces, moderation rules, other
+    widgets pinned or taken off) are
+    `RoomChange::log_only` and go to the room log. A device setting brings them back into
+    timelines ("Room changes", `Settings::show_room_changes` on the desktop's General settings,
+    `showRoomChanges` in the phone's Preferences; off by default), replanning them like hidden
+    events. A change left out is passed over like an undrawn hidden event: it doesn't break a run
+    of joins or a sender's group of messages.
+  - The room log (`SidePanel::Log`, "Room log" in the room's info; a pushed screen on phones)
+    lists every room event of the room's loaded main timeline, membership included, newest
+    first, with the sender's picture, the timeline's sentence and its date and time; ignored
+    senders are left out. It reads the open timeline rather than asking the server for state, so
+    it holds what history is loaded: "Load earlier" at its foot pages the room's timeline back
+    through the same path scrolling up takes (`State::load_earlier_log`, `load_older`), and a
+    failed page offers Try again there. It ends where the timeline reaches its start. The desktop
+    builds only the log rows in view (`virtual_rows`) and loads the pictures of those and ten
+    either side (`State::log_shown`). Retrying a timeline that failed to open keeps the panel:
+    the side panel closes only when the room shown changes (`nav.visited`).
+  - A date divider whose day draws nothing (only changes the log keeps, hidden events, people
+    the user ignores) has no row, so no empty day shows; a "New" marker under it doesn't count
+    as something to show.
 - **Hidden events** (developer tools): every timeline item the app draws nothing for (state it
   has no `RoomChange` for, events that didn't parse, membership events that changed nothing)
   is `EntryKind::Hidden` with its sender, type and event ID, so diff indices stay true. Whether
@@ -497,8 +521,8 @@ see who is typing there.
 ## Consequences
 
 - One source of truth per timeline. A new message action is a toolbar button and a command; a
-  new timeline kind is a key; a new room event is a `RoomChange` variant, a conversion arm and a
-  catalog key.
+  new timeline kind is a key; a new room event is a `RoomChange` variant, a conversion arm, a
+  `log_only` arm and a catalog key.
 - Warm timelines hold items in memory; eight per account is small next to the event cache.
 - A failed history page needs a click; reconnects don't retry it.
 - A changed room summary still rebuilds the whole room list. Hundreds of rooms at most make that

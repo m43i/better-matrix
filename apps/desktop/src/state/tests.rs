@@ -1020,6 +1020,42 @@ fn scrolling_near_the_top_should_load_older_messages() {
 }
 
 #[test]
+fn the_room_logs_load_earlier_should_load_older_messages() {
+    let (mut s, mut commands) = scrolled_room();
+    s.load_earlier_log();
+    assert!(matches!(&open_commands(&mut commands)[..], [Command::LoadOlder { key, .. }] if key.thread.is_none()));
+}
+
+#[test]
+fn trying_a_timeline_that_failed_to_open_again_should_keep_the_room_log_open() {
+    let (mut s, mut commands) = scrolled_room();
+    s.show_side(SidePanel::Log);
+    // A timeline that failed to open is no longer followed.
+    s.open_timelines.clear();
+    s.retry_history(&TimelineKey::room("!one:x"));
+    assert_eq!(s.side, Some(SidePanel::Log));
+    assert!(matches!(&open_commands(&mut commands)[..], [Command::OpenTimeline { .. }]));
+}
+
+#[test]
+fn another_room_should_close_the_room_log() {
+    let (mut s, _commands) = state();
+    with_rooms(&mut s, &AccountId::new("@a:example.org"), &["!one:x", "!two:x"], Vec::new());
+    s.select_room("!one:x");
+    s.show_side(SidePanel::Log);
+    s.select_room("!two:x");
+    assert_eq!(s.side, None);
+}
+
+#[test]
+fn the_room_logs_load_earlier_should_not_ask_twice_while_a_page_is_on_its_way() {
+    let (mut s, mut commands) = scrolled_room();
+    s.load_earlier_log();
+    s.load_earlier_log();
+    assert_eq!(open_commands(&mut commands).len(), 1);
+}
+
+#[test]
 fn a_page_in_flight_should_not_be_requested_twice() {
     let (mut s, mut commands) = scrolled_room();
     s.near_top.store(true, Ordering::Relaxed);

@@ -132,9 +132,10 @@ impl Opens {
 
 /// The attachment batch of `event_id` in `entries`: the run of attachments its sender posted
 /// together around it (messages the timeline groups under one header, with nothing else
-/// between them; entries it doesn't draw don't break the run), the previewable ones in order.
-/// Empty when `event_id` isn't a previewable attachment there.
-pub fn batch(entries: &[Entry], event_id: &str) -> Vec<PreviewItem> {
+/// between them; entries it doesn't draw don't break the run, room changes left to the room log
+/// among them unless `show_room_changes`), the previewable ones in order. Empty when `event_id`
+/// isn't a previewable attachment there.
+pub fn batch(entries: &[Entry], event_id: &str, show_room_changes: bool) -> Vec<PreviewItem> {
     let Some(at) = entries.iter().position(|entry| entry.message().is_some_and(|m| m.event_id == event_id)) else {
         return Vec::new();
     };
@@ -143,7 +144,7 @@ pub fn batch(entries: &[Entry], event_id: &str) -> Vec<PreviewItem> {
     let mut before = Vec::new();
     let mut later = opened;
     for entry in entries[..at].iter().rev() {
-        match attachment(entry) {
+        match attachment(entry, show_room_changes) {
             None => continue,
             Some(Ok(message)) if continues_group(message, later) => {
                 before.push(message);
@@ -155,7 +156,7 @@ pub fn batch(entries: &[Entry], event_id: &str) -> Vec<PreviewItem> {
     let mut after = Vec::new();
     let mut earlier = opened;
     for entry in &entries[at + 1..] {
-        match attachment(entry) {
+        match attachment(entry, show_room_changes) {
             None => continue,
             Some(Ok(message)) if continues_group(earlier, message) => {
                 after.push(message);
@@ -169,8 +170,9 @@ pub fn batch(entries: &[Entry], event_id: &str) -> Vec<PreviewItem> {
 
 /// What an entry is to a batch: nothing (the timeline doesn't draw it), an attachment message
 /// that may join, or something that ends the run.
-fn attachment(entry: &Entry) -> Option<Result<&Message, ()>> {
+fn attachment(entry: &Entry, show_room_changes: bool) -> Option<Result<&Message, ()>> {
     match &entry.kind {
+        EntryView::RoomEvent(event) if !show_room_changes && event.change.log_only() => None,
         EntryView::Message(item) => match &item.message.content {
             MessageContent::Attachment(_) => Some(Ok(&item.message)),
             _ => Some(Err(())),
@@ -282,25 +284,25 @@ mod tests {
     #[test]
     fn a_senders_attachments_posted_together_should_form_one_batch() {
         let entries = [picture("a", "@g", 0), picture("b", "@g", 1), picture("c", "@g", 1)];
-        assert_eq!(ids(&batch(&entries, "$b")), ["$a", "$b", "$c"]);
+        assert_eq!(ids(&batch(&entries, "$b", false)), ["$a", "$b", "$c"]);
     }
 
     #[test]
     fn a_text_message_should_end_a_batch() {
         let entries = [picture("a", "@g", 0), text("t", "@g", 0), picture("b", "@g", 1), picture("c", "@g", 1)];
-        assert_eq!(ids(&batch(&entries, "$c")), ["$b", "$c"]);
+        assert_eq!(ids(&batch(&entries, "$c", false)), ["$b", "$c"]);
     }
 
     #[test]
     fn another_senders_attachment_should_end_a_batch() {
         let entries = [picture("a", "@g", 0), picture("b", "@h", 0), picture("c", "@g", 0)];
-        assert_eq!(ids(&batch(&entries, "$a")), ["$a"]);
+        assert_eq!(ids(&batch(&entries, "$a", false)), ["$a"]);
     }
 
     #[test]
     fn an_attachment_posted_long_after_should_start_its_own_batch() {
         let entries = [picture("a", "@g", 0), picture("b", "@g", 6)];
-        assert_eq!(ids(&batch(&entries, "$b")), ["$b"]);
+        assert_eq!(ids(&batch(&entries, "$b", false)), ["$b"]);
     }
 
     #[test]
@@ -311,7 +313,7 @@ mod tests {
                 Some(matrix_core::Quote { event_id: "$x".into(), sender_name: None, body: None, call: None });
         }
         let entries = [picture("a", "@g", 0), reply];
-        assert_eq!(ids(&batch(&entries, "$a")), ["$a"]);
+        assert_eq!(ids(&batch(&entries, "$a", false)), ["$a"]);
     }
 
     #[test]
@@ -319,7 +321,30 @@ mod tests {
         let marker =
             Entry::from(matrix_core::TimelineEntry { id: "m".into(), kind: matrix_core::EntryKind::ReadMarker });
         let entries = [picture("a", "@g", 0), marker, picture("b", "@g", 1)];
-        assert_eq!(ids(&batch(&entries, "$a")), ["$a", "$b"]);
+        assert_eq!(ids(&batch(&entries, "$a", false)), ["$a", "$b"]);
+    }
+
+    /// Someone changing the room's topic.
+    fn topic_change() -> Entry {
+        let sender = matrix_core::Person { id: "@a".into(), name: "Ada".into(), avatar: None };
+        let change = matrix_core::RoomChange::RoomTopic("News".into());
+        let event = matrix_core::RoomEvent { sender, change, timestamp_ms: 0 };
+        Entry::from(matrix_core::TimelineEntry {
+            id: "t".into(),
+            kind: matrix_core::EntryKind::RoomEvent(Box::new(event)),
+        })
+    }
+
+    #[test]
+    fn a_room_change_left_to_the_room_log_should_not_break_a_batch() {
+        let entries = [picture("a", "@g", 0), topic_change(), picture("b", "@g", 1)];
+        assert_eq!(ids(&batch(&entries, "$a", false)), ["$a", "$b"]);
+    }
+
+    #[test]
+    fn a_room_change_should_break_a_batch_while_room_changes_show() {
+        let entries = [picture("a", "@g", 0), topic_change(), picture("b", "@g", 1)];
+        assert_eq!(ids(&batch(&entries, "$a", true)), ["$a"]);
     }
 
     #[test]
@@ -328,7 +353,7 @@ mod tests {
         zip.media = Some(MediaRef::opaque("zip"));
         let entries =
             [picture("a", "@g", 0), message("z", "@g", 0, MessageContent::Attachment(zip)), picture("b", "@g", 1)];
-        assert_eq!(ids(&batch(&entries, "$a")), ["$a", "$b"]);
+        assert_eq!(ids(&batch(&entries, "$a", false)), ["$a", "$b"]);
     }
 
     #[test]

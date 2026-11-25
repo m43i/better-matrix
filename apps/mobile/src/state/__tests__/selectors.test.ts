@@ -10,6 +10,7 @@ import {
   rightsKey,
   roomMeetings,
   roomWidgetCount,
+  roomLogOf,
   roomSettings as settingsOf,
   savedMessages,
   savedSignature,
@@ -23,6 +24,7 @@ import {
   GRACE,
   messageEntry,
   person,
+  roomEventEntry,
   roomSettings,
   roomSummary,
   spaceSummary,
@@ -328,5 +330,41 @@ describe('canStartMeeting', () => {
 
   it('should not let a meeting start in a room the account doesn’t know', () => {
     expect(canStartMeeting(withRoom(true), ADA, '!other:x')).toBe(false);
+  });
+});
+
+describe('the room log', () => {
+  const grace = person(GRACE, 'Grace');
+
+  const withEvents = () => {
+    const state = withSaved([]);
+
+    return apply(state, {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: { room_id: '!r:x', thread: null },
+        diffs: [
+          {
+            type: 'Reset',
+            data: [
+              roomEventEntry('topic', grace, { type: 'RoomTopic', data: 'Plans' }, 1),
+              messageEntry('$m'),
+              roomEventEntry('joined', grace, { type: 'Joined' }, 2),
+            ],
+          },
+        ],
+      },
+    });
+  };
+
+  it('should list the room’s main timeline’s room events, newest first', () => {
+    expect(roomLogOf(withEvents(), ADA, '!r:x').map((e) => e.id)).toEqual(['joined', 'topic']);
+  });
+
+  it('should stay the same while the timeline is unchanged', () => {
+    const state = withEvents();
+
+    expect(roomLogOf(state, ADA, '!r:x')).toBe(roomLogOf(state, ADA, '!r:x'));
   });
 });

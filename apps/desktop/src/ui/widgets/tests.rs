@@ -186,9 +186,11 @@ fn a_started_meeting_should_read_as_one_in_the_timeline() {
     assert!(rt.a11y_json().contains("Grace Hopper started a meeting"));
 }
 
-/// The general room's timeline ending with Grace's `change`.
+/// The general room's timeline ending with Grace's `change`, room changes shown in it (widgets
+/// pinned or taken off are otherwise left to the room log).
 fn ending_with(s: &mut State, change: RoomChange) {
     demo::meeting(s);
+    s.set_show_room_changes(true);
     let account = s.nav.account.clone().expect("an account");
     let key = matrix_core::TimelineKey::room(demo::DEMO_THREAD.0);
     let entry = matrix_core::TimelineEntry {
@@ -196,6 +198,7 @@ fn ending_with(s: &mut State, change: RoomChange) {
         kind: matrix_core::EntryKind::RoomEvent(Box::new(matrix_core::RoomEvent {
             sender: matrix_core::Person { id: "@grace:example.org".into(), name: "Grace Hopper".into(), avatar: None },
             change,
+            timestamp_ms: 0,
         })),
     };
     s.apply(

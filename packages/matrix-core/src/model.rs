@@ -538,7 +538,7 @@ pub struct Person {
 }
 
 /// Something that happened to a room rather than something someone wrote: a member came or
-/// went, the room's settings changed. Timelines show it as a small line.
+/// went, the room's settings changed. Timelines show it as a small line; the room log lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct RoomEvent {
@@ -546,6 +546,8 @@ pub struct RoomEvent {
     pub sender: Person,
     /// What changed.
     pub change: RoomChange,
+    /// When, in milliseconds since the Unix epoch.
+    pub timestamp_ms: u64,
 }
 
 /// What a [`RoomEvent`] changed. The member a membership change is about is named; the sender
@@ -627,6 +629,46 @@ impl RoomChange {
     /// Whether consecutive events of this kind read as one line: several people joining.
     pub fn groups(&self) -> bool {
         matches!(self, Self::Joined | Self::Left)
+    }
+
+    /// Whether only the room log lists it by default: profile and room-setting changes, widgets
+    /// among them. Who came, went or was moderated (and an upgrade, a shared live location, a
+    /// meeting started, which people join) stays in the timeline.
+    pub fn log_only(&self) -> bool {
+        match self {
+            Self::Created
+            | Self::DisplayName(_)
+            | Self::ProfilePicture
+            | Self::RoomName(_)
+            | Self::RoomTopic(_)
+            | Self::RoomPicture
+            | Self::Encrypted
+            | Self::HistoryVisibility(_)
+            | Self::JoinRules
+            | Self::Permissions
+            | Self::PinnedMessages
+            | Self::Addresses
+            | Self::GuestAccess
+            | Self::ServerAccess
+            | Self::SpaceRooms
+            | Self::Spaces
+            | Self::ModerationRules
+            | Self::WidgetAdded { meeting: None, .. }
+            | Self::WidgetRemoved => true,
+            Self::Joined
+            | Self::Left
+            | Self::Invited(_)
+            | Self::InviteRevoked(_)
+            | Self::InviteDeclined
+            | Self::Removed(_)
+            | Self::Banned(_)
+            | Self::Unbanned(_)
+            | Self::Knocked
+            | Self::Upgraded
+            | Self::InvitedByContact(_)
+            | Self::LiveLocation
+            | Self::WidgetAdded { meeting: Some(_), .. } => false,
+        }
     }
 }
 
@@ -1141,6 +1183,38 @@ pub fn initials(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_topic_change_should_be_left_to_the_room_log() {
+        assert!(RoomChange::RoomTopic("News".into()).log_only());
+    }
+
+    #[test]
+    fn a_profile_picture_change_should_be_left_to_the_room_log() {
+        assert!(RoomChange::ProfilePicture.log_only());
+    }
+
+    #[test]
+    fn a_ban_should_stay_in_the_timeline() {
+        let banned = Person { id: "@k:x".into(), name: "K".into(), avatar: None };
+        assert!(!RoomChange::Banned(banned).log_only());
+    }
+
+    #[test]
+    fn a_widget_pinned_to_the_room_should_be_left_to_the_room_log() {
+        assert!(RoomChange::WidgetAdded { name: "Board".into(), meeting: None }.log_only());
+    }
+
+    #[test]
+    fn a_meeting_started_should_stay_in_the_timeline() {
+        let meeting = RoomChange::WidgetAdded { name: "Standup".into(), meeting: Some(crate::Meeting::Jitsi) };
+        assert!(!meeting.log_only());
+    }
+
+    #[test]
+    fn a_join_should_stay_in_the_timeline() {
+        assert!(!RoomChange::Joined.log_only());
+    }
 
     #[test]
     fn initials_should_use_one_letter_for_a_single_word() {

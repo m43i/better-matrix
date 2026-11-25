@@ -266,6 +266,22 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   they were; phones read that HTML as their source only when it spells the body exactly, else
   as a message's. The desktop keeps text and HTML.
 - **Uploads:** `Outgoing::File` carries an `Upload`, a path on disk or bytes with a name.
+  - An upload whose name says it is a picture shows in the composer as a 64-point thumbnail,
+    the picture alone cropped square with rounded corners and its remove button over its corner
+    (no chip around it); other files, and pictures that can't be decoded, keep the chip with
+    their name. On the desktop `State::upload_thumbnails` keeps one per image upload of the two
+    composers, synced in `poll`: photos are read, decoded and cut to a 128-pixel square one at a
+    time on a worker of their own, which wakes the window after each, so only that square is
+    kept, never the whole photo, a batch never decodes at once, and no file is read on the UI
+    thread. The square comes from `matrix_core::upload_thumbnail`: turned upright by its EXIF
+    orientation, decoding bounded as the engine's thumbnails are (8192 pixels a side, 256 MiB).
+    The middle square is scaled from the decoded picture in place and turned upright after, so
+    the picture is never copied whole. Only regular files up to 64 MiB are read, looked at before
+    they are opened (a pipe would block the worker); a job whose upload went before its turn is
+    skipped, and one finished for an upload removed and attached again since is dropped (jobs
+    have IDs). An SVG is read by the worker too and rasterized at the thumbnail's size by Rune. A thumbnail goes once its upload is sent, removed or set aside with
+    its draft, and is made again when the draft comes back. Headless runs without a decoder show
+    chips.
   - Pastes reach the field through `on_input_paste`. A pasted image joins the draft as
     `image.png`, `image-2.png` and so on; pasted files are attached; text pastes as text.
 - **Voice and audio:**
@@ -434,8 +450,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     arrive as a run of messages. The batch of the opened one (`preview::batch`) is the run
     around it of attachment messages the timeline groups under one header
     (`continues_group`: one sender, each within 5 minutes of the one before, none a reply), with
-    nothing drawn between them (read markers and undrawn entries don't break it; any other
-    message, a room event or a date divider does), the previewable ones kept. Two or more get a
+    nothing drawn between them (read markers, undrawn entries and room changes the timeline
+    leaves to the room log don't break it; any other message, a room event it draws or a date
+    divider does), the previewable ones kept. Two or more get a
     strip of thumbnails along the bottom (the batch's previews, fetched like the timeline's
     rows on screen; else the kind's icon; it scrolls sideways when they don't fit, and whatever moves the
     preview, opening included, scrolls the current one into view on the next `poll`), arrows at the sides, and "2 of 4" beside the name. Left and Right (when nothing

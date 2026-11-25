@@ -2,6 +2,7 @@
 // preview steps through. Matrix carries one attachment per message, so a batch of photos
 // arrives as a run of attachment messages; the run is the batch (the desktop's rule).
 
+import { logOnly } from './roomLog';
 import type {
   Attachment,
   MediaRef,
@@ -50,13 +51,21 @@ function sameBatch(earlier: Message, later: Message): boolean {
 
 /**
  * The message `step` (±1) entries along from `index`, past the entries the timeline doesn't draw
- * (read markers, unknown events); `null` at anything else that isn't a message, or the end.
+ * (read markers, unknown events, room changes left to the room log unless `showRoomChanges`);
+ * `null` at anything else that isn't a message, or the end.
  */
-function neighbour(entries: readonly TimelineEntry[], index: number, step: 1 | -1) {
+function neighbour(
+  entries: readonly TimelineEntry[],
+  index: number,
+  step: 1 | -1,
+  showRoomChanges: boolean,
+) {
   for (let i = index + step; i >= 0 && i < entries.length; i += step) {
     const kind = entries[i]?.kind;
 
     if (kind?.type === 'ReadMarker' || kind?.type === 'Hidden') continue;
+
+    if (kind?.type === 'RoomEvent' && !showRoomChanges && logOnly(kind.data.change)) continue;
 
     return kind?.type === 'Message' ? { message: kind.data, index: i } : null;
   }
@@ -75,6 +84,7 @@ export function attachmentBatch(
   entries: readonly TimelineEntry[],
   eventId: string,
   root: string | null = null,
+  showRoomChanges = false,
 ): Message[] {
   const at = entries.findIndex(
     (e) => e.kind.type === 'Message' && e.kind.data.event_id === eventId,
@@ -91,9 +101,9 @@ export function attachmentBatch(
     let current = start;
 
     for (
-      let next = neighbour(entries, at, step);
+      let next = neighbour(entries, at, step, showRoomChanges);
       next;
-      next = neighbour(entries, next.index, step)
+      next = neighbour(entries, next.index, step, showRoomChanges)
     ) {
       const [earlier, later] = step < 0 ? [next.message, current] : [current, next.message];
       const linked = earlier.event_id !== root && sameBatch(earlier, later);
@@ -117,8 +127,9 @@ export function previewGallery(
   entries: readonly TimelineEntry[],
   eventId: string,
   root: string | null = null,
+  showRoomChanges = false,
 ): Message[] {
-  return attachmentBatch(entries, eventId, root).filter((message) => {
+  return attachmentBatch(entries, eventId, root, showRoomChanges).filter((message) => {
     const attachment = attachmentOf(message);
 
     return message.event_id === eventId || (attachment !== null && previewable(attachment));
@@ -134,10 +145,11 @@ export function galleryAround(
   current: string,
   opened: string,
   root: string | null = null,
+  showRoomChanges = false,
 ): Message[] {
-  const gallery = previewGallery(entries, current, root);
+  const gallery = previewGallery(entries, current, root, showRoomChanges);
 
-  return gallery.length > 0 ? gallery : previewGallery(entries, opened, root);
+  return gallery.length > 0 ? gallery : previewGallery(entries, opened, root, showRoomChanges);
 }
 
 /** Whether a gallery shows its strip of thumbnails: when there is more than one to show. */

@@ -1,7 +1,8 @@
 // Files waiting to be sent, above the field: a thumbnail for pictures, an icon and name for
-// anything else, each with a button that takes it out.
+// anything else (a picture that can't be decoded included), each with a button that takes it out.
 
 import { Image } from 'expo-image';
+import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
@@ -21,6 +22,8 @@ export function Attachments({
   onRemove: (path: string) => void;
 }) {
   const palette = usePalette();
+  // Pictures whose thumbnail failed to decode, by path: they show as files.
+  const [broken, setBroken] = useState<ReadonlySet<string>>(new Set());
 
   if (attachments.length === 0) return null;
 
@@ -37,11 +40,12 @@ export function Attachments({
           style={styles.item}
           testID={`composer-attachment-${attachment.name}`}
         >
-          {attachment.kind === 'image' ? (
+          {attachment.kind === 'image' && !broken.has(attachment.path) ? (
             <Image
               source={{ uri: attachment.uri }}
               style={[styles.thumb, { backgroundColor: palette.surface }]}
               contentFit="cover"
+              onError={() => setBroken((paths) => new Set(paths).add(attachment.path))}
             />
           ) : (
             <View
