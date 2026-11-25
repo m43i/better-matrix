@@ -2,7 +2,8 @@
 //! Dock icon's menu on macOS) offers the rooms and direct chats used most. Each open adds to a
 //! room's score and every other's fades a little, so rooms used lately and often come first, and
 //! rooms no longer opened make way. Saved in this device's prefs, apart from its settings
-//! ([`crate::platform::Shell::save_visits`]).
+//! ([`crate::platform::Shell::save_visits`]). Only kept where the system shows a jump list
+//! ([`crate::platform::Shell::offers_jump_list`]).
 
 use std::collections::HashSet;
 
@@ -86,11 +87,8 @@ impl State {
             let account = AccountId::new(visit.account.as_str());
             let Some(data) = self.accounts.get(&account) else { continue };
             let Some(room) = data.room(&visit.room_id) else { continue };
-            if !listed.insert(room.room_id.as_str()) {
-                continue;
-            }
             let list = if room.kind == RoomKind::Direct { &mut direct } else { &mut rooms };
-            if list.len() == SHOWN {
+            if list.len() == SHOWN || !listed.insert(room.room_id.as_str()) {
                 continue;
             }
             let shared = self.accounts.iter().filter(|other| other.room(&room.room_id).is_some()).nth(1).is_some();

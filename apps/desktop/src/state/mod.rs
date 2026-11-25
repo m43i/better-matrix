@@ -3978,7 +3978,9 @@ impl State {
     fn show_taskbar(&self) {
         let count = self.accounts.iter().map(AccountData::attention).sum::<u64>() + self.rings.len() as u64;
         self.shell.show_badge(u32::try_from(count).unwrap_or(u32::MAX));
-        self.shell.show_jump_list(self.jump_list());
+        if self.shell.offers_jump_list() {
+            self.shell.show_jump_list(self.jump_list());
+        }
     }
 
     fn remember_account(&mut self) {
@@ -4088,7 +4090,9 @@ impl State {
             .get(&account)
             .and_then(|data| data.room(room_id))
             .map(|room| room.kind == matrix_core::RoomKind::Direct);
-        if let Some(direct) = direct {
+        if self.shell.offers_jump_list()
+            && let Some(direct) = direct
+        {
             self.visits.visit(&account, room_id, direct);
             self.shell.save_visits(self.visits.clone());
         }

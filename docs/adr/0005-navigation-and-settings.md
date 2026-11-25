@@ -205,7 +205,8 @@ Date: 2026-11-22
     accounts share shows once, naming neither.
   - Windows gets no jump list. The app has an explicit AppUserModelID (`rune-notify`), and then
     Windows requires `ICustomDestinationList::SetAppID` before `BeginList`; Rune's jump list
-    doesn't call it, and changing Rune is out of this app's hands.
+    doesn't call it, and changing Rune is out of this app's hands. Without a jump list, Windows
+    and Linux don't keep the rooms opened at all (`Shell::offers_jump_list`).
 - **Settings:** a modal in sections (`SettingsSection`). Device settings go to a prefs file off
   the UI thread; account settings live on the homeserver.
   - Every desktop dialog uses the shared modal layer's Rune focus trap and Escape dismissal.

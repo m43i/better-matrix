@@ -54,15 +54,14 @@ impl Taskbar {
         }
     }
 
-    /// Offers `list` as the jump list when it changed, to the system only when `native` and on
-    /// macOS (see the module's notes on Windows).
+    /// Offers `list` as the jump list when it changed, to the system only when `native`.
     pub fn jump_list(&self, list: rune::JumpList, native: bool) {
         let Ok(mut shown) = self.0.lock() else { return };
         if shown.jump_list.as_ref() == Some(&list) {
             return;
         }
         shown.jump_list = Some(list.clone());
-        if native && cfg!(target_os = "macos") {
+        if native {
             rune::set_jump_list(list);
         }
     }

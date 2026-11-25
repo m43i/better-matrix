@@ -33,6 +33,9 @@ pub struct Shell {
     updates: Option<std::sync::mpsc::Sender<updates::Release>>,
     notifier: Box<dyn notify::Notifier>,
     taskbar: Taskbar,
+    /// Whether the system shows the jump list: macOS only (see `taskbar`'s notes on Windows).
+    /// Headless, as on macOS, so tests see it.
+    offers_jump_list: bool,
     prefs: Arc<Mutex<Prefs>>,
     /// Counts document renders: a render keeps going while it is the latest and not stopped.
     document: Arc<std::sync::atomic::AtomicU64>,
@@ -65,6 +68,7 @@ impl Shell {
             app: Some(app),
             notifier,
             taskbar,
+            offers_jump_list: cfg!(target_os = "macos"),
             prefs: Arc::new(Mutex::new(prefs)),
             document: Arc::default(),
             saves: Arc::default(),
@@ -81,6 +85,7 @@ impl Shell {
             updates: None,
             notifier: Box::new(notify::Silent),
             taskbar: Taskbar::default(),
+            offers_jump_list: true,
             prefs: Arc::new(Mutex::new(Prefs::memory())),
             document: Arc::default(),
             saves: Arc::default(),
@@ -101,6 +106,7 @@ impl Shell {
                 updates: None,
                 notifier: Box::new(notify::Recording(posted.clone())),
                 taskbar: Taskbar::default(),
+                offers_jump_list: true,
                 prefs,
                 document: Arc::default(),
                 saves: Arc::default(),
@@ -309,8 +315,13 @@ impl Shell {
         self.taskbar.count()
     }
 
-    /// Offers `list` in the Dock icon's menu (macOS); a pick opens its link. Headless, and on
-    /// other systems, it is only kept.
+    /// Whether the system shows a jump list; elsewhere the rooms opened aren't even kept.
+    pub fn offers_jump_list(&self) -> bool {
+        self.offers_jump_list
+    }
+
+    /// Offers `list` in the Dock icon's menu (macOS); a pick opens its link. Headless, it is
+    /// only kept.
     pub fn show_jump_list(&self, list: rune::JumpList) {
         self.taskbar.jump_list(list, self.app.is_some());
     }
