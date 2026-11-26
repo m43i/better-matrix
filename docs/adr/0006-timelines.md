@@ -321,7 +321,7 @@ see who is typing there.
 - **Emotes** are their own content (`MessageContent::Emote`), drawn in italics after the
   sender's name ("* Ada waves"), formatting and pills kept.
 - **Locations** (`MessageContent::Location`): an avatar pin over the place's map. A live location card follows the latest
-  valid fix from the beacon owner in the room’s decrypted reference events, including early stop and expiry ([0007](0007-composer-and-media.md)).
+  fix from the beacon owner whose timestamp falls within the original sharing window, including early stop and expiry ([0007](0007-composer-and-media.md)).
 - **Edit history:** an edited message's "edited" is a button opening every version, newest
   first (`Modal::EditHistory`, `Command::ListEdits`): the original event and its `m.replace`
   relations (decrypted by the SDK, up to 200), counting only the sender's own edits as the spec

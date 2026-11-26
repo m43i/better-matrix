@@ -127,11 +127,10 @@ pub(crate) fn message(event: &EventTimelineItem, me: &UserId) -> Option<Message>
         MsgLikeKind::LiveLocation(live) => {
             // The SDK aggregate omits the fix sender. Resolve attributed fixes from the room cache.
             let geo_uri = String::new();
-            let until =
-                u64::from(live.ts().0).saturating_add(u64::try_from(live.timeout().as_millis()).unwrap_or(u64::MAX));
+            let window = crate::geo::live::window(live.ts(), live.timeout());
             (
                 MessageContent::Location(crate::Location {
-                    live_until: Some(if live.is_live() { until } else { 0 }),
+                    live_until: Some(if live.is_live() { *window.end() } else { 0 }),
                     map: crate::geo::map(&geo_uri),
                     geo_uri,
                     description: live.description().map(str::to_owned),

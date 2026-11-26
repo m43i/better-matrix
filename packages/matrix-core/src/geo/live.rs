@@ -9,14 +9,36 @@ use tokio::sync::mpsc;
 
 const DURATION: Duration = Duration::from_secs(15 * 60);
 
+/// Element includes both endpoints when it selects fixes for a beacon.
+pub(crate) fn window(
+    start: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch,
+    timeout: Duration,
+) -> std::ops::RangeInclusive<u64> {
+    let start = u64::from(start.0);
+    let duration = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
+    start..=start.saturating_add(duration)
+}
+
 /// Read the original, decrypted reference events. The SDK timeline aggregate drops their sender.
 pub(crate) async fn latest_fix(room: &Room, beacon: &str, owner: &str) -> Option<String> {
     use matrix_sdk::ruma::events::{
-        AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent, relation::RelationType,
+        AnySyncMessageLikeEvent, AnySyncStateEvent, AnySyncTimelineEvent, SyncMessageLikeEvent, SyncStateEvent,
+        relation::RelationType,
     };
     let beacon = matrix_sdk::ruma::EventId::parse(beacon).ok()?;
     let (cache, _guard) = room.event_cache().await.ok()?;
-    let references = cache.find_event_relations(&beacon, Some(vec![RelationType::Reference])).await.ok()?;
+    let (root, references) =
+        cache.find_event_with_relations(&beacon, Some(vec![RelationType::Reference])).await.ok()??;
+    let AnySyncTimelineEvent::State(AnySyncStateEvent::BeaconInfo(SyncStateEvent::Original(info))) =
+        root.raw().deserialize().ok()?
+    else {
+        return None;
+    };
+    if info.sender.as_str() != owner || info.state_key != info.sender {
+        return None;
+    }
+    // Use the original beacon's window even when showing a stopped or expired card.
+    let sharing_window = window(info.content.ts, info.content.timeout);
     references
         .into_iter()
         .filter_map(|event| {
@@ -27,6 +49,9 @@ pub(crate) async fn latest_fix(room: &Room, beacon: &str, owner: &str) -> Option
             };
             let SyncMessageLikeEvent::Original(fix) = beacon_event else { return None };
             if fix.sender.as_str() != owner || fix.content.relates_to.event_id != beacon {
+                return None;
+            }
+            if !sharing_window.contains(&u64::from(fix.content.ts.0)) {
                 return None;
             }
             let uri = fix.content.location.uri;
@@ -159,6 +184,17 @@ mod tests {
     use matrix_sdk::config::SyncSettings;
     use serde_json::{Value, json};
 
+    #[test]
+    fn a_beacon_should_include_fixes_from_its_start_through_its_expiry() {
+        let start = matrix_sdk::ruma::MilliSecondsSinceUnixEpoch::now();
+        let ms = u64::from(start.0);
+        let window = window(start, Duration::from_millis(100));
+        assert!(!window.contains(&(ms - 1)));
+        assert!(window.contains(&ms));
+        assert!(window.contains(&(ms + 100)));
+        assert!(!window.contains(&(ms + 101)));
+    }
+
     #[tokio::test]
     async fn an_element_beacon_should_show_its_latest_fix_on_the_original_timeline_card() {
         let now = matrix_sdk::ruma::MilliSecondsSinceUnixEpoch::now();
@@ -172,7 +208,13 @@ mod tests {
                     "event_id":"$session","sender":"@b:example.org","origin_server_ts":now,
                     "content":{"live":true,"timeout":900000,"org.matrix.msc3488.ts":now,"org.matrix.msc3488.asset":{"type":"m.self"}}
                 }));
-                for (id, uri, ts) in [("$first", "geo:1,2", 10), ("$next", "geo:3,4", 11)] {
+                let start = u64::from(now.0);
+                for (id, uri, ts) in [
+                    ("$early", "geo:0,1", start - 1),
+                    ("$first", "geo:1,2", start),
+                    ("$next", "geo:3,4", start + 900000),
+                    ("$late", "geo:5,6", start + 900001),
+                ] {
                     events.push(json!({
                         "type":"org.matrix.msc3672.beacon","event_id":id,"sender":"@b:example.org","origin_server_ts":now,
                         "content":{"m.relates_to":{"rel_type":"m.reference","event_id":"$session"},
