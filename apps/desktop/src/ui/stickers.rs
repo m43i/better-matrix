@@ -252,7 +252,6 @@ fn gif_tile(s: &State, target: ComposerTarget, gif: &FoundGif, p: &Palette) -> E
 pub fn gif_key_field(s: &State, key: &str, p: &Palette) -> El {
     let field = field_input(&s.picker.key, t!("picker.key_placeholder"), p)
         .key(key.to_owned())
-        .grow(1.0)
         .on_edit(|s: &mut State| &mut s.picker.key)
         .on_submit(|s: &mut State, _| s.save_gif_key());
     let save = button(t!("picker.save_key"), ButtonKind::Primary, !s.picker.key.text.trim().is_empty(), p)
@@ -263,7 +262,8 @@ pub fn gif_key_field(s: &State, key: &str, p: &Palette) -> El {
             .key(format!("{key}-cancel"))
             .on_press(State::cancel_gif_key)
     });
-    row().w_full().gap(8.0).center_y().child(field).children(cancel).child(save)
+    // The field takes what's left: a long key scrolls inside it rather than pushing Save out.
+    row().w_full().gap(8.0).center_y().child(col().grow(1.0).min_w(0.0).child(field)).children(cancel).child(save)
 }
 
 /// Asks for the user's GIPHY API key: what it is for, where to make one, a field to put it in.
