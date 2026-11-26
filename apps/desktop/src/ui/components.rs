@@ -420,18 +420,34 @@ pub fn setting_group(glyph: &'static Icon, title: &str, hint: &str, controls: El
 }
 
 /// A dialog card for the modal layer: a title, its content, and buttons at the bottom right.
+/// For a question its buttons answer (confirm, cancel, save).
 pub fn dialog(key: &str, title: &str, content: El, buttons: Vec<El>, p: &Palette) -> El {
-    dialog_card(key, title, None, content, buttons, p)
+    dialog_card(key, title, None, content, buttons, false, p)
 }
 
-/// A [`dialog`] with a bar (a search, its filters) under the title that stays in view while
-/// the content scrolls. The content fills the card's height, so a caller giving it one keeps
-/// the card's size steady as the content changes.
-pub fn dialog_with_bar(key: &str, title: &str, bar: El, content: El, buttons: Vec<El>, p: &Palette) -> El {
-    dialog_card(key, title, Some(bar), content, buttons, p)
+/// A [`dialog`] to look through or manage rather than answer (saved messages, a directory, an
+/// edit history): an X beside the title closes it (`{key}-close`), as in Settings, in place of
+/// a Close button.
+pub fn closable_dialog(key: &str, title: &str, content: El, buttons: Vec<El>, p: &Palette) -> El {
+    dialog_card(key, title, None, content, buttons, true, p)
 }
 
-fn dialog_card(key: &str, title: &str, bar: Option<El>, content: El, buttons: Vec<El>, p: &Palette) -> El {
+/// A [`closable_dialog`] with a bar (a search, its filters) under the title that stays in view
+/// while the content scrolls. The content fills the card's height, so a caller giving it one
+/// keeps the card's size steady as the content changes.
+pub fn closable_dialog_with_bar(key: &str, title: &str, bar: El, content: El, p: &Palette) -> El {
+    dialog_card(key, title, Some(bar), content, Vec::new(), true, p)
+}
+
+fn dialog_card(
+    key: &str,
+    title: &str,
+    bar: Option<El>,
+    content: El,
+    buttons: Vec<El>,
+    closable: bool,
+    p: &Palette,
+) -> El {
     let fills = bar.is_some();
     let mut content = col()
         .key(format!("{key}-content"))
@@ -454,12 +470,23 @@ fn dialog_card(key: &str, title: &str, bar: Option<El>, content: El, buttons: Ve
         .shadow(16.0, 48.0, Color::BLACK.alpha(0.5))
         .role("dialog")
         .label(title.to_owned())
-        // Two lines at most (a title may carry a long name): the rest is the content's.
-        .child(text(title.to_owned()).font(font::HEADER).color(p.text).max_lines(2))
+        .child(
+            row()
+                .w_full()
+                .gap(8.0)
+                .center_y()
+                // Two lines at most (a title may carry a long name): the rest is the content's.
+                .child(text(title.to_owned()).font(font::HEADER).color(p.text).max_lines(2).grow(1.0).min_w(0.0))
+                .children(closable.then(|| {
+                    icon_button(&super::icons::CLOSE, t!("common.close"), false, p.text_muted, p)
+                        .key(format!("{key}-close"))
+                        .on_press(crate::state::State::close_modal)
+                })),
+        )
         .children(bar)
         // In a window too short for it, the content scrolls and the buttons stay in view.
         .child(content)
-        .child(row().w_full().gap(8.0).mt(8.0).justify_end().children(buttons))
+        .children((!buttons.is_empty()).then(|| row().w_full().gap(8.0).mt(8.0).justify_end().children(buttons)))
 }
 
 /// A filter's chip: outlined, or in the accent with a close mark while it applies. The caller

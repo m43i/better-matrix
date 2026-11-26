@@ -4,7 +4,7 @@
 use matrix_core::{Person, RoomSummary};
 use rune::{ChromeInsets, Color, El, ScrollSpec, col, el, icon, row, text, text_input};
 
-use super::components::{ButtonKind, button, dialog, media_avatar};
+use super::components::{ButtonKind, button, closable_dialog, media_avatar};
 use super::icons;
 use super::room::display_name;
 use super::search::highlighted;
@@ -217,11 +217,5 @@ pub fn invite_dialog(s: &State, account: &AccountData, room_id: &str, invited: &
         .gap(10.0)
         .child(field)
         .child(col().w_full().max_h(320.0).scroll(ScrollSpec { stick_bottom: false }).child(list));
-    dialog(
-        "invite-dialog",
-        &title,
-        content,
-        vec![button(t!("common.done"), ButtonKind::Primary, true, p).key("invite-done").on_press(State::close_modal)],
-        p,
-    )
+    closable_dialog("invite-dialog", &title, content, Vec::new(), p)
 }

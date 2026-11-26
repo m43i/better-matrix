@@ -213,6 +213,10 @@ Date: 2026-11-22
     Attachment previews and selects above a dialog have their own traps; Escape dismisses
     the topmost overlay first. Popover fields (search, new chat and emoji) intercept Escape
     before the text editor consumes it to blur; the window handles Escape for other popovers.
+  - A modal to look through or manage (Settings, room settings, saved messages, the sticker
+    manager, a directory, an invite list, an edit history, an event's source) closes with an X
+    beside its title (`closable_dialog`), never a Close or Done button at the bottom. A dialog
+    that asks something (confirm, report, a form) keeps its answering buttons and no X.
   - The section content uses `instant_changes`: switching sections replaces it immediately,
     without morphing unrelated controls. Each section's content has its own stable key, so
     Rune does not reuse an unrelated control's colour tracks at the same position in the tree:

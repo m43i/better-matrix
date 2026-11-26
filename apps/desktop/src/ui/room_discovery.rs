@@ -3,7 +3,7 @@
 use matrix_core::{AccountId, PublicRoom};
 use rune::{El, col, icon, row, text};
 
-use super::components::{ButtonKind, NavEmphasis, avatar, button, dialog, media_avatar, nav_row};
+use super::components::{ButtonKind, NavEmphasis, avatar, button, closable_dialog, dialog, media_avatar, nav_row};
 use super::icons;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf, tp};
@@ -194,18 +194,8 @@ pub fn suggestions(s: &State, account: &AccountData, space: &str, p: &Palette) -
 }
 
 pub fn public_rooms(s: &State, account: &AccountId, space: &str, p: &Palette) -> El {
-    dialog(
-        "public-rooms",
-        t!("directory.title"),
-        room_list(s, account, space, None, p),
-        vec![
-            button(t!("common.close"), ButtonKind::Secondary, true, p)
-                .key("public-rooms-close")
-                .on_press(State::close_modal),
-        ],
-        p,
-    )
-    .w(640.0)
+    closable_dialog("public-rooms", t!("directory.title"), room_list(s, account, space, None, p), Vec::new(), p)
+        .w(640.0)
 }
 
 fn room_list(s: &State, account: &AccountId, space: &str, limit: Option<usize>, p: &Palette) -> El {

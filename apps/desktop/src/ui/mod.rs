@@ -251,7 +251,12 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
                 .child(settings::backdrop())
                 // A press inside the dialog that nothing in it takes stays there, rather than
                 // reaching the backdrop behind and closing it.
-                .child(dialog.max_h((window[1] - 48.0).max(200.0)).on_press(|_: &mut State| {})),
+                .child(
+                    dialog
+                        .max_w((window[0] - 16.0).max(280.0))
+                        .max_h((window[1] - 48.0).max(200.0))
+                        .on_press(|_: &mut State| {}),
+                ),
         );
     }
     if let Some(select) = select {

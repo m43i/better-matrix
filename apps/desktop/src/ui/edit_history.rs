@@ -3,7 +3,7 @@
 
 use rune::{El, col, row, text};
 
-use super::components::{ButtonKind, button, dialog, when};
+use super::components::{closable_dialog, when};
 use super::message_text::{Look, formatted};
 use super::theme::{Palette, font};
 use crate::i18n::t;
@@ -59,15 +59,5 @@ pub fn dialog_for(s: &State, history: &EditHistory, p: &Palette) -> El {
         }
         (None, None) => content = content.child(text(t!("edits.loading")).font(font::BODY).color(p.text_muted)),
     }
-    dialog(
-        "edit-history",
-        t!("edits.title"),
-        content,
-        vec![
-            button(t!("common.close"), ButtonKind::Secondary, true, p)
-                .key("edit-history-close")
-                .on_press(State::close_modal),
-        ],
-        p,
-    )
+    closable_dialog("edit-history", t!("edits.title"), content, Vec::new(), p)
 }
