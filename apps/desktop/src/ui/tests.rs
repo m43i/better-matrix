@@ -4987,3 +4987,35 @@ fn removing_the_gif_key_in_settings_should_ask_for_a_new_one() {
     assert_eq!(rt.state.picker.giphy, crate::state::GifKey::Missing);
     assert!(rt.find("settings-giphy-key").is_some() && rt.find("settings-giphy-key-cancel").is_none());
 }
+
+#[test]
+fn a_long_gif_key_should_keep_save_inside_its_settings_group() {
+    let mut rt = runtime(|s| {
+        s.picker.giphy = crate::state::GifKey::Missing;
+        s.open_settings();
+    });
+    tall(&mut rt);
+    press(&mut rt, "settings-giphy-key");
+    rt.paste("k".repeat(400));
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.picker.key.text.len(), 400, "the key is in the field");
+    // The link under the field spans the group's width: the field's row must stay inside it.
+    let (save, column) = (element_rect(&rt, "settings-giphy-key-save"), element_rect(&rt, "settings-giphy-get"));
+    assert!(save[0] + save[2] <= column[0] + column[2] + 0.5, "Save leaves its group: {save:?} past {column:?}");
+}
+
+#[test]
+fn a_long_gif_key_should_keep_save_inside_the_gif_picker() {
+    let mut rt = runtime(|s| demo::typing(s, ""));
+    rt.state.picker.giphy = crate::state::GifKey::Missing;
+    press(&mut rt, &super::composer::sticker_button(crate::state::ComposerTarget::Room));
+    press(&mut rt, "picker-tab-gifs");
+    press(&mut rt, "picker-gif-key");
+    rt.paste("k".repeat(400));
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.picker.key.text.len(), 400, "the key is in the field");
+    let (save, picker) = (element_rect(&rt, "picker-gif-key-save"), element_rect(&rt, "sticker-picker"));
+    assert!(save[0] + save[2] <= picker[0] + picker[2], "Save leaves the picker: {save:?} past {picker:?}");
+}
