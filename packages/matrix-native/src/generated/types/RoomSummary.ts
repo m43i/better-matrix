@@ -81,6 +81,10 @@ call: RoomCall,
  */
 can_start_meeting: boolean, 
 /**
+ * Whether this user can publish a beacon and its fixes in this room.
+ */
+can_share_live_location: boolean, 
+/**
  * When the room's latest event came, in milliseconds since the epoch, as the store keeps
  * it across restarts (the room list's order, before any timeline opens). `None` until the
  * SDK has worked it out.

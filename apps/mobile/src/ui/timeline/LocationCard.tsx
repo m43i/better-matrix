@@ -1,89 +1,140 @@
-// A shared place: its map (drawn by the engine from OpenStreetMap, with a pin), what the sender
-// called it and its coordinates, with OpenStreetMap's credit on the map. With maps off
-// (Preferences, "Maps from OpenStreetMap") a pin stands in for the map and nothing is fetched.
-// Tapping it opens the place on openstreetmap.org; a long press opens the message's actions.
-
-import type { Location, MediaSize, Message } from '@better-matrix/matrix-native/types';
-import { Image } from 'expo-image';
+// A shared place opens by event ID so the sheet follows live timeline updates.
+import type { Location, Message, Person } from '@better-matrix/matrix-native/types';
+import { Camera, Map, Marker } from '@maplibre/maplibre-react-native';
+import { router } from 'expo-router';
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
-import { coordinatesText, OSM_CREDIT, webLink } from '../../state/geo';
-import { useAppStore, useStore } from '../../state/react';
+import { routes } from '../../routes';
+import { coordinates, coordinatesText } from '../../state/geo';
+import { useStore } from '../../state/react';
 import { font } from '../../theme/palette';
+import { Avatar } from '../Avatar';
 import { Icon } from '../icons';
-import { useMedia } from '../media';
+import { useNow } from '../shell/useNow';
 import { usePalette } from '../theme';
 import { useTimelineContext } from './context';
-import { openLink } from './open';
 import { useContentWidth } from './readersLayout';
 
-/** The size maps are drawn at, 5:3, crisp on a phone's screen. */
-export const MAP_SIZE: MediaSize = { type: 'Thumbnail', data: { width: 600, height: 360 } };
+import darkMap from '../../../../../packages/matrix-core/maps/dark.json';
+import lightMap from '../../../../../packages/matrix-core/maps/light.json';
 
-const CARD_WIDTH = 300;
+const stylesByTheme = { dark: JSON.stringify(darkMap), light: JSON.stringify(lightMap) };
+
+export function locationTitle(location: Location | undefined, now: number) {
+  const until = location?.live_until;
+
+  if (until != null) return until > now ? t('location.live') : t('location.ended');
+
+  return location?.description ?? t('location.shared');
+}
+
+export function senderPin(message: Message): Person {
+  return { id: message.sender_id, name: message.sender_name, avatar: message.sender_avatar };
+}
 
 export function LocationCard({ message, location }: { message: Message; location: Location }) {
   const palette = usePalette();
-  const store = useAppStore();
-  const { account, openActions } = useTimelineContext();
-  const width = Math.min(CARD_WIDTH, useContentWidth());
-  const link = webLink(location.geo_uri);
-  const where = coordinatesText(location.geo_uri) ?? location.geo_uri;
+  const { account, timelineKey, thread, openActions } = useTimelineContext();
+  const width = Math.min(300, useContentWidth());
+  const title = locationTitle(location, useNow());
+  const shown = useStore((s) => s.settings.showMaps);
 
   return (
     <Pressable
-      onPress={link ? () => openLink(store, link, account) : undefined}
+      onPress={() =>
+        router.push(
+          routes.locationMap(account, timelineKey.room_id, message.event_id, thread ?? undefined),
+        )
+      }
       onLongPress={() => openActions(message)}
-      delayLongPress={350}
-      accessibilityRole="link"
-      accessibilityLabel={location.description ?? t('mobile.conversation.location')}
-      accessibilityHint={t('mobile.conversation.location_open')}
+      accessibilityRole="button"
+      accessibilityLabel={title}
       style={[
         styles.card,
         { width, borderColor: palette.divider, backgroundColor: palette.surface },
       ]}
       testID="location-card"
     >
-      <MapView account={account} map={location.map} />
-      <View style={styles.words}>
-        <View style={styles.title}>
-          <Icon name="location" size={16} color={palette.accent} />
-          <Text style={[font.bodyStrong, styles.grow, { color: palette.text }]} numberOfLines={2}>
-            {location.description ?? t('mobile.conversation.location')}
-          </Text>
-        </View>
-        <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
-          {where}
+      <MapView account={account} uri={location.geo_uri} person={senderPin(message)} />
+      <Text style={[font.bodyStrong, styles.caption, { color: palette.text }]} numberOfLines={2}>
+        {title}
+      </Text>
+      {!shown && (
+        <Text style={[font.meta, styles.caption, { color: palette.textMuted }]}>
+          {coordinatesText(location.geo_uri) ?? t('location.waiting')}
         </Text>
-      </View>
+      )}
     </Pressable>
   );
 }
 
-/**
- * A map at 5:3 with OpenStreetMap's credit; a pin until it is drawn, and in its place while maps
- * are off (then it is never fetched).
- */
-export function MapView({ account, map }: { account: string; map: Location['map'] }) {
-  const palette = usePalette();
+export function MapView({
+  account,
+  uri,
+  person,
+  interactive = false,
+  zoom = 15,
+}: {
+  account: string;
+  uri?: string;
+  person: Person;
+  interactive?: boolean;
+  zoom?: number;
+}) {
+  const p = usePalette();
   const shown = useStore((s) => s.settings.showMaps);
-  const uri = useMedia(account, shown ? map : null, MAP_SIZE);
+  const point = coordinates(uri ?? '');
+
+  const pin = (
+    <View style={[styles.pin, { borderColor: p.accent }]}>
+      <Avatar account={account} id={person.id} name={person.name} media={person.avatar} size={36} />
+    </View>
+  );
+
+  const [failedStyle, setFailedStyle] = useState('');
+  const style = p.dark ? 'dark' : 'light';
+  const center: [number, number] | null = point ? [point.longitude, point.latitude] : null;
+
+  if (!shown) return null;
 
   return (
-    <View style={[styles.map, { backgroundColor: palette.hover }]}>
-      {uri ? (
-        <Image source={{ uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+    <View
+      pointerEvents={interactive ? 'auto' : 'none'}
+      style={[styles.map, { backgroundColor: p.surface }]}
+    >
+      {center ? (
+        <>
+          <Map
+            style={StyleSheet.absoluteFill}
+            mapStyle={stylesByTheme[style]}
+            androidView="texture"
+            attribution={interactive}
+            logo={false}
+            compass={interactive}
+            scaleBar={false}
+            dragPan={interactive}
+            touchZoom={interactive}
+            onDidFailLoadingMap={() => setFailedStyle(style)}
+            onDidFinishLoadingMap={() => setFailedStyle('')}
+          >
+            <Camera center={center} zoom={zoom} duration={0} />
+            {interactive && <Marker lngLat={center}>{pin}</Marker>}
+          </Map>
+          {!interactive && pin}
+          <Text style={[styles.credit, { color: p.textMuted, backgroundColor: p.surface }]}>
+            {t('location.credit')}
+          </Text>
+          {failedStyle === style && (
+            <Text style={[styles.error, { color: p.text, backgroundColor: p.surface }]}>
+              {t('location.unavailable')}
+            </Text>
+          )}
+        </>
       ) : (
-        <View style={[StyleSheet.absoluteFill, styles.center]}>
-          <Icon name="location" size={28} color={palette.textMuted} />
-        </View>
+        <Icon name="location" size={28} color={p.textMuted} />
       )}
-      {shown ? (
-        <Text style={[styles.credit, { color: '#1f2328', backgroundColor: '#ffffffcc' }]}>
-          {OSM_CREDIT}
-        </Text>
-      ) : null}
     </View>
   );
 }
@@ -91,22 +142,26 @@ export function MapView({ account, map }: { account: string; map: Location['map'
 const styles = StyleSheet.create({
   card: {
     marginTop: 4,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
-  map: { width: '100%', aspectRatio: 5 / 3 },
-  center: { alignItems: 'center', justifyContent: 'center' },
+  caption: { paddingHorizontal: 10, paddingVertical: 6 },
+  map: {
+    width: '100%',
+    aspectRatio: 1.7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  pin: { width: 42, height: 42, borderWidth: 3, borderRadius: 21, overflow: 'hidden' },
   credit: {
     position: 'absolute',
-    right: 0,
-    bottom: 0,
-    fontSize: 10,
+    left: 4,
+    bottom: 4,
+    fontSize: 9,
     paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderTopLeftRadius: 4,
+    borderRadius: 3,
   },
-  words: { padding: 10, gap: 2 },
-  title: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  grow: { flex: 1 },
+  error: { position: 'absolute', top: 4, fontSize: 12, paddingHorizontal: 4 },
 });

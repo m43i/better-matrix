@@ -101,6 +101,8 @@ pub enum Permission {
     Addresses,
     /// Change who may join, read history and join as a guest.
     Access,
+    /// Publish a beacon and its location updates.
+    LiveLocation,
     /// Pin messages.
     Pins,
     /// Change these permissions and people's roles.
@@ -167,6 +169,7 @@ impl Permission {
                 RemoveMessages,
                 MentionRoom,
                 Pins,
+                LiveLocation,
                 ChangeSettings,
                 Name,
                 Topic,
@@ -193,6 +196,11 @@ impl Permission {
                 })
                 .max()
                 .unwrap_or(power.events_default),
+            Self::LiveLocation => {
+                let start = power.events.get(&TimelineEventType::BeaconInfo).unwrap_or(&power.state_default);
+                let fix = power.events.get(&TimelineEventType::Beacon).unwrap_or(&power.events_default);
+                *start.max(fix)
+            }
             Self::Invite => power.invite,
             Self::Kick => power.kick,
             Self::Ban => power.ban,
@@ -236,6 +244,9 @@ impl Permission {
                         power.events.get(&TimelineEventType::from(event.clone())).is_none_or(|set| *set == level)
                     })
             }
+            Self::LiveLocation => [TimelineEventType::BeaconInfo, TimelineEventType::Beacon]
+                .iter()
+                .all(|event| power.events.get(event) == Some(&level)),
             permission if !state_events(permission).is_empty() => state_events(permission)
                 .iter()
                 .all(|event| power.events.get(&TimelineEventType::from(event.clone())) == Some(&level)),
@@ -255,6 +266,11 @@ impl Permission {
                     if let Some(set) = power.events.get_mut(&TimelineEventType::from(event.clone())) {
                         *set = level;
                     }
+                }
+            }
+            Self::LiveLocation => {
+                for event in [TimelineEventType::BeaconInfo, TimelineEventType::Beacon] {
+                    power.events.insert(event, level);
                 }
             }
             Self::Invite => power.invite = level,

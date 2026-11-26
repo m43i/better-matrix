@@ -90,6 +90,10 @@ embed-resource = "3"
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 rune-notify.workspace = true
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["Devices_Geolocation"] }
+windows-future = "0.3"
+
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 # Notifications: one session-bus connection shows them and hears their clicks.
 zbus = { version = "6", default-features = false, features = ["default-rt"] }

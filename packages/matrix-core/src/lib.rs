@@ -117,6 +117,9 @@ pub const DEVICE_DISPLAY_NAME: &str = "Better Matrix";
 /// Everything that can go wrong in the core.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// A map or location service failed.
+    #[error("{0}")]
+    Location(String),
     /// A message is gone, unreadable, or unsupported for this action.
     #[error("the message is no longer available for this action")]
     MessageUnavailable,

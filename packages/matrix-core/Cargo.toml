@@ -10,8 +10,6 @@ base64.workspace = true
 eyeball-im.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
-# Reads tiles' `Expires` for the map tile cache (src/geo.rs).
-httpdate = "1"
 # Scales thumbnails a server sends larger than asked for down to their box (src/thumbnail.rs),
 # and reads the size of pictures added to image packs (src/packs.rs).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
@@ -60,3 +58,15 @@ ffi = ["dep:ts-rs"]
 
 [lints]
 workspace = true
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+maplibre-native-ffi = "0.202611.0"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+waterkit-location = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+waterkit-permission = "0.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.14", features = ["location"] }

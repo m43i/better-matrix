@@ -124,6 +124,20 @@ pub(crate) fn message(event: &EventTimelineItem, me: &UserId) -> Option<Message>
         MsgLikeKind::Sticker(sticker) => (convert::sticker(sticker.content()), false),
         MsgLikeKind::Redacted => (MessageContent::Redacted, false),
         MsgLikeKind::UnableToDecrypt(_) => (MessageContent::Undecryptable, false),
+        MsgLikeKind::LiveLocation(live) => {
+            // The SDK aggregate omits the fix sender. Resolve attributed fixes from the room cache.
+            let geo_uri = String::new();
+            let window = crate::geo::live::window(live.ts(), live.timeout());
+            (
+                MessageContent::Location(crate::Location {
+                    live_until: Some(if live.is_live() { *window.end() } else { 0 }),
+                    map: crate::geo::map(&geo_uri),
+                    geo_uri,
+                    description: live.description().map(str::to_owned),
+                }),
+                false,
+            )
+        }
         MsgLikeKind::Poll(poll) => (MessageContent::Poll(poll_view(&poll.results(), me)), false),
         _ => return None,
     };
@@ -205,10 +219,10 @@ fn base_message(event: &EventTimelineItem, me: &UserId) -> Message {
     }
 }
 
-pub(crate) fn diff(diff: VectorDiff<Arc<TimelineItem>>, me: &UserId) -> TimelineDiff {
+pub(crate) async fn diff(diff: VectorDiff<Arc<TimelineItem>>, me: &UserId, room: &matrix_sdk::Room) -> TimelineDiff {
     let entry = |item: &Arc<TimelineItem>| entry(item, me);
     let all = |items: &eyeball_im::Vector<Arc<TimelineItem>>| items.iter().map(entry).collect();
-    match diff {
+    let mut result = match diff {
         VectorDiff::Append { values } => TimelineDiff::Append(all(&values)),
         VectorDiff::Clear => TimelineDiff::Clear,
         VectorDiff::PushFront { value } => TimelineDiff::PushFront(entry(&value)),
@@ -220,6 +234,31 @@ pub(crate) fn diff(diff: VectorDiff<Arc<TimelineItem>>, me: &UserId) -> Timeline
         VectorDiff::Remove { index } => TimelineDiff::Remove { index },
         VectorDiff::Truncate { length } => TimelineDiff::Truncate { length },
         VectorDiff::Reset { values } => TimelineDiff::Reset(all(&values)),
+    };
+    let entries: &mut [TimelineEntry] = match &mut result {
+        TimelineDiff::Reset(entries) | TimelineDiff::Append(entries) => entries,
+        TimelineDiff::PushFront(entry)
+        | TimelineDiff::PushBack(entry)
+        | TimelineDiff::Set { entry, .. }
+        | TimelineDiff::Insert { entry, .. } => std::slice::from_mut(entry),
+        _ => &mut [],
+    };
+    for entry in entries {
+        if let EntryKind::Message(message) = &mut entry.kind {
+            resolve_live_location(room, message).await;
+        }
+    }
+    result
+}
+
+/// Resolve only live beacons, preserving ordinary messages and static places.
+pub(crate) async fn resolve_live_location(room: &matrix_sdk::Room, message: &mut Message) {
+    if let MessageContent::Location(place) = &mut message.content
+        && place.live_until.is_some()
+        && let Some(uri) = crate::geo::live::latest_fix(room, &message.event_id, &message.sender_id).await
+    {
+        place.map = crate::geo::map(&uri);
+        place.geo_uri = uri;
     }
 }
 

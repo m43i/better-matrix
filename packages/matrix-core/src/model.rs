@@ -108,6 +108,9 @@ pub struct RoomSummary {
     /// Whether the user can start a meeting here ([`Command::StartMeeting`](crate::Command::StartMeeting)):
     /// the homeserver names a Jitsi server and the user may pin widgets.
     pub can_start_meeting: bool,
+    /// Whether this user can publish a beacon and its fixes in this room.
+    #[cfg_attr(feature = "ffi", serde(default))]
+    pub can_share_live_location: bool,
     /// When the room's latest event came, in milliseconds since the epoch, as the store keeps
     /// it across restarts (the room list's order, before any timeline opens). `None` until the
     /// SDK has worked it out.
@@ -770,6 +773,9 @@ pub enum MessageContent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Location {
+    /// End time of an Element live location in epoch milliseconds (zero after an early stop).
+    #[cfg_attr(feature = "ffi", serde(default), ts(optional = nullable))]
+    pub live_until: Option<u64>,
     /// Where, as an RFC 5870 `geo:` URI (`geo:51.5008,0.1247;u=35`); read it with
     /// [`geo::coordinates`](crate::geo::coordinates).
     pub geo_uri: String,

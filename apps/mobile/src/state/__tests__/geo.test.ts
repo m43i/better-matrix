@@ -1,4 +1,4 @@
-import { coordinates, coordinatesText, geoUri, mapOf, webLink } from '../geo';
+import { coordinates, coordinatesText, geoUri, mapOf, navigationLink } from '../geo';
 
 // The engine's `geo.rs` reads and writes the same (its doc tests).
 describe('coordinates', () => {
@@ -34,15 +34,19 @@ describe('geoUri', () => {
 
 describe('mapOf', () => {
   it('should name the map the engine draws', () => {
-    expect(mapOf('geo:52.5163,13.3777;u=10')).toBe('osm:52.5163,13.3777,15');
+    expect(mapOf('geo:52.5163,13.3777;u=10')).toBe('map:52.5163,13.3777,15,light');
   });
 });
 
-describe('webLink', () => {
-  it('should link the place on openstreetmap.org', () => {
-    expect(webLink('geo:52.5163,13.3777')).toBe(
-      'https://www.openstreetmap.org/?mlat=52.5163&mlon=13.3777#map=17/52.5163/13.3777',
+describe('navigationLink', () => {
+  it('should address the configured iOS navigation app', () => {
+    expect(navigationLink('geo:52.5,13.4', 'ios')).toBe(
+      'geo-navigation:///place?coordinate=52.5,13.4',
     );
+  });
+  it('should open the Android navigation handler with only validated coordinates', () => {
+    expect(navigationLink('geo:52.5,13.4;u=10', 'android')).toBe('geo:0,0?q=52.5,13.4');
+    expect(navigationLink('https://example.org', 'android')).toBeNull();
   });
 });
 

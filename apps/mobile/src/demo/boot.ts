@@ -20,11 +20,8 @@ const ASSETS = new Map<string, number>([
   [mxcMedia(DEMO_PACK_IMAGES.coffee), require('../../assets/demo/sticker-coffee.png')],
 ]);
 
-/** One street map stands in for every place (the engine draws real ones from OpenStreetMap). */
-const MAP: number = require('../../assets/demo/map.png');
-
 async function resolveMedia(media: string): Promise<string | null> {
-  const module = media.startsWith(DEMO_MEDIA.map) ? MAP : ASSETS.get(media);
+  const module = ASSETS.get(media);
 
   if (module === undefined) return null;
   const { Asset } = await import('expo-asset');

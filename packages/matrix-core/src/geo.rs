@@ -1,41 +1,17 @@
-//! Places: `geo:` URIs (RFC 5870), maps of them from OpenStreetMap, and finding places by name.
-//!
-//! - **Maps** are media like any other: a [`Location`](crate::model::Location) carries a
-//!   [`MediaRef`] naming the place ([`map`]), and [`Command::FetchMedia`] draws it from
-//!   OpenStreetMap's standard tiles (`tile.openstreetmap.org`), composed to the size asked for
-//!   with a pin at the place, so apps fetch, cache and retry maps as they do pictures. As
-//!   OpenStreetMap's tile policy asks, tiles are kept on disk (the store layout's `map-tiles`)
-//!   for as long as the server's `Cache-Control`/`Expires` say, then asked for again with
-//!   `If-None-Match`/`If-Modified-Since`, the last [`TILES_KEPT`] also kept in memory, and fetched
-//!   two at a time; requests name the app, never the user. Apps credit "© OpenStreetMap
-//!   contributors" beside every map.
-//! - **Search** goes to OpenStreetMap's Nominatim ([`search_places`]), only when the user asks
-//!   (never as they type: its usage policy forbids autocomplete), at most one request a second
-//!   from the app, the last [`SEARCHES_KEPT`] answers kept, as the policy asks.
-//!
-//! [`Command::FetchMedia`]: crate::Command::FetchMedia
-
-use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
-
-use matrix_sdk::reqwest;
+//! Shared places, GeoJS IP estimates and on-submit Nominatim searches.
 
 use crate::Error;
-use crate::model::{MediaRef, MediaSize, Place};
+use crate::model::{MediaRef, Place};
+use matrix_sdk::reqwest;
+use std::sync::OnceLock;
 
-/// What a map's [`MediaRef`] starts with: never a media source's JSON, which starts with `{`
-/// or `"`.
-const MAP_PREFIX: &str = "osm:";
-/// How close maps are drawn: streets and their names.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(crate) mod desktop;
+pub(crate) mod live;
+
+const MAP_PREFIX: &str = "map:";
+/// Street-level detail for a shared place.
 pub const MAP_ZOOM: u8 = 15;
-/// The size a map is drawn at when asked for the original.
-const ORIGINAL_MAP: (u32, u32) = (640, 400);
-/// A tile's side in pixels.
-const TILE: u32 = 256;
-/// How many decoded tiles stay in memory, shared by every map.
-const TILES_KEPT: usize = 64;
-/// Where tiles come from.
-const TILE_SERVER: &str = "https://tile.openstreetmap.org";
 /// Where places are looked up by name.
 const SEARCH_SERVER: &str = "https://nominatim.openstreetmap.org";
 /// How many searches' answers are kept, so asking again asks no one.
@@ -94,290 +70,50 @@ pub fn describe(geo_uri: &str) -> String {
     }
 }
 
-/// The map of a place, to fetch like any media (any size: it is drawn to fit the box asked
-/// for); `None` when the URI names no place. Its handle is `osm:<latitude>,<longitude>,<zoom>`,
-/// which an app may also write itself for a place it found on its own (a phone's position).
+/// A light street map of a geo URI. The UI chooses the style and zoom for display.
 pub fn map(geo_uri: &str) -> Option<MediaRef> {
-    let (latitude, longitude) = coordinates(geo_uri)?;
-    Some(MediaRef(format!("{MAP_PREFIX}{},{},{MAP_ZOOM}", trim_number(latitude), trim_number(longitude))))
+    styled_map(geo_uri, false, MAP_ZOOM)
 }
 
-/// The place on openstreetmap.org, to open in the browser.
-///
-/// ```
-/// assert_eq!(
-///     matrix_core::geo::web_link("geo:52.5163,13.3777").as_deref(),
-///     Some("https://www.openstreetmap.org/?mlat=52.5163&mlon=13.3777#map=17/52.5163/13.3777")
-/// );
-/// ```
+/// The style and zoom are part of the preview cache key.
+pub fn styled_map(geo_uri: &str, dark: bool, zoom: u8) -> Option<MediaRef> {
+    let (latitude, longitude) = coordinates(geo_uri)?;
+    Some(MediaRef(format!(
+        "{MAP_PREFIX}{},{},{zoom},{}",
+        trim_number(latitude),
+        trim_number(longitude),
+        if dark { "dark" } else { "light" }
+    )))
+}
+
+/// Open this place in Google Maps.
 pub fn web_link(geo_uri: &str) -> Option<String> {
-    let (latitude, longitude) = coordinates(geo_uri)?;
-    let (latitude, longitude) = (trim_number(latitude), trim_number(longitude));
-    Some(format!("https://www.openstreetmap.org/?mlat={latitude}&mlon={longitude}#map=17/{latitude}/{longitude}"))
+    let (lat, lon) = coordinates(geo_uri)?;
+    Some(format!("https://www.google.com/maps/search/?api=1&query={},{}", trim_number(lat), trim_number(lon)))
 }
 
-/// A map's place and zoom, when `media` is a map.
-fn map_of(media: &MediaRef) -> Option<(f64, f64, u8)> {
-    let rest = media.0.strip_prefix(MAP_PREFIX)?;
-    let mut parts = rest.split(',');
-    let latitude = parts.next()?.parse().ok()?;
-    let longitude = parts.next()?.parse().ok()?;
-    let zoom = parts.next()?.parse().ok().filter(|zoom| *zoom <= 19)?;
-    Some((latitude, longitude, zoom))
-}
-
-/// Whether `media` is a map, drawn by [`draw_map`] rather than fetched from a homeserver.
-pub(crate) fn is_map(media: &MediaRef) -> bool {
-    media.0.starts_with(MAP_PREFIX)
-}
-
-/// Where a place is in the world's pixels at `zoom`, Web Mercator as the tiles are drawn.
-fn world_pixel(latitude: f64, longitude: f64, zoom: u8) -> (f64, f64) {
-    let size = f64::from(TILE) * f64::from(1u32 << zoom);
-    let latitude = latitude.clamp(-85.051_128, 85.051_128).to_radians();
-    let x = (longitude + 180.0) / 360.0 * size;
-    let y = (1.0 - (latitude.tan() + 1.0 / latitude.cos()).ln() / std::f64::consts::PI) / 2.0 * size;
-    (x, y)
-}
-
-/// The tiles a box `width`×`height` centred on a place covers, by column and row, with where
-/// each goes in the box; columns wrap round the world, rows off it are left out.
-fn tiles_for(latitude: f64, longitude: f64, zoom: u8, width: u32, height: u32) -> Vec<((u32, u32), (i64, i64))> {
-    let (x, y) = world_pixel(latitude, longitude, zoom);
-    #[expect(clippy::cast_possible_truncation, reason = "world pixels fit an i64 at every zoom")]
-    let (left, top) = ((x - f64::from(width) / 2.0).floor() as i64, (y - f64::from(height) / 2.0).floor() as i64);
-    let tile = i64::from(TILE);
-    let count = 1i64 << zoom;
-    let mut tiles = Vec::new();
-    for row in top.div_euclid(tile)..=(top + i64::from(height) - 1).div_euclid(tile) {
-        if !(0..count).contains(&row) {
-            continue;
-        }
-        for column in left.div_euclid(tile)..=(left + i64::from(width) - 1).div_euclid(tile) {
-            let wrapped = column.rem_euclid(count);
-            #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "within 0..2^19")]
-            let key = (wrapped as u32, row as u32);
-            tiles.push((key, (column * tile - left, row * tile - top)));
-        }
+pub(crate) async fn estimate(http: &reqwest::Client) -> Result<String, Error> {
+    #[derive(serde::Deserialize)]
+    struct Estimate {
+        latitude: String,
+        longitude: String,
     }
-    tiles
-}
-
-type Tile = Arc<image::RgbaImage>;
-/// Decoded tiles by zoom, column and row, with when each stops being fresh (milliseconds since
-/// the epoch), the newest last.
-type Tiles = Mutex<Vec<((u8, u32, u32), Tile, u64)>>;
-
-/// The tiles kept in memory, shared by every map.
-fn tile_cache() -> &'static Tiles {
-    static CACHE: OnceLock<Tiles> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-/// What is kept on disk beside a tile: when it stops being fresh, and what the server said to
-/// ask again with.
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-struct Kept {
-    fresh_until_ms: u64,
-    etag: Option<String>,
-    last_modified: Option<String>,
-}
-
-/// How long a tile is kept fresh when the server says nothing readable: seven days, as
-/// OpenStreetMap's tile policy asks.
-const FRESH_AT_LEAST: u64 = 7 * 24 * 60 * 60 * 1000;
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |at| u64::try_from(at.as_millis()).unwrap_or(u64::MAX))
-}
-
-/// When a response stops being fresh, by its `Cache-Control: max-age` less its `Age` (what a
-/// cache on the way already held it for), else its `Expires`, else [`FRESH_AT_LEAST`] from now.
-fn fresh_until(headers: &reqwest::header::HeaderMap, now: u64) -> u64 {
-    let header = |name| headers.get(name).and_then(|value| value.to_str().ok());
-    let max_age = header(reqwest::header::CACHE_CONTROL).and_then(|value| {
-        value.split(',').find_map(|part| part.trim().strip_prefix("max-age=")?.trim().parse::<u64>().ok())
-    });
-    if let Some(seconds) = max_age {
-        let age = header(reqwest::header::AGE).and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(0);
-        return now.saturating_add(seconds.saturating_sub(age).saturating_mul(1000));
-    }
-    let expires = header(reqwest::header::EXPIRES)
-        .and_then(|value| httpdate::parse_http_date(value).ok())
-        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
-        .and_then(|at| u64::try_from(at.as_millis()).ok());
-    expires.unwrap_or(now.saturating_add(FRESH_AT_LEAST))
-}
-
-/// A tile: from memory while fresh, else from `dir` on disk while fresh, else from the server,
-/// asked whether the copy on disk still holds (`If-None-Match`, `If-Modified-Since`) when there
-/// is one, as OpenStreetMap's tile policy asks. A copy past its time still shows when the
-/// server can't be reached.
-async fn tile(http: &reqwest::Client, dir: &Path, zoom: u8, column: u32, row: u32) -> Result<Tile, String> {
-    let key = (zoom, column, row);
-    let now = now_ms();
-    if let Ok(mut cache) = tile_cache().lock()
-        && let Some(index) = cache.iter().position(|(k, _, until)| *k == key && *until > now)
-    {
-        let entry = cache.remove(index);
-        let tile = Arc::clone(&entry.1);
-        cache.push(entry);
-        return Ok(tile);
-    }
-    let file = dir.join(zoom.to_string()).join(column.to_string()).join(format!("{row}.png"));
-    let meta = file.with_extension("json");
-    let on_disk = tokio::fs::read(&file).await.ok();
-    let mut kept: Kept = match tokio::fs::read(&meta).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-        Err(_) => Kept::default(),
-    };
-    let bytes = match on_disk {
-        Some(bytes) if kept.fresh_until_ms > now => bytes,
-        on_disk => {
-            let mut request = http.get(format!("{TILE_SERVER}/{zoom}/{column}/{row}.png"));
-            if on_disk.is_some() {
-                if let Some(etag) = &kept.etag {
-                    request = request.header(reqwest::header::IF_NONE_MATCH, etag);
-                }
-                if let Some(modified) = &kept.last_modified {
-                    request = request.header(reqwest::header::IF_MODIFIED_SINCE, modified);
-                }
-            }
-            match (request.send().await, on_disk) {
-                (Ok(response), Some(bytes)) if response.status() == reqwest::StatusCode::NOT_MODIFIED => {
-                    kept.fresh_until_ms = fresh_until(response.headers(), now);
-                    write_kept(&meta, &kept).await;
-                    bytes
-                }
-                (Ok(response), _) if response.status().is_success() => {
-                    let header =
-                        |name| response.headers().get(name).and_then(|value| value.to_str().ok()).map(str::to_owned);
-                    kept = Kept {
-                        fresh_until_ms: fresh_until(response.headers(), now),
-                        etag: header(reqwest::header::ETAG),
-                        last_modified: header(reqwest::header::LAST_MODIFIED),
-                    };
-                    let bytes = response.bytes().await.map_err(|e| e.to_string())?.to_vec();
-                    if let Some(parent) = file.parent()
-                        && tokio::fs::create_dir_all(parent).await.is_ok()
-                        && tokio::fs::write(&file, &bytes).await.is_ok()
-                    {
-                        write_kept(&meta, &kept).await;
-                    }
-                    bytes
-                }
-                // The server can't be reached, or failed: a copy past its time is better than none.
-                (_, Some(bytes)) => bytes,
-                (Ok(response), None) => return Err(format!("the map server answered {}", response.status())),
-                (Err(error), None) => return Err(error.to_string()),
-            }
-        }
-    };
-    let decoded = tokio::task::spawn_blocking(move || image::load_from_memory(&bytes).map(|image| image.into_rgba8()))
+    let failed = |e: reqwest::Error| Error::Location(e.without_url().to_string());
+    let body = http
+        .get("https://get.geojs.io/v1/ip/geo.json")
+        .timeout(std::time::Duration::from_secs(8))
+        .send()
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-    let tile = Arc::new(decoded);
-    if let Ok(mut cache) = tile_cache().lock() {
-        cache.retain(|(k, _, _)| *k != key);
-        cache.push((key, Arc::clone(&tile), kept.fresh_until_ms.max(now + 60_000)));
-        let excess = cache.len().saturating_sub(TILES_KEPT);
-        cache.drain(..excess);
-    }
-    Ok(tile)
-}
-
-/// Writes what is kept beside a tile; a failure only costs asking the server sooner.
-async fn write_kept(meta: &Path, kept: &Kept) {
-    if let Ok(json) = serde_json::to_vec(kept) {
-        let _ = tokio::fs::write(meta, json).await;
-    }
-}
-
-/// Draws the map `media` names as a PNG the size `size` asks for, a pin at its place.
-pub(crate) async fn draw_map(
-    http: &reqwest::Client,
-    tiles: &Path,
-    media: &MediaRef,
-    size: MediaSize,
-) -> Result<Vec<u8>, Error> {
-    let (latitude, longitude, zoom) = map_of(media).ok_or(Error::MessageUnavailable)?;
-    let (width, height) = match size {
-        MediaSize::Original => ORIGINAL_MAP,
-        MediaSize::Thumbnail { width, height } => (width.clamp(32, 2048), height.clamp(32, 2048)),
-    };
-    let placed = tiles_for(latitude, longitude, zoom, width, height);
-    let mut fetched = Vec::with_capacity(placed.len());
-    // Two at a time, as the tile policy asks.
-    for pair in placed.chunks(2) {
-        let tiles = futures_util::future::join_all(
-            pair.iter().map(|((column, row), _)| tile(http, tiles, zoom, *column, *row)),
-        );
-        for (result, (_, at)) in tiles.await.into_iter().zip(pair) {
-            fetched.push((result.map_err(|e| Error::Storage(std::io::Error::other(e)))?, *at));
-        }
-    }
-    tokio::task::spawn_blocking(move || compose(width, height, &fetched))
+        .map_err(failed)?
+        .error_for_status()
+        .map_err(failed)?
+        .bytes()
         .await
-        .map_err(|e| Error::Storage(std::io::Error::other(e)))?
-}
-
-/// The tiles laid out in a box, the pin at its middle, as a PNG.
-fn compose(width: u32, height: u32, tiles: &[(Tile, (i64, i64))]) -> Result<Vec<u8>, Error> {
-    let mut map = image::RgbaImage::from_pixel(width, height, image::Rgba([224, 224, 224, 255]));
-    for (tile, (x, y)) in tiles {
-        image::imageops::overlay(&mut map, tile.as_ref(), *x, *y);
-    }
-    draw_pin(&mut map);
-    let mut png = Vec::new();
-    map.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-        .map_err(|e| Error::Storage(std::io::Error::other(e)))?;
-    Ok(png)
-}
-
-/// A map pin whose point is the box's middle: a red head with a white dot, over a soft shadow.
-fn draw_pin(map: &mut image::RgbaImage) {
-    let (cx, cy) = (f64::from(map.width()) / 2.0, f64::from(map.height()) / 2.0);
-    let (head_y, radius) = (cy - 18.0, 10.0);
-    let blend = |pixel: &mut image::Rgba<u8>, colour: [u8; 3], alpha: f64| {
-        for (channel, value) in pixel.0.iter_mut().zip(colour) {
-            #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a blend of two bytes")]
-            let mixed = (f64::from(*channel) * (1.0 - alpha) + f64::from(value) * alpha).round() as u8;
-            *channel = mixed;
-        }
-    };
-    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "pixel bounds of the box")]
-    let (left, right, top, bottom) =
-        ((cx - 16.0).max(0.0) as u32, (cx + 16.0) as u32, (head_y - 16.0).max(0.0) as u32, (cy + 6.0) as u32);
-    for y in top..bottom.min(map.height()) {
-        for x in left..right.min(map.width()) {
-            let (px, py) = (f64::from(x) + 0.5, f64::from(y) + 0.5);
-            let pixel = map.get_pixel_mut(x, y);
-            // The shadow: a flat ellipse under the point.
-            let shadow = ((px - cx) / 7.0).powi(2) + ((py - cy) / 2.5).powi(2);
-            if shadow < 1.0 {
-                blend(pixel, [0, 0, 0], 0.25 * (1.0 - shadow));
-            }
-            // The head, and the tail narrowing from it down to the point.
-            let head = ((px - cx).powi(2) + (py - head_y).powi(2)).sqrt() - radius;
-            let tail = if (head_y..=cy).contains(&py) {
-                (px - cx).abs() - radius * 0.75 * (cy - py) / (cy - head_y)
-            } else {
-                f64::INFINITY
-            };
-            let edge = head.min(tail);
-            if edge < 0.5 {
-                let coverage = (0.5 - edge).clamp(0.0, 1.0);
-                blend(pixel, [229, 72, 77], coverage);
-                let dot = ((px - cx).powi(2) + (py - head_y).powi(2)).sqrt() - 3.5;
-                if dot < 0.5 {
-                    blend(pixel, [255, 255, 255], (0.5 - dot).clamp(0.0, 1.0));
-                }
-            }
-        }
-    }
+        .map_err(failed)?;
+    let answer: Estimate = serde_json::from_slice(&body).map_err(|e| Error::Location(e.to_string()))?;
+    let (lat, lon) =
+        coordinates(&format!("geo:{},{}", answer.latitude, answer.longitude)).ok_or(Error::MessageUnavailable)?;
+    Ok(uri(lat, lon))
 }
 
 /// Places whose name matches `query`, best first, up to eight, named in `language` (a BCP 47
@@ -466,89 +202,6 @@ mod tests {
         assert_eq!(coordinates("geo:1,2;crs=mars2000"), None);
     }
 
-    #[test]
-    fn a_map_should_name_its_place_and_zoom() {
-        let media = map("geo:52.5163,13.3777;u=20").expect("a map");
-        assert_eq!(map_of(&media), Some((52.5163, 13.3777, MAP_ZOOM)));
-    }
-
-    #[test]
-    fn a_media_source_should_not_read_as_a_map() {
-        assert!(!is_map(&MediaRef("{\"url\":\"mxc://x/y\"}".into())));
-    }
-
-    #[test]
-    fn a_map_box_should_be_covered_by_the_tiles_around_its_place() {
-        let tiles = tiles_for(0.0, 0.0, 1, 256, 256);
-        // At zoom 1 the null island is where all four tiles meet.
-        let keys: Vec<_> = tiles.iter().map(|(key, _)| *key).collect();
-        assert_eq!(keys, [(0, 0), (1, 0), (0, 1), (1, 1)]);
-        assert_eq!(tiles[0].1, (-128, -128));
-    }
-
-    #[test]
-    fn tiles_past_the_date_line_should_wrap_round_the_world() {
-        let tiles = tiles_for(0.0, 179.99, 2, 300, 10);
-        assert!(tiles.iter().any(|((column, _), _)| *column == 0), "{tiles:?}");
-    }
-
-    #[test]
-    fn a_tile_should_stay_fresh_for_the_servers_max_age() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::CACHE_CONTROL, "public, max-age=600".parse().expect("header"));
-        assert_eq!(fresh_until(&headers, 1_000), 601_000);
-    }
-
-    #[test]
-    fn a_tile_should_stay_fresh_until_it_expires() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::EXPIRES, "Thu, 01 Jan 1970 00:10:00 GMT".parse().expect("header"));
-        assert_eq!(fresh_until(&headers, 1_000), 600_000);
-    }
-
-    #[test]
-    fn a_tile_a_cache_already_held_should_be_fresh_for_what_is_left() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::CACHE_CONTROL, "max-age=600".parse().expect("header"));
-        headers.insert(reqwest::header::AGE, "590".parse().expect("header"));
-        assert_eq!(fresh_until(&headers, 1_000), 11_000);
-    }
-
-    #[test]
-    fn a_tile_the_server_says_nothing_of_should_stay_fresh_a_week() {
-        assert_eq!(fresh_until(&reqwest::header::HeaderMap::new(), 0), FRESH_AT_LEAST);
-    }
-
-    #[test]
-    fn a_composed_map_should_be_the_size_asked_for_with_the_pin_at_its_middle() {
-        let tile = Arc::new(image::RgbaImage::from_pixel(256, 256, image::Rgba([200, 220, 200, 255])));
-        let png = compose(120, 80, &[(tile, (-60, -60))]).expect("a map");
-        let map = image::load_from_memory(&png).expect("a PNG").into_rgba8();
-        assert_eq!(map.dimensions(), (120, 80));
-        // The pin's head is red, above the middle.
-        let head = map.get_pixel(60, 40 - 26);
-        assert!(head.0[0] > 200 && head.0[1] < 120, "{head:?}");
-    }
-
-    /// Fetches a real map: needs the network.
-    #[tokio::test]
-    #[ignore = "contacts OpenStreetMap"]
-    async fn a_map_should_be_drawn_from_openstreetmap() {
-        let http = crate::links::http_client().expect("client");
-        let media = map("geo:52.5163,13.3777").expect("a map");
-        let tiles = std::env::temp_dir().join(format!("matrix-core-tiles-{}", std::process::id()));
-        let png =
-            draw_map(&http, &tiles, &media, MediaSize::Thumbnail { width: 400, height: 240 }).await.expect("drawn");
-        // Kept on disk, with when to ask again.
-        let kept = std::fs::read_dir(tiles.join(MAP_ZOOM.to_string())).expect("tiles kept").count();
-        assert!(kept > 0);
-        // To look at it: `MAP_PNG=/tmp/map.png cargo test -p matrix-core -- --ignored geo::`.
-        if let Ok(path) = std::env::var("MAP_PNG") {
-            std::fs::write(path, &png).expect("written");
-        }
-        assert_eq!(image::load_from_memory(&png).expect("a PNG").into_rgba8().dimensions(), (400, 240));
-    }
-
     /// Searches OpenStreetMap: needs the network.
     #[tokio::test]
     #[ignore = "contacts OpenStreetMap"]
@@ -556,5 +209,15 @@ mod tests {
         let http = crate::links::http_client().expect("client");
         let places = search_places(&http, "Brandenburger Tor", Some("de")).await.expect("found");
         assert!(places.iter().any(|place| place.name.contains("Brandenburger Tor")), "{places:?}");
+    }
+}
+
+#[cfg(test)]
+mod estimate_tests {
+    #[tokio::test]
+    #[ignore = "contacts GeoJS for this connection's approximate location"]
+    async fn an_ip_estimate_should_be_a_valid_location() {
+        let estimate = super::estimate(&matrix_sdk::reqwest::Client::new()).await.unwrap();
+        assert!(super::coordinates(&estimate).is_some());
     }
 }

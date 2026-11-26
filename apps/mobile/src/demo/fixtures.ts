@@ -108,8 +108,6 @@ export const DEMO_MEDIA = {
   voice: 'demo-voice-memo',
   /** A video the demo has no file for: its poster shows, the player waits. */
   walkthrough: 'demo-walkthrough',
-  /** Every map the demo draws (the engine draws real ones from OpenStreetMap). */
-  map: 'osm:',
 } as const;
 
 /** The demo's custom emoji and stickers, by `mxc://` URI, as the demo engine serves them. */
@@ -410,6 +408,7 @@ function room(
     saved: id === GENERAL ? [TEST_PLAN] : [],
     // The demo's homeserver names a Jitsi server; #general has a meeting pinned, #design none.
     can_start_meeting: id === GENERAL || id === DESIGN,
+    can_share_live_location: true,
     can_rename: true,
     priority: 'Normal',
     marked_unread: false,

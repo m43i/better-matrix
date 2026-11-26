@@ -3,4 +3,4 @@
 /**
  * Something an admin may allow from a chosen power level on.
  */
-export type Permission = "DefaultLevel" | "SendMessages" | "Invite" | "Kick" | "Ban" | "RemoveMessages" | "MentionRoom" | "ChangeSettings" | "Name" | "Topic" | "Avatar" | "Addresses" | "Access" | "Pins" | "Permissions" | "Encryption" | "Upgrade" | "SpaceRooms";
+export type Permission = "DefaultLevel" | "SendMessages" | "Invite" | "Kick" | "Ban" | "RemoveMessages" | "MentionRoom" | "ChangeSettings" | "Name" | "Topic" | "Avatar" | "Addresses" | "Access" | "LiveLocation" | "Pins" | "Permissions" | "Encryption" | "Upgrade" | "SpaceRooms";

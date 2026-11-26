@@ -278,19 +278,14 @@ Date: 2026-11-16
     from `mxc://` is one (label: `alt`, else `title`), marked `data-mx-emoticon` or not, as the
     engine's `to_pills` reads it: the SDK's sanitiser drops that attribute. Other images show
     their `alt`.
-- **Locations:** the sheet (`app/location.tsx`) takes the phone's position (expo-location,
-  when-in-use permission only, configured in `app.json`), looked up only once the user presses
-  "Use my location", or a place found by name (`SearchPlaces`, only on submit: Nominatim's
-  policy forbids searching as one types), previews it on its map and sends
-  `Outgoing::Location`. A sticker or a place answers what that timeline's composer answers (a
-  thread's goes into the thread) and ends the reply, as sending text does and as the desktop's
-  `send_from` does. The timeline's card (`LocationCard`) draws the map the engine renders
-  from OpenStreetMap (`osm:<lat>,<lon>,15`, which the app also writes for the phone's own
-  position, `state/geo.ts` mirroring `geo.rs`), the description, the coordinates and
-  "© OpenStreetMap contributors" on every map; tapping opens openstreetmap.org. The device
-  fetches those maps, so OpenStreetMap sees its address and the area shown: Preferences' "Maps
-  from OpenStreetMap" (`Settings.showMaps`, on by default) turns them off, and `MapView` then
-  draws a pin and fetches nothing, in cards and in the sheet alike.
+- **Locations.** The foreground location permission supplies a device fix. Without one the
+  picker shows a labelled GeoJS IP estimate. A one-time location follows the composer's reply
+  or thread. Live sharing belongs to the room. A user-initiated expo-location task continues delivering fixes while the phone is locked
+  or another app is open. Android shows a foreground service notification and iOS shows its
+  background location indicator. The engine ends each share on stop or expiry. The last
+  share unregisters the watch. A headless restart discards an orphaned watch.
+  The map sheet follows the selected event and can open the system navigation handler.
+  Turning off maps keeps the place and coordinates available without loading tiles.
 - **Scheduled messages** (MSC4140): a long press on Send (text, or a command that makes a
   message: `/me`, `/plain`, `/spoiler`, the faces; not an edit, not with attachments, which
   upload at once; anything else says why and keeps the draft, `scheduleProblem`, checked again
@@ -592,11 +587,10 @@ Date: 2026-11-16
   audio clip). #releases holds every message kind the composer sends (`message-kinds`); the
   composer scenes are `mention`, `mention-pill`, `commands`, `emoji-suggestions`,
   `emoji-custom`, `stickers`, `gifs`, `gifs-key`, `packs`, `pack`, `pack-image`, `new-pack`,
-  `sticker`, `sticker-actions`, `settings-giphy`, `settings-giphy-saved`, `location`, `schedule`, `scheduled-bar`,
+  `sticker`, `sticker-actions`, `settings-giphy`, `settings-giphy-saved`, `location`, `location-map`, `schedule`, `scheduled-bar`,
   `scheduled` and `edit-history`. The demo engine answers packs (and keeps edits to them for the
   run, `demo/stickers.ts`), GIF searches (the demo pack's pictures standing in for GIFs), place
-  search, edit history, `LocateMessage` and scheduled messages, and serves one stand-in map (`assets/demo/map.png`) for every place
-  and the demo pack's images from `assets/demo`.
+  search, edit history, `LocateMessage` and scheduled messages, and serves the demo pack's images from `assets/demo`.
 - **The attachment preview** (`app/preview.tsx`) shows one attachment full screen on black: an
   image to pinch, pan and double-tap to zoom, a video in expo-video's player with the
   platform's controls, or an audio clip in a player of ours (`ui/preview/AudioPreview.tsx`:
@@ -748,7 +742,6 @@ Date: 2026-11-16
   canonical alias, so `#` suggestions link `!id` without `via`); custom emoji in received HTML
   need their media handle written by the app (`mxcMedia`), which ties it to the engine's
   `MediaRef` encoding until the engine hands handles for them; reactions don't offer custom
-  emoji; formulas are only sent inline (`$$…$$`), never as blocks; the phone's position is
-  read once, with no live location sharing.
+  emoji; formulas are only sent inline (`$$…$$`), never as blocks.
 - Watch: a new boundary type needs the `ffi` derives (the build fails without them); a new event
   needs a case in the reducer (the type check fails without it).

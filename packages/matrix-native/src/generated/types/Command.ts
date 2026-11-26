@@ -235,7 +235,23 @@ offset: number,
 /**
  * The app's language (a BCP 47 tag), to read the query in.
  */
-language: string | null, } } | { "type": "SearchPlaces", "data": { 
+language: string | null, } } | { "type": "Locate", "data": { 
+/**
+ * Explicitly request access to the desktop device position, without an IP fallback.
+ */
+request_access: boolean, } } | { "type": "ShareLiveLocation", "data": { 
+/**
+ * Sending account.
+ */
+account: AccountId, 
+/**
+ * Destination room.
+ */
+room_id: string, 
+/**
+ * The first device fix.
+ */
+geo_uri: string, } } | { "type": "SearchPlaces", "data": { 
 /**
  * What to look for.
  */

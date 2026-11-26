@@ -158,7 +158,8 @@ impl Account {
                 thread: None,
             };
             if let Some(item) = timeline.item_by_event_id(&id).await {
-                if let Some(message) = crate::timeline::message(&item, room.own_user_id()) {
+                if let Some(mut message) = crate::timeline::message(&item, room.own_user_id()) {
+                    crate::timeline::resolve_live_location(&room, &mut message).await;
                     preview.sender_name = message.sender_name;
                     preview.sender_id = message.sender_id;
                     preview.sender_avatar = message.sender_avatar;

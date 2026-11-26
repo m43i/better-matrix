@@ -157,14 +157,6 @@ impl Entry {
         }
     }
 
-    /// The map of the place it shares, if it shares one.
-    pub fn location_map(&self) -> Option<&matrix_core::MediaRef> {
-        match &self.message()?.content {
-            MessageContent::Location(location) => location.map.as_ref(),
-            _ => None,
-        }
-    }
-
     /// The image attachment it shows a preview of, if any.
     pub fn image(&self) -> Option<&Attachment> {
         match &self.message()?.content {
@@ -2191,6 +2183,7 @@ mod tests {
             pinned: Vec::new(),
             can_pin: true,
             can_start_meeting: false,
+            can_share_live_location: false,
             saved: Vec::new(),
             priority: matrix_core::RoomPriority::Normal,
             marked_unread: false,

@@ -715,7 +715,27 @@ offset: number,
 /**
  * The GIFs.
  */
-page: GifPage, } } | { "type": "PlacesFound", "data": { 
+page: GifPage, } } | { "type": "PositionFound", "data": { 
+/**
+ * The locate request.
+ */
+request: RequestId, 
+/**
+ * A validated geo URI.
+ */
+geo_uri: string, 
+/**
+ * Whether the position was estimated from the public IP.
+ */
+estimated: boolean, } } | { "type": "LiveLocationStarted", "data": { 
+/**
+ * The running share.
+ */
+request: RequestId, 
+/**
+ * The beacon state event that owns subsequent fixes.
+ */
+event_id: string, } } | { "type": "PlacesFound", "data": { 
 /**
  * The search it answers.
  */

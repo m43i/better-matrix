@@ -52,6 +52,7 @@ fn room(room_id: &str) -> RoomSummary {
         pinned: Vec::new(),
         can_pin: true,
         can_start_meeting: false,
+        can_share_live_location: false,
         saved: Vec::new(),
         can_change_settings: true,
         knocks: 0,
@@ -6215,6 +6216,31 @@ fn typed_coordinates_should_be_chosen_without_a_search() {
 }
 
 #[test]
+fn a_late_ip_estimate_should_leave_a_manually_chosen_place_selected() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.open_location(ComposerTarget::Room);
+    let request = s.location.locating.unwrap();
+    s.location.search.insert("52.5, 13.4");
+    s.search_places();
+    apply(&mut s, Event::PositionFound { request, geo_uri: "geo:1,2".into(), estimated: true });
+    assert_eq!(s.location.chosen.unwrap().geo_uri, "geo:52.5,13.4");
+}
+
+#[test]
+fn an_ip_estimate_should_be_available_to_send_but_never_start_tracking() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.open_location(ComposerTarget::Room);
+    let request = s.location.locating.unwrap();
+    apply(&mut s, Event::PositionFound { request, geo_uri: "geo:1,2".into(), estimated: true });
+    s.start_live_location();
+    assert!(all_commands(&mut commands).iter().all(|command| !matches!(command, Command::ShareLiveLocation { .. })));
+    s.send_location(&mut Tx::default());
+    assert!(matches!(sent(&mut commands).as_slice(), [Outgoing::Location { geo_uri, .. }] if geo_uri == "geo:1,2"));
+}
+
+#[test]
 fn a_place_should_be_searched_by_name_and_sent() {
     let (mut s, mut commands) = state();
     writing(&mut s, &mut commands);
@@ -7989,4 +8015,28 @@ fn a_composers_suggestions_should_cover_only_its_own_timeline() {
     thread.edit.focused = true;
     assert!(s.timeline_covered(ComposerTarget::Thread));
     assert!(!s.timeline_covered(ComposerTarget::Room));
+}
+
+#[test]
+fn a_viewer_should_only_stop_the_beacon_displayed_on_its_card() {
+    let (mut s, _) = state();
+    let account = AccountId::new("@a:x");
+    let request = s.dispatch(
+        Command::ShareLiveLocation { account: account.clone(), room_id: "!one:x".into(), geo_uri: "geo:1,2".into() },
+        Purpose::LiveShare(account.clone(), "!one:x".into(), None),
+    );
+    apply(&mut s, Event::LiveLocationStarted { request, event_id: "$current".into() });
+    assert_eq!(s.live_share(&account, "!one:x", Some("$previous")), None);
+    assert_eq!(s.live_share(&account, "!one:x", Some("$current")), Some(request));
+}
+
+#[test]
+fn an_idle_location_card_should_redraw_once_at_expiry() {
+    let (mut s, _) = state();
+    let mut tx = Tx::default();
+    let until = now_ms() + 1000;
+    s.watch_location_expiry(until, &mut tx);
+    assert!(!s.expire_locations(until - 1, &mut tx));
+    assert!(s.expire_locations(until, &mut tx));
+    assert!(!s.expire_locations(until + 1, &mut tx));
 }

@@ -1,0 +1,162 @@
+{
+  "version": 8,
+  "name": "Better Matrix Dark",
+  "sources": {
+    "planet": {
+      "type": "vector",
+      "url": "https://tiles.openfreemap.org/planet"
+    }
+  },
+  "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#222528"
+      }
+    },
+    {
+      "id": "parks",
+      "type": "fill",
+      "source": "planet",
+      "source-layer": "park",
+      "paint": {
+        "fill-color": "#253b30"
+      }
+    },
+    {
+      "id": "greenery",
+      "type": "fill",
+      "source": "planet",
+      "source-layer": "landcover",
+      "filter": ["in", "class", "wood", "grass", "farmland"],
+      "paint": {
+        "fill-color": "#253b30"
+      }
+    },
+    {
+      "id": "water",
+      "type": "fill",
+      "source": "planet",
+      "source-layer": "water",
+      "paint": {
+        "fill-color": "#243d58"
+      }
+    },
+    {
+      "id": "streams",
+      "type": "line",
+      "source": "planet",
+      "source-layer": "waterway",
+      "paint": {
+        "line-color": "#243d58",
+        "line-width": ["interpolate", ["exponential", 1.35], ["zoom"], 7, 0.5, 12, 1, 19, 5]
+      }
+    },
+    {
+      "id": "buildings",
+      "type": "fill",
+      "source": "planet",
+      "source-layer": "building",
+      "minzoom": 13,
+      "paint": {
+        "fill-color": "#34383c",
+        "fill-outline-color": "#4b5056"
+      }
+    },
+    {
+      "id": "paths",
+      "type": "line",
+      "source": "planet",
+      "source-layer": "transportation",
+      "minzoom": 13,
+      "filter": ["all", ["==", "$type", "LineString"], ["in", "class", "path", "track"]],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#4b5056",
+        "line-width": ["interpolate", ["exponential", 1.35], ["zoom"], 7, 0.5, 12, 1, 19, 3]
+      }
+    },
+    {
+      "id": "streets",
+      "type": "line",
+      "source": "planet",
+      "source-layer": "transportation",
+      "minzoom": 5,
+      "filter": [
+        "all",
+        ["==", "$type", "LineString"],
+        ["in", "class", "minor", "service", "tertiary", "secondary", "primary", "trunk", "motorway"]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#45494e",
+        "line-width": ["interpolate", ["exponential", 1.35], ["zoom"], 7, 0.5, 12, 2, 19, 25]
+      }
+    },
+    {
+      "id": "main-roads",
+      "type": "line",
+      "source": "planet",
+      "source-layer": "transportation",
+      "minzoom": 5,
+      "filter": [
+        "all",
+        ["==", "$type", "LineString"],
+        ["in", "class", "primary", "trunk", "motorway"]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#625b4a",
+        "line-width": ["interpolate", ["exponential", 1.35], ["zoom"], 7, 0.5, 12, 1.6, 19, 17]
+      }
+    },
+    {
+      "id": "road-names",
+      "type": "symbol",
+      "source": "planet",
+      "source-layer": "transportation_name",
+      "minzoom": 12,
+      "layout": {
+        "text-field": ["coalesce", ["get", "name:latin"], ["get", "name"]],
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 11,
+        "symbol-placement": "line",
+        "symbol-spacing": 190
+      },
+      "paint": {
+        "text-color": "#a3a3a3",
+        "text-halo-color": "#222528",
+        "text-halo-width": 1.35
+      }
+    },
+    {
+      "id": "places",
+      "type": "symbol",
+      "source": "planet",
+      "source-layer": "place",
+      "minzoom": 1,
+      "layout": {
+        "text-field": ["coalesce", ["get", "name:latin"], ["get", "name"]],
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 12,
+        "symbol-sort-key": ["coalesce", ["get", "rank"], 20]
+      },
+      "paint": {
+        "text-color": "#e5e5e5",
+        "text-halo-color": "#222528",
+        "text-halo-width": 1.35
+      }
+    }
+  ]
+}

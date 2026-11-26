@@ -339,3 +339,18 @@ fn a_one_to_one_chat_should_offer_only_its_topic_and_encryption() {
     let rights = every_right().direct_chat(true);
     assert_eq!(rights, RoomRights { topic: true, encryption: true, ..RoomRights::default() });
 }
+
+#[test]
+fn a_room_admin_should_be_able_to_allow_members_to_share_live_locations() {
+    let mut power = RoomPowerLevels::new(
+        matrix_sdk::ruma::events::room::power_levels::RoomPowerLevelsSource::None,
+        &matrix_sdk::ruma::room_version_rules::AuthorizationRules::V1,
+        [],
+    );
+    let member = matrix_sdk::ruma::user_id!("@member:example.org");
+    assert!(!crate::geo::live::permitted(&power, member, false));
+    Permission::LiveLocation.set(&mut power, Int::from(0u8));
+    assert!(crate::geo::live::permitted(&power, member, false));
+    power.events.insert(TimelineEventType::Beacon, Int::from(50u8));
+    assert!(!crate::geo::live::permitted(&power, member, false));
+}

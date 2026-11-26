@@ -115,6 +115,9 @@ pub(crate) async fn room_summary(
         can_rename: rights.name,
         pinned: room.pinned_event_ids().unwrap_or_default().iter().map(ToString::to_string).collect(),
         saved: crate::saved::saved_ids(room).await,
+        can_share_live_location: power.as_ref().is_some_and(|power| {
+            crate::geo::live::permitted(power, room.own_user_id(), room.encryption_state().is_encrypted())
+        }),
         can_pin: may_send_state(StateEventType::RoomPinnedEvents),
         // Where the homeserver names a Jitsi server and the user may pin widgets.
         can_start_meeting: meetings
@@ -423,6 +426,7 @@ pub(crate) fn content(msgtype: &MessageType) -> MessageContent {
                 && !description.contains(c.geo_uri.trim_start_matches("geo:").split(';').next().unwrap_or_default()))
             .then(|| description.to_owned());
             return MessageContent::Location(crate::model::Location {
+                live_until: None,
                 geo_uri: c.geo_uri.clone(),
                 description,
                 map: crate::geo::map(&c.geo_uri),

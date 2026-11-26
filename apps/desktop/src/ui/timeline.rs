@@ -1529,7 +1529,7 @@ fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Pa
     match (&item.message.content, &item.rich) {
         (MessageContent::Text { body, .. }, rich) => text_body(&item.message, body, rich.as_ref(), cx, p),
         (MessageContent::Emote { body, .. }, rich) => emote_body(item, body, rich.as_ref(), cx, p),
-        (MessageContent::Location(location), _) => location_card(&item.message.event_id, location, cx, p),
+        (MessageContent::Location(location), _) => location_card(&item.message, location, cx, p),
         (MessageContent::Attachment(attachment), _)
             if attachment.kind == AttachmentKind::Audio && audio_supported() =>
         {
@@ -1670,63 +1670,53 @@ fn emote_body(item: &TimelineItem, body: &str, rich: Option<&RichText>, cx: &Con
     }
 }
 
-/// A shared place: its map from OpenStreetMap with a pin, what the sender called it and its
-/// coordinates, the map's credit, and a way to open it on openstreetmap.org.
-fn location_card(event_id: &str, location: &matrix_core::Location, cx: &Context<'_>, p: &Palette) -> El {
-    let (w, h) = (crate::state::MAP_PIXELS.0 as f32, crate::state::MAP_PIXELS.1 as f32);
-    let width = w.min(cx.content_width.max(120.0) - 2.0).min(360.0);
-    let height = (width * h / w).round();
-    let image = location.map.as_ref().filter(|_| cx.show_maps).and_then(|map| cx.media.image(map));
-    let map = el()
-        .key(cx.key(&format!("map-{event_id}")))
-        .size(width, height)
-        .fill(p.surface)
-        .role("img")
-        .label(t!("location.map"));
-    let map = match image {
-        Some(image) => map.pixels_fit(image.pixels(), SurfaceFit::Fill),
-        None => map.center().child(icon(&icons::MAP_PIN, 28.0).color(p.text_muted)),
-    };
-    let coordinates = matrix_core::geo::coordinates(&location.geo_uri)
-        .map(|(latitude, longitude)| format!("{latitude:.5}, {longitude:.5}"))
-        .unwrap_or_else(|| location.geo_uri.clone());
-    let title = location.description.clone().unwrap_or_else(|| t!("location.shared").to_owned());
-    let link = matrix_core::geo::web_link(&location.geo_uri);
-    let mut words = col()
-        .w_full()
-        .px(12.0)
-        .py(8.0)
-        .gap(2.0)
-        .child(text(title).font(font::BODY_STRONG).color(p.text).wrap())
-        .child(text(coordinates).font(font::META).color(p.text_muted).selectable(true));
-    let credit = text(t!("location.credit")).font(font::META).color(p.text_muted).shrink().truncate();
-    let mut footer = row().w_full().gap(8.0).center_y().child(credit).child(el().grow(1.0));
-    if let Some(link) = link.clone() {
-        footer = footer.child(
-            text(t!("location.open"))
-                .key(cx.key(&format!("map-open-{event_id}")))
-                .font(font::META)
-                .color(p.accent)
-                .role("link")
-                .cursor(rune::Cursor::Pointer)
-                .on_press_tx(move |s: &mut State, tx| s.open_link(&link, tx)),
-        );
-    }
-    words = words.child(footer.pt(4.0));
-    let mut card = col()
+/// Open the event by ID so a live map follows subsequent timeline diffs.
+fn location_card(message: &Message, location: &matrix_core::Location, cx: &Context<'_>, p: &Palette) -> El {
+    let width = (cx.content_width - 2.0).clamp(120.0, 360.0);
+    let face = media_avatar(&message.sender_id, &message.sender_name, message.sender_avatar.as_ref(), cx.media, 36.0);
+    let map = super::location::map_view(
+        &cx.key(&format!("location-tile-{}", message.event_id)),
+        cx.account,
+        &location.geo_uri,
+        matrix_core::geo::MAP_ZOOM,
+        width,
+        face,
+        cx.media,
+        cx.show_maps,
+        p,
+    );
+    let (account, key, event_id) = (cx.account.clone(), cx.key.clone(), message.event_id.clone());
+    let card = col()
         .key(cx.key(&format!("location-{event_id}")))
         .w(width + 2.0)
         .mt(4.0)
-        .radius(10.0)
-        .clip_rounded(10.0)
+        .radius(12.0)
+        .clip_rounded(12.0)
         .fill(p.surface)
         .border(1.0, p.divider)
+        .role("button")
+        .label(super::location::title(location))
+        .focusable(true)
+        .cursor(rune::Cursor::Pointer)
         .child(map)
-        .child(words);
-    if let Some(link) = link {
-        card = card.cursor(rune::Cursor::Pointer).on_press_tx(move |s: &mut State, tx| s.open_link(&link, tx));
-    }
-    card
+        .child(
+            text(super::location::title(location)).font(font::BODY_STRONG).color(p.text).px(10.0).py(6.0).truncate(),
+        );
+    let card = if cx.show_maps {
+        card
+    } else {
+        let label = matrix_core::geo::coordinates(&location.geo_uri)
+            .map_or_else(|| t!("location.waiting").to_owned(), |(lat, lon)| format!("{lat}, {lon}"));
+        card.child(text(label).font(font::META).color(p.text_muted).px(10.0).pb(6.0))
+    };
+    super::location::watch_expiry(card, location).on_press(move |s: &mut State| {
+        s.modal = Some(crate::state::Modal::LocationMap {
+            account: account.clone(),
+            key: key.clone(),
+            event_id: event_id.clone(),
+            zoom: matrix_core::geo::MAP_ZOOM,
+        })
+    })
 }
 
 /// A message's stand-in when its content can't be shown.
