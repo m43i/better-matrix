@@ -1957,6 +1957,10 @@ struct Running {
     feed: RoomFeed,
     /// The handlers hearing the account's call signals.
     handlers: Vec<matrix_sdk::event_handler::EventHandlerHandle>,
+    /// By room, the last message sent: it lets go once it has gone (an attachment) or is in the
+    /// room's send queue (anything else), or failed, and the next one waits for that, so they go
+    /// in the order they were sent.
+    sends: HashMap<String, tokio::sync::oneshot::Receiver<()>>,
 }
 
 /// How many closed timelines an account keeps warm: the rooms and threads switched between.
@@ -3628,9 +3632,18 @@ impl State {
             }
             Command::Send { account, key, reply_to, message } => {
                 let usage = self.accounts.get(&account).map(|running| running.usage.clone());
+                // Held until this send is done: dropping it lets the room's next one go.
+                let (sending, next) = tokio::sync::oneshot::channel::<()>();
+                let previous =
+                    self.accounts.get_mut(&account).and_then(|running| running.sends.insert(key.room_id.clone(), next));
                 let (account, timeline) = (self.account(&account), self.open_timeline(&account, &key));
                 let http = self.http.clone().ok();
                 Box::pin(async move {
+                    // The words typed with attachments go first, then the attachments in order.
+                    let sending = sending;
+                    if let Some(previous) = previous {
+                        let _ = previous.await;
+                    }
                     let account = account?;
                     let replied_to = reply_to.clone();
                     match timeline {
@@ -3642,6 +3655,7 @@ impl State {
                         }
                         Err(error) => return Err(error),
                     }
+                    drop(sending);
                     if let Some(usage) = usage {
                         usage.room(&account, &key.room_id, 3, replied_to);
                     }
@@ -3968,6 +3982,7 @@ impl State {
                     keys_fetched: HashSet::new(),
                     feed,
                     handlers,
+                    sends: HashMap::new(),
                 };
                 self.accounts.insert(running.account.id().clone(), running);
                 Ok(())
@@ -5165,10 +5180,45 @@ async fn send_in(
                 info: crate::account::voice_info(message),
                 ..Default::default()
             };
+            // An attachment goes straight to the server, past the room's send queue: the words
+            // queued before it go out first.
+            queue_sent(timeline.room()).await;
             timeline.send_attachment(source, upload.mime(), config).await?;
         }
     }
     Ok(())
+}
+
+/// Waits until the room's send queue has sent what it holds, as long as it can: a queue the SDK
+/// stopped (after a failure) or one held up by a message it couldn't send isn't waited for. It
+/// looks again on every change to the queue, and every second, as the look and the listening
+/// start apart.
+async fn queue_sent(room: &matrix_sdk::Room) {
+    use matrix_sdk::send_queue::LocalEchoContent;
+    use tokio::sync::broadcast::error::RecvError;
+
+    let queue = room.send_queue();
+    loop {
+        let Ok((echoes, mut changes)) = queue.subscribe().await else { return };
+        // A message or redaction the SDK couldn't send holds the whole queue up: a wedge.
+        let wedged = |echo: &matrix_sdk::send_queue::LocalEcho| match &echo.content {
+            LocalEchoContent::Event { send_error, .. } | LocalEchoContent::Redaction { send_error, .. } => {
+                send_error.is_some()
+            }
+            LocalEchoContent::React { .. } => false,
+        };
+        let stuck = echoes.iter().any(wedged);
+        let waiting =
+            echoes.iter().any(|echo| matches!(echo.content, LocalEchoContent::Event { send_error: None, .. }));
+        if !waiting || stuck || !queue.is_enabled() || !room.client().send_queue().is_enabled() {
+            return;
+        }
+        if let Ok(Err(RecvError::Closed)) =
+            tokio::time::timeout(std::time::Duration::from_secs(1), changes.recv()).await
+        {
+            return;
+        }
+    }
 }
 
 /// Reports a session the server no longer accepts. Refreshed tokens are saved by the client's
@@ -5368,6 +5418,7 @@ mod tests {
             keys_fetched: HashSet::new(),
             feed,
             handlers: Vec::new(),
+            sends: HashMap::new(),
         };
         running.forget_opening(RequestId(3));
         assert!(running.opening.is_empty());
@@ -6028,6 +6079,110 @@ mod tests {
         let (closed, seen) = run(&engine, &events, close);
         closed.expect("deactivated");
         assert!(seen.iter().any(|e| matches!(e, Event::AccountRemoved(gone) if *gone == account)));
+    }
+
+    /// A message's words reach the room before the files sent with it, every time, as the
+    /// composer sends them: one command each, straight after one another.
+    /// `BM_LIVE_HOMESERVER=http://127.0.0.1:8008 cargo test -p matrix-core -- --ignored live_send_order`.
+    #[test]
+    #[ignore = "needs a homeserver with open registration"]
+    fn live_send_order_should_put_the_words_before_the_files_sent_with_them() {
+        let Ok(server) = std::env::var("BM_LIVE_HOMESERVER") else { return };
+        let (engine, events) = start_as("live-order", false);
+        let (found, seen) = run(&engine, &events, Command::Discover { server });
+        found.expect("discovered");
+        let homeserver = seen
+            .into_iter()
+            .find_map(|e| match e {
+                Event::HomeserverDiscovered { homeserver, .. } => Some(homeserver.url),
+                _ => None,
+            })
+            .expect("a homeserver");
+        let ada = register_live(&engine, &events, &homeserver, "order");
+        let room = crate::NewRoom { encrypted: false, ..crate::NewRoom::private("order", false) };
+        let (created, seen) = run(&engine, &events, Command::CreateRoom { account: ada.clone(), room });
+        created.expect("created");
+        let room_id = seen
+            .into_iter()
+            .find_map(|e| match e {
+                Event::RoomCreated { room_id, .. } => Some(room_id),
+                _ => None,
+            })
+            .expect("a room");
+        let key = TimelineKey::room(&room_id);
+        run(&engine, &events, Command::OpenTimeline { account: ada.clone(), key: key.clone() }).0.expect("opened");
+
+        let mut sent = Vec::new();
+        let mut requests = Vec::new();
+        for round in 0..5 {
+            let words = format!("words {round}");
+            let files = [format!("file-{round}a.txt"), format!("file-{round}b.txt")];
+            let text = Outgoing::Text { body: words.clone(), html: None, mentions: crate::Mentions::default() };
+            let uploads =
+                files.clone().map(|name| Outgoing::File(crate::Upload::Bytes { name, bytes: Arc::from(&b"x"[..]) }));
+            for message in std::iter::once(text).chain(uploads) {
+                let send = Command::Send { account: ada.clone(), key: key.clone(), reply_to: None, message };
+                requests.push(engine.send(send));
+            }
+            sent.push(words);
+            sent.extend(files);
+        }
+        while !requests.is_empty() {
+            match events.recv_timeout(Duration::from_secs(60)).expect("an event") {
+                Event::Finished { request, result } if requests.contains(&request) => {
+                    result.expect("sent");
+                    requests.retain(|r| *r != request);
+                }
+                _ => {}
+            }
+        }
+
+        // The room as the server has it, read as Ada from a fresh login.
+        let bodies = tokio::runtime::Runtime::new().expect("a runtime").block_on(async {
+            let homeserver = homeserver.trim_end_matches('/');
+            let http = matrix_sdk::reqwest::Client::new();
+            let user = ada.as_str().trim_start_matches('@').split(':').next().expect("a user");
+            let login = serde_json::json!({
+                "type": "m.login.password", "identifier": {"type": "m.id.user", "user": user}, "password": "a password"
+            });
+            let token = http
+                .post(format!("{homeserver}/_matrix/client/v3/login"))
+                .header("Content-Type", "application/json")
+                .body(login.to_string())
+                .send()
+                .await
+                .expect("logged in")
+                .text()
+                .await
+                .expect("a token");
+            let token: serde_json::Value = serde_json::from_str(&token).expect("a token");
+            let token = token["access_token"].as_str().expect("an access token").to_owned();
+            for _ in 0..30 {
+                let page = http
+                    .get(format!("{homeserver}/_matrix/client/v3/rooms/{room_id}/messages?dir=f&limit=100"))
+                    .bearer_auth(&token)
+                    .send()
+                    .await
+                    .expect("messages")
+                    .text()
+                    .await
+                    .expect("a page");
+                let page: serde_json::Value = serde_json::from_str(&page).expect("a page");
+                let bodies: Vec<String> = page["chunk"]
+                    .as_array()
+                    .expect("a chunk")
+                    .iter()
+                    .filter(|event| event["type"] == "m.room.message")
+                    .filter_map(|event| event["content"]["body"].as_str().map(str::to_owned))
+                    .collect();
+                if bodies.len() >= sent.len() {
+                    return bodies;
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            panic!("the messages never all arrived");
+        });
+        assert_eq!(bodies, sent);
     }
 
     /// Registers a fresh account on `homeserver` (a resolved URL) and returns it.
