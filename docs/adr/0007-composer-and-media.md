@@ -16,6 +16,13 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   - The composer edits a rich `TextEdit` limited to what Matrix HTML carries: bold, italic,
     strike, code, links, lists, quotes, code blocks.
   - Formatted text is sent as `to_html()` with the plain body; unformatted text goes plain.
+  - What one send carries goes in order: the words, then each attachment. Each is its own
+    `Command::Send`, so the engine runs a room's sends one after another in the order they came
+    (`Running::sends`). The SDK sends an attachment straight to the server, past the room's send
+    queue (the queue would show it pending, but a file the server refuses, too large say,
+    would wedge the queue and hold every later message in the room), so an attachment first
+    waits for that queue to send the words before it (`queue_sent`): not when the queue is
+    stopped or held by a message it couldn't send, which no wait would get out.
   - Markdown code fences typed in the field (a line of three or more backticks, optionally a
     language, and a closing line of as many) go as the code block they stand for
     (`composer::with_code_fences`, on the copy that is sent; the field keeps what was typed): the
