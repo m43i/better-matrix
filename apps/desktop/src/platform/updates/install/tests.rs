@@ -39,3 +39,59 @@ fn a_windows_archive_without_an_executable_should_be_rejected() {
     zip::ZipWriter::new(File::create(&path).unwrap()).finish().unwrap();
     assert!(extract_executable(&path, temp.path()).is_err());
 }
+
+#[test]
+fn a_start_should_clear_staged_updates_no_helper_took() {
+    let temp = tempfile::tempdir().unwrap();
+    let install = Install { platform: Platform::Windows, target: temp.path().join("better-matrix.exe") };
+    let root = temp.path().join(".better-matrix-update-staging");
+    let (abandoned, handed, unrelated) =
+        (root.join("old"), root.join("run"), temp.path().join(".better-matrix-update-x"));
+    for folder in [&abandoned, &handed, &unrelated] {
+        fs::create_dir_all(folder).unwrap();
+    }
+    File::create(handed.join("ready")).unwrap();
+    install.clear_stale();
+    assert!(!abandoned.exists() && handed.exists() && unrelated.exists());
+}
+
+/// Live: downloads v0.0.17's Windows archive from GitHub
+/// (`cargo test -p better-matrix-desktop -- --ignored staging`).
+#[test]
+#[ignore = "downloads a release from GitHub"]
+fn staging_a_release_should_unpack_it_beside_the_install_until_dropped() {
+    let client = release::client().unwrap();
+    let metadata: release::Metadata = client
+        .get("https://api.github.com/repos/m43i/better-matrix/releases/tags/v0.0.17")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .and_then(reqwest::blocking::Response::json)
+        .unwrap();
+    let found = release::select(metadata, "0.0.16", &release::Target::Archive(Platform::Windows)).unwrap().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let install = Install { platform: Platform::Windows, target: folder.path().join("better-matrix.exe") };
+    let staged = install.stage(&client, &found).unwrap();
+    assert_eq!(staged.version, "0.0.17");
+    assert!(fs::metadata(&staged.app).unwrap().len() > 1_000_000, "the executable is unpacked");
+    let work = staged.app.parent().unwrap().to_owned();
+    assert_eq!(
+        work.parent(),
+        Some(folder.path().join(".better-matrix-update-staging").as_path()),
+        "staged beside the install"
+    );
+    drop(staged);
+    assert!(!work.exists(), "an update never handed over leaves nothing behind");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_in_place_of_the_staging_folder_should_never_be_cleared() {
+    let (temp, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let install = Install { platform: Platform::Windows, target: temp.path().join("better-matrix.exe") };
+    let theirs = elsewhere.path().join("theirs");
+    fs::create_dir(&theirs).unwrap();
+    std::os::unix::fs::symlink(elsewhere.path(), temp.path().join(".better-matrix-update-staging")).unwrap();
+    install.clear_stale();
+    assert!(theirs.exists());
+}

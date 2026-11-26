@@ -91,10 +91,11 @@ Root: HKCU; Subkey: "Software\Classes\matrix\shell\open\command"; ValueType: str
 [Run]
 Filename: "{app}\better-matrix.exe"; Description: "{cm:LaunchProgram,Better Matrix}"; Flags: nowait postinstall skipifsilent
 
-; An interrupted self-update can leave its staging folder behind. Accounts, history and keys live
-; in the user's profile, not here, and stay.
+; An interrupted self-update can leave its staging folder behind (uninstallers from v0.0.17 and
+; earlier remove it as `.better-matrix-update-*`, which its name still matches). Accounts,
+; history and keys live in the user's profile, not here, and stay.
 [UninstallDelete]
-Type: filesandordirs; Name: "{app}\.better-matrix-update-*"
+Type: filesandordirs; Name: "{app}\.better-matrix-update-staging"
 
 [Code]
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

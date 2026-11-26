@@ -140,7 +140,7 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
         let installing = matches!(s.update, Update::Installing(_));
         let label = if installing {
             t!("update.installing").to_owned()
-        } else if matches!(release.upgrade, Upgrade::Archive { .. }) {
+        } else if matches!(s.update, Update::Ready(_)) {
             tf!("update.install", version = release.version)
         } else {
             tf!("update.available", version = release.version)

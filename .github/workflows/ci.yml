@@ -80,7 +80,9 @@ jobs:
           # The self-update replaces the installed executable and keeps the listed version current.
           $gone = Start-Process cmd.exe -ArgumentList '/c', 'exit' -PassThru -WindowStyle Hidden
           $gone.WaitForExit()
-          $work = New-Item -ItemType Directory "$app\.better-matrix-update-check"
+          # Staged as the app stages it: a folder of its own inside the updater's, which the helper
+          # removes, leaving the updater's folder for the uninstaller.
+          $work = New-Item -ItemType Directory -Force "$app\.better-matrix-update-staging\check"
           Copy-Item "$env:SystemRoot\System32\hostname.exe" "$work\better-matrix.exe"
           & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive `
             -ExecutionPolicy Bypass -File apps\desktop\src\platform\updates\install.ps1 `

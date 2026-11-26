@@ -168,6 +168,11 @@ impl Method {
     }
 }
 
+/// The page of the release tagged `v{version}`, which offers its downloads.
+pub fn release_page(version: &str) -> String {
+    format!("{RELEASES}/tag/v{version}")
+}
+
 /// openSUSE and SUSE Linux Enterprise name themselves, or what they are like, with "suse".
 fn suse(os_release: &str) -> bool {
     os_release.lines().any(|line| {

@@ -1689,7 +1689,7 @@ fn the_update_icon_should_be_absent_without_an_available_release() {
 
 #[test]
 fn an_update_should_appear_directly_above_the_avatar() {
-    let rt = runtime(|s| s.update_found(demo::update()));
+    let rt = runtime(|s| s.update_ready(demo::update()));
     let update = rt.presented("rail-update").unwrap().0;
     let avatar = rt.presented("account-button").unwrap().0;
     assert!((avatar[1] - update[1] - update[3] - 16.0).abs() < 0.5);
@@ -1699,7 +1699,7 @@ fn an_update_should_appear_directly_above_the_avatar() {
 fn a_long_rail_should_keep_plus_update_and_avatar_in_order() {
     let mut rt = runtime(|s| {
         demo::many_spaces(s);
-        s.update_found(demo::update());
+        s.update_ready(demo::update());
     });
     let add = rt.presented("rail-create-space").unwrap().0;
     let update = rt.presented("rail-update").unwrap().0;
@@ -1715,7 +1715,7 @@ fn a_long_rail_should_keep_plus_update_and_avatar_in_order() {
 
 #[test]
 fn clicking_the_rail_update_should_start_installation() {
-    let mut rt = runtime(|s| s.update_found(demo::update()));
+    let mut rt = runtime(|s| s.update_ready(demo::update()));
     press(&mut rt, "rail-update");
     assert!(matches!(rt.state.update, crate::state::Update::Installing(_)));
 }
@@ -1822,12 +1822,15 @@ fn an_unknown_install_should_offer_the_release_page() {
 }
 
 #[test]
-fn an_update_failure_should_keep_the_rail_action_available() {
+fn a_failed_restart_should_offer_the_update_again_once_it_is_staged_again() {
     let mut rt = runtime(|s| {
-        s.update_found(demo::update());
+        s.update_ready(demo::update());
         s.install_update();
         s.update_failed("offline".into());
     });
+    assert!(rt.find("rail-update").is_none());
+    rt.update(|s, _| s.update_ready(demo::update()));
+    rt.frame(1.0 / 60.0);
     press(&mut rt, "rail-update");
     assert!(matches!(rt.state.update, crate::state::Update::Installing(_)));
 }

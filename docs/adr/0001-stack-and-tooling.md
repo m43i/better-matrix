@@ -173,10 +173,17 @@ Date: 2026-11-14
   - A shell worker checks GitHub's latest stable release at startup and hourly. Offline checks
     are quiet; prereleases, equal/older versions and releases without a matching archive and
     SHA-256 digest are ignored. SemVer precedence decides what is newer.
-  - Discovery only offers an update. Clicking the rail's update icon downloads the immutable
-    asset ID over HTTPS and verifies GitHub's SHA-256 digest before extracting it. This trusts
-    the repository's release permissions and GitHub HTTPS; it is not a separate signing key.
-  - Stage beside the install so permissions and disk failures are reported before quitting.
+  - A newer release downloads as soon as a check finds it: the immutable asset ID over HTTPS,
+    with GitHub's SHA-256 digest verified before extracting it. This trusts the repository's
+    release permissions and GitHub HTTPS; it is not a separate signing key. Only then does the
+    rail show the update icon, which restarts into the release: restarting stays the user's
+    action. A download that fails is retried at the next check; until then the icon offers the
+    release's page.
+  - Stage beside the install, in the updater's own `.better-matrix-update-staging` folder, so
+    permissions and disk failures surface before quitting. A staged release stays until a newer
+    one is staged in its place. What a run staged and never handed over (it quit first) is
+    removed at the next start, so a deferred update downloads again; a folder whose helper
+    started (its ready file) is the helper's.
     macOS publishes a ditto ZIP of the complete signed bundle as well as the DMG, and
     verifies its code signature. Windows extracts only `better-matrix.exe` from the existing ZIP,
     and its helper sets the installer's `DisplayVersion` (under the `AppId`) when that entry
