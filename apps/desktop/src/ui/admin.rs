@@ -6,8 +6,8 @@ use matrix_core::{HistoryVisibility, JoinRule, Permission, RoomSetting, RoomSett
 use rune::{Color, El, ScrollSpec, col, el, icon, row, text};
 
 use super::components::{
-    ButtonKind, button, choice_row, dialog, field_input, icon_button, labelled, media_avatar, pick_row, select_button,
-    select_menu, select_option, setting_group, switch_row,
+    ButtonKind, button, choice_row, closable_dialog, dialog, field_input, icon_button, labelled, media_avatar,
+    pick_row, select_button, select_menu, select_option, setting_group, switch_row,
 };
 use super::icons;
 use super::theme::{Palette, font};
@@ -794,17 +794,7 @@ fn space_rooms(account: &AccountData, space_id: &str, p: &Palette) -> El {
         .child(listed)
         .child(text(t!("space_rooms.add_heading")).font(font::SECTION).color(p.text_muted))
         .child(adding);
-    dialog(
-        "space-rooms",
-        &tf!("space_rooms.title", space = space.name),
-        content,
-        vec![
-            button(t!("common.done"), ButtonKind::Primary, true, p)
-                .key("space-rooms-done")
-                .on_press(State::close_modal),
-        ],
-        p,
-    )
+    closable_dialog("space-rooms", &tf!("space_rooms.title", space = space.name), content, Vec::new(), p)
 }
 
 // ----- leaving a space -------------------------------------------------------------------------

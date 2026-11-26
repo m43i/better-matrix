@@ -8,8 +8,8 @@ use matrix_core::SavedMessage;
 use rune::{Align, El, Side, col, row, text};
 
 use super::components::{
-    ButtonKind, button, dialog, dialog_with_bar, divider, field_input, filter_chip, icon_button, media_avatar,
-    popover_panel, select_option, when,
+    ButtonKind, button, closable_dialog, closable_dialog_with_bar, divider, field_input, filter_chip, icon_button,
+    media_avatar, popover_panel, select_option, when,
 };
 use super::icons;
 use super::theme::{Palette, font};
@@ -34,13 +34,12 @@ const SHORT: f32 = 360.0;
 /// answered for another account switches it): every row acts on `list.account`'s own.
 /// `window` is the window's size, which the dialog stays inside.
 pub fn saved(s: &State, list: &SavedList, account: &AccountData, window: [f32; 2], p: &Palette) -> El {
-    let close =
-        button(t!("common.close"), ButtonKind::Secondary, true, p).key("saved-close").on_press(State::close_modal);
     let (bar, messages) = (bar(s, list, p), messages(s, list, account, p));
     let dialog = if window[1] < SHORT {
-        dialog("saved-dialog", t!("saved.title"), col().w_full().gap(14.0).child(bar).child(messages), vec![close], p)
+        let content = col().w_full().gap(14.0).child(bar).child(messages);
+        closable_dialog("saved-dialog", t!("saved.title"), content, Vec::new(), p)
     } else {
-        dialog_with_bar("saved-dialog", t!("saved.title"), bar, messages, vec![close], p).h(HEIGHT)
+        closable_dialog_with_bar("saved-dialog", t!("saved.title"), bar, messages, p).h(HEIGHT)
     };
     dialog.w(WIDTH.min(window[0] - 2.0 * MARGIN).max(280.0))
 }

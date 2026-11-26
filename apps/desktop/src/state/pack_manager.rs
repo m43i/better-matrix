@@ -112,14 +112,6 @@ impl State {
         }
     }
 
-    /// Closes the sticker manager.
-    pub fn close_pack_manager(&mut self) {
-        self.pack_manager = None;
-        if matches!(self.modal, Some(Modal::Packs)) {
-            self.modal = None;
-        }
-    }
-
     /// The packs the manager lists: the user's own, the room's, then those used everywhere.
     pub fn managed_packs(&self) -> Vec<&ImagePack> {
         let Some(manager) = self.pack_manager.as_ref().filter(|_| matches!(self.modal, Some(Modal::Packs))) else {

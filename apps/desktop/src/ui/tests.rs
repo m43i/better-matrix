@@ -2252,7 +2252,7 @@ fn inside(rect: [f32; 4], window: [f32; 4]) -> bool {
 fn the_saved_dialog_should_stay_inside_a_small_zoomed_window() {
     let rt = small_saved_window();
     let [_, _, width, height] = element_rect(&rt, "root");
-    for key in [super::saved::FILTER, "saved-close", "saved-dialog"] {
+    for key in [super::saved::FILTER, "saved-dialog-close", "saved-dialog"] {
         assert!(inside(element_rect(&rt, key), [0.0, 0.0, width, height]), "{key} must fit the window");
     }
 }
@@ -2296,7 +2296,12 @@ fn assert_choice_shown(rt: &Runtime<State>, key: &str) {
 #[test]
 fn choosing_the_first_saved_filter_should_keep_the_choice_in_view() {
     let mut rt = saved_window_since(175, crate::state::SavedSince::AnyTime, true);
-    press(&mut rt, "saved-since-week");
+    // The choice may sit partly below the menu's fold: press where it shows.
+    let ([x, y, width, tall], [_, top, _, height]) =
+        (rt.presented("saved-since-week").expect("the choice").0, element_rect(&rt, super::saved::CHOICES));
+    let (x, y) = (x + width / 2.0, (y + (y + tall).min(top + height)) / 2.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
     for _ in 0..30 {
         rt.frame(1.0 / 60.0);
     }
@@ -5018,4 +5023,71 @@ fn a_long_gif_key_should_keep_save_inside_the_gif_picker() {
     assert_eq!(rt.state.picker.key.text.len(), 400, "the key is in the field");
     let (save, picker) = (element_rect(&rt, "picker-gif-key-save"), element_rect(&rt, "sticker-picker"));
     assert!(save[0] + save[2] <= picker[0] + picker[2], "Save leaves the picker: {save:?} past {picker:?}");
+}
+
+#[test]
+fn a_dialog_to_look_through_should_close_with_the_x_beside_its_title() {
+    for (scene, dialog) in [
+        ("demo-saved", "saved-dialog"),
+        ("demo-edit-history", "edit-history"),
+        ("demo-source", "source-dialog"),
+        ("demo-public-rooms", "public-rooms"),
+        ("demo-packs", "pack-manager"),
+        ("demo-invite", "invite-dialog"),
+        ("demo-space-rooms", "space-rooms"),
+    ] {
+        let (_, setup) = crate::spec().scenes.iter().find(|(name, _)| *name == scene).expect(scene);
+        let mut rt = runtime(setup);
+        let (card, close) = (element_rect(&rt, dialog), element_rect(&rt, &format!("{dialog}-close")));
+        assert!(close[1] < card[1] + 60.0 && close[0] + close[2] > card[0] + card[2] - 60.0, "{scene}: X top right");
+        press(&mut rt, &format!("{dialog}-close"));
+        assert!(rt.state.modal.is_none() && rt.find(dialog).is_none(), "{scene}: the X closes it");
+    }
+}
+
+#[test]
+fn a_wide_dialog_should_keep_its_x_in_a_small_zoomed_window() {
+    for (scene, dialog) in
+        [("demo-public-rooms", "public-rooms"), ("demo-packs", "pack-manager"), ("demo-source", "source-dialog")]
+    {
+        let (_, setup) = crate::spec().scenes.iter().find(|(name, _)| *name == scene).expect(scene);
+        let mut state = State::detached();
+        setup(&mut state);
+        state.settings.zoom = crate::state::Zoom::from_percent(150);
+        let mut rt = Runtime::new(state, super::view, (720.0, 480.0), Env::new(true, 1.0));
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        let [_, _, width, height] = element_rect(&rt, "root");
+        let close = element_rect(&rt, &format!("{dialog}-close"));
+        assert!(inside(close, [0.0, 0.0, width, height]), "{scene}: the X {close:?} must fit {width}x{height}");
+    }
+}
+
+#[test]
+fn a_long_title_should_wrap_beside_the_x() {
+    fn long_title(_: &State, _: &mut rune::Cx<State>) -> rune::El {
+        let title = "The Analytical Engine Society for Difference Engines and Other Calculating Machines";
+        let p = super::theme::palette(true);
+        super::components::closable_dialog("long", title, rune::el(), Vec::new(), &p).w(320.0)
+    }
+    let mut rt = Runtime::new(State::detached(), long_title, (800.0, 600.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    let (close, card) = (element_rect(&rt, "long-close"), element_rect(&rt, "long"));
+    assert!(close[0] + close[2] <= card[0] + card[2], "the X {close:?} must stay on its card {card:?}");
+}
+
+#[test]
+fn a_stickers_actions_should_stay_inside_the_sticker_manager_in_a_small_window() {
+    let mut state = State::detached();
+    demo::pack_manager(&mut state, true);
+    let mut rt = Runtime::new(state, super::view, (720.0, 480.0), Env::new(true, 1.0));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let card = element_rect(&rt, "pack-manager");
+    for key in ["pack-image-remove", "pack-image-save"] {
+        let button = element_rect(&rt, key);
+        assert!(button[0] + button[2] <= card[0] + card[2] - 24.0, "{key} {button:?} must fit the card {card:?}");
+    }
 }

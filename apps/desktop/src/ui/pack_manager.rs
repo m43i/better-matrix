@@ -5,7 +5,7 @@
 
 use rune::{Color, El, ScrollSpec, col, el, icon, row, text};
 
-use super::components::{ButtonKind, button, check_row, dialog, field_input, labelled, switch_row};
+use super::components::{ButtonKind, button, check_row, closable_dialog, field_input, labelled, switch_row};
 use super::icons;
 use super::stickers::pack_name;
 use super::theme::{Palette, font};
@@ -34,9 +34,7 @@ pub fn dialog_for(s: &State, p: &Palette) -> Option<El> {
                 .scroll(ScrollSpec { stick_bottom: false })
                 .child(detail(s, manager, p)),
         );
-    let close =
-        button(t!("packs.done"), ButtonKind::Primary, true, p).key("packs-done").on_press(State::close_pack_manager);
-    Some(dialog("pack-manager", t!("packs.title"), content, vec![close], p).w(760.0))
+    Some(closable_dialog("pack-manager", t!("packs.title"), content, Vec::new(), p).w(760.0))
 }
 
 fn pack_list(s: &State, manager: &PackManager, packs: &[&ImagePack], p: &Palette) -> El {
@@ -257,10 +255,12 @@ fn image_form(s: &State, pack: &ImagePack, form: &ImageForm, p: &Palette) -> El 
                 .on_press(|s: &mut State| s.toggle_pack_image_use(false)),
         )
         .child(
+            // In a narrow window Cancel and Save wrap onto their own line rather than leave it.
             row()
                 .w_full()
                 .gap(8.0)
                 .center_y()
+                .flex_wrap()
                 .child(
                     button(t!("packs.remove"), ButtonKind::Danger, true, p)
                         .key("pack-image-remove")

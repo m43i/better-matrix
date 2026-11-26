@@ -3,7 +3,7 @@
 use matrix_core::{EventSource, RoomSummary, Widget};
 use rune::{El, col, el, icon, row, text};
 
-use super::components::{ButtonKind, Tone, button, dialog, divider, icon_button, menu_action, popover_panel};
+use super::components::{ButtonKind, Tone, button, closable_dialog, divider, icon_button, menu_action, popover_panel};
 use super::icons;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf, tp};
@@ -11,13 +11,11 @@ use crate::state::{AccountData, Popover, SourceView, State};
 
 /// An event's JSON, selectable, with a button that copies it.
 pub fn source(view: &SourceView, p: &Palette) -> El {
-    let close =
-        button(t!("common.close"), ButtonKind::Secondary, true, p).key("source-close").on_press(State::close_modal);
     let (content, copy) = match view {
         SourceView::Loading(_) => (text(t!("info.loading")).font(font::BODY).color(p.text_muted), None),
         SourceView::Shown(source) => (shown(source, p), Some(copy_button(source, p))),
     };
-    dialog("source-dialog", t!("actions.view_source"), content, copy.into_iter().chain([close]).collect(), p).w(640.0)
+    closable_dialog("source-dialog", t!("actions.view_source"), content, copy.into_iter().collect(), p).w(640.0)
 }
 
 fn shown(source: &EventSource, p: &Palette) -> El {
