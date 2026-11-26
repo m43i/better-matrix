@@ -30,3 +30,9 @@ fn waking_after_several_hours_should_only_check_once() {
     schedule.due(now + HOUR * 8);
     assert_eq!(schedule.wait(now + HOUR * 8), HOUR);
 }
+
+#[test]
+fn only_a_later_release_should_replace_a_staged_one() {
+    assert!(newer("0.0.19", "0.0.18"));
+    assert!(!newer("0.0.18", "0.0.18") && !newer("0.0.17", "0.0.18"));
+}

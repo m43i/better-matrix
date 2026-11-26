@@ -103,8 +103,9 @@ The release's `better-matrix-windows-x86_64.zip` holds the same app to unpack an
 ### Updating and removing
 
 On macOS and Windows, the app checks for a newer stable release on startup and every hour.
-When one is available, an update icon appears above your avatar in the rail. Click it to download,
-install and restart. The app never installs an update automatically. The install folder must be
+When one is available, the app downloads it in the background; then an update icon appears above
+your avatar in the rail. Click it to restart into the new version. The app never restarts on its
+own. The install folder must be
 writable; on macOS, run the app from Applications rather than the disk image. Your accounts,
 history and keys stay where they are. See [the update icon in a scrolling rail](docs/self-update.png).
 On Linux, the app checks the same way, but your package manager owns the install, so the update

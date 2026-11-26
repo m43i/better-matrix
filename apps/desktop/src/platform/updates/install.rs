@@ -1,5 +1,6 @@
-//! Stage beside the install (same filesystem, writable before quitting), then hand over to a
-//! helper. Its ready file proves the script started before the app is asked to quit.
+//! Stage beside the install (same filesystem, writable before quitting) while the app runs, then,
+//! when the user restarts, hand over to a helper. Its ready file proves the script started before
+//! the app is asked to quit.
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -38,26 +39,22 @@ impl Install {
         self.platform
     }
 
-    pub fn prepare(
-        &self,
-        client: &reqwest::blocking::Client,
-        release: &Release,
-        error_file: &Path,
-    ) -> Result<(), String> {
+    /// Downloads `release`, checks its digest (and on macOS its signature), and unpacks it beside
+    /// the install, ready to swap in at [`Install::hand_over`]. Dropping the result removes it.
+    pub fn stage(&self, client: &reqwest::blocking::Client, release: &Release) -> Result<Staged, String> {
         let Upgrade::Archive { asset_id, digest } = &release.upgrade else {
             return Err("This release installs outside the app".into());
         };
-        let parent = self.target.parent().ok_or("The install has no parent directory")?;
-        let work = tempfile::Builder::new()
-            .prefix(".better-matrix-update-")
-            .tempdir_in(parent)
-            .map_err(|error| format!("The install folder must be writable: {error}"))?;
+        let writable = |error: std::io::Error| format!("The install folder must be writable: {error}");
+        let root = self.staging()?;
+        fs::create_dir_all(&root).map_err(writable)?;
+        let work = tempfile::Builder::new().tempdir_in(&root).map_err(writable)?;
         let archive = work.path().join("release.zip");
         let mut file = File::create(&archive).map_err(|error| error.to_string())?;
         release::download(client, *asset_id, digest, &mut file)?;
         file.sync_all().map_err(|error| error.to_string())?;
         drop(file);
-        let staged = match self.platform {
+        let app = match self.platform {
             Platform::Mac => {
                 let output = Command::new("/usr/bin/ditto")
                     .args(["-x", "-k"])
@@ -85,6 +82,16 @@ impl Install {
             Platform::Windows => extract_executable(&archive, work.path())?,
         };
         fs::remove_file(archive).map_err(|error| error.to_string())?;
+        Ok(Staged { version: release.version.clone(), app, work })
+    }
+
+    /// Starts the helper that swaps `staged` in once this process exits, and waits until it has
+    /// started. On success the caller [keeps](Staged::keep) the staged files for the helper,
+    /// then quits.
+    pub fn hand_over(&self, staged: &Staged, error_file: &Path) -> Result<(), String> {
+        let Staged { version, app, work } = staged;
+        // A helper an earlier try gave up on may have left its acknowledgement.
+        let _ = fs::remove_file(work.path().join("ready"));
         let script = work.path().join(match self.platform {
             Platform::Mac => "install.sh",
             Platform::Windows => "install.ps1",
@@ -116,11 +123,11 @@ impl Install {
         let mut helper = command
             .arg(script)
             .arg(&self.target)
-            .arg(staged)
+            .arg(app)
             .arg(std::process::id().to_string())
             .arg(work.path())
             .arg(error_file)
-            .arg(&release.version)
+            .arg(version)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -132,8 +139,6 @@ impl Install {
                 return Err("The update helper could not start".into());
             }
             if work.path().join("ready").is_file() {
-                // The helper owns cleanup now; its paths stay alive across our process exit.
-                let _ = work.keep();
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -143,6 +148,49 @@ impl Install {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    /// The updater's own folder beside the install (the same filesystem, so a staged release
+    /// moves into place), holding one folder per staged release. A link in its place is never
+    /// followed: what it points to isn't the updater's.
+    fn staging(&self) -> Result<PathBuf, String> {
+        let root =
+            self.target.parent().ok_or("The install has no parent directory")?.join(".better-matrix-update-staging");
+        match fs::symlink_metadata(&root) {
+            Ok(meta) if !meta.is_dir() => Err(format!("{} is not the updater's folder", root.display())),
+            _ => Ok(root),
+        }
+    }
+
+    /// Removes what an earlier run staged and never handed over (it quit, or crashed, while an
+    /// update waited for a restart). A folder with a ready file belongs to a helper: kept.
+    pub fn clear_stale(&self) {
+        let Ok(root) = self.staging() else { return };
+        let Ok(entries) = fs::read_dir(&root) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) && !path.join("ready").exists() {
+                let _ = fs::remove_dir_all(path);
+            }
+        }
+        // Gone once empty, so no folder is left beside the install.
+        let _ = fs::remove_dir(root);
+    }
+}
+
+/// A release downloaded, checked and unpacked beside the install, waiting for a restart.
+#[derive(Debug)]
+pub struct Staged {
+    pub version: String,
+    /// The app bundle (macOS) or executable (Windows) to swap in.
+    app: PathBuf,
+    work: tempfile::TempDir,
+}
+
+impl Staged {
+    /// Leaves the files for the helper [`Install::hand_over`] started, which removes them.
+    pub fn keep(self) {
+        let _ = self.work.keep();
     }
 }
 
