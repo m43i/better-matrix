@@ -153,6 +153,10 @@ export const routes = {
     pathname: '/new-pack',
     params: { account, roomId },
   }),
+  locationMap: (account: AccountId, roomId: string, eventId: string, thread?: string): Href => ({
+    pathname: '/location-map',
+    params: thread ? { account, roomId, eventId, thread } : { account, roomId, eventId },
+  }),
   /** Sharing a place: the phone's position or one found by name. */
   location: (account: AccountId, roomId: string, thread?: string): Href => ({
     pathname: '/location',

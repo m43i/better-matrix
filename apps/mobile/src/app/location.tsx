@@ -1,12 +1,3 @@
-// Sharing a place (sheet, from the composer's +): the phone's position, once the user asks for it
-// ("Use my location") and it is allowed and found, or a place found by name. Nothing is sent to
-// OpenStreetMap until the user asks: searching goes there only when they submit (its policy
-// forbids searching as they type), and the phone's position is neither looked up nor drawn on
-// its map before "Use my location". The chosen place shows on its map with OpenStreetMap's
-// credit (when maps are on, `MapView`), and Send shares it to the room or thread the composer
-// writes to.
-
-import type { MediaRef } from '@better-matrix/matrix-native/types';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -15,8 +6,10 @@ import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from '
 import { locale, t } from '../i18n';
 import { keyOf } from '../state/actions/composer';
 import { searchPlaces, sendLocation } from '../state/actions/messages';
-import { coordinatesText, geoUri, mapOf } from '../state/geo';
-import { useAppStore } from '../state/react';
+import { coordinatesText, geoUri } from '../state/geo';
+import { liveLocations } from '../engine/locationTask';
+import { shareKey } from '../engine/liveLocation';
+import { useStore, useAppStore } from '../state/react';
 import { font } from '../theme/palette';
 import { Button, Divider, ListRow } from '../ui/components';
 import { Icon } from '../ui/icons';
@@ -27,7 +20,7 @@ import { MapView } from '../ui/timeline/LocationCard';
 interface Chosen {
   geoUri: string;
   description: string | null;
-  map: MediaRef | null;
+  estimated?: boolean;
   /** How far off the phone's position may be, in metres. */
   accuracy: number | null;
 }
@@ -46,21 +39,33 @@ type Search =
   | { type: 'found'; places: Chosen[] }
   | { type: 'failed'; error: string };
 
-async function findHere(): Promise<Here> {
-  const permission = await Location.requestForegroundPermissionsAsync();
+async function findHere(ask: boolean): Promise<Here> {
+  const permission = await (ask
+    ? Location.requestForegroundPermissionsAsync()
+    : Location.getForegroundPermissionsAsync());
 
   if (!permission.granted) return { type: 'denied' };
 
-  const position = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.High,
-  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const position = await Promise.race([
+    Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.High,
+      mayShowUserSettingsDialog: ask,
+    }),
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), 10000);
+    }),
+  ]).finally(() => clearTimeout(timer));
+
+  if (!position) return { type: 'failed', error: t('location.no_fix') };
 
   const { latitude, longitude, accuracy } = position.coords;
   const uri = geoUri(latitude, longitude, accuracy);
 
   return {
     type: 'found',
-    place: { geoUri: uri, description: null, map: mapOf(uri), accuracy: accuracy ?? null },
+    place: { geoUri: uri, description: null, accuracy: accuracy ?? null },
   };
 }
 
@@ -79,36 +84,57 @@ export default function LocationScreen() {
   const [search, setSearch] = useState<Search>({ type: 'idle' });
   const [picked, setPicked] = useState<Chosen | null>(null);
 
-  // The sheet may close while the phone looks: what it finds then goes nowhere.
-  const live = useRef(true);
-  useEffect(
-    () => () => {
-      live.current = false;
-    },
-    [],
-  );
+  const request = useStore((s) => s.liveShares[shareKey(account, roomId)]);
+  const owner = useStore((s) => s.accounts.find((a) => a.summary.id === account)?.summary);
+  const [estimated, setEstimated] = useState<Chosen | null>(null);
+  const generation = useRef(0);
+  useEffect(() => {
+    let mounted = true;
+    const initial = generation.current;
+    void (async () => {
+      const fix = await findHere(false).catch(() => null);
 
-  /** "Use my location": the phone's position, looked up once asked, then chosen. */
+      if (!mounted || generation.current !== initial) return;
+
+      if (fix?.type === 'found') {
+        setHere(fix);
+
+        return;
+      }
+
+      await store.run({ type: 'Locate', data: { request_access: false } }, (event) => {
+        if (mounted && event.type === 'PositionFound')
+          setEstimated({
+            geoUri: event.data.geo_uri,
+            description: t('location.estimated'),
+            accuracy: null,
+            estimated: true,
+          });
+      });
+    })().catch(() => {});
+
+    return () => {
+      mounted = false;
+    };
+  }, [store]);
+
   const locateHere = () => {
     setPicked(null);
 
     if (here.type === 'found' || here.type === 'locating') return;
+    const attempt = ++generation.current;
     setHere({ type: 'locating' });
-    findHere().then(
+    findHere(true).then(
       (found) => {
-        if (live.current) setHere(found);
+        if (generation.current === attempt) setHere(found);
       },
       (cause: unknown) => {
-        if (live.current)
-          setHere({
-            type: 'failed',
-            error: cause instanceof Error ? cause.message : String(cause),
-          });
+        if (generation.current === attempt) setHere({ type: 'failed', error: String(cause) });
       },
     );
   };
 
-  const chosen = picked ?? (here.type === 'found' ? here.place : null);
+  const chosen = picked ?? (here.type === 'found' ? here.place : estimated);
 
   const submit = () => {
     const term = query.trim();
@@ -122,7 +148,6 @@ export default function LocationScreen() {
           places: places.map((place) => ({
             geoUri: place.geo_uri,
             description: place.name,
-            map: place.map,
             accuracy: null,
           })),
         }),
@@ -157,7 +182,16 @@ export default function LocationScreen() {
         {t('mobile.composer.location_title')}
       </Text>
       <View style={[styles.preview, { borderColor: palette.divider }]} testID="location-preview">
-        <MapView account={account} map={chosen?.map ?? null} />
+        <MapView
+          account={account}
+          uri={chosen?.geoUri}
+          zoom={chosen?.estimated ? 10 : 15}
+          person={{
+            id: account,
+            name: owner?.display_name ?? account,
+            avatar: owner?.avatar ?? null,
+          }}
+        />
         <View style={styles.previewWords}>
           <Text style={[font.bodyStrong, { color: palette.text }]} numberOfLines={2}>
             {chosen?.description ?? t('mobile.composer.location_current')}
@@ -185,6 +219,29 @@ export default function LocationScreen() {
         disabled={!chosen}
         testID="location-send"
       />
+      {!thread &&
+        (request != null ? (
+          <Button
+            title={t('location.stop')}
+            onPress={() => liveLocations.stop(store, request)}
+            testID="location-stop"
+          />
+        ) : (
+          <Button
+            title={t('location.start_live')}
+            disabled={here.type !== 'found' || !!picked}
+            onPress={() => {
+              if (here.type === 'found') {
+                liveLocations.start(store, account, roomId, here.place.geoUri);
+                router.back();
+              }
+            }}
+            testID="location-live"
+          />
+        ))}
+      {estimated && !picked && (here.type === 'denied' || here.type === 'failed') && (
+        <Text style={[font.meta, { color: palette.textMuted }]}>{status}</Text>
+      )}
       {here.type !== 'found' || picked ? (
         <ListRow
           icon="myLocation"

@@ -80,6 +80,7 @@ fn spec() -> AppSpec<State> {
             ("demo-pills", demo::pills_draft),
             ("demo-upload-thumbnails", demo::upload_thumbnails),
             ("demo-location", demo::location),
+            ("demo-location-map", demo::location_map),
             ("demo-edit-history", demo::edit_history),
             ("demo-stickers", |s| {
                 demo::typing(s, "");
@@ -1191,6 +1192,26 @@ mod tests {
         rt.frame(1.0 / 60.0);
         assert_eq!(rt.take_url_requests(), ["https://matrix.org"]);
         assert!(rt.state.active_thread().is_none());
+    }
+
+    #[test]
+    fn a_location_card_should_open_its_map_and_only_launch_google_maps_on_request() {
+        let mut rt = runtime(|s| {
+            posted_message(
+                s,
+                matrix_core::MessageContent::Location(matrix_core::Location {
+                    geo_uri: "geo:52.5,13.4".into(),
+                    description: None,
+                    map: None,
+                    live_until: None,
+                }),
+            )
+        });
+        press(&mut rt, "location-$hit-test");
+        assert!(rt.find("location-viewer").is_some());
+        assert!(rt.take_url_requests().is_empty());
+        press(&mut rt, "map-external");
+        assert_eq!(rt.take_url_requests(), ["https://www.google.com/maps/search/?api=1&query=52.5,13.4"]);
     }
 
     #[test]

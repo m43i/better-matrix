@@ -26,6 +26,7 @@ import type {
   RoomSummary,
 } from '@better-matrix/matrix-native/types';
 
+import { demoLiveLocations } from './liveLocations';
 import { withPending } from '../state/admin';
 import { mapOf } from '../state/geo';
 import { messageText } from '../state/messages';
@@ -334,6 +335,13 @@ export function answer(
           },
         },
       ];
+    case 'Locate':
+      return [
+        {
+          type: 'PositionFound',
+          data: { request, estimated: true, geo_uri: 'geo:52.516275,13.377704' },
+        },
+      ];
     case 'SearchPlaces':
       return [{ type: 'PlacesFound', data: { request, places: demoPlaces(command.data.query) } }];
     case 'ListEdits': {
@@ -601,6 +609,7 @@ export function nextAsked(answer: Answer, request: RequestId): EngineEvent[] {
         },
       ];
     case 'Continue':
+    case 'LocationFix':
     // Widget runs' answers (`widgetAnswered`).
     case 'WidgetMessage':
     case 'WidgetPermissions':
@@ -1153,7 +1162,11 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
       data: { request, result: error === undefined ? { Ok: null } : { Err: error } },
     });
 
+  const live = demoLiveLocations(engine, finish);
+
   async function respond(command: Command, request: RequestId) {
+    if (live(command, request)) return;
+
     if (command.type === 'ListImagePacks') {
       const { account, room_id: roomId } = command.data;
       engine.emit({

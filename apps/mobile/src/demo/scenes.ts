@@ -421,6 +421,11 @@ export const scenes = {
     setup: general,
     routes: [routes.room(ADA, GENERAL), routes.messageActions(ADA, GENERAL, STICKER_MESSAGE)],
   },
+  'location-map': {
+    about: 'A shared place on its map',
+    setup: general,
+    routes: [routes.room(ADA, RELEASES), routes.locationMap(ADA, RELEASES, `$demo-${GRACE}-2`)],
+  },
   location: {
     about: 'Sharing a place: the phone’s position or one found by name',
     setup: general,

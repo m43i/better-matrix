@@ -119,6 +119,10 @@ function Routes({ scene }: { scene: SceneName | null }) {
           <Stack.Screen name="pack" />
           <Stack.Screen name="pack-image" options={{ ...sheet, sheetAllowedDetents: [0.75, 1] }} />
           <Stack.Screen name="new-pack" options={{ presentation: 'modal' }} />
+          <Stack.Screen
+            name="location-map"
+            options={{ ...sheet, sheetAllowedDetents: [0.65, 1] }}
+          />
           <Stack.Screen name="location" options={{ ...sheet, sheetAllowedDetents: [0.75, 1] }} />
           <Stack.Screen name="schedule" options={fittedSheet} />
           <Stack.Screen name="scheduled" options={sheet} />

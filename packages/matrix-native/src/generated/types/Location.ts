@@ -6,6 +6,10 @@ import type { MediaRef } from "./MediaRef";
  */
 export type Location = { 
 /**
+ * End time of an Element live location in epoch milliseconds (zero after an early stop).
+ */
+live_until?: number | null, 
+/**
  * Where, as an RFC 5870 `geo:` URI (`geo:51.5008,0.1247;u=35`); read it with
  * [`geo::coordinates`](crate::geo::coordinates).
  */

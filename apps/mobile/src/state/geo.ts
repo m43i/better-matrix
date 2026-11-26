@@ -1,14 +1,7 @@
-// Places: `geo:` URIs (RFC 5870) read and written as the engine's `geo.rs` does, the map of a
-// place as media (`osm:<lat>,<lon>,<zoom>`, which the engine draws from OpenStreetMap), and the
-// place's page on openstreetmap.org. Every map shows OpenStreetMap's credit (`OSM_CREDIT`).
-
 import type { MediaRef } from '@better-matrix/matrix-native/types';
 
 /** How close maps are drawn (the engine's `MAP_ZOOM`). */
 const MAP_ZOOM = 15;
-
-/** The credit every map carries, as OpenStreetMap's licence asks; never translated. */
-export const OSM_CREDIT = '© OpenStreetMap contributors';
 
 /** The latitude and longitude a `geo:` URI names, in degrees; `null` when it names none. */
 export function coordinates(geoUri: string): { latitude: number; longitude: number } | null {
@@ -67,18 +60,21 @@ export function mapOf(uri: string): MediaRef | null {
 
   if (!place) return null;
 
-  return `osm:${trimNumber(place.latitude)},${trimNumber(place.longitude)},${MAP_ZOOM}`;
+  return `map:${trimNumber(place.latitude)},${trimNumber(place.longitude)},${MAP_ZOOM},light`;
 }
 
-/** The place on openstreetmap.org, to open in the browser. */
-export function webLink(uri: string): string | null {
+/** A validated destination for the platform's navigation handler. */
+export function navigationLink(uri: string, platform: string): string | null {
   const place = coordinates(uri);
 
   if (!place) return null;
-  const latitude = trimNumber(place.latitude);
-  const longitude = trimNumber(place.longitude);
+  const point = `${trimNumber(place.latitude)},${trimNumber(place.longitude)}`;
 
-  return `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=17/${latitude}/${longitude}`;
+  if (platform === 'android') return `geo:0,0?q=${point}`;
+
+  if (platform === 'ios') return `geo-navigation:///place?coordinate=${point}`;
+
+  return `https://www.google.com/maps/search/?api=1&query=${point}`;
 }
 
 /** A place's coordinates as people read them: `52.5163, 13.3777`. */

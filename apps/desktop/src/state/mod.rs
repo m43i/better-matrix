@@ -87,7 +87,7 @@ pub use edit_history::EditHistory;
 pub use gifs::GifCache;
 pub use link_previews::LinkPreviews;
 pub use links::{LinkDialog, LinkStep};
-pub use location::{LocationForm, MAP_PIXELS, MAP_SIZE};
+pub use location::LocationForm;
 pub use media::{MediaCache, THUMBNAIL_SIZE, UploadThumbnails};
 pub use message_actions::{MessageAt, MessageHover};
 pub use navigation::{navigate, navigate_now};
@@ -463,6 +463,13 @@ pub enum Modal {
     Poll,
     /// Sharing a place (`State::location`).
     Location,
+    /// A shared place, resolved again as live fixes arrive.
+    LocationMap {
+        account: AccountId,
+        key: TimelineKey,
+        event_id: String,
+        zoom: u8,
+    },
     /// The sticker manager (`State::pack_manager`).
     Packs,
     /// The versions an edited message went through.
@@ -730,6 +737,8 @@ enum Purpose {
     Packs,
     /// Searching places for the location dialog; a failure shows in it.
     Places,
+    Position,
+    LiveShare(AccountId, String),
     /// Finding where a linked or quoted message shows.
     Locate,
     /// Listing the account's scheduled messages; a server without them lists none.
@@ -1913,6 +1922,8 @@ impl State {
             }
             Event::GifsFound { request, offset, page, .. } => self.gifs_found(request, offset, page),
             Event::ImagePackEdited { request, pack, .. } => self.pack_made(request, &pack),
+            Event::PositionFound { request, geo_uri, estimated } => self.position_found(request, geo_uri, estimated),
+            Event::LiveLocationStarted { .. } => {}
             Event::PlacesFound { request, places } => self.places_found(request, places),
         }
         self.settle_widget_prompts();
@@ -2204,6 +2215,8 @@ impl State {
             Purpose::Packs | Purpose::ListScheduled => {}
             Purpose::PackEdit { account, added } => self.pack_edited(request, account, added, Some(error)),
             Purpose::GifSearch => self.picker.gifs.failed(request, error),
+            Purpose::Position => self.position_failed(request, error),
+            Purpose::LiveShare(_, _) => self.notice = Some(tf!("notice.command", error = error)),
             Purpose::Places => self.places_failed(request, error),
             // Only the latest jump says it found nothing, and only while its room shows.
             Purpose::Locate if self.locating.as_ref().is_some_and(|(asked, _, _)| *asked == request) => {
@@ -2990,9 +3003,6 @@ impl State {
             // short codes), and the map of a place it shares.
             for media in entry.emotes().iter().filter(|_| !held) {
                 wanted.push((account.clone(), media.clone(), PACK_IMAGE_SIZE, Some((128, 128))));
-            }
-            if let Some(map) = entry.location_map().filter(|_| self.settings.show_maps) {
-                wanted.push((account.clone(), map.clone(), MAP_SIZE, Some(MAP_PIXELS)));
             }
             // A link card's image.
             if self.settings.show_link_previews

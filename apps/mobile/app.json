@@ -100,13 +100,13 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Better Matrix shares your location when you send it to a conversation.",
+          "locationWhenInUsePermission": "Better Matrix uses your location when you send a place or start live sharing in a room.",
           "locationAlwaysAndWhenInUsePermission": false,
           "locationAlwaysPermission": false,
           "motionUsagePermission": false,
-          "isIosBackgroundLocationEnabled": false,
+          "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": false,
-          "isAndroidForegroundServiceEnabled": false
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       "expo-notifications",
@@ -117,7 +117,8 @@
           "appGroup": "group.chat.bettermatrix.mobile",
           "googleServicesFile": "./google-services.json"
         }
-      ]
+      ],
+      "@maplibre/maplibre-react-native"
     ],
     "experiments": {
       "typedRoutes": true,

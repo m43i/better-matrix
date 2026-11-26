@@ -33,6 +33,8 @@
   </array>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSLocationUsageDescription</key>
+  <string>Share your position in a conversation when you choose to.</string>
   <key>NSCameraUsageDescription</key>
   <string>Better Matrix uses the camera for video calls.</string>
   <key>NSMicrophoneUsageDescription</key>

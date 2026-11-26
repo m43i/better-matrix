@@ -217,23 +217,16 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   until it is shown.
 - **Locations** (`matrix_core::geo`): `Outgoing::Location` sends `m.location` with a
   `geo:` URI, a pin asset (MSC3488) and the place's name as its body (else its coordinates).
-  Maps come from OpenStreetMap, as asked: a map is a `MediaRef` (`osm:lat,lon,zoom`) that
-  `Command::FetchMedia` draws from the standard tiles at the size asked for, with a pin, so maps
-  load, cache and retry as pictures do on both apps. As OpenStreetMap's tile policy asks, tiles
-  are kept on disk (`StoreLayout::map_tiles`) for as long as the server's `Cache-Control` or
-  `Expires` say (less what a cache on the way already held it for; seven days when it says
-  nothing readable), then asked for again with `If-None-Match` /
-  `If-Modified-Since`, a copy past its time still showing when the server can't be reached; the
-  last 64 are also kept decoded in memory, and they are fetched two at a time with a User-Agent
-  naming the app and its home;
-  every map credits "© OpenStreetMap contributors". Loading a map tells OpenStreetMap the
-  device's address and the area shown, for places shared in encrypted rooms too, so Settings →
-  General → Maps of shared places turns maps off (on by default, as GIFs from links): cards and
-  the dialog then show the name and coordinates only, and fetch nothing. The location dialog
-  (`Modal::Location`) finds places with Nominatim on Enter or Search only (its policy forbids
-  searching as one types), at most once a second with the last 32 answers kept, in the app's
-  language, or takes typed coordinates; the timeline's card shows the map, the name,
-  the coordinates and "Open in OpenStreetMap". The desktop has no position of its own to share.
+  The picker uses a permitted device fix or a labelled approximate position from GeoJS, which
+  receives the public IP when the picker needs an estimate. Search and typed coordinates remain
+  available. Sending a place takes an explicit action. Live location is a separate 15-minute
+  room share using Element’s MSC3672 beacon info and related beacon events. Only a device fix
+  can start one. It can be stopped early from the location picker or map viewer.
+  Desktop renders MapLibre Native snapshots off the UI thread, cached by coordinates, style and
+  zoom. Both clients use the app’s bundled light and dark street styles with OpenFreeMap vector tiles. The sender’s avatar
+  marks the place. The in-app map dialog offers zoom and an explicit Google Maps action.
+  Turning off maps suppresses the renderer and tile requests. Nominatim still searches only on
+  submit, with cached results and a one-second interval between requests.
 - **Scheduled messages** (MSC4140 delayed events, `matrix_core::scheduled`): the button beside
   send (or right-clicking send) offers in 30 minutes, in an hour, tomorrow 09:00 and next Monday
   09:00, local time (on that day's clock, summer time and all); the server sends the message
@@ -635,9 +628,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   would need the user's device then, which is what scheduling on the server avoids.
 - Refused scheduled drafts that wait for a busy composer live for the run, as refused edits do;
   quitting before the composer is free again drops them. The message itself was never sent.
-- Every map and place search contacts OpenStreetMap's servers from the device (not the
-  homeserver): the app's name, the place, and the device's address. Maps can be turned off;
-  searches go only when the user asks.
+- OpenFreeMap receives the device IP and map area when maps are enabled. Nominatim receives
+  submitted place searches. GeoJS receives the device IP for an approximate starting position.
 - On the desktop, `@room` in a draft kept across a restart comes back as text: drafts keep
   Matrix HTML, where it is plain words (phones keep it as a pill).
 - Only what the user looks at is downloaded, and a server hiccup heals without a restart.

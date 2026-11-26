@@ -416,8 +416,11 @@ renaming, describing, choosing sticker or emoji use, the pack's picture, new roo
 using a room's pack everywhere (`Modal::Packs`, `Command::EditImagePack`).
 
 **Location**
-: A place a message shares (`m.location`), shown with a **map** drawn from OpenStreetMap's
-tiles (`matrix_core::geo`), fetched like any media.
+: A place a message shares (`m.location`), shown on a MapLibre map with the sender’s avatar pin.
+
+**Live location**
+: A time-limited room share whose avatar pin follows the sender’s device. Element-compatible beacon
+updates refer to the state event that started the share.
 
 **Scheduled message**
 : A message the server holds to send later (MSC4140's delayed events), encrypted like any

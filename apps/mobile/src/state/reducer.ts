@@ -43,6 +43,7 @@ export function previewKey(account: AccountId, url: string): string {
 
 export function initialState(settings: Settings = DEFAULT_SETTINGS): State {
   return {
+    liveShares: {},
     accounts: [],
     active: null,
     restoring: [],
@@ -795,6 +796,8 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'ContactCodeSent':
     case 'MessagesFound':
     case 'PeopleFound':
+    case 'PositionFound':
+    case 'LiveLocationStarted':
     case 'PlacesFound':
     case 'MessageLocated':
     case 'EventSource':

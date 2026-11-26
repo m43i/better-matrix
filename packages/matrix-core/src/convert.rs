@@ -423,6 +423,7 @@ pub(crate) fn content(msgtype: &MessageType) -> MessageContent {
                 && !description.contains(c.geo_uri.trim_start_matches("geo:").split(';').next().unwrap_or_default()))
             .then(|| description.to_owned());
             return MessageContent::Location(crate::model::Location {
+                live_until: None,
                 geo_uri: c.geo_uri.clone(),
                 description,
                 map: crate::geo::map(&c.geo_uri),

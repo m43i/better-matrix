@@ -770,6 +770,9 @@ pub enum MessageContent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 pub struct Location {
+    /// End time of an Element live location in epoch milliseconds (zero after an early stop).
+    #[cfg_attr(feature = "ffi", serde(default), ts(optional = nullable))]
+    pub live_until: Option<u64>,
     /// Where, as an RFC 5870 `geo:` URI (`geo:51.5008,0.1247;u=35`); read it with
     /// [`geo::coordinates`](crate::geo::coordinates).
     pub geo_uri: String,

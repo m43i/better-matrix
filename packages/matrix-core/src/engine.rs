@@ -222,6 +222,22 @@ pub enum Command {
         /// The app's language (a BCP 47 tag), to read the query in.
         language: Option<String>,
     },
+    /// Find a location for the composer. Desktop uses an existing device grant first;
+    /// phones supply their own device fix and use this command only for the IP estimate.
+    Locate {
+        /// Explicitly request access to the desktop device position, without an IP fallback.
+        request_access: bool,
+    },
+    /// Share a fresh device fix in the room for 15 minutes. This request stays open for
+    /// further fixes and an early stop. Beacon state events always belong to the room.
+    ShareLiveLocation {
+        /// Sending account.
+        account: AccountId,
+        /// Destination room.
+        room_id: String,
+        /// The first device fix.
+        geo_uri: String,
+    },
     /// Find places by name on OpenStreetMap, for sharing a location; answered by
     /// [`Event::PlacesFound`]. Send it when the user asks, never as they type.
     SearchPlaces {
@@ -1070,6 +1086,8 @@ pub enum Command {
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 #[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum Answer {
+    /// A new device fix from the phone for its running live location share.
+    LocationFix(String),
     /// The two digits the other device shows ([`QrLoginStep::EnterCheckCode`](crate::QrLoginStep::EnterCheckCode)).
     CheckCode(u8),
     /// The registration token ([`RegistrationStep::Token`](crate::RegistrationStep::Token)).
@@ -1695,6 +1713,20 @@ pub enum Event {
         /// The GIFs.
         page: crate::GifPage,
     },
+    /// Initial position for a location composer.
+    PositionFound {
+        /// The locate request.
+        request: RequestId,
+        /// A validated geo URI.
+        geo_uri: String,
+        /// Whether the position was estimated from the public IP.
+        estimated: bool,
+    },
+    /// The first fix has reached the room. Phones can now deliver subsequent fixes.
+    LiveLocationStarted {
+        /// The running share.
+        request: RequestId,
+    },
     /// Places found for [`Command::SearchPlaces`].
     PlacesFound {
         /// The search it answers.
@@ -1920,6 +1952,7 @@ impl Engine {
             tasks: JoinSet::new(),
             running: HashMap::new(),
             widget_runs: HashMap::new(),
+            live_shares: HashMap::new(),
             http: crate::links::http_client().map_err(|e| e.to_string()),
             signals,
             call: None,
@@ -2115,6 +2148,8 @@ struct State {
     tasks: JoinSet<Completion>,
     /// Command tasks still running, for [`Command::Cancel`].
     running: HashMap<RequestId, AbortHandle>,
+    /// Local live shares, scoped to the destination, including starts still in flight.
+    live_shares: HashMap<(AccountId, String), (RequestId, tokio::sync::watch::Sender<()>)>,
     /// Widget runs ([`Command::RunWidget`] and the like), by the account they act for: signing
     /// it out ends them.
     widget_runs: HashMap<RequestId, AccountId>,
@@ -2191,6 +2226,7 @@ impl State {
         // The app is quitting: the call under way (or just hung up) leaves, so nobody sees the
         // user in it for the seconds until the delayed leave would.
         self.hang_up();
+        self.end_locations(|_, _| true).await;
         if let Some(task) = self.leaving.any() {
             let _ = tokio::time::timeout(QUIT_WAIT, task).await;
         }
@@ -2267,9 +2303,31 @@ impl State {
         self.end_ring(account, room_id);
     }
 
-    /// An account went: its call ends and its rings stop.
+    /// Signal the selected shares now. Before giving up the room or its token, let each
+    /// share send its final beacon state while the account still has permission.
+    fn end_locations(
+        &self,
+        matches: impl Fn(&AccountId, &str) -> bool,
+    ) -> futures_util::future::BoxFuture<'static, ()> {
+        let mut stopping = Vec::new();
+        for ((account, room), (_, stop)) in &self.live_shares {
+            if matches(account, room) {
+                let _ = stop.send(());
+                stopping.push(stop.clone());
+            }
+        }
+        Box::pin(async move {
+            let finished = futures_util::future::join_all(stopping.iter().map(tokio::sync::watch::Sender::closed));
+            let _ = tokio::time::timeout(QUIT_WAIT, finished).await;
+        })
+    }
+
     /// Stops a running command; it finishes as cancelled.
     fn cancel(&mut self, target: RequestId) {
+        if let Some((_, stop)) = self.live_shares.values().find(|(request, _)| *request == target) {
+            let _ = stop.send(());
+            return;
+        }
         self.answers.remove(&target);
         self.widget_runs.remove(&target);
         if let Some(handle) = self.running.remove(&target) {
@@ -2356,7 +2414,10 @@ impl State {
                 }
                 self.ring(account, room_id, caller, Ring::Rtc { video, until });
             }
-            Signal::Left { account, room_id } => self.leave_calls_in(&account, &room_id),
+            Signal::Left { account, room_id } => {
+                self.leave_calls_in(&account, &room_id);
+                drop(self.end_locations(|owner, room| owner == &account && room == room_id));
+            }
             Signal::RingLapsed { account, room_id, ring } => {
                 if self.ringing(&account, &room_id, ring) {
                     self.end_ring(&account, &room_id);
@@ -2755,6 +2816,41 @@ impl State {
                     sink.emit(Event::GifsFound { request, query, offset, page });
                     Ok(Outcome::Done)
                 })
+            }
+            Command::Locate { request_access } => {
+                let http = self.http.clone();
+                Box::pin(async move {
+                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                    {
+                        let position = crate::geo::desktop::position(request_access).await;
+                        if position.is_ok() || request_access {
+                            sink.emit(Event::PositionFound { request, geo_uri: position?, estimated: false });
+                            return Ok(Outcome::Done);
+                        }
+                    }
+                    let _ = request_access;
+                    let geo_uri = crate::geo::estimate(&http.map_err(Error::Location)?).await?;
+                    sink.emit(Event::PositionFound { request, geo_uri, estimated: true });
+                    Ok(Outcome::Done)
+                })
+            }
+            Command::ShareLiveLocation { account, room_id, geo_uri } => {
+                let room = self.account(&account).and_then(|owner| owner.joined_room(&room_id));
+                let destination = (account, room_id);
+                if let std::collections::hash_map::Entry::Vacant(entry) = self.live_shares.entry(destination) {
+                    let (stop, stopped) = tokio::sync::watch::channel(());
+                    entry.insert((request, stop));
+                    let answers = self.answers_for(request);
+                    Box::pin(async move {
+                        crate::geo::live::share(room?, geo_uri, answers, stopped, || {
+                            sink.emit(Event::LiveLocationStarted { request })
+                        })
+                        .await?;
+                        Ok(Outcome::Done)
+                    })
+                } else {
+                    Box::pin(async { Err(Error::Location("A live location is already being shared here".into())) })
+                }
             }
             Command::SearchPlaces { query, language } => {
                 let http = self.http.clone();
@@ -3323,7 +3419,10 @@ impl State {
                 for room_id in &rooms {
                     self.leave_calls_in(&id, room_id);
                 }
+                let locations = self
+                    .end_locations(|owner, room| owner == &id && (room == space || rooms.iter().any(|r| r == room)));
                 Box::pin(async move {
+                    locations.await;
                     let left = account?.leave_space(&space, &rooms).await;
                     feed?.refresh(None).await;
                     left?;
@@ -3605,7 +3704,9 @@ impl State {
                 // The account's call leaves while its token still works.
                 self.forget_calls(&id);
                 let leaving = self.leaving.of_account(&id);
+                let locations = self.end_locations(|owner, _| owner == &id);
                 Box::pin(async move {
+                    locations.await;
                     if let Some(task) = leaving {
                         let _ = tokio::time::timeout(QUIT_WAIT, task).await;
                     }
@@ -3617,8 +3718,10 @@ impl State {
                 })
             }
             Command::Suspend(id) => {
+                let locations = self.end_locations(|owner, _| owner == &id);
                 let sessions = self.sessions.clone();
                 Box::pin(async move {
+                    locations.await;
                     crate::account::set_signed_out(&sessions, &id).await?;
                     Ok(Outcome::LoggedOut(id))
                 })
@@ -3665,13 +3768,11 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
-            Command::FetchMedia { account, media, size } if crate::geo::is_map(&media) => {
-                // Maps come from OpenStreetMap, drawn to the size asked for: no account needed.
-                let (http, tiles) = (self.http.clone(), self.layout.map_tiles());
-                let _ = account;
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            Command::FetchMedia { media, size, .. } if crate::geo::desktop::is_map(&media) => {
+                let cache = self.layout.map_tiles();
                 Box::pin(async move {
-                    let http = http.map_err(|reason| Error::Link { url: String::new(), reason })?;
-                    let bytes = crate::geo::draw_map(&http, &tiles, &media, size).await?;
+                    let bytes = crate::geo::desktop::draw(&cache, &media, size).await?;
                     sink.emit(Event::MediaLoaded { request, media, size, bytes: bytes.into() });
                     Ok(Outcome::Done)
                 })
@@ -3702,7 +3803,9 @@ impl State {
                 // Whether it was under way or already hung up: the room is left after it.
                 self.leave_calls_in(&id, &room_id);
                 let leaving = self.leaving.of_room(&id, &room_id);
+                let locations = self.end_locations(|owner, room| owner == &id && room == room_id);
                 Box::pin(async move {
+                    locations.await;
                     if let Some(task) = leaving {
                         let _ = tokio::time::timeout(QUIT_WAIT, task).await;
                     }
@@ -3856,6 +3959,7 @@ impl State {
             self.running.remove(&request);
             self.answers.remove(&request);
             self.widget_runs.remove(&request);
+            self.live_shares.retain(|_, (active, _)| *active != request);
         }
         let result = match result {
             Ok(Outcome::Done) => Ok(()),

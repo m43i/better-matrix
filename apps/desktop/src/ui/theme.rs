@@ -6,6 +6,7 @@ use rune::{Color, oklch, oklcha};
 /// Every colour role the UI paints with.
 #[derive(Clone, Copy, Debug)]
 pub struct Palette {
+    pub dark: bool,
     pub rail_bg: Color,
     pub sidebar_bg: Color,
     pub sidebar_text: Color,
@@ -96,6 +97,7 @@ pub fn palette(dark: bool) -> Palette {
         )
     };
     Palette {
+        dark,
         syntax: rune_kit::syntax::SyntaxTheme::neutral(dark),
         rail_bg: sidebar.rail_bg,
         sidebar_bg: sidebar.sidebar_bg,

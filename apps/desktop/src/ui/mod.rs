@@ -211,6 +211,9 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             s.accounts.get(&list.account).map(|account| saved::saved(s, list, account, window, &p))
         }
         Some(Modal::Poll) => Some(poll::form(s, &p)),
+        Some(Modal::LocationMap { account, key, event_id, zoom }) => {
+            Some(location::viewer(s, account, key, event_id, *zoom, &p))
+        }
         Some(Modal::Location) => Some(location::dialog_for(s, &p)),
         Some(Modal::Packs) => pack_manager::dialog_for(s, &p),
         Some(Modal::EditHistory(history)) => Some(edit_history::dialog_for(s, history, &p)),

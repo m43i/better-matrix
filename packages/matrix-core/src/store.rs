@@ -20,7 +20,7 @@ impl StoreLayout {
         &self.root
     }
 
-    /// Where map tiles from OpenStreetMap are kept between runs (`crate::geo`).
+    /// Where MapLibre style resources and vector tiles are kept between runs (`crate::geo`).
     pub fn map_tiles(&self) -> PathBuf {
         self.root.join("map-tiles")
     }

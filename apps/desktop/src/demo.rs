@@ -1564,6 +1564,7 @@ pub fn message_features(s: &mut State) {
             "Kai",
             10,
             MessageContent::Location(matrix_core::Location {
+                live_until: None,
                 geo_uri: "geo:52.516275,13.377704".into(),
                 description: Some("Brandenburger Tor, Berlin".into()),
                 map: matrix_core::geo::map("geo:52.516275,13.377704"),
@@ -1699,6 +1700,36 @@ pub fn pills_draft(s: &mut State) {
     s.composer.formatting = true;
 }
 
+/// Seed the same MapLibre snapshots that the media worker normally supplies.
+fn berlin_map(s: &mut State) {
+    s.media.attach(std::sync::Arc::new(|| {}));
+    for (dark, png) in [
+        (false, include_bytes!("../assets/demo/location-light.png").as_slice()),
+        (true, include_bytes!("../assets/demo/location-dark.png").as_slice()),
+    ] {
+        if let Some(source) = matrix_core::geo::styled_map("geo:52.516275,13.377704", dark, matrix_core::geo::MAP_ZOOM)
+        {
+            let bytes: std::sync::Arc<[u8]> = png.into();
+            s.media.loaded(source, bytes.clone(), Some((480, 280)));
+            if let Some(image) = s.media.decode(bytes) {
+                let _ = image.wait();
+            }
+        }
+    }
+    s.media.measure();
+}
+
+pub fn location_map(s: &mut State) {
+    message_features(s);
+    berlin_map(s);
+    s.modal = Some(crate::state::Modal::LocationMap {
+        account: AccountId::new(ADA),
+        key: TimelineKey::room(DEMO_THREAD.0),
+        event_id: "$place".into(),
+        zoom: matrix_core::geo::MAP_ZOOM,
+    });
+}
+
 /// The location dialog with a place found and chosen.
 pub fn location(s: &mut State) {
     seed(s);
@@ -1715,6 +1746,7 @@ pub fn location(s: &mut State) {
         place("Brandenburger Tor, Potsdam, Brandenburg, Deutschland", "geo:52.399929,13.047917"),
     ]);
     s.location.chosen = s.location.places.as_ref().and_then(|places| places.first().cloned());
+    berlin_map(s);
 }
 
 /// The edit history of the user's edited reply.

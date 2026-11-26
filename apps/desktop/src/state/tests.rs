@@ -6215,6 +6215,31 @@ fn typed_coordinates_should_be_chosen_without_a_search() {
 }
 
 #[test]
+fn a_late_ip_estimate_should_leave_a_manually_chosen_place_selected() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.open_location(ComposerTarget::Room);
+    let request = s.location.locating.unwrap();
+    s.location.search.insert("52.5, 13.4");
+    s.search_places();
+    apply(&mut s, Event::PositionFound { request, geo_uri: "geo:1,2".into(), estimated: true });
+    assert_eq!(s.location.chosen.unwrap().geo_uri, "geo:52.5,13.4");
+}
+
+#[test]
+fn an_ip_estimate_should_be_available_to_send_but_never_start_tracking() {
+    let (mut s, mut commands) = state();
+    writing(&mut s, &mut commands);
+    s.open_location(ComposerTarget::Room);
+    let request = s.location.locating.unwrap();
+    apply(&mut s, Event::PositionFound { request, geo_uri: "geo:1,2".into(), estimated: true });
+    s.start_live_location();
+    assert!(all_commands(&mut commands).iter().all(|command| !matches!(command, Command::ShareLiveLocation { .. })));
+    s.send_location(&mut Tx::default());
+    assert!(matches!(sent(&mut commands).as_slice(), [Outgoing::Location { geo_uri, .. }] if geo_uri == "geo:1,2"));
+}
+
+#[test]
 fn a_place_should_be_searched_by_name_and_sent() {
     let (mut s, mut commands) = state();
     writing(&mut s, &mut commands);

@@ -3,7 +3,7 @@
 /**
  * The app's answer to a question a running command asked ([`Command::Answer`]).
  */
-export type Answer = { "type": "CheckCode", "data": number } | { "type": "RegistrationToken", "data": string } | { "type": "Agree" } | { "type": "Email", "data": string } | { "type": "WidgetMessage", "data": string } | { "type": "WidgetPermissions", "data": { 
+export type Answer = { "type": "LocationFix", "data": string } | { "type": "CheckCode", "data": number } | { "type": "RegistrationToken", "data": string } | { "type": "Agree" } | { "type": "Email", "data": string } | { "type": "WidgetMessage", "data": string } | { "type": "WidgetPermissions", "data": { 
 /**
  * The question answered ([`Event::WidgetPermissions::question`]); an answer to another
  * is dropped.

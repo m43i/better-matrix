@@ -715,7 +715,23 @@ offset: number,
 /**
  * The GIFs.
  */
-page: GifPage, } } | { "type": "PlacesFound", "data": { 
+page: GifPage, } } | { "type": "PositionFound", "data": { 
+/**
+ * The locate request.
+ */
+request: RequestId, 
+/**
+ * A validated geo URI.
+ */
+geo_uri: string, 
+/**
+ * Whether the position was estimated from the public IP.
+ */
+estimated: boolean, } } | { "type": "LiveLocationStarted", "data": { 
+/**
+ * The running share.
+ */
+request: RequestId, } } | { "type": "PlacesFound", "data": { 
 /**
  * The search it answers.
  */
