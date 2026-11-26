@@ -1,5 +1,5 @@
 import * as Location from 'expo-location';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -10,6 +10,7 @@ import { coordinatesText, geoUri } from '../state/geo';
 import { liveLocations } from '../engine/locationTask';
 import { shareKey } from '../engine/liveLocation';
 import { useStore, useAppStore } from '../state/react';
+import { room } from '../state/selectors';
 import { font } from '../theme/palette';
 import { Button, Divider, ListRow } from '../ui/components';
 import { Icon } from '../ui/icons';
@@ -78,13 +79,15 @@ export default function LocationScreen() {
 
   const store = useAppStore();
   const router = useRouter();
+  const navigation = useNavigation();
   const palette = usePalette();
   const [here, setHere] = useState<Here>({ type: 'idle' });
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState<Search>({ type: 'idle' });
   const [picked, setPicked] = useState<Chosen | null>(null);
 
-  const request = useStore((s) => s.liveShares[shareKey(account, roomId)]);
+  const canShareLive = useStore((s) => room(s, account, roomId)?.can_share_live_location);
+  const request = useStore((s) => s.liveShares[shareKey(account, roomId)]?.request);
   const owner = useStore((s) => s.accounts.find((a) => a.summary.id === account)?.summary);
   const [estimated, setEstimated] = useState<Chosen | null>(null);
   const generation = useRef(0);
@@ -226,15 +229,21 @@ export default function LocationScreen() {
             onPress={() => liveLocations.stop(store, request)}
             testID="location-stop"
           />
+        ) : !canShareLive ? (
+          <Text style={[font.meta, { color: palette.textMuted }]}>
+            {t('location.permission_needed')}
+          </Text>
         ) : (
           <Button
             title={t('location.start_live')}
             disabled={here.type !== 'found' || !!picked}
-            onPress={() => {
-              if (here.type === 'found') {
-                liveLocations.start(store, account, roomId, here.place.geoUri);
+            onPress={async () => {
+              if (
+                here.type === 'found' &&
+                (await liveLocations.start(store, account, roomId, here.place.geoUri)) &&
+                navigation.isFocused()
+              )
                 router.back();
-              }
             }}
             testID="location-live"
           />

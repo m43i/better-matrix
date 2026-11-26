@@ -57,6 +57,7 @@ const PERMISSIONS: Record<Permission, Key> = {
   Avatar: 'mobile.admin.permission.Avatar',
   Addresses: 'mobile.admin.permission.Addresses',
   Access: 'mobile.admin.permission.Access',
+  LiveLocation: 'permission.live_location',
   Pins: 'mobile.admin.permission.Pins',
   Permissions: 'mobile.admin.permission.Permissions',
   Encryption: 'mobile.admin.permission.Encryption',

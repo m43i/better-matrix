@@ -408,6 +408,7 @@ function room(
     saved: id === GENERAL ? [TEST_PLAN] : [],
     // The demo's homeserver names a Jitsi server; #general has a meeting pinned, #design none.
     can_start_meeting: id === GENERAL || id === DESIGN,
+    can_share_live_location: true,
     can_rename: true,
     priority: 'Normal',
     marked_unread: false,

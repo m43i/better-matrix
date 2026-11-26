@@ -7,10 +7,10 @@ import { LiveLocations } from './liveLocation';
 
 const TASK = 'better-matrix-live-location';
 
-export const liveLocations = new LiveLocations(async (wanted) => {
-  const running = await Location.hasStartedLocationUpdatesAsync(TASK);
+let watching = false;
 
-  if (wanted && !running) {
+export const liveLocations = new LiveLocations(async (wanted) => {
+  if (wanted && !watching) {
     await Location.startLocationUpdatesAsync(TASK, {
       accuracy: Location.Accuracy.High,
       timeInterval: 15000,
@@ -22,7 +22,11 @@ export const liveLocations = new LiveLocations(async (wanted) => {
         killServiceOnDestroy: true,
       },
     });
-  } else if (!wanted && running) await Location.stopLocationUpdatesAsync(TASK);
+    watching = true;
+  } else if (!wanted && (watching || (await Location.hasStartedLocationUpdatesAsync(TASK)))) {
+    await Location.stopLocationUpdatesAsync(TASK);
+    watching = false;
+  }
 });
 
 TaskManager.defineTask<{ locations: Location.LocationObject[] }>(TASK, async ({ data, error }) => {

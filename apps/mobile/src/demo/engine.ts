@@ -864,6 +864,7 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
     can_pin: true,
     saved: [],
     can_start_meeting: false,
+    can_share_live_location: true,
     can_rename: true,
     can_change_settings: true,
     knocks: 0,

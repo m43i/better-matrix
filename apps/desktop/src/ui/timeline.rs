@@ -1709,7 +1709,7 @@ fn location_card(message: &Message, location: &matrix_core::Location, cx: &Conte
             .map_or_else(|| t!("location.waiting").to_owned(), |(lat, lon)| format!("{lat}, {lon}"));
         card.child(text(label).font(font::META).color(p.text_muted).px(10.0).pb(6.0))
     };
-    card.on_press(move |s: &mut State| {
+    super::location::watch_expiry(card, location).on_press(move |s: &mut State| {
         s.modal = Some(crate::state::Modal::LocationMap {
             account: account.clone(),
             key: key.clone(),

@@ -731,7 +731,11 @@ estimated: boolean, } } | { "type": "LiveLocationStarted", "data": {
 /**
  * The running share.
  */
-request: RequestId, } } | { "type": "PlacesFound", "data": { 
+request: RequestId, 
+/**
+ * The beacon state event that owns subsequent fixes.
+ */
+event_id: string, } } | { "type": "PlacesFound", "data": { 
 /**
  * The search it answers.
  */

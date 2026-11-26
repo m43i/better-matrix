@@ -1726,6 +1726,8 @@ pub enum Event {
     LiveLocationStarted {
         /// The running share.
         request: RequestId,
+        /// The beacon state event that owns subsequent fixes.
+        event_id: String,
     },
     /// Places found for [`Command::SearchPlaces`].
     PlacesFound {
@@ -2842,8 +2844,8 @@ impl State {
                     entry.insert((request, stop));
                     let answers = self.answers_for(request);
                     Box::pin(async move {
-                        crate::geo::live::share(room?, geo_uri, answers, stopped, || {
-                            sink.emit(Event::LiveLocationStarted { request })
+                        crate::geo::live::share(room?, geo_uri, answers, stopped, |event_id| {
+                            sink.emit(Event::LiveLocationStarted { request, event_id })
                         })
                         .await?;
                         Ok(Outcome::Done)
@@ -4936,7 +4938,8 @@ async fn open_timeline(
         None
     };
     let loaded = crate::timeline::message_count(&items);
-    let reset = crate::timeline::diff(eyeball_im::VectorDiff::Reset { values: items.clone() }, &me);
+    let reset =
+        crate::timeline::diff(eyeball_im::VectorDiff::Reset { values: items.clone() }, &me, timeline.room()).await;
     let first_page: Option<FirstPage> = if key.thread.is_some() && loaded <= 1 {
         let (account, key) = (account.clone(), key.clone());
         Some(Box::pin(async move { account.thread_first_page(&key).await }))
@@ -5014,7 +5017,8 @@ fn start_timeline(open: OpenTimeline, sink: &Arc<dyn EventSink>) -> TimelineWatc
     let forward = {
         let (sink, id, key) = (Arc::clone(sink), id.clone(), key.clone());
         // Typing belongs to the room: a thread's timeline doesn't watch it again.
-        let room = key.thread.is_none().then(|| timeline.room().clone());
+        let timeline_room = timeline.room().clone();
+        let room = key.thread.is_none().then(|| timeline_room.clone());
         tokio::spawn(async move {
             let (_watching, mut typing) = match &room {
                 Some(room) => {
@@ -5038,7 +5042,10 @@ fn start_timeline(open: OpenTimeline, sink: &Arc<dyn EventSink>) -> TimelineWatc
                                 sink.emit(Event::ReadBoundary { account: id.clone(), room_id: key.room_id.clone(), event_id: read_boundary.clone(), loaded });
                             }
                         }
-                        let diffs = batch.into_iter().map(|diff| crate::timeline::diff(diff, &me)).collect();
+                        let mut diffs = Vec::with_capacity(batch.len());
+                        for diff in batch {
+                            diffs.push(crate::timeline::diff(diff, &me, &timeline_room).await);
+                        }
                         let diffs = match &mut bootstrap { Some(bootstrap) => bootstrap.update(diffs), None => diffs };
                         if let Some(bootstrap) = &bootstrap {
                             catchup.send_replace(bootstrap.progress());
@@ -6310,6 +6317,74 @@ mod tests {
                 _ => None,
             })
             .expect("signed in")
+    }
+
+    #[test]
+    #[ignore = "needs a homeserver with open registration"]
+    fn live_location_should_deliver_a_second_fix_to_the_room_and_stop() {
+        let Ok(server) = std::env::var("BM_LIVE_HOMESERVER") else { return };
+        for encrypted in [false, true] {
+            share_and_receive_live_location(&server, encrypted);
+        }
+    }
+
+    fn share_and_receive_live_location(server: &str, encrypted: bool) {
+        let (engine, events) = start_as(if encrypted { "live-location-encrypted" } else { "live-location" }, false);
+        let account = register_live(&engine, &events, server, "beacon");
+        let room = crate::NewRoom { encrypted, ..crate::NewRoom::private("Live location", false) };
+        let (result, seen) = run(&engine, &events, Command::CreateRoom { account: account.clone(), room });
+        result.unwrap();
+        let room_id = seen
+            .iter()
+            .find_map(|event| match event {
+                Event::RoomCreated { room_id, .. } => Some(room_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let key = TimelineKey::room(&room_id);
+        let (opened, opening) = run(&engine, &events, Command::OpenTimeline { account: account.clone(), key });
+        opened.unwrap();
+        // The picker becomes available when the new room's power levels reach the room list.
+        let allowed = |event: &Event| {
+            matches!(event, Event::RoomsUpdated { list, .. }
+            if list.rooms.iter().any(|room| room.room_id == room_id && room.can_share_live_location))
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(45);
+        if !seen.iter().chain(&opening).any(allowed) {
+            while !allowed(&events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).unwrap())
+            {
+            }
+        }
+        let request = engine.send(Command::ShareLiveLocation { account, room_id, geo_uri: "geo:1,2".into() });
+        let mut beacon = None;
+        let deadline = std::time::Instant::now() + Duration::from_secs(45);
+        loop {
+            match events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).unwrap() {
+                Event::Finished { request: id, result } if id == request => panic!("early finish: {result:?}"),
+                Event::LiveLocationStarted { request: id, event_id } if id == request => {
+                    beacon = Some(event_id);
+                    engine.send(Command::Answer { request, answer: Answer::LocationFix("geo:3,4".into()) });
+                }
+                Event::TimelineChanged { diffs, .. } => {
+                    let updated = diffs.iter().any(|diff| {
+                        let entries: &[_] = match diff {
+                            crate::TimelineDiff::Reset(entries) | crate::TimelineDiff::Append(entries) => entries,
+                            crate::TimelineDiff::PushBack(entry) | crate::TimelineDiff::PushFront(entry)
+                            | crate::TimelineDiff::Set { entry, .. } | crate::TimelineDiff::Insert { entry, .. } => std::slice::from_ref(entry),
+                            _ => &[],
+                        };
+                        entries.iter().any(|entry| matches!(&entry.kind, crate::EntryKind::Message(m)
+                            if Some(&m.event_id) == beacon.as_ref() && matches!(&m.content, crate::MessageContent::Location(place) if place.geo_uri == "geo:3,4")))
+                    });
+                    if updated {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        engine.send(Command::Cancel(request));
+        finished(&events, request).unwrap();
     }
 
     /// The bytes a phone's camera would read from a code drawn on a screen.

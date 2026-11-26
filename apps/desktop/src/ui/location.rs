@@ -83,15 +83,22 @@ pub fn dialog_for(s: &State, p: &Palette) -> El {
             .child(text(place.name.clone()).font(font::BODY_STRONG).color(p.text).wrap());
     }
     content = content.child(
-        button(t!("location.use_device"), ButtonKind::Secondary, form.locating.is_none(), p)
+        button(t!("location.use_device"), ButtonKind::Secondary, !s.requesting_position(), p)
             .key("location-device")
-            .on_press(|s: &mut State| s.locate_position(true)),
+            .on_press_tx(State::request_device_position),
     );
     if let (Some(account), Some(key)) = (&s.nav.account, form.target.and_then(|target| s.composer_key(target)))
         && key.thread.is_none()
     {
-        if let Some(request) = s.live_share(account, &key.room_id) {
+        if let Some(request) = s.live_share(account, &key.room_id, None) {
             content = content.child(stop_button(request, p));
+        } else if !s
+            .accounts
+            .get(account)
+            .and_then(|data| data.room(&key.room_id))
+            .is_some_and(|room| room.can_share_live_location)
+        {
+            content = content.child(text(t!("location.permission_needed")).font(font::META).color(p.text_muted).wrap());
         } else {
             content = content.child(
                 button(t!("location.start_live"), ButtonKind::Secondary, form.estimated == Some(false), p)
@@ -115,6 +122,13 @@ pub fn dialog_for(s: &State, p: &Palette) -> El {
         ],
         p,
     )
+}
+
+pub fn watch_expiry(element: El, location: &Location) -> El {
+    if let Some(until) = location.live_until.filter(|until| *until > crate::state::now_ms()) {
+        return element.on_layout_tx(move |s: &mut State, _, tx| s.watch_location_expiry(until, tx));
+    }
+    element
 }
 
 pub fn title(location: &Location) -> String {
@@ -199,6 +213,7 @@ pub fn viewer(s: &State, account: &AccountId, key: &TimelineKey, event_id: &str,
         && let MessageContent::Location(location) = &message.content
     {
         heading = title(location);
+        content = watch_expiry(content.key("location-viewer-content"), location);
         let face = super::components::media_avatar(
             &message.sender_id,
             &message.sender_name,
@@ -248,7 +263,7 @@ pub fn viewer(s: &State, account: &AccountId, key: &TimelineKey, event_id: &str,
         }
         if location.live_until.is_some_and(|until| until > crate::state::now_ms())
             && message.sender_id == account.as_str()
-            && let Some(request) = s.live_share(account, &key.room_id)
+            && let Some(request) = s.live_share(account, &key.room_id, Some(event_id))
         {
             content = content.child(stop_button(request, p));
         }

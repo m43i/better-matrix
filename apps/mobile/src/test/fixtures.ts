@@ -58,6 +58,7 @@ export function roomSummary(
     can_pin: true,
     saved: [],
     can_start_meeting: false,
+    can_share_live_location: false,
     can_rename: true,
     priority: 'Normal',
     marked_unread: false,

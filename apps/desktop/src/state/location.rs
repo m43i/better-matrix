@@ -29,6 +29,8 @@ pub struct LocationForm {
     pub locating: Option<RequestId>,
     /// Whether the chosen place is a device fix or an IP estimate.
     pub estimated: Option<bool>,
+    #[cfg(target_os = "windows")]
+    consent: Option<windows_future::IAsyncOperation<windows::Devices::Geolocation::GeolocationAccessStatus>>,
     /// Why the last search failed.
     pub error: Option<String>,
 }
@@ -47,6 +49,25 @@ pub fn typed_place(text: &str) -> Option<Place> {
 }
 
 impl State {
+    pub fn watch_location_expiry(&mut self, until: u64, tx: &mut Tx) {
+        self.location_expiries.insert(until);
+        tx.wake_after(std::time::Duration::from_millis(until.saturating_sub(super::now_ms())));
+        tx.live_only();
+    }
+
+    pub(super) fn expire_locations(&mut self, now: u64, tx: &mut Tx) -> bool {
+        let mut changed = false;
+        while let Some(&until) = self.location_expiries.first() {
+            if until > now {
+                tx.wake_after(std::time::Duration::from_millis(until - now));
+                break;
+            }
+            self.location_expiries.pop_first();
+            changed = true;
+        }
+        changed
+    }
+
     /// Opens the location dialog for a composer.
     pub fn open_location(&mut self, target: ComposerTarget) {
         self.popover = None;
@@ -57,7 +78,50 @@ impl State {
         self.locate_position(false);
     }
 
-    pub fn locate_position(&mut self, request_access: bool) {
+    pub fn requesting_position(&self) -> bool {
+        #[cfg(target_os = "windows")]
+        if self.location.consent.is_some() {
+            return true;
+        }
+        self.location.locating.is_some()
+    }
+
+    pub fn request_device_position(&mut self, tx: &mut Tx) {
+        #[cfg(target_os = "windows")]
+        match windows::Devices::Geolocation::Geolocator::RequestAccessAsync() {
+            Ok(op) => {
+                self.location.consent = Some(op);
+                tx.wake_after(std::time::Duration::ZERO);
+            }
+            Err(error) => self.location.error = Some(error.to_string()),
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = tx;
+            self.locate_position(true);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn poll_location_consent(&mut self, tx: &mut Tx) -> bool {
+        let Some(op) = &self.location.consent else { return false };
+        if op.Status() == Ok(windows_future::AsyncStatus::Started) {
+            tx.wake_after(std::time::Duration::from_millis(100));
+            return false;
+        }
+        let granted = op.GetResults() == Ok(windows::Devices::Geolocation::GeolocationAccessStatus::Allowed);
+        self.location.consent = None;
+        if matches!(self.modal, Some(Modal::Location)) {
+            if granted {
+                self.locate_position(true);
+            } else {
+                self.location.error = Some(crate::i18n::t!("location.no_fix").into());
+            }
+        }
+        true
+    }
+
+    fn locate_position(&mut self, request_access: bool) {
         self.location.error = None;
         self.location.searching = None;
         self.location.locating = Some(self.dispatch(Command::Locate { request_access }, Purpose::Position));
@@ -79,9 +143,14 @@ impl State {
         }
     }
 
-    pub fn live_share(&self, account: &matrix_core::AccountId, room_id: &str) -> Option<RequestId> {
+    pub fn live_share(
+        &self,
+        account: &matrix_core::AccountId,
+        room_id: &str,
+        event_id: Option<&str>,
+    ) -> Option<RequestId> {
         self.pending.iter().find_map(|(id, purpose)| {
-            matches!(purpose, Purpose::LiveShare(owner, room) if owner == account && room == room_id).then_some(*id)
+            matches!(purpose, Purpose::LiveShare(owner, room, beacon) if owner == account && room == room_id && event_id.is_none_or(|id| beacon.as_deref() == Some(id))).then_some(*id)
         })
     }
 
@@ -94,7 +163,12 @@ impl State {
         let Some(key) = self.composer_key(target) else { return };
         if key.thread.is_some()
             || self.location.estimated != Some(false)
-            || self.live_share(&account, &key.room_id).is_some()
+            || self.live_share(&account, &key.room_id, None).is_some()
+            || !self
+                .accounts
+                .get(&account)
+                .and_then(|data| data.room(&key.room_id))
+                .is_some_and(|room| room.can_share_live_location)
         {
             return;
         }
@@ -104,7 +178,7 @@ impl State {
                 room_id: key.room_id.clone(),
                 geo_uri: place.geo_uri.clone(),
             },
-            Purpose::LiveShare(account, key.room_id),
+            Purpose::LiveShare(account, key.room_id, None),
         );
         self.close_modal();
     }
@@ -125,6 +199,10 @@ impl State {
         let query = self.location.search.text.trim().to_owned();
         if query.is_empty() {
             return;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            self.location.consent = None;
         }
         self.location.locating = None;
         if let Some(place) = typed_place(&query) {
@@ -161,6 +239,10 @@ impl State {
 
     /// Picks the place to send, and fetches its map.
     pub fn choose_place(&mut self, place: Place) {
+        #[cfg(target_os = "windows")]
+        {
+            self.location.consent = None;
+        }
         self.location.locating = None;
         self.location.searching = None;
         self.location.estimated = None;

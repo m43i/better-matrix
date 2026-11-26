@@ -221,7 +221,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   receives the public IP when the picker needs an estimate. Search and typed coordinates remain
   available. Sending a place takes an explicit action. Live location is a separate 15-minute
   room share using Element’s MSC3672 beacon info and related beacon events. Only a device fix
-  can start one. It can be stopped early from the location picker or map viewer.
+  can start one in a room where the sender may publish both events. Room permissions let an
+  admin set their level together. The picker can stop the current share, and each viewer can
+  stop its own beacon. On Android the foreground service starts when sharing is requested and
+  holds the latest fix until the first Matrix send succeeds.
   Desktop renders MapLibre Native snapshots off the UI thread, cached by coordinates, style and
   zoom. Both clients use the app’s bundled light and dark street styles with OpenFreeMap vector tiles. The sender’s avatar
   marks the place. The in-app map dialog offers zoom and an explicit Google Maps action.

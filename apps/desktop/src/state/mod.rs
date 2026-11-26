@@ -738,7 +738,7 @@ enum Purpose {
     /// Searching places for the location dialog; a failure shows in it.
     Places,
     Position,
-    LiveShare(AccountId, String),
+    LiveShare(AccountId, String, Option<String>),
     /// Finding where a linked or quoted message shows.
     Locate,
     /// Listing the account's scheduled messages; a server without them lists none.
@@ -1016,6 +1016,7 @@ pub struct State {
     /// Accounts whose sidebar layout changed while a save was under way.
     layout_unsaved: HashSet<AccountId>,
     /// What [`State::clock`] read when the view last showed it.
+    location_expiries: std::collections::BTreeSet<u64>,
     clock_shown: Option<(Option<u64>, Option<u64>, Option<u64>)>,
     /// The entries of each open timeline its view shows, by ID; one not reported yet counts
     /// its newest entries.
@@ -1172,6 +1173,7 @@ impl State {
             visits: shell.visits(),
             reveal_thumbnail: false,
             layout_unsaved: HashSet::new(),
+            location_expiries: Default::default(),
             clock_shown: None,
             typing: typing::Typing::default(),
             receipts: receipts::Receipts::default(),
@@ -1923,7 +1925,11 @@ impl State {
             Event::GifsFound { request, offset, page, .. } => self.gifs_found(request, offset, page),
             Event::ImagePackEdited { request, pack, .. } => self.pack_made(request, &pack),
             Event::PositionFound { request, geo_uri, estimated } => self.position_found(request, geo_uri, estimated),
-            Event::LiveLocationStarted { .. } => {}
+            Event::LiveLocationStarted { request, event_id } => {
+                if let Some(Purpose::LiveShare(_, _, beacon)) = self.pending.get_mut(&request) {
+                    *beacon = Some(event_id);
+                }
+            }
             Event::PlacesFound { request, places } => self.places_found(request, places),
         }
         self.settle_widget_prompts();
@@ -2216,7 +2222,7 @@ impl State {
             Purpose::PackEdit { account, added } => self.pack_edited(request, account, added, Some(error)),
             Purpose::GifSearch => self.picker.gifs.failed(request, error),
             Purpose::Position => self.position_failed(request, error),
-            Purpose::LiveShare(_, _) => self.notice = Some(tf!("notice.command", error = error)),
+            Purpose::LiveShare(..) => self.notice = Some(tf!("notice.command", error = error)),
             Purpose::Places => self.places_failed(request, error),
             // Only the latest jump says it found nothing, and only while its room shows.
             Purpose::Locate if self.locating.as_ref().is_some_and(|(asked, _, _)| *asked == request) => {
@@ -2567,6 +2573,11 @@ impl State {
     /// scrolled near its top. True when it changed state.
     pub fn poll(&mut self, tx: &mut Tx) -> bool {
         let mut changed = self.expire_notice(tx);
+        changed |= self.expire_locations(now_ms(), tx);
+        #[cfg(target_os = "windows")]
+        {
+            changed |= self.poll_location_consent(tx);
+        }
         // Whatever closed or replaced a dialog since, a widget's question shows once none does.
         changed |= self.settle_widget_prompts();
         changed |= self.accounts.poll_timelines(tx, self.reduced_motion.get());

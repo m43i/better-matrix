@@ -64,6 +64,8 @@ maplibre-native-ffi = "0.202611.0"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 waterkit-location = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
 waterkit-permission = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]

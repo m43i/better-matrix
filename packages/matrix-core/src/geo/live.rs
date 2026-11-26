@@ -9,14 +9,60 @@ use tokio::sync::mpsc;
 
 const DURATION: Duration = Duration::from_secs(15 * 60);
 
+/// Read the original, decrypted reference events. The SDK timeline aggregate drops their sender.
+pub(crate) async fn latest_fix(room: &Room, beacon: &str, owner: &str) -> Option<String> {
+    use matrix_sdk::ruma::events::{
+        AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent, relation::RelationType,
+    };
+    let beacon = matrix_sdk::ruma::EventId::parse(beacon).ok()?;
+    let (cache, _guard) = room.event_cache().await.ok()?;
+    let references = cache.find_event_relations(&beacon, Some(vec![RelationType::Reference])).await.ok()?;
+    references
+        .into_iter()
+        .filter_map(|event| {
+            let AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::Beacon(beacon_event)) =
+                event.raw().deserialize().ok()?
+            else {
+                return None;
+            };
+            let SyncMessageLikeEvent::Original(fix) = beacon_event else { return None };
+            if fix.sender.as_str() != owner || fix.content.relates_to.event_id != beacon {
+                return None;
+            }
+            let uri = fix.content.location.uri;
+            super::coordinates(&uri)?;
+            Some((fix.content.ts, uri))
+        })
+        .max_by_key(|(ts, _)| *ts)
+        .map(|(_, uri)| uri)
+}
+
+pub(crate) fn permitted(
+    power: &matrix_sdk::ruma::events::room::power_levels::RoomPowerLevels,
+    user: &matrix_sdk::ruma::UserId,
+    encrypted: bool,
+) -> bool {
+    use matrix_sdk::ruma::events::{MessageLikeEventType, StateEventType};
+    power.user_can_send_state(user, StateEventType::BeaconInfo)
+        && power.user_can_send_message(user, MessageLikeEventType::Beacon)
+        && (!encrypted || power.user_can_send_message(user, MessageLikeEventType::RoomEncrypted))
+}
+
 pub(crate) async fn share(
     room: Room,
     first: String,
     mut answers: mpsc::UnboundedReceiver<Answer>,
     mut stopped: tokio::sync::watch::Receiver<()>,
-    started: impl FnOnce(),
+    started: impl FnOnce(String),
 ) -> Result<(), Error> {
     super::coordinates(&first).ok_or(Error::MessageUnavailable)?;
+    if !permitted(
+        &room.power_levels().await.map_err(matrix_sdk::Error::from)?,
+        room.own_user_id(),
+        room.encryption_state().is_encrypted(),
+    ) {
+        return Err(Error::Location("Insufficient permission to share live location".into()));
+    }
     let mut info = BeaconInfoEventContent::new(None, DURATION, true, None);
     let until = tokio::time::Instant::now() + DURATION;
     let before = beacon_id(&room).await?;
@@ -27,7 +73,7 @@ pub(crate) async fn share(
     let publish = |uri: String| room.send(BeaconEventContent::new(id.clone(), uri, None));
     let run = async {
         publish(first).await?;
-        started();
+        started(id.to_string());
         loop {
             let next = tokio::select! {
                 biased;
@@ -141,13 +187,21 @@ mod tests {
         let timeline = account.timeline(&crate::TimelineKey::room("!room:example.org")).await.unwrap();
         let (items, _) = timeline.subscribe().await;
         let me = account.user_id().unwrap();
-        let card = items
-            .iter()
-            .filter_map(|item| crate::timeline::message(item.as_event()?, &me))
-            .find(|msg| msg.event_id == "$session")
+        let crate::TimelineDiff::Reset(entries) =
+            crate::timeline::diff(eyeball_im::VectorDiff::Reset { values: items }, &me, timeline.room()).await
+        else {
+            panic!("timeline reset")
+        };
+        let card = entries
+            .into_iter()
+            .find_map(|entry| match entry.kind {
+                crate::EntryKind::Message(msg) if msg.event_id == "$session" => Some(msg),
+                _ => None,
+            })
             .unwrap();
         let crate::MessageContent::Location(place) = card.content else { panic!("location card") };
         assert_eq!(place.geo_uri, "geo:3,4");
+        assert_eq!(latest_fix(timeline.room(), "$session", "@other:example.org").await, None);
         assert_eq!(place.live_until, Some(u64::from(now.0) + 900000));
     }
 
@@ -167,14 +221,21 @@ mod tests {
                 sent.send((state, serde_json::from_str::<Value>(body).unwrap())).unwrap();
                 return json!({"event_id":if state {"$session"} else {"$fix"}});
             }
-            crate::test_server::thread_response(request)
+            let mut response = crate::test_server::thread_response(request);
+            if request.contains("/sync?") {
+                response["rooms"]["join"]["!room:example.org"]["state"]["events"].as_array_mut().unwrap().push(json!({
+                    "type":"m.room.power_levels","event_id":"$permissions","state_key":"","sender":"@a:example.org",
+                    "origin_server_ts":0,"content":{"events":{"org.matrix.msc3672.beacon_info":0}}
+                }));
+            }
+            response
         });
         let account = crate::Account::for_test(&server.url()).await;
         account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.unwrap();
         let room = account.joined_room("!room:example.org").unwrap();
         let (answers, rx) = mpsc::unbounded_channel();
         let (stop, stopped) = tokio::sync::watch::channel(());
-        let task = tokio::spawn(share(room, "geo:1,2".into(), rx, stopped, || {}));
+        let task = tokio::spawn(share(room, "geo:1,2".into(), rx, stopped, |_| {}));
         let (state, start) = tokio::time::timeout(Duration::from_secs(10), requests.recv()).await.unwrap().unwrap();
         assert!(state && start["live"] == true);
         assert_eq!(start["timeout"], 900000);

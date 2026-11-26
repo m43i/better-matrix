@@ -952,6 +952,7 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
         pinned: Vec::new(),
         can_pin: true,
         can_start_meeting: true,
+        can_share_live_location: true,
         saved: Vec::new(),
         priority: matrix_core::RoomPriority::Normal,
         marked_unread: false,

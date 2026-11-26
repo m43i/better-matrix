@@ -562,6 +562,7 @@ fn permission_label(permission: Permission) -> &'static str {
         Permission::Avatar => t!("permission.avatar"),
         Permission::Addresses => t!("permission.addresses"),
         Permission::Access => t!("permission.access"),
+        Permission::LiveLocation => t!("permission.live_location"),
         Permission::Pins => t!("permission.pins"),
         Permission::Permissions => t!("permission.permissions"),
         Permission::Encryption => t!("permission.encryption"),

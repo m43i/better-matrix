@@ -1021,6 +1021,8 @@
   "permission.mention_room": "Alle mit @room benachrichtigen",
   "permission.name": "Namen ändern",
   "permission.permissions": "Berechtigungen und Rollen ändern",
+  "permission.live_location": "Live-Standort teilen",
+  "location.permission_needed": "Du benötigst die Berechtigung, um deinen Live-Standort in diesem Raum zu teilen.",
   "permission.pins": "Nachrichten anheften",
   "permission.remove_messages": "Nachrichten anderer löschen",
   "permission.send_messages": "Nachrichten senden",

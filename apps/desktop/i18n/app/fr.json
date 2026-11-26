@@ -1021,6 +1021,8 @@
   "permission.mention_room": "Notifier tout le monde avec @room",
   "permission.name": "Modifier le nom",
   "permission.permissions": "Modifier les permissions et les rôles",
+  "permission.live_location": "Partager la position en direct",
+  "location.permission_needed": "Vous devez avoir la permission de partager votre position en direct dans ce salon.",
   "permission.pins": "Épingler des messages",
   "permission.remove_messages": "Supprimer les messages des autres",
   "permission.send_messages": "Envoyer des messages",

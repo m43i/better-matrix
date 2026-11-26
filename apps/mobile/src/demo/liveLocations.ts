@@ -105,7 +105,7 @@ export function demoLiveLocations(engine: Engine, finish: (request: number) => v
           ],
         },
       });
-      engine.emit({ type: 'LiveLocationStarted', data: { request } });
+      engine.emit({ type: 'LiveLocationStarted', data: { request, event_id: message.event_id } });
 
       return true;
     }

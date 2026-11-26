@@ -182,7 +182,7 @@ export interface CallState {
 
 export interface State {
   /** Foreground live shares by account and room, including their pending start. */
-  liveShares: Record<string, number>;
+  liveShares: Record<string, { request: number; eventId: string | null }>;
   /** Signed-in accounts, in the order they were added. */
   accounts: AccountData[];
   /** The account on screen. */

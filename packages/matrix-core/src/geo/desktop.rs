@@ -2,11 +2,14 @@
 use crate::{Error, MediaRef, MediaSize};
 use maplibre_native_ffi as mln;
 use std::{path::Path, time::Duration};
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
 use waterkit_permission::{Permission, PermissionStatus};
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) async fn position(request: bool) -> Result<String, Error> {
+    #[cfg(target_os = "windows")]
+    let _ = request; // The Rune window owns the foreground permission prompt.
+    #[cfg(target_os = "macos")]
     if request {
         let access =
             waterkit_permission::request(Permission::Location).await.map_err(|e| Error::Location(e.to_string()))?;

@@ -52,6 +52,7 @@ fn room(room_id: &str) -> RoomSummary {
         pinned: Vec::new(),
         can_pin: true,
         can_start_meeting: false,
+        can_share_live_location: false,
         saved: Vec::new(),
         can_change_settings: true,
         knocks: 0,
@@ -8014,4 +8015,28 @@ fn a_composers_suggestions_should_cover_only_its_own_timeline() {
     thread.edit.focused = true;
     assert!(s.timeline_covered(ComposerTarget::Thread));
     assert!(!s.timeline_covered(ComposerTarget::Room));
+}
+
+#[test]
+fn a_viewer_should_only_stop_the_beacon_displayed_on_its_card() {
+    let (mut s, _) = state();
+    let account = AccountId::new("@a:x");
+    let request = s.dispatch(
+        Command::ShareLiveLocation { account: account.clone(), room_id: "!one:x".into(), geo_uri: "geo:1,2".into() },
+        Purpose::LiveShare(account.clone(), "!one:x".into(), None),
+    );
+    apply(&mut s, Event::LiveLocationStarted { request, event_id: "$current".into() });
+    assert_eq!(s.live_share(&account, "!one:x", Some("$previous")), None);
+    assert_eq!(s.live_share(&account, "!one:x", Some("$current")), Some(request));
+}
+
+#[test]
+fn an_idle_location_card_should_redraw_once_at_expiry() {
+    let (mut s, _) = state();
+    let mut tx = Tx::default();
+    let until = now_ms() + 1000;
+    s.watch_location_expiry(until, &mut tx);
+    assert!(!s.expire_locations(until - 1, &mut tx));
+    assert!(s.expire_locations(until, &mut tx));
+    assert!(!s.expire_locations(until + 1, &mut tx));
 }

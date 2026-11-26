@@ -2183,6 +2183,7 @@ mod tests {
             pinned: Vec::new(),
             can_pin: true,
             can_start_meeting: false,
+            can_share_live_location: false,
             saved: Vec::new(),
             priority: matrix_core::RoomPriority::Normal,
             marked_unread: false,

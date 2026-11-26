@@ -29,7 +29,7 @@ export default function LocationMapScreen() {
     findMessage(timeline(s, account, keyOf(roomId, thread)).entries, eventId),
   );
 
-  const request = useStore((s) => s.liveShares[shareKey(account, roomId)]);
+  const share = useStore((s) => s.liveShares[shareKey(account, roomId)]);
   const location = message?.content.type === 'Location' ? message.content.data : undefined;
   const now = useNow();
   const title = locationTitle(location, now);
@@ -75,13 +75,15 @@ export default function LocationMapScreen() {
         {coordinatesText(location.geo_uri) ?? t('location.waiting')}
       </Text>
       {uri && <Button title={t('location.navigate')} onPress={open} testID="location-navigate" />}
-      {message.sender_id === account && (location.live_until ?? 0) > now && request != null && (
-        <Button
-          title={t('location.stop')}
-          onPress={() => liveLocations.stop(store, request)}
-          testID="location-stop"
-        />
-      )}
+      {message.sender_id === account &&
+        (location.live_until ?? 0) > now &&
+        share?.eventId === eventId && (
+          <Button
+            title={t('location.stop')}
+            onPress={() => liveLocations.stop(store, share.request)}
+            testID="location-stop"
+          />
+        )}
     </ScrollView>
   );
 }

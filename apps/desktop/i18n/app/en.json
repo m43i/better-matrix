@@ -1021,6 +1021,8 @@
   "permission.mention_room": "Notify everyone with @room",
   "permission.name": "Change the name",
   "permission.permissions": "Change permissions and roles",
+  "permission.live_location": "Share live location",
+  "location.permission_needed": "You need permission to share live location in this room.",
   "permission.pins": "Pin messages",
   "permission.remove_messages": "Delete others' messages",
   "permission.send_messages": "Send messages",
