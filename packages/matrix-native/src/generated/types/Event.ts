@@ -47,6 +47,7 @@ import type { Session } from "./Session";
 import type { SharedFile } from "./SharedFile";
 import type { SidebarLayout } from "./SidebarLayout";
 import type { Status } from "./Status";
+import type { StatusMessageExpiry } from "./StatusMessageExpiry";
 import type { ThreadInfo } from "./ThreadInfo";
 import type { TimelineDiff } from "./TimelineDiff";
 import type { TimelineKey } from "./TimelineKey";
@@ -422,7 +423,15 @@ account: AccountId,
 /**
  * One entry per person.
  */
-people: Array<PersonPresence>, } } | { "type": "RecoveryKey", "data": { 
+people: Array<PersonPresence>, } } | { "type": "StatusMessageExpiry", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * The scheduled clear, if one is set.
+ */
+expiry: StatusMessageExpiry | null, } } | { "type": "RecoveryKey", "data": { 
 /**
  * Which account.
  */

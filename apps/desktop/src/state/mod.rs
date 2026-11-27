@@ -112,7 +112,9 @@ pub use sections::{
 };
 pub use settings::{Appearance, Emoticons, MessageLayout, PlaybackSpeed, Settings, SettingsSection, Zoom};
 pub use sign_in::{Asked, SignInForm, SignInStep};
-pub use status_message::{leading_emoji, suggestions as status_suggestions};
+pub use status_message::{
+    Expiry as StatusExpiry, ExpiryPicker as StatusExpiryPicker, leading_emoji, suggestions as status_suggestions,
+};
 pub use suggest::{Suggestion, Trigger};
 pub use updates::Update;
 pub use widgets::{PromptKey, VideoOption, WidgetPermissions, WidgetPrompt};
@@ -1070,6 +1072,7 @@ pub struct State {
     pub status_draft: Option<AccountId>,
     /// The status message being written.
     pub status_edit: TextEdit,
+    pub status_expiry: status_message::ExpiryDraft,
     /// The poll being written, while [`Modal::Poll`] shows.
     pub poll_form: PollForm,
     /// Edits set aside: refused by the server, or left by navigating away. Each comes back into
@@ -1200,6 +1203,7 @@ impl State {
             emoji_search: TextEdit::default(),
             status_draft: None,
             status_edit: TextEdit::default(),
+            status_expiry: status_message::ExpiryDraft::default(),
             poll_form: PollForm::default(),
             set_aside: Vec::new(),
             drafts: HashMap::new(),
@@ -1668,6 +1672,7 @@ impl State {
             Event::Status { account, status } => self.accounts.status_saved(&account, status),
             Event::Safety { account, safety } => self.safety_reported(&account, safety),
             Event::Presence { account, people } => self.accounts.set_presence(&account, people),
+            Event::StatusMessageExpiry { account, expiry } => self.accounts.set_status_message_expiry(&account, expiry),
             Event::Keywords { account, keywords } => self.accounts.set_keywords(&account, keywords),
             Event::SidebarLayout { account, layout } => {
                 let newer = self
@@ -1794,15 +1799,16 @@ impl State {
                     && self.nav.account.as_ref() == Some(&notification.account)
                     && self.active_room_id() == Some(notification.room_id.as_str());
                 if !looking {
-                    let account_count = self.accounts.iter().count();
+                    let conversation = if notification.one_to_one {
+                        notification.sender_name
+                    } else {
+                        tf!("notify.message_in_room", sender = notification.sender_name, room = notification.room_name)
+                    };
                     let title = match self.accounts.get(&notification.account) {
-                        Some(account) if account_count > 1 => {
-                            format!(
-                                "{} in {} · {}",
-                                notification.sender_name, notification.room_name, account.summary.display_name
-                            )
+                        Some(account) if self.accounts.iter().nth(1).is_some() => {
+                            format!("{conversation} · {}", account.summary.display_name)
                         }
-                        _ => format!("{} in {}", notification.sender_name, notification.room_name),
+                        _ => conversation,
                     };
                     self.shell.notify(&Toast {
                         id: notification.event_id,

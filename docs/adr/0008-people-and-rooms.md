@@ -65,10 +65,9 @@ Date: 2026-11-22
     reads; the next sync or change sets it again. Hidden is not affected. Servers with presence
     switched off accept the status but show nobody's.
 - **Status message:** what the user says they are up to ("🌴 On vacation"), Matrix presence's
-  `status_msg`. It is the spec's only custom status: there is no emoji field and no expiry, so an
-  emoji is the message's first character and the message stays until changed.
-  - Kept on the server only, not in `chat.bettermatrix.status`: other clients set and show the
-    same field. `Command::SetStatusMessage` puts it with the presence of the status that holds
+  `status_msg`. An emoji is the message's first character. The desktop can set an optional expiry.
+  - The message lives in Matrix presence, where other clients set and show the same field.
+    `Command::SetStatusMessage` puts it with the presence of the status that holds
     (Online when none was ever set), under the status's lock, so an announcement running
     meanwhile can't write back the old message (announcing keeps whatever message is set).
     Until a sync has brought the status it goes out offline, as the copy here may be stale and
@@ -78,10 +77,17 @@ Date: 2026-11-22
     wait for the lock. Blank clears it; the apps trim it and keep at most 100 characters.
   - Written in the account menu: its first row shows the message (× clears it); pressed, the
     menu becomes a field with an emoji button (the picker takes the menu's place and returns to
-    it), four suggestions that set themselves at once, and Save. Escape stops writing. The
-    message shows at once, over what the engine reports, until the request saving the latest
+    it), a calendar button at the right of the field, four suggestions that fill the field, and
+    Save. The calendar opens a clear-after picker with presets and an optional date for a custom
+    local time. Escape stops writing. The message shows at once,
+    over what the engine reports, until the request saving the latest
     choice finishes (`saving_status_message`); then it shows as last reported, so a failure falls
     back with a notice and an earlier save finishing late changes nothing.
+  - The account's local SDK store keeps its expiry across restarts. Its engine task waits for
+    a write when nothing is scheduled. While an expiry is pending it checks the wall clock at
+    most once a minute and at the deadline. Once due it reads Matrix presence and clears only
+    a matching message, using the same lock as manual writes. Failed requests retry a minute
+    later. A deadline that passed while the app was closed is handled when the account starts again.
 - **Presence of others:** `Event::Presence` carries `PersonPresence` (presence and status
   message) for the people an account learns about: at start, from this device's store, for the
   people in the user's direct chats, before syncing starts; then whoever's presence a

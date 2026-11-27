@@ -20,7 +20,9 @@ use crate::state::{AccountData, ComposerTarget, EmojiFor, PaneLayout, Popover, R
 
 pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<State>, layout: &PaneLayout) -> El {
     let Some(room) = s.active_room_id().and_then(|id| account.room(id)) else {
-        return super::overview::overview(s, account, p);
+        let window_width = ui.layout_size("root").map_or(1200.0, |size| size[0]);
+        let width = window_width - super::rail::WIDTH - layout.sidebar.map_or(0.0, |size| size.width);
+        return super::overview::overview(s, account, width, layout.sidebar.is_some(), p);
     };
     let key = TimelineKey::room(&room.room_id);
     let cx = Context { covered: s.timeline_covered(ComposerTarget::Room), ..Context::new(s, account, room, &key) };

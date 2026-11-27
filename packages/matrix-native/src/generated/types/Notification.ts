@@ -18,6 +18,10 @@ room_id: string,
  */
 room_name: string, 
 /**
+ * The room is a one-to-one direct chat.
+ */
+one_to_one: boolean, 
+/**
  * The event that notified.
  */
 event_id: string, 

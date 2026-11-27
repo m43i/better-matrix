@@ -9,6 +9,7 @@ function notification(change: Partial<Notification> = {}): Notification {
     account: ADA,
     room_id: '!r',
     room_name: 'Team',
+    one_to_one: false,
     event_id: '$e',
     sender_name: 'Grace',
     body: 'hi',

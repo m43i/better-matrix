@@ -260,8 +260,10 @@ impl Settings {
 pub enum SettingsSection {
     #[default]
     General,
-    /// The theme, the interface size, how messages lay out and whether emoticons become emoji.
+    /// The theme, the interface size and how messages lay out.
     Appearance,
+    /// Composition, previews, media and the room events shown in conversations.
+    MessagesMedia,
     /// The active account's name, picture and contact details.
     Profile,
     Notifications,
@@ -278,22 +280,22 @@ pub enum SettingsSection {
 }
 
 impl SettingsSection {
-    pub const ALL: [SettingsSection; 9] = [
+    pub const PREFERENCES: [SettingsSection; 5] = [
         SettingsSection::General,
         SettingsSection::Appearance,
-        SettingsSection::Profile,
+        SettingsSection::MessagesMedia,
         SettingsSection::Notifications,
-        SettingsSection::Safety,
-        SettingsSection::Account,
-        SettingsSection::Sessions,
         SettingsSection::VoiceVideo,
-        SettingsSection::Info,
     ];
+
+    pub const ACCOUNT: [SettingsSection; 4] =
+        [SettingsSection::Profile, SettingsSection::Safety, SettingsSection::Account, SettingsSection::Sessions];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::General => t!("settings.general"),
             Self::Appearance => t!("settings.appearance"),
+            Self::MessagesMedia => t!("settings.messages_media"),
             Self::Profile => t!("settings.profile"),
             Self::Notifications => t!("settings.notifications"),
             Self::Safety => t!("settings.safety"),
@@ -309,6 +311,7 @@ impl SettingsSection {
         match self {
             Self::General => "general",
             Self::Appearance => "appearance",
+            Self::MessagesMedia => "messages-media",
             Self::Profile => "profile",
             Self::Notifications => "notifications",
             Self::Safety => "safety",

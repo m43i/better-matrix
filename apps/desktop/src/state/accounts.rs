@@ -818,6 +818,7 @@ pub struct AccountData {
     pub presence: HashMap<String, matrix_core::PersonPresence>,
     /// The user's status message as the engine last reported it.
     pub saved_status_message: Option<String>,
+    status_message_expiry: Option<matrix_core::status::StatusMessageExpiry>,
     /// The words that notify the user wherever they are written, once the engine reports them.
     pub keywords: Option<Vec<String>>,
     /// The latest status message chosen while it is saved: until that request finishes, it shows
@@ -882,6 +883,7 @@ impl AccountData {
             saved_status: matrix_core::Status::default(),
             presence: HashMap::new(),
             saved_status_message: None,
+            status_message_expiry: None,
             saving_status_message: None,
             safety: matrix_core::Safety::default(),
             saved_safety: matrix_core::Safety::default(),
@@ -898,6 +900,14 @@ impl AccountData {
     /// The status message the user set on this account, if any.
     pub fn status_message(&self) -> Option<&str> {
         self.status_message_of(self.summary.id.as_str())
+    }
+
+    /// The local deadline, if it is for the message currently shown.
+    pub fn status_message_clear_at(&self) -> Option<u64> {
+        self.status_message_expiry
+            .as_ref()
+            .filter(|expiry| self.status_message() == Some(expiry.message.as_str()))
+            .map(|expiry| expiry.clear_at_ms)
     }
 
     fn index(&self) -> &RoomIndex {
@@ -1257,11 +1267,16 @@ impl AccountData {
         let in_scope = || [RoomKind::Group, RoomKind::Direct].into_iter().flat_map(|kind| self.rooms_in(scope, kind));
         let mut unread: Vec<_> = in_scope().filter(|room| wants_attention(room)).collect();
         unread.sort_by_key(|room| (std::cmp::Reverse(room.mentions), std::cmp::Reverse(room.unread)));
-        let mut recent: Vec<_> =
-            in_scope().filter_map(|room| self.last_message(&room.room_id).map(|message| (room, message))).collect();
         // By the same believable time as the room list, so a misdated message can't hold a slot.
         let now = now_ms();
-        recent.sort_by_key(|(room, _)| std::cmp::Reverse(self.activity(room, now)));
+        let mut recent: Vec<_> = in_scope()
+            .filter_map(|room| {
+                let message = self.last_message(&room.room_id);
+                let activity = self.activity(room, now);
+                (activity > 0 || message.is_some()).then_some(RecentConversation { room, message, activity })
+            })
+            .collect();
+        recent.sort_by_key(|entry| std::cmp::Reverse(entry.activity));
         recent.truncate(RECENT_LIMIT);
         Overview { unread, recent, rooms: self.rooms_in(scope, RoomKind::Group).count() }
     }
@@ -1274,9 +1289,16 @@ const RECENT_LIMIT: usize = 6;
 #[derive(Debug)]
 pub struct Overview<'a> {
     pub unread: Vec<&'a RoomSummary>,
-    pub recent: Vec<(&'a RoomSummary, &'a Message)>,
+    pub recent: Vec<RecentConversation<'a>>,
     /// Group rooms the scope lists (direct chats not counted).
     pub rooms: usize,
+}
+
+#[derive(Debug)]
+pub struct RecentConversation<'a> {
+    pub room: &'a RoomSummary,
+    pub message: Option<&'a Message>,
+    pub activity: u64,
 }
 
 /// How many of a timeline's newest entries count as on screen before the view reports which
@@ -1587,6 +1609,16 @@ impl Accounts {
                 }
                 account.presence.insert(shown.user_id.clone(), shown);
             }
+        }
+    }
+
+    pub fn set_status_message_expiry(
+        &mut self,
+        id: &AccountId,
+        expiry: Option<matrix_core::status::StatusMessageExpiry>,
+    ) {
+        if let Some(account) = self.get_mut(id) {
+            account.status_message_expiry = expiry;
         }
     }
 
@@ -2372,8 +2404,18 @@ mod tests {
         let at = |id: &str, ms| Message { timestamp_ms: ms, ..message(id) };
         account.latest.insert("!c".into(), at("$old", 1));
         account.latest.insert("!dk".into(), at("$new", 2));
-        let recent: Vec<_> = account.overview(&Scope::Home).recent.iter().map(|(r, _)| r.room_id.as_str()).collect();
+        let recent: Vec<_> =
+            account.overview(&Scope::Home).recent.iter().map(|entry| entry.room.room_id.as_str()).collect();
         assert_eq!(recent, ["!dk", "!c"]);
+    }
+
+    #[test]
+    fn the_overview_should_show_recent_rooms_with_activity_before_the_preview_arrives() {
+        let mut account = nested();
+        account.rooms[2].activity_ms = Some(1);
+        let overview = account.overview(&Scope::Home);
+        let recent = &overview.recent[0];
+        assert_eq!((recent.room.room_id.as_str(), recent.message, recent.activity), ("!c", None, 1));
     }
 
     #[test]

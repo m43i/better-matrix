@@ -357,7 +357,7 @@ see who is typing there.
     addresses, guest and server access, a space's rooms and spaces, moderation rules, other
     widgets pinned or taken off) are
     `RoomChange::log_only` and go to the room log. A device setting brings them back into
-    timelines ("Room changes", `Settings::show_room_changes` on the desktop's General settings,
+    timelines ("Room changes", `Settings::show_room_changes` in the desktop's Messages & media settings,
     `showRoomChanges` in the phone's Preferences; off by default), replanning them like hidden
     events. A change left out is passed over like an undrawn hidden event: it doesn't break a run
     of joins or a sender's group of messages.
@@ -408,7 +408,7 @@ see who is typing there.
     its change at once (`El::instant_changes`) rather than fading the picture in.
   - Frames decode on a worker and stream into a `rune::Pixels`, so animation redraws only the
     picture.
-  - Fetching contacts those sites, so General → GIFs from links turns it off. Memory bounds and
+  - Fetching contacts those sites, so Messages & media → GIFs from links turns it off. Memory bounds and
     retries are in [0007](0007-composer-and-media.md).
 - **On screen:** only on-screen rows load media.
   - The virtual list reports its visible rows (`on_visible_rows`); the view maps them, plus 10

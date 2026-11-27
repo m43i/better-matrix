@@ -171,8 +171,10 @@ fn switching_settings_sections_should_land_the_new_content_at_once() {
 
 #[test]
 fn switching_settings_sections_should_show_their_final_colours_on_the_first_frame() {
-    for source in SettingsSection::ALL {
-        for destination in SettingsSection::ALL {
+    let sections =
+        || SettingsSection::PREFERENCES.into_iter().chain(SettingsSection::ACCOUNT).chain([SettingsSection::Info]);
+    for source in sections() {
+        for destination in sections() {
             if source == destination {
                 continue;
             }
@@ -1869,13 +1871,33 @@ fn pressing_the_status_message_should_open_its_field_with_suggestions() {
 }
 
 #[test]
-fn picking_a_suggested_status_message_should_set_it() {
+fn picking_a_suggested_status_message_should_leave_time_to_choose_its_expiry() {
     let mut rt = runtime(|_| {});
     press(&mut rt, "account-button");
     press(&mut rt, "status-message");
     press(&mut rt, "status-suggestion-vacation");
+    assert_eq!(rt.state.status_edit.text, "🌴 On vacation");
+    assert!(rt.find("status-expiry").is_some());
+    press(&mut rt, "status-message-save");
     assert_eq!(rt.state.active_account().and_then(|a| a.status_message()), Some("🌴 On vacation"));
     assert!(rt.find("account-menu").is_none());
+}
+
+#[test]
+fn the_calendar_should_reveal_the_status_expiry_picker_from_the_field() {
+    let mut rt = runtime(|_| {});
+    press(&mut rt, "account-button");
+    press(&mut rt, "status-message");
+    let [x, _, width, _] = element_rect(&rt, "status-message-field");
+    assert!(element_rect(&rt, "status-expiry")[0] >= x + width - 0.5);
+    assert!(rt.find("status-expiry-picker").is_none());
+    press(&mut rt, "status-expiry");
+    press(&mut rt, "status-expiry-custom");
+    assert!(!rt.state.status_message_ready());
+    press(&mut rt, "status-expiry-time");
+    rt.paste("18:30");
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.status_message_ready());
 }
 
 #[test]
@@ -3282,10 +3304,10 @@ fn choosing_chat_bubbles_in_the_appearance_settings_should_lay_messages_out_in_b
 }
 
 #[test]
-fn choosing_typed_emoticons_in_the_appearance_settings_should_keep_them_as_typed() {
+fn choosing_typed_emoticons_in_messages_and_media_should_keep_them_as_typed() {
     let mut rt = runtime(|s| {
         s.open_settings();
-        s.show_settings_section(SettingsSection::Appearance);
+        s.show_settings_section(SettingsSection::MessagesMedia);
     });
     press(&mut rt, "emoticons-typed");
     assert_eq!(rt.state.settings.emoticons, crate::state::Emoticons::AsTyped);
@@ -4974,7 +4996,7 @@ fn a_kept_gif_key_should_be_offered_only_to_replace_or_remove_never_shown() {
     let secret = "sekret-giphy-key-zq9x";
     let mut rt = runtime(|s| {
         s.picker.giphy = crate::state::GifKey::Kept(secret.into());
-        s.open_settings();
+        s.show_settings_section(SettingsSection::MessagesMedia);
     });
     tall(&mut rt);
     assert!(rt.find("settings-giphy-replace").is_some() && rt.find("settings-giphy-remove").is_some());
@@ -4988,7 +5010,7 @@ fn a_kept_gif_key_should_be_offered_only_to_replace_or_remove_never_shown() {
 fn removing_the_gif_key_in_settings_should_ask_for_a_new_one() {
     let mut rt = runtime(|s| {
         s.picker.giphy = crate::state::GifKey::Kept("k".into());
-        s.open_settings();
+        s.show_settings_section(SettingsSection::MessagesMedia);
     });
     tall(&mut rt);
     press(&mut rt, "settings-giphy-remove");
@@ -5000,7 +5022,7 @@ fn removing_the_gif_key_in_settings_should_ask_for_a_new_one() {
 fn a_long_gif_key_should_keep_save_inside_its_settings_group() {
     let mut rt = runtime(|s| {
         s.picker.giphy = crate::state::GifKey::Missing;
-        s.open_settings();
+        s.show_settings_section(SettingsSection::MessagesMedia);
     });
     tall(&mut rt);
     press(&mut rt, "settings-giphy-key");

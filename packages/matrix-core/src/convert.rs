@@ -301,6 +301,7 @@ pub(crate) async fn notification(
         account: account.clone(),
         room_id: room.room_id().to_string(),
         room_name: display_name(room).await,
+        one_to_one: room.direct_targets_length() == 1 && room.active_members_count() <= 2,
         event_id: event.event_id.to_string(),
         sender_name: sender_name(room, &event.sender).await,
         body: content(&event.content.msgtype).plain().into_owned(),

@@ -828,6 +828,7 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'PushContent':
     // Presence dots and status messages are desktop-only for now.
     case 'Presence':
+    case 'StatusMessageExpiry':
       return state;
     // Answers its search alone (`store.run`), into the picker that asked.
     case 'GifsFound':

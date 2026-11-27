@@ -121,6 +121,7 @@ export type { SignInMethod } from "./SignInMethod";
 export type { SpaceChange } from "./SpaceChange";
 export type { SpaceSummary } from "./SpaceSummary";
 export type { Status } from "./Status";
+export type { StatusMessageExpiry } from "./StatusMessageExpiry";
 export type { Successor } from "./Successor";
 export type { ThreadInfo } from "./ThreadInfo";
 export type { ThreadSummary } from "./ThreadSummary";

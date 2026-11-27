@@ -95,6 +95,7 @@ fn notification(room_id: &str) -> Notification {
         account: AccountId::new("@a:example.org"),
         room_id: room_id.into(),
         room_name: "general".into(),
+        one_to_one: false,
         event_id: "$1".into(),
         sender_name: "Grace".into(),
         body: "hi".into(),
@@ -487,7 +488,15 @@ fn muting_a_room_should_update_it_at_once_and_tell_the_server() {
 fn a_notification_for_another_room_should_be_shown() {
     let (mut s, posted) = recording_state();
     apply(&mut s, Event::Notification(notification("!two:x")));
-    assert_eq!(posted.lock().unwrap().len(), 1);
+    assert_eq!(posted.lock().unwrap()[0].title, "Grace in general");
+}
+
+#[test]
+fn a_one_to_one_notification_should_use_the_senders_name() {
+    let (mut s, posted) = recording_state();
+    let notification = Notification { one_to_one: true, room_name: "Grace, Ada".into(), ..notification("!two:x") };
+    apply(&mut s, Event::Notification(notification));
+    assert_eq!(posted.lock().unwrap()[0].title, "Grace");
 }
 
 #[test]
@@ -704,6 +713,25 @@ fn clearing_the_status_message_should_send_none() {
     s.set_status_message(&id, "");
     assert_eq!(s.accounts.get(&id).and_then(|a| a.status_message()), None);
     assert!(matches!(&drain(&mut commands)[..], [(_, Command::SetStatusMessage { message: None, .. })]));
+}
+
+#[test]
+fn adding_a_deadline_should_send_an_unchanged_status_message() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    let me = person_presence(id.as_str(), matrix_core::Presence::Online, Some("Out"));
+    apply(&mut s, Event::Presence { account: id, people: vec![me] });
+    s.edit_status_message();
+    s.choose_status_expiry(StatusExpiry::HalfHour);
+    let before = now_ms();
+    s.save_status_message();
+    let sent = drain(&mut commands);
+    assert!(matches!(
+        &sent[..],
+        [(_, Command::SetStatusMessage { message: Some(message), clear_at_ms: Some(at), .. })]
+            if message == "Out" && (before + 1_800_000..=now_ms() + 1_800_000).contains(at)
+    ));
 }
 
 #[test]

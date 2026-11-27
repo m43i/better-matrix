@@ -328,6 +328,7 @@ mod tests {
             account: account(),
             room_id: "!r".into(),
             room_name: room.into(),
+            one_to_one: false,
             event_id: "$e".into(),
             sender_name: sender.into(),
             body: "hi".into(),

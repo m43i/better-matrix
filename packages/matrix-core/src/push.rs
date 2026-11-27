@@ -196,6 +196,7 @@ fn content_of(account: &AccountId, room_id: &str, event_id: &str, item: Notifica
                 account: account.clone(),
                 room_id: room_id.to_owned(),
                 room_name,
+                one_to_one: item.is_direct_message_room && item.joined_members_count <= 2,
                 event_id: event_id.to_owned(),
                 sender_name,
                 body,

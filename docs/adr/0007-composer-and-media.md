@@ -92,7 +92,7 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   before it, whitespace, the end or `.`, `,`, `!`, `?` after it, and not between backticks; `<3`
   beside a number stays a comparison. The desktop also leaves code, code blocks, links and pills
   (mentions, maths, spoilers) as typed. Inline code sends one literally. A device setting
-  under Appearance (`Settings::emoticons`, `Emoticons::AsEmoji` by default, or `AsTyped`)
+  under Messages & media (`Settings::emoticons`, `Emoticons::AsEmoji` by default, or `AsTyped`)
   sends them all as typed instead, so `:D` can go as it is; the composer takes the choice
   when it builds what to send (`take_outgoing`, `take_edit`). Phones don't replace them yet.
 - **Spoilers and formulas:** received spoilers draw as a block of their own colour, carrying an
@@ -183,7 +183,7 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   pictures are stickers until changed. After a change the packs shown are listed again; other
   rooms' lists are dropped and listed when next needed.
 - **GIF search** (`Command::SearchGifs`, `matrix_core::gif_search`): GIPHY, with the user's
-  own API key (Settings → General → GIF search, or the picker's GIF tab, which asks for it with
+  own API key (Settings → Messages & media → GIF search, or the picker's GIF tab, which asks for it with
   a link to GIPHY's dashboard); the app ships no key, so no one pays for everyone's searches.
   The key goes into the system keychain alone (`system_keychain`: unlike sessions, never into
   files when no keychain is reachable; the key then lasts the run), read and written off the
@@ -502,7 +502,7 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     card like any other (`TimelineItem::card_link`).
   - The card sits below the message text; pressing it opens the link. Its image loads like the
     other media on screen, as a 160-pixel thumbnail; one that fails to load is left out.
-    Settings → General → Link previews turns them off (on by default).
+    Settings → Messages & media → Link previews turns them off (on by default).
 - **Linked GIFs:** each holds at most 48 MiB of frames (beyond that, its first frame only), and
   at most 16 play.
   - Past 128 MiB of frames across them, those off screen are forgotten, the one shown longest
