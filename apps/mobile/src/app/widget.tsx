@@ -10,7 +10,7 @@
 import type { AccountId, Policy, WidgetAccess } from '@better-matrix/matrix-native/types';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../i18n';
 import { widgetTarget } from '../routes';
@@ -23,7 +23,7 @@ import { openInBrowser } from '../ui/accounts/browser';
 import { Button, EmptyState, IconButton, ListRow, ListSection } from '../ui/components';
 import { HeaderClose } from '../ui/HeaderButtons';
 import { usePalette } from '../ui/theme';
-import { openOutside, openWidgetInSystemBrowser } from '../ui/widgets/browser';
+import { openWidgetInSystemBrowser } from '../ui/widgets/browser';
 import { bridgeToken, widgetLaunches } from '../ui/widgets/launch';
 import { PermissionSheet } from '../ui/widgets/PermissionSheet';
 import { WidgetPageView } from '../ui/widgets/WidgetPageView';
@@ -111,15 +111,30 @@ function Running({
     );
   }, [askingCapture, run]);
 
-  // A run that ended by itself (the widget or the manager closed) takes the screen with it; one
-  // the engine opens in the browser instead (a page on plain HTTP) opens there and goes too.
+  // A closed widget leaves the screen. A browser handoff leaves only once the OS accepts it.
   const browserUrl = view.type === 'browser' ? view.url : null;
 
   useEffect(() => {
-    if (browserUrl !== null) openOutside(store, browserUrl);
+    if (view.type === 'ended' && router.canGoBack()) router.back();
+  }, [view.type, router]);
 
-    if ((view.type === 'ended' || browserUrl !== null) && router.canGoBack()) router.back();
-  }, [view.type, browserUrl, router, store]);
+  useEffect(() => {
+    if (browserUrl === null) return;
+    let onScreen = true;
+
+    void Linking.openURL(browserUrl).then(
+      () => {
+        if (onScreen && router.canGoBack()) router.back();
+      },
+      () => {
+        if (onScreen) run.browserFailed(t('widgets.browser_failed'));
+      },
+    );
+
+    return () => {
+      onScreen = false;
+    };
+  }, [browserUrl, router, run]);
 
   const title =
     view.type === 'page'

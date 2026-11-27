@@ -373,7 +373,9 @@ async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Res
             if asked["url"].is_null() {
                 account.remove_widget(room.room_id().as_str(), id).await?;
             } else {
-                room.send_state_event_raw(super::LEGACY_TYPE, id, content).await?;
+                let state = account.widget_state(room, super::Freshness::Server).await?;
+                let kind = state.iter().find(|(_, key, ..)| key == id).map_or(super::LEGACY_TYPE, |(kind, ..)| *kind);
+                room.send_state_event_raw(kind, id, content).await?;
             }
             (json!({ "success": true }), After::Widgets)
         }

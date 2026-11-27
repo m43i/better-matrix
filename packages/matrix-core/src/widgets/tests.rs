@@ -10,8 +10,8 @@ use crate::test_server::{Server, thread_response};
 use super::integrations::{After, SENDABLE, answer_request, named_manager, policies, terms_url, widget_content};
 use super::meetings::{BigBlueButton, Jitsi, Place, base32, jwt, named_jitsi, place};
 use super::session::{
-    Grants, Handshake, IDENTITY, PermissionKind, Step, WidgetAccessKind, WidgetUrlField, api_url, describe, grants_key,
-    identity, manage_permissions, refused, run,
+    Grants, Handshake, IDENTITY, PermissionKind, Step, WidgetAccessKind, WidgetPermission, WidgetUrlField, api_url,
+    describe, grants_key, identity, manage_permissions, refused, run,
 };
 use super::*;
 
@@ -115,7 +115,11 @@ async fn resetting_jitsi_permissions_should_clear_the_grant_for_the_canonical_or
 
     let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else { panic!("expected permission dialog") };
     assert_eq!(access.origin, origin);
-    assert_eq!(access.kind, WidgetAccessKind::Saved(vec![identity(origin)]));
+    let permission = WidgetPermission {
+        disclosed: Some(vec![WidgetUrlField::DisplayName, WidgetUrlField::AvatarUrl, WidgetUrlField::RoomId]),
+        ..identity(origin)
+    };
+    assert_eq!(access.kind, WidgetAccessKind::Saved(vec![permission]));
     assert!(store.get_custom_value(&key).await.unwrap().is_none());
 }
 
@@ -157,7 +161,41 @@ async fn a_jitsi_meeting_should_ask_again_if_only_a_legacy_decision_was_saved() 
     let Event::WidgetPermissions { permissions, .. } = events.try_recv().unwrap() else {
         panic!("expected identity permission");
     };
-    assert_eq!(permissions, [identity("https://meet.example.org")]);
+    assert_eq!(
+        permissions,
+        [WidgetPermission {
+            disclosed: Some(vec![WidgetUrlField::DisplayName, WidgetUrlField::AvatarUrl, WidgetUrlField::RoomId]),
+            ..identity("https://meet.example.org")
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_dimension_meeting_should_disclose_the_profile_fields_it_requests() {
+    let server = pinned_widget(json!({
+        "type": "m.custom", "name": "Class",
+        "url": "https://dimension.example/widgets/bigbluebutton?meetingId=m1&meetingPassword=pw"
+    }));
+    let account = synced(&server).await;
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+
+    assert!(matches!(result, Err(Error::Cancelled)));
+    let Event::WidgetPermissions { permissions, .. } = events.try_recv().unwrap() else {
+        panic!("expected identity permission");
+    };
+    assert_eq!(
+        permissions,
+        [WidgetPermission {
+            disclosed: Some(vec![WidgetUrlField::DisplayName, WidgetUrlField::AvatarUrl]),
+            ..identity("https://dimension.example")
+        }]
+    );
 }
 
 #[tokio::test]
@@ -438,6 +476,35 @@ fn a_manager_setting_a_widget_without_a_url_should_remove_it() {
     let set = widget_content(&json!({"widget_id": "w", "type": "m.custom", "url": "https://w.example", "name": "W"}))
         .unwrap();
     assert_eq!(set, json!({"type": "m.custom", "url": "https://w.example", "name": "W", "data": {}}));
+}
+
+#[tokio::test]
+async fn a_manager_should_update_a_widget_under_its_existing_state_type() {
+    let updated = Arc::new(AtomicBool::new(false));
+    let captured = Arc::clone(&updated);
+    let server = Server::new(move |request| {
+        if request.contains("/state ") {
+            return json!([{
+                "type": SPEC_TYPE, "state_key": "board", "sender": "@a:example.org",
+                "event_id": "$board", "origin_server_ts": 1,
+                "content": {"type": "m.custom", "url": "https://board.example/"}
+            }]);
+        }
+        if request.starts_with("PUT ") {
+            captured.store(request.contains("/state/m.widget/board"), Ordering::Relaxed);
+            return json!({"event_id": "$updated"});
+        }
+        thread_response(request)
+    });
+    let account = synced(&server).await;
+    let room = account.joined_room(ROOM).unwrap();
+    let asked = json!({
+        "action": "set_widget", "room_id": ROOM, "widget_id": "board",
+        "type": "m.custom", "name": "Board", "url": "https://board.example/updated",
+    });
+
+    assert_eq!(answer_request(&account, &room, &asked).await, (json!({"success": true}), After::Widgets));
+    assert!(updated.load(Ordering::Relaxed));
 }
 
 #[tokio::test]

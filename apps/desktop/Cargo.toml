@@ -91,8 +91,24 @@ rune-notify.workspace = true
 tray-icon = { version = "0.27", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+webview2-com = "0.39"
 windows = { version = "0.62", features = ["Devices_Geolocation"] }
 windows-future = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "NSError",
+  "NSString",
+  "NSURLError",
+] }
+objc2-web-kit = { version = "0.3", default-features = false, features = [
+  "WKNavigation",
+  "WKNavigationDelegate",
+  "WKWebView",
+  "WebKitErrors",
+  "objc2-app-kit",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Tray registration must report whether there is a host that can actually show the item.

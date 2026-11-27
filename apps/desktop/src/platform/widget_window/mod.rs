@@ -21,6 +21,8 @@
 //! a pipe or a process. Headless, nothing starts and the calls are kept ([`WindowCall`]).
 
 pub mod helper;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod native_load;
 #[cfg(test)]
 mod tests;
 

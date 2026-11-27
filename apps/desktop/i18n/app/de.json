@@ -1172,6 +1172,7 @@
   "notice.widget_run": "Das Widget konnte nicht geöffnet werden: {{error}}",
   "notice.widget_window": "Das Fenster des Widgets konnte nicht geöffnet werden: {{error}}",
   "widgets.permission.identity": "{{subject}} deine Matrix-ID bestätigen",
+  "widgets.permission.identity_shares": "Matrix-ID gegenüber {{subject}} bestätigen und folgende Daten teilen: {{fields}}",
   "slash.meet": "Ein Video-Meeting starten",
   "slash.meet_unavailable": "Dein Homeserver bietet keine Meetings an.",
   "widgets.menu": "Zum Raum hinzufügen",

@@ -38,7 +38,7 @@ fn board_open(s: &mut State) -> RequestId {
 }
 
 fn permission(capability: &str) -> WidgetPermission {
-    WidgetPermission { capability: capability.into(), kind: PermissionKind::Other, subject: None }
+    WidgetPermission { capability: capability.into(), kind: PermissionKind::Other, subject: None, disclosed: None }
 }
 
 /// The demo's general room with its Jitsi meeting pinned, and what it sends.

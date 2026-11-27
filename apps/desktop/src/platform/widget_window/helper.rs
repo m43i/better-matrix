@@ -44,7 +44,6 @@ enum Wake {
     /// The page started loading (`false`) or finished (`true`).
     Loaded(bool),
     /// The native web view failed to load the page.
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     LoadFailed,
     /// The app is gone: stdin ended.
     Orphaned,
@@ -89,7 +88,6 @@ fn show(url: &str, title: &str, bridge: Bridge) -> Result<std::convert::Infallib
     let token = token().map_err(|error| error.to_string())?;
     let event_loop = EventLoopBuilder::<Wake>::with_user_event().build();
     let proxy = event_loop.create_proxy();
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let failure = proxy.clone();
     let listener = proxy.clone();
     std::thread::Builder::new().name("widget-window-stdin".into()).spawn(move || {
@@ -115,7 +113,6 @@ fn show(url: &str, title: &str, bridge: Bridge) -> Result<std::convert::Infallib
     // Each address handed to the browser once: a page can't open tab after tab by itself.
     let handed: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
     let mut builder = WebViewBuilder::new_with_web_context(&mut context)
-        .with_url(url)
         .with_ipc_handler(move |request| {
             if origin(&request.uri().to_string()).as_deref() != Some(from_page.borrow().as_str()) {
                 return;
@@ -132,7 +129,12 @@ fn show(url: &str, title: &str, bridge: Bridge) -> Result<std::convert::Infallib
             stays
         })
         .with_on_page_load_handler(move |event, _| {
-            let _ = proxy.send_event(Wake::Loaded(matches!(event, PageLoadEvent::Finished)));
+            let finished = matches!(event, PageLoadEvent::Finished);
+            // On Windows Wry reports Finished even when navigation fails. WebView2's
+            // completion callback below distinguishes success from failure.
+            if !cfg!(target_os = "windows") || !finished {
+                let _ = proxy.send_event(Wake::Loaded(finished));
+            }
         })
         .with_permission_handler(|kind| match kind {
             PermissionKind::Microphone
@@ -150,6 +152,14 @@ fn show(url: &str, title: &str, bridge: Bridge) -> Result<std::convert::Infallib
     }
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     let webview = builder.build(&window)?;
+    #[cfg(target_os = "windows")]
+    super::native_load::watch(&webview, move |loaded| {
+        let _ = failure.send_event(if loaded { Wake::Loaded(true) } else { Wake::LoadFailed });
+    })?;
+    #[cfg(target_os = "macos")]
+    let delegate = super::native_load::watch(&webview, move || {
+        let _ = failure.send_event(Wake::LoadFailed);
+    })?;
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let webview = {
         use tao::platform::unix::WindowExtUnix;
@@ -169,12 +179,16 @@ fn show(url: &str, title: &str, bridge: Bridge) -> Result<std::convert::Infallib
         });
         webview
     };
+    // Attach the native callbacks before the first navigation. A failure can arrive before
+    // the page has anything to load.
+    webview.load_url(url)?;
     let mut loaded = false;
     let mut waiting: Vec<String> = Vec::new();
     event_loop.run(move |event, _, flow| {
+        #[cfg(target_os = "macos")]
+        let _keep_navigation_delegate = &delegate; // WKWebView's delegate reference is weak.
         *flow = ControlFlow::Wait;
         match event {
-            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
             Event::UserEvent(Wake::LoadFailed) => {
                 say(&FromHelper::Failed);
                 *flow = ControlFlow::Exit;

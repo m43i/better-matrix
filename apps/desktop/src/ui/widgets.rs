@@ -24,7 +24,13 @@ pub fn permission_text(permission: &WidgetPermission) -> String {
         PermissionKind::DownloadFiles => t!("widgets.permission.download_files").to_owned(),
         PermissionKind::CallServices => t!("widgets.permission.call_services").to_owned(),
         PermissionKind::StayInApp => t!("widgets.permission.stay_in_app").to_owned(),
-        PermissionKind::Identity => tf!("widgets.permission.identity", subject = subject),
+        PermissionKind::Identity => match &permission.disclosed {
+            Some(fields) => {
+                let fields = fields.iter().map(|field| url_field(*field)).collect::<Vec<_>>().join(", ");
+                tf!("widgets.permission.identity_shares", subject = subject, fields = fields)
+            }
+            None => tf!("widgets.permission.identity", subject = subject),
+        },
         PermissionKind::Other => permission.capability.clone(),
     }
 }

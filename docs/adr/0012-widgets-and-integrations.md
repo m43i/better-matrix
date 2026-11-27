@@ -110,9 +110,11 @@ Date: 2026-11-25
 - **Opening a widget:** the engine resolves the room's current state, then asks for confirmation
   before loading a generic widget or handing its URL to a browser. The prompt identifies the
   origin, room and Matrix account, and names any Matrix context placed in the URL, including
-  the widget ID added by the bridge. Jitsi's confirmation discloses the display name it passes
-  to the meeting. BigBlueButton confirms the resolved meeting origin before opening the page.
-  Widget API permissions and meeting identity access are requested separately.
+  the widget ID added by the bridge. Jitsi's confirmation discloses whether the meeting receives
+  the display name or the Matrix ID it uses in its place. BigBlueButton confirms the resolved
+  meeting origin before opening the page. Widget API permissions and meeting identity access
+  are requested separately. Meeting identity prompts name the profile and room fields sent
+  with the identity.
 - **Permissions:** what a widget asks for arrives as `Event::WidgetPermissions`, numbered within
   the run, each capability described (`WidgetPermission`, `PermissionKind`, its subject); the
   user starts with no options selected and grants any subset (`Answer::WidgetPermissions`, naming the question: an answer to another
@@ -156,13 +158,14 @@ Date: 2026-11-25
   the user may send an event, encryption, sending integration state (`SENDABLE`: widgets, their
   layout, bot options, plumbing; never messages or the room's settings), and closing. Its
   replies are never taken as requests. Membership queries, invite, kick and bot power changes
-  read the current room state from the homeserver. Widget changes list the room's widgets again.
+  read the current room state from the homeserver. Scalar updates use the widget's existing
+  state type. Widget changes list the room's widgets again.
 - **Desktop:** a widget runs in its own window from a web-view helper: the same binary started
   as `better-matrix --widget-window` (wry and tao; WebKitGTK on Linux, WKWebView on macOS,
   WebView2 on Windows), one process per run, JSON lines over stdin and stdout
   (`platform::widget_window`). It forwards the bridge's messages (token, origin and filter
-  checked again in Rust), reports each document's start and load and WebKitGTK navigation
-  failures, posts the engine's after
+  checked again in Rust), reports each document's start, load and native navigation failure,
+  posts the engine's after
   load, reloads on a repeated `open`, sends pages opening new windows and navigations off the
   page's origin to the browser (wry can't tell frames from the page there, so another site's
   frame opens in the browser too, and a top-level `data:`/`blob:` document may appear but gets
@@ -188,7 +191,8 @@ Date: 2026-11-25
     `demo-widget-permissions`, `demo-integration-terms`.
 - **Phones** run HTTPS widgets and Jitsi and BigBlueButton meetings in an in-app web view
   (`app/widget.tsx`, `WidgetRun`). They hand off HTTP pages and hosted Teams and Zoom meetings
-  to the browser. Android's video chooser pages through meeting options. See [0010](0010-mobile.md).
+  to the browser. A refused handoff keeps the widget screen open for retry. Android's video
+  chooser pages through meeting options. See [0010](0010-mobile.md).
 
 ## Consequences
 

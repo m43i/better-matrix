@@ -162,6 +162,9 @@ pub struct WidgetPermission {
     /// What it allows it for: an event type (`m.room.message`, `m.room.message#m.text`, a state
     /// type and key), when it names one.
     pub subject: Option<String>,
+    /// Other fields sent to a server that receives a meeting identity.
+    #[cfg_attr(feature = "ffi", serde(default, skip_serializing_if = "Option::is_none"), ts(optional))]
+    pub disclosed: Option<Vec<WidgetUrlField>>,
 }
 
 /// What a widget permission allows.
@@ -221,7 +224,7 @@ pub(crate) fn describe(capability: &str) -> WidgetPermission {
             };
             (kind, None)
         });
-    WidgetPermission { capability: capability.to_owned(), kind, subject }
+    WidgetPermission { capability: capability.to_owned(), kind, subject, disclosed: None }
 }
 
 /// What the user granted a widget before: what it asked for then, and what of it they allowed.
@@ -306,8 +309,17 @@ pub(crate) async fn manage_permissions(
     let origin = permission_origin(place.as_ref(), &widget.url)?;
     let key = grants_key(&room_id, &widget_id, &origin);
     let saved = account.grants(&key).await;
-    let permissions =
-        saved.granted.iter().map(|name| if name == IDENTITY { identity(&origin) } else { describe(name) }).collect();
+    let permissions = saved
+        .granted
+        .iter()
+        .map(|name| {
+            if name == IDENTITY {
+                place.as_ref().map_or_else(|| identity(&origin), |place| meeting_identity(place, &viewer, &origin))
+            } else {
+                describe(name)
+            }
+        })
+        .collect();
     let access = access_for(&account, &viewer, &widget, origin, WidgetAccessKind::Saved(permissions))?;
     confirm_access(&*sink, request, access, &mut answers).await?;
     let store = account.client().state_store();
@@ -380,6 +392,7 @@ impl Ask<'_> {
     async fn identity(
         &self,
         origin: &str,
+        permission: WidgetPermission,
         widget: &str,
         answers: &mut mpsc::UnboundedReceiver<Answer>,
     ) -> Result<bool, Error> {
@@ -388,7 +401,7 @@ impl Ask<'_> {
         if let Some(granted) = grants.answer(&[IDENTITY.to_owned()]) {
             return Ok(!granted.is_empty());
         }
-        let permissions = vec![identity(origin)];
+        let permissions = vec![permission];
         // The run's only question.
         let question = 1;
         self.sink.emit(Event::WidgetPermissions {
@@ -589,6 +602,22 @@ pub(crate) fn identity(origin: &str) -> WidgetPermission {
     WidgetPermission { subject: Some(origin.to_owned()), ..describe(IDENTITY) }
 }
 
+/// The field that supplies the name, including the fallback when the account has no name.
+fn name_field(viewer: &super::Viewer) -> WidgetUrlField {
+    if viewer.display_name == viewer.user_id { WidgetUrlField::UserId } else { WidgetUrlField::DisplayName }
+}
+
+fn meeting_identity(place: &meetings::Place, viewer: &super::Viewer, origin: &str) -> WidgetPermission {
+    let mut fields = vec![WidgetUrlField::AvatarUrl];
+    if name_field(viewer) == WidgetUrlField::DisplayName {
+        fields.insert(0, WidgetUrlField::DisplayName);
+    }
+    if matches!(place, meetings::Place::Jitsi(_)) {
+        fields.push(WidgetUrlField::RoomId);
+    }
+    WidgetPermission { disclosed: Some(fields), ..identity(origin) }
+}
+
 /// Whether a page message is the widget asking who the user is.
 fn asks_identity(message: &Value) -> bool {
     message["api"] == "fromWidget" && message["action"] == "get_openid" && message.get("response").is_none()
@@ -627,7 +656,7 @@ pub(crate) async fn run(
                 &viewer,
                 &widget,
                 permission_site.clone(),
-                WidgetAccessKind::Open(vec![WidgetUrlField::DisplayName]),
+                WidgetAccessKind::Open(vec![name_field(&viewer)]),
             )?;
             confirm_access(&*sink, request, access, &mut answers).await?;
         }
@@ -639,7 +668,8 @@ pub(crate) async fn run(
                 | meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { .. })
         ) {
             let ask = Ask { account: &account, room_id: &room_id, widget_id: &widget_id, request, sink: &sink };
-            ask.identity(&permission_site, &widget.name, &mut answers).await?
+            let permission = meeting_identity(&place, &viewer, &permission_site);
+            ask.identity(&permission_site, permission, &widget.name, &mut answers).await?
         } else {
             false
         };

@@ -1172,6 +1172,7 @@
   "notice.widget_run": "Impossible d'ouvrir le widget : {{error}}",
   "notice.widget_window": "Impossible d'ouvrir la fenêtre du widget : {{error}}",
   "widgets.permission.identity": "Confirmer votre identifiant Matrix à {{subject}}",
+  "widgets.permission.identity_shares": "Confirmer votre identifiant Matrix auprès de {{subject}} et partager les données suivantes : {{fields}}",
   "slash.meet": "Démarrer une réunion vidéo",
   "slash.meet_unavailable": "Votre serveur d'accueil ne propose pas de réunions.",
   "widgets.menu": "Ajouter au salon",

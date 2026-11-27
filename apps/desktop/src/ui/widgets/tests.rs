@@ -256,6 +256,7 @@ fn asking_who_the_user_is_should_read_in_words() {
         capability: "io.bettermatrix.identity".into(),
         kind: matrix_core::PermissionKind::Identity,
         subject: Some("https://jitsi.example".into()),
+        disclosed: None,
     };
     assert_eq!(super::permission_text(&permission), "Confirm your Matrix ID to https://jitsi.example");
 }
@@ -402,6 +403,7 @@ fn successive_questions_should_show_under_different_keys() {
         capability: "io.element.requires_client".into(),
         kind: matrix_core::PermissionKind::StayInApp,
         subject: None,
+        disclosed: None,
     };
     rt.update(|s, tx| {
         s.apply(
@@ -434,6 +436,7 @@ fn downloading_files_should_read_as_any_file_the_account_can_open() {
         capability: "org.matrix.msc4039.download_file".into(),
         kind: matrix_core::PermissionKind::DownloadFiles,
         subject: None,
+        disclosed: None,
     };
     assert_eq!(super::permission_text(&permission), "Download files your account can open");
 }

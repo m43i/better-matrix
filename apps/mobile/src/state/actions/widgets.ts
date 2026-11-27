@@ -131,6 +131,12 @@ export class WidgetRun {
     };
   };
 
+  /** The operating system refused the browser handoff. Keep the launch open for retry. */
+  browserFailed(error: string): void {
+    if (this.current.view.type === 'browser')
+      this.set({ view: { type: 'failed', error }, asking: null });
+  }
+
   private set(change: Partial<WidgetRunSnapshot>): void {
     this.current = { ...this.current, ...change };
 
@@ -432,8 +438,9 @@ export class WidgetRun {
     this.request = null;
     this.leavePage();
 
-    // Opened in the browser: the screen is going already.
-    if (this.current.view.type !== 'browser') this.set({ view: { type: 'ended' }, asking: null });
+    // After a browser handoff, the screen handles the result independently of the engine.
+    if (this.current.view.type !== 'browser' && this.current.view.type !== 'failed')
+      this.set({ view: { type: 'ended' }, asking: null });
   }
 
   private failed(request: RequestId, cause: unknown): void {

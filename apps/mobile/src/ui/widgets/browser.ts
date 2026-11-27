@@ -28,14 +28,6 @@ function askInAlert(widget: string, permissions: WidgetPermission[]): Promise<Pe
   });
 }
 
-/** Opens a widget's address in the system's browser; a failure becomes a notice. */
-export function openOutside(store: Store, url: string): void {
-  Linking.openURL(url).catch((cause: unknown) => {
-    const error = cause instanceof Error ? cause.message : String(cause);
-    store.update((s) => addNotice(s, t('notice.browser', { error })));
-  });
-}
-
 function confirmInAlert(access: WidgetAccess): Promise<boolean> {
   const { title, body, action } = accessText(access);
 

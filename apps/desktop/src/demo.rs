@@ -1925,9 +1925,13 @@ pub fn meeting_without_calls(s: &mut State) {
 pub fn widget_permissions(s: &mut State) {
     widgets(s);
     let Some(request) = s.run_widget("board", false) else { return };
-    let permission = |capability: &str, kind: matrix_core::PermissionKind, subject: Option<&str>| {
-        matrix_core::WidgetPermission { capability: capability.into(), kind, subject: subject.map(Into::into) }
-    };
+    let permission =
+        |capability: &str, kind: matrix_core::PermissionKind, subject: Option<&str>| matrix_core::WidgetPermission {
+            capability: capability.into(),
+            kind,
+            subject: subject.map(Into::into),
+            disclosed: None,
+        };
     use matrix_core::PermissionKind as Kind;
     let permissions = vec![
         permission("org.matrix.msc2762.receive.event:m.room.message", Kind::ReadEvents, Some("m.room.message")),

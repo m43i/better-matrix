@@ -326,6 +326,16 @@ describe('WidgetRun', () => {
     expect(run.snapshot().view.type).toBe('browser');
   });
 
+  it('should retain the retry state if the browser refuses before the engine finishes', async () => {
+    const { engine, run, request, finish } = setup();
+    engine.emit({ type: 'OpenUrl', data: { request, url: 'https://zoom.us/j/123456789' } });
+    run.browserFailed('Browser unavailable');
+    finish();
+    await flush();
+
+    expect(run.snapshot().view).toEqual({ type: 'failed', error: 'Browser unavailable' });
+  });
+
   it('should start over when the main frame leaves the page’s origin', () => {
     const { engine, run, request, show, load, commands } = setup();
     show();

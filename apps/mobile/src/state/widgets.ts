@@ -191,6 +191,12 @@ export function permissionText(permission: WidgetPermission): string {
       return t('mobile.widgets.permission_stay_in_app');
     case 'Identity':
       // The subject is the server that will learn who the user is.
+      if (subject !== null && permission.disclosed?.length)
+        return t('widgets.permission.identity_shares', {
+          subject,
+          fields: permission.disclosed.map((field) => t(urlFields[field])).join(', '),
+        });
+
       return subject === null
         ? t('mobile.widgets.permission.identity')
         : t('mobile.widgets.permission.identity_to', { subject });

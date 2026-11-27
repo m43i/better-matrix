@@ -237,11 +237,14 @@ impl Account {
             // can put an old event after its removal).
             Freshness::Server => {
                 let resolved = self.read_extra_state(room).await?;
-                return Ok(resolved
+                let mut widgets: Vec<_> = resolved
                     .iter()
                     .filter(|event| TYPES.iter().any(|kind| event["type"] == *kind))
                     .filter_map(read_state)
-                    .collect());
+                    .collect();
+                // Match the store's order when the same ID is pinned under both state types.
+                widgets.sort_by_key(|(kind, ..)| *kind != LEGACY_TYPE);
+                return Ok(widgets);
             }
             // Without sliding sync, the store holds every widget sync brought.
             Freshness::Known if !self.sliding() => Vec::new(),

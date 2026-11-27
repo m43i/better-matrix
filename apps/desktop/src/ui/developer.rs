@@ -61,7 +61,7 @@ pub fn widgets(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette
     let failed = account.widget_errors.contains_key(&room.room_id);
     let count = match listed {
         Some(listed) => tp!("widgets.count", listed.widgets.len()),
-        None if failed => t!("widgets.title").to_owned(),
+        None if failed => t!("widgets.integrations").to_owned(),
         None => t!("info.loading").to_owned(),
     };
     let top = row()
