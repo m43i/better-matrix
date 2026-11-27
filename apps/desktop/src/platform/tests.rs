@@ -19,6 +19,32 @@ fn older_settings_should_have_no_last_used_account() {
 }
 
 #[test]
+fn older_settings_should_close_to_the_tray_by_default() {
+    assert!(load_settings(&Prefs::memory()).close_to_tray);
+}
+
+#[test]
+fn quitting_during_a_settings_save_should_preserve_the_latest_close_preference() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("prefs.json");
+    let mut shell = Shell::headless();
+    shell.prefs = Arc::new(Mutex::new(Prefs::at(&file)));
+    let prefs = Arc::clone(&shell.prefs);
+    let (held, waiting) = std::sync::mpsc::channel();
+    let other_writer = std::thread::spawn(move || {
+        let _guard = prefs.lock().unwrap();
+        held.send(()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    });
+    waiting.recv().unwrap();
+    shell.save_settings(Settings { close_to_tray: false, ..Settings::default() });
+    drop(shell);
+
+    assert!(!load_settings(&Prefs::at(file)).close_to_tray);
+    other_writer.join().unwrap();
+}
+
+#[test]
 fn clearing_the_last_used_account_should_survive_saving_and_loading_settings() {
     let mut prefs = Prefs::memory();
     prefs.set(LAST_ACCOUNT, "@ada:example.org").unwrap();

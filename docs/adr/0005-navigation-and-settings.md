@@ -211,6 +211,19 @@ Date: 2026-11-22
     Windows requires `ICustomDestinationList::SetAppID` before `BeginList`; Rune's jump list
     doesn't call it, and changing Rune is out of this app's hands. Without a jump list, Windows
     and Linux don't keep the rooms opened at all (`Shell::offers_jump_list`).
+- **Close to tray:** by default, closing the main window leaves the engine and app state running
+  with a system tray icon (a menu-bar item on macOS). Its menu reopens the window or quits the
+  app. The icon disappears when the window regains focus. On Linux, a StatusNotifier host must
+  accept the icon and remain available while the window is closed. This supports Plasma,
+  GNOME with AppIndicator, Hyprland with the Waybar or Quickshell tray, Xfce's Notification Area,
+  and Cinnamon with its XApp Status Applet. A failed registration or a lost host quits if the
+  window is still closed. Give a previously working tray time to return after a panel or
+  Explorer restart, and verify that the app's own icon is registered.
+  Plasma's watcher and host can outlive the tray widget, so check for the widget on a screen
+  when Plasma owns the host. The pinned Rune tray has no macOS backend and its Linux backend
+  can report success without a host. Its Windows tray can't receive Explorer's restart
+  broadcast. Native quit and the General preference to quit on close use Rune's orderly exit
+  so the app can finish the latest settings save, stop the engine and release the instance.
 - **Settings:** a modal in sections (`SettingsSection`). Device settings go to a prefs file off
   the UI thread; account settings live on the homeserver.
   - Every desktop dialog uses the shared modal layer's Rune focus trap and Escape dismissal.
@@ -231,8 +244,9 @@ Date: 2026-11-22
     (`select_button`, `select_option`, `select_menu`; `Popover::Select(SelectFor)`). The list
     draws above the settings modal. The theme, message layout and emoticons use radio rows.
     On/off options use switches with their explanations visible in either state.
-  - The navigation groups preferences and account pages. General holds language and developer
-    tools. Appearance holds theme, interface size and message layout ([0006](0006-timelines.md)).
+  - The navigation groups preferences and account pages. General holds language, close to tray
+    (desktop) and developer tools. Appearance holds theme, interface size and message layout
+    ([0006](0006-timelines.md)).
     Messages & media holds emoticons, room changes, link previews, GIFs, GIF search and maps
     ([0007](0007-composer-and-media.md)). Settings sit in a single centered column, with switches on the right of their descriptions. Phones use the same General, Appearance, and Messages & media sections (ADR 0010).
   - Voice & video picks the microphone, speaker and camera by name, for calls and voice

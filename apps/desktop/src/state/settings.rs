@@ -164,6 +164,8 @@ pub struct Settings {
     pub appearance: Appearance,
     pub message_layout: MessageLayout,
     pub zoom: Zoom,
+    /// Keep the app running in the system tray when its window closes.
+    pub close_to_tray: bool,
     /// Play GIFs linked from Giphy, Tenor and Imgur. Loading them contacts those sites.
     pub show_link_gifs: bool,
     /// Links show a preview card (through the homeserver).
@@ -235,6 +237,7 @@ impl Default for Settings {
             appearance: Appearance::default(),
             message_layout: MessageLayout::default(),
             zoom: Zoom::default(),
+            close_to_tray: true,
             show_link_gifs: true,
             show_link_previews: true,
             show_maps: true,

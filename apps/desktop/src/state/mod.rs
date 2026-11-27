@@ -2549,6 +2549,18 @@ impl State {
         self.dispatch(command, purpose);
     }
 
+    pub fn close_window(&mut self, tx: &mut Tx) {
+        if self.window_focused {
+            self.focus_changed(false);
+        }
+        self.shell.close_window(self.settings.close_to_tray, tx);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    pub fn settle_tray(&mut self) {
+        self.shell.settle_tray();
+    }
+
     /// The window gained or lost focus. Coming back marks what is on screen read: messages that
     /// arrived while away count as unread until the user is back.
     pub fn focus_changed(&mut self, focused: bool) {
@@ -2559,6 +2571,7 @@ impl State {
             self.write_drafts(std::time::Instant::now(), true);
             return;
         }
+        self.shell.dismiss_tray();
         self.breath.ask();
         for (account, key) in self.open_timelines.clone() {
             self.unmark(&account, &key.room_id);
@@ -5192,6 +5205,11 @@ impl State {
 
     pub fn set_appearance(&mut self, appearance: Appearance) {
         self.settings.appearance = appearance;
+        self.shell.save_settings(self.settings.clone());
+    }
+
+    pub fn set_close_to_tray(&mut self, enabled: bool) {
+        self.settings.close_to_tray = enabled;
         self.shell.save_settings(self.settings.clone());
     }
 
