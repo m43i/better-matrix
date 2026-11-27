@@ -47,6 +47,7 @@ fn room(room_id: &str) -> RoomSummary {
         custom_notifications: false,
         call: matrix_core::RoomCall::default(),
         activity_ms: None,
+        latest_event_id: None,
         encrypted: false,
         public: false,
         can_rename: true,
@@ -448,6 +449,85 @@ fn opening_a_room_should_clear_its_unread_count() {
     with_rooms(&mut s, &id, &["!one:x", "!two:x"], Vec::new());
     s.select_room("!two:x");
     assert_eq!(s.accounts.get(&id).unwrap().room("!two:x").unwrap().unread, 0);
+}
+
+#[test]
+fn a_direct_message_should_not_restore_another_rooms_old_unread_count() {
+    let (mut s, _) = state();
+    let account = AccountId::new("@a:example.org");
+    let sender = "@mario:example.org";
+    let group = RoomSummary { activity_ms: Some(10), latest_event_id: Some("$old".into()), ..room("!group:x") };
+    let chat = RoomSummary { kind: RoomKind::Direct, unread: 0, dm_users: vec![sender.into()], ..room("!direct:x") };
+    with_summaries(&mut s, &account, vec![group.clone(), chat.clone()]);
+    apply(
+        &mut s,
+        Event::LatestMessage {
+            account: account.clone(),
+            room_id: group.room_id.clone(),
+            message: Box::new(Message { event_id: "$old".into(), sender_id: sender.into(), ..Message::default() }),
+        },
+    );
+    s.select_room("!group:x");
+    s.show_overview();
+
+    apply(
+        &mut s,
+        Event::LatestMessage {
+            account: account.clone(),
+            room_id: chat.room_id.clone(),
+            message: Box::new(Message { event_id: "$dm".into(), sender_id: sender.into(), ..Message::default() }),
+        },
+    );
+    let incoming = RoomSummary { unread: 1, activity_ms: Some(20), latest_event_id: Some("$dm".into()), ..chat };
+    apply(
+        &mut s,
+        Event::RoomsUpdated {
+            account: account.clone(),
+            list: RoomList { rooms: vec![group, incoming], ..Default::default() },
+        },
+    );
+
+    let data = s.accounts.get(&account).unwrap();
+    assert!(wants_attention(data.room("!direct:x").unwrap()));
+    assert!(!wants_attention(data.room("!group:x").unwrap()));
+}
+
+#[test]
+fn a_new_message_at_the_same_time_should_bring_back_the_rooms_unread_count() {
+    let (mut s, _) = state();
+    let account = AccountId::new("@a:example.org");
+    let group = RoomSummary { activity_ms: Some(10), latest_event_id: Some("$old".into()), ..room("!group:x") };
+    with_summaries(&mut s, &account, vec![group.clone()]);
+    s.select_room("!group:x");
+    s.show_overview();
+
+    let next = RoomSummary { latest_event_id: Some("$new".into()), ..group };
+    apply(
+        &mut s,
+        Event::RoomsUpdated { account: account.clone(), list: RoomList { rooms: vec![next], ..Default::default() } },
+    );
+    assert!(wants_attention(s.accounts.get(&account).unwrap().room("!group:x").unwrap()));
+}
+
+#[test]
+fn a_confirmed_read_should_let_a_later_unread_count_through() {
+    let (mut s, _) = state();
+    let account = AccountId::new("@a:example.org");
+    let group = room("!group:x");
+    with_summaries(&mut s, &account, vec![group.clone()]);
+    s.select_room("!group:x");
+    s.show_overview();
+
+    for summary in [RoomSummary { unread: 0, ..group.clone() }, group] {
+        apply(
+            &mut s,
+            Event::RoomsUpdated {
+                account: account.clone(),
+                list: RoomList { rooms: vec![summary], ..Default::default() },
+            },
+        );
+    }
+    assert!(wants_attention(s.accounts.get(&account).unwrap().room("!group:x").unwrap()));
 }
 
 #[test]

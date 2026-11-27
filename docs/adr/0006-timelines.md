@@ -476,7 +476,9 @@ see who is typing there.
     opens the room's timeline for the request (the engine marks through open timelines) and
     closes it after.
   - The engine re-reads rooms on the SDK's room-info updates (receipts, unread markers), so
-    badges follow the counts the SDK works out after sync.
+    badges follow the counts the SDK works out after sync. Desktop keeps a locally cleared unread
+    count clear while the room list repeats the same latest event and counts still settling.
+    A new event, higher counts or confirmation of the clear ends that local override.
   - The "New" marker is dismissed when its own row enters the viewport, including on open,
     without the media prefetch margin. It fades over a 2.5-second opacity spring, keeping its
     row's full height until the fade ends, and after (`ReadMarkerFade::Faded`) while the row is
