@@ -75,7 +75,8 @@ fn list(s: &State, target: ComposerTarget, p: &Palette) -> Option<El> {
 fn entry(s: &State, suggestion: &Suggestion, p: &Palette) -> El {
     let (leading, name, hint): (El, String, String) = match suggestion {
         Suggestion::Person { user_id, name, avatar } => {
-            (media_avatar(user_id, name, avatar.as_ref(), &s.media, 24.0), name.clone(), user_id.clone())
+            let shown = s.settings.person_name(name);
+            (media_avatar(user_id, &shown, avatar.as_ref(), &s.media, 24.0), shown.into_owned(), user_id.clone())
         }
         Suggestion::Everyone => (
             el().size(24.0, 24.0)

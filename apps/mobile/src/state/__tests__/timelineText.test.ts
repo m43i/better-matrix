@@ -109,6 +109,12 @@ describe('humanSize', () => {
 });
 
 describe('typingText', () => {
+  it('should name the typist in the chosen display order', () => {
+    expect(typingText([person('@grace:x', 'Hopper, Grace')], true)).toBe(
+      'Grace, Hopper is typing…',
+    );
+  });
+
   it('should name one person typing', () => {
     expect(typingText([ada])).toBe('Ada is typing…');
   });

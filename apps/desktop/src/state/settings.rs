@@ -285,6 +285,20 @@ pub(crate) fn person_name(name: &str, reverse: bool) -> Cow<'_, str> {
     Cow::Borrowed(name)
 }
 
+/// Keep a mention's leading @ with the displayed name.
+pub(crate) fn mention_name(label: &str, reverse: bool) -> Cow<'_, str> {
+    if let Some(name) = label.strip_prefix('@') {
+        if label.contains(':') {
+            return Cow::Borrowed(label);
+        }
+        if let Cow::Owned(shown) = person_name(name, reverse) {
+            return format!("@{shown}").into();
+        }
+        return Cow::Borrowed(label);
+    }
+    person_name(label, reverse)
+}
+
 /// A section of the settings modal. New sections are new variants.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SettingsSection {

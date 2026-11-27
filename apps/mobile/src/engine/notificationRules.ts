@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { AccountId, Notification, PushContent } from '@better-matrix/matrix-native/types';
 
 import { t } from '../i18n';
+import { personName } from '../state/names';
 import type { State } from '../state/types';
 
 /** Whether to show a notification: not while its room is on screen in the foreground. */
@@ -32,14 +33,16 @@ export interface NotificationContent {
 /**
  * A one-to-one direct chat names its sender. Group conversations use the room and sender.
  */
-export function contentOf(n: Notification): NotificationContent {
+export function contentOf(n: Notification, reverse = false): NotificationContent {
+  const sender = personName(n.sender_name, reverse);
+
   return {
     identifier: `${n.account}|${n.event_id}`,
-    title: n.one_to_one ? n.sender_name : n.room_name,
+    title: n.one_to_one ? sender : n.room_name,
     body:
       n.one_to_one || n.sender_name === n.room_name
         ? n.body
-        : t('overview.preview', { sender: n.sender_name, body: n.body }),
+        : t('overview.preview', { sender, body: n.body }),
     thread: `${n.account}|${n.room_id}`,
     data: { account: n.account, roomId: n.room_id, eventId: n.event_id },
   };
@@ -49,17 +52,17 @@ export function contentOf(n: Notification): NotificationContent {
  * The notification for what a push turned out to be (engine/push.ts): a message as the sync's,
  * an invite, or a generic text in its room when the event can't be read. Null for nothing.
  */
-export function pushContentOf(content: PushContent): NotificationContent | null {
+export function pushContentOf(content: PushContent, reverse = false): NotificationContent | null {
   switch (content.type) {
     case 'Message':
-      return contentOf(content.data);
+      return contentOf(content.data, reverse);
     case 'Invite': {
       const { account, room_id, room_name, event_id, sender_name } = content.data;
 
       return {
         identifier: `${account}|${event_id}`,
         title: room_name,
-        body: t('mobile.push.invite', { sender: sender_name }),
+        body: t('mobile.push.invite', { sender: personName(sender_name, reverse) }),
         thread: `${account}|${room_id}`,
         data: { account, roomId: room_id, eventId: event_id },
       };

@@ -128,6 +128,7 @@ impl<'a> Context<'a> {
             revealed: self.spoilers,
             media: self.media,
             pictures: !self.hides(message),
+            reverse_display_names: self.settings.reverse_display_names,
         }
     }
 

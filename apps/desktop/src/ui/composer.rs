@@ -204,9 +204,18 @@ fn typing_line(s: &State, p: &Palette) -> El {
         faces = faces.child(if index == 0 { face } else { face.ml(-5.0) });
     }
     let sentence = match people.as_slice() {
-        [one] => tf!("typing.one", name = one.name),
-        [first, second] => tf!("typing.two", first = first.name, second = second.name),
-        [first, second, rest @ ..] => tf!("typing.many", first = first.name, second = second.name, count = rest.len()),
+        [one] => tf!("typing.one", name = s.settings.person_name(&one.name)),
+        [first, second] => tf!(
+            "typing.two",
+            first = s.settings.person_name(&first.name),
+            second = s.settings.person_name(&second.name)
+        ),
+        [first, second, rest @ ..] => tf!(
+            "typing.many",
+            first = s.settings.person_name(&first.name),
+            second = s.settings.person_name(&second.name),
+            count = rest.len()
+        ),
         [] => String::new(),
     };
     line.label(sentence.clone())

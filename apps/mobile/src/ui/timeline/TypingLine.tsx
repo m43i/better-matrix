@@ -5,6 +5,7 @@ import type { AccountId, Person } from '@better-matrix/matrix-native/types';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { account as accountOf } from '../../state/selectors';
+import { personName } from '../../state/names';
 import { shallow, useStore } from '../../state/react';
 import { typingText } from '../../state/timelineText';
 import { font } from '../../theme/palette';
@@ -25,7 +26,8 @@ export function TypingLine({ account, roomId }: { account: AccountId; roomId: st
     shallow,
   );
 
-  const sentence = typingText(people);
+  const reverse = useStore((s) => s.settings.reverseDisplayNames);
+  const sentence = typingText(people, reverse);
 
   return (
     <View
@@ -44,7 +46,7 @@ export function TypingLine({ account, roomId }: { account: AccountId; roomId: st
                 <Avatar
                   account={account}
                   id={person.id}
-                  name={person.name}
+                  name={personName(person.name, reverse)}
                   media={person.avatar}
                   size={FACE}
                 />

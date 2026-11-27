@@ -253,8 +253,9 @@ Date: 2026-11-22
     ([0007](0007-composer-and-media.md)). Settings sit in a single centered column, with switches on the right of their descriptions. Phones use the same General, Appearance, and Messages & media sections (ADR 0010).
   - **Reverse display names** is off by default. The setting shows a person's display name with
     two non-empty parts and one comma as `First, Last` when stored as `Last, First`. It also
-    applies to a direct chat whose name comes from its partner. Profile editors and outgoing
-    Matrix events use the original names.
+    applies to a direct chat whose name comes from its partner and to names on rendered mention
+    pills. Local search accepts both orders for direct chats. Profile editors and outgoing Matrix
+    events use the original names.
   - Voice & video picks the microphone, speaker and camera by name, for calls and voice
     messages alike (`Settings::devices`, `State::choose_device`); the system's default when
     none is picked or the picked one is gone. The devices list when the section opens

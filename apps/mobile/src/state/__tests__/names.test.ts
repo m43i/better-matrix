@@ -1,5 +1,5 @@
 import { roomSummary } from '../../test/fixtures';
-import { personName, roomName } from '../names';
+import { mentionName, personName, roomName } from '../names';
 
 describe('personName', () => {
   it('should preserve the original name when the preference is off', () => {
@@ -31,5 +31,15 @@ describe('roomName', () => {
   it('should leave an explicitly named direct chat alone', () => {
     const room = roomSummary('!dm:x', 'Design, Support', 'Direct');
     expect(roomName(room, true)).toBe('Design, Support');
+  });
+});
+
+describe('mentionName', () => {
+  it('should keep the mention prefix with the displayed name', () => {
+    expect(mentionName('@Hopper, Grace', true)).toBe('@Grace, Hopper');
+  });
+
+  it('should keep the user ID when there is no display label', () => {
+    expect(mentionName('@hopper,grace:example.org', true)).toBe('@hopper,grace:example.org');
   });
 });

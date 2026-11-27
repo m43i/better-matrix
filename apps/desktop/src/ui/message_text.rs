@@ -2,12 +2,13 @@
 //! without making a received message a text field.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use rune::{Block, Color, Cursor, El, InlineImage, Link, Mark, PillStyle, Span, TextEdit, TextStyle, col, row, text};
 
 use super::theme::{Palette, font};
 use crate::i18n::t;
-use crate::state::{MediaCache, PlacedCode, RichText, SPOILER_LINK, State, place_code};
+use crate::state::{MediaCache, PlacedCode, RichText, SPOILER_LINK, State, mention_name, place_code};
 
 /// What a message's text needs besides its words: whose it is, who reads it, which spoilers
 /// they revealed, and the custom emoji's pictures.
@@ -22,6 +23,7 @@ pub struct Look<'a> {
     /// Whether its custom emoji show as pictures: not while the account keeps the message's
     /// media back (ADR 0011), when they read as their short codes.
     pub pictures: bool,
+    pub reverse_display_names: bool,
 }
 
 /// How far beside a message's text a press still lands on the text: a click or drag that
@@ -185,6 +187,69 @@ fn code_colors(rich: &RichText, placed: &[PlacedCode<'_>], p: &Palette) -> HashM
     colors
 }
 
+/// A line's displayed text, with its user mention ranges mapped back to the original offsets.
+struct MentionLabels {
+    text: String,
+    ranges: Vec<(Range<usize>, Range<usize>)>,
+}
+
+impl MentionLabels {
+    fn new(edit: &TextEdit, line: Range<usize>, reverse: bool) -> Self {
+        let words = &edit.text[line.clone()];
+        if !reverse {
+            return Self { text: words.to_owned(), ranges: Vec::new() };
+        }
+        let mut labels: Vec<_> = edit
+            .marks()
+            .iter()
+            .filter_map(|mark| {
+                let Mark::Pill(id) = &mark.mark else { return None };
+                if !id.starts_with("user:") || mark.start < line.start || mark.end > line.end {
+                    return None;
+                }
+                let range = mark.start - line.start..mark.end - line.start;
+                let std::borrow::Cow::Owned(label) = mention_name(&words[range.clone()], true) else { return None };
+                Some((range, label))
+            })
+            .collect();
+        labels.sort_unstable_by_key(|(range, _)| range.start);
+        let mut text = String::with_capacity(words.len());
+        let mut ranges = Vec::new();
+        let mut previous = 0;
+        for (range, label) in labels {
+            if range.start < previous {
+                continue;
+            }
+            text.push_str(&words[previous..range.start]);
+            let start = text.len();
+            text.push_str(&label);
+            previous = range.end;
+            ranges.push((range, start..text.len()));
+        }
+        text.push_str(&words[previous..]);
+        Self { text, ranges }
+    }
+
+    fn span(&self, start: usize, end: usize) -> Range<usize> {
+        self.offset(start, false)..self.offset(end, true)
+    }
+
+    fn offset(&self, at: usize, end: bool) -> usize {
+        let (mut source, mut target) = (0, 0);
+        for (original, shown) in &self.ranges {
+            if at <= original.start {
+                break;
+            }
+            if at < original.end {
+                // A style inside a mention follows the displayed pill as a whole.
+                return if end { shown.end } else { shown.start };
+            }
+            (source, target) = (original.end, shown.end);
+        }
+        target + (at - source)
+    }
+}
+
 #[expect(clippy::too_many_arguments, reason = "one line's text, place and look, as each caller has them")]
 fn inline(
     key: &str,
@@ -198,6 +263,7 @@ fn inline(
     p: &Palette,
 ) -> El {
     let words = &edit.text[range.clone()];
+    let displayed = MentionLabels::new(edit, range.clone(), look.reverse_display_names && block != Block::Code);
     let mut spans = Vec::new();
     let mut links = Vec::new();
     let mut strikes = Vec::new();
@@ -213,7 +279,9 @@ fn inline(
             if start >= end {
                 continue;
             }
-            let (start, end) = (start - range.start, end - range.start);
+            let original = start - range.start..end - range.start;
+            let shown = displayed.span(original.start, original.end);
+            let (start, end) = (shown.start, shown.end);
             let span = Span::new(start, end);
             let span = match &mark.mark {
                 Mark::Bold => span.weight(650.0),
@@ -230,7 +298,7 @@ fn inline(
                 }
                 Mark::Pill(id) => {
                     let absolute = mark.start;
-                    match pill(id, start..end, absolute, &words[start..end], look, p) {
+                    match pill(id, start..end, absolute, &words[original], look, p) {
                         Inline::Chip { style, link, span: chip_span, hides } => {
                             if hides {
                                 hidden.push(start..end);
@@ -258,7 +326,7 @@ fn inline(
     }
     // Hidden words never reach the text: not the screen reader, not a copied selection. Blanks
     // of the same length keep every other range where it is.
-    let mut shown = words.to_owned();
+    let mut shown = displayed.text;
     for range in hidden {
         shown.replace_range(range.clone(), &" ".repeat(range.len()));
     }
@@ -378,7 +446,14 @@ mod tests {
     use rune::{Env, Runtime};
 
     fn test_look(s: &State) -> Look<'_> {
-        Look { event_id: "$m", me: "@me:x", revealed: &s.revealed, media: &s.media, pictures: true }
+        Look {
+            event_id: "$m",
+            me: "@me:x",
+            revealed: &s.revealed,
+            media: &s.media,
+            pictures: true,
+            reverse_display_names: s.settings.reverse_display_names,
+        }
     }
 
     fn view(s: &State, _: &mut rune::Cx<State>) -> El {
@@ -403,6 +478,37 @@ mod tests {
         rt.pointer_move(5.0, 10.0);
         rt.frame(1.0 / 60.0);
         assert_eq!(rt.cursor(), Cursor::Text);
+    }
+
+    #[test]
+    fn the_mention_should_show_the_reordered_name_and_keep_its_link() {
+        let mut rt = Runtime::new(
+            State::detached(),
+            |s, _| {
+                let edit = TextEdit::from_html(
+                    "<p><span data-pill='user:@jose:x'>@García,José</span> and <a href='https://matrix.org'>Matrix</a></p>",
+                );
+                formatted(
+                    "mention",
+                    &RichText { edit, code: Vec::new() },
+                    test_look(s),
+                    &super::super::theme::palette(true),
+                )
+            },
+            (600.0, 100.0),
+            Env::new(true, 1.0),
+        );
+        let words =
+            |rt: &Runtime<State>| rt.elements().into_iter().filter_map(|element| element.text).collect::<Vec<_>>();
+        rt.frame(0.0);
+        let before = words(&rt);
+        assert!(before.iter().any(|text| text.contains("@García,José")), "{before:?}");
+        rt.update(|s, _| s.set_reverse_display_names(true));
+        rt.frame(0.0);
+        let after = words(&rt);
+        assert!(after.iter().any(|text| text.contains("@José, García")), "{after:?}");
+        assert!(rt.find("https://matrix.to/#/@jose:x").is_some());
+        assert!(rt.find("https://matrix.org").is_some());
     }
 
     fn hidden_spoiler(s: &State, _: &mut rune::Cx<State>) -> El {

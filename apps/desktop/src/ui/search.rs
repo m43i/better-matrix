@@ -6,7 +6,7 @@ use super::people::person_row;
 use super::room::display_name;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf, tp};
-use crate::state::{AccountData, SearchFilter, SearchStatus, State};
+use crate::state::{AccountData, SearchFilter, SearchStatus, Settings, State};
 use matrix_core::search::fuzzy_match;
 use matrix_core::{DirectoryKind, LinkTarget, Permalink, Person, RoomKind, RoomSummary};
 use rune::{Align, El, ScrollSpec, Side, Span, col, el, icon, row, text};
@@ -26,6 +26,17 @@ pub fn highlights(value: &str, positions: &[usize], p: &Palette) -> El {
         .map(|(_, (byte, c))| Span::new(byte, byte + c.len_utf8()).color(p.accent).weight(700.0))
         .collect();
     rune::rich(value.to_owned(), spans).font(font::BODY).color(p.text).truncate()
+}
+
+/// Local name matching accepts the display label and the original room name.
+pub(super) fn room_match_rank(room: &RoomSummary, query: &str, settings: &Settings) -> Option<usize> {
+    let original = fuzzy_match(&room.name, query).map(|matched| matched.rank);
+    let shown = settings.room_name(room);
+    if shown == room.name {
+        return original;
+    }
+    let display = fuzzy_match(&shown, query).map(|matched| matched.rank);
+    original.into_iter().chain(display).min()
 }
 
 /// The search's results under the field: a typed link or address to open, rooms, direct chats
@@ -103,7 +114,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
             .rooms
             .iter()
             .filter(|room| !query.is_empty() && filter.includes(SearchFilter::Rooms) && room.kind == kind)
-            .filter_map(|room| fuzzy_match(&room.name, query).map(|matched| (room, matched.rank)))
+            .filter_map(|room| room_match_rank(room, query, &s.settings).map(|rank| (room, rank)))
             .collect();
         found.sort_by_key(|(room, rank)| (std::cmp::Reverse(account.search_usage.room(&room.room_id)), *rank));
         found.truncate(RESULTS);

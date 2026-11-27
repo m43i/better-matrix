@@ -232,8 +232,11 @@ pub fn dialog(s: &State, p: &Palette) -> Option<El> {
                 field_input(search, t!("message.find_room"), p).key("forward-search").on_edit(State::modal_field),
             );
             if let Some(data) = s.accounts.get(account) {
-                let rooms: Vec<_> =
-                    data.rooms.iter().filter(|room| crate::state::matches(&room.name, &search.text)).collect();
+                let rooms: Vec<_> = data
+                    .rooms
+                    .iter()
+                    .filter(|room| super::search::room_match_rank(room, &search.text, &s.settings).is_some())
+                    .collect();
                 if rooms.is_empty() {
                     content = content.child(text(t!("message.no_rooms")).font(font::BODY).color(p.text_muted));
                 }

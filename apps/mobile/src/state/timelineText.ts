@@ -213,16 +213,20 @@ export function humanSize(bytes: number): string {
 }
 
 /** "Ada is typing…", "Ada and Grace are typing…", "Ada, Grace and 3 others are typing…". */
-export function typingText(people: readonly Person[]): string {
+export function typingText(people: readonly Person[], reverse = false): string {
   const [first, second] = people;
 
   if (!first) return '';
 
-  if (!second) return t('typing.one', { name: first.name });
+  const name = personName(first.name, reverse);
 
-  if (people.length === 2) return t('typing.two', { first: first.name, second: second.name });
+  if (!second) return t('typing.one', { name });
 
-  return t('typing.many', { first: first.name, second: second.name, count: people.length - 2 });
+  const other = personName(second.name, reverse);
+
+  if (people.length === 2) return t('typing.two', { first: name, second: other });
+
+  return t('typing.many', { first: name, second: other, count: people.length - 2 });
 }
 
 /** A call's kind: "Video call", "Voice call" or "Call". */

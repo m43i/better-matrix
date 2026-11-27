@@ -18,3 +18,12 @@ export function personName(name: string, reverse: boolean): string {
 export function roomName(room: RoomSummary, reverse: boolean): string {
   return personName(room.name, reverse && room.name_from_member);
 }
+
+/** Keep a mention's leading @ with the displayed name. */
+export function mentionName(label: string, reverse: boolean): string {
+  if (!label.startsWith('@')) return personName(label, reverse);
+
+  if (label.includes(':')) return label;
+
+  return `@${personName(label.slice(1), reverse)}`;
+}

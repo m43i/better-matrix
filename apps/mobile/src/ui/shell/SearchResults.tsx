@@ -74,8 +74,8 @@ export function SearchResults({
   useEffect(() => type(term), [term, type]);
 
   const results = useMemo(
-    () => searchResults(account, term, people.people, now, messages.messages),
-    [account, term, people.people, now, messages.messages],
+    () => searchResults(account, term, people.people, now, messages.messages, reverse),
+    [account, term, people.people, now, messages.messages, reverse],
   );
 
   const sections = useMemo(() => {

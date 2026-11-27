@@ -136,6 +136,15 @@ describe('jumpTo', () => {
 });
 
 describe('searchResults', () => {
+  it.each(['Grace, Hopper', 'Hopper, Grace'])(
+    'the direct chat should be found by %s when the name order is reversed',
+    (term) => {
+      const chat = { ...roomSummary('!dm', 'Hopper, Grace', 'Direct'), name_from_member: true };
+
+      expect(searchResults(accountWith([chat]), term, [], NOW, [], true).direct).toEqual([chat]);
+    },
+  );
+
   it('a pasted address should be offered as a link', () => {
     const results = searchResults(accountWith([]), ' #rust:matrix.org ', [], NOW);
     expect(results.link?.id).toBe('#rust:matrix.org');
