@@ -4112,6 +4112,21 @@ fn paging_a_call_should_stop_hidden_videos_and_start_visible_ones() {
 }
 
 #[test]
+fn quitting_should_send_the_read_position_held_back() {
+    let (mut s, mut commands) = state();
+    let (account, key) = (AccountId::new("@a:example.org"), TimelineKey::room("!room:example.org"));
+    let now = std::time::Instant::now();
+    s.receipts.update(account.clone(), key.clone(), Some("$1".into()), true, now);
+    s.receipts.update(account, key, Some("$2".into()), true, now);
+    s.quitting();
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::MarkRead { event_id: Some(id), .. } if id == "$2"))
+    );
+}
+
+#[test]
 fn a_call_in_a_window_off_screen_should_not_stream_its_video() {
     let (mut s, mut commands) = state();
     let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);

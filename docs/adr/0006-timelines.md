@@ -471,9 +471,11 @@ see who is typing there.
     acknowledgement sent as soon as the preceding request finishes. Only one receipt request
     per timeline is in flight, including across quick close/reopen; failures retry the latest
     position after two seconds. Closing a timeline sends the position it still held back (before
-    `CloseTimeline`, or once the receipt in flight finishes, without retrying), and the engine
-    takes a receipt for a closed timeline through its warm copy, so leaving a room right after
-    reading it doesn't leave its last messages unread on the server. Warm rows wait for the SDK subscription's first snapshot before
+    `CloseTimeline`, or once the receipt in flight finishes, whatever its outcome, without
+    retrying), and the engine takes a receipt for a closed timeline through its warm copy, which
+    stays reachable while it reopens, so leaving a room right after reading it doesn't leave its
+    last messages unread on the server. Quitting (`App::on_quit`) sends every position held
+    back, and the engine waits up to two seconds for read receipts in flight before it stops. Warm rows wait for the SDK subscription's first snapshot before
     sending. Viewport progress and visible-marker metadata do not change the row-plan revision;
     dismissing the marker does.
     `ReadBoundary` reports the existing fully-read event (or receipt fallback) independently of

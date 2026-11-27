@@ -2042,6 +2042,7 @@ impl Engine {
             accounts: HashMap::new(),
             tasks: JoinSet::new(),
             running: HashMap::new(),
+            reading: HashSet::new(),
             widget_runs: HashMap::new(),
             live_shares: HashMap::new(),
             http: crate::links::http_client().map_err(|e| e.to_string()),
@@ -2137,17 +2138,13 @@ impl Running {
     /// The timeline a read receipt goes through: the open one, or the warm one it left behind
     /// when the user moved on before its last receipt went out.
     fn reading_timeline(&self, key: &TimelineKey) -> Option<Arc<matrix_sdk_ui::timeline::Timeline>> {
-        self.timelines
-            .get(key)
-            .map(|(timeline, _)| timeline)
-            .or_else(|| self.warm.iter().find(|(warm, _)| warm == key).map(|(_, timeline)| timeline))
-            .map(Arc::clone)
+        self.timelines.get(key).map(|(timeline, _)| Arc::clone(timeline)).or_else(|| self.warm_timeline(key))
     }
 
-    /// A warm timeline for `key`, taken out of the warm set.
-    fn take_warm(&mut self, key: &TimelineKey) -> Option<Arc<matrix_sdk_ui::timeline::Timeline>> {
-        let index = self.warm.iter().position(|(warm, _)| warm == key)?;
-        Some(self.warm.remove(index).1)
+    /// A warm timeline for `key`, to open again. It stays in the warm set until it is open, so
+    /// a receipt sent meanwhile still finds it ([`Running::reading_timeline`]).
+    fn warm_timeline(&self, key: &TimelineKey) -> Option<Arc<matrix_sdk_ui::timeline::Timeline>> {
+        self.warm.iter().find(|(warm, _)| warm == key).map(|(_, timeline)| Arc::clone(timeline))
     }
 }
 
@@ -2189,6 +2186,8 @@ impl Drop for Running {
 
 /// How long quitting waits for the call under way to leave.
 const QUIT_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+/// How long quitting waits for read receipts still on their way.
+const RECEIPTS_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The longest a ring rings, whatever its event says.
 #[cfg(feature = "native-media")]
@@ -2287,6 +2286,9 @@ struct State {
     tasks: JoinSet<Completion>,
     /// Command tasks still running, for [`Command::Cancel`].
     running: HashMap<RequestId, AbortHandle>,
+    /// [`Command::MarkRead`] requests still running: quitting waits a moment for them, so what
+    /// the user read last counts as read on the next start.
+    reading: HashSet<RequestId>,
     /// Local live shares, scoped to the destination, including starts still in flight.
     live_shares: HashMap<(AccountId, String), (RequestId, tokio::sync::watch::Sender<()>)>,
     /// Widget runs ([`Command::RunWidget`] and the like), by the account they act for: signing
@@ -2371,7 +2373,21 @@ impl State {
                 },
             }
         }
-        // The app is quitting: the call under way (or just hung up) leaves, so nobody sees the
+        // The app is quitting: read receipts still on their way finish first (briefly), so the
+        // rooms just read stay read.
+        let receipts = async {
+            while !self.reading.is_empty() {
+                match self.tasks.join_next().await {
+                    Some(Ok(Completion { request: Some(request), .. })) => {
+                        self.reading.remove(&request);
+                    }
+                    Some(_) => {}
+                    None => break,
+                }
+            }
+        };
+        let _ = tokio::time::timeout(RECEIPTS_WAIT, receipts).await;
+        // The call under way (or just hung up) leaves, so nobody sees the
         // user in it for the seconds until the delayed leave would.
         #[cfg(feature = "native-media")]
         self.hang_up();
@@ -2925,13 +2941,14 @@ impl State {
                             }
                         });
                     }
-                    (running.take_warm(&key), fetch_keys)
+                    (running.warm_timeline(&key), fetch_keys)
                 });
                 Box::pin(async move {
                     Ok(Outcome::TimelineOpened(Box::new(open_timeline(account?, key, warm, fetch_keys).await?)))
                 })
             }
             Command::MarkRead { account, key, event_id, fully_read } => {
+                self.reading.insert(request);
                 let timeline = self.accounts.get(&account).and_then(|running| running.reading_timeline(&key));
                 Box::pin(async move {
                     if let Some(timeline) = timeline {
@@ -4219,6 +4236,7 @@ impl State {
     fn complete(&mut self, Completion { request, result }: Completion) {
         if let Some(request) = request {
             self.running.remove(&request);
+            self.reading.remove(&request);
             self.answers.remove(&request);
             self.widget_runs.remove(&request);
             self.live_shares.retain(|_, (active, _)| *active != request);
@@ -4383,6 +4401,7 @@ impl State {
                     let wanted = request.is_some() && running.opening.get(&open.key) == request.as_ref();
                     if wanted {
                         running.opening.remove(&open.key);
+                        running.warm.retain(|(warm, _)| *warm != open.key);
                         let (key, timeline) = (open.key.clone(), Arc::clone(&open.timeline));
                         let forward = start_timeline(*open, &self.sink);
                         if let Some((_, old)) = running.timelines.insert(key, (timeline, forward)) {
@@ -5934,6 +5953,9 @@ mod tests {
         };
         let reading = running.reading_timeline(&key).expect("the warm timeline");
         assert!(Arc::ptr_eq(&reading, &timeline));
+        // Opening it again leaves it reachable until the open completes.
+        assert!(running.warm_timeline(&key).is_some());
+        assert!(running.reading_timeline(&key).is_some());
         assert!(running.reading_timeline(&TimelineKey::room("!other:example.org")).is_none());
     }
 

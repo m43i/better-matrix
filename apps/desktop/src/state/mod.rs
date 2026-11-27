@@ -1126,7 +1126,7 @@ pub struct State {
     /// A permalink that came before any account was ready: it opens with the first room list.
     pending_link: Option<matrix_core::Permalink>,
     /// The notice on screen and since when, so it goes after a while.
-    notice_shown: Option<(String, std::time::Instant)>,
+    notice_shown: Option<(String, f64)>,
     /// Where a dialog's text field types when its dialog has just closed.
     scratch: TextEdit,
     /// Set by a timeline's scroll handler when its view nears the oldest loaded message;
@@ -2565,6 +2565,14 @@ impl State {
             _ => Command::ListFiles { account, room_id },
         };
         self.dispatch(command, purpose);
+    }
+
+    /// The app is quitting: the read positions still held back go now, and the engine waits a
+    /// moment for them, so the rooms just read stay read on the next start.
+    pub fn quitting(&mut self) {
+        for command in self.receipts.flush() {
+            self.dispatch(command, Purpose::Read);
+        }
     }
 
     pub fn close_window(&mut self, tx: &mut Tx) {
@@ -5902,26 +5910,28 @@ impl State {
 
     /// Clears the notice once it has been on screen a while; true when it went.
     fn expire_notice(&mut self, tx: &mut Tx) -> bool {
-        /// Long enough to read a sentence or two.
-        const SHOWN_FOR: std::time::Duration = std::time::Duration::from_secs(6);
+        /// Long enough to read a sentence or two, in seconds.
+        const SHOWN_FOR: f64 = 6.0;
         let Some(message) = &self.notice else {
             self.notice_shown = None;
             return false;
         };
-        match &self.notice_shown {
-            Some((shown, since)) if shown == message => {
-                if since.elapsed() >= SHOWN_FOR {
-                    self.notice = None;
-                    self.notice_shown = None;
-                    return true;
-                }
+        let clock = tx.clock();
+        let due = match &self.notice_shown {
+            Some((shown, due)) if shown == message => *due,
+            _ => {
+                self.notice_shown = Some((message.clone(), clock + SHOWN_FOR));
+                clock + SHOWN_FOR
             }
-            _ => self.notice_shown = Some((message.clone(), std::time::Instant::now())),
+        };
+        if clock >= due {
+            self.notice = None;
+            self.notice_shown = None;
+            return true;
         }
-        // Woken once, when it is due, rather than polling while it shows.
-        if let Some((_, since)) = &self.notice_shown {
-            tx.wake_after(SHOWN_FOR.saturating_sub(since.elapsed()));
-        }
+        // One deadline on the frame clock, the same at every poll, rather than polling while it
+        // shows.
+        tx.wake_at(due);
         false
     }
 

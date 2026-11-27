@@ -1045,6 +1045,7 @@ fn run_app() {
             let shell_scratch = scratch.clone();
             let stopped = engine.stopped();
             app.keep_running()
+                .on_quit(|s, _| s.quitting())
                 .on_close(|s, tx| {
                     if !rune::quitting() {
                         s.close_window(tx);

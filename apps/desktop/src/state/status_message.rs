@@ -102,7 +102,7 @@ impl Expiry {
 /// When local `date` starts. Where a clock change skips midnight, the day starts with its first
 /// hour that exists.
 fn day_start<T: TimeZone>(now: &DateTime<T>, date: NaiveDate) -> Option<u64> {
-    (0..3).find_map(|hour| local_deadline(now, date, NaiveTime::from_hms_opt(hour, 0, 0)?))
+    (0..24).find_map(|hour| local_deadline(now, date, NaiveTime::from_hms_opt(hour, 0, 0)?))
 }
 
 fn custom_deadline<T: TimeZone>(now: &DateTime<T>, time: &str, date: &str) -> Option<u64> {
