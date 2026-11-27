@@ -93,7 +93,8 @@ export default function LocationMapScreen() {
 
   useEffect(() => {
     if (leaves == null) return;
-    const timer = setTimeout(() => setMoment(Date.now()), leaves - now + 1);
+    // From the time now, not the render's: a render can be late in its minute.
+    const timer = setTimeout(() => setMoment(Date.now()), Math.max(0, leaves - Date.now() + 1));
 
     return () => clearTimeout(timer);
   }, [leaves, now]);
