@@ -9,6 +9,7 @@ import { t } from '../../i18n';
 import { font } from '../../theme/palette';
 import { Button, TextField } from '../components';
 import { usePalette } from '../theme';
+import { ModalNotices } from '../Notices';
 
 export interface PromptOptions {
   title: string;
@@ -142,6 +143,7 @@ function PromptDialog({ asking: { options, resolve } }: { asking: Asking }) {
           </View>
         </View>
       </KeyboardAvoidingView>
+      <ModalNotices />
     </Modal>
   );
 }

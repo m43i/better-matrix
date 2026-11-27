@@ -7,7 +7,7 @@
 import type { CameraRef } from '@maplibre/maplibre-react-native';
 import { Camera, Map, Marker } from '@maplibre/maplibre-react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Linking,
@@ -26,15 +26,15 @@ import { t } from '../i18n';
 import { keyOf } from '../state/actions/composer';
 import {
   coordinatesText,
+  googleMapsLink,
   isLive,
   type MapPin,
   mapPins,
-  navigationLink,
   pinDetail,
 } from '../state/geo';
 import { findMessage } from '../state/messages';
 import { useAppStore, useStore } from '../state/react';
-import { timeline } from '../state/selectors';
+import { account as accountOf, timeline } from '../state/selectors';
 import { font } from '../theme/palette';
 import { Avatar } from '../ui/Avatar';
 import { Button, EmptyState, IconButton } from '../ui/components';
@@ -44,34 +44,22 @@ import { useNow } from '../ui/shell/useNow';
 import { headerTint, usePalette } from '../ui/theme';
 import { mapStyle } from '../ui/timeline/LocationCard';
 
+/** Nobody ignored: one array, so the store's selector stays the same between renders. */
+const NO_ONE: readonly string[] = [];
+
 /** Street level, where a focused person is shown (the engine's `MAP_ZOOM`). */
 const STREET_ZOOM = 15;
 
-/** Hands a place to the platform's maps or navigation app. */
-async function openInMaps(uri: string) {
-  const link = navigationLink(uri, Platform.OS);
+/** Opens a place in Google Maps, as the desktop's map does. */
+async function openInGoogleMaps(uri: string) {
+  const link = googleMapsLink(uri);
 
   if (!link) return;
 
   try {
     await Linking.openURL(link);
   } catch (error) {
-    // Older devices have no default-navigation handler.
-    if (Platform.OS === 'ios') {
-      const point = coordinatesText(uri)?.replace(' ', '');
-
-      try {
-        await Linking.openURL(`https://maps.apple.com/?ll=${point}&q=${point}`);
-
-        return;
-      } catch (fallbackError) {
-        Alert.alert(t('location.navigate'), String(fallbackError));
-
-        return;
-      }
-    }
-
-    Alert.alert(t('location.navigate'), String(error));
+    Alert.alert(t('location.open'), String(error));
   }
 }
 
@@ -90,12 +78,18 @@ export default function LocationMapScreen() {
   const shown = useStore((s) => s.settings.showMaps);
   const entries = useStore((s) => timeline(s, account, keyOf(roomId, thread)).entries);
   const opened = useMemo(() => findMessage(entries, eventId), [entries, eventId]);
-  const pins = useMemo(() => mapPins(entries, eventId, now), [entries, eventId, now]);
+  const ignored = useStore((s) => accountOf(s, account)?.safety.ignored ?? NO_ONE);
+
+  const pins = useMemo(
+    () => mapPins(entries, eventId, now, ignored),
+    [entries, eventId, now, ignored],
+  );
+
   // Who is focused, by sender (the card's, until another is picked): their pin stays focused as
   // their place moves.
   const [picked, setPicked] = useState<string | null>(null);
   const focusedSender = picked ?? opened?.sender_id;
-  const focused = pins.find((pin) => pin.message.sender_id === focusedSender) ?? pins[0];
+  const focused = pins.find((pin) => pin.message.sender_id === focusedSender);
   const camera = useRef<CameraRef>(null);
   const [cardHeight, setCardHeight] = useState(0);
   const [failedStyle, setFailedStyle] = useState('');
@@ -104,17 +98,30 @@ export default function LocationMapScreen() {
   const externalIcon = useToolbarIcon('external', tint);
   const closeIcon = useToolbarIcon('close', tint);
 
-  // Where the map first looks, once there is a place; later moves are the camera's own.
+  // Where the map first looks, once there is a place (the focused one's, else anyone's until it
+  // has one); later moves are the camera's own.
   const [start, setStart] = useState<[number, number] | null>(null);
+  const first = focused ?? pins[0];
 
-  if (!start && focused) setStart([focused.longitude, focused.latitude]);
+  if (!start && first) setStart([first.longitude, first.latitude]);
 
-  const centre = (pin: MapPin) =>
+  // The camera follows the focused person as their live place moves, until the user moves the map.
+  const [following, setFollowing] = useState(true);
+  const [latitude, longitude] = [focused?.latitude, focused?.longitude];
+
+  useEffect(() => {
+    if (following && latitude != null && longitude != null)
+      camera.current?.easeTo({ center: [longitude, latitude], duration: 500 });
+  }, [following, latitude, longitude]);
+
+  const centre = (pin: MapPin) => {
+    setFollowing(true);
     camera.current?.easeTo({
       center: [pin.longitude, pin.latitude],
       zoom: STREET_ZOOM,
       duration: 500,
     });
+  };
 
   const focus = (pin: MapPin) => {
     setPicked(pin.message.sender_id);
@@ -128,8 +135,8 @@ export default function LocationMapScreen() {
         <Stack.Toolbar.Button
           icon={externalIcon}
           hidden={!focused || !externalIcon}
-          accessibilityLabel={t('location.navigate')}
-          onPress={() => focused && void openInMaps(focused.location.geo_uri)}
+          accessibilityLabel={t('location.open')}
+          onPress={() => focused && void openInGoogleMaps(focused.location.geo_uri)}
         />
         <Stack.Toolbar.Button
           icon={closeIcon}
@@ -184,6 +191,9 @@ export default function LocationMapScreen() {
           scaleBar={false}
           touchPitch={false}
           contentInset={{ bottom: cardHeight }}
+          onRegionWillChange={(event) => {
+            if (event.nativeEvent.userInteraction) setFollowing(false);
+          }}
           onDidFailLoadingMap={() => setFailedStyle(style)}
           onDidFinishLoadingMap={() => setFailedStyle('')}
         >

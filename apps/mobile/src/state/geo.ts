@@ -71,18 +71,13 @@ export function mapOf(uri: string): MediaRef | null {
   return `map:${trimNumber(place.latitude)},${trimNumber(place.longitude)},${MAP_ZOOM},light`;
 }
 
-/** A validated destination for the platform's navigation handler. */
-export function navigationLink(uri: string, platform: string): string | null {
+/** A place in Google Maps (its app where installed, else the browser), as the desktop opens it. */
+export function googleMapsLink(uri: string): string | null {
   const place = coordinates(uri);
 
   if (!place) return null;
-  const point = `${trimNumber(place.latitude)},${trimNumber(place.longitude)}`;
 
-  if (platform === 'android') return `geo:0,0?q=${point}`;
-
-  if (platform === 'ios') return `geo-navigation:///place?coordinate=${point}`;
-
-  return `https://www.google.com/maps/search/?api=1&query=${point}`;
+  return `https://www.google.com/maps/search/?api=1&query=${trimNumber(place.latitude)},${trimNumber(place.longitude)}`;
 }
 
 /** A place's coordinates as people read them: `52.5163, 13.3777`. */
@@ -118,6 +113,7 @@ export function mapPins(
   entries: readonly TimelineEntry[],
   focusEventId: string,
   now: number,
+  ignored: readonly string[] = [],
 ): MapPin[] {
   const newest = new Map<string, MapPin>();
   let focus: MapPin | null = null;
@@ -126,7 +122,7 @@ export function mapPins(
     if (entry.kind.type !== 'Message') continue;
     const message = entry.kind.data;
 
-    if (message.content.type !== 'Location') continue;
+    if (message.content.type !== 'Location' || ignored.includes(message.sender_id)) continue;
     const location = message.content.data;
     const point = coordinates(location.geo_uri);
 
@@ -143,12 +139,14 @@ export function mapPins(
   if (focus) newest.set(focus.message.sender_id, focus);
 
   return [...newest.values()]
-    .filter(
-      (pin) =>
-        pin === focus ||
-        isLive(pin.location, now) ||
-        now - pin.message.timestamp_ms <= RECENT_PLACE_MS,
-    )
+    .filter((pin) => {
+      if (pin === focus) return true;
+
+      // A live share stays while it runs and goes once it ends; a place stays a day.
+      if (pin.location.live_until != null) return isLive(pin.location, now);
+
+      return now - pin.message.timestamp_ms <= RECENT_PLACE_MS;
+    })
     .sort((a, b) => b.message.timestamp_ms - a.message.timestamp_ms);
 }
 

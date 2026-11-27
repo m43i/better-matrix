@@ -301,12 +301,13 @@ Date: 2026-11-16
   length of its own, and the last share to finish unregisters it. A headless restart discards an
   orphaned watch.
   A location card opens the conversation's map (`app/location-map.tsx`, full screen under a
-  native header with Open in navigation app and an X): one MapLibre map with everyone's recent
+  native header with Open in Google Maps and an X): one MapLibre map with everyone's recent
   place as an avatar pin, the desktop's rules (`mapPins`: each sender's newest place in the room
-  or thread, while live or under a day old, and always the card's own), and a card floating at
+  or thread, a live share while it runs or a place under a day old, and always the card's own), and a card floating at
   the bottom listing them (until when a live share runs, else when it was shared; Stop sharing
   on the user's own). The card's place is centred at street level; a row or pin centres its
-  person, and the button at the top right comes back to them. Pins follow the timeline.
+  person, and the button at the top right comes back to them. Pins follow the timeline, and the
+  camera follows the focused person's live place until the user moves the map.
   Turning off maps keeps the places and coordinates available without loading tiles.
 - **Scheduled messages** (MSC4140): a long press on Send (text, or a command that makes a
   message: `/me`, `/plain`, `/spoiler`, the faces; not an edit, not with attachments, which

@@ -71,13 +71,19 @@ pub(crate) fn permitted(
         && (!encrypted || power.user_can_send_message(user, MessageLikeEventType::RoomEncrypted))
 }
 
+/// How long before a renewed beacon runs out its successor starts, so the share never lapses.
+const RENEW_EARLY: Duration = Duration::from_secs(60);
+
+/// Shares fixes in `room` from `first`, each beacon for `timeout`. One that `renews` (a share until
+/// stopped) carries on: shortly before its beacon runs out, a fresh beacon goes on from the latest
+/// fix (`started` hears each beacon's ID).
 pub(crate) async fn share(
     room: Room,
     first: String,
-    duration: Duration,
+    (timeout, renews): (Duration, bool),
     mut answers: mpsc::UnboundedReceiver<Answer>,
     mut stopped: tokio::sync::watch::Receiver<()>,
-    started: impl FnOnce(String),
+    started: impl Fn(String),
 ) -> Result<(), Error> {
     super::coordinates(&first).ok_or(Error::MessageUnavailable)?;
     if !permitted(
@@ -87,47 +93,57 @@ pub(crate) async fn share(
     ) {
         return Err(Error::Location("Insufficient permission to share live location".into()));
     }
-    let mut info = BeaconInfoEventContent::new(None, duration, true, None);
-    let until = tokio::time::Instant::now() + duration;
-    let before = beacon_id(&room).await?;
-    if stopped.has_changed().unwrap_or(true) {
-        return Ok(());
-    }
-    let id = room.send_state_event_for_key(room.own_user_id(), info.clone()).await?.event_id;
-    let publish = |uri: String| room.send(BeaconEventContent::new(id.clone(), uri, None));
-    let run = async {
-        publish(first).await?;
-        started(id.to_string());
-        loop {
-            let next = tokio::select! {
-                biased;
-                answer = answers.recv() => match answer {
-                    Some(Answer::LocationFix(uri)) => uri,
-                    None => break,
-                    _ => continue,
-                },
-                result = next_desktop_fix() => result?,
-            };
-            super::coordinates(&next).ok_or(Error::MessageUnavailable)?;
-            // Sync may already show an early stop or a replacement from another device.
-            if !current(&room, &id, before.as_deref()).await? {
-                return Ok(());
-            }
-            publish(next).await?;
+    let mut latest = first;
+    loop {
+        let mut info = BeaconInfoEventContent::new(None, timeout, true, None);
+        let ends = if renews { timeout.saturating_sub(RENEW_EARLY).max(timeout / 2) } else { timeout };
+        let until = tokio::time::Instant::now() + ends;
+        let before = beacon_id(&room).await?;
+        if stopped.has_changed().unwrap_or(true) {
+            return Ok(());
         }
-        Ok::<_, Error>(())
-    };
-    let result = tokio::select! {
-        biased;
-        _ = stopped.changed() => Ok(()),
-        _ = tokio::time::sleep_until(until) => Ok(()),
-        result = run => result,
-    };
-    if info.is_live() && owns_server_state(&room, &id, &info).await? {
-        info.stop();
-        room.send_state_event_for_key(room.own_user_id(), info).await?;
+        let id = room.send_state_event_for_key(room.own_user_id(), info.clone()).await?.event_id;
+        let publish = |uri: String| room.send(BeaconEventContent::new(id.clone(), uri, None));
+        let latest = &mut latest;
+        let run = async {
+            publish(latest.clone()).await?;
+            started(id.to_string());
+            loop {
+                let next = tokio::select! {
+                    biased;
+                    answer = answers.recv() => match answer {
+                        Some(Answer::LocationFix(uri)) => uri,
+                        None => break,
+                        _ => continue,
+                    },
+                    result = next_desktop_fix() => result?,
+                };
+                super::coordinates(&next).ok_or(Error::MessageUnavailable)?;
+                // Sync may already show an early stop or a replacement from another device.
+                if !current(&room, &id, before.as_deref()).await? {
+                    return Ok(());
+                }
+                publish(next.clone()).await?;
+                *latest = next;
+            }
+            Ok::<_, Error>(())
+        };
+        let (result, ran_out) = tokio::select! {
+            biased;
+            _ = stopped.changed() => (Ok(()), false),
+            _ = tokio::time::sleep_until(until) => (Ok(()), true),
+            result = run => (result, false),
+        };
+        // The fresh beacon replaces this one in the room's state: nothing to stop.
+        if renews && ran_out {
+            continue;
+        }
+        if info.is_live() && owns_server_state(&room, &id, &info).await? {
+            info.stop();
+            room.send_state_event_for_key(room.own_user_id(), info).await?;
+        }
+        return result;
     }
-    result
 }
 
 /// State writes share a key across devices. Check the server before stopping, since sync may
@@ -247,6 +263,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_share_until_stopped_should_carry_on_in_a_fresh_beacon_from_the_latest_fix() {
+        let (sent, mut requests) = mpsc::unbounded_channel();
+        let server = crate::test_server::Server::new(move |request| {
+            if request.starts_with("GET ") && request.contains("beacon_info") {
+                return json!({"event_id":"$beacon"});
+            }
+            if request.starts_with("GET ") && request.contains("/state/m.room.encryption") {
+                return json!({"errcode":"M_NOT_FOUND","error":"Room is unencrypted"});
+            }
+            if request.starts_with("PUT ") && request.contains("org.matrix.msc3672.beacon") {
+                let (headers, body) = request.split_once("\r\n\r\n").unwrap();
+                let state = headers.lines().next().unwrap().contains("/state/");
+                sent.send((state, serde_json::from_str::<Value>(body).unwrap())).unwrap();
+                return json!({"event_id":if state {"$beacon"} else {"$fix"}});
+            }
+            let mut response = crate::test_server::thread_response(request);
+            if request.contains("/sync?") {
+                response["rooms"]["join"]["!room:example.org"]["state"]["events"].as_array_mut().unwrap().push(json!({
+                    "type":"m.room.power_levels","event_id":"$permissions","state_key":"","sender":"@a:example.org",
+                    "origin_server_ts":0,"content":{"events":{"org.matrix.msc3672.beacon_info":0}}
+                }));
+            }
+            response
+        });
+        let account = crate::Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.unwrap();
+        let room = account.joined_room("!room:example.org").unwrap();
+        let (answers, rx) = mpsc::unbounded_channel();
+        let (stop, stopped) = tokio::sync::watch::channel(());
+        let beacons = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = std::sync::Arc::clone(&beacons);
+        let task =
+            tokio::spawn(share(room, "geo:1,2".into(), (Duration::from_secs(2), true), rx, stopped, move |_| {
+                counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }));
+        async fn next(requests: &mut mpsc::UnboundedReceiver<(bool, Value)>) -> (bool, Value) {
+            tokio::time::timeout(Duration::from_secs(10), requests.recv()).await.unwrap().unwrap()
+        }
+        let (state, start) = next(&mut requests).await;
+        assert!(state && start["live"] == true);
+        assert_eq!(next(&mut requests).await.1["org.matrix.msc3488.location"]["uri"], "geo:1,2");
+        answers.send(Answer::LocationFix("geo:3,4".into())).unwrap();
+        assert_eq!(next(&mut requests).await.1["org.matrix.msc3488.location"]["uri"], "geo:3,4");
+        // Halfway through its two seconds, a fresh beacon carries on from the latest fix.
+        let (state, renewed) = next(&mut requests).await;
+        assert!(state && renewed["live"] == true, "{renewed}");
+        let (state, fix) = next(&mut requests).await;
+        assert!(!state);
+        assert_eq!(fix["org.matrix.msc3488.location"]["uri"], "geo:3,4");
+        // Each beacon is announced once its first fix went.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while beacons.load(std::sync::atomic::Ordering::Relaxed) < 2 && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(beacons.load(std::sync::atomic::Ordering::Relaxed), 2);
+        stop.send(()).unwrap();
+        task.await.unwrap().unwrap();
+        let (state, end) = next(&mut requests).await;
+        assert!(state && end["live"] == false);
+    }
+
+    #[tokio::test]
     async fn a_share_should_publish_fixes_related_to_its_own_beacon_and_stop_early() {
         let (sent, mut requests) = mpsc::unbounded_channel();
         let server = crate::test_server::Server::new(move |request| {
@@ -276,8 +354,7 @@ mod tests {
         let room = account.joined_room("!room:example.org").unwrap();
         let (answers, rx) = mpsc::unbounded_channel();
         let (stop, stopped) = tokio::sync::watch::channel(());
-        let task =
-            tokio::spawn(share(room, "geo:1,2".into(), crate::LiveDuration::Hour.timeout(), rx, stopped, |_| {}));
+        let task = tokio::spawn(share(room, "geo:1,2".into(), (Duration::from_secs(3600), false), rx, stopped, |_| {}));
         let (state, start) = tokio::time::timeout(Duration::from_secs(10), requests.recv()).await.unwrap().unwrap();
         assert!(state && start["live"] == true);
         assert_eq!(start["timeout"], 3_600_000);

@@ -221,9 +221,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   receives the public IP when the picker needs an estimate. Search and typed coordinates remain
   available. Sending a place takes an explicit action. Live location is a separate room share
   for 1 hour, 1 day or until stopped (`LiveDuration`), using Element’s MSC3672 beacon info and
-  related beacon events. "Until stopped" still names an end, 24 days on: JavaScript timers (Element
+  related beacon events. "Until stopped" still names an end on each beacon, 24 days on: JavaScript timers (Element
   Web's among them) overflow past 2^31 − 1 ms, so a longer timeout would end the share at once
-  there. An orderly quit stops the share either way. Only a device fix
+  there. A minute before it, the share carries on in a fresh beacon from the latest fix (a new
+  card; `LiveLocationStarted` again, so Stop stops the newest). An orderly quit stops the share. Only a device fix
   can start one in a room where the sender may publish both events. Room permissions let an
   admin set their level together. The picker can stop the current share, and each viewer can
   stop its own beacon. On Android the foreground service starts when sharing is requested and
@@ -231,8 +232,8 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   Desktop renders MapLibre Native snapshots off the UI thread, cached by coordinates, style and
   zoom. Both clients use the app’s bundled light and dark street styles with OpenFreeMap vector tiles. The sender’s avatar
   marks the place. A location card opens the **map viewer**: one map, near the window's size,
-  of every recent place in that conversation (each sender's newest, if still live or shared within
-  a day, and always the card's own, focused and centred at street level). A list over the map
+  of every recent place in that conversation (each sender's newest: a live share while it runs,
+  a place shared within a day, and always the card's own, focused and centred at street level). A list over the map
   names who is there; choosing someone (a row or a pin) turns the map to them. The desktop drags
   the map and zooms with the wheel (toward the pointer) or buttons, from MapLibre snapshots of the
   map's size (`geo::framed_map`), placing pins by Web Mercator (`geo::project`); while a moved

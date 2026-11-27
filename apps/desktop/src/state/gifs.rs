@@ -3,8 +3,8 @@
 //! The GIF picker's previews have a cache of their own ([`PICKER_PLAYERS`]), apart from the
 //! timelines', and are still: each holds its first frame and plays only while the pointer is
 //! over it.
-//! Bounded: a GIF whose frames would exceed [`MAX_FRAME_BYTES`] plays only its first frame, at
-//! most [`MAX_PLAYERS`] play at once, and past [`MAX_TOTAL_BYTES`] of frames across them the GIFs
+//! Bounded: a GIF whose frames would exceed [`MAX_FRAME_BYTES`] keeps every other frame (each
+//! shown twice as long) until they fit, at most [`MAX_PLAYERS`] play at once, and past [`MAX_TOTAL_BYTES`] of frames across them the GIFs
 //! shown longest ago that are off screen are let go.
 
 use std::collections::{HashMap, VecDeque};
@@ -120,6 +120,31 @@ impl Held {
         self.own.fetch_add(bytes, Ordering::Relaxed);
         self.all.fetch_add(bytes, Ordering::Relaxed);
     }
+
+    fn give_back(&self, bytes: usize) {
+        self.own.fetch_sub(bytes, Ordering::Relaxed);
+        self.all.fetch_sub(bytes, Ordering::Relaxed);
+    }
+}
+
+/// A decoded frame: width, height, RGBA pixels, and how long it shows.
+type Frame = (u32, u32, Vec<u8>, Duration);
+
+/// Keeps every other frame, each shown as long as the pair it stands for; the bytes let go.
+fn thin(frames: &mut Vec<Frame>) -> usize {
+    let mut freed = 0;
+    let mut kept: Vec<Frame> = Vec::with_capacity(frames.len().div_ceil(2));
+    for (index, frame) in frames.drain(..).enumerate() {
+        match kept.last_mut() {
+            Some(last) if index % 2 == 1 => {
+                last.3 += frame.3;
+                freed += frame.2.len();
+            }
+            _ => kept.push(frame),
+        }
+    }
+    *frames = kept;
+    freed
 }
 
 impl Drop for Held {
@@ -132,12 +157,21 @@ impl Drop for Held {
 /// holding the frame shown while paused.
 fn play(bytes: Arc<[u8]>, out: &Pixels, stop: &AtomicBool, paused: &AtomicBool, held: &Held) {
     let Ok(decoder) = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(&bytes[..])) else { return };
-    let mut frames = Vec::new();
+    let mut frames: Vec<Frame> = Vec::new();
     let mut total = 0usize;
-    for frame in decoder.into_frames() {
+    // One frame in `stride` is kept: more once the frames outgrow the budget.
+    let mut stride = 1usize;
+    for (index, frame) in decoder.into_frames().enumerate() {
         let Ok(frame) = frame else { break };
         let (numerator, denominator) = frame.delay().numer_denom_ms();
         let delay = Duration::from_millis(u64::from(numerator / denominator.max(1)).max(20));
+        if index % stride != 0 {
+            // Left out to fit: the frame kept before it shows for its time too.
+            if let Some(last) = frames.last_mut() {
+                last.3 += delay;
+            }
+            continue;
+        }
         let image = frame.into_buffer();
         total += image.as_raw().len();
         held.add(image.as_raw().len());
@@ -152,8 +186,18 @@ fn play(bytes: Arc<[u8]>, out: &Pixels, stop: &AtomicBool, paused: &AtomicBool, 
                 std::thread::park_timeout(Duration::from_secs(5));
             }
         }
-        if total > MAX_FRAME_BYTES || stop.load(Ordering::Relaxed) {
+        if stop.load(Ordering::Relaxed) {
             frames.truncate(1);
+            break;
+        }
+        while total > MAX_FRAME_BYTES && frames.len() > 1 {
+            let freed = thin(&mut frames);
+            total -= freed;
+            held.give_back(freed);
+            stride *= 2;
+        }
+        // One frame alone is too big to animate: it shows still.
+        if total > MAX_FRAME_BYTES {
             break;
         }
     }
@@ -388,6 +432,15 @@ mod tests {
     }
 
     #[test]
+    fn thinning_frames_should_keep_every_other_one_for_the_time_of_both() {
+        let frame = |ms| (1, 1, vec![0; 4], Duration::from_millis(ms));
+        let mut frames = vec![frame(10), frame(20), frame(30), frame(40), frame(50)];
+        assert_eq!(thin(&mut frames), 8);
+        let delays: Vec<u128> = frames.iter().map(|frame| frame.3.as_millis()).collect();
+        assert_eq!(delays, [30, 70, 50]);
+    }
+
+    #[test]
     fn a_gifs_size_should_be_read_from_its_header() {
         assert_eq!(header_size(b"GIF89a\x2c\x01\xc8\x00"), Some((300, 200)));
     }
@@ -577,6 +630,36 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!((held, decoded.load(Ordering::Relaxed)), (one, 3 * one));
+    }
+
+    #[test]
+    fn a_gif_over_its_budget_should_keep_animating_with_fewer_frames() {
+        // 17 frames of 4 MiB: 68 MiB decoded, over the 48 MiB a GIF may hold.
+        let side = 1024;
+        let frame =
+            |shade| image::Frame::new(image::RgbaImage::from_pixel(side, side, image::Rgba([shade, 0, 0, 255])));
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new_with_speed(&mut bytes, 30);
+            encoder.encode_frames((0..17u8).map(|index| frame(index * 10))).unwrap();
+        }
+        let decoded = Arc::new(AtomicUsize::new(0));
+        let _player = Player::start(Arc::from(bytes), &decoded, false);
+        // Decoding is done once the count holds still.
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let (mut last, mut since) = (usize::MAX, Instant::now());
+        while Instant::now() < deadline {
+            let now = decoded.load(Ordering::Relaxed);
+            if now != last {
+                (last, since) = (now, Instant::now());
+            } else if since.elapsed() > Duration::from_secs(1) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // Thinned to every other frame once the thirteenth crossed the budget: 0, 2, …, 16.
+        let one = (side * side * 4) as usize;
+        assert_eq!(last, 9 * one);
     }
 
     #[test]

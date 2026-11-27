@@ -3146,7 +3146,8 @@ impl State {
                     entry.insert((request, stop));
                     let answers = self.answers_for(request);
                     Box::pin(async move {
-                        crate::geo::live::share(room?, geo_uri, duration.timeout(), answers, stopped, |event_id| {
+                        let beacon = (duration.timeout(), duration == crate::LiveDuration::UntilStopped);
+                        crate::geo::live::share(room?, geo_uri, beacon, answers, stopped, |event_id| {
                             sink.emit(Event::LiveLocationStarted { request, event_id })
                         })
                         .await?;

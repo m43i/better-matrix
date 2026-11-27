@@ -8320,3 +8320,14 @@ fn the_map_should_not_zoom_past_street_detail() {
     s.zoom_map(40, (0.0, 0.0));
     assert_eq!(s.map_viewer().unwrap().zoom, *MAP_ZOOMS.end());
 }
+
+#[test]
+fn the_map_should_leave_out_the_places_of_people_the_user_ignores() {
+    let mut s = map_viewer();
+    if let Some(data) = s.accounts.get_mut(&AccountId::new("@ada:example.org")) {
+        data.safety.ignored.push("@grace:example.org".into());
+    }
+    let viewer = s.map_viewer().unwrap();
+    let pins: Vec<&str> = s.map_pins(viewer, now_ms()).iter().map(|pin| pin.message.event_id.as_str()).collect();
+    assert_eq!(pins, ["$ada-place", "$place"]);
+}

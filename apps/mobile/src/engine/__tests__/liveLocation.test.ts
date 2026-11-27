@@ -114,3 +114,15 @@ it('should ask the engine to share for the chosen duration', async () => {
     },
   });
 });
+
+it('should make a renewed beacon the one to stop', async () => {
+  const { engine, sent } = detachedEngine();
+  const store = new Store(engine);
+  const live = new LiveLocations(async () => {});
+
+  await live.start(store, '@me:test', '!room:test', 'geo:1,2', 'UntilStopped');
+  const request = sent[0]!.request;
+  engine.emit({ type: 'LiveLocationStarted', data: { request, event_id: '$first' } });
+  engine.emit({ type: 'LiveLocationStarted', data: { request, event_id: '$renewed' } });
+  expect(Object.values(store.getState().liveShares)).toEqual([{ request, eventId: '$renewed' }]);
+});

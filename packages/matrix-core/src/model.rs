@@ -1047,8 +1047,9 @@ pub enum LiveDuration {
     Hour,
     /// A day.
     Day,
-    /// Until the sharer stops it. Its beacon still names an end, 24 days on: longer timers
-    /// overflow other clients' (JavaScript's `setTimeout` takes at most 2^31 − 1 ms).
+    /// Until the sharer stops it. Each beacon still names an end, 24 days on (longer timers
+    /// overflow other clients': JavaScript's `setTimeout` takes at most 2^31 − 1 ms), and a fresh
+    /// beacon carries on shortly before it.
     UntilStopped,
 }
 

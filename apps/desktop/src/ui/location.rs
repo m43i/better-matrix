@@ -288,10 +288,14 @@ fn moving_map(
 ) -> El {
     let zoom = f64::from(viewer.zoom);
     let origin = matrix_core::geo::project(center.0, center.1, zoom);
-    // Where a place is drawn, in points from the map's top left.
+    // Where a place is drawn, in points from the map's top left: on the world's nearest copy, so
+    // places either side of the antimeridian stay side by side.
+    let world = matrix_core::geo::project(0.0, 180.0, zoom).0;
     let place = |(lat, lon): (f64, f64)| {
         let (x, y) = matrix_core::geo::project(lat, lon, zoom);
-        [(x - origin.0) as f32 + size[0] / 2.0 + viewer.drag.0, (y - origin.1) as f32 + size[1] / 2.0 + viewer.drag.1]
+        let dx = x - origin.0;
+        let dx = dx - world * (dx / world).round();
+        [dx as f32 + size[0] / 2.0 + viewer.drag.0, (y - origin.1) as f32 + size[1] / 2.0 + viewer.drag.1]
     };
     let step = |points: f32| ((points / FRAME_STEP).ceil() * FRAME_STEP).clamp(FRAME_STEP, 2048.0) as u32;
     let frame = MapFrame {

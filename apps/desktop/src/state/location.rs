@@ -86,8 +86,8 @@ impl MapPin<'_> {
 }
 
 /// The places a map viewer shows, newest first: each sender's newest place in the conversation,
-/// if it is still live or was shared within a day, and always the focused one (in place of its
-/// sender's newest).
+/// if it is a live share still running or a place shared within a day, and always the focused
+/// one (in place of its sender's newest).
 pub fn map_pins<'a>(messages: impl IntoIterator<Item = &'a Message>, focus: &str, now: u64) -> Vec<MapPin<'a>> {
     let mut pins: Vec<MapPin<'a>> = Vec::new();
     for message in messages {
@@ -105,8 +105,14 @@ pub fn map_pins<'a>(messages: impl IntoIterator<Item = &'a Message>, focus: &str
             None => pins.push(pin),
         }
     }
+    // A live share stays while it runs, and goes once it ends: its last fix is no longer where
+    // they are.
     pins.retain(|pin| {
-        pin.message.event_id == focus || pin.live(now) || pin.message.timestamp_ms.saturating_add(RECENT_MS) >= now
+        pin.message.event_id == focus
+            || match pin.location.live_until {
+                Some(_) => pin.live(now),
+                None => pin.message.timestamp_ms.saturating_add(RECENT_MS) >= now,
+            }
     });
     pins.sort_by_key(|pin| std::cmp::Reverse(pin.message.timestamp_ms));
     pins
@@ -287,12 +293,11 @@ impl State {
         }
     }
 
-    /// The places the map viewer shows.
+    /// The places the map viewer shows, none from someone the user ignores.
     pub fn map_pins(&self, viewer: &MapViewer, now: u64) -> Vec<MapPin<'_>> {
-        let Some(timeline) = self.accounts.get(&viewer.account).and_then(|data| data.timeline(&viewer.key)) else {
-            return Vec::new();
-        };
-        map_pins(timeline.messages(), &viewer.focus, now)
+        let Some(data) = self.accounts.get(&viewer.account) else { return Vec::new() };
+        let Some(timeline) = data.timeline(&viewer.key) else { return Vec::new() };
+        map_pins(timeline.messages().filter(|message| !data.ignores(&message.sender_id)), &viewer.focus, now)
     }
 
     /// Where the map viewer centres (latitude, longitude); `None` while the focused place is
@@ -579,6 +584,16 @@ mod tests {
     fn a_live_share_should_stay_on_the_map_however_long_ago_it_began() {
         let messages = [shared("$live", "@a:x", 2 * RECENT_MS, Some(NOW + MINUTE)), shared("$b", "@b:x", MINUTE, None)];
         assert_eq!(ids(&map_pins(&messages, "$b", NOW)), ["$b", "$live"]);
+    }
+
+    #[test]
+    fn a_live_share_that_ended_should_leave_the_map_at_once() {
+        let messages = [
+            shared("$expired", "@a:x", 2 * 60 * MINUTE, Some(NOW - 60 * MINUTE)),
+            shared("$stopped", "@c:x", 10 * MINUTE, Some(0)),
+            shared("$b", "@b:x", MINUTE, None),
+        ];
+        assert_eq!(ids(&map_pins(&messages, "$b", NOW)), ["$b"]);
     }
 
     #[test]

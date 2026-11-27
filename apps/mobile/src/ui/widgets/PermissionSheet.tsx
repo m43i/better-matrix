@@ -12,6 +12,7 @@ import { accessContext, permissionText } from '../../state/widgets';
 import { font } from '../../theme/palette';
 import { Button, ListRow, ListSection } from '../components';
 import { usePalette } from '../theme';
+import { ModalNotices } from '../Notices';
 
 export function PermissionSheet({
   ask,
@@ -100,6 +101,7 @@ export function PermissionSheet({
           </View>
         </SafeAreaView>
       </SafeAreaProvider>
+      <ModalNotices />
     </Modal>
   );
 }

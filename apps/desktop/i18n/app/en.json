@@ -1255,7 +1255,6 @@
   "location.live": "Live location",
   "location.ended": "Location sharing ended",
   "location.stop": "Stop sharing",
-  "location.navigate": "Open in navigation app",
   "location.waiting": "Waiting for a location…",
   "location.unavailable": "Map unavailable",
   "location.zoom_in": "Zoom in",

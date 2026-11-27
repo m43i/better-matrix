@@ -124,7 +124,9 @@ export class LiveLocations {
           data: { account, room_id: roomId, geo_uri: first, duration },
         },
         (event) => {
-          if (event.type !== 'LiveLocationStarted' || share.state !== 'starting') return;
+          // A share until stopped starts a fresh beacon before each one runs out: the newest
+          // is the one to stop.
+          if (event.type !== 'LiveLocationStarted' || share.state === 'stopping') return;
           share.state = 'receiving';
           store.update((s) => ({
             ...s,

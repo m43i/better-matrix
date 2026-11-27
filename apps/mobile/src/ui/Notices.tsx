@@ -1,7 +1,8 @@
 // Notices: one message at a time over the top of the screen, gone after a few seconds or a tap.
 // iOS presents modals and form sheets in windows of their own above the root view, so there the
-// notice sits in a full-window overlay; Android's sheets and modals are views under the root's
-// later children, so the notice stays above them as it is.
+// notice sits in a full-window overlay, there only while it shows. Android's sheets and native-stack
+// modals are views under the root's later children, so the notice stays above them as it is; a
+// React Native `Modal` is a window of its own, which shows the notice itself (`ModalNotices`).
 
 import { type ReactNode, useEffect } from 'react';
 import { Platform, Pressable, StyleSheet, Text } from 'react-native';
@@ -27,12 +28,35 @@ export function Notices() {
     return () => clearTimeout(timer);
   }, [store, notice]);
 
-  return <Above>{notice ? <Notice key={notice.id} notice={notice} /> : null}</Above>;
+  if (!notice) return null;
+
+  return (
+    <Above>
+      <Notice key={notice.id} notice={notice} />
+    </Above>
+  );
 }
 
-/** Over everything: the window's overlay on iOS; on Android, the root's last child is enough. */
+/**
+ * The notice inside a React Native `Modal`: on Android the modal is a window of its own, over
+ * the root's notice, so it shows the notice too. On iOS the root's overlay is already above it.
+ */
+export function ModalNotices() {
+  return Platform.OS === 'android' ? <Notices /> : null;
+}
+
+/**
+ * Over everything: the window's overlay on iOS; on Android, the root's last child is enough. The
+ * overlay isn't modal to VoiceOver, which would otherwise leave the screen under it out.
+ */
 function Above({ children }: { children: ReactNode }) {
-  return Platform.OS === 'ios' ? <FullWindowOverlay>{children}</FullWindowOverlay> : children;
+  return Platform.OS === 'ios' ? (
+    <FullWindowOverlay unstable_accessibilityContainerViewIsModal={false}>
+      {children}
+    </FullWindowOverlay>
+  ) : (
+    children
+  );
 }
 
 function Notice({ notice }: { notice: NoticeData }) {

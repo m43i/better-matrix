@@ -1255,7 +1255,6 @@
   "location.live": "Position en direct",
   "location.ended": "Partage de position terminé",
   "location.stop": "Arrêter le partage",
-  "location.navigate": "Ouvrir dans l’application de navigation",
   "location.waiting": "En attente d’une position…",
   "location.unavailable": "Carte indisponible",
   "location.zoom_in": "Zoom avant",

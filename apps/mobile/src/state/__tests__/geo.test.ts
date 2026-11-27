@@ -7,7 +7,7 @@ import {
   mapOf,
   mapPins,
   pinDetail,
-  navigationLink,
+  googleMapsLink,
   RECENT_PLACE_MS,
 } from '../geo';
 import { clockTime, sentAt } from '../timelineText';
@@ -50,15 +50,15 @@ describe('mapOf', () => {
   });
 });
 
-describe('navigationLink', () => {
-  it('should address the configured iOS navigation app', () => {
-    expect(navigationLink('geo:52.5,13.4', 'ios')).toBe(
-      'geo-navigation:///place?coordinate=52.5,13.4',
+describe('googleMapsLink', () => {
+  it('should search Google Maps for the coordinates', () => {
+    expect(googleMapsLink('geo:52.5,13.4;u=10')).toBe(
+      'https://www.google.com/maps/search/?api=1&query=52.5,13.4',
     );
   });
-  it('should open the Android navigation handler with only validated coordinates', () => {
-    expect(navigationLink('geo:52.5,13.4;u=10', 'android')).toBe('geo:0,0?q=52.5,13.4');
-    expect(navigationLink('https://example.org', 'android')).toBeNull();
+
+  it('should name nothing for another address', () => {
+    expect(googleMapsLink('https://example.org')).toBeNull();
   });
 });
 
@@ -131,6 +131,20 @@ describe('mapPins', () => {
 
   it('should leave out an old live share that has ended', () => {
     expect(ids([place('$ended', '@a', NOW - 2 * RECENT_PLACE_MS, 'geo:1,2', NOW - 1)])).toEqual([]);
+  });
+
+  it('should leave out a live share that ended today, stopped or run out', () => {
+    expect(
+      ids([
+        place('$expired', '@a', NOW - 2 * HOUR, 'geo:1,2', NOW - HOUR),
+        place('$stopped', '@b', NOW - 10 * 60_000, 'geo:1,2', 0),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('should leave out the places of people the user ignores', () => {
+    const pins = mapPins([place('$a', '@a', NOW), place('$b', '@b', NOW)], '$a', NOW, ['@b']);
+    expect(pins.map((pin) => pin.message.event_id)).toEqual(['$a']);
   });
 
   it('should always show the focused place, however old', () => {
