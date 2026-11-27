@@ -542,7 +542,9 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
     round past either end (`State::step_preview`, `State::show_preview_item`). Leaving an item
     lets go of it: a PDF render stops, a video's player is dropped, a clip pauses; closing does
     the same. Phones use the same rule ([0010-mobile.md](0010-mobile.md)).
-  - Space plays or pauses the video or clip shown (`State::toggle_preview_playback`).
+  - Space plays or pauses the video or clip shown (`State::toggle_preview_playback`). The video
+    scrubber is a Rune Kit slider with continuous seeking, keyboard steps, and an accessible
+    playback time.
   - A press on an audio card beside its controls opens the clip in the preview. Audio shows
     the timeline's voice card at 420 points under a large audio glyph
     (`timeline::audio_player`): it plays through `State::audio` like any card, so speed,
@@ -597,15 +599,16 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   - A PDF render stops at 40 million pixels (160 MiB), draws pages above 8 million pixels
     smaller, and stops when the preview closes.
 - **Attachment actions:** `AttachmentAction` flows through `State::act_on_attachment`. Copy
-  image fetches the original, converts it to a clipboard PNG on a worker, then writes through
-  Rune. Open saves the original to a unique path in the private scratch folder, then asks the
+  image uses Rune's clipboard worker to encode and write the preview's ready original. When
+  the original isn't decoded in the preview, it fetches and converts the original on a worker.
+  Open saves the original to a unique path in the private scratch folder, then asks the
   OS default application on a worker; the file lives until the app exits. Open is available
   only for recognized document, media and archive extensions, checked in both the menu and
   the state action; executables, scripts and unknown types stay available through Download.
   Edits made to an opened scratch copy are temporary too: Download is the path for keeping a
   file and edits to it. Download uses the save dialog. Fetch, conversion and open failures
   become notices.
-- **Download:** the save dialog (rfd) runs on a worker; `Command::SaveMedia` downloads the
+- **Download:** Rune's save dialog returns the chosen path. `Command::SaveMedia` downloads the
   original and writes it in the engine.
 - **Pointer cursors** mark whatever a press acts on: components with a button, menu, radio or
   tab role, message rows (they open the thread), attachments. Message text keeps the text

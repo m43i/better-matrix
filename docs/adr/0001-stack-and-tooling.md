@@ -248,7 +248,7 @@ Date: 2026-11-14
   - Numbers go through the locale (`I18N.decimal`).
   - **Headless** runs and tests use English (`Settings::fixed_english`).
 - **Fonts:** `families` are `("Inter", "ui-monospace")`, so `mono()` text (code, recovery keys,
-  the **backdrop**) uses the system's monospace font; Rune's default put Inter in both slots.
+  the **backdrop**) uses the system's monospace font. These families also match Rune's defaults.
 
 ## Consequences
 

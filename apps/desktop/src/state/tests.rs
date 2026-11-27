@@ -457,7 +457,11 @@ fn sending_should_send_text_and_each_attachment_to_the_open_room() {
     drain(&mut commands);
     s.composer.edit.insert("hi");
     s.files_picked(
-        PickFor::Attachments(ComposerTarget::Room),
+        PickFor::Attachments {
+            target: ComposerTarget::Room,
+            account: AccountId::new("@a:example.org"),
+            key: TimelineKey::room("!one:x"),
+        },
         &[PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.png")],
     );
     s.send_message(ComposerTarget::Room, &mut Tx::default());
@@ -1562,7 +1566,7 @@ fn a_picked_picture_should_become_the_profile_picture() {
     let (mut s, mut commands) = state();
     signed_in_with(&mut s, matrix_core::SignInMethod::Password);
     drain(&mut commands);
-    s.files_picked(PickFor::Avatar, &[PathBuf::from("/tmp/me.png")]);
+    s.files_picked(PickFor::Avatar(AccountId::new("@a:example.org")), &[PathBuf::from("/tmp/me.png")]);
     assert!(matches!(
         commands.try_next(),
         Some((_, Command::SetAvatar { file: Some(f), .. })) if f.as_path() == std::path::Path::new("/tmp/me.png")
@@ -1781,6 +1785,7 @@ fn clicking_an_image_should_preview_it_full_size() {
         &TimelineKey::room("!one:x"),
         "$file",
         &attachment("cat.png", matrix_core::AttachmentKind::Image),
+        &mut rune::Tx::default(),
     );
     assert!(matches!(
         &s.preview,
@@ -1803,6 +1808,7 @@ fn a_decoded_attachment_preview_should_refresh_without_another_user_action() {
         &TimelineKey::room("!one:x"),
         "$file",
         &attachment("cat.png", matrix_core::AttachmentKind::Image),
+        &mut rune::Tx::default(),
     );
     let (request, _) = commands.try_next().unwrap();
     let bytes: Arc<[u8]> = include_bytes!("../../../../packaging/icons/better-matrix-256.png").as_slice().into();
@@ -1830,7 +1836,7 @@ fn opening_an_attachment_should_show_its_cached_thumbnail_while_the_original_loa
     s.media.loaded(file.media.clone().unwrap(), bytes.clone(), Some((256, 256)));
     s.media.decode(bytes).unwrap().wait().unwrap();
     s.media.measure();
-    s.open_attachment(&TimelineKey::room("!one:x"), "$file", &file);
+    s.open_attachment(&TimelineKey::room("!one:x"), "$file", &file, &mut rune::Tx::default());
     assert!(matches!(
         &s.preview,
         Some(Preview { content: PreviewContent::Image { thumbnail: Some(_), status: ImageStatus::Downloading }, .. })
@@ -1845,6 +1851,7 @@ fn clicking_a_pdf_should_preview_its_pages() {
         &TimelineKey::room("!one:x"),
         "$file",
         &attachment("Report.PDF", matrix_core::AttachmentKind::File),
+        &mut rune::Tx::default(),
     );
     assert!(matches!(
         &s.preview,
@@ -1861,6 +1868,7 @@ fn clicking_another_file_should_not_preview_it() {
         &TimelineKey::room("!one:x"),
         "$file",
         &attachment("notes.zip", matrix_core::AttachmentKind::File),
+        &mut rune::Tx::default(),
     );
     assert!(s.preview.is_none());
     assert!(commands.try_next().is_none());
@@ -1875,6 +1883,7 @@ fn a_preview_that_failed_to_download_should_say_so() {
         &TimelineKey::room("!one:x"),
         "$file",
         &attachment("Report.pdf", matrix_core::AttachmentKind::File),
+        &mut rune::Tx::default(),
     );
     let (request, _) = commands.try_next().unwrap();
     apply(&mut s, Event::Finished { request, result: Err("gone".into()) });
@@ -1891,7 +1900,12 @@ fn batch_preview(index: usize) -> (State, DetachedCommands) {
     crate::demo::batch_messages(&mut s);
     drain(&mut commands);
     let file = crate::demo::batch_attachments().swap_remove(index);
-    s.open_attachment(&TimelineKey::room(crate::demo::DEMO_THREAD.0), &format!("$batch-{index}"), &file);
+    s.open_attachment(
+        &TimelineKey::room(crate::demo::DEMO_THREAD.0),
+        &format!("$batch-{index}"),
+        &file,
+        &mut rune::Tx::default(),
+    );
     (s, commands)
 }
 
@@ -1983,7 +1997,7 @@ fn opening_a_batch_should_fetch_the_previews_its_strip_shows() {
     s.media.forget(&MediaRef::opaque("launch-poster"));
     drain(&mut commands);
     let file = crate::demo::batch_attachments().swap_remove(0);
-    s.open_attachment(&TimelineKey::room(crate::demo::DEMO_THREAD.0), "$batch-0", &file);
+    s.open_attachment(&TimelineKey::room(crate::demo::DEMO_THREAD.0), "$batch-0", &file, &mut rune::Tx::default());
     let poster = MediaRef::opaque("launch-poster");
     assert!(
         drain(&mut commands).iter().any(|(_, c)| matches!(c, Command::FetchMedia { media, .. } if *media == poster))
@@ -2024,7 +2038,7 @@ fn a_video_starting_should_pause_the_clip_playing() {
     s.toggle_audio(&crate::demo::batch_attachments().swap_remove(2));
     drain(&mut commands);
     let video = crate::demo::batch_attachments().swap_remove(1);
-    s.open_attachment(&TimelineKey::room(crate::demo::DEMO_THREAD.0), "$batch-1", &video);
+    s.open_attachment(&TimelineKey::room(crate::demo::DEMO_THREAD.0), "$batch-1", &video, &mut rune::Tx::default());
     assert!(s.audio.as_ref().is_some_and(|clip| clip.play), "the clip plays on while the video downloads");
     let saved = drain(&mut commands).into_iter().find(|(_, c)| matches!(c, Command::SaveMedia { .. }));
     apply(&mut s, Event::Finished { request: saved.unwrap().0, result: Ok(()) });
@@ -2044,7 +2058,7 @@ fn a_video_sharing_an_upload_with_a_clip_saving_it_should_play_once_it_is_saved(
     drain(&mut commands);
     s.toggle_audio(&clip);
     let (saving, _) = commands.try_next().unwrap();
-    s.open_attachment(&TimelineKey::room(crate::demo::DEMO_THREAD.0), "$batch-1", &video);
+    s.open_attachment(&TimelineKey::room(crate::demo::DEMO_THREAD.0), "$batch-1", &video, &mut rune::Tx::default());
     assert!(drain(&mut commands).iter().all(|(_, c)| !matches!(c, Command::SaveMedia { .. })), "one download");
     apply(&mut s, Event::Finished { request: saving, result: Ok(()) });
     assert!(matches!(
@@ -2795,6 +2809,7 @@ fn a_thumbnail_of_the_previewed_file_should_not_replace_its_preview() {
         &TimelineKey::room("!one:x"),
         "$file",
         &attachment("Report.pdf", matrix_core::AttachmentKind::File),
+        &mut rune::Tx::default(),
     );
     let media = s.preview.as_ref().map(|preview| preview.media.clone()).unwrap();
     // Another fetch of the same file: a thumbnail for the timeline.
@@ -7592,7 +7607,7 @@ fn a_permission_level_should_go_no_higher_than_the_users_own() {
 #[test]
 fn a_picture_should_go_to_the_room_it_was_picked_for() {
     let (mut s, mut commands, id) = settings_open(admin_settings("!one:x"));
-    s.pick_room_avatar();
+    s.pick_room_avatar(&mut Tx::default());
     // Meanwhile another room's settings open.
     s.open_room_settings("!two:x");
     drain(&mut commands);

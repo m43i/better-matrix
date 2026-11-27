@@ -184,9 +184,9 @@ impl State {
     }
 
     /// Asks for pictures to add to the shown pack.
-    pub fn pick_pack_images(&mut self) {
+    pub fn pick_pack_images(&mut self, tx: &mut rune::Tx) {
         let (Some(place), Some(manager)) = (self.editable_place(), &self.pack_manager) else { return };
-        self.shell.pick_files(PickFor::PackImages { account: manager.account.clone(), pack: place });
+        self.shell.pick_files(tx, PickFor::PackImages { account: manager.account.clone(), pack: place });
     }
 
     /// Adds the pictures picked to a pack, as stickers.

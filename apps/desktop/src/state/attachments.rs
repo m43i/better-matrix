@@ -1,8 +1,10 @@
 //! Actions on an attachment, independent of the timeline or preview that shows it.
 
 use matrix_core::{AccountId, Attachment, AttachmentKind, Command, MediaSize};
+use rune::Tx;
 
-use super::{Purpose, State};
+use super::{ImageStatus, PreviewContent, Purpose, State};
+use crate::i18n::{t, tf};
 
 /// Documents, media and archives the system may view; programs and unknown formats are downloaded instead.
 pub fn can_open_attachment(file: &Attachment) -> bool {
@@ -88,6 +90,7 @@ impl State {
         event_id: &str,
         file: &Attachment,
         action: AttachmentAction,
+        tx: &mut Tx,
     ) {
         let held = self.accounts.get(account).is_some_and(|data| {
             data.hides_listed_media(room_id, event_id, file, &self.revealed_media)
@@ -97,10 +100,10 @@ impl State {
             self.popover = None;
             return;
         }
-        self.act_on_attachment(account.clone(), file, action);
+        self.act_on_attachment(account.clone(), file, action, tx);
     }
 
-    pub fn act_on_attachment(&mut self, account: AccountId, file: &Attachment, action: AttachmentAction) {
+    pub fn act_on_attachment(&mut self, account: AccountId, file: &Attachment, action: AttachmentAction, tx: &mut Tx) {
         self.popover = None;
         // What the preview holds back can't be saved, copied or opened either (ADR 0011).
         // Nor what someone the user ignores sent.
@@ -112,10 +115,26 @@ impl State {
         let Some(media) = file.media.clone() else { return };
         match action {
             AttachmentAction::CopyImage if file.kind == AttachmentKind::Image => {
-                self.dispatch(Command::FetchMedia { account, media, size: MediaSize::Original }, Purpose::CopyImage);
+                if let Some(preview) = self.preview.as_ref().filter(|p| p.account == account && p.attachment == *file)
+                    && let PreviewContent::Image { status: ImageStatus::Ready(image), .. } = &preview.content
+                {
+                    tx.copy_image_then(image, |s: &mut State, result, _| {
+                        let error = match result {
+                            Ok(()) | Err(rune::CopyImageError::Superseded) => return,
+                            Err(rune::CopyImageError::TooLarge) => t!("attachment.copy_too_large").to_owned(),
+                            Err(error) => error.to_string(),
+                        };
+                        s.notice = Some(tf!("notice.copy_image", error = error));
+                    });
+                } else {
+                    self.dispatch(
+                        Command::FetchMedia { account, media, size: MediaSize::Original },
+                        Purpose::CopyImage,
+                    );
+                }
             }
             AttachmentAction::CopyImage => {}
-            AttachmentAction::Download => self.download(account, media, &file.name),
+            AttachmentAction::Download => self.download(account, media, &file.name, tx),
             AttachmentAction::Open if can_open_attachment(file) => {
                 let path = self.shell.attachment_path(&file.name);
                 self.dispatch(Command::SaveMedia { account, media, path: path.clone() }, Purpose::OpenFile(path));

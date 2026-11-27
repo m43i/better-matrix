@@ -1878,7 +1878,7 @@ fn image_preview(event_id: &str, attachment: &Attachment, cx: &Context<'_>, held
         .role("img")
         .label(attachment.name.clone())
         .cursor(rune::Cursor::Pointer)
-        .on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened));
+        .on_press_tx(move |s: &mut State, tx| s.open_attachment(&key, &id, &opened, tx));
     let video = attachment.kind == AttachmentKind::Video;
     let frame = match image {
         Some(image) => frame.pixels_fit(image.pixels(), SurfaceFit::Fit).center(),
@@ -1984,7 +1984,9 @@ fn attachment_card(event_id: &str, attachment: &Attachment, cx: &Context<'_>, he
         )
         .child(titles);
     if !held {
-        return card.cursor(rune::Cursor::Pointer).on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened));
+        return card
+            .cursor(rune::Cursor::Pointer)
+            .on_press_tx(move |s: &mut State, tx| s.open_attachment(&key, &id, &opened, tx));
     }
     let account = cx.account.clone();
     card.child(el().grow(1.0)).child(
@@ -2091,7 +2093,7 @@ fn audio_card(message: &Message, attachment: &Attachment, cx: &Context<'_>, p: &
     let card = audio_player(event_id, attachment, &clips, cx.content_width, p);
     // A voice card keeps to its message's side: the right for the user's own bubbles.
     let card = if cx.on_right(message) { card.self_end() } else { card };
-    card.cursor(rune::Cursor::Pointer).on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened))
+    card.cursor(rune::Cursor::Pointer).on_press_tx(move |s: &mut State, tx| s.open_attachment(&key, &id, &opened, tx))
 }
 
 /// What an audio card needs to know of the clips playing and played.

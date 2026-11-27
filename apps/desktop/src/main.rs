@@ -849,8 +849,7 @@ fn spec() -> AppSpec<State> {
             ("demo-link-preview", demo::link_preview),
             ("demo-link-person", demo::link_person),
         ],
-        // Inter for text; the system's monospace font for code, recovery keys and the sign-in
-        // backdrop (Rune's default mono slot is Inter too).
+        // Inter for text; the system's monospace font for code, recovery keys and the sign-in backdrop.
         families: ("Inter", "ui-monospace"),
         setup: Some(|s, waker| s.media.attach(waker)),
         poll: Some(|s, clock, tx| {

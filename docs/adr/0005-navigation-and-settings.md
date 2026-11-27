@@ -177,7 +177,8 @@ Date: 2026-11-22
     by notification id. A thread and connection per notification, waiting for its click, piled
     up with the notification history. A failed show closes the connection (ending its
     listener) and the next notification opens a new one; the listener skips messages it can't
-    read and ends only with its connection. The action's label is a catalog key.
+    read and ends only with its connection. On Wayland it forwards the clicked notification's
+    activation token when the service sends one. The action's label is a catalog key.
 - **Wants attention:** one rule (`wants_attention`) for sidebar, rail and account menu.
   - Unread messages or mentions, or only mentions for mentions-only and muted rooms; and any
     room marked unread, whatever its mode.
@@ -220,10 +221,11 @@ Date: 2026-11-22
   window is still closed. Give a previously working tray time to return after a panel or
   Explorer restart, and verify that the app's own icon is registered.
   Plasma's watcher and host can outlive the tray widget, so check for the widget on a screen
-  when Plasma owns the host. The pinned Rune tray has no macOS backend and its Linux backend
-  can report success without a host. Its Windows tray can't receive Explorer's restart
-  broadcast. Native quit and the General preference to quit on close use Rune's orderly exit
-  so the app can finish the latest settings save, stop the engine and release the instance.
+  when Plasma owns the host. The app uses `tray-icon` for the macOS menu-bar item and for a
+  Windows tray that receives Explorer's restart broadcast. It uses `ksni` on Linux so it can
+  detect an absent host. Native quit and the General preference to quit on close use Rune's
+  orderly exit so the app can finish the latest settings save, stop the engine and release the
+  instance.
 - **Settings:** a modal in sections (`SettingsSection`). Device settings go to a prefs file off
   the UI thread; account settings live on the homeserver.
   - Every desktop dialog uses the shared modal layer's Rune focus trap and Escape dismissal.

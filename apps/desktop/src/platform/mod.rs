@@ -1,6 +1,5 @@
-//! Everything that talks to the operating system on the app's behalf: picking files, posting
-//! notifications, the taskbar badge, and the keychain. State code calls [`Shell`]; it never touches the OS itself,
-//! so tests run it headless.
+//! The operating system services the app uses, including notifications, the taskbar badge,
+//! and the keychain. State uses [`Shell`] for those and Rune transactions for file dialogs.
 
 mod attachments;
 mod files;
@@ -162,13 +161,6 @@ impl Shell {
         )
     }
 
-    /// Opens the system file dialog; its answer arrives through [`State::files_picked`].
-    pub fn pick_files(&self, picked_for: crate::state::PickFor) {
-        if let Some(app) = &self.app {
-            files::pick(app.clone(), picked_for);
-        }
-    }
-
     /// Renders a PDF's pages on a worker; they arrive through [`State::document_page`], then
     /// [`State::document_rendered`], each with the render's number, which this returns: what an
     /// earlier render of the same file still sends is told apart.
@@ -272,13 +264,6 @@ impl Shell {
     /// Stops the document render under way, if any: its preview closed.
     pub fn stop_document(&self) {
         self.document.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Asks where to save a file named `name`; `chosen` runs with the path once picked.
-    pub fn pick_save_path(&self, name: &str, chosen: impl FnOnce(&mut State, std::path::PathBuf) + Send + 'static) {
-        if let Some(app) = &self.app {
-            files::save(app.clone(), name.to_owned(), chosen);
-        }
     }
 
     /// Saves this device's settings, off the UI thread (the prefs file is rewritten whole).

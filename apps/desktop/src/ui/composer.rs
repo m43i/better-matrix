@@ -539,7 +539,7 @@ fn bottom_bar(s: &State, target: ComposerTarget, p: &Palette) -> El {
             .child(
                 bar_button(&icons::PAPERCLIP, t!("composer.attach"), false, p)
                     .key(key(target, "attach"))
-                    .on_press(move |s: &mut State| s.pick_attachments(target)),
+                    .on_press_tx(move |s: &mut State, tx| s.pick_attachments(target, tx)),
             )
             .child(separator());
     }

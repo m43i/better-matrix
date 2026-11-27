@@ -776,7 +776,7 @@ fn profile(s: &State, p: &Palette) -> El {
                             p,
                         )
                         .key("avatar-upload")
-                        .on_press(State::pick_avatar),
+                        .on_press_tx(State::pick_avatar),
                     )
                     .children(has_picture.then(|| {
                         button(t!("profile.remove_picture"), ButtonKind::Secondary, !form.saving_avatar, p)
@@ -1052,12 +1052,12 @@ fn account(s: &State, p: &Palette) -> El {
         .child(
             button(t!("keys.export_button"), ButtonKind::Secondary, true, p)
                 .key("keys-export")
-                .on_press(State::export_room_keys),
+                .on_press_tx(State::export_room_keys),
         )
         .child(
             button(t!("keys.import_button"), ButtonKind::Secondary, true, p)
                 .key("keys-import")
-                .on_press(State::import_room_keys),
+                .on_press_tx(State::import_room_keys),
         );
     let (password_hint, password_label) = if oauth {
         (t!("password.hint_oauth"), t!("password.change_on_page"))

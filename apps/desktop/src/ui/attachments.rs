@@ -30,9 +30,11 @@ pub fn actions(account: &AccountId, file: &Attachment, message: Option<(&str, &s
         .map(|(action, glyph, label, key)| {
             let (account, file) = (account.clone(), file.clone());
             let message = message.map(|(room_id, event_id)| (room_id.to_owned(), event_id.to_owned()));
-            menu_action(glyph, label, Tone::Normal, p).key(key).on_press(move |s: &mut State| match &message {
-                Some((room_id, event_id)) => s.act_on_message_attachment(&account, room_id, event_id, &file, action),
-                None => s.act_on_attachment(account.clone(), &file, action),
+            menu_action(glyph, label, Tone::Normal, p).key(key).on_press_tx(move |s: &mut State, tx| match &message {
+                Some((room_id, event_id)) => {
+                    s.act_on_message_attachment(&account, room_id, event_id, &file, action, tx)
+                }
+                None => s.act_on_attachment(account.clone(), &file, action, tx),
             })
         })
         .collect()
