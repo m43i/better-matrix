@@ -2087,8 +2087,8 @@ struct Running {
     opening: HashMap<TimelineKey, RequestId>,
     /// Rooms whose keys were fetched from the backup this run; after verification, all again.
     keys_fetched: HashSet<String>,
-    /// The end of the last read this account sent ([`Running::next_read`]).
-    last_read: Option<tokio::sync::oneshot::Receiver<()>>,
+    /// The end of the last read this account sent in each room ([`Running::next_read`]).
+    last_read: HashMap<String, tokio::sync::oneshot::Receiver<()>>,
     /// The account's room list: every re-read of rooms goes through it.
     feed: RoomFeed,
     /// The handlers hearing the account's call signals.
@@ -2144,13 +2144,16 @@ impl Running {
         self.timelines.get(key).map(|(timeline, _)| Arc::clone(timeline)).or_else(|| self.warm_timeline(key))
     }
 
-    /// A place in this account's line of reads (receipts and room-list reads): they go one at a
-    /// time, in the order the app sent them, as some servers (Conduwuit) let a late older
-    /// fully-read marker overwrite a newer one. The read waits for the first value, then holds
-    /// the second until it is done (dropped, also when cancelled).
-    fn next_read(&mut self) -> (Option<tokio::sync::oneshot::Receiver<()>>, tokio::sync::oneshot::Sender<()>) {
+    /// A place in the line of reads (receipts and room-list reads) in `room_id`: they go one at
+    /// a time, in the order the app sent them, as some servers (Conduwuit) let a late older
+    /// fully-read marker overwrite a newer one. Other rooms don't wait. The read waits for the
+    /// first value, then holds the second until it is done.
+    fn next_read(
+        &mut self,
+        room_id: &str,
+    ) -> (Option<tokio::sync::oneshot::Receiver<()>>, tokio::sync::oneshot::Sender<()>) {
         let (done, finished) = tokio::sync::oneshot::channel();
-        (self.last_read.replace(finished), done)
+        (self.last_read.insert(room_id.to_owned(), finished), done)
     }
 
     /// A warm timeline for `key`, to open again. It stays in the warm set until it is open, so
@@ -2975,7 +2978,7 @@ impl State {
                 let (timeline, turn) = self
                     .accounts
                     .get_mut(&account)
-                    .map(|running| (running.reading_timeline(&key), Some(running.next_read())))
+                    .map(|running| (running.reading_timeline(&key), Some(running.next_read(&key.room_id))))
                     .unwrap_or_default();
                 Box::pin(async move {
                     let _done = wait_turn(turn).await;
@@ -4216,7 +4219,7 @@ impl State {
             Command::MarkRoomRead { account: id, room_id } => {
                 self.reading.insert(request);
                 let feed = self.feed(&id);
-                let turn = self.accounts.get_mut(&id).map(Running::next_read);
+                let turn = self.accounts.get_mut(&id).map(|running| running.next_read(&room_id));
                 let changed = self.account(&id).map(|account| {
                     let (queue, room_id) = (account.organising.clone(), room_id.clone());
                     queue.run(async move {
@@ -4422,7 +4425,7 @@ impl State {
                     warm: Vec::new(),
                     opening: HashMap::new(),
                     keys_fetched: HashSet::new(),
-                    last_read: None,
+                    last_read: HashMap::new(),
                     feed,
                     handlers,
                     sends: HashMap::new(),
@@ -5965,7 +5968,7 @@ mod tests {
             warm: Vec::new(),
             opening: HashMap::from([(TimelineKey::room("!room:example.org"), RequestId(3))]),
             keys_fetched: HashSet::new(),
-            last_read: None,
+            last_read: HashMap::new(),
             feed,
             handlers: Vec::new(),
             sends: HashMap::new(),
@@ -5995,7 +5998,7 @@ mod tests {
             timelines: HashMap::new(),
             opening: HashMap::new(),
             keys_fetched: HashSet::new(),
-            last_read: None,
+            last_read: HashMap::new(),
             feed,
             handlers: Vec::new(),
             sends: HashMap::new(),
@@ -6019,10 +6022,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_read_should_wait_for_the_one_sent_before_it() {
+    async fn a_read_should_wait_for_the_one_sent_before_it_in_its_room() {
         let server = crate::test_server::Server::new(crate::test_server::thread_response);
         let mut running = running_with(&server, |_| Vec::new()).await;
-        let (first, second) = (running.next_read(), running.next_read());
+        let (first, second) = (running.next_read("!room:example.org"), running.next_read("!room:example.org"));
+        let mut other = std::pin::pin!(wait_turn(Some(running.next_read("!other:example.org"))));
+        assert!(futures_util::poll!(&mut other).is_ready(), "another room doesn't wait");
         // The newer one is polled first, as spawned tasks may be.
         let mut second = std::pin::pin!(wait_turn(Some(second)));
         assert!(futures_util::poll!(&mut second).is_pending());
