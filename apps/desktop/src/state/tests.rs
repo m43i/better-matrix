@@ -808,14 +808,14 @@ fn adding_a_deadline_should_send_an_unchanged_status_message() {
     let me = person_presence(id.as_str(), matrix_core::Presence::Online, Some("Out"));
     apply(&mut s, Event::Presence { account: id, people: vec![me] });
     s.edit_status_message();
-    s.choose_status_expiry(StatusExpiry::HalfHour);
+    s.choose_status_expiry(StatusExpiry::Hour);
     let before = now_ms();
     s.save_status_message();
     let sent = drain(&mut commands);
     assert!(matches!(
         &sent[..],
         [(_, Command::SetStatusMessage { message: Some(message), clear_at_ms: Some(at), .. })]
-            if message == "Out" && (before + 1_800_000..=now_ms() + 1_800_000).contains(at)
+            if message == "Out" && (before + 3_600_000..=now_ms() + 3_600_000).contains(at)
     ));
 }
 
@@ -4112,6 +4112,40 @@ fn paging_a_call_should_stop_hidden_videos_and_start_visible_ones() {
 }
 
 #[test]
+fn quitting_should_send_the_read_position_held_back() {
+    let (mut s, mut commands) = state();
+    let (account, key) = (AccountId::new("@a:example.org"), TimelineKey::room("!room:example.org"));
+    let now = std::time::Instant::now();
+    s.receipts.update(account.clone(), key.clone(), Some("$1".into()), true, now);
+    s.receipts.update(account, key, Some("$2".into()), true, now);
+    s.quitting();
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::MarkRead { event_id: Some(id), .. } if id == "$2"))
+    );
+}
+
+#[test]
+fn a_call_in_a_window_off_screen_should_not_stream_its_video() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.select_room("!one:x");
+    apply(&mut s, Event::CallUpdated(Box::new(call_info(&id, "!one:x", Some(7)))));
+    drain(&mut commands);
+    s.window_visible = false;
+    s.sync_watching();
+    assert!(all_commands(&mut commands).contains(&Command::UnwatchVideo(matrix_core::VideoId(7))));
+    s.window_visible = true;
+    s.sync_watching();
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::WatchVideo { video: matrix_core::VideoId(7), .. }))
+    );
+}
+
+#[test]
 fn showing_chat_should_keep_visible_call_videos_watched() {
     let (mut s, mut commands) = state();
     let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
@@ -7252,6 +7286,21 @@ fn marking_a_room_unread_should_draw_attention_to_it_and_tell_the_server() {
     s.set_unread("!r:x", true);
     assert!(wants_attention(s.accounts.get(&id).unwrap().room("!r:x").unwrap()));
     assert_eq!(all_commands(&mut commands), [Command::SetUnread { account: id, room_id: "!r:x".into(), unread: true }]);
+}
+
+#[test]
+fn marking_a_room_unread_should_drop_the_receipt_held_back_for_it() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_summaries(&mut s, &id, vec![RoomSummary { unread: 0, ..room("!r:x") }]);
+    let (key, now) = (TimelineKey::room("!r:x"), std::time::Instant::now());
+    s.receipts.update(id.clone(), key.clone(), Some("$1".into()), true, now);
+    s.receipts.sent(&id, &key, RequestId(1));
+    s.receipts.update(id.clone(), key.clone(), Some("$2".into()), true, now);
+    s.set_unread("!r:x", true);
+    drain(&mut commands);
+    s.quitting();
+    assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::MarkRead { .. })));
 }
 
 #[test]

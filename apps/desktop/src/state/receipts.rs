@@ -1,4 +1,6 @@
-//! Coalesces viewport progress while scrolling, independently for each open timeline.
+//! Coalesces viewport progress while scrolling, independently for each open timeline. Closing a
+//! timeline sends what it still held back: the engine takes it through the closed timeline while
+//! it is kept warm, so leaving a room right after reading it keeps it read.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -103,12 +105,18 @@ impl Receipts {
         else {
             return;
         };
-        if self.timelines.get(&open).is_some_and(|sent| sent.closed) {
-            self.timelines.remove(&open);
-            return;
-        }
         let Some(sent) = self.timelines.get_mut(&open) else { return };
         sent.in_flight = None;
+        // A closed timeline sends what it held back at once, whatever became of the receipt
+        // before it, and retries nothing: the room may be gone, and opening it reads it again.
+        if sent.closed {
+            if sent.pending.is_some() {
+                sent.next_send = now;
+            } else {
+                self.timelines.remove(&open);
+            }
+            return;
+        }
         if !succeeded {
             sent.pending.get_or_insert_with(|| sent.position.clone());
             sent.next_send = now + RETRY;
@@ -117,16 +125,43 @@ impl Receipts {
         }
     }
 
-    pub fn forget(&mut self, account: &AccountId, key: &TimelineKey) {
-        let open = (account.clone(), key.clone());
-        if let Some(sent) = self.timelines.get_mut(&open)
-            && sent.in_flight.is_some()
-        {
-            sent.closed = true;
+    /// The whole room was marked read (positions held back on its main timeline are older) or
+    /// unread (they would take the mark away): they are dropped. Threads keep theirs: neither
+    /// reads them nor is touched by them.
+    pub fn supersede(&mut self, account: &AccountId, room_id: &str) {
+        self.timelines.retain(|(owner, key), sent| {
+            if owner != account || key.room_id != room_id || key.thread.is_some() {
+                return true;
+            }
             sent.pending = None;
-        } else {
-            self.timelines.remove(&open);
+            !sent.closed || sent.in_flight.is_some()
+        });
+    }
+
+    /// The app is quitting: every position held back goes now, even beside a receipt in flight
+    /// (the server keeps the later of two receipts). The engine waits a moment for them.
+    pub fn flush(&mut self) -> Vec<Command> {
+        self.timelines
+            .drain()
+            .filter_map(|((account, key), sent)| sent.pending.map(|position| command(account, key, position)))
+            .collect()
+    }
+
+    /// The timeline closed. A position held back goes now (dispatch it before closing), or once
+    /// the receipt in flight finishes; nothing is sent for it after that.
+    pub fn forget(&mut self, account: &AccountId, key: &TimelineKey) -> Option<Command> {
+        let open = (account.clone(), key.clone());
+        let sent = self.timelines.get_mut(&open)?;
+        sent.closed = true;
+        if sent.in_flight.is_some() {
+            return None;
         }
+        let Some(position) = sent.pending.take() else {
+            self.timelines.remove(&open);
+            return None;
+        };
+        sent.position = position.clone();
+        Some(command(account.clone(), key.clone(), position))
     }
 }
 
@@ -165,14 +200,128 @@ mod tests {
     }
 
     #[test]
-    fn closing_a_timeline_should_discard_its_queued_receipt() {
+    fn closing_a_timeline_should_send_its_queued_receipt_at_once() {
         let (mut receipts, now) = (Receipts::default(), Instant::now());
         let account = AccountId::new("@a:example.org");
         let key = TimelineKey::room("!room:example.org");
         receipts.update(account.clone(), key.clone(), Some("$1".into()), true, now);
         receipts.update(account.clone(), key.clone(), Some("$2".into()), true, now);
-        receipts.forget(&account, &key);
+        assert_eq!(
+            receipts.forget(&account, &key),
+            Some(Command::MarkRead {
+                account: account.clone(),
+                key: key.clone(),
+                event_id: Some("$2".into()),
+                fully_read: true
+            })
+        );
+        receipts.sent(&account, &key, RequestId(1));
+        receipts.finished(RequestId(1), true, now);
         assert!(receipts.due(now + INTERVAL).is_empty());
+        assert!(receipts.timelines.is_empty());
+    }
+
+    #[test]
+    fn marking_the_room_read_should_drop_its_queued_receipts() {
+        let (mut receipts, now) = (Receipts::default(), Instant::now());
+        let account = AccountId::new("@a:example.org");
+        let key = TimelineKey::room("!room:example.org");
+        receipts.update(account.clone(), key.clone(), Some("$1".into()), true, now);
+        receipts.sent(&account, &key, RequestId(1));
+        receipts.update(account.clone(), key.clone(), Some("$2".into()), true, now);
+        receipts.forget(&account, &key);
+        receipts.supersede(&account, "!room:example.org");
+        receipts.finished(RequestId(1), true, now);
+        assert!(receipts.due(now).is_empty());
+        assert!(receipts.timelines.is_empty());
+    }
+
+    #[test]
+    fn marking_the_room_read_should_keep_a_threads_queued_receipt() {
+        let (mut receipts, now) = (Receipts::default(), Instant::now());
+        let account = AccountId::new("@a:example.org");
+        let key = TimelineKey { room_id: "!room:example.org".into(), thread: Some("$root".into()) };
+        receipts.update(account.clone(), key.clone(), Some("$1".into()), false, now);
+        receipts.update(account.clone(), key, Some("$2".into()), false, now);
+        receipts.supersede(&account, "!room:example.org");
+        assert_eq!(receipts.due(now + INTERVAL).len(), 1);
+    }
+
+    #[test]
+    fn quitting_should_send_every_queued_receipt() {
+        let (mut receipts, now) = (Receipts::default(), Instant::now());
+        let account = AccountId::new("@a:example.org");
+        let key = TimelineKey::room("!room:example.org");
+        receipts.update(account.clone(), key.clone(), Some("$1".into()), true, now);
+        receipts.sent(&account, &key, RequestId(1));
+        receipts.update(account.clone(), key.clone(), Some("$2".into()), true, now);
+        assert_eq!(
+            receipts.flush(),
+            [Command::MarkRead { account, key, event_id: Some("$2".into()), fully_read: true }]
+        );
+    }
+
+    #[test]
+    fn closing_a_timeline_with_nothing_queued_should_send_nothing() {
+        let (mut receipts, now) = (Receipts::default(), Instant::now());
+        let account = AccountId::new("@a:example.org");
+        let key = TimelineKey::room("!room:example.org");
+        receipts.update(account.clone(), key.clone(), Some("$1".into()), true, now);
+        assert!(receipts.forget(&account, &key).is_none());
+        assert!(receipts.timelines.is_empty());
+    }
+
+    #[test]
+    fn closing_a_timeline_should_send_its_queued_receipt_once_the_one_in_flight_finishes() {
+        let (mut receipts, now) = (Receipts::default(), Instant::now());
+        let account = AccountId::new("@a:example.org");
+        let key = TimelineKey::room("!room:example.org");
+        receipts.update(account.clone(), key.clone(), Some("$1".into()), true, now);
+        receipts.sent(&account, &key, RequestId(1));
+        receipts.update(account.clone(), key.clone(), Some("$2".into()), true, now);
+        assert!(receipts.forget(&account, &key).is_none());
+        receipts.finished(RequestId(1), true, now);
+        assert_eq!(
+            receipts.due(now),
+            [Command::MarkRead {
+                account: account.clone(),
+                key: key.clone(),
+                event_id: Some("$2".into()),
+                fully_read: true
+            }]
+        );
+        receipts.sent(&account, &key, RequestId(2));
+        receipts.finished(RequestId(2), true, now);
+        assert!(receipts.timelines.is_empty());
+    }
+
+    #[test]
+    fn a_closed_timeline_should_still_send_its_queued_receipt_after_a_failure() {
+        let (mut receipts, now) = (Receipts::default(), Instant::now());
+        let account = AccountId::new("@a:example.org");
+        let key = TimelineKey::room("!room:example.org");
+        receipts.update(account.clone(), key.clone(), Some("$1".into()), true, now);
+        receipts.sent(&account, &key, RequestId(1));
+        receipts.update(account.clone(), key.clone(), Some("$2".into()), true, now);
+        receipts.forget(&account, &key);
+        receipts.finished(RequestId(1), false, now);
+        assert_eq!(
+            receipts.due(now),
+            [Command::MarkRead { account, key, event_id: Some("$2".into()), fully_read: true }]
+        );
+    }
+
+    #[test]
+    fn a_closed_timeline_should_not_retry_a_failed_receipt() {
+        let (mut receipts, now) = (Receipts::default(), Instant::now());
+        let account = AccountId::new("@a:example.org");
+        let key = TimelineKey::room("!room:example.org");
+        receipts.update(account.clone(), key.clone(), Some("$1".into()), true, now);
+        receipts.sent(&account, &key, RequestId(1));
+        receipts.forget(&account, &key);
+        receipts.finished(RequestId(1), false, now);
+        assert!(receipts.due(now + RETRY).is_empty());
+        assert!(receipts.timelines.is_empty());
     }
 
     #[test]

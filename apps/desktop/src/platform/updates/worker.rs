@@ -1,10 +1,11 @@
 //! One worker owns network and disk work. A channel serializes restart requests with checks.
 //! On macOS and Windows it downloads a newer release as soon as it finds it, then asks the user
-//! to restart; on Linux it only checks: the user installs the release with the command it offers.
+//! to restart, checking once more then so the restart lands on the newest release; on Linux it
+//! only checks: the user installs the release with the command it offers.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use rune::AppHandle;
 
@@ -13,6 +14,14 @@ use super::{Release, Upgrade, linux, release};
 use crate::state::State;
 
 const HOUR: Duration = Duration::from_secs(60 * 60);
+/// How long a download in the background may take.
+const DOWNLOAD_LIMIT: Duration = Duration::from_secs(15 * 60);
+/// How long the restart waits for a release newer than the one staged before it restarts into
+/// the staged one instead.
+const RESTART_DOWNLOAD_LIMIT: Duration = Duration::from_secs(90);
+/// The longest the worker sleeps at once, so a wall clock that jumped (sleep, a time change)
+/// is noticed soon.
+const GLANCE: Duration = Duration::from_secs(5 * 60);
 
 pub fn start(app: AppHandle<State>, cache: PathBuf) -> Option<Sender<Release>> {
     let (sender, receiver) = mpsc::channel::<Release>();
@@ -35,47 +44,45 @@ pub fn start(app: AppHandle<State>, cache: PathBuf) -> Option<Sender<Release>> {
                 }
             }
             let client = release::client()?;
-            let mut schedule = Schedule::new(Instant::now());
+            let mut schedule = Schedule::new(SystemTime::now());
             let mut staged = None::<Staged>;
-            loop {
-                let now = Instant::now();
-                if schedule.due(now) {
-                    match release::check(&client, &target) {
-                        Ok(Some(release)) => match &install {
-                            // Only a newer release than the one waiting replaces it, once staged.
-                            Some(install)
-                                if staged.as_ref().is_none_or(|ready| newer(&release.version, &ready.version)) =>
-                            {
-                                match install.stage(&client, &release) {
-                                    Ok(ready) => {
-                                        staged = Some(ready);
-                                        app.update(move |s, _| s.update_ready(release));
-                                    }
-                                    Err(error) => {
-                                        eprintln!("better-matrix: update download failed: {error}");
-                                        // Retried at the next check; until then, its page has it.
-                                        if staged.is_none() {
-                                            let page = Upgrade::Page(linux::release_page(&release.version));
-                                            app.update(move |s, _| {
-                                                s.update_found(Release { upgrade: page, ..release })
-                                            });
-                                        }
-                                    }
+            let refresh = |staged: &mut Option<Staged>, limit: Duration| match release::check(&client, &target) {
+                Ok(Some(release)) => match &install {
+                    // Only a newer release than the one waiting replaces it, once staged.
+                    Some(install) if staged.as_ref().is_none_or(|ready| newer(&release.version, &ready.version)) => {
+                        match install.stage(&client, &release, limit) {
+                            Ok(ready) => {
+                                *staged = Some(ready);
+                                app.update(move |s, _| s.update_ready(release));
+                            }
+                            Err(error) => {
+                                eprintln!("better-matrix: update download failed: {error}");
+                                // Retried at the next check; until then, its page has it.
+                                if staged.is_none() {
+                                    let page = Upgrade::Page(linux::release_page(&release.version));
+                                    app.update(move |s, _| s.update_found(Release { upgrade: page, ..release }));
                                 }
                             }
-                            Some(_) => {}
-                            None => app.update(move |s, _| s.update_found(release)),
-                        },
-                        Ok(None) => {}
-                        // A laptop can be offline: retry on the next hourly check, without a notice.
-                        Err(error) => eprintln!("better-matrix: update check failed: {error}"),
+                        }
                     }
+                    Some(_) => {}
+                    None => app.update(move |s, _| s.update_found(release)),
+                },
+                Ok(None) => {}
+                // A laptop can be offline: retry on the next hourly check, without a notice.
+                Err(error) => eprintln!("better-matrix: update check failed: {error}"),
+            };
+            loop {
+                if schedule.due(SystemTime::now()) {
+                    refresh(&mut staged, DOWNLOAD_LIMIT);
                 }
-                match receiver.recv_timeout(schedule.wait(Instant::now())) {
-                    // The user restarts into what is staged: a newer release staged since the
-                    // rail offered one is the better one to restart into.
+                match receiver.recv_timeout(schedule.wait(SystemTime::now())) {
+                    // The user restarts into the newest release: one published since the last
+                    // check replaces what is staged first, so a copy several releases behind
+                    // never restarts into one that is already outdated.
                     Ok(_) => {
                         let Some(install) = &install else { continue };
+                        refresh(&mut staged, RESTART_DOWNLOAD_LIMIT);
                         let Some(ready) = &staged else {
                             app.update(|s, _| s.update_failed("the update is not downloaded".into()));
                             continue;
@@ -93,7 +100,7 @@ pub fn start(app: AppHandle<State>, cache: PathBuf) -> Option<Sender<Release>> {
                             Err(error) => {
                                 let version = ready.version.clone();
                                 staged = None;
-                                schedule = Schedule::new(Instant::now());
+                                schedule = Schedule::new(SystemTime::now());
                                 let page = Upgrade::Page(linux::release_page(&version));
                                 app.update(move |s, _| {
                                     s.update_failed(error);
@@ -128,27 +135,31 @@ fn newer(a: &str, b: &str) -> bool {
     }
 }
 
+/// The hourly check, by the wall clock: a laptop asleep for a day checks soon after it wakes, and
+/// no hour of sleep is replayed. The monotonic clock some systems stop during sleep only bounds
+/// each wait.
 #[derive(Debug)]
 struct Schedule {
-    next: Instant,
+    next: SystemTime,
 }
 
 impl Schedule {
-    fn new(now: Instant) -> Self {
+    fn new(now: SystemTime) -> Self {
         Self { next: now }
     }
 
-    fn due(&mut self, now: Instant) -> bool {
-        if now < self.next {
+    fn due(&mut self, now: SystemTime) -> bool {
+        // A clock set back by more than an hour would otherwise hold checks off until it caught up.
+        if now < self.next && self.next.duration_since(now).is_ok_and(|left| left <= HOUR) {
             return false;
         }
-        // After sleep, check once; don't replay missed hours.
         self.next = now + HOUR;
         true
     }
 
-    fn wait(&self, now: Instant) -> Duration {
-        self.next.saturating_duration_since(now)
+    /// How long to sleep before looking again: until the check is due, at most [`GLANCE`].
+    fn wait(&self, now: SystemTime) -> Duration {
+        self.next.duration_since(now).unwrap_or_default().min(GLANCE)
     }
 }
 

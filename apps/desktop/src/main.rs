@@ -230,6 +230,12 @@ fn spec() -> AppSpec<State> {
                 s.toggle_popover(Popover::AccountSwitcher);
                 s.edit_status_message();
             }),
+            ("demo-status-expiry", |s| {
+                demo::seed(s);
+                s.toggle_popover(Popover::AccountSwitcher);
+                s.edit_status_message();
+                s.toggle_status_expiry();
+            }),
             ("demo-compose", demo::compose),
             ("demo-add-account", |s| {
                 demo::seed(s);
@@ -1039,6 +1045,7 @@ fn run_app() {
             let shell_scratch = scratch.clone();
             let stopped = engine.stopped();
             app.keep_running()
+                .on_quit(|s, _| s.quitting())
                 .on_close(|s, tx| {
                     if !rune::quitting() {
                         s.close_window(tx);

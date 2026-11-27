@@ -1116,6 +1116,9 @@ pub struct State {
     pub drop_hover: bool,
     /// Whether the window has keyboard focus; notifications for the open room are skipped then.
     pub window_focused: bool,
+    /// Whether the window is on screen (not hidden, minimised or covered whole), as the last poll
+    /// saw it: a call's videos convert no frames while it isn't.
+    pub window_visible: bool,
     /// The selected rail tile's halo: breathing a while after the user turns to the window.
     pub breath: breath::Breath,
     /// The latest error worth telling the user about; dismissable.
@@ -1123,7 +1126,7 @@ pub struct State {
     /// A permalink that came before any account was ready: it opens with the first room list.
     pending_link: Option<matrix_core::Permalink>,
     /// The notice on screen and since when, so it goes after a while.
-    notice_shown: Option<(String, std::time::Instant)>,
+    notice_shown: Option<(String, f64)>,
     /// Where a dialog's text field types when its dialog has just closed.
     scratch: TextEdit,
     /// Set by a timeline's scroll handler when its view nears the oldest loaded message;
@@ -1228,6 +1231,7 @@ impl State {
             settings,
             drop_hover: false,
             window_focused: true,
+            window_visible: true,
             breath: breath::Breath::Asked,
             notice: None,
             pending_link: None,
@@ -1986,13 +1990,14 @@ impl State {
     }
 
     /// Diffs watches against the visible call plan, so hidden pages and hidden self-view
-    /// convert no frames. A call outside the current room watches nothing.
+    /// convert no frames. A call outside the current room, or in a window that isn't on screen,
+    /// watches nothing.
     pub fn sync_watching(&mut self) {
         let layout_menu = self.call_here().is_some_and(|call| call.video() && !call.compact());
         if !layout_menu && self.popover == Some(Popover::CallLayout) {
             self.popover = None;
         }
-        let shows = self.call_here().is_some();
+        let shows = self.window_visible && self.call_here().is_some();
         let Some(call) = self.call.as_mut() else { return };
         // Called every frame: the plan is worked out again only when what it reads changed.
         let key = (shows, call.videos_key());
@@ -2502,7 +2507,10 @@ impl State {
             }
             self.accounts.timeline_closed(&account, &key);
             self.timelines_ready.remove(&(account.clone(), key.clone()));
-            self.receipts.forget(&account, &key);
+            // What was read last goes before the close, while the engine still has it open.
+            if let Some(command) = self.receipts.forget(&account, &key) {
+                self.dispatch(command, Purpose::Read);
+            }
             self.on_screen.remove(&(account.clone(), key.clone()));
             self.engine.send(Command::CloseTimeline { account, key });
         }
@@ -2557,6 +2565,14 @@ impl State {
             _ => Command::ListFiles { account, room_id },
         };
         self.dispatch(command, purpose);
+    }
+
+    /// The app is quitting: the read positions still held back go now, and the engine waits a
+    /// moment for them, so the rooms just read stay read on the next start.
+    pub fn quitting(&mut self) {
+        for command in self.receipts.flush() {
+            self.dispatch(command, Purpose::Read);
+        }
     }
 
     pub fn close_window(&mut self, tx: &mut Tx) {
@@ -2729,6 +2745,8 @@ impl State {
     /// when that changed what shows.
     pub fn animate(&mut self, clock: f64, tx: &mut Tx) -> bool {
         let (focused, still) = (self.window_focused, self.reduced_motion.get());
+        // Each change of visibility wakes this poll once.
+        self.window_visible = tx.window_visible();
         // A memo whose microphone failed ends now, with why, rather than on send.
         let mut ended = false;
         for target in [ComposerTarget::Room, ComposerTarget::Thread] {
@@ -4672,12 +4690,17 @@ impl State {
         // Reading a room with unread messages needs a receipt; one only marked loses the mark.
         let (command, undo) = if unread {
             self.accounts.set_marked(&account, &room_id, true);
+            // A receipt held back would clear the mark once it went (the SDK clears it on any).
+            self.receipts.supersede(&account, &room_id);
             (
                 Command::SetUnread { account: account.clone(), room_id, unread },
                 accounts::RoomUndo::Mark(before.marked_unread),
             )
         } else if before.unread > 0 || before.mentions > 0 {
             self.accounts.mark_read(&account, &room_id);
+            // Reading to the latest message supersedes positions held back in the room, which
+            // would otherwise follow it and move the marker back.
+            self.receipts.supersede(&account, &room_id);
             let undo = accounts::RoomUndo::Read {
                 marked: before.marked_unread,
                 unread: before.unread,
@@ -5892,23 +5915,28 @@ impl State {
 
     /// Clears the notice once it has been on screen a while; true when it went.
     fn expire_notice(&mut self, tx: &mut Tx) -> bool {
-        /// Long enough to read a sentence or two.
-        const SHOWN_FOR: std::time::Duration = std::time::Duration::from_secs(6);
+        /// Long enough to read a sentence or two, in seconds.
+        const SHOWN_FOR: f64 = 6.0;
         let Some(message) = &self.notice else {
             self.notice_shown = None;
             return false;
         };
-        match &self.notice_shown {
-            Some((shown, since)) if shown == message => {
-                if since.elapsed() >= SHOWN_FOR {
-                    self.notice = None;
-                    self.notice_shown = None;
-                    return true;
-                }
+        let clock = tx.clock();
+        let due = match &self.notice_shown {
+            Some((shown, due)) if shown == message => *due,
+            _ => {
+                self.notice_shown = Some((message.clone(), clock + SHOWN_FOR));
+                clock + SHOWN_FOR
             }
-            _ => self.notice_shown = Some((message.clone(), std::time::Instant::now())),
+        };
+        if clock >= due {
+            self.notice = None;
+            self.notice_shown = None;
+            return true;
         }
-        tx.wake_after(std::time::Duration::from_millis(500));
+        // One deadline on the frame clock, the same at every poll, rather than polling while it
+        // shows.
+        tx.wake_at(due);
         false
     }
 

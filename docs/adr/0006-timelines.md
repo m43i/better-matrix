@@ -470,7 +470,16 @@ see who is typing there.
     Scrolling receipts are coalesced at 500 ms per open timeline, with the first fully-read
     acknowledgement sent as soon as the preceding request finishes. Only one receipt request
     per timeline is in flight, including across quick close/reopen; failures retry the latest
-    position after two seconds. Warm rows wait for the SDK subscription's first snapshot before
+    position after two seconds. Closing a timeline sends the position it still held back (before
+    `CloseTimeline`, or once the receipt in flight finishes, whatever its outcome, without
+    retrying), and the engine takes a receipt for a closed timeline through its warm copy, which
+    stays reachable while it reopens, so leaving a room right after reading it doesn't leave its
+    last messages unread on the server. Quitting (`App::on_quit`) sends every position held
+    back, and the engine waits up to two seconds for read receipts (and room-list reads) in flight,
+    alongside leaving a call, before it stops. Each room's reads (receipts and room-list
+    "Mark as read") go one at a time in the order the engine received them, chained when
+    dispatched (`Running::next_read`; other rooms don't wait, and reads can't be cancelled), as some servers (Conduwuit) let a late older fully-read
+    marker overwrite a newer one. Warm rows wait for the SDK subscription's first snapshot before
     sending. Viewport progress and visible-marker metadata do not change the row-plan revision;
     dismissing the marker does.
     `ReadBoundary` reports the existing fully-read event (or receipt fallback) independently of

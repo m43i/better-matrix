@@ -143,7 +143,7 @@ export function StatusMessageEditor({ account }: { account: AccountData }) {
               title={t(duration.label)}
               selected={
                 'at' in expiry
-                  ? timed === null && duration.minutes === null
+                  ? timed === null && duration.id === 'never'
                   : expiry.id === duration.id
               }
               chevron={false}

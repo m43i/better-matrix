@@ -5,7 +5,7 @@
 //! never holds up a send on another account. Tasks report what they find with events directly;
 //! anything that changes the engine's own state (an account signing in or out) comes back to
 //! the loop as an [`Outcome`]. Every command ends with exactly one [`Event::Finished`] carrying
-//! its [`RequestId`], and any command can be cancelled with [`Command::Cancel`].
+//! its [`RequestId`], and any command but a read can be cancelled with [`Command::Cancel`].
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -501,9 +501,10 @@ pub enum Command {
         /// Which timeline.
         key: TimelineKey,
     },
-    /// Mark an open timeline read up to a displayed event with a read receipt, which the server
-    /// counts unread messages from in every session. Does nothing when it is closed or already
-    /// read.
+    /// Mark a timeline read up to a displayed event with a read receipt, which the server
+    /// counts unread messages from in every session. A timeline closed since still takes it while
+    /// it is kept warm, so the last receipt of a room the user just left isn't lost. Does nothing
+    /// when it is cold or already read.
     MarkRead {
         /// Whose room.
         account: AccountId,
@@ -1032,7 +1033,8 @@ pub enum Command {
         /// The verification.
         flow_id: String,
     },
-    /// Stop an earlier command. It finishes with an error saying it was cancelled.
+    /// Stop an earlier command. It finishes with an error saying it was cancelled. Reads
+    /// ([`Command::MarkRead`], [`Command::MarkRoomRead`]) aren't stopped: they keep their order.
     Cancel(RequestId),
     /// Start a call in a room (ending any other): MatrixRTC where the room allows it, else
     /// one-to-one in a direct chat. Reported by [`Event::CallUpdated`] until
@@ -2041,6 +2043,7 @@ impl Engine {
             accounts: HashMap::new(),
             tasks: JoinSet::new(),
             running: HashMap::new(),
+            reading: HashSet::new(),
             widget_runs: HashMap::new(),
             live_shares: HashMap::new(),
             http: crate::links::http_client().map_err(|e| e.to_string()),
@@ -2084,6 +2087,8 @@ struct Running {
     opening: HashMap<TimelineKey, RequestId>,
     /// Rooms whose keys were fetched from the backup this run; after verification, all again.
     keys_fetched: HashSet<String>,
+    /// The end of the last read this account sent in each room ([`Running::next_read`]).
+    last_read: HashMap<String, tokio::sync::oneshot::Receiver<()>>,
     /// The account's room list: every re-read of rooms goes through it.
     feed: RoomFeed,
     /// The handlers hearing the account's call signals.
@@ -2133,10 +2138,28 @@ impl Running {
         }
     }
 
-    /// A warm timeline for `key`, taken out of the warm set.
-    fn take_warm(&mut self, key: &TimelineKey) -> Option<Arc<matrix_sdk_ui::timeline::Timeline>> {
-        let index = self.warm.iter().position(|(warm, _)| warm == key)?;
-        Some(self.warm.remove(index).1)
+    /// The timeline a read receipt goes through: the open one, or the warm one it left behind
+    /// when the user moved on before its last receipt went out.
+    fn reading_timeline(&self, key: &TimelineKey) -> Option<Arc<matrix_sdk_ui::timeline::Timeline>> {
+        self.timelines.get(key).map(|(timeline, _)| Arc::clone(timeline)).or_else(|| self.warm_timeline(key))
+    }
+
+    /// A place in the line of reads (receipts and room-list reads) in `room_id`: they go one at
+    /// a time, in the order the app sent them, as some servers (Conduwuit) let a late older
+    /// fully-read marker overwrite a newer one. Other rooms don't wait. The read waits for the
+    /// first value, then holds the second until it is done.
+    fn next_read(
+        &mut self,
+        room_id: &str,
+    ) -> (Option<tokio::sync::oneshot::Receiver<()>>, tokio::sync::oneshot::Sender<()>) {
+        let (done, finished) = tokio::sync::oneshot::channel();
+        (self.last_read.insert(room_id.to_owned(), finished), done)
+    }
+
+    /// A warm timeline for `key`, to open again. It stays in the warm set until it is open, so
+    /// a receipt sent meanwhile still finds it ([`Running::reading_timeline`]).
+    fn warm_timeline(&self, key: &TimelineKey) -> Option<Arc<matrix_sdk_ui::timeline::Timeline>> {
+        self.warm.iter().find(|(warm, _)| warm == key).map(|(_, timeline)| Arc::clone(timeline))
     }
 }
 
@@ -2178,6 +2201,8 @@ impl Drop for Running {
 
 /// How long quitting waits for the call under way to leave.
 const QUIT_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+/// How long quitting waits for read receipts still on their way.
+const RECEIPTS_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The longest a ring rings, whatever its event says.
 #[cfg(feature = "native-media")]
@@ -2276,6 +2301,9 @@ struct State {
     tasks: JoinSet<Completion>,
     /// Command tasks still running, for [`Command::Cancel`].
     running: HashMap<RequestId, AbortHandle>,
+    /// [`Command::MarkRead`] and [`Command::MarkRoomRead`] requests still running: quitting
+    /// waits a moment for them, so what the user read last counts as read on the next start.
+    reading: HashSet<RequestId>,
     /// Local live shares, scoped to the destination, including starts still in flight.
     live_shares: HashMap<(AccountId, String), (RequestId, tokio::sync::watch::Sender<()>)>,
     /// Widget runs ([`Command::RunWidget`] and the like), by the account they act for: signing
@@ -2360,15 +2388,35 @@ impl State {
                 },
             }
         }
-        // The app is quitting: the call under way (or just hung up) leaves, so nobody sees the
+        // The app is quitting. The call under way (or just hung up) leaves, so nobody sees the
         // user in it for the seconds until the delayed leave would.
         #[cfg(feature = "native-media")]
         self.hang_up();
-        self.end_locations(|_, _| true).await;
+        let locations = self.end_locations(|_, _| true);
         #[cfg(feature = "native-media")]
-        if let Some(task) = self.leaving.any() {
-            let _ = tokio::time::timeout(QUIT_WAIT, task).await;
-        }
+        let leaving = self.leaving.any();
+        // Meanwhile (all at once, inside the app's wait for the engine), live locations stop and
+        // read receipts still on their way finish, so the rooms just read stay read.
+        let receipts = async {
+            while !self.reading.is_empty() {
+                match self.tasks.join_next().await {
+                    Some(Ok(Completion { request: Some(request), .. })) => {
+                        self.reading.remove(&request);
+                    }
+                    Some(_) => {}
+                    None => break,
+                }
+            }
+        };
+        let receipts = tokio::time::timeout(RECEIPTS_WAIT, receipts);
+        #[cfg(feature = "native-media")]
+        let _ = tokio::join!(receipts, locations, async {
+            if let Some(task) = leaving {
+                let _ = tokio::time::timeout(QUIT_WAIT, task).await;
+            }
+        });
+        #[cfg(not(feature = "native-media"))]
+        let _ = tokio::join!(receipts, locations);
     }
 
     fn restore_saved(&mut self) {
@@ -2470,10 +2518,15 @@ impl State {
         })
     }
 
-    /// Stops a running command; it finishes as cancelled.
+    /// Stops a running command; it finishes as cancelled. Reads aren't stopped: they finish.
     fn cancel(&mut self, target: RequestId) {
         if let Some((_, stop)) = self.live_shares.values().find(|(request, _)| *request == target) {
             let _ = stop.send(());
+            return;
+        }
+        // A read is short and holds its account's line of reads: aborting it while it waits its
+        // turn would let a newer read past an older one still in flight.
+        if self.reading.contains(&target) {
             return;
         }
         self.answers.remove(&target);
@@ -2914,16 +2967,22 @@ impl State {
                             }
                         });
                     }
-                    (running.take_warm(&key), fetch_keys)
+                    (running.warm_timeline(&key), fetch_keys)
                 });
                 Box::pin(async move {
                     Ok(Outcome::TimelineOpened(Box::new(open_timeline(account?, key, warm, fetch_keys).await?)))
                 })
             }
             Command::MarkRead { account, key, event_id, fully_read } => {
-                let timeline = self.open_timeline(&account, &key);
+                self.reading.insert(request);
+                let (timeline, turn) = self
+                    .accounts
+                    .get_mut(&account)
+                    .map(|running| (running.reading_timeline(&key), Some(running.next_read(&key.room_id))))
+                    .unwrap_or_default();
                 Box::pin(async move {
-                    if let Ok(timeline) = timeline {
+                    let _done = wait_turn(turn).await;
+                    if let Some(timeline) = timeline {
                         mark_timeline_read(&timeline, event_id.as_deref(), fully_read && key.thread.is_none()).await?;
                     }
                     Ok(Outcome::Done)
@@ -4158,10 +4217,15 @@ impl State {
                 })
             }
             Command::MarkRoomRead { account: id, room_id } => {
+                self.reading.insert(request);
                 let feed = self.feed(&id);
+                let turn = self.accounts.get_mut(&id).map(|running| running.next_read(&room_id));
                 let changed = self.account(&id).map(|account| {
                     let (queue, room_id) = (account.organising.clone(), room_id.clone());
-                    queue.run(async move { account.mark_room_read(&room_id).await })
+                    queue.run(async move {
+                        let _done = wait_turn(turn).await;
+                        account.mark_room_read(&room_id).await
+                    })
                 });
                 Box::pin(async move {
                     changed?.await?;
@@ -4208,6 +4272,7 @@ impl State {
     fn complete(&mut self, Completion { request, result }: Completion) {
         if let Some(request) = request {
             self.running.remove(&request);
+            self.reading.remove(&request);
             self.answers.remove(&request);
             self.widget_runs.remove(&request);
             self.live_shares.retain(|_, (active, _)| *active != request);
@@ -4360,6 +4425,7 @@ impl State {
                     warm: Vec::new(),
                     opening: HashMap::new(),
                     keys_fetched: HashSet::new(),
+                    last_read: HashMap::new(),
                     feed,
                     handlers,
                     sends: HashMap::new(),
@@ -4372,6 +4438,7 @@ impl State {
                     let wanted = request.is_some() && running.opening.get(&open.key) == request.as_ref();
                     if wanted {
                         running.opening.remove(&open.key);
+                        running.warm.retain(|(warm, _)| *warm != open.key);
                         let (key, timeline) = (open.key.clone(), Arc::clone(&open.timeline));
                         let forward = start_timeline(*open, &self.sink);
                         if let Some((_, old)) = running.timelines.insert(key, (timeline, forward)) {
@@ -5228,6 +5295,19 @@ impl RoomFeed {
     }
 }
 
+/// Waits for the read before this one ([`Running::next_read`]), and gives back what tells the
+/// next one this is done, to hold until it is.
+async fn wait_turn(
+    turn: Option<(Option<tokio::sync::oneshot::Receiver<()>>, tokio::sync::oneshot::Sender<()>)>,
+) -> Option<tokio::sync::oneshot::Sender<()>> {
+    let (before, done) = turn?;
+    if let Some(before) = before {
+        // Sent, or dropped: either way that read is over.
+        let _ = before.await;
+    }
+    Some(done)
+}
+
 async fn mark_timeline_read(
     timeline: &matrix_sdk_ui::timeline::Timeline,
     event_id: Option<&str>,
@@ -5888,12 +5968,73 @@ mod tests {
             warm: Vec::new(),
             opening: HashMap::from([(TimelineKey::room("!room:example.org"), RequestId(3))]),
             keys_fetched: HashSet::new(),
+            last_read: HashMap::new(),
             feed,
             handlers: Vec::new(),
             sends: HashMap::new(),
         };
         running.forget_opening(RequestId(3));
         assert!(running.opening.is_empty());
+    }
+
+    /// A running account with a room synced, keeping `warm` warm.
+    async fn running_with(
+        server: &crate::test_server::Server,
+        warm: impl FnOnce(&Account) -> Vec<(TimelineKey, Arc<matrix_sdk_ui::timeline::Timeline>)>,
+    ) -> Running {
+        let account = Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
+        let sink: Arc<dyn EventSink> = Arc::new(|_| {});
+        let (usage, worker) = crate::search::Usage::start(account.clone(), Arc::clone(&sink));
+        let feed = RoomFeed { account: account.clone(), sink, cache: Arc::default() };
+        Running {
+            #[cfg(feature = "command-line")]
+            watch_ready: None,
+            warm: warm(&account),
+            account,
+            usage,
+            background: vec![worker],
+            flows: crate::security::Flows::default(),
+            timelines: HashMap::new(),
+            opening: HashMap::new(),
+            keys_fetched: HashSet::new(),
+            last_read: HashMap::new(),
+            feed,
+            handlers: Vec::new(),
+            sends: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_receipt_for_a_timeline_just_closed_should_go_through_its_warm_copy() {
+        let server = crate::test_server::Server::new(crate::test_server::thread_response);
+        let key = TimelineKey::room("!room:example.org");
+        let account = Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
+        let timeline = Arc::new(account.timeline(&key).await.expect("timeline"));
+        let running = running_with(&server, |_| vec![(key.clone(), Arc::clone(&timeline))]).await;
+        let reading = running.reading_timeline(&key).expect("the warm timeline");
+        assert!(Arc::ptr_eq(&reading, &timeline));
+        // Opening it again leaves it reachable until the open completes.
+        assert!(running.warm_timeline(&key).is_some());
+        assert!(running.reading_timeline(&key).is_some());
+        assert!(running.reading_timeline(&TimelineKey::room("!other:example.org")).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_read_should_wait_for_the_one_sent_before_it_in_its_room() {
+        let server = crate::test_server::Server::new(crate::test_server::thread_response);
+        let mut running = running_with(&server, |_| Vec::new()).await;
+        let (first, second) = (running.next_read("!room:example.org"), running.next_read("!room:example.org"));
+        let mut other = std::pin::pin!(wait_turn(Some(running.next_read("!other:example.org"))));
+        assert!(futures_util::poll!(&mut other).is_ready(), "another room doesn't wait");
+        // The newer one is polled first, as spawned tasks may be.
+        let mut second = std::pin::pin!(wait_turn(Some(second)));
+        assert!(futures_util::poll!(&mut second).is_pending());
+        let first = wait_turn(Some(first)).await.expect("the first read's turn");
+        assert!(futures_util::poll!(&mut second).is_pending());
+        drop(first);
+        assert!(second.await.is_some());
     }
 
     #[test]

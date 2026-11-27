@@ -5222,3 +5222,13 @@ fn an_account_file_dialog_answer_should_be_canceled_after_switching_accounts() {
         assert!(!matches!(rt.state.modal, Some(crate::state::Modal::KeyFile(_))));
     }
 }
+
+#[test]
+fn a_notice_should_go_after_six_seconds() {
+    // The scene settles for a second first.
+    let mut rt = runtime(|s| s.notice = Some("Saved".into()));
+    rt.frame(4.0);
+    assert!(rt.state.notice.is_some());
+    rt.frame(2.0);
+    assert!(rt.state.notice.is_none());
+}

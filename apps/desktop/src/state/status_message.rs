@@ -2,7 +2,7 @@
 //! beside their presence. Written in the account menu, which shows the message set until the
 //! user starts writing one for its account (`State::status_draft`, in `State::status_edit`).
 
-use chrono::{DateTime, Local, LocalResult, NaiveDate, NaiveTime, TimeZone};
+use chrono::{DateTime, Datelike, Days, Local, LocalResult, NaiveDate, NaiveTime, TimeZone};
 use matrix_core::{AccountId, Command};
 use rune::{TextEdit, Tx};
 
@@ -12,15 +12,17 @@ use crate::i18n::t;
 /// The longest status message the field takes, in characters.
 pub const MAX_LENGTH: usize = 100;
 
-/// When a draft status message should clear, relative to saving it or at a local clock time.
+/// When a draft status message should clear: an hour after saving it, at the end of the local
+/// day or week, or at a local clock time.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Expiry {
     #[default]
     Never,
-    HalfHour,
     Hour,
-    FourHours,
-    Day,
+    /// At the next local midnight.
+    Today,
+    /// At the local midnight that starts next Monday: the end of Sunday.
+    Week,
     Custom,
     At(u64),
 }
@@ -51,15 +53,14 @@ impl ExpiryDraft {
 }
 
 impl Expiry {
-    pub const OPTIONS: [Self; 6] = [Self::Never, Self::HalfHour, Self::Hour, Self::FourHours, Self::Day, Self::Custom];
+    pub const OPTIONS: [Self; 5] = [Self::Never, Self::Hour, Self::Today, Self::Week, Self::Custom];
 
     pub fn id(self) -> &'static str {
         match self {
             Self::Never => "never",
-            Self::HalfHour => "half-hour",
             Self::Hour => "hour",
-            Self::FourHours => "four-hours",
-            Self::Day => "day",
+            Self::Today => "today",
+            Self::Week => "week",
             Self::Custom => "custom",
             Self::At(_) => "at",
         }
@@ -68,10 +69,9 @@ impl Expiry {
     pub fn label(self) -> &'static str {
         match self {
             Self::Never => t!("status_message.expiry_never"),
-            Self::HalfHour => t!("schedule.half_hour"),
             Self::Hour => t!("schedule.hour"),
-            Self::FourHours => t!("status_message.expiry_four_hours"),
-            Self::Day => t!("status_message.expiry_day"),
+            Self::Today => t!("status_message.expiry_today"),
+            Self::Week => t!("status_message.expiry_week"),
             Self::Custom | Self::At(_) => t!("status_message.expiry_custom"),
         }
     }
@@ -83,18 +83,26 @@ impl Expiry {
         }
     }
 
-    fn deadline(self, now: &DateTime<Local>) -> Option<u64> {
-        let now = u64::try_from(now.timestamp_millis()).ok()?;
-        let minutes = match self.current(now) {
-            Self::Never | Self::Custom => return None,
-            Self::At(at) => return Some(at),
-            Self::HalfHour => 30,
-            Self::Hour => 60,
-            Self::FourHours => 240,
-            Self::Day => 1440,
-        };
-        Some(now + minutes * 60_000)
+    fn deadline<T: TimeZone>(self, now: &DateTime<T>) -> Option<u64> {
+        let now_ms = u64::try_from(now.timestamp_millis()).ok()?;
+        let today = now.date_naive();
+        match self.current(now_ms) {
+            Self::Never | Self::Custom => None,
+            Self::At(at) => Some(at),
+            Self::Hour => Some(now_ms + 60 * 60_000),
+            Self::Today => day_start(now, today.succ_opt()?),
+            Self::Week => {
+                let days = 7 - u64::from(today.weekday().num_days_from_monday());
+                day_start(now, today.checked_add_days(Days::new(days))?)
+            }
+        }
     }
+}
+
+/// When local `date` starts. Where a clock change skips midnight, the day starts with its first
+/// hour that exists.
+fn day_start<T: TimeZone>(now: &DateTime<T>, date: NaiveDate) -> Option<u64> {
+    (0..24).find_map(|hour| local_deadline(now, date, NaiveTime::from_hms_opt(hour, 0, 0)?))
 }
 
 fn custom_deadline<T: TimeZone>(now: &DateTime<T>, time: &str, date: &str) -> Option<u64> {
@@ -264,6 +272,45 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ms(at: DateTime<chrono::Utc>) -> Option<u64> {
+        u64::try_from(at.timestamp_millis()).ok()
+    }
+
+    #[test]
+    fn today_should_clear_at_the_next_midnight() {
+        let now = chrono::Utc.with_ymd_and_hms(2026, 11, 27, 14, 0, 0).unwrap();
+        let midnight = chrono::Utc.with_ymd_and_hms(2026, 11, 28, 0, 0, 0).unwrap();
+        assert_eq!(Expiry::Today.deadline(&now), ms(midnight));
+    }
+
+    #[test]
+    fn this_week_should_clear_when_sunday_ends() {
+        // A Friday.
+        let now = chrono::Utc.with_ymd_and_hms(2026, 11, 27, 14, 0, 0).unwrap();
+        let monday = chrono::Utc.with_ymd_and_hms(2026, 11, 30, 0, 0, 0).unwrap();
+        assert_eq!(Expiry::Week.deadline(&now), ms(monday));
+    }
+
+    #[test]
+    fn this_week_on_a_sunday_should_clear_at_midnight() {
+        let now = chrono::Utc.with_ymd_and_hms(2026, 11, 29, 23, 0, 0).unwrap();
+        let monday = chrono::Utc.with_ymd_and_hms(2026, 11, 30, 0, 0, 0).unwrap();
+        assert_eq!(Expiry::Week.deadline(&now), ms(monday));
+    }
+
+    #[test]
+    fn this_week_on_a_monday_should_last_until_the_next_monday() {
+        let now = chrono::Utc.with_ymd_and_hms(2026, 11, 30, 0, 0, 0).unwrap();
+        let next = chrono::Utc.with_ymd_and_hms(2026, 12, 7, 0, 0, 0).unwrap();
+        assert_eq!(Expiry::Week.deadline(&now), ms(next));
+    }
+
+    #[test]
+    fn an_hour_should_clear_an_hour_after_saving() {
+        let now = chrono::Utc.with_ymd_and_hms(2026, 11, 27, 14, 0, 0).unwrap();
+        assert_eq!(Expiry::Hour.deadline(&now), ms(now + chrono::Duration::hours(1)));
+    }
 
     #[test]
     fn a_custom_time_that_already_passed_should_clear_tomorrow() {
