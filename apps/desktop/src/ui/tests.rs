@@ -5145,6 +5145,7 @@ fn a_file_dialog_answer_should_not_attach_files_to_a_different_room() {
     rt.frame(0.0);
 
     assert!(rt.state.composer.attachments.is_empty());
+    assert_eq!(rt.state.notice.as_deref(), Some(crate::i18n::t!("dialog.destination_changed")));
 }
 
 #[test]
@@ -5152,17 +5153,27 @@ fn copying_a_previewed_image_should_put_the_original_on_the_clipboard() {
     let clipboard = rune::clipboard::memory();
     let mut rt = runtime(|s| {
         demo::attachment_preview(s);
-        let Some(crate::state::Preview {
-            content: crate::state::PreviewContent::Image { status: crate::state::ImageStatus::Decoding(image), .. },
-            ..
-        }) = &s.preview
+        use crate::state::{ImageStatus, PreviewContent};
+
+        let Some(crate::state::Preview { content: PreviewContent::Image { thumbnail, status }, .. }) = &mut s.preview
         else {
+            panic!("an image should be previewed");
+        };
+        let ImageStatus::Decoding(original) = status else {
             panic!("the original image should be decoding");
         };
-        image.wait().unwrap();
+        original.wait().unwrap();
+        *status = ImageStatus::Ready(original.clone());
+
+        let decoder = rune::ImageCache::new(std::sync::Arc::new(|| {}));
+        let small = decoder.rgba(2, 1, vec![255; 8]);
+        small.wait().unwrap();
+        *thumbnail = Some(small);
     });
     rt.use_clipboard(&clipboard);
     press(&mut rt, "attachment-copy-image");
 
-    assert!(clipboard.content().is_some_and(|content| content.image().is_some()));
+    let content = clipboard.content().expect("the clipboard write");
+    let pixels = image::load_from_memory(content.image().expect("an image was copied").png()).unwrap();
+    assert_eq!((pixels.width(), pixels.height()), (256, 256));
 }

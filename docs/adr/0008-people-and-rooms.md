@@ -127,7 +127,8 @@ Date: 2026-11-22
   in the shared media cache, drawn by `media_avatar`/`account_avatar` with initials as fallback.
 - **File dialog:** `Shell::pick_files` asks Rune to open a single- or multi-file dialog.
   `State::files_picked` routes the answer through `PickFor` to the account, composer, room
-  or pack that asked for it.
+  or pack that asked for it. A selection for a composer or profile the user left is canceled
+  with a notice to keep it from reaching another room or account.
 - **Search:**
   - The desktop opens search on a field press or the in-application `mod+k` shortcut (Ctrl+K,
     Command+K on macOS). Filters for Spaces, Rooms, People and Messages stay above the scrolling

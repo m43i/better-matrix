@@ -5726,20 +5726,25 @@ impl State {
     pub fn files_picked(&mut self, picked_for: PickFor, paths: &[PathBuf]) {
         match picked_for {
             PickFor::Attachments { target, account, key } => {
-                if self.nav.account.as_ref() == Some(&account) && self.composer_key(target).as_ref() == Some(&key) {
+                if self.nav.account.as_ref() == Some(&account)
+                    && self.composer_key(target).as_ref() == Some(&key)
+                    && self.composer(target).editing.is_none()
+                {
                     self.attach_files_to(target, paths);
+                } else {
+                    self.file_destination_changed();
                 }
             }
             PickFor::Avatar(account) => {
-                if self.nav.account.as_ref() == Some(&account)
-                    && let Some(path) = paths.first()
+                if let Some(path) = paths.first()
+                    && self.file_account_is_active(&account)
                 {
                     self.set_avatar(Some(path.clone()));
                 }
             }
             PickFor::KeyFile(account) => {
-                if self.nav.account.as_ref() == Some(&account)
-                    && let Some(path) = paths.first()
+                if let Some(path) = paths.first()
+                    && self.file_account_is_active(&account)
                 {
                     self.key_file_chosen(KeyTransfer::Import, path.clone());
                 }
@@ -5753,9 +5758,23 @@ impl State {
             PickFor::PackImages { account, pack } => {
                 if self.pack_manager.as_ref().is_some_and(|manager| manager.account == account) {
                     self.add_pack_images(pack, paths);
+                } else {
+                    self.file_destination_changed();
                 }
             }
         }
+    }
+
+    fn file_account_is_active(&mut self, account: &AccountId) -> bool {
+        let active = self.nav.account.as_ref() == Some(account);
+        if !active {
+            self.file_destination_changed();
+        }
+        active
+    }
+
+    fn file_destination_changed(&mut self) {
+        self.notice = Some(t!("dialog.destination_changed").to_owned());
     }
 
     /// A paste into a composer: an image or files become attachments, and a lone web address a

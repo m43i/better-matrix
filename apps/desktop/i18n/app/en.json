@@ -166,6 +166,7 @@
   "date.today": "Today",
   "date.yesterday": "Yesterday",
   "dialog.attach_title": "Attach files",
+  "dialog.destination_changed": "The file selection was canceled because its destination changed.",
   "dialog.avatar_title": "Choose a profile picture",
   "dialog.images": "Images",
   "dialog.save_title": "Save file",

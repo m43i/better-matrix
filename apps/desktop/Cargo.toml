@@ -97,12 +97,12 @@ windows-future = "0.3"
 [target.'cfg(target_os = "linux")'.dependencies]
 # Tray registration must report whether there is a host that can actually show the item.
 ksni = { version = "0.3.8", default-features = false, features = ["async-io"] }
-async-channel = "2"
 async-io = "2"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
-# Zenity fallback for Rune file dialogs when the XDG portal is unavailable.
-rfd = "0.17"
+# Cancellable Zenity fallback when the XDG file chooser is unavailable.
+async-channel = "2"
+async-process = "2"
 # Notifications: one session-bus connection shows them and hears their clicks.
 zbus = { version = "6", default-features = false, features = ["default-rt"] }
 futures-lite = "2"

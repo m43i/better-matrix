@@ -145,7 +145,7 @@ impl State {
     pub fn export_room_keys(&mut self, tx: &mut Tx) {
         let Some(account) = self.nav.account.clone() else { return };
         self.shell.pick_save_path(tx, KEY_FILE_NAME, move |s, path| {
-            if s.nav.account.as_ref() == Some(&account) {
+            if s.file_account_is_active(&account) {
                 s.key_file_chosen(KeyTransfer::Export, path);
             }
         });
