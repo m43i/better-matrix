@@ -5357,6 +5357,7 @@ fn resizing_the_self_view_should_follow_the_pointer_without_jumps() {
     let two = width(&rt);
     rt.pointer_up(grip.0 - 50.0, grip.1 + 29.0);
     assert!((one - two).abs() < 2.0, "{before} -> {one} -> {two}");
+}
 
 #[test]
 fn a_notice_over_a_dialog_should_dismiss_without_closing_the_dialog() {
