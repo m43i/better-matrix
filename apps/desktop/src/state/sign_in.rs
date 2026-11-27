@@ -305,7 +305,7 @@ impl super::State {
             &self.sign_in.step
             && let Err(error) = tx.open_url(url)
         {
-            self.notice = Some(crate::i18n::tf!("notice.browser", error = error));
+            self.notice = Some(super::Notice::problem(crate::i18n::tf!("notice.browser", error = error)));
         }
     }
 

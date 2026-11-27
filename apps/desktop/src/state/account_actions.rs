@@ -112,7 +112,7 @@ impl State {
             {
                 *step = VerificationStep::Cancelled(error);
             }
-            _ => self.notice = Some(error),
+            _ => self.notice = Some(super::Notice::problem(error)),
         }
     }
 
@@ -227,7 +227,7 @@ impl State {
                 file.step = KeyFileStep::Entering;
                 file.error = Some(error);
             }
-            _ => self.notice = Some(error),
+            _ => self.notice = Some(super::Notice::problem(error)),
         }
     }
 
@@ -346,7 +346,7 @@ impl State {
         if let Some(Modal::LinkDevice { flow: QrLogin { step: QrLoginStep::Approve { url }, .. }, .. }) = &self.modal
             && let Err(error) = tx.open_url(url)
         {
-            self.notice = Some(tf!("notice.browser", error = error));
+            self.notice = Some(super::Notice::problem(tf!("notice.browser", error = error)));
         }
     }
 }

@@ -49,7 +49,7 @@ pub fn gif_source(link: &str) -> Option<GifSource> {
             Some(GifSource::File(format!("https://i.giphy.com/{id}.gif")))
         }
         "gph.is" => None,
-        "tenor.com" if path.starts_with("view/") => Some(GifSource::Page(format!("https://tenor.com/{path}"))),
+        "tenor.com" if is_tenor_gif_page(path) => Some(GifSource::Page(format!("https://tenor.com/{path}"))),
         "imgur.com" if !path.is_empty() && !path.contains('/') => {
             Some(GifSource::File(format!("https://i.imgur.com/{path}.gif")))
         }
@@ -60,6 +60,14 @@ pub fn gif_source(link: &str) -> Option<GifSource> {
         _ if last.to_ascii_lowercase().ends_with(".gif") => Some(GifSource::File(link.split('#').next()?.to_owned())),
         _ => None,
     }
+}
+
+/// Whether a tenor.com path is a GIF's page: `view/…`, or the same in a language
+/// (`de/view/…`, `pt-BR/view/…`), as Tenor shares it to users browsing in one.
+fn is_tenor_gif_page(path: &str) -> bool {
+    let is_language = |part: &str| part != "view" && part.chars().all(|c| c.is_ascii_alphabetic() || c == '-');
+    let page = path.split_once('/').filter(|(first, _)| is_language(first)).map_or(path, |(_, rest)| rest);
+    page.strip_prefix("view/").is_some_and(|name| !name.is_empty())
 }
 
 /// The links in a message's text, in order, without the punctuation around them.
@@ -407,6 +415,25 @@ mod tests {
     }
 
     #[test]
+    fn a_tenor_share_link_in_a_language_should_be_read_from_its_page() {
+        for (link, page) in [
+            (
+                "https://tenor.com/de/view/bingchilling-gif-10067072887923246131",
+                "de/view/bingchilling-gif-10067072887923246131",
+            ),
+            ("https://tenor.com/pt-BR/view/happy-cat-12345?x=1", "pt-BR/view/happy-cat-12345"),
+        ] {
+            assert_eq!(gif_source(link), Some(GifSource::Page(format!("https://tenor.com/{page}"))), "{link}");
+        }
+    }
+
+    #[test]
+    fn a_tenor_page_that_isnt_a_gif_should_not_count() {
+        assert_eq!(gif_source("https://tenor.com/de/search/cat-gifs"), None);
+        assert_eq!(gif_source("https://tenor.com/de/view"), None);
+    }
+
+    #[test]
     fn an_imgur_page_should_point_at_its_gif() {
         assert_eq!(
             gif_source("https://imgur.com/AbC123"),
@@ -449,6 +476,15 @@ mod tests {
     #[ignore = "needs the network"]
     async fn a_giphy_link_should_fetch_a_gif() {
         let bytes = fetch_gif(&http_client().unwrap(), "https://giphy.com/gifs/cat-funny-JIX9t2j0ZTN9S").await.unwrap();
+        assert!(bytes.starts_with(b"GIF8"), "{} bytes", bytes.len());
+    }
+
+    /// Talks to Tenor; run with `cargo test -p matrix-core -- --ignored`.
+    #[tokio::test]
+    #[ignore = "needs the network"]
+    async fn a_tenor_link_in_a_language_should_fetch_a_gif() {
+        let link = "https://tenor.com/de/view/bingchilling-gif-10067072887923246131";
+        let bytes = fetch_gif(&http_client().unwrap(), link).await.unwrap();
         assert!(bytes.starts_with(b"GIF8"), "{} bytes", bytes.len());
     }
 

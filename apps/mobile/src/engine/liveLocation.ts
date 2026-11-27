@@ -1,4 +1,7 @@
-// The engine owns the room beacons. One native device watch serves their active requests.
+// The engine owns the room beacons and ends each when its duration is up. One native device
+// watch serves their active requests until the last one finishes.
+import type { LiveDuration } from '@better-matrix/matrix-native/types';
+
 import { addNotice } from '../state/reducer';
 import type { Store } from '../state/store';
 
@@ -71,7 +74,13 @@ export class LiveLocations {
     }
   }
 
-  async start(store: Store, account: string, roomId: string, first: string) {
+  async start(
+    store: Store,
+    account: string,
+    roomId: string,
+    first: string,
+    duration: LiveDuration,
+  ) {
     const key = shareKey(account, roomId);
 
     if ([...this.shares].some((share) => share.store === store && share.key === key)) return false;
@@ -110,9 +119,14 @@ export class LiveLocations {
       }
 
       const run = store.run(
-        { type: 'ShareLiveLocation', data: { account, room_id: roomId, geo_uri: first } },
+        {
+          type: 'ShareLiveLocation',
+          data: { account, room_id: roomId, geo_uri: first, duration },
+        },
         (event) => {
-          if (event.type !== 'LiveLocationStarted' || share.state !== 'starting') return;
+          // A share until stopped starts a fresh beacon before each one runs out: the newest
+          // is the one to stop.
+          if (event.type !== 'LiveLocationStarted' || share.state === 'stopping') return;
           share.state = 'receiving';
           store.update((s) => ({
             ...s,

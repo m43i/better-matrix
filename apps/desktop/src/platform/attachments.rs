@@ -31,14 +31,14 @@ impl Shell {
             let result = clipboard_image(&bytes);
             app.update(move |s, tx| match result {
                 Ok(image) => tx.copy_rich(ClipboardContent::default().with_image(image)),
-                Err(error) => s.notice = Some(tf!("notice.copy_image", error = error)),
+                Err(error) => s.notice = Some(crate::state::Notice::problem(tf!("notice.copy_image", error = error))),
             });
         });
         if let Err(error) = spawned
             && let Some(app) = &self.app
         {
             let message = tf!("notice.copy_image", error = error);
-            app.update(move |s, _| s.notice = Some(message));
+            app.update(move |s, _| s.notice = Some(crate::state::Notice::problem(message)));
         }
     }
 
@@ -50,14 +50,16 @@ impl Shell {
                 if status.success() { Ok(()) } else { Err(std::io::Error::other(status.to_string())) }
             });
             if let Err(error) = result {
-                app.update(move |s, _| s.notice = Some(tf!("notice.open_attachment", error = error)));
+                app.update(move |s, _| {
+                    s.notice = Some(crate::state::Notice::problem(tf!("notice.open_attachment", error = error)))
+                });
             }
         });
         if let Err(error) = spawned
             && let Some(app) = &self.app
         {
             let message = tf!("notice.open_attachment", error = error);
-            app.update(move |s, _| s.notice = Some(message));
+            app.update(move |s, _| s.notice = Some(crate::state::Notice::problem(message)));
         }
     }
 }

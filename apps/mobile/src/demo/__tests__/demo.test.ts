@@ -1,4 +1,5 @@
 import { previewGallery } from '../../state/gallery';
+import { isLive, mapPins } from '../../state/geo';
 import { activeAccount, activeRoomList, roomLogOf } from '../../state/selectors';
 import { timelineId } from '../../state/timeline';
 import { bootDemo } from '../boot';
@@ -16,6 +17,7 @@ import {
 import {
   ADA,
   ADA_HOBBY,
+  ALAN,
   DEMO_BATCH,
   DEMO_THREAD,
   DESIGN,
@@ -25,6 +27,7 @@ import {
   KAI,
   LAB,
   LAB_V2,
+  PARTY_MESSAGE,
   RELEASES,
   SCREENSHOT,
   SIGN_OFF,
@@ -72,6 +75,16 @@ describe('scenes', () => {
   it('should leave the lone screenshot without a gallery', () => {
     const design = bootDemo('preview', noMedia).getState().accounts[0]!.timelines[DESIGN]!;
     expect(previewGallery(design.entries, SCREENSHOT)).toHaveLength(1);
+  });
+
+  it('should put several people’s places on the location map scene', () => {
+    const releases = bootDemo('location-map', noMedia).getState().accounts[0]!.timelines[RELEASES]!;
+    const now = Date.now();
+    const pins = mapPins(releases.entries, PARTY_MESSAGE, now);
+    expect({
+      senders: pins.map((pin) => pin.message.sender_id).sort(),
+      live: pins.filter((pin) => isLive(pin.location, now)).map((pin) => pin.message.sender_id),
+    }).toEqual({ senders: [ADA, ALAN, GRACE, KAI].sort(), live: [KAI] });
   });
 
   it('should fill the general room’s timeline', () => {

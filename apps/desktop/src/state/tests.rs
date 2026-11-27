@@ -6407,7 +6407,7 @@ fn an_ip_estimate_should_be_available_to_send_but_never_start_tracking() {
     s.open_location(ComposerTarget::Room);
     let request = s.location.locating.unwrap();
     apply(&mut s, Event::PositionFound { request, geo_uri: "geo:1,2".into(), estimated: true });
-    s.start_live_location();
+    s.start_live_location(matrix_core::LiveDuration::Hour);
     assert!(all_commands(&mut commands).iter().all(|command| !matches!(command, Command::ShareLiveLocation { .. })));
     s.send_location(&mut Tx::default());
     assert!(matches!(sent(&mut commands).as_slice(), [Outgoing::Location { geo_uri, .. }] if geo_uri == "geo:1,2"));
@@ -8210,7 +8210,12 @@ fn a_viewer_should_only_stop_the_beacon_displayed_on_its_card() {
     let (mut s, _) = state();
     let account = AccountId::new("@a:x");
     let request = s.dispatch(
-        Command::ShareLiveLocation { account: account.clone(), room_id: "!one:x".into(), geo_uri: "geo:1,2".into() },
+        Command::ShareLiveLocation {
+            account: account.clone(),
+            room_id: "!one:x".into(),
+            geo_uri: "geo:1,2".into(),
+            duration: matrix_core::LiveDuration::Hour,
+        },
         Purpose::LiveShare(account.clone(), "!one:x".into(), None),
     );
     apply(&mut s, Event::LiveLocationStarted { request, event_id: "$current".into() });
@@ -8227,4 +8232,128 @@ fn an_idle_location_card_should_redraw_once_at_expiry() {
     assert!(!s.expire_locations(until - 1, &mut tx));
     assert!(s.expire_locations(until, &mut tx));
     assert!(!s.expire_locations(until + 1, &mut tx));
+}
+
+#[test]
+fn a_live_share_should_run_for_the_duration_chosen() {
+    let (mut s, mut commands) = state();
+    let id = writing(&mut s, &mut commands);
+    let list = RoomList {
+        rooms: vec![RoomSummary { can_share_live_location: true, ..room("!one:x") }],
+        spaces: Vec::new(),
+        invitations: Vec::new(),
+    };
+    apply(&mut s, Event::RoomsUpdated { account: id, list });
+    s.open_location(ComposerTarget::Room);
+    let request = s.location.locating.unwrap();
+    apply(&mut s, Event::PositionFound { request, geo_uri: "geo:1,2".into(), estimated: false });
+    drain(&mut commands);
+    s.start_live_location(matrix_core::LiveDuration::Day);
+    assert!(matches!(
+        all_commands(&mut commands).as_slice(),
+        [Command::ShareLiveLocation { duration: matrix_core::LiveDuration::Day, .. }]
+    ));
+}
+
+/// The map viewer on the demo's three places, centred on Kai's.
+fn map_viewer() -> State {
+    let (mut s, _) = state();
+    crate::demo::location_map(&mut s);
+    s
+}
+
+#[test]
+fn letting_go_of_a_dragged_map_should_leave_it_where_it_was_dragged() {
+    let mut s = map_viewer();
+    let (latitude, longitude) = s.map_center(s.map_viewer().unwrap()).unwrap();
+    s.drag_map(rune::Phase::Move, 100.0, -40.0);
+    assert_eq!(s.map_viewer().unwrap().drag, (100.0, -40.0));
+    s.drag_map(rune::Phase::Up, 100.0, -40.0);
+    let viewer = s.map_viewer().unwrap();
+    let Camera::Free { latitude: lat, longitude: lon } = viewer.camera else { panic!("the map stays where it went") };
+    let zoom = f64::from(viewer.zoom);
+    let (x, y) = matrix_core::geo::project(latitude, longitude, zoom);
+    let (moved_x, moved_y) = matrix_core::geo::project(lat, lon, zoom);
+    assert!((x - moved_x - 100.0).abs() < 1e-6 && (y - moved_y + 40.0).abs() < 1e-6);
+    assert_eq!(viewer.drag, (0.0, 0.0));
+}
+
+#[test]
+fn zooming_toward_the_pointer_should_keep_the_place_under_it() {
+    let mut s = map_viewer();
+    let viewer = s.map_viewer().unwrap();
+    let (zoom, center) = (f64::from(viewer.zoom), s.map_center(viewer).unwrap());
+    let (x, y) = matrix_core::geo::project(center.0, center.1, zoom);
+    let under = matrix_core::geo::unproject(x + 200.0, y + 50.0, zoom);
+    s.wheel_map(1.0, false, (200.0, 50.0));
+    let viewer = s.map_viewer().unwrap();
+    let (zoom, center) = (f64::from(viewer.zoom), s.map_center(viewer).unwrap());
+    assert_eq!(viewer.zoom, matrix_core::geo::MAP_ZOOM + 1);
+    let (x, y) = matrix_core::geo::project(center.0, center.1, zoom);
+    let (lat, lon) = matrix_core::geo::unproject(x + 200.0, y + 50.0, zoom);
+    assert!((lat - under.0).abs() < 1e-9 && (lon - under.1).abs() < 1e-9);
+}
+
+#[test]
+fn a_trackpad_should_zoom_a_step_only_once_it_has_moved_far_enough() {
+    let mut s = map_viewer();
+    s.wheel_map(30.0, true, (0.0, 0.0));
+    assert_eq!(s.map_viewer().unwrap().zoom, matrix_core::geo::MAP_ZOOM);
+    s.wheel_map(60.0, true, (0.0, 0.0));
+    assert_eq!(s.map_viewer().unwrap().zoom, matrix_core::geo::MAP_ZOOM + 1);
+}
+
+#[test]
+fn choosing_a_person_should_centre_the_map_on_them_at_street_level() {
+    let mut s = map_viewer();
+    s.drag_map(rune::Phase::Up, 300.0, 0.0);
+    s.zoom_map(-3, (0.0, 0.0));
+    s.focus_map_pin("@grace:example.org".into());
+    let viewer = s.map_viewer().unwrap();
+    assert_eq!(
+        (viewer.chosen.as_deref(), viewer.camera, viewer.zoom),
+        (Some("@grace:example.org"), Camera::Following, 15)
+    );
+    assert_eq!(s.map_center(viewer), Some((52.5171, 13.3892)));
+}
+
+#[test]
+fn the_map_should_not_zoom_past_street_detail() {
+    let mut s = map_viewer();
+    s.zoom_map(40, (0.0, 0.0));
+    assert_eq!(s.map_viewer().unwrap().zoom, *MAP_ZOOMS.end());
+}
+
+#[test]
+fn the_map_should_leave_out_the_places_of_people_the_user_ignores() {
+    let mut s = map_viewer();
+    if let Some(data) = s.accounts.get_mut(&AccountId::new("@ada:example.org")) {
+        data.safety.ignored.push("@grace:example.org".into());
+    }
+    let viewer = s.map_viewer().unwrap();
+    let pins: Vec<&str> = s.map_pins(viewer, now_ms()).iter().map(|pin| pin.message.event_id.as_str()).collect();
+    assert_eq!(pins, ["$ada-place", "$place"]);
+}
+
+#[test]
+fn a_chosen_persons_live_share_should_leave_the_map_once_it_ends() {
+    let mut s = map_viewer();
+    s.focus_map_pin("@grace:example.org".into());
+    let viewer = s.map_viewer().unwrap();
+    let later = now_ms() + 2 * 60 * 60_000;
+    let pins: Vec<&str> = s.map_pins(viewer, later).iter().map(|pin| pin.message.event_id.as_str()).collect();
+    assert!(!pins.contains(&"$grace-live"), "{pins:?}");
+    assert!(pins.contains(&"$place"), "the opened card stays: {pins:?}");
+}
+
+#[test]
+fn the_map_should_turn_to_the_newest_place_once_the_chosen_persons_leaves() {
+    let mut s = map_viewer();
+    s.focus_map_pin("@grace:example.org".into());
+    if let Some(data) = s.accounts.get_mut(&AccountId::new("@ada:example.org")) {
+        data.safety.ignored.push("@grace:example.org".into());
+    }
+    let viewer = s.map_viewer().unwrap();
+    assert_eq!(s.map_focus(viewer), Some("@ada:example.org"));
+    assert_eq!(s.map_center(viewer), Some((52.5136, 13.3721)));
 }

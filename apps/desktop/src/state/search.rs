@@ -355,7 +355,7 @@ impl super::State {
         }
         if timeline.reached_start {
             self.message_jump = None;
-            self.notice = Some(crate::i18n::t!("search.message_unavailable").to_owned());
+            self.notice = Some(super::Notice::problem(crate::i18n::t!("search.message_unavailable").to_owned()));
             return true;
         }
         let (account, key) = (jump.account.clone(), jump.key.clone());

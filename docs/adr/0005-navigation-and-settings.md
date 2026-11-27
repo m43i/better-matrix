@@ -226,6 +226,12 @@ Date: 2026-11-22
   detect an absent host. Native quit and the General preference to quit on close use Rune's
   orderly exit so the app can finish the latest settings save, stop the engine and release the
   instance.
+- **Toasts:** one at a time at the window's top right (`State::notice`), gone after six seconds
+  or on its close button. Each says what it reports (`NoticeKind`): a problem (warning icon),
+  something to know (info), or that something worked (check), so "Copied" doesn't read as an
+  error. It belongs to the topmost full-window layer (the preview, an open dialog, or the window)
+  and paints raised, so it shows over dialogs and menus and stays clickable while a dialog holds
+  the pointer. On iOS the phone's notice draws in a `FullWindowOverlay`, over native sheets.
 - **Settings:** a modal in sections (`SettingsSection`). Device settings go to a prefs file off
   the UI thread; account settings live on the homeserver.
   - Every desktop dialog uses the shared modal layer's Rune focus trap and Escape dismissal.

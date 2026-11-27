@@ -2063,7 +2063,7 @@ fn search_results_should_open_below_the_unverified_banner_in_a_narrow_window() {
 fn a_notice_should_appear_below_the_unverified_banner() {
     let rt = runtime(|s| {
         s.select_account(&AccountId::new("@ada:hobby.chat"));
-        s.notice = Some("Could not send the message.".into());
+        s.notice = Some(crate::state::Notice::problem("Could not send the message."));
     });
     let [_, top, _, height] = element_rect(&rt, "unverified-bar");
     let [_, notice_top, _, _] = element_rect(&rt, "notice");
@@ -5226,7 +5226,7 @@ fn an_account_file_dialog_answer_should_be_canceled_after_switching_accounts() {
 #[test]
 fn a_notice_should_go_after_six_seconds() {
     // The scene settles for a second first.
-    let mut rt = runtime(|s| s.notice = Some("Saved".into()));
+    let mut rt = runtime(|s| s.notice = Some(crate::state::Notice::problem("Saved")));
     rt.frame(4.0);
     assert!(rt.state.notice.is_some());
     rt.frame(2.0);
@@ -5357,4 +5357,86 @@ fn resizing_the_self_view_should_follow_the_pointer_without_jumps() {
     let two = width(&rt);
     rt.pointer_up(grip.0 - 50.0, grip.1 + 29.0);
     assert!((one - two).abs() < 2.0, "{before} -> {one} -> {two}");
+}
+
+#[test]
+fn a_notice_over_a_dialog_should_dismiss_without_closing_the_dialog() {
+    let mut rt = runtime(|s| {
+        s.open_settings();
+        s.notice = Some(crate::state::Notice::done(crate::i18n::t!("update.copied")));
+    });
+    press(&mut rt, "dismiss-notice");
+    assert!(rt.state.notice.is_none());
+    assert!(rt.state.modal.is_some());
+}
+
+#[test]
+fn the_map_viewer_should_show_everyone_who_shared_a_place_lately() {
+    let rt = runtime(demo::location_map);
+    for id in ["$place", "$grace-live", "$ada-place"] {
+        assert!(rt.find(&format!("map-pin-{id}")).is_some(), "pin {id}");
+        assert!(rt.find(&format!("map-person-{id}")).is_some(), "row {id}");
+    }
+}
+
+#[test]
+fn pressing_a_person_on_the_map_should_turn_the_map_to_them() {
+    let mut rt = runtime(demo::location_map);
+    press(&mut rt, "map-person-$grace-live");
+    assert_eq!(rt.state.map_viewer().and_then(|viewer| viewer.chosen.as_deref()), Some("@grace:example.org"));
+}
+
+#[test]
+fn the_map_viewers_zoom_buttons_should_zoom_the_map() {
+    let mut rt = runtime(demo::location_map);
+    press(&mut rt, "map-zoom-in");
+    assert_eq!(rt.state.map_viewer().map(|viewer| viewer.zoom), Some(matrix_core::geo::MAP_ZOOM + 1));
+    press(&mut rt, "map-zoom-out");
+    press(&mut rt, "map-zoom-out");
+    assert_eq!(rt.state.map_viewer().map(|viewer| viewer.zoom), Some(matrix_core::geo::MAP_ZOOM - 1));
+}
+
+#[test]
+fn dragging_the_map_viewer_should_move_the_map() {
+    let mut rt = runtime(demo::location_map);
+    let (x, y) = rt.find("map-viewport").expect("the map");
+    let (x, y) = (x + 200.0, y + 150.0);
+    rt.pointer_down(x, y);
+    rt.pointer_move(x - 60.0, y);
+    rt.pointer_move(x - 120.0, y);
+    rt.pointer_up(x - 120.0, y);
+    rt.frame(1.0 / 60.0);
+    assert!(matches!(rt.state.map_viewer().map(|viewer| viewer.camera), Some(crate::state::Camera::Free { .. })));
+    assert!(rt.find("map-recenter").is_some(), "the map offers to go back");
+    // Until the moved map's picture arrives, the last one stays, moved with the drag.
+    let drawn = crate::state::MapFrame {
+        latitude: 52.516275,
+        longitude: 13.377704,
+        zoom: matrix_core::geo::MAP_ZOOM,
+        width: 1152,
+        height: 640,
+    };
+    let key = format!("map-frame-{}", drawn.key(rt.state.dark(true)));
+    let (moved, _) = rt.find(&key).expect("the last picture");
+    assert!(rt.state.map_viewer().is_some_and(|viewer| viewer.drawn == Some(drawn)));
+    assert!(moved < x - 100.0, "the picture moved left with the drag: {moved}");
+}
+
+#[test]
+fn a_notice_that_something_worked_should_not_look_like_an_error() {
+    let mut rt = runtime(|s| {
+        s.update_found(demo::package_update());
+        s.install_update();
+    });
+    press(&mut rt, "update-copy");
+    assert_eq!(rt.state.notice.as_ref().map(|notice| notice.kind), Some(crate::state::NoticeKind::Done));
+}
+
+#[test]
+fn a_place_on_the_map_viewer_should_wake_the_view_as_it_leaves() {
+    let rt = runtime(demo::location_map);
+    let viewer = rt.state.map_viewer().expect("the map viewer");
+    let pins = rt.state.map_pins(viewer, crate::state::now_ms());
+    let ada = pins.iter().find(|pin| pin.message.event_id == "$ada-place").expect("Ada's place");
+    assert!(rt.state.location_expiries.contains(&(ada.leaves_at() + 1)));
 }

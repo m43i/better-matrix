@@ -79,9 +79,9 @@ pub use engine::{
 };
 pub use model::{
     AccountId, AccountSummary, Attachment, AttachmentKind, AudioDetails, CallCard, EditVersion, EntryKind, FoundGif,
-    GifPage, HiddenEvent, HistoryVisibility, ImagePack, Invitation, Location, LoginMethods, MediaRef, MediaSize,
-    Mentions, Message, MessageContent, NewPackImage, NewPackImageSource, Notification, NotificationMode, Outgoing,
-    PackEdit, PackImage, PackImageChange, PackPlace, Password, Person, Place, Poll, PollAnswer, PublicRoom,
+    GifPage, HiddenEvent, HistoryVisibility, ImagePack, Invitation, LiveDuration, Location, LoginMethods, MediaRef,
+    MediaSize, Mentions, Message, MessageContent, NewPackImage, NewPackImageSource, Notification, NotificationMode,
+    Outgoing, PackEdit, PackImage, PackImageChange, PackPlace, Password, Person, Place, Poll, PollAnswer, PublicRoom,
     PushContent, PushTarget, Pusher, Quote, Reaction, ReadReceipt, RoomChange, RoomEvent, RoomKind, RoomList,
     RoomPriority, RoomSummary, ScheduledAction, ScheduledMessage, SignInMethod, SpaceSummary, Successor, ThreadSummary,
     TimelineDiff, TimelineEntry, TimelineKey, Upload,

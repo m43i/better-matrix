@@ -49,6 +49,20 @@ describe('gifSource', () => {
     });
   });
 
+  it('should read a Tenor share link in a language from its page', () => {
+    expect(gifSource('https://tenor.com/de/view/bingchilling-gif-10067072887923246131')).toEqual({
+      page: 'https://tenor.com/de/view/bingchilling-gif-10067072887923246131',
+    });
+    expect(gifSource('https://tenor.com/pt-BR/view/happy-cat-12345?x=1')).toEqual({
+      page: 'https://tenor.com/pt-BR/view/happy-cat-12345',
+    });
+  });
+
+  it('should not count a Tenor page that is not a GIF', () => {
+    expect(gifSource('https://tenor.com/de/search/cat-gifs')).toBeNull();
+    expect(gifSource('https://tenor.com/de/view')).toBeNull();
+  });
+
   it('should point an Imgur page at its GIF', () => {
     expect(gifSource('https://imgur.com/AbC123')).toEqual({
       file: 'https://i.imgur.com/AbC123.gif',

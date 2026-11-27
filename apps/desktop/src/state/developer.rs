@@ -33,7 +33,7 @@ impl State {
     pub(super) fn source_failed(&mut self, request: RequestId, error: &str) {
         if self.modal == Some(Modal::Source(SourceView::Loading(request))) {
             self.modal = None;
-            self.notice = Some(tf!("notice.source", error = error));
+            self.notice = Some(super::Notice::problem(tf!("notice.source", error = error)));
         }
     }
 

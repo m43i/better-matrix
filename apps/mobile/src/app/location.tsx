@@ -1,9 +1,10 @@
+import type { LiveDuration } from '@better-matrix/matrix-native/types';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { locale, t } from '../i18n';
+import { type Key, locale, t } from '../i18n';
 import { keyOf } from '../state/actions/composer';
 import { searchPlaces, sendLocation } from '../state/actions/messages';
 import { coordinatesText, geoUri } from '../state/geo';
@@ -13,7 +14,7 @@ import { useStore, useAppStore } from '../state/react';
 import { room } from '../state/selectors';
 import { font } from '../theme/palette';
 import { Button, Divider, ListRow } from '../ui/components';
-import { Icon } from '../ui/icons';
+import { Icon, type IconName } from '../ui/icons';
 import { usePalette } from '../ui/theme';
 import { MapView } from '../ui/timeline/LocationCard';
 
@@ -234,18 +235,16 @@ export default function LocationScreen() {
             {t('location.permission_needed')}
           </Text>
         ) : (
-          <Button
-            title={t('location.start_live')}
+          <LiveChoices
             disabled={here.type !== 'found' || !!picked}
-            onPress={async () => {
+            onPick={async (duration) => {
               if (
                 here.type === 'found' &&
-                (await liveLocations.start(store, account, roomId, here.place.geoUri)) &&
+                (await liveLocations.start(store, account, roomId, here.place.geoUri, duration)) &&
                 navigation.isFocused()
               )
                 router.back();
             }}
-            testID="location-live"
           />
         ))}
       {estimated && !picked && (here.type === 'denied' || here.type === 'failed') && (
@@ -322,7 +321,68 @@ export default function LocationScreen() {
   );
 }
 
+const LIVE_CHOICES: ReadonlyArray<{
+  duration: LiveDuration;
+  label: Key;
+  icon: IconName;
+  testID: string;
+}> = [
+  { duration: 'Hour', label: 'location.live_hour', icon: 'clock', testID: 'location-live-hour' },
+  { duration: 'Day', label: 'location.live_day', icon: 'calendar', testID: 'location-live-day' },
+  {
+    duration: 'UntilStopped',
+    label: 'location.live_always',
+    icon: 'myLocation',
+    testID: 'location-live-always',
+  },
+];
+
+/**
+ * Sharing the phone's position live: how long, each choice starting at once. Only the phone's
+ * own fix can go live, so the choices wait while there is none or another place is picked.
+ */
+function LiveChoices({
+  disabled,
+  onPick,
+}: {
+  disabled: boolean;
+  onPick: (duration: LiveDuration) => Promise<void>;
+}) {
+  const palette = usePalette();
+  const [starting, setStarting] = useState(false);
+  const inactive = disabled || starting;
+
+  return (
+    <View style={styles.live} testID="location-live">
+      <Text style={[font.section, { color: palette.textMuted }]}>{t('location.share_live')}</Text>
+      <View
+        style={[styles.liveChoices, { borderColor: palette.divider, opacity: inactive ? 0.5 : 1 }]}
+        pointerEvents={inactive ? 'none' : 'auto'}
+        accessibilityState={{ disabled: inactive }}
+      >
+        {LIVE_CHOICES.map((choice, index) => (
+          <View key={choice.testID}>
+            {index > 0 && <Divider inset={52} />}
+            <ListRow
+              icon={choice.icon}
+              title={t(choice.label)}
+              chevron={false}
+              onPress={() => {
+                setStarting(true);
+                void onPick(choice.duration).finally(() => setStarting(false));
+              }}
+              testID={choice.testID}
+            />
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  live: { gap: 6 },
+  liveChoices: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   content: { paddingBottom: 24 },
   header: { gap: 12, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
   preview: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },

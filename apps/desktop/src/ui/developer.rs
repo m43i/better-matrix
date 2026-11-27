@@ -47,7 +47,7 @@ fn copy_button(source: &EventSource, p: &Palette) -> El {
     button(t!("source.copy"), ButtonKind::Secondary, true, p).key("source-copy").on_press_tx(
         move |s: &mut State, tx| {
             tx.copy(json.clone());
-            s.notice = Some(t!("source.copied").to_owned());
+            s.notice = Some(crate::state::Notice::done(t!("source.copied").to_owned()));
         },
     )
 }

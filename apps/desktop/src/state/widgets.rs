@@ -415,7 +415,7 @@ impl State {
         {
             data.widget_launch_errors.insert(room, (error.clone(), command));
         }
-        self.notice = Some(tf!("notice.widget_run", error = error));
+        self.notice = Some(super::Notice::problem(tf!("notice.widget_run", error = error)));
     }
 
     /// Stops a run the user is done with; its cancelled finish says nothing.

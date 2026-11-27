@@ -87,7 +87,7 @@ pub use edit_history::EditHistory;
 pub use gifs::GifCache;
 pub use link_previews::LinkPreviews;
 pub use links::{LinkDialog, LinkStep};
-pub use location::LocationForm;
+pub use location::{Camera, LocationForm, MAP_ZOOMS, MapFrame, MapPin, MapViewer};
 pub use media::{MediaCache, THUMBNAIL_SIZE, UploadThumbnails};
 pub use message_actions::{MessageAt, MessageHover};
 pub use navigation::{navigate, navigate_now};
@@ -435,6 +435,47 @@ fn verification_ended(step: &VerificationStep) -> bool {
     matches!(step, VerificationStep::Done | VerificationStep::Cancelled(_))
 }
 
+/// Something the toast tells the user: what went wrong, mostly, or that something worked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Notice {
+    pub message: String,
+    pub kind: NoticeKind,
+}
+
+/// What a [`Notice`] reports, which its icon shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoticeKind {
+    /// Something failed or can't be done.
+    Problem,
+    /// Something to know that isn't a failure (a call declined, a wait).
+    Info,
+    /// Something the user asked for worked (copied, sent, added).
+    Done,
+}
+
+impl Notice {
+    pub fn problem(message: impl Into<String>) -> Self {
+        Self { message: message.into(), kind: NoticeKind::Problem }
+    }
+
+    pub fn info(message: impl Into<String>) -> Self {
+        Self { message: message.into(), kind: NoticeKind::Info }
+    }
+
+    pub fn done(message: impl Into<String>) -> Self {
+        Self { message: message.into(), kind: NoticeKind::Done }
+    }
+}
+
+/// A notice reads as its message, so `notice.as_deref()` gives the text.
+impl std::ops::Deref for Notice {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.message
+    }
+}
+
 /// A dialog over the whole window, with the rest dimmed. At most one is open; new kinds are new
 /// variants.
 #[derive(Clone, Debug, PartialEq)]
@@ -466,13 +507,8 @@ pub enum Modal {
     Poll,
     /// Sharing a place (`State::location`).
     Location,
-    /// A shared place, resolved again as live fixes arrive.
-    LocationMap {
-        account: AccountId,
-        key: TimelineKey,
-        event_id: String,
-        zoom: u8,
-    },
+    /// The places shared in a conversation on one map, resolved again as live fixes arrive.
+    LocationMap(Box<location::MapViewer>),
     /// The sticker manager (`State::pack_manager`).
     Packs,
     /// The versions an edited message went through.
@@ -1018,8 +1054,9 @@ pub struct State {
     reveal_thumbnail: bool,
     /// Accounts whose sidebar layout changed while a save was under way.
     layout_unsaved: HashSet<AccountId>,
-    /// What [`State::clock`] read when the view last showed it.
-    location_expiries: std::collections::BTreeSet<u64>,
+    /// When places on screen end (a live share runs out, a place leaves the map viewer): the view
+    /// wakes then to show it.
+    pub(crate) location_expiries: std::collections::BTreeSet<u64>,
     clock_shown: Option<(Option<u64>, Option<u64>, Option<u64>)>,
     /// The entries of each open timeline its view shows, by ID; one not reported yet counts
     /// its newest entries.
@@ -1121,8 +1158,8 @@ pub struct State {
     pub window_visible: bool,
     /// The selected rail tile's halo: breathing a while after the user turns to the window.
     pub breath: breath::Breath,
-    /// The latest error worth telling the user about; dismissable.
-    pub notice: Option<String>,
+    /// The latest thing worth telling the user about (mostly what went wrong); dismissable.
+    pub notice: Option<Notice>,
     /// A permalink that came before any account was ready: it opens with the first room list.
     pending_link: Option<matrix_core::Permalink>,
     /// The notice on screen and since when, so it goes after a while.
@@ -1364,7 +1401,7 @@ impl State {
                 if matches!(self.pending.get(&request), Some(Purpose::AccountPage | Purpose::LinkDevice)) =>
             {
                 if let Err(error) = tx.open_url(&url) {
-                    self.notice = Some(tf!("notice.browser", error = error));
+                    self.notice = Some(Notice::problem(tf!("notice.browser", error = error)));
                 }
             }
             Event::OpenUrl { request, url } if matches!(self.pending.get(&request), Some(Purpose::Guarded { .. })) => {
@@ -1376,7 +1413,7 @@ impl State {
                     *shown = Some(url.clone());
                 }
                 if let Err(error) = tx.open_url(&url) {
-                    self.notice = Some(tf!("notice.browser", error = error));
+                    self.notice = Some(Notice::problem(tf!("notice.browser", error = error)));
                 }
             }
             Event::OpenUrl { request, url }
@@ -1387,14 +1424,14 @@ impl State {
             Event::OpenUrl { request, url } => match &mut self.sign_in.step {
                 SignInStep::Browser { request: Some(waiting), url: shown, .. } if *waiting == request => {
                     if let Err(error) = tx.open_url(&url) {
-                        self.notice = Some(tf!("notice.browser", error = error));
+                        self.notice = Some(Notice::problem(tf!("notice.browser", error = error)));
                     }
                     *shown = Some(url);
                 }
                 // A registration stage on the server's page; its step keeps the URL to open again.
                 SignInStep::Register { request: Some(waiting), .. } if *waiting == request => {
                     if let Err(error) = tx.open_url(&url) {
-                        self.notice = Some(tf!("notice.browser", error = error));
+                        self.notice = Some(Notice::problem(tf!("notice.browser", error = error)));
                     }
                 }
                 _ => {}
@@ -1839,7 +1876,7 @@ impl State {
                 if self.nav.account.as_ref() == Some(&account) && self.accounts.get(&account).is_none() {
                     self.nav.account = self.accounts.iter().next().map(|data| data.summary.id.clone());
                 }
-                self.notice = Some(tf!("notice.account", account = account, error = error));
+                self.notice = Some(Notice::problem(tf!("notice.account", account = account, error = error)));
             }
             Event::CallUpdated(info) => {
                 self.call_updated(*info);
@@ -1855,10 +1892,10 @@ impl State {
                     }
                     self.notice = match reason {
                         CallEnd::HungUp | CallEnd::Left => None,
-                        CallEnd::Declined => Some(t!("call.declined").to_owned()),
-                        CallEnd::NoAnswer => Some(t!("call.no_answer").to_owned()),
-                        CallEnd::AnsweredElsewhere => Some(t!("call.answered_elsewhere").to_owned()),
-                        CallEnd::Failed(error) => Some(tf!("call.failed", error = error)),
+                        CallEnd::Declined => Some(Notice::info(t!("call.declined").to_owned())),
+                        CallEnd::NoAnswer => Some(Notice::info(t!("call.no_answer").to_owned())),
+                        CallEnd::AnsweredElsewhere => Some(Notice::info(t!("call.answered_elsewhere").to_owned())),
+                        CallEnd::Failed(error) => Some(Notice::problem(tf!("call.failed", error = error))),
                     }
                     .or(self.notice.take());
                 }
@@ -1869,15 +1906,17 @@ impl State {
                     tx.live_only();
                 }
             }
-            Event::CallMediaFailed(error) => self.notice = Some(tf!("call.media_failed", error = error)),
+            Event::CallMediaFailed(error) => {
+                self.notice = Some(Notice::problem(tf!("call.media_failed", error = error)))
+            }
             Event::CallMediaStopped(media) => {
-                self.notice = Some(
+                self.notice = Some(Notice::problem(
                     match media {
                         MediaToggle::Screen(_) => t!("call.share_stopped"),
                         MediaToggle::Camera(_) | MediaToggle::Microphone(_) => t!("call.camera_stopped"),
                     }
                     .to_owned(),
-                );
+                ));
             }
             Event::IncomingCall(ring) => {
                 if !self.window_focused {
@@ -1934,7 +1973,10 @@ impl State {
             }
             Event::ScheduledMessages { account, messages } => {
                 if let Some(reason) = self.scheduled.listed(account, messages) {
-                    self.notice = Some(tf!("schedule.failed_notice", reason = scheduled::failure_reason(&reason)));
+                    self.notice = Some(Notice::problem(tf!(
+                        "schedule.failed_notice",
+                        reason = scheduled::failure_reason(&reason)
+                    )));
                 }
             }
             Event::ImagePacks { account, room_id, packs, may_add } => {
@@ -2223,28 +2265,28 @@ impl State {
                     self.directories.insert((account, space), room_discovery::Directory::Failed(error));
                 }
             }
-            Purpose::Membership { .. } => self.notice = Some(tf!("notice.membership", error = error)),
+            Purpose::Membership { .. } => self.notice = Some(Notice::problem(tf!("notice.membership", error = error))),
             Purpose::Discover | Purpose::SignIn => self.sign_in.fail(request, error),
             Purpose::Cancel => {}
             Purpose::Media { media, .. } => {
                 self.media.failed(media, std::time::Instant::now());
                 self.schedule_retry();
             }
-            Purpose::Send => self.notice = Some(tf!("notice.not_sent", error = error)),
+            Purpose::Send => self.notice = Some(Notice::problem(tf!("notice.not_sent", error = error))),
             Purpose::Edit(edit) => {
-                self.notice = Some(tf!("notice.not_changed", error = error));
+                self.notice = Some(Notice::problem(tf!("notice.not_changed", error = error)));
                 // It comes back as the user left it: now, or once its timeline and composer are
                 // free. (Removing an account forgets its edits on their way.)
                 self.set_edit_aside(*edit);
                 self.resume_edits();
             }
-            Purpose::MessageAction => self.notice = Some(tf!("notice.message_action", error = error)),
-            Purpose::Command => self.notice = Some(tf!("notice.command", error = error)),
+            Purpose::MessageAction => self.notice = Some(Notice::problem(tf!("notice.message_action", error = error))),
+            Purpose::Command => self.notice = Some(Notice::problem(tf!("notice.command", error = error))),
             Purpose::Packs | Purpose::ListScheduled => {}
             Purpose::PackEdit { account, added } => self.pack_edited(request, account, added, Some(error)),
             Purpose::GifSearch => self.picker.gifs.failed(request, error),
             Purpose::Position => self.position_failed(request, error),
-            Purpose::LiveShare(..) => self.notice = Some(tf!("notice.command", error = error)),
+            Purpose::LiveShare(..) => self.notice = Some(Notice::problem(tf!("notice.command", error = error))),
             Purpose::Places => self.places_failed(request, error),
             // Only the latest jump says it found nothing, and only while its room shows.
             Purpose::Locate if self.locating.as_ref().is_some_and(|(asked, _, _)| *asked == request) => {
@@ -2252,13 +2294,13 @@ impl State {
                     && self.nav.account.as_ref() == Some(&account)
                     && self.active_room_id() == Some(room.as_str())
                 {
-                    self.notice = Some(t!("search.message_unavailable").to_owned());
+                    self.notice = Some(Notice::problem(t!("search.message_unavailable").to_owned()));
                 }
             }
             Purpose::Locate => {}
-            Purpose::Schedule => self.notice = Some(tf!("notice.schedule", error = error)),
+            Purpose::Schedule => self.notice = Some(Notice::problem(tf!("notice.schedule", error = error))),
             Purpose::Scheduling { owner, draft } => {
-                self.notice = Some(tf!("notice.schedule", error = error));
+                self.notice = Some(Notice::problem(tf!("notice.schedule", error = error)));
                 self.scheduling_failed(owner, *draft);
             }
             Purpose::EditHistory => self.edit_history_failed(error),
@@ -2273,14 +2315,16 @@ impl State {
                 {
                     *sending = None;
                 }
-                self.notice = Some(tf!("notice.message_action", error = error));
+                self.notice = Some(Notice::problem(tf!("notice.message_action", error = error)));
             }
-            Purpose::Delete => self.notice = Some(tf!("notice.not_deleted", error = error)),
-            Purpose::Logout => self.notice = Some(tf!("notice.sign_out", error = error)),
-            Purpose::NotificationMode => self.notice = Some(tf!("notice.notification_setting", error = error)),
+            Purpose::Delete => self.notice = Some(Notice::problem(tf!("notice.not_deleted", error = error))),
+            Purpose::Logout => self.notice = Some(Notice::problem(tf!("notice.sign_out", error = error))),
+            Purpose::NotificationMode => {
+                self.notice = Some(Notice::problem(tf!("notice.notification_setting", error = error)))
+            }
             Purpose::RoomMark { account, room_id, undo } => {
                 self.accounts.undo(&account, &room_id, &undo);
-                self.notice = Some(tf!("notice.room_mark", error = error));
+                self.notice = Some(Notice::problem(tf!("notice.room_mark", error = error)));
             }
             Purpose::Status { account, chosen } => {
                 if let Some(data) = self.accounts.get(&account)
@@ -2289,15 +2333,15 @@ impl State {
                     let saved = data.saved_status;
                     self.accounts.set_status(&account, saved);
                 }
-                self.notice = Some(tf!("notice.status", error = error));
+                self.notice = Some(Notice::problem(tf!("notice.status", error = error)));
             }
             // A choice made since has the say.
             Purpose::StatusMessage { account } => {
                 if self.accounts.status_message_saved(&account, request) {
-                    self.notice = Some(tf!("notice.status_message", error = error));
+                    self.notice = Some(Notice::problem(tf!("notice.status_message", error = error)));
                 }
             }
-            Purpose::Leave => self.notice = Some(tf!("notice.leave", error = error)),
+            Purpose::Leave => self.notice = Some(Notice::problem(tf!("notice.leave", error = error))),
             // History that couldn't load waits for the user to retry, instead of retrying on every
             // scroll; a timeline that couldn't open opens again the next time it is shown.
             Purpose::History { account, key } => {
@@ -2311,7 +2355,7 @@ impl State {
                 }
                 self.open_timelines.retain(|open| *open != (account.clone(), key.clone()));
             }
-            Purpose::React => self.notice = Some(tf!("notice.react", error = error)),
+            Purpose::React => self.notice = Some(Notice::problem(tf!("notice.react", error = error))),
             Purpose::Recover => {
                 if let Some(Modal::RecoveryKeyEntry { error: shown, submitting, .. }) = &mut self.modal {
                     *shown = Some(error);
@@ -2334,19 +2378,19 @@ impl State {
                     Purpose::Guarded { action: Guarded::AddContact { pending }, .. } => {
                         self.profile.contact_mut(pending.kind).fail(error);
                     }
-                    _ => self.notice = Some(error),
+                    _ => self.notice = Some(Notice::problem(error)),
                 },
             },
             Purpose::ContactCode(kind) | Purpose::ContactConfirm(kind) => self.profile.contact_mut(kind).fail(error),
             Purpose::ProfileName => {
                 self.profile.saving_name = false;
-                self.notice = Some(error);
+                self.notice = Some(Notice::problem(error));
             }
             Purpose::Avatar => {
                 self.profile.saving_avatar = false;
-                self.notice = Some(error);
+                self.notice = Some(Notice::problem(error));
             }
-            Purpose::Profile | Purpose::AccountPage => self.notice = Some(error),
+            Purpose::Profile | Purpose::AccountPage => self.notice = Some(Notice::problem(error)),
             Purpose::Preview(visit) => {
                 if let Some(preview) = self.preview.as_mut().filter(|preview| preview.visit == visit) {
                     match &mut preview.content {
@@ -2363,10 +2407,10 @@ impl State {
                 }
                 self.video_failed(&media, &error);
             }
-            Purpose::Save => self.notice = Some(tf!("notice.save", error = error)),
-            Purpose::CopyImage => self.notice = Some(tf!("notice.copy_image", error = error)),
-            Purpose::OpenFile(_) => self.notice = Some(tf!("notice.open_attachment", error = error)),
-            Purpose::RecoveryKey | Purpose::Security => self.notice = Some(error),
+            Purpose::Save => self.notice = Some(Notice::problem(tf!("notice.save", error = error))),
+            Purpose::CopyImage => self.notice = Some(Notice::problem(tf!("notice.copy_image", error = error))),
+            Purpose::OpenFile(_) => self.notice = Some(Notice::problem(tf!("notice.open_attachment", error = error))),
+            Purpose::RecoveryKey | Purpose::Security => self.notice = Some(Notice::problem(error)),
             Purpose::Verification => self.verification_failed(request, error),
             Purpose::Identity => {}
             Purpose::KeyFile => self.key_file_failed(request, error),
@@ -2394,37 +2438,39 @@ impl State {
             | Purpose::Read
             | Purpose::Typing
             | Purpose::CallVideo => {}
-            Purpose::Call => self.notice = Some(tf!("call.failed", error = error)),
+            Purpose::Call => self.notice = Some(Notice::problem(tf!("call.failed", error = error))),
             Purpose::Layout(account) => {
-                self.notice = Some(tf!("notice.layout", error = error));
+                self.notice = Some(Notice::problem(tf!("notice.layout", error = error)));
                 self.save_layout_again(account);
             }
-            Purpose::Create { .. } => self.notice = Some(tf!("notice.create", error = error)),
-            Purpose::Widget => self.notice = Some(tf!("notice.widget", error = error)),
+            Purpose::Create { .. } => self.notice = Some(Notice::problem(tf!("notice.create", error = error))),
+            Purpose::Widget => self.notice = Some(Notice::problem(tf!("notice.widget", error = error))),
             Purpose::WidgetRun { closed } => self.widget_run_finished(request, closed, Some(error)),
             Purpose::WidgetAnswer => {}
             Purpose::Source => self.source_failed(request, &error),
-            Purpose::ReadRoomSettings => self.notice = Some(tf!("notice.room_settings_read", error = error)),
-            Purpose::RoomSettings => self.notice = Some(tf!("notice.room_settings", error = error)),
+            Purpose::ReadRoomSettings => {
+                self.notice = Some(Notice::problem(tf!("notice.room_settings_read", error = error)))
+            }
+            Purpose::RoomSettings => self.notice = Some(Notice::problem(tf!("notice.room_settings", error = error))),
             Purpose::RoomText => {
                 self.room_text_saved(request, false);
-                self.notice = Some(tf!("notice.room_settings", error = error));
+                self.notice = Some(Notice::problem(tf!("notice.room_settings", error = error)));
             }
-            Purpose::Upgrade { .. } => self.notice = Some(tf!("notice.upgrade", error = error)),
+            Purpose::Upgrade { .. } => self.notice = Some(Notice::problem(tf!("notice.upgrade", error = error))),
             Purpose::SpaceRooms { order } => {
                 if let Some(order) = order {
                     self.unorder_space(order);
                 }
-                self.notice = Some(tf!("notice.space_rooms", error = error));
+                self.notice = Some(Notice::problem(tf!("notice.space_rooms", error = error)));
             }
-            Purpose::Successor { .. } => self.notice = Some(tf!("notice.join", error = error)),
+            Purpose::Successor { .. } => self.notice = Some(Notice::problem(tf!("notice.join", error = error))),
             Purpose::Audio { media, .. } => {
                 self.scratch_files.remove(&media);
                 self.video_failed(&media, &error);
                 self.audio_failed(&media, None, error);
             }
-            Purpose::Invite => self.notice = Some(tf!("notice.invite", error = error)),
-            Purpose::Moderate => self.notice = Some(tf!("notice.moderate", error = error)),
+            Purpose::Invite => self.notice = Some(Notice::problem(tf!("notice.invite", error = error))),
+            Purpose::Moderate => self.notice = Some(Notice::problem(tf!("notice.moderate", error = error))),
             Purpose::Safety { account, .. } => self.safety_failed(&account, request, &error),
             Purpose::Report { .. } => self.report_failed(request, &error),
             // The panel stops loading, and says why.
@@ -2443,13 +2489,13 @@ impl State {
                     SidePanel::Info | SidePanel::Members | SidePanel::Log | SidePanel::Person(_) => {}
                 }
                 if !matches!(panel, SidePanel::Pins | SidePanel::Widgets) {
-                    self.notice = Some(tf!("notice.side", error = error));
+                    self.notice = Some(Notice::problem(tf!("notice.side", error = error)));
                 }
             }
-            Purpose::Poll => self.notice = Some(tf!("notice.poll", error = error)),
+            Purpose::Poll => self.notice = Some(Notice::problem(tf!("notice.poll", error = error))),
             Purpose::Permalink => self.link_failed(request, error),
             Purpose::DirectChat(_) | Purpose::DirectCall { .. } => {
-                self.notice = Some(tf!("notice.direct_chat", error = error));
+                self.notice = Some(Notice::problem(tf!("notice.direct_chat", error = error)));
             }
         }
     }
@@ -2757,7 +2803,7 @@ impl State {
         for target in [ComposerTarget::Room, ComposerTarget::Thread] {
             if let Some(error) = self.composer(target).voice.as_ref().and_then(|memo| memo.recorder.failed()) {
                 self.cancel_voice_memo(target);
-                self.notice = Some(tf!("notice.voice", error = error));
+                self.notice = Some(Notice::problem(tf!("notice.voice", error = error)));
                 ended = true;
             }
         }
@@ -3312,7 +3358,7 @@ impl State {
         let Some(account) = self.accounts.get(&id) else { return };
         // Saving before the saved layout is read would replace it on every device.
         if !account.sidebar_loaded {
-            self.notice = Some(t!("notice.layout_loading").to_owned());
+            self.notice = Some(Notice::info(t!("notice.layout_loading").to_owned()));
             return;
         }
         let mut layout = account.sidebar.clone();
@@ -5032,7 +5078,7 @@ impl State {
         if let Some(Modal::ResetIdentity { step: ResetStep::Resetting { url: Some(url), .. }, .. }) = &self.modal
             && let Err(error) = tx.open_url(url)
         {
-            self.notice = Some(tf!("notice.browser", error = error));
+            self.notice = Some(Notice::problem(tf!("notice.browser", error = error)));
         }
     }
 
@@ -5388,7 +5434,7 @@ impl State {
         if let SignInStep::Browser { url: Some(url), .. } = &self.sign_in.step
             && let Err(error) = tx.open_url(url)
         {
-            self.notice = Some(tf!("notice.browser", error = error));
+            self.notice = Some(Notice::problem(tf!("notice.browser", error = error)));
         }
     }
 
@@ -5721,7 +5767,7 @@ impl State {
                 self.dispatch(command, Purpose::Send);
                 tx.scroll_to_bottom(timeline_view(memo.target));
             }
-            Err(error) => self.notice = Some(tf!("notice.voice", error = error)),
+            Err(error) => self.notice = Some(Notice::problem(tf!("notice.voice", error = error))),
         }
     }
 
@@ -5735,7 +5781,7 @@ impl State {
         } else if clip.is_some() {
             return;
         }
-        self.notice = Some(tf!("notice.audio", error = error));
+        self.notice = Some(Notice::problem(tf!("notice.audio", error = error)));
     }
 
     /// The second a voice memo's timer shows, and a playing clip's and previewed video's second
@@ -5817,7 +5863,7 @@ impl State {
     }
 
     fn file_destination_changed(&mut self) {
-        self.notice = Some(t!("dialog.destination_changed").to_owned());
+        self.notice = Some(Notice::info(t!("dialog.destination_changed").to_owned()));
     }
 
     /// A paste into a composer: an image or files become attachments, and a lone web address a
@@ -5830,7 +5876,7 @@ impl State {
         }
         // A code block pastes plain text: a copied spoiler would go there as its words.
         if composer.pastes_into_code() && content.html().is_some_and(holds_spoiler) {
-            self.notice = Some(t!("composer.spoiler_in_code").to_owned());
+            self.notice = Some(Notice::problem(t!("composer.spoiler_in_code").to_owned()));
             return true;
         }
         let composer = self.composer_mut(target);
@@ -5885,7 +5931,7 @@ impl State {
         if matrix_core::Permalink::is_permalink(url) {
             navigation::navigate_now(self, tx, |s| s.open_permalink(url));
         } else if let Err(error) = tx.open_url(url) {
-            self.notice = Some(tf!("notice.browser", error = error));
+            self.notice = Some(Notice::problem(tf!("notice.browser", error = error)));
         }
     }
 
@@ -5922,7 +5968,7 @@ impl State {
     fn expire_notice(&mut self, tx: &mut Tx) -> bool {
         /// Long enough to read a sentence or two, in seconds.
         const SHOWN_FOR: f64 = 6.0;
-        let Some(message) = &self.notice else {
+        let Some(Notice { message, .. }) = &self.notice else {
             self.notice_shown = None;
             return false;
         };

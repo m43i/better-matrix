@@ -219,15 +219,34 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   `geo:` URI, a pin asset (MSC3488) and the place's name as its body (else its coordinates).
   The picker uses a permitted device fix or a labelled approximate position from GeoJS, which
   receives the public IP when the picker needs an estimate. Search and typed coordinates remain
-  available. Sending a place takes an explicit action. Live location is a separate 15-minute
-  room share using Element’s MSC3672 beacon info and related beacon events. Only a device fix
+  available. Sending a place takes an explicit action. Live location is a separate room share
+  for 1 hour, 1 day or until stopped (`LiveDuration`), using Element’s MSC3672 beacon info and
+  related beacon events. "Until stopped" still names an end on each beacon, 24 days on: JavaScript timers (Element
+  Web's among them) overflow past 2^31 − 1 ms, so a longer timeout would end the share at once
+  there. A minute before it, the share carries on in a fresh beacon from the latest fix (a new
+  card; `LiveLocationStarted` again, so Stop stops the newest), but only while the beacon is
+  still the room's: renewal checks the server before writing, and after, that the fresh beacon
+  replaced the old (`unsigned.replaces_state`, else `prev_content`) and is still current, else
+  it stops the fresh beacon if still its own, so a stop from another device stands; a server that
+  can't say ends the share with an error. An orderly quit stops the share. Only a device fix
   can start one in a room where the sender may publish both events. Room permissions let an
   admin set their level together. The picker can stop the current share, and each viewer can
   stop its own beacon. On Android the foreground service starts when sharing is requested and
   holds the latest fix until the first Matrix send succeeds.
   Desktop renders MapLibre Native snapshots off the UI thread, cached by coordinates, style and
   zoom. Both clients use the app’s bundled light and dark street styles with OpenFreeMap vector tiles. The sender’s avatar
-  marks the place. The in-app map dialog offers zoom and an explicit Google Maps action.
+  marks the place. A location card opens the **map viewer**: one map, near the window's size,
+  of every recent place in that conversation (each sender's newest: a live share while it runs,
+  a place shared within a day), and the opened card's own place in its sender's stead, however
+  old, unless it is a live share that ended while they have a newer place (a renewed share's).
+  The map centres on that person at street level, and on whoever has the newest place once
+  theirs leaves; choosing someone on the map moves the focus without keeping their place past
+  its time. A list over the map
+  names who is there; choosing someone (a row or a pin) turns the map to them. The desktop drags
+  the map and zooms with the wheel (toward the pointer) or buttons, from MapLibre snapshots of the
+  map's size (`geo::framed_map`), placing pins by Web Mercator (`geo::project`); while a moved
+  map's snapshot renders, the last one stays, moved and scaled into place. The phones use MapLibre's
+  own interactive map. The viewer's bar opens the focused place in Google Maps.
   Turning off maps suppresses the renderer and tile requests. Nominatim still searches only on
   submit, with cached results and a one-second interval between requests.
 - **Scheduled messages** (MSC4140 delayed events, `matrix_core::scheduled`): the button beside
@@ -503,8 +522,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   - The card sits below the message text; pressing it opens the link. Its image loads like the
     other media on screen, as a 160-pixel thumbnail; one that fails to load is left out.
     Settings → Messages & media → Link previews turns them off (on by default).
-- **Linked GIFs:** each holds at most 48 MiB of frames (beyond that, its first frame only), and
-  at most 16 play.
+- **Linked GIFs:** each holds at most 48 MiB of frames, and at most 16 play. A GIF whose frames
+  outgrow that keeps every other frame, each shown as long as the pair it stands for, until they
+  fit (a single frame too big shows still), so a long GIF plays at a lower frame rate rather than
+  freezing.
   - Past 128 MiB of frames across them, those off screen are forgotten, the one shown longest
     ago first, and fetched again if they come back; those on screen keep theirs. Each frame is
     still copied into the picture as it shows: Rune's `Pixels::set` takes an owned buffer.

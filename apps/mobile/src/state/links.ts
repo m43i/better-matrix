@@ -87,7 +87,8 @@ export function gifSource(link: string): GifSource | null {
     case 'gph.is':
       return null;
     case 'tenor.com':
-      if (path.startsWith('view/')) return { page: `https://tenor.com/${path}` };
+      // A GIF's page, `view/…`, also comes in a language (`de/view/…`, `pt-BR/view/…`).
+      if (/^([A-Za-z-]+\/)?view\/./.test(path)) return { page: `https://tenor.com/${path}` };
       break;
     case 'imgur.com':
       if (path !== '' && !path.includes('/')) return { file: `https://i.imgur.com/${path}.gif` };

@@ -1780,14 +1780,8 @@ fn location_card(message: &Message, location: &matrix_core::Location, cx: &Conte
             .map_or_else(|| t!("location.waiting").to_owned(), |(lat, lon)| format!("{lat}, {lon}"));
         card.child(text(label).font(font::META).color(p.text_muted).px(10.0).pb(6.0))
     };
-    super::location::watch_expiry(card, location).on_press(move |s: &mut State| {
-        s.modal = Some(crate::state::Modal::LocationMap {
-            account: account.clone(),
-            key: key.clone(),
-            event_id: event_id.clone(),
-            zoom: matrix_core::geo::MAP_ZOOM,
-        })
-    })
+    super::location::watch_expiry(card, location)
+        .on_press(move |s: &mut State| s.open_location_map(account.clone(), key.clone(), event_id.clone()))
 }
 
 /// A message's stand-in when its content can't be shown.
