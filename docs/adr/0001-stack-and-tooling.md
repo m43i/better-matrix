@@ -58,6 +58,9 @@ Date: 2026-11-14
   - `bun run build:windows` builds natively on Windows and cross-compiles elsewhere with
     `cargo-xwin` (clang-cl, lld-link).
   - Windows release builds use the GUI subsystem: no console window.
+  - Linux releases include separate x86_64 and aarch64 `bm` archives. Build the CLI in a
+    separate Cargo invocation so it uses the engine without the desktop media features
+    ([0013](0013-command-line.md)).
   - Windows builds embed the installer artwork (`packaging/icons/better-matrix.ico`) in
     `better-matrix.exe` as icon resource 1; `rune::set_app_icon_resource` gives every window
     that icon for its caption, the taskbar and Alt+Tab, at the size it shows.
@@ -74,7 +77,7 @@ Date: 2026-11-14
     (the mobile app's and matrix-native's tests, under `jest-expo`) run on Node 26 in CI.
   - CI (`ci.yml`) lints and tests in one Linux job on every pull request and every commit to
     `main`, the mobile app's TypeScript (typecheck and Jest, [0010](0010-mobile.md)) included;
-    releases build the desktop app only, until the phones ship. A newer push cancels a pull request's older run. Only `main` writes the Rust cache;
+    releases build the desktop app and the Linux CLI, until the phones ship. A newer push cancels a pull request's older run. Only `main` writes the Rust cache;
     pull requests read it. Linux builds use clang 21 from LLVM's packages (libwebrtc's libc++
     needs it), passed to Cargo through Turbo (`CC`, `CXX`, `CARGO_*` in `turbo.json`). The shared
     Linux dependency action explicitly requests GStreamer's `libunwind-dev`, letting apt replace

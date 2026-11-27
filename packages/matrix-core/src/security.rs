@@ -301,7 +301,7 @@ fn recovery_status(state: RecoveryState) -> RecoveryStatus {
 }
 
 impl Account {
-    fn security(&self) -> Security {
+    pub(crate) fn security(&self) -> Security {
         let encryption = self.client().encryption();
         Security {
             session_verified: encryption.verification_state().get() == VerificationState::Verified,

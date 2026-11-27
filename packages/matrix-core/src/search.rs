@@ -106,12 +106,21 @@ impl Account {
     /// Reads the SDK's encrypted-at-rest cache, including closed rooms and thread-only events.
     /// Results are bounded, ranked by local interaction frequency, then match quality and recency.
     pub async fn search_messages(&self, term: &str, usage: &SearchUsage) -> Result<Vec<MessageHit>, Error> {
+        self.search_messages_in(term, usage, None).await
+    }
+
+    pub(crate) async fn search_messages_in(
+        &self,
+        term: &str,
+        usage: &SearchUsage,
+        only_room: Option<&str>,
+    ) -> Result<Vec<MessageHit>, Error> {
         if term.trim().is_empty() {
             return Ok(Vec::new());
         }
         let mut found = Vec::new();
         for room in self.client().joined_rooms() {
-            if room.is_space() {
+            if room.is_space() || only_room.is_some_and(|id| id != room.room_id().as_str()) {
                 continue;
             }
             let events = {

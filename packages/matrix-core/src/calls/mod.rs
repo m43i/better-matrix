@@ -4,15 +4,25 @@
 //! [`Command`](crate::Command)s and hears it through [`Event`](crate::Event)s. Video reaches the
 //! app only through the [`VideoSink`]s it hands over, as RGBA frames.
 
+#[cfg(feature = "native-media")]
 mod direct;
+#[cfg(feature = "native-media")]
 mod keys;
+#[cfg(feature = "native-media")]
 mod media;
+#[cfg(feature = "native-media")]
 mod platform;
+#[cfg(feature = "native-media")]
 mod rtc;
+#[cfg(feature = "native-media")]
 mod session;
+#[cfg(feature = "native-media")]
 mod signals;
+#[cfg(feature = "native-media")]
 mod sticky;
+#[cfg(feature = "native-media")]
 mod support;
+#[cfg(feature = "native-media")]
 mod task;
 
 use std::fmt;
@@ -20,13 +30,39 @@ use std::sync::Arc;
 
 use crate::model::{AccountId, Person};
 
-pub(crate) use direct::{has_video, reject};
+#[cfg(not(feature = "native-media"))]
+pub(crate) type Signal = std::convert::Infallible;
+
+#[cfg(not(feature = "native-media"))]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct StickyMembers {}
+
+/// Whether an offer is a video call: it has a video section that is on and that the caller
+/// sends on (one only asking to receive video is a voice call).
+pub(crate) fn has_video(sdp: &str) -> bool {
+    let mut sections = sdp.split("\nm=").skip(1);
+    sections.any(|section| {
+        let lines: Vec<&str> = section.lines().map(str::trim).collect();
+        let on = lines.first().is_some_and(|first| first.starts_with("video ") && !first.starts_with("video 0 "));
+        on && !lines.iter().any(|line| matches!(*line, "a=recvonly" | "a=inactive"))
+    })
+}
+
+#[cfg(feature = "native-media")]
+pub(crate) use direct::reject;
+#[cfg(feature = "native-media")]
 pub(crate) use media::list_devices;
+#[cfg(feature = "native-media")]
 pub use platform::{CameraFrame, CameraPlanes, PlatformCamera, camera_lost, push_camera_frame, use_platform_camera};
+#[cfg(feature = "native-media")]
 pub(crate) use rtc::{Member, joined_sticky};
+#[cfg(feature = "native-media")]
 pub(crate) use signals::{DirectEvent, Signal, listen};
+#[cfg(feature = "native-media")]
 pub(crate) use sticky::StickyMembers;
+#[cfg(feature = "native-media")]
 pub use support::via;
+#[cfg(feature = "native-media")]
 pub(crate) use task::{CallHandle, Control, Invite, Leaving, RingHeard, Start, hear_ringing, person, start};
 
 /// Which standard a call speaks.

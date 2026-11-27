@@ -39,6 +39,15 @@ pub struct RequestId(pub u64);
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 #[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum Command {
+    /// A request for paginated data or server-confirmed actions.
+    #[cfg(feature = "command-line")]
+    #[cfg_attr(feature = "ffi", serde(skip), ts(skip))]
+    Terminal {
+        /// The account answering the request.
+        account: AccountId,
+        /// The operation to perform.
+        action: Box<crate::terminal::Action>,
+    },
     /// Resolve a server name or URL (through `.well-known`) and find out how it lets users sign
     /// in; answered by [`Event::HomeserverDiscovered`].
     Discover {
@@ -57,6 +66,17 @@ pub enum Command {
         /// Create a new account on the server's page first (when
         /// [`LoginMethods::create_account`](crate::LoginMethods::create_account)).
         create: bool,
+    },
+    /// Sign in as an explicitly selected account using the browser.
+    #[cfg(feature = "command-line")]
+    #[cfg_attr(feature = "ffi", serde(skip), ts(skip))]
+    LoginOAuthAs {
+        /// The resolved homeserver URL.
+        homeserver: String,
+        /// The only Matrix user ID whose session this login may save.
+        account: AccountId,
+        /// Resume the suspended device and its stores.
+        resume: bool,
     },
     /// The browser came back to the app's own redirect URI ([`OAuthRedirect::App`]) for the
     /// sign-in `request` started: finishes it. Unknown or finished sign-ins answer cancelled.
@@ -1120,11 +1140,35 @@ pub enum Answer {
     Continue,
 }
 
+/// Exit categories preserved across the engine boundary for one-shot clients.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// Sign in or supply the account password.
+    Authentication,
+    /// The account lacks permission.
+    Permission,
+    /// The homeserver is limiting requests.
+    RateLimit,
+    /// The operation ran out of time.
+    Timeout,
+    /// Any other failure.
+    Other,
+}
+
 /// What the engine reports. Delivered on the engine's threads; a sink forwards them to its UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, ts_rs::TS))]
 #[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum Event {
+    /// Structured error category for a terminal command, before its completion.
+    #[cfg_attr(feature = "ffi", serde(skip), ts(skip))]
+    CommandError(RequestId, ErrorKind),
+    /// Result of a terminal operation, or a message in a running watch.
+    #[cfg_attr(feature = "ffi", serde(skip), ts(skip))]
+    TerminalResult(RequestId, serde_json::Value),
+    /// The first successful sync with full room state has been applied to the room list.
+    #[cfg_attr(feature = "ffi", serde(skip), ts(skip))]
+    SyncReady(AccountId),
     /// A command ended. `Err` holds a message fit to show the user.
     Finished {
         /// The command this answers.
@@ -1168,8 +1212,9 @@ pub enum Event {
         /// history and keys. Also sent at start for an account suspended earlier.
         kept: bool,
     },
-    /// At start: the saved accounts being signed back in. Each then arrives as
-    /// [`Event::AccountAdded`], or fails with [`Event::AccountError`].
+    /// At start: the accounts being restored. Each then arrives as
+    /// [`Event::AccountAdded`], [`Event::AccountError`], or (for suspended terminal sessions)
+    /// [`Event::SessionEnded`].
     Restoring(Vec<AccountId>),
     /// An account signed out and was removed.
     AccountRemoved(AccountId),
@@ -1942,6 +1987,21 @@ impl Engine {
     /// Starts an engine on its own thread with its own Tokio runtime. Saved accounts are
     /// restored right away and reported with [`Event::AccountAdded`].
     pub fn start(config: EngineConfig, sink: impl EventSink) -> Result<EngineHandle, Error> {
+        Self::start_with_sync(config, sink, true, false)
+    }
+
+    /// Starts the engine with ordinary sync, which can report a complete first room list.
+    #[cfg(feature = "command-line")]
+    pub fn start_terminal(config: EngineConfig, sink: impl EventSink, watch: bool) -> Result<EngineHandle, Error> {
+        Self::start_with_sync(config, sink, false, watch)
+    }
+
+    fn start_with_sync(
+        config: EngineConfig,
+        sink: impl EventSink,
+        sliding_sync: bool,
+        pause_for_watch: bool,
+    ) -> Result<EngineHandle, Error> {
         crate::tls::install_provider();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(WORKERS.min(std::thread::available_parallelism().map_or(WORKERS, usize::from)))
@@ -1949,7 +2009,7 @@ impl Engine {
             .thread_name("matrix-engine")
             .build()?;
         let (commands, receiver) = mpsc::unbounded_channel();
-        let (signals, signal_receiver) = mpsc::unbounded_channel();
+        let (_signals, signal_receiver) = mpsc::unbounded_channel();
         let state = State {
             layout: StoreLayout::new(&config.data_dir),
             sessions: Sessions::new(&config.data_dir, config.secrets),
@@ -1959,6 +2019,8 @@ impl Engine {
             oauth_returns: HashMap::new(),
             answers: HashMap::new(),
             scans_qr: config.scans_qr,
+            sliding_sync,
+            pause_for_watch,
             sink: Arc::new(sink),
             accounts: HashMap::new(),
             tasks: JoinSet::new(),
@@ -1966,13 +2028,19 @@ impl Engine {
             widget_runs: HashMap::new(),
             live_shares: HashMap::new(),
             http: crate::links::http_client().map_err(|e| e.to_string()),
-            signals,
+            #[cfg(feature = "native-media")]
+            signals: _signals,
+            #[cfg(feature = "native-media")]
             call: None,
+            #[cfg(feature = "native-media")]
             leaving: crate::calls::Leaving::default(),
+            #[cfg(feature = "native-media")]
             rings: HashMap::new(),
+            #[cfg(feature = "native-media")]
             next_ring: 0,
             status_stamp: 0,
             message_number: 0,
+            #[cfg(feature = "native-media")]
             devices: crate::calls::DeviceChoice::default(),
         };
         let thread = std::thread::Builder::new().name("matrix-engine".into()).spawn(move || {
@@ -1987,6 +2055,8 @@ impl Engine {
 
 struct Running {
     account: Account,
+    #[cfg(feature = "command-line")]
+    watch_ready: Option<Arc<WatchSync>>,
     usage: crate::search::Usage,
     background: Vec<AbortHandle>,
     flows: crate::security::Flows,
@@ -2094,10 +2164,12 @@ impl Drop for Running {
 const QUIT_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// The longest a ring rings, whatever its event says.
+#[cfg(feature = "native-media")]
 const RING_CAP: u64 = 2 * 60 * 1000;
 
 /// A call ringing for the user, until it is answered, declined or lapses.
 #[derive(Clone, Debug)]
+#[cfg(feature = "native-media")]
 enum Ring {
     /// A MatrixRTC session's ring: answering joins the session.
     Rtc { video: bool, until: u64 },
@@ -2105,6 +2177,7 @@ enum Ring {
     Direct { invite: crate::calls::Invite, video: bool, until: u64 },
 }
 
+#[cfg(feature = "native-media")]
 impl Ring {
     fn until(&self) -> u64 {
         match self {
@@ -2115,6 +2188,7 @@ impl Ring {
 
 /// Whether the user is in the room's call on another device. One entry per device: this
 /// device's own (stale, after a crash) doesn't count.
+#[cfg(feature = "native-media")]
 fn joined_elsewhere(room: &matrix_sdk::Room, sticky: &crate::calls::StickyMembers) -> bool {
     let me = room.own_user_id();
     let mine = room.active_room_call_participants().iter().filter(|user| *user == me).count();
@@ -2129,11 +2203,13 @@ fn joined_elsewhere(room: &matrix_sdk::Room, sticky: &crate::calls::StickyMember
 }
 
 /// Whether anyone is in the room's call: a membership of either standard.
+#[cfg(feature = "native-media")]
 fn call_under_way(room: &matrix_sdk::Room, sticky: &crate::calls::StickyMembers) -> bool {
     room.has_active_room_call() || !sticky.members(room.room_id().as_str(), now_ms()).is_empty()
 }
 
 /// One of the account's rooms, by ID.
+#[cfg(feature = "native-media")]
 fn room_of(account: &Account, room_id: &str) -> Option<matrix_sdk::Room> {
     matrix_sdk::ruma::RoomId::parse(room_id).ok().and_then(|id| account.client().get_room(&id))
 }
@@ -2155,6 +2231,8 @@ struct State {
     answers: HashMap<RequestId, mpsc::UnboundedSender<Answer>>,
     /// Whether the app scans QR codes ([`EngineConfig::scans_qr`]).
     scans_qr: bool,
+    sliding_sync: bool,
+    pause_for_watch: bool,
     sink: Arc<dyn EventSink>,
     accounts: HashMap<AccountId, Running>,
     tasks: JoinSet<Completion>,
@@ -2168,15 +2246,20 @@ struct State {
     /// For linked files and call services; shared by every account, carries no credentials.
     http: Result<matrix_sdk::reqwest::Client, String>,
     /// Where the accounts' call signals go, for [`State::run`] to route.
+    #[cfg(feature = "native-media")]
     signals: mpsc::UnboundedSender<crate::calls::Signal>,
     /// The call under way.
+    #[cfg(feature = "native-media")]
     call: Option<crate::calls::CallHandle>,
     /// The call last hung up, until it has left: the next call, a sign-out and quitting wait
     /// for it.
+    #[cfg(feature = "native-media")]
     leaving: crate::calls::Leaving,
     /// Calls ringing for the user, by account and room, numbered so a lapse ends only its own.
+    #[cfg(feature = "native-media")]
     rings: HashMap<(AccountId, String), (u64, Ring)>,
     /// The number of the next ring.
+    #[cfg(feature = "native-media")]
     next_ring: u64,
     /// When the last status was chosen (`Command::SetStatus`), in ms since the epoch: each is
     /// stamped later than the one before, even within one millisecond.
@@ -2184,6 +2267,7 @@ struct State {
     /// The number of the last status message set (`Command::SetStatusMessage`).
     message_number: u64,
     /// The microphone, speaker and camera the user picked for calls.
+    #[cfg(feature = "native-media")]
     devices: crate::calls::DeviceChoice,
 }
 
@@ -2226,7 +2310,10 @@ impl State {
                     Some(envelope) => self.dispatch(envelope),
                     None => break,
                 },
-                Some(signal) = signals.recv() => self.signal(signal),
+                Some(_signal) = signals.recv() => {
+                    #[cfg(feature = "native-media")]
+                    self.signal(_signal);
+                },
                 Some(joined) = self.tasks.join_next() => match joined {
                     Ok(completion) => self.complete(completion),
                     // Cancelled tasks were answered when cancelled; a panic loses its answer.
@@ -2237,8 +2324,10 @@ impl State {
         }
         // The app is quitting: the call under way (or just hung up) leaves, so nobody sees the
         // user in it for the seconds until the delayed leave would.
+        #[cfg(feature = "native-media")]
         self.hang_up();
         self.end_locations(|_, _| true).await;
+        #[cfg(feature = "native-media")]
         if let Some(task) = self.leaving.any() {
             let _ = tokio::time::timeout(QUIT_WAIT, task).await;
         }
@@ -2247,7 +2336,11 @@ impl State {
     fn restore_saved(&mut self) {
         let (suspended, saved): (Vec<_>, Vec<_>) =
             self.sessions.list().into_iter().partition(|stored| stored.signed_out);
-        self.sink.emit(Event::Restoring(saved.iter().map(|stored| AccountId::new(&stored.id)).collect()));
+        let mut restoring: Vec<_> = saved.iter().map(|stored| AccountId::new(&stored.id)).collect();
+        if !self.sliding_sync {
+            restoring.extend(suspended.iter().map(|stored| AccountId::new(&stored.id)));
+        }
+        self.sink.emit(Event::Restoring(restoring));
         // Signed out softly in an earlier run: they wait for the user to sign in again.
         for stored in suspended {
             self.sink.emit(Event::SessionEnded { account: AccountId::new(&stored.id), kept: true });
@@ -2274,6 +2367,7 @@ impl State {
     }
 
     /// The call under way, unless it has ended.
+    #[cfg(feature = "native-media")]
     fn live_call(&mut self) -> Option<&crate::calls::CallHandle> {
         if self.call.as_ref().is_some_and(crate::calls::CallHandle::is_over) {
             self.call = None;
@@ -2282,6 +2376,7 @@ impl State {
     }
 
     /// Ends the call under way, if any, keeping hold of it until it has left.
+    #[cfg(feature = "native-media")]
     fn hang_up(&mut self) {
         if let Some(call) = self.call.take() {
             let account = call.account.clone();
@@ -2292,6 +2387,7 @@ impl State {
 
     /// Starts a call, which first waits for the one under way (or the one just hung up) to
     /// leave.
+    #[cfg(feature = "native-media")]
     fn start_call(&mut self, account: Account, room_id: String, start: crate::calls::Start) {
         self.hang_up();
         let previous = self.leaving.any();
@@ -2301,6 +2397,7 @@ impl State {
         self.call = Some(crate::calls::start(account, room_id, start, devices, sink, http, previous));
     }
 
+    #[cfg(feature = "native-media")]
     fn end_ring(&mut self, account: &AccountId, room_id: &str) -> Option<Ring> {
         let (_, ring) = self.rings.remove(&(account.clone(), room_id.to_owned()))?;
         self.sink.emit(Event::RingEnded { account: account.clone(), room_id: room_id.to_owned() });
@@ -2308,6 +2405,7 @@ impl State {
     }
 
     /// The user is leaving (or is out of) a room: its call ends and its ring stops.
+    #[cfg(feature = "native-media")]
     fn leave_calls_in(&mut self, account: &AccountId, room_id: &str) {
         if self.call.as_ref().is_some_and(|call| call.account == *account && call.room_id == room_id) {
             self.hang_up();
@@ -2358,6 +2456,7 @@ impl State {
         }
     }
 
+    #[cfg(feature = "native-media")]
     fn forget_calls(&mut self, account: &AccountId) {
         if self.call.as_ref().is_some_and(|call| call.account == *account) {
             self.hang_up();
@@ -2370,6 +2469,7 @@ impl State {
     }
 
     /// Routes what sync delivered for calls: to the call under way, or as a call ringing.
+    #[cfg(feature = "native-media")]
     fn signal(&mut self, signal: crate::calls::Signal) {
         use crate::calls::{DirectEvent, Signal};
         if self.call.as_ref().is_some_and(crate::calls::CallHandle::is_over) {
@@ -2501,6 +2601,7 @@ impl State {
     }
 
     /// Reports a call ringing, with who calls, and ends the ring when it lapses.
+    #[cfg(feature = "native-media")]
     fn ring(&mut self, account: AccountId, room_id: String, caller: String, ring: Ring) {
         let Some(running) = self.accounts.get(&account) else { return };
         let (video, via) = match &ring {
@@ -2531,6 +2632,7 @@ impl State {
     }
 
     /// Whether ring number `ring` still rings in the room.
+    #[cfg(feature = "native-media")]
     fn ringing(&self, account: &AccountId, room_id: &str, ring: u64) -> bool {
         self.rings.get(&(account.clone(), room_id.to_owned())).is_some_and(|(id, _)| *id == ring)
     }
@@ -2539,11 +2641,55 @@ impl State {
         self.accounts.get(id).map(|running| running.account.clone()).ok_or_else(|| Error::UnknownAccount(id.clone()))
     }
 
+    fn login_oauth(
+        &mut self,
+        request: RequestId,
+        homeserver: String,
+        resume: Option<AccountId>,
+        create: bool,
+        expected: Option<AccountId>,
+    ) -> futures_util::future::BoxFuture<'static, Result<Outcome, Error>> {
+        let (layout, sessions, identity) = (self.layout.clone(), self.sessions.clone(), self.identity.clone());
+        let (holder, sink) = (self.holder, Arc::clone(&self.sink));
+        self.oauth_returns.retain(|_, waiting| !waiting.is_closed());
+        let app_redirect = match &self.oauth_redirect {
+            crate::account::OAuthRedirect::Loopback => None,
+            crate::account::OAuthRedirect::App(uri) => {
+                let (sender, returned) = tokio::sync::oneshot::channel();
+                self.oauth_returns.insert(request, sender);
+                Some((uri.clone(), returned))
+            }
+        };
+        Box::pin(async move {
+            let target =
+                crate::account::OAuthTarget { homeserver: &homeserver, resume: resume.as_ref(), create, expected };
+            let pending = Account::start_oauth(&layout, &sessions, holder, &identity, target, app_redirect).await?;
+            sink.emit(Event::OpenUrl { request, url: pending.url.to_string() });
+            Ok(signed_in(pending.finish(&sessions).await?).await)
+        })
+    }
+
     /// Starts the task for one command. Runs on the loop, so it must not await.
     fn dispatch(&mut self, Envelope { request, command }: Envelope) {
         let sink = Arc::clone(&self.sink);
         let command_kind = if matches!(command, Command::ResetRecoveryKey(_)) { Kind::Reset } else { Kind::Other };
         let task: std::pin::Pin<Box<dyn Future<Output = Result<Outcome, Error>> + Send>> = match command {
+            #[cfg(feature = "command-line")]
+            Command::Terminal { account, action } => {
+                let found = self.account(&account);
+                let running = self.accounts.get(&account);
+                let usage = running.map(|running| running.usage.clone());
+                let watch_ready = running.and_then(|running| running.watch_ready.clone());
+                Box::pin(async move {
+                    let report = |value| sink.emit(Event::TerminalResult(request, value));
+                    let usage = match usage {
+                        Some(usage) => usage.snapshot().await,
+                        None => crate::SearchUsage::default(),
+                    };
+                    crate::terminal::run(found?, *action, usage, report, watch_ready).await?;
+                    Ok(Outcome::Done)
+                })
+            }
             Command::FinishOAuth { request: sign_in, url } => {
                 let result = match self.oauth_returns.remove(&sign_in) {
                     Some(waiting) => waiting.send(url).map_err(|_| Error::Cancelled.to_string()),
@@ -2564,6 +2710,7 @@ impl State {
                 self.sink.emit(Event::Finished { request, result: Ok(()) });
                 return;
             }
+            #[cfg(feature = "native-media")]
             Command::StartCall { account, room_id, video } => {
                 let result = self.account(&account).map(|found| {
                     self.end_ring(&account, &room_id);
@@ -2572,6 +2719,7 @@ impl State {
                 self.sink.emit(Event::Finished { request, result: result.map_err(|e| e.to_string()) });
                 return;
             }
+            #[cfg(feature = "native-media")]
             Command::AnswerCall { account, room_id, video } => {
                 let ring = self.end_ring(&account, &room_id).filter(|ring| ring.until() > now_ms());
                 let result = match (self.account(&account), ring) {
@@ -2589,6 +2737,7 @@ impl State {
                 self.sink.emit(Event::Finished { request, result });
                 return;
             }
+            #[cfg(feature = "native-media")]
             Command::DeclineCall { account, room_id } => {
                 if let (Some(Ring::Direct { invite, .. }), Ok(found)) =
                     (self.end_ring(&account, &room_id), self.account(&account))
@@ -2605,11 +2754,13 @@ impl State {
                 self.sink.emit(Event::Finished { request, result: Ok(()) });
                 return;
             }
+            #[cfg(feature = "native-media")]
             Command::HangUp => {
                 self.hang_up();
                 self.sink.emit(Event::Finished { request, result: Ok(()) });
                 return;
             }
+            #[cfg(feature = "native-media")]
             Command::SetCallMedia(toggle) => {
                 let result = match self.live_call() {
                     Some(call) => {
@@ -2621,6 +2772,7 @@ impl State {
                 self.sink.emit(Event::Finished { request, result });
                 return;
             }
+            #[cfg(feature = "native-media")]
             Command::WatchVideo { video, sink } => {
                 if let Some(call) = self.live_call() {
                     call.send(crate::calls::Control::Watch(video, sink));
@@ -2628,6 +2780,7 @@ impl State {
                 self.sink.emit(Event::Finished { request, result: Ok(()) });
                 return;
             }
+            #[cfg(feature = "native-media")]
             Command::ListCallDevices => {
                 let sink = Arc::clone(&self.sink);
                 tokio::task::spawn_blocking(move || {
@@ -2636,6 +2789,7 @@ impl State {
                 });
                 return;
             }
+            #[cfg(feature = "native-media")]
             Command::ChooseCallDevice { kind, id } => {
                 self.devices.set(kind, id.clone());
                 if let Some(call) = self.live_call() {
@@ -2644,6 +2798,7 @@ impl State {
                 self.sink.emit(Event::Finished { request, result: Ok(()) });
                 return;
             }
+            #[cfg(feature = "native-media")]
             Command::UnwatchVideo(video) => {
                 if let Some(call) = self.live_call() {
                     call.send(crate::calls::Control::Unwatch(video));
@@ -2651,6 +2806,16 @@ impl State {
                 self.sink.emit(Event::Finished { request, result: Ok(()) });
                 return;
             }
+            #[cfg(not(feature = "native-media"))]
+            Command::StartCall { .. }
+            | Command::AnswerCall { .. }
+            | Command::DeclineCall { .. }
+            | Command::HangUp
+            | Command::SetCallMedia(_)
+            | Command::WatchVideo { .. }
+            | Command::ListCallDevices
+            | Command::ChooseCallDevice { .. }
+            | Command::UnwatchVideo(_) => Box::pin(async { Err(Error::Unsupported("calls")) }),
             Command::CloseTimeline { account, key } => {
                 if let Some(running) = self.accounts.get_mut(&account) {
                     running.close_timeline(&key);
@@ -2677,6 +2842,7 @@ impl State {
                     // Whether a matrix_2_0 call is under way here, from members who joined before
                     // this session heard them (once per room until a reconnect; nothing where the
                     // server has no sticky events).
+                    #[cfg(feature = "native-media")]
                     if let Some(room) = room_of(&running.account, &key.room_id) {
                         let account = running.account.clone();
                         tokio::spawn(async move {
@@ -2832,7 +2998,7 @@ impl State {
             Command::Locate { request_access } => {
                 let http = self.http.clone();
                 Box::pin(async move {
-                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                    #[cfg(all(feature = "native-media", not(any(target_os = "android", target_os = "ios"))))]
                     {
                         let position = crate::geo::desktop::position(request_access).await;
                         if position.is_ok() || request_access {
@@ -3428,6 +3594,7 @@ impl State {
             }
             Command::LeaveSpace { account: id, space, rooms } => {
                 let (account, feed) = (self.account(&id), self.feed(&id));
+                #[cfg(feature = "native-media")]
                 for room_id in &rooms {
                     self.leave_calls_in(&id, room_id);
                 }
@@ -3634,8 +3801,9 @@ impl State {
             }),
             Command::Login(login) => {
                 let (layout, sessions, holder) = (self.layout.clone(), self.sessions.clone(), self.holder);
+                let strict = !self.sliding_sync;
                 Box::pin(async move {
-                    Ok(signed_in(Account::login_password(&layout, &sessions, holder, &login).await?).await)
+                    Ok(signed_in(Account::login_password(&layout, &sessions, holder, &login, strict).await?).await)
                 })
             }
             Command::Register(registration) => {
@@ -3686,39 +3854,23 @@ impl State {
                 Ok(Outcome::Done)
             }),
             Command::LoginOAuth { homeserver, resume, create } => {
-                let (layout, sessions, identity) = (self.layout.clone(), self.sessions.clone(), self.identity.clone());
-                let holder = self.holder;
-                self.oauth_returns.retain(|_, waiting| !waiting.is_closed());
-                let app_redirect = match &self.oauth_redirect {
-                    crate::account::OAuthRedirect::Loopback => None,
-                    crate::account::OAuthRedirect::App(uri) => {
-                        let (sender, returned) = tokio::sync::oneshot::channel();
-                        self.oauth_returns.insert(request, sender);
-                        Some((uri.clone(), returned))
-                    }
-                };
-                Box::pin(async move {
-                    let pending = Account::start_oauth(
-                        &layout,
-                        &sessions,
-                        holder,
-                        &identity,
-                        crate::account::OAuthTarget { homeserver: &homeserver, resume: resume.as_ref(), create },
-                        app_redirect,
-                    )
-                    .await?;
-                    sink.emit(Event::OpenUrl { request, url: pending.url.to_string() });
-                    Ok(signed_in(pending.finish(&sessions).await?).await)
-                })
+                self.login_oauth(request, homeserver, resume, create, None)
+            }
+            #[cfg(feature = "command-line")]
+            Command::LoginOAuthAs { homeserver, account, resume } => {
+                self.login_oauth(request, homeserver, resume.then(|| account.clone()), false, Some(account))
             }
             Command::Logout(id) => {
                 let (account, sessions) = (self.account(&id).ok(), self.sessions.clone());
                 // The account's call leaves while its token still works.
+                #[cfg(feature = "native-media")]
                 self.forget_calls(&id);
+                #[cfg(feature = "native-media")]
                 let leaving = self.leaving.of_account(&id);
                 let locations = self.end_locations(|owner, _| owner == &id);
                 Box::pin(async move {
                     locations.await;
+                    #[cfg(feature = "native-media")]
                     if let Some(task) = leaving {
                         let _ = tokio::time::timeout(QUIT_WAIT, task).await;
                     }
@@ -3780,7 +3932,7 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            #[cfg(all(feature = "native-media", not(any(target_os = "android", target_os = "ios"))))]
             Command::FetchMedia { media, size, .. } if crate::geo::desktop::is_map(&media) => {
                 let cache = self.layout.map_tiles();
                 Box::pin(async move {
@@ -3813,11 +3965,14 @@ impl State {
                 let (account, feed) = (self.account(&id), self.feed(&id));
                 // The room's call leaves first, while the user can still write to the room.
                 // Whether it was under way or already hung up: the room is left after it.
+                #[cfg(feature = "native-media")]
                 self.leave_calls_in(&id, &room_id);
+                #[cfg(feature = "native-media")]
                 let leaving = self.leaving.of_room(&id, &room_id);
                 let locations = self.end_locations(|owner, room| owner == &id && room == room_id);
                 Box::pin(async move {
                     locations.await;
+                    #[cfg(feature = "native-media")]
                     if let Some(task) = leaving {
                         let _ = tokio::time::timeout(QUIT_WAIT, task).await;
                     }
@@ -3987,15 +4142,23 @@ impl State {
                     self.sink.emit(Event::SignedIn { request, account: account.id().clone() });
                 }
                 // Saving refreshed tokens comes first: the summary's requests may refresh them.
-                let tokens = tokio::spawn(watch_session(account.clone(), Arc::clone(&self.sink)));
+                let terminal_sessions = (!self.sliding_sync).then(|| self.sessions.clone());
+                let tokens = tokio::spawn(watch_session(account.clone(), Arc::clone(&self.sink), terminal_sessions));
                 let flows = crate::security::Flows::default();
                 let feed = RoomFeed { account: account.clone(), sink: Arc::clone(&self.sink), cache: Arc::default() };
+                #[cfg(feature = "native-media")]
                 account.sticky.report_to(account.id().clone(), self.signals.clone());
+                #[cfg(feature = "native-media")]
                 let mut handlers = crate::calls::listen(account.client(), account.id(), &self.signals, &account.sticky);
+                #[cfg(not(feature = "native-media"))]
+                let mut handlers = Vec::new();
                 handlers.extend(crate::security::listen(&account, &flows, self.scans_qr, &self.sink));
                 // The rest waits on the server, so it runs beside the engine rather than holding
                 // up every account's commands. The account shows before anything about it.
+                let sliding_sync = self.sliding_sync;
+                let watch_ready = self.pause_for_watch.then(|| Arc::new(WatchSync::new()));
                 let started = {
+                    let watch_ready = watch_ready.clone();
                     let (account, sink, feed) = (account.clone(), Arc::clone(&self.sink), feed.clone());
                     tokio::spawn(async move {
                         // The safety choices as this device stored them, before any room or
@@ -4040,6 +4203,7 @@ impl State {
                         let status = account
                             .report_status(|status| sink.emit(Event::Status { account: account.id().clone(), status }));
                         // Once the homeserver names a call service, rooms offer MatrixRTC calls.
+                        #[cfg(feature = "native-media")]
                         let calls = {
                             let (account, feed) = (account.clone(), feed.clone());
                             async move {
@@ -4048,6 +4212,8 @@ impl State {
                                 }
                             }
                         };
+                        #[cfg(not(feature = "native-media"))]
+                        let calls = std::future::ready(());
                         // Once the homeserver names a Jitsi server, rooms offer meetings.
                         let meetings = {
                             let (account, feed) = (account.clone(), feed.clone());
@@ -4089,7 +4255,14 @@ impl State {
                             calls,
                             meetings,
                             crate::security::watch(account.clone(), Arc::clone(&sink)),
-                            sync_loop(account.clone(), Arc::clone(&sink), feed, Arc::clone(&own_refresh)),
+                            sync_loop(
+                                account.clone(),
+                                Arc::clone(&sink),
+                                feed,
+                                Arc::clone(&own_refresh),
+                                sliding_sync,
+                                watch_ready.clone()
+                            ),
                         );
                     })
                 };
@@ -4097,6 +4270,8 @@ impl State {
                 let background = vec![tokens.abort_handle(), started.abort_handle(), usage_worker];
                 let running = Running {
                     account,
+                    #[cfg(feature = "command-line")]
+                    watch_ready,
                     usage,
                     background,
                     flows,
@@ -4139,6 +4314,7 @@ impl State {
             }
             Ok(Outcome::LoggedOut(id)) => {
                 self.end_widget_runs(&id);
+                #[cfg(feature = "native-media")]
                 self.forget_calls(&id);
                 self.accounts.remove(&id);
                 self.sink.emit(Event::AccountRemoved(id));
@@ -4147,6 +4323,8 @@ impl State {
             Err(error) => {
                 if let Some(request) = request {
                     self.forget_opening(request);
+                    #[cfg(feature = "command-line")]
+                    self.sink.emit(Event::CommandError(request, crate::terminal::error_kind(&error)));
                 }
                 Err(error.to_string())
             }
@@ -4208,11 +4386,18 @@ fn follow_widgets(account: Account, sink: Arc<dyn EventSink>) -> AbortHandle {
 /// `RoomListService`, a few at a time and newest first, so a big account shows its rooms at
 /// once; a long-poll sync that asks for no rooms carries what sliding sync can't: to-device
 /// messages and keys, presence and account data. Elsewhere one long-poll sync brings it all.
-async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, own_refresh: Arc<tokio::sync::Notify>) {
+async fn sync_loop(
+    account: Account,
+    sink: Arc<dyn EventSink>,
+    feed: RoomFeed,
+    own_refresh: Arc<tokio::sync::Notify>,
+    sliding_sync: bool,
+    watch_ready: Option<Arc<WatchSync>>,
+) {
     // Waits between failed syncs: from a few seconds, doubling, to a minute.
     const FIRST_RETRY: std::time::Duration = std::time::Duration::from_secs(2);
     const LAST_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
-    let caught_up = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let progress = Arc::new(SyncProgress { watch_ready, ..SyncProgress::default() });
     // Room changes the SDK works out on its own (unread counts, each room's latest event) are
     // heard from before the first read: a latest event worked out for a room the read below
     // registers isn't missed. Missed ones (the channel overflowing) re-read every room. The
@@ -4239,7 +4424,7 @@ async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, o
     // Once sliding sync was refused, the first long-poll sync for every room brings each room's
     // whole state: the room-less sync before moved the token past changes sliding sync never
     // delivered.
-    let mut full_rooms = SyncedRooms::All;
+    let mut full_rooms = if sliding_sync { SyncedRooms::All } else { SyncedRooms::Terminal };
     let mut retry = FIRST_RETRY;
     loop {
         // Spaces arrive from the store now and from syncs later (all of them, after a fresh
@@ -4249,10 +4434,10 @@ async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, o
         }
         let started = std::time::Instant::now();
         // Asked again after every failure: a server may gain (or lose) sliding sync.
-        let rooms_sliding = !refused_sliding && supports_sliding_sync(account.client()).await;
+        let rooms_sliding = sliding_sync && !refused_sliding && supports_sliding_sync(account.client()).await;
         sliding.store(rooms_sliding, Ordering::Relaxed);
         let mut rooms = if rooms_sliding { SyncedRooms::None } else { full_rooms };
-        let long_poll = sync_until_error(&account, &sink, &feed, &caught_up, &own_refresh, &wanted_members, &mut rooms);
+        let long_poll = sync_until_error(&account, &sink, &feed, &progress, &own_refresh, &wanted_members, &mut rooms);
         let result = if rooms_sliding {
             tokio::select! {
                 result = long_poll => result,
@@ -4273,7 +4458,9 @@ async fn sync_loop(account: Account, sink: Arc<dyn EventSink>, feed: RoomFeed, o
         account.set_room_list(None).await;
         // Sticky memberships sent meanwhile may have come only in the sync that failed: the
         // rooms on screen (a call's among them) ask again now, the others when next opened.
+        #[cfg(feature = "native-media")]
         account.sticky.fetch_again();
+        #[cfg(feature = "native-media")]
         for room_id in account.followed_rooms() {
             if let Some(room) = room_of(&account, &room_id) {
                 let sticky = account.sticky.clone();
@@ -4437,11 +4624,35 @@ fn follow_notable_updates(
 }
 
 /// Syncs until the first error.
+#[derive(Debug)]
+pub(crate) struct WatchSync {
+    pub ready: tokio::sync::Notify,
+    pub updates: tokio::sync::broadcast::Sender<Arc<matrix_sdk::sync::RoomUpdates>>,
+    pub checkpoints: std::sync::Mutex<HashMap<matrix_sdk::ruma::OwnedRoomId, matrix_sdk::ruma::OwnedEventId>>,
+}
+
+impl WatchSync {
+    fn new() -> Self {
+        Self {
+            ready: tokio::sync::Notify::new(),
+            updates: tokio::sync::broadcast::channel(32).0,
+            checkpoints: std::sync::Mutex::default(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct SyncProgress {
+    caught_up: std::sync::atomic::AtomicBool,
+    terminal_ready: std::sync::atomic::AtomicBool,
+    watch_ready: Option<Arc<WatchSync>>,
+}
+
 async fn sync_until_error(
     account: &Account,
     sink: &Arc<dyn EventSink>,
     feed: &RoomFeed,
-    caught_up: &Arc<std::sync::atomic::AtomicBool>,
+    progress: &Arc<SyncProgress>,
     own_refresh: &Arc<tokio::sync::Notify>,
     wanted_members: &WantedMembers,
     rooms: &mut SyncedRooms,
@@ -4455,11 +4666,13 @@ async fn sync_until_error(
     let settings = SyncSettings::default()
         .timeout(std::time::Duration::from_secs(30))
         .filter(matrix_sdk::ruma::api::client::sync::sync_events::v3::Filter::FilterDefinition(filter));
+    let terminal = *rooms == SyncedRooms::Terminal;
     let on_response = |response: matrix_sdk::sync::SyncResponse, sent: PresenceState| {
-        let (account, sink, caught_up, feed) = (account.clone(), Arc::clone(sink), Arc::clone(caught_up), feed.clone());
+        let (account, sink, progress, feed) = (account.clone(), Arc::clone(sink), Arc::clone(progress), feed.clone());
         async move {
             let changed = report_room_updates(&account, &sink, wanted_members, &response.rooms).await;
-            if caught_up.swap(true, Ordering::Relaxed) {
+            let already_synced = progress.caught_up.swap(true, Ordering::Relaxed);
+            if already_synced {
                 for (room_id, notifications) in &response.notifications {
                     let Some(room) = account.client().get_room(room_id) else { continue };
                     for notification in notifications {
@@ -4510,9 +4723,29 @@ async fn sync_until_error(
                 own_refresh.notify_one();
             }
             let report = |status| sink.emit(Event::Status { account: account.id().clone(), status });
-            account.follow_status(&response.account_data, &sent, report).await;
+            account.follow_status(&response.account_data, (!terminal).then_some(&sent), report).await;
             account.follow_offline_device(&response.account_data).await;
             feed.refresh((!all).then_some(&changed)).await;
+            if let Some(watch) = &progress.watch_ready {
+                if progress.terminal_ready.load(Ordering::Relaxed) {
+                    let _ = watch.updates.send(Arc::new(response.rooms));
+                } else if let Ok(mut checkpoints) = watch.checkpoints.lock() {
+                    // A limited first live batch can backfill to the exact event seen during
+                    // catch-up, even when the SDK is still computing the room's latest event.
+                    for (room, update) in &response.rooms.joined {
+                        if let Some(event) = update.timeline.events.iter().rev().find_map(|event| event.event_id()) {
+                            checkpoints.insert(room.clone(), event.to_owned());
+                        }
+                    }
+                }
+            }
+            if terminal && response.to_device.is_empty() && !progress.terminal_ready.swap(true, Ordering::Relaxed) {
+                // Let a watcher resolve its room and register its receiver before another sync.
+                sink.emit(Event::SyncReady(account.id().clone()));
+                if let Some(watch_ready) = &progress.watch_ready {
+                    watch_ready.ready.notified().await;
+                }
+            }
             LoopCtrl::Continue
         }
     };
@@ -4527,12 +4760,26 @@ async fn sync_until_error(
         }
         last_sync = Some(std::time::Instant::now());
         // Each sync announces the status as last synced, so one set elsewhere holds here too.
-        let sent = crate::status::sync_presence(account.status().await, caught_up.load(Ordering::Relaxed));
+        let sent = if terminal {
+            PresenceState::Offline
+        } else {
+            crate::status::sync_presence(account.status().await, progress.caught_up.load(Ordering::Relaxed))
+        };
         settings = settings.set_presence(sent.clone());
         // The room list's sliding sync announces the same.
         let _ = account.client().set_presence(sent.clone(), None, false).await;
         let whole_state = *rooms == SyncedRooms::Reconcile;
-        let response = match account.sync_once_locked(settings.clone().full_state(whole_state)).await {
+        let response = match account
+            .sync_once_locked(
+                if terminal && !progress.terminal_ready.load(Ordering::Relaxed) {
+                    settings.clone().timeout(std::time::Duration::ZERO)
+                } else {
+                    settings.clone()
+                }
+                .full_state(whole_state),
+            )
+            .await
+        {
             Ok(response) => response,
             Err(error) => {
                 account.sync_failed(&sent).await;
@@ -4554,6 +4801,8 @@ async fn sync_until_error(
 enum SyncedRooms {
     /// Every room: the server has no sliding sync.
     All,
+    /// All rooms, with a zero-timeout first request for one-shot clients.
+    Terminal,
     /// None: the room list's sliding sync brings them.
     None,
     /// Every room, the first response with each room's whole state: after the room list's
@@ -5353,14 +5602,25 @@ async fn queue_sent(room: &matrix_sdk::Room) {
 /// Reports a session the server no longer accepts. Refreshed tokens are saved by the client's
 /// session callback inside the refresh's cross-process lock (`account::build_client`), and only
 /// there: a later save from here could overwrite tokens another process refreshed since.
-async fn watch_session(account: Account, sink: Arc<dyn EventSink>) {
+async fn watch_session(account: Account, sink: Arc<dyn EventSink>, terminal_sessions: Option<Sessions>) {
     use tokio::sync::broadcast::error::RecvError;
 
     let mut changes = account.session_changes();
     loop {
         match changes.recv().await {
             Ok(SessionChange::UnknownToken(token)) => {
-                sink.emit(Event::SessionEnded { account: account.id().clone(), kept: token.soft_logout });
+                let mut kept = token.soft_logout;
+                if kept
+                    && let Some(sessions) = &terminal_sessions
+                    && let Err(error) = crate::account::set_signed_out(sessions, account.id()).await
+                {
+                    kept = false;
+                    sink.emit(Event::AccountError { account: account.id().clone(), error: error.to_string() });
+                }
+                sink.emit(Event::SessionEnded { account: account.id().clone(), kept });
+                if terminal_sessions.is_some() {
+                    return;
+                }
             }
             Ok(SessionChange::TokensRefreshed) | Err(RecvError::Lagged(_)) => {}
             Err(RecvError::Closed) => return,
@@ -5537,6 +5797,8 @@ mod tests {
         let (usage, worker) = crate::search::Usage::start(account.clone(), Arc::clone(&sink));
         let feed = RoomFeed { account: account.clone(), sink, cache: Arc::default() };
         let mut running = Running {
+            #[cfg(feature = "command-line")]
+            watch_ready: None,
             account,
             usage,
             background: vec![worker],

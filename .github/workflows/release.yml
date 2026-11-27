@@ -7,8 +7,8 @@
 # and can simply be started again. Then: tests (unless the commit already passed CI on main, a
 # version-only change counting as the same commit), builds for macOS (arm64), Windows (x86_64:
 # an installer, and the ZIP the self-update downloads) and Linux (x86_64, aarch64: .deb, .rpm,
-# .pkg.tar.xz with a PKGBUILD, AppImage), and publishes them with notes from the merged pull
-# requests' labels (.github/release.yml).
+# .pkg.tar.xz with a PKGBUILD, AppImage, standalone CLI archive), and publishes them with notes
+# from the merged pull requests' labels (.github/release.yml).
 #
 # Signing (ADR 0001) uses whatever the repository has set up, and builds as before without it:
 # - macOS: the secrets MACOS_CERTIFICATE (base64 .p12 with a Developer ID Application certificate)
@@ -197,6 +197,18 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends nfpm zstd xz-utils patchelf \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav gstreamer1.0-pulseaudio
           packaging/linux/package.sh "${{ matrix.arch }}" "${{ needs.verify.outputs.version }}"
+      - name: Package CLI (Linux)
+        if: runner.os == 'Linux'
+        env:
+          BM_ARCH: ${{ matrix.arch }}
+        run: |
+          cargo build -p better-matrix-cli --release --locked
+          target/release/bm --version
+          target/release/bm messages send --help
+          mkdir -p dist/cli
+          install -m 755 target/release/bm dist/cli/bm
+          install -m 644 LICENSE dist/cli/LICENSE
+          tar -C dist/cli -czf "dist/out/better-matrix-cli-linux-${BM_ARCH}.tar.gz" bm LICENSE
       - name: Package (macOS)
         if: runner.os == 'macOS'
         env:

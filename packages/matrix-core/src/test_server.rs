@@ -65,6 +65,7 @@ impl Server {
                     Some(_) => "404 Not Found",
                     None if reply["errcode"] == "M_NOT_FOUND" => "404 Not Found",
                     None if reply["errcode"] == "M_FORBIDDEN" => "403 Forbidden",
+                    None if reply["errcode"] == "M_UNKNOWN_TOKEN" => "401 Unauthorized",
                     None => "200 OK",
                 };
                 let body = reply.to_string();

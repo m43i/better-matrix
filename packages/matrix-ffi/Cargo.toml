@@ -10,7 +10,7 @@ license.workspace = true
 crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
-matrix-core = { workspace = true, features = ["ffi"] }
+matrix-core = { workspace = true, features = ["client", "ffi", "native-media"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

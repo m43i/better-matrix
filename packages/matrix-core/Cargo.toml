@@ -13,13 +13,13 @@ getrandom.workspace = true
 # Scales thumbnails a server sends larger than asked for down to their box (src/thumbnail.rs),
 # and reads the size of pictures added to image packs (src/packs.rs).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-livekit.workspace = true
+livekit = { workspace = true, optional = true }
 matrix-sdk.workspace = true
 matrix-sdk-ui.workspace = true
 matrix-sdk-base.workspace = true
 ruma.workspace = true
 mime_guess.workspace = true
-nokhwa.workspace = true
+nokhwa = { workspace = true, optional = true }
 # Draws QR codes for others to scan (src/qr.rs).
 qrcode = { version = "0.14", default-features = false }
 # Reads QR codes from camera pictures on the phones (src/qr.rs).
@@ -29,12 +29,13 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+tempfile = { version = "3", optional = true }
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
 ts-rs = { workspace = true, optional = true }
-zune-core.workspace = true
-zune-jpeg.workspace = true
+zune-core = { workspace = true, optional = true }
+zune-jpeg = { workspace = true, optional = true }
 pulldown-cmark = { version = "0.13.6", default-features = false }
 
 # Android trusts Mozilla's roots (src/tls.rs).
@@ -46,7 +47,19 @@ webpki-root-certs = "1"
 rustls = { workspace = true, features = ["ring"] }
 
 [features]
-default = ["client"]
+default = ["client", "native-media"]
+native-media = [
+  "dep:livekit",
+  "dep:nokhwa",
+  "dep:maplibre-native-ffi",
+  "dep:waterkit-location",
+  "dep:waterkit-permission",
+  "dep:ashpd",
+  "dep:zune-core",
+  "dep:zune-jpeg",
+]
+# Typed operations used by terminal clients, outside the mobile wire format.
+command-line = ["ffi", "dep:tempfile"]
 # Ruma's request macros generate a request's client side under a `client` feature of the crate
 # using them, its server side under `server` (never built): the MSC4140 requests the pinned ruma
 # lacks (src/scheduled/api.rs).
@@ -60,13 +73,13 @@ ffi = ["dep:ts-rs"]
 workspace = true
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-maplibre-native-ffi = "0.202611.0"
+maplibre-native-ffi = { version = "0.202611.0", optional = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
-waterkit-location = "0.3"
+waterkit-location = { version = "0.3", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-waterkit-permission = "0.3"
+waterkit-permission = { version = "0.3", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.14", features = ["location"] }
+ashpd = { version = "0.14", features = ["location"], optional = true }

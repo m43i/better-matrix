@@ -221,17 +221,31 @@ pub(crate) struct OAuthTarget<'a> {
     pub homeserver: &'a str,
     pub resume: Option<&'a AccountId>,
     pub create: bool,
+    pub expected: Option<AccountId>,
 }
 
 /// A browser sign-in waiting for the user: the URL to open, and the redirect to wait for.
 pub(crate) struct PendingOAuth {
     pub url: Url,
     client: Client,
-    crypto: Crypto,
+    crypto: Option<Crypto>,
+    expected: Option<PendingAccount>,
     holder: Holder,
     redirect: Redirect,
     store_dir: PathBuf,
     passphrase: String,
+}
+
+struct PendingAccount {
+    id: AccountId,
+    device: Option<matrix_sdk::ruma::OwnedDeviceId>,
+    homeserver: String,
+}
+
+struct LoginIdentity<'a> {
+    account: &'a AccountId,
+    device: Option<&'a matrix_sdk::ruma::DeviceId>,
+    homeserver: &'a str,
 }
 
 /// How every client handles encryption keys:
@@ -345,6 +359,17 @@ pub(crate) async fn build_client(
     sessions: &Sessions,
     holder: Holder,
 ) -> Result<(Client, Crypto), Error> {
+    build_client_with_encryption(homeserver_url, store_dir, passphrase, sessions, holder, ENCRYPTION).await
+}
+
+async fn build_client_with_encryption(
+    homeserver_url: &str,
+    store_dir: &Path,
+    passphrase: &str,
+    sessions: &Sessions,
+    holder: Holder,
+    encryption: EncryptionSettings,
+) -> Result<(Client, Crypto), Error> {
     use matrix_sdk::cross_process_lock::CrossProcessLockConfig;
     let locks = holder.name().map_or(CrossProcessLockConfig::SingleProcess, CrossProcessLockConfig::multi_process);
     let base = base_client(&store_config(store_dir, holder).passphrase(Some(passphrase)), &locks).await?;
@@ -354,7 +379,7 @@ pub(crate) async fn build_client(
         // so the account keeps a handle to it (`Crypto`).
         .base_client(base.clone())
         .cross_process_store_config(locks)
-        .with_encryption_settings(ENCRYPTION)
+        .with_encryption_settings(encryption)
         .handle_refresh_tokens()
         .build()
         .await?;
@@ -511,17 +536,32 @@ impl Account {
         sessions: &Sessions,
         holder: Holder,
         request: &LoginRequest,
+        strict: bool,
     ) -> Result<Self, Error> {
         let resume = request.resume.as_ref();
         let (store_dir, passphrase, device) =
             store_for(layout, sessions, resume, &request.homeserver, Some(&request.username)).await?;
-        let (client, crypto) = build_client(&request.homeserver, &store_dir, &passphrase, sessions, holder).await?;
+        if strict && resume.is_some() && device.is_none() {
+            return Err(Error::ResumeStore);
+        }
+        let expected = strict.then(|| AccountId::new(&request.username));
+        let (client, crypto) =
+            login_client(&request.homeserver, &store_dir, &passphrase, sessions, holder, strict).await?;
         let mut login = client.matrix_auth().login_username(&request.username, &request.password);
         login = match &device {
             Some(device) => login.device_id(device.as_str()),
             None => login.initial_device_display_name(DEVICE_DISPLAY_NAME),
         };
         login.await?;
+        let (client, crypto) = match expected {
+            Some(expected) => {
+                let identity =
+                    LoginIdentity { account: &expected, device: device.as_deref(), homeserver: &request.homeserver };
+                checked_login(client, identity, &store_dir, &passphrase, sessions, holder, Some(&request.password))
+                    .await?
+            }
+            None => (client, crypto.ok_or(Error::NoUserId)?),
+        };
         Self::signed_in(client, crypto, sessions, holder, store_dir, passphrase).await
     }
 
@@ -536,9 +576,14 @@ impl Account {
         target: OAuthTarget<'_>,
         app_redirect: Option<(Url, tokio::sync::oneshot::Receiver<String>)>,
     ) -> Result<PendingOAuth, Error> {
-        let OAuthTarget { homeserver, resume, create } = target;
+        let OAuthTarget { homeserver, resume, create, expected } = target;
         let (store_dir, passphrase, device) = store_for(layout, sessions, resume, homeserver, None).await?;
-        let (client, crypto) = build_client(homeserver, &store_dir, &passphrase, sessions, holder).await?;
+        if expected.is_some() && resume.is_some() && device.is_none() {
+            return Err(Error::ResumeStore);
+        }
+        let (client, crypto) =
+            login_client(homeserver, &store_dir, &passphrase, sessions, holder, expected.is_some()).await?;
+        let expected = expected.map(|id| PendingAccount { id, device: device.clone(), homeserver: homeserver.into() });
         let (redirect_uri, redirect) = match app_redirect {
             Some((uri, returned)) => (uri, Redirect::App(returned)),
             None => {
@@ -559,7 +604,7 @@ impl Account {
             login = login.prompt(vec![Prompt::Create]);
         }
         let data = login.build().await?;
-        Ok(PendingOAuth { url: data.url, client, crypto, holder, redirect, store_dir, passphrase })
+        Ok(PendingOAuth { url: data.url, client, crypto, expected, holder, redirect, store_dir, passphrase })
     }
 
     /// Resumes a saved session.
@@ -772,6 +817,7 @@ impl Account {
 
     /// Looks up the homeserver's call service (its RTC transports, else its well-known file).
     /// True when it names one.
+    #[cfg(feature = "native-media")]
     pub(crate) async fn discover_rtc(&self) -> bool {
         use matrix_sdk::ruma::api::client::rtc::RtcTransport;
         // An unreachable server is asked again until it answers, waiting longer each time, up
@@ -1292,7 +1338,103 @@ impl PendingOAuth {
             }
         };
         self.client.oauth().finish_login(returned).await?;
-        Account::signed_in(self.client, self.crypto, sessions, self.holder, self.store_dir, self.passphrase).await
+        let (client, crypto) = match self.expected {
+            Some(expected) => {
+                let identity = LoginIdentity {
+                    account: &expected.id,
+                    device: expected.device.as_deref(),
+                    homeserver: &expected.homeserver,
+                };
+                checked_login(self.client, identity, &self.store_dir, &self.passphrase, sessions, self.holder, None)
+                    .await?
+            }
+            None => (self.client, self.crypto.ok_or(Error::NoUserId)?),
+        };
+        Account::signed_in(client, crypto, sessions, self.holder, self.store_dir, self.passphrase).await
+    }
+}
+
+/// Authenticate explicitly selected accounts in memory before opening a persistent crypto store.
+async fn login_client(
+    homeserver: &str,
+    store_dir: &Path,
+    passphrase: &str,
+    sessions: &Sessions,
+    holder: Holder,
+    strict: bool,
+) -> Result<(Client, Option<Crypto>), Error> {
+    if strict {
+        let client = crate::tls::sdk(Client::builder()).homeserver_url(homeserver).build().await?;
+        Ok((client, None))
+    } else {
+        let (client, crypto) = build_client(homeserver, store_dir, passphrase, sessions, holder).await?;
+        Ok((client, Some(crypto)))
+    }
+}
+
+fn check_login_identity(
+    client: &Client,
+    expected: &AccountId,
+    device: Option<&matrix_sdk::ruma::DeviceId>,
+) -> Result<(), Error> {
+    let actual = client.user_id().ok_or(Error::NoUserId)?;
+    if actual.as_str() != expected.as_str() {
+        return Err(Error::UnexpectedAccount { expected: expected.clone(), actual: actual.to_string() });
+    }
+    if let Some(device) = device
+        && client.device_id() != Some(device)
+    {
+        return Err(Error::UnexpectedDevice);
+    }
+    Ok(())
+}
+
+async fn checked_login(
+    temporary: Client,
+    identity: LoginIdentity<'_>,
+    store_dir: &Path,
+    passphrase: &str,
+    sessions: &Sessions,
+    holder: Holder,
+    password: Option<&str>,
+) -> Result<(Client, Crypto), Error> {
+    let LoginIdentity { account, device, homeserver } = identity;
+    check_login_identity(&temporary, account, device)?;
+    let resolved = temporary.homeserver();
+    if device.is_some() && !same_server(resolved.as_str(), homeserver) {
+        return Err(Error::ResumeStore);
+    }
+    let session = temporary.session().ok_or(Error::NoUserId)?;
+    if let (matrix_sdk::AuthSession::OAuth(_), Some(device)) = (&session, device) {
+        // The SDK tags this session with the device it requested in the scope. Check the
+        // server's actual device as well before opening that device's crypto store.
+        let who = temporary.whoami().await?;
+        if who.device_id.as_deref() != Some(device) {
+            return Err(Error::UnexpectedDevice);
+        }
+    }
+    // Restoring a session supplies no UIA credentials. For a password sign-in, perform the
+    // SDK's guarded initial setup explicitly, once the validated store is open.
+    let encryption = EncryptionSettings { auto_enable_cross_signing: password.is_none(), ..ENCRYPTION };
+    let (client, crypto) =
+        build_client_with_encryption(resolved.as_str(), store_dir, passphrase, sessions, holder, encryption).await?;
+    client.restore_session(session).await?;
+    if let Some(password) = password {
+        initialize_password_identity(&client, account, password).await;
+    }
+    Ok((client, crypto))
+}
+
+async fn initialize_password_identity(client: &Client, account: &AccountId, password: &str) {
+    use matrix_sdk::ruma::api::client::uiaa::{AuthData, MatrixUserIdentifier, Password, UserIdentifier};
+    let auth = AuthData::Password(Password::new(
+        UserIdentifier::Matrix(MatrixUserIdentifier::new(account.to_string())),
+        password.to_owned(),
+    ));
+    let encryption = client.encryption();
+    let setup = encryption.bootstrap_cross_signing_if_needed(Some(auth));
+    if !matches!(tokio::time::timeout(std::time::Duration::from_secs(5), setup).await, Ok(Ok(()))) {
+        tracing::warn!("could not initialize cross-signing after password sign-in");
     }
 }
 
@@ -1338,9 +1480,15 @@ fn suspended_for<'a>(accounts: &'a [StoredAccount], homeserver: &str, username: 
         .map(|stored| stored.id.as_str())
 }
 
-/// Whether two homeserver URLs are the same server, ignoring a trailing slash and case.
+/// Whether two homeserver URLs identify the same Matrix API, ignoring trailing path slashes.
 fn same_server(a: &str, b: &str) -> bool {
-    a.trim_end_matches('/').eq_ignore_ascii_case(b.trim_end_matches('/'))
+    use url::Position::BeforePath;
+
+    let (Ok(a), Ok(b)) = (Url::parse(a), Url::parse(b)) else { return false };
+    a[..BeforePath] == b[..BeforePath]
+        && a.path().trim_end_matches('/') == b.path().trim_end_matches('/')
+        && a.query() == b.query()
+        && a.fragment() == b.fragment()
 }
 
 /// Whether a typed username (a localpart, or a full user ID) names the user `id`.
@@ -1570,6 +1718,12 @@ mod tests {
     fn a_trailing_slash_should_not_make_another_server() {
         assert!(same_server("https://matrix.example.org/", "https://matrix.example.org"));
         assert!(!same_server("https://matrix.example.org/", "https://matrix.other.org/"));
+    }
+
+    #[test]
+    fn server_comparison_should_preserve_the_case_of_the_api_path() {
+        assert!(same_server("https://MATRIX.example.org/Matrix/", "https://matrix.example.org/Matrix"));
+        assert!(!same_server("https://matrix.example.org/Matrix", "https://matrix.example.org/matrix"));
     }
 }
 

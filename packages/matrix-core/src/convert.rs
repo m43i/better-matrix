@@ -45,9 +45,9 @@ pub(crate) async fn room_summary(
     room: &Room,
     settings: &NotificationSettings,
     note_to_self: Option<&matrix_sdk::ruma::RoomId>,
-    rtc_service: bool,
+    _rtc_service: bool,
     meetings: bool,
-    sticky: &crate::calls::StickyMembers,
+    _sticky: &crate::calls::StickyMembers,
 ) -> RoomSummary {
     let name = display_name(room).await;
     let custom = settings.get_user_defined_room_notification_mode(room.room_id()).await;
@@ -87,12 +87,17 @@ pub(crate) async fn room_summary(
         None if kind == RoomKind::Direct => partner_avatar(room, dm_users.first()).await,
         None => None,
     };
-    let mut call =
-        call_in(room, kind, rtc_service, power.as_ref(), crate::calls::joined_sticky(room, sticky, false).await);
-    // Nobody to call.
-    if note_to_self {
-        call.via = None;
-    }
+    #[cfg(feature = "native-media")]
+    let call = {
+        let mut call =
+            call_in(room, kind, _rtc_service, power.as_ref(), crate::calls::joined_sticky(room, _sticky, false).await);
+        if note_to_self {
+            call.via = None;
+        }
+        call
+    };
+    #[cfg(not(feature = "native-media"))]
+    let call = crate::calls::RoomCall::default();
     RoomSummary {
         room_id: room.room_id().to_string(),
         name,
@@ -166,6 +171,7 @@ async fn successor(room: &Room) -> Option<crate::Successor> {
 }
 
 /// How a call would start in the room, and who is in its call now.
+#[cfg(feature = "native-media")]
 pub(crate) async fn room_call(
     room: &Room,
     kind: RoomKind,
@@ -177,6 +183,7 @@ pub(crate) async fn room_call(
 }
 
 /// [`room_call`] with the room's power levels already read.
+#[cfg(feature = "native-media")]
 fn call_in(
     room: &Room,
     kind: RoomKind,

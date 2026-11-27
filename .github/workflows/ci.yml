@@ -1,7 +1,7 @@
 # Lint and test: on every pull request, on every commit to main, and (called) before a release
 # when its commit hasn't passed here already. One Linux job: the code is the same on every
 # platform, and the release builds catch platform breakage. It covers the mobile app's
-# TypeScript (typecheck and Jest) too; releases build only the desktop app for now.
+# TypeScript (typecheck and Jest) too. The release workflow packages the desktop app and Linux CLI.
 name: CI
 
 on:
@@ -214,6 +214,8 @@ jobs:
         with:
           shared-key: ci
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Test the standalone CLI feature set
+        run: cargo test -p better-matrix-cli --locked
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json

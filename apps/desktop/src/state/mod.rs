@@ -1345,6 +1345,7 @@ impl State {
             Event::Finished { request, result } => self.finish(request, result),
             // The sign-in in progress takes its account from `AccountAdded`.
             Event::SignedIn { .. } => {}
+            Event::CommandError(..) | Event::TerminalResult(..) | Event::SyncReady(_) => {}
             Event::HomeserverDiscovered { request, homeserver } => {
                 if self.sign_in.step == SignInStep::Discovering(request) {
                     self.continue_sign_in(homeserver);

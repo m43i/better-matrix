@@ -903,6 +903,11 @@ memos), emptied at launch and exit (`Shell::scratch`).
 fixtures.
 On phones, `bettermatrix://demo/<scene>` opens one in a dev build (`apps/mobile/src/demo`).
 
+**CLI**
+: The Better Matrix terminal client, installed as `bm`. It uses the engine with its own
+account stores, and supplies JSON results and foreground watches for scripts. See
+[ADR 0013](adr/0013-command-line.md).
+
 **Headless**
 : Running the UI without a window: `--snap` renders a PNG, `--tree` dumps the element tree, and
 tests drive `rune::Runtime`.

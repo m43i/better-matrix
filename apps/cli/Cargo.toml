@@ -1,0 +1,28 @@
+[package]
+name = "better-matrix-cli"
+description = "Headless Better Matrix client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "bm"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6", features = ["derive"] }
+clap_complete = "4.6"
+matrix-core = { workspace = true, features = ["client", "command-line"] }
+rpassword = "7"
+serde_json.workspace = true
+thiserror.workspace = true
+time = { version = "0.3", features = ["parsing"] }
+tempfile = "3"
+tokio = { workspace = true, features = ["signal"] }
+url.workspace = true
+
+[dev-dependencies]
+shlex = "2"
+
+[lints]
+workspace = true
