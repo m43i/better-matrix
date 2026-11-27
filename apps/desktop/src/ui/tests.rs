@@ -5120,3 +5120,82 @@ fn a_stickers_actions_should_stay_inside_the_sticker_manager_in_a_small_window()
         assert!(button[0] + button[2] <= card[0] + card[2] - 24.0, "{key} {button:?} must fit the card {card:?}");
     }
 }
+
+#[test]
+fn choosing_multiple_files_should_attach_them_to_the_composer() {
+    let mut rt = runtime(|s| s.select_room(demo::DEMO_THREAD.0));
+    press(&mut rt, "attach");
+    assert!(rt.file_dialog_multiple());
+
+    let directory = std::env::temp_dir();
+    rt.resolve_file_dialog_files(Some(vec![directory.join("a.png"), directory.join("b.png")])).unwrap();
+    rt.frame(0.0);
+
+    assert_eq!(rt.state.composer.attachments.len(), 2);
+}
+
+#[test]
+fn a_file_dialog_answer_should_not_attach_files_to_a_different_room() {
+    let mut rt = runtime(|s| s.select_room(demo::DEMO_THREAD.0));
+    press(&mut rt, "attach");
+    rt.update(|s, _| s.select_room("!lab:example.org"));
+    rt.frame(0.0);
+
+    rt.resolve_file_dialog_files(Some(vec![std::env::temp_dir().join("a.png")])).unwrap();
+    rt.frame(0.0);
+
+    assert!(rt.state.composer.attachments.is_empty());
+    assert_eq!(rt.state.notice.as_deref(), Some(crate::i18n::t!("dialog.destination_changed")));
+}
+
+#[test]
+fn copying_a_previewed_image_should_put_the_original_on_the_clipboard() {
+    let clipboard = rune::clipboard::memory();
+    let mut rt = runtime(|s| {
+        demo::attachment_preview(s);
+        use crate::state::{ImageStatus, PreviewContent};
+
+        let Some(crate::state::Preview { content: PreviewContent::Image { thumbnail, status }, .. }) = &mut s.preview
+        else {
+            panic!("an image should be previewed");
+        };
+        let ImageStatus::Decoding(original) = status else {
+            panic!("the original image should be decoding");
+        };
+        original.wait().unwrap();
+        *status = ImageStatus::Ready(original.clone());
+
+        let decoder = rune::ImageCache::new(std::sync::Arc::new(|| {}));
+        let small = decoder.rgba(2, 1, vec![255; 8]);
+        small.wait().unwrap();
+        *thumbnail = Some(small);
+    });
+    rt.use_clipboard(&clipboard);
+    press(&mut rt, "attachment-copy-image");
+
+    let content = clipboard.content().expect("the clipboard write");
+    let pixels = image::load_from_memory(content.image().expect("an image was copied").png()).unwrap();
+    assert_eq!((pixels.width(), pixels.height()), (256, 256));
+}
+
+#[test]
+fn an_account_file_dialog_answer_should_be_canceled_after_switching_accounts() {
+    let pickers: [fn(&mut State, &mut rune::Tx); 3] =
+        [State::pick_avatar, State::import_room_keys, State::export_room_keys];
+    for pick in pickers {
+        let mut rt = runtime(|_| {});
+        let other = AccountId::new("@ada:hobby.chat");
+        assert_ne!(rt.state.nav.account.as_ref(), Some(&other));
+        rt.update(pick);
+        rt.frame(0.0);
+        rt.update(|s, _| s.select_account(&other));
+        rt.frame(0.0);
+
+        rt.resolve_file_dialog(Some(std::env::temp_dir().join("selected.file"))).unwrap();
+        rt.frame(0.0);
+
+        assert_eq!(rt.state.notice.as_deref(), Some(crate::i18n::t!("dialog.destination_changed")));
+        assert!(!rt.state.profile.saving_avatar);
+        assert!(!matches!(rt.state.modal, Some(crate::state::Modal::KeyFile(_))));
+    }
+}

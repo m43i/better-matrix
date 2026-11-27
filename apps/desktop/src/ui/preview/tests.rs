@@ -162,11 +162,61 @@ fn opening_the_last_of_a_long_batch_should_scroll_its_thumbnail_into_view() {
     let last = files[39].clone();
     let mut rt = runtime(move |s| {
         demo::post_batch(s, files);
-        s.open_attachment(&matrix_core::TimelineKey::room(demo::DEMO_THREAD.0), "$batch-39", &last);
+        s.open_attachment(
+            &matrix_core::TimelineKey::room(demo::DEMO_THREAD.0),
+            "$batch-39",
+            &last,
+            &mut rune::Tx::default(),
+        );
     });
     rt.settle_all();
     rt.frame(1.0 / 60.0);
     let ([strip_x, _, strip_w, _], _) = rt.presented("preview-strip").expect("the strip");
     let ([x, _, w, _], _) = rt.presented("preview-thumb-39").expect("the last thumbnail");
     assert!(x >= strip_x - 0.5 && x + w <= strip_x + strip_w + 0.5, "{x}+{w} outside {strip_x}+{strip_w}");
+}
+
+#[test]
+fn the_video_slider_should_seek_to_the_end_with_the_end_key() {
+    let mut rt = runtime(demo::preview_video);
+    rt.update(|_, tx| tx.focus("preview-seek", true));
+    rt.frame(0.0);
+    key(&mut rt, Key::End);
+    let Some(Preview { content: PreviewContent::Video { status: VideoStatus::Open(player), .. }, .. }) =
+        &rt.state.preview
+    else {
+        panic!("the preview should have a video player");
+    };
+    assert_eq!(player.progress(), 1.0);
+}
+
+#[test]
+fn setting_the_video_sliders_accessible_value_should_seek_to_that_fraction() {
+    use rune::accesskit::{Action, ActionData};
+
+    let mut rt = runtime(demo::preview_video);
+    assert!(rt.accessibility_action("preview-seek", Action::SetValue, Some(ActionData::NumericValue(0.375))));
+    rt.frame(0.0);
+    let Some(Preview { content: PreviewContent::Video { status: VideoStatus::Open(player), .. }, .. }) =
+        &rt.state.preview
+    else {
+        panic!("the preview should have a video player");
+    };
+    assert_eq!(player.progress(), 0.375);
+}
+
+#[test]
+fn a_video_slider_should_use_the_space_between_the_time_and_sound_button() {
+    let mut state = State::detached();
+    demo::preview_video(&mut state);
+    state.settings.zoom = crate::state::Zoom::from_percent(150);
+    let mut rt = Runtime::new(state, crate::ui::view, (720.0, 480.0), Env::new(true, 1.5));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+
+    let [time_x, _, time_w, _] = rt.presented("preview-time").unwrap().0;
+    let [seek_x, _, seek_w, _] = rt.presented("preview-seek").unwrap().0;
+    let [sound_x, _, _, _] = rt.presented("preview-sound").unwrap().0;
+    assert!(seek_x >= time_x + time_w && seek_x + seek_w <= sound_x);
 }

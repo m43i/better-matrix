@@ -265,7 +265,7 @@ pub fn files(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
                             .child(text(file.attachment.name.clone()).font(font::BODY).color(p.text).truncate())
                             .child(text(detail).font(font::META).color(p.text_muted).truncate()),
                     )
-                    .on_press(move |s: &mut State| s.open_attachment(&key, &id, &opened)),
+                    .on_press_tx(move |s: &mut State, tx| s.open_attachment(&key, &id, &opened, tx)),
             )
         }),
     };

@@ -106,16 +106,34 @@ pub fn presence_text(shown: &matrix_core::PersonPresence) -> Option<String> {
 
 /// A square button showing an icon; `active` draws it pressed (a toggled format, say).
 pub fn icon_button(glyph: &'static Icon, label: &str, active: bool, color: Color, p: &Palette) -> El {
-    el().size(28.0, 28.0)
-        .radius(6.0)
-        .center()
-        .fill(if active { p.hover.alpha(p.hover.a * 3.0) } else { Color::TRANSPARENT })
-        .hover(p.hover.alpha(p.hover.a * 2.0))
-        .role("button")
-        .cursor(rune::Cursor::Pointer)
-        .label(label.to_owned())
-        .focusable(true)
-        .child(icon(glyph, 18.0).color(if active { p.text } else { color }))
+    use rune_kit::{ControlSize, IconButton, IconButtonMetrics, IconButtonVariant, Kit};
+
+    thread_local! {
+        // The glyph and surface colours vary by caller. Keep the kit's fixed metrics and
+        // elevation tokens so building repeated buttons does not allocate a theme each time.
+        static KIT: std::cell::RefCell<Kit> = std::cell::RefCell::new({
+            let mut kit = Kit::neutral(true);
+            let mut metrics = IconButtonMetrics::kit(&kit);
+            metrics.large = IconButtonMetrics { size: 28.0, radius: 6.0, icon: 18.0 };
+            kit.metrics.icon_button = Some(metrics);
+            kit
+        });
+    }
+
+    KIT.with_borrow_mut(|kit| {
+        kit.dark = p.dark;
+        kit.c.text_base = if active { p.text } else { color };
+        kit.c.border_focus = p.accent;
+        kit.c.hover = p.hover.alpha(p.hover.a * 2.0);
+        kit.c.pressed = p.hover.alpha(p.hover.a * 3.0);
+        IconButton::new(glyph)
+            .label(label)
+            .control_size(ControlSize::Large)
+            .variant(IconButtonVariant::Ghost)
+            .build(kit)
+            .cursor(rune::Cursor::Pointer)
+            .fill(if active { kit.c.pressed } else { Color::TRANSPARENT })
+    })
 }
 
 /// A floating panel for popovers; the caller anchors it.

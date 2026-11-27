@@ -1,6 +1,5 @@
-//! Everything that talks to the operating system on the app's behalf: picking files, posting
-//! notifications, the taskbar badge, and the keychain. State code calls [`Shell`]; it never touches the OS itself,
-//! so tests run it headless.
+//! The operating system services the app uses, including notifications, the taskbar badge,
+//! and the keychain. State uses [`Shell`] for those and Rune transactions for file dialogs.
 
 mod attachments;
 mod files;
@@ -39,6 +38,8 @@ pub struct Shell {
     taskbar: Taskbar,
     /// The user can reach the app here while its window is closed.
     tray: Option<tray::Tray>,
+    #[cfg(all(unix, not(target_os = "macos")))]
+    file_dialog: files::DialogScope,
     /// Whether the system shows the jump list: macOS only (see `taskbar`'s notes on Windows).
     /// Headless, as on macOS, so tests see it.
     offers_jump_list: bool,
@@ -76,6 +77,8 @@ impl std::fmt::Debug for Shell {
 
 impl Drop for Shell {
     fn drop(&mut self) {
+        #[cfg(all(unix, not(target_os = "macos")))]
+        self.file_dialog.cancel();
         self.tray = None;
         if let Some(save) = self.settings_save.take() {
             let _ = save.join();
@@ -96,6 +99,8 @@ impl Shell {
             notifier,
             taskbar,
             tray: None,
+            #[cfg(all(unix, not(target_os = "macos")))]
+            file_dialog: files::DialogScope::default(),
             offers_jump_list: cfg!(target_os = "macos"),
             prefs: Arc::new(Mutex::new(prefs)),
             document: Arc::default(),
@@ -118,6 +123,8 @@ impl Shell {
             notifier: Box::new(notify::Silent),
             taskbar: Taskbar::default(),
             tray: None,
+            #[cfg(all(unix, not(target_os = "macos")))]
+            file_dialog: files::DialogScope::default(),
             offers_jump_list: true,
             prefs: Arc::new(Mutex::new(Prefs::memory())),
             document: Arc::default(),
@@ -145,6 +152,8 @@ impl Shell {
                 notifier: Box::new(notify::Recording(posted.clone())),
                 taskbar: Taskbar::default(),
                 tray: None,
+                #[cfg(all(unix, not(target_os = "macos")))]
+                file_dialog: files::DialogScope::default(),
                 offers_jump_list: true,
                 prefs,
                 document: Arc::default(),
@@ -160,13 +169,6 @@ impl Shell {
             },
             posted,
         )
-    }
-
-    /// Opens the system file dialog; its answer arrives through [`State::files_picked`].
-    pub fn pick_files(&self, picked_for: crate::state::PickFor) {
-        if let Some(app) = &self.app {
-            files::pick(app.clone(), picked_for);
-        }
     }
 
     /// Renders a PDF's pages on a worker; they arrive through [`State::document_page`], then
@@ -274,13 +276,6 @@ impl Shell {
         self.document.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Asks where to save a file named `name`; `chosen` runs with the path once picked.
-    pub fn pick_save_path(&self, name: &str, chosen: impl FnOnce(&mut State, std::path::PathBuf) + Send + 'static) {
-        if let Some(app) = &self.app {
-            files::save(app.clone(), name.to_owned(), chosen);
-        }
-    }
-
     /// Saves this device's settings, off the UI thread (the prefs file is rewritten whole).
     pub fn save_settings(&mut self, settings: Settings) {
         self.settings_save = save(&self.prefs, &self.saves, "settings", move |prefs| write_settings(prefs, &settings));
@@ -289,6 +284,8 @@ impl Shell {
     /// Keep the closed window reachable. Linux finishes registration off the UI thread and
     /// quits through the app handle if its tray is unavailable while the window is closed.
     pub fn close_window(&mut self, close_to_tray: bool, tx: &mut rune::Tx) {
+        #[cfg(all(unix, not(target_os = "macos")))]
+        self.file_dialog.cancel();
         self.tray = None;
         if close_to_tray && let Some(app) = &self.app {
             self.tray = tray::show(app.clone());

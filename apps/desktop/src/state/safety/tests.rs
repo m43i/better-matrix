@@ -165,11 +165,11 @@ fn media_opened_from_the_files_panel_should_wait_for_a_press_when_its_sender_is_
     drain(&mut commands);
     let file = crate::demo::demo_attachment();
     let key = TimelineKey::room(DEMO_THREAD.0);
-    s.open_attachment(&key, "$listed-only", &file);
+    s.open_attachment(&key, "$listed-only", &file, &mut rune::Tx::default());
     assert!(s.preview.is_none());
     assert!(!drain(&mut commands).iter().any(|(_, command)| matches!(command, Command::FetchMedia { .. })));
     // Shown now: the next press opens it.
-    s.open_attachment(&key, "$listed-only", &file);
+    s.open_attachment(&key, "$listed-only", &file, &mut rune::Tx::default());
     assert!(s.preview.is_some());
 }
 
@@ -365,7 +365,12 @@ fn a_custom_emoji_in_held_back_media_should_not_load_until_shown() {
 fn opening_held_back_media_should_show_it_in_place_first() {
     let (mut s, _) = state();
     crate::demo::hidden_media(&mut s);
-    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$attachment", &crate::demo::demo_attachment());
+    s.open_attachment(
+        &TimelineKey::room(DEMO_THREAD.0),
+        "$attachment",
+        &crate::demo::demo_attachment(),
+        &mut rune::Tx::default(),
+    );
     assert!(s.preview.is_none());
     assert!(s.revealed_media.contains(&(ada(), "$attachment".to_owned())));
 }
@@ -468,7 +473,7 @@ fn a_held_back_video_without_a_poster_should_not_open_directly() {
     crate::demo::image_message(&mut s, video.clone());
     media_never(&mut s);
     drain(&mut commands);
-    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$attachment", &video);
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$attachment", &video, &mut rune::Tx::default());
     assert!(s.preview.is_none());
     assert!(!drain(&mut commands).iter().any(|(_, command)| matches!(command, Command::SaveMedia { .. })));
     assert!(s.revealed_media.contains(&(ada(), "$attachment".to_owned())));
@@ -482,7 +487,7 @@ fn a_batch_should_keep_its_audio_and_documents_and_hold_back_its_pictures_until_
     let files = crate::demo::batch_attachments();
     let key = TimelineKey::room(DEMO_THREAD.0);
     // The recording opens, never held back, with the whole batch to step through.
-    s.open_attachment(&key, "$batch-2", &files[2]);
+    s.open_attachment(&key, "$batch-2", &files[2], &mut rune::Tx::default());
     assert_eq!(s.preview.as_ref().map(|preview| preview.batch.len()), Some(4));
     drain(&mut commands);
     // Onto the video: held back, nothing fetched.
@@ -568,9 +573,9 @@ fn a_held_preview_item_should_not_be_copied_saved_or_opened() {
     drain(&mut commands);
     let file = s.preview.as_ref().unwrap().attachment.clone();
     for action in [AttachmentAction::CopyImage, AttachmentAction::Open, AttachmentAction::Download] {
-        s.act_on_attachment(ada(), &file, action);
+        s.act_on_attachment(ada(), &file, action, &mut rune::Tx::default());
     }
-    s.download_preview();
+    s.download_preview(&mut rune::Tx::default());
     assert!(drain(&mut commands).is_empty());
 }
 
@@ -607,13 +612,20 @@ fn a_held_back_pictures_file_actions_from_its_message_should_do_nothing() {
     drain(&mut commands);
     let file = crate::demo::demo_attachment();
     for action in [AttachmentAction::CopyImage, AttachmentAction::Open, AttachmentAction::Download] {
-        s.act_on_message_attachment(&ada(), DEMO_THREAD.0, "$attachment", &file, action);
+        s.act_on_message_attachment(&ada(), DEMO_THREAD.0, "$attachment", &file, action, &mut rune::Tx::default());
     }
     assert!(drain(&mut commands).is_empty());
     // Shown, they work again.
     s.reveal_media(&ada(), "$attachment");
     drain(&mut commands);
-    s.act_on_message_attachment(&ada(), DEMO_THREAD.0, "$attachment", &file, AttachmentAction::CopyImage);
+    s.act_on_message_attachment(
+        &ada(),
+        DEMO_THREAD.0,
+        "$attachment",
+        &file,
+        AttachmentAction::CopyImage,
+        &mut rune::Tx::default(),
+    );
     assert!(drain(&mut commands).iter().any(|(_, command)| matches!(command, Command::FetchMedia { .. })));
 }
 
@@ -627,7 +639,7 @@ fn an_open_preview_should_hold_back_someone_elses_picture_once_media_shows_nowhe
     drain(&mut commands);
     let file = s.preview.as_ref().unwrap().attachment.clone();
     for action in [AttachmentAction::CopyImage, AttachmentAction::Open, AttachmentAction::Download] {
-        s.act_on_attachment(ada(), &file, action);
+        s.act_on_attachment(ada(), &file, action, &mut rune::Tx::default());
     }
     assert!(drain(&mut commands).is_empty());
 }
@@ -889,10 +901,10 @@ fn an_open_preview_should_close_once_its_sender_is_ignored() {
     // Nor does it open again, nor do its file actions run.
     drain(&mut commands);
     let file = crate::demo::demo_attachment();
-    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$attachment", &file);
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$attachment", &file, &mut rune::Tx::default());
     assert!(s.preview.is_none());
     for action in [AttachmentAction::CopyImage, AttachmentAction::Open, AttachmentAction::Download] {
-        s.act_on_message_attachment(&ada(), DEMO_THREAD.0, "$attachment", &file, action);
+        s.act_on_message_attachment(&ada(), DEMO_THREAD.0, "$attachment", &file, action, &mut rune::Tx::default());
     }
     assert!(drain(&mut commands).is_empty());
 }
@@ -907,7 +919,7 @@ fn a_batch_should_leave_out_items_of_someone_ignored() {
     s.apply(Event::Safety { account: ada(), safety }, &mut Tx::default());
     assert!(s.accounts.get(&ada()).unwrap().ignores_sender_of(DEMO_THREAD.0, "$batch-0"));
     let files = crate::demo::batch_attachments();
-    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$batch-2", &files[2]);
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$batch-2", &files[2], &mut rune::Tx::default());
     assert!(s.preview.is_none());
 }
 

@@ -166,6 +166,7 @@
   "date.today": "Heute",
   "date.yesterday": "Gestern",
   "dialog.attach_title": "Dateien anhängen",
+  "dialog.destination_changed": "Die Dateiauswahl wurde abgebrochen, weil sich das Ziel geändert hat.",
   "dialog.avatar_title": "Profilbild auswählen",
   "dialog.images": "Bilder",
   "dialog.save_title": "Datei speichern",

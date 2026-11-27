@@ -90,7 +90,7 @@ pub fn image_message(s: &mut State, file: Attachment) {
 pub fn attachment_preview(s: &mut State) {
     attachment_message(s);
     let file = demo_attachment();
-    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$attachment", &file);
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$attachment", &file, &mut rune::Tx::default());
     let bytes = include_bytes!("../../../packaging/icons/better-matrix-256.png").as_slice().into();
     if let (Some(preview), Some(image)) = (&mut s.preview, s.media.decode(bytes)) {
         preview.content =
@@ -180,7 +180,7 @@ pub fn post_batch(s: &mut State, files: Vec<Attachment>) {
 fn open_batch(s: &mut State, index: usize) {
     batch_messages(s);
     let file = batch_attachments().swap_remove(index);
-    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), &format!("$batch-{index}"), &file);
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), &format!("$batch-{index}"), &file, &mut rune::Tx::default());
 }
 
 /// The batch's picture full size, the strip of the others under it.
@@ -200,7 +200,7 @@ pub fn preview_held(s: &mut State) {
     let safety = matrix_core::Safety { media: matrix_core::ShowMedia::Never, ..matrix_core::Safety::default() };
     apply(s, Event::Safety { account: AccountId::new(ADA), safety });
     let file = batch_attachments().swap_remove(2);
-    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$batch-2", &file);
+    s.open_attachment(&TimelineKey::room(DEMO_THREAD.0), "$batch-2", &file, &mut rune::Tx::default());
     s.show_preview_item(1);
 }
 

@@ -142,13 +142,19 @@ impl State {
     // ----- key export and import -----------------------------------------------------------
 
     /// Asks where to write the message keys; the passphrase dialog follows.
-    pub fn export_room_keys(&mut self) {
-        self.shell.pick_save_path(KEY_FILE_NAME, |s: &mut State, path| s.key_file_chosen(KeyTransfer::Export, path));
+    pub fn export_room_keys(&mut self, tx: &mut Tx) {
+        let Some(account) = self.nav.account.clone() else { return };
+        self.shell.pick_save_path(tx, KEY_FILE_NAME, move |s, path| {
+            if s.file_account_is_active(&account) {
+                s.key_file_chosen(KeyTransfer::Export, path);
+            }
+        });
     }
 
     /// Asks for a key file to read; the passphrase dialog follows.
-    pub fn import_room_keys(&mut self) {
-        self.shell.pick_files(PickFor::KeyFile);
+    pub fn import_room_keys(&mut self, tx: &mut Tx) {
+        let Some(account) = self.nav.account.clone() else { return };
+        self.shell.pick_files(tx, PickFor::KeyFile(account));
     }
 
     /// The file dialog's answer for a key export or import: asks for its passphrase.

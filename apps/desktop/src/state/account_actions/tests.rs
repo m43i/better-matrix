@@ -329,7 +329,8 @@ fn a_finished_export_should_say_where_the_keys_went() {
 #[test]
 fn an_import_should_need_the_passphrase_once() {
     let (mut s, mut commands) = state(SignInMethod::Password);
-    s.files_picked(crate::state::PickFor::KeyFile, &["/tmp/keys.txt".into()]);
+    let account = s.nav.account.clone().unwrap();
+    s.files_picked(crate::state::PickFor::KeyFile(account), &["/tmp/keys.txt".into()]);
     *s.modal_field() = TextEdit::new("horse");
     s.submit_key_file();
     assert!(

@@ -136,10 +136,12 @@ Date: 2026-11-14
     `State::confirm`.
   - Escape or a click outside closes either. A new kind is a new variant.
 - **The OS goes through `platform::Shell`:**
-  - It does file picking, notifications, the taskbar (`platform::Taskbar`: the badge, the
+  - It does notifications, the taskbar (`platform::Taskbar`: the badge, the
     flash and the jump list, passed to Rune only when they change) and saving `Settings` and
     the rooms opened (`rune::prefs`, on a worker thread, only the latest of each); opening a URL
-    goes through `Tx`.
+    goes through `Tx`. File dialogs also use `Tx`, with options and response routing in
+    `platform::files`. Headless runtimes can answer them without native UI. On Linux, when the
+    portal is unavailable, the app starts Zenity and cancels it when the window closes.
   - `Shell::headless()` and `Shell::recording()` replace it in tests.
   - Played audio and voice memos go to a private scratch folder under the cache, emptied at
     launch and exit.

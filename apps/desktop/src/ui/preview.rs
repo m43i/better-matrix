@@ -5,15 +5,14 @@
 
 use matrix_core::{Attachment, AttachmentKind};
 use rune::{Color, El, ScrollSpec, SurfaceFit, col, el, icon, row, text};
+use rune_kit::{ControlSize, Kit, Slider};
 
 use super::icons;
 use super::theme::{Palette, font};
 use super::timeline::{Clips, audio_player, minutes};
 use crate::i18n::{t, tf};
 use crate::platform::video::{self, Playback};
-use crate::state::{
-    AUDIO_STEP, DocumentStatus, ImageStatus, Opens, Popover, Preview, PreviewContent, State, VideoStatus,
-};
+use crate::state::{DocumentStatus, ImageStatus, Opens, Popover, Preview, PreviewContent, State, VideoStatus};
 
 /// The widest a PDF page draws, in points.
 const PAGE_WIDTH: f32 = 820.0;
@@ -24,9 +23,9 @@ const THUMB: f32 = 56.0;
 const STRIP: f32 = THUMB + 28.0;
 /// The video's controls under it.
 const CONTROLS: f32 = 52.0;
-/// The scrubber's dot and the line it runs along.
-const KNOB: f32 = 12.0;
-const TRACK: f32 = 4.0;
+/// Buttons and spacing in the preview's bars.
+const ACTION: f32 = 40.0;
+const CONTROLS_GAP: f32 = 12.0;
 /// The audio player's width.
 const AUDIO_WIDTH: f32 = 420.0;
 
@@ -185,7 +184,7 @@ fn bar(preview: &Preview) -> El {
     // A held-back file can't be downloaded until shown.
     if !matches!(preview.content, PreviewContent::Held) {
         bar = bar.child(
-            action(&icons::DOWNLOAD, t!("preview.download"), "preview-download").on_press(State::download_preview),
+            action(&icons::DOWNLOAD, t!("preview.download"), "preview-download").on_press_tx(State::download_preview),
         );
     }
     bar.child(action(&icons::CLOSE, t!("preview.close"), "preview-close").on_press(State::close_preview))
@@ -194,8 +193,8 @@ fn bar(preview: &Preview) -> El {
 /// A round button on the dark layer.
 fn action(glyph: &'static rune::Icon, label: &str, key: &str) -> El {
     el().key(key.to_owned())
-        .size(40.0, 40.0)
-        .radius(20.0)
+        .size(ACTION, ACTION)
+        .radius(ACTION / 2.0)
         .center()
         .fill(Color::WHITE.alpha(0.12))
         .hover(Color::WHITE.alpha(0.22))
@@ -343,54 +342,46 @@ fn controls(player: Option<&video::Player>, width: f32, p: &Palette) -> El {
     } else {
         (&icons::SPEAKER, t!("preview.mute"))
     };
+    let width = width.max(320.0);
+    let scrubber_width = rune::memo::layout_with("preview-seek-space", |rect| rect[2]).unwrap_or_else(|| {
+        let time_width = rune::text::measure(&time, &[], font::META, None).0;
+        width - 2.0 * ACTION - 3.0 * CONTROLS_GAP - time_width
+    });
+    let time_label = text(time.clone()).key("preview-time").font(font::META).color(Color::WHITE.alpha(0.85));
+
+    thread_local! {
+        static KIT: std::cell::RefCell<Kit> = std::cell::RefCell::new({
+            let mut kit = Kit::neutral(true);
+            kit.c.layer_03 = Color::WHITE.alpha(0.25);
+            kit.c.border_base = Color::WHITE;
+            kit
+        });
+    }
+    let slider = KIT.with_borrow_mut(|kit| {
+        kit.c.bg_accent = p.accent;
+        kit.c.border_focus = p.accent;
+        kit.c.knob = p.accent;
+        Slider::new("preview-seek", progress)
+            .width(scrubber_width)
+            .control_size(ControlSize::Mini)
+            .label(t!("audio.seek"))
+            .hide_label()
+            .value_text(time)
+            .disabled(player.duration().is_none())
+            .on_change(|s: &mut State, value, _| s.seek_video(f64::from(value)))
+            .build(kit)
+    });
+
     row()
         .key("preview-controls")
-        .w(width.max(320.0))
+        .w(width)
         .h(CONTROLS)
-        .gap(12.0)
+        .gap(CONTROLS_GAP)
         .center_y()
         .child(action(glyph, label, "preview-play").on_press(State::toggle_preview_playback))
-        .child(text(time).font(font::META).color(Color::WHITE.alpha(0.85)))
-        .child(scrubber(progress, p))
+        .child(time_label)
+        .child(row().key("preview-seek-space").grow(1.0).min_w(12.0).center_y().child(slider.shrink()))
         .child(action(sound, sound_label, "preview-sound").on_press(State::toggle_video_sound))
-}
-
-/// The line the video runs along, filled as it plays, with a dot to drag; pressing anywhere
-/// along it jumps there, and focused, the arrow keys step it.
-fn scrubber(progress: f32, p: &Palette) -> El {
-    el().key("preview-seek")
-        .grow(1.0)
-        .h(KNOB + 8.0)
-        .role("slider")
-        .label(t!("audio.seek"))
-        .range_value(f64::from(progress), 0.0, 1.0)
-        .range_step(AUDIO_STEP)
-        .focusable(true)
-        .cursor(rune::Cursor::Pointer)
-        .on_drag(|s: &mut State, drag, _| {
-            let width = (drag.w - KNOB).max(1.0);
-            s.seek_video(f64::from((drag.x - KNOB / 2.0) / width));
-        })
-        .on_step(|s: &mut State, steps, _| s.step_video(steps))
-        .on_step_limit(|s: &mut State, end, _| s.seek_video(if end { 1.0 } else { 0.0 }))
-        .child(
-            // The track runs between the dot's centres at either end; the dot rides the filled
-            // part's end.
-            row()
-                .pin(Some(KNOB / 2.0), Some((KNOB + 8.0 - TRACK) / 2.0), Some(KNOB / 2.0), None)
-                .h(TRACK)
-                .radius(TRACK / 2.0)
-                .fill(Color::WHITE.alpha(0.25))
-                .child(
-                    el().h_full().w_frac(progress).radius(TRACK / 2.0).fill(p.accent).child(
-                        el().pin(None, Some((TRACK - KNOB) / 2.0), Some(-KNOB / 2.0), None)
-                            .size(KNOB, KNOB)
-                            .radius(KNOB / 2.0)
-                            .fill(p.accent)
-                            .border(2.0, Color::WHITE),
-                    ),
-                ),
-        )
 }
 
 fn status(message: &str) -> El {

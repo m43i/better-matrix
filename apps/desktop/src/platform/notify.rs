@@ -41,10 +41,10 @@ impl Notifier for Recording {
     }
 }
 
-fn open_room(app: &AppHandle<State>, account: String, room_id: String) {
+fn open_room(app: &AppHandle<State>, account: String, room_id: String, token: Option<String>) {
     let account = matrix_core::AccountId::new(account);
     app.update(crate::state::navigate(move |s| s.open_room(&account, &room_id)));
-    app.open();
+    app.activate(token.unwrap_or_default());
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -52,7 +52,7 @@ pub fn system(app: AppHandle<State>) -> Box<dyn Notifier> {
     let _ = rune_notify::register(&rune_notify::Identity::new(crate::APP_ID, "Better Matrix"));
     rune_notify::on_click(move |click| {
         if let (Some(account), Some(room)) = (click.get("account"), click.get("room")) {
-            open_room(&app, account.to_owned(), room.to_owned());
+            open_room(&app, account.to_owned(), room.to_owned(), None);
         }
     });
     Box::new(RuneNotify)
@@ -76,7 +76,7 @@ impl Notifier for RuneNotify {
 pub fn system(app: AppHandle<State>) -> Box<dyn Notifier> {
     let (posts, queue) = std::sync::mpsc::channel();
     // Showing and hearing clicks both talk D-Bus; keep them off the UI thread.
-    let open = move |account, room_id| open_room(&app, account, room_id);
+    let open = move |account, room_id, token| open_room(&app, account, room_id, token);
     let _ = std::thread::Builder::new().name("notifications".into()).spawn(move || freedesktop::serve(queue, open));
     Box::new(Freedesktop { posts })
 }
@@ -111,7 +111,10 @@ mod freedesktop {
 
     /// Shows each toast posted, until the notifier goes; a click on one `open`s its account
     /// and room.
-    pub fn serve(queue: std::sync::mpsc::Receiver<Toast>, open: impl Fn(String, String) + Send + Sync + 'static) {
+    pub fn serve(
+        queue: std::sync::mpsc::Receiver<Toast>,
+        open: impl Fn(String, String, Option<String>) + Send + Sync + 'static,
+    ) {
         let (shown, open) = (Arc::new(Mutex::new(Shown::default())), Arc::new(open));
         let mut bus: Option<zbus::Connection> = None;
         for toast in queue {
@@ -136,12 +139,13 @@ mod freedesktop {
     /// closes.
     fn connect(
         shown: &Arc<Mutex<Shown>>,
-        open: &Arc<impl Fn(String, String) + Send + Sync + 'static>,
+        open: &Arc<impl Fn(String, String, Option<String>) + Send + Sync + 'static>,
     ) -> Option<zbus::Connection> {
         let (connection, signals) = block_on(async {
             let connection = zbus::Connection::session().await?;
             let rule = zbus::MatchRule::builder()
                 .msg_type(zbus::message::Type::Signal)
+                .sender(SERVICE)
                 .interface(SERVICE)
                 .path(PATH)
                 .build()?;
@@ -152,7 +156,7 @@ mod freedesktop {
         let (open, shown) = (Arc::clone(open), Arc::clone(shown));
         let _ = std::thread::Builder::new()
             .name("notification-clicks".into())
-            .spawn(move || block_on(hear(signals, &shown, |account, room_id| open(account, room_id))));
+            .spawn(move || block_on(hear(signals, &shown, |account, room_id, token| open(account, room_id, token))));
         Some(connection)
     }
 
@@ -161,7 +165,7 @@ mod freedesktop {
     pub(super) async fn hear(
         mut signals: impl Stream<Item = zbus::Result<zbus::Message>> + Unpin,
         shown: &Mutex<Shown>,
-        open: impl Fn(String, String),
+        open: impl Fn(String, String, Option<String>),
     ) {
         while let Some(message) = signals.next().await {
             let Ok(message) = message else { continue };
@@ -171,13 +175,21 @@ mod freedesktop {
                 Some("ActionInvoked") => {
                     message.body().deserialize::<(u32, String)>().ok().map(|(id, action)| (id, Some(action)))
                 }
+                Some("ActivationToken") => {
+                    if let Ok((id, token)) = message.body().deserialize::<(u32, String)>()
+                        && let Ok(mut shown) = shown.lock()
+                    {
+                        shown.set_token(id, token);
+                    }
+                    continue;
+                }
                 Some("NotificationClosed") => message.body().deserialize::<(u32, u32)>().ok().map(|(id, _)| (id, None)),
                 _ => None,
             };
             let Some((id, action)) = id else { continue };
             let room = shown.lock().ok().and_then(|mut shown| shown.take(id));
-            if let (Some((account, room_id)), Some("default")) = (room, action.as_deref()) {
-                open(account, room_id);
+            if let (Some(room), Some("default")) = (room, action.as_deref()) {
+                open(room.account, room.room_id, room.token);
             }
         }
     }
@@ -225,24 +237,40 @@ fn deliver<C, T, E>(
 /// service gave them: a click opens one. Past [`Shown::MAX`], the oldest are forgotten.
 #[cfg(any(test, all(unix, not(target_os = "macos"))))]
 #[derive(Debug, Default)]
-struct Shown(std::collections::VecDeque<(u32, String, String)>);
+struct Shown(std::collections::VecDeque<ShownToast>);
+
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
+#[derive(Debug, PartialEq, Eq)]
+struct ShownToast {
+    id: u32,
+    account: String,
+    room_id: String,
+    token: Option<String>,
+}
 
 #[cfg(any(test, all(unix, not(target_os = "macos"))))]
 impl Shown {
     const MAX: usize = 256;
 
     fn remember(&mut self, id: u32, account: String, room_id: String) {
-        self.0.retain(|(shown, ..)| *shown != id);
+        self.0.retain(|shown| shown.id != id);
         if self.0.len() >= Self::MAX {
             self.0.pop_front();
         }
-        self.0.push_back((id, account, room_id));
+        self.0.push_back(ShownToast { id, account, room_id, token: None });
     }
 
-    /// The account and room of notification `id`, forgotten: it was clicked or closed.
-    fn take(&mut self, id: u32) -> Option<(String, String)> {
-        let at = self.0.iter().position(|(shown, ..)| *shown == id)?;
-        self.0.remove(at).map(|(_, account, room_id)| (account, room_id))
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn set_token(&mut self, id: u32, token: String) {
+        if let Some(toast) = self.0.iter_mut().find(|shown| shown.id == id) {
+            toast.token = (!token.is_empty()).then_some(token);
+        }
+    }
+
+    /// The notification was clicked or closed.
+    fn take(&mut self, id: u32) -> Option<ShownToast> {
+        let at = self.0.iter().position(|shown| shown.id == id)?;
+        self.0.remove(at)
     }
 }
 
@@ -290,7 +318,7 @@ mod tests {
     fn a_clicked_notification_should_give_its_room_once() {
         let mut shown = Shown::default();
         shown.remember(7, "@me:example.org".into(), "!room:example.org".into());
-        let first = shown.take(7);
+        let first = shown.take(7).map(|toast| (toast.account, toast.room_id));
         assert_eq!((first, shown.take(7)), (Some(("@me:example.org".into(), "!room:example.org".into())), None));
     }
 
@@ -336,9 +364,33 @@ mod tests {
         let broken = Err(zbus::Error::Failure("unreadable".into()));
         let signals = futures_lite::stream::iter([broken, signal("ActionInvoked", &(7u32, "default"))]);
         let opened = std::sync::Mutex::new(Vec::new());
-        futures_lite::future::block_on(super::freedesktop::hear(signals, &shown, |account, room_id| {
+        futures_lite::future::block_on(super::freedesktop::hear(signals, &shown, |account, room_id, _| {
             opened.lock().unwrap().push((account, room_id));
         }));
         assert_eq!(opened.into_inner().unwrap(), [("@me:example.org".to_owned(), "!room:example.org".to_owned())]);
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn a_notification_click_should_take_its_own_activation_token() {
+        let mut shown = Shown::default();
+        shown.remember(7, "@me:example.org".into(), "!room:example.org".into());
+        shown.remember(8, "@me:example.org".into(), "!other:example.org".into());
+        let signals = futures_lite::stream::iter([
+            signal("ActivationToken", &(7u32, "activation")),
+            signal("ActionInvoked", &(8u32, "default")),
+            signal("ActionInvoked", &(7u32, "default")),
+        ]);
+        let opened = std::cell::RefCell::new(Vec::new());
+        futures_lite::future::block_on(super::freedesktop::hear(
+            signals,
+            &std::sync::Mutex::new(shown),
+            |_, room, token| {
+                opened.borrow_mut().push((room, token));
+            },
+        ));
+        assert_eq!(
+            opened.into_inner(),
+            [("!other:example.org".into(), None), ("!room:example.org".into(), Some("activation".into())),]
+        );
     }
 }

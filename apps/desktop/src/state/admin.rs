@@ -498,9 +498,9 @@ impl State {
     }
 
     /// Asks for a new picture for the room whose settings are open.
-    pub fn pick_room_avatar(&mut self) {
+    pub fn pick_room_avatar(&mut self, tx: &mut rune::Tx) {
         let Some((account, room_id, _)) = self.settings_open() else { return };
-        self.shell.pick_files(PickFor::RoomAvatar { account, room_id });
+        self.shell.pick_files(tx, PickFor::RoomAvatar { account, room_id });
     }
 
     /// Gives a permission the level `level`, never above the user's own, unless it already asks

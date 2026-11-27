@@ -319,7 +319,7 @@ fn general(s: &State, dialog: &RoomSettingsDialog, settings: &RoomSettings, p: &
             .child(
                 button(t!("room_settings.upload_picture"), ButtonKind::Secondary, true, p)
                     .key("room-settings-picture")
-                    .on_press(State::pick_room_avatar),
+                    .on_press_tx(State::pick_room_avatar),
             );
         if settings.avatar.is_some() {
             controls = controls.child(

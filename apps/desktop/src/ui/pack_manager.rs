@@ -163,7 +163,7 @@ fn detail(s: &State, manager: &PackManager, p: &Palette) -> El {
         let mut actions = row().w_full().gap(8.0).center_y().child(
             button(t!("packs.add_stickers"), ButtonKind::Primary, !busy, p)
                 .key("pack-add")
-                .on_press(State::pick_pack_images),
+                .on_press_tx(State::pick_pack_images),
         );
         if busy {
             actions = actions.child(text(t!("packs.saving")).font(font::META).color(p.text_muted));

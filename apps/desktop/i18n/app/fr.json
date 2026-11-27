@@ -166,6 +166,7 @@
   "date.today": "Aujourd'hui",
   "date.yesterday": "Hier",
   "dialog.attach_title": "Joindre des fichiers",
+  "dialog.destination_changed": "La sélection de fichiers a été annulée parce que sa destination a changé.",
   "dialog.avatar_title": "Choisir une photo de profil",
   "dialog.images": "Images",
   "dialog.save_title": "Enregistrer le fichier",

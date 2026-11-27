@@ -282,11 +282,11 @@ const AVATAR_SIZE: MediaSize = MediaSize::Thumbnail { width: AVATAR_PIXELS.0, he
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PickFor {
     /// Files to attach to a composer.
-    Attachments(ComposerTarget),
+    Attachments { target: ComposerTarget, account: AccountId, key: TimelineKey },
     /// A new profile picture.
-    Avatar,
+    Avatar(AccountId),
     /// A file of exported message keys to import.
-    KeyFile,
+    KeyFile(AccountId),
     /// A new picture for a room or space: the one whose settings it was asked from, whatever
     /// shows by the time the dialog answers.
     RoomAvatar { account: AccountId, room_id: String },
@@ -3812,7 +3812,13 @@ impl State {
 
     /// Clicking an attachment in `key`'s timeline: an image, PDF, video or audio clip opens
     /// full size, with the rest of its batch to step through; any other file saves.
-    pub fn open_attachment(&mut self, key: &TimelineKey, event_id: &str, attachment: &matrix_core::Attachment) {
+    pub fn open_attachment(
+        &mut self,
+        key: &TimelineKey,
+        event_id: &str,
+        attachment: &matrix_core::Attachment,
+        tx: &mut Tx,
+    ) {
         let (Some(account), Some(media)) = (self.nav.account.clone(), attachment.media.clone()) else { return };
         // Nothing opens of what someone the user ignores sent.
         if self.accounts.get(&account).is_some_and(|data| data.ignores_sender_of(&key.room_id, event_id)) {
@@ -3829,7 +3835,7 @@ impl State {
             return;
         }
         if !Opens::previews(attachment) {
-            self.download(account, media, &attachment.name);
+            self.download(account, media, &attachment.name, tx);
             return;
         }
         // The whole batch, audio and documents included: its pictures and videos the media
@@ -4114,13 +4120,6 @@ impl State {
         }
     }
 
-    /// Moves the previewed video `steps` twentieths along, as the arrow keys do on its bar.
-    pub fn step_video(&mut self, steps: i32) {
-        if let Some(player) = self.preview_video() {
-            player.seek(player.progress() + f64::from(steps) * AUDIO_STEP);
-        }
-    }
-
     /// Mutes the previewed video, or lets it be heard again.
     pub fn toggle_video_sound(&mut self) {
         if let Some(player) = self.preview_video() {
@@ -4187,15 +4186,15 @@ impl State {
     }
 
     /// Saves the previewed file where the user picks.
-    pub fn download_preview(&mut self) {
+    pub fn download_preview(&mut self, tx: &mut Tx) {
         let Some(preview) = &self.preview else { return };
         let (account, file) = (preview.account.clone(), preview.attachment.clone());
-        self.act_on_attachment(account, &file, AttachmentAction::Download);
+        self.act_on_attachment(account, &file, AttachmentAction::Download, tx);
     }
 
     /// Asks where to save a file, then saves it there.
-    fn download(&mut self, account: AccountId, media: MediaRef, name: &str) {
-        self.shell.pick_save_path(name, move |s: &mut State, path| {
+    fn download(&mut self, account: AccountId, media: MediaRef, name: &str, tx: &mut Tx) {
+        self.shell.pick_save_path(tx, name, move |s, path| {
             s.dispatch(Command::SaveMedia { account, media, path }, Purpose::Save);
         });
     }
@@ -5092,8 +5091,9 @@ impl State {
     }
 
     /// Asks for a new profile picture; the dialog's answer uploads it.
-    pub fn pick_avatar(&mut self) {
-        self.shell.pick_files(PickFor::Avatar);
+    pub fn pick_avatar(&mut self, tx: &mut Tx) {
+        let Some(account) = self.nav.account.clone() else { return };
+        self.shell.pick_files(tx, PickFor::Avatar(account));
     }
 
     /// Uploads `file` as the profile picture, or with `None` removes it.
@@ -5717,21 +5717,35 @@ impl State {
 
     /// Asks for files with the system dialog for a composer; they arrive through
     /// [`State::files_picked`].
-    pub fn pick_attachments(&mut self, target: ComposerTarget) {
-        self.shell.pick_files(PickFor::Attachments(target));
+    pub fn pick_attachments(&mut self, target: ComposerTarget, tx: &mut Tx) {
+        let (Some(account), Some(key)) = (self.nav.account.clone(), self.composer_key(target)) else { return };
+        self.shell.pick_files(tx, PickFor::Attachments { target, account, key });
     }
 
     /// The system file dialog's answer.
     pub fn files_picked(&mut self, picked_for: PickFor, paths: &[PathBuf]) {
         match picked_for {
-            PickFor::Attachments(target) => self.attach_files_to(target, paths),
-            PickFor::Avatar => {
-                if let Some(path) = paths.first() {
+            PickFor::Attachments { target, account, key } => {
+                if self.nav.account.as_ref() == Some(&account)
+                    && self.composer_key(target).as_ref() == Some(&key)
+                    && self.composer(target).editing.is_none()
+                {
+                    self.attach_files_to(target, paths);
+                } else {
+                    self.file_destination_changed();
+                }
+            }
+            PickFor::Avatar(account) => {
+                if let Some(path) = paths.first()
+                    && self.file_account_is_active(&account)
+                {
                     self.set_avatar(Some(path.clone()));
                 }
             }
-            PickFor::KeyFile => {
-                if let Some(path) = paths.first() {
+            PickFor::KeyFile(account) => {
+                if let Some(path) = paths.first()
+                    && self.file_account_is_active(&account)
+                {
                     self.key_file_chosen(KeyTransfer::Import, path.clone());
                 }
             }
@@ -5744,9 +5758,23 @@ impl State {
             PickFor::PackImages { account, pack } => {
                 if self.pack_manager.as_ref().is_some_and(|manager| manager.account == account) {
                     self.add_pack_images(pack, paths);
+                } else {
+                    self.file_destination_changed();
                 }
             }
         }
+    }
+
+    fn file_account_is_active(&mut self, account: &AccountId) -> bool {
+        let active = self.nav.account.as_ref() == Some(account);
+        if !active {
+            self.file_destination_changed();
+        }
+        active
+    }
+
+    fn file_destination_changed(&mut self) {
+        self.notice = Some(t!("dialog.destination_changed").to_owned());
     }
 
     /// A paste into a composer: an image or files become attachments, and a lone web address a
