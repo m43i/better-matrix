@@ -104,6 +104,7 @@ pub(crate) async fn room_summary(
     };
     #[cfg(not(feature = "native-media"))]
     let call = crate::calls::RoomCall::default();
+    let latest = room.latest_event();
     RoomSummary {
         room_id: room.room_id().to_string(),
         name,
@@ -121,7 +122,8 @@ pub(crate) async fn room_summary(
         notifications: notification_mode(mode),
         custom_notifications: custom.is_some(),
         call,
-        activity_ms: room.latest_event_timestamp().map(|at| at.get().into()),
+        activity_ms: latest.timestamp().map(|at| at.get().into()),
+        latest_event_id: latest.event_id().map(|id| id.to_string()),
         encrypted: room.encryption_state().is_encrypted(),
         public: !private_join_rule(room.join_rule().as_ref()),
         can_rename: rights.name,
@@ -583,9 +585,6 @@ mod tests {
             .await
             .expect("sync room");
         let room = account.client().get_room(matrix_sdk::ruma::room_id!("!room:example.org")).expect("room");
-        let event = |value: serde_json::Value| {
-            TimelineEvent::from_plaintext(serde_json::from_value(value).unwrap_or_else(|e| panic!("{e}")))
-        };
         let message = |id: &str| {
             event(serde_json::json!({"type":"m.room.message", "event_id":id, "sender":"@b:example.org",
                 "origin_server_ts":1, "content":{"msgtype":"m.text", "body":id}}))
@@ -598,12 +597,46 @@ mod tests {
         assert!(latest.is_some() && latest == messages(&room, &events).await.pop(), "{latest:?}");
     }
 
+    fn event(value: serde_json::Value) -> TimelineEvent {
+        TimelineEvent::from_plaintext(serde_json::from_value(value).expect("timeline event"))
+    }
+
     #[tokio::test]
     async fn a_direct_chat_named_from_its_partner_should_identify_that_name_source() {
         let (calculated, explicit) =
             (direct_room_summary(None).await, direct_room_summary(Some("Design, Support")).await);
         assert_eq!((calculated.name.as_str(), calculated.name_from_member), ("Hopper, Grace", true));
         assert_eq!((explicit.name.as_str(), explicit.name_from_member), ("Design, Support", false));
+    }
+
+    #[tokio::test]
+    async fn events_with_the_same_timestamp_should_produce_distinct_room_summaries() {
+        use matrix_sdk_base::{RoomInfoNotableUpdateReasons, latest_event::LatestEventValue};
+
+        let server = crate::test_server::Server::new(crate::test_server::thread_response);
+        let account = crate::Account::for_test(&server.url()).await;
+        let client = account.client();
+        client.sync_once(matrix_sdk::config::SyncSettings::default()).await.expect("initial sync");
+        let room = client.get_room(matrix_sdk::ruma::room_id!("!room:example.org")).expect("room");
+        let settings = client.notification_settings().await;
+        let mut summaries = Vec::new();
+        for event_id in ["$old", "$new"] {
+            let message = event(serde_json::json!({
+                "type": "m.room.message", "event_id": event_id, "sender": "@b:example.org",
+                "origin_server_ts": 1, "content": {"msgtype": "m.text", "body": "Hello"}
+            }));
+            room.update_and_save_room_info(|mut info| {
+                info.set_latest_event(LatestEventValue::Remote(message));
+                (info, RoomInfoNotableUpdateReasons::LATEST_EVENT)
+            })
+            .await
+            .expect("latest event");
+            summaries.push(room_summary(&room, &settings, None, false, false, &Default::default()).await);
+        }
+        assert_eq!(summaries[0].activity_ms, summaries[1].activity_ms);
+        assert_eq!(summaries[0].latest_event_id.as_deref(), Some("$old"));
+        assert_eq!(summaries[1].latest_event_id.as_deref(), Some("$new"));
+        assert_ne!(summaries[0], summaries[1]);
     }
 
     async fn direct_room_summary(name: Option<&'static str>) -> RoomSummary {

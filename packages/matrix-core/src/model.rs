@@ -118,6 +118,9 @@ pub struct RoomSummary {
     /// it across restarts (the room list's order, before any timeline opens). `None` until the
     /// SDK has worked it out.
     pub activity_ms: Option<u64>,
+    /// Identifies the latest event even when two messages have the same timestamp.
+    #[cfg_attr(feature = "ffi", serde(skip), ts(skip))]
+    pub latest_event_id: Option<String>,
     /// Whether messages here are end-to-end encrypted.
     pub encrypted: bool,
     /// Whether anyone may join (the public join rule): strangers may speak, so media may wait

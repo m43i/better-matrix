@@ -747,6 +747,38 @@ pub fn rich_body(plain: &str, html: Option<&str>) -> Option<RichText> {
 /// How many timelines off screen keep their entries, per account.
 const KEPT_TIMELINES: usize = 8;
 
+#[derive(Debug)]
+struct UnreadSnapshot {
+    unread: u64,
+    mentions: u64,
+    activity_ms: Option<u64>,
+    latest_event_id: Option<String>,
+}
+
+impl UnreadSnapshot {
+    fn of(room: &RoomSummary) -> Self {
+        Self {
+            unread: room.unread,
+            mentions: room.mentions,
+            activity_ms: room.activity_ms,
+            latest_event_id: room.latest_event_id.clone(),
+        }
+    }
+
+    fn still_cleared(&self, room: &RoomSummary) -> bool {
+        (room.unread > 0 || room.mentions > 0)
+            && room.unread <= self.unread
+            && room.mentions <= self.mentions
+            && room.latest_event_id == self.latest_event_id
+            && room.activity_ms == self.activity_ms
+    }
+
+    fn clear(room: &mut RoomSummary) {
+        room.unread = 0;
+        room.mentions = 0;
+    }
+}
+
 /// One account's synced data.
 #[derive(Debug)]
 pub struct AccountData {
@@ -754,6 +786,9 @@ pub struct AccountData {
     pub invitations: Vec<matrix_core::Invitation>,
     pub rooms: Vec<RoomSummary>,
     pub spaces: Vec<SpaceSummary>,
+    /// The counts this device cleared ahead of sync, by room. Another room's update can
+    /// include the same old counts again.
+    cleared_unread: HashMap<String, UnreadSnapshot>,
     /// Lookups worked out from `rooms` and `spaces`, on first use after the list changes
     /// ([`Accounts::set_room_list`] starts it again).
     index: std::sync::OnceLock<RoomIndex>,
@@ -854,6 +889,7 @@ impl AccountData {
             invitations: Vec::new(),
             rooms: Vec::new(),
             spaces: Vec::new(),
+            cleared_unread: HashMap::new(),
             index: std::sync::OnceLock::new(),
             timelines: HashMap::new(),
             closed: Vec::new(),
@@ -1534,8 +1570,17 @@ impl Accounts {
         }
     }
 
-    pub fn set_room_list(&mut self, id: &AccountId, list: RoomList) {
+    pub fn set_room_list(&mut self, id: &AccountId, mut list: RoomList) {
         if let Some(account) = self.get_mut(id) {
+            let mut cleared = std::mem::take(&mut account.cleared_unread);
+            for room in &mut list.rooms {
+                if let Some(old) = cleared.remove(&room.room_id)
+                    && old.still_cleared(room)
+                {
+                    account.cleared_unread.insert(room.room_id.clone(), old);
+                    UnreadSnapshot::clear(room);
+                }
+            }
             account.rooms = list.rooms;
             account.spaces = list.spaces;
             account.invitations = list.invitations;
@@ -1946,10 +1991,14 @@ impl Accounts {
 
     /// Clears a room's unread counts locally, ahead of the server's next count.
     pub fn mark_read(&mut self, id: &AccountId, room_id: &str) {
-        if let Some(room) = self.room_mut(id, room_id) {
-            room.unread = 0;
-            room.mentions = 0;
-            room.marked_unread = false;
+        let Some(room) = self.room_mut(id, room_id) else { return };
+        let old = UnreadSnapshot::of(room);
+        UnreadSnapshot::clear(room);
+        room.marked_unread = false;
+        if (old.unread > 0 || old.mentions > 0)
+            && let Some(account) = self.get_mut(id)
+        {
+            account.cleared_unread.insert(room_id.to_owned(), old);
         }
     }
 
@@ -1971,6 +2020,11 @@ impl Accounts {
     /// Takes back the one change to a room the server refused, keeping whatever else changed
     /// about the room since.
     pub fn undo(&mut self, id: &AccountId, room_id: &str, undo: &RoomUndo) {
+        if matches!(undo, RoomUndo::Read { .. })
+            && let Some(account) = self.get_mut(id)
+        {
+            account.cleared_unread.remove(room_id);
+        }
         let Some(room) = self.room_mut(id, room_id) else { return };
         match *undo {
             RoomUndo::Priority(priority) => room.priority = priority,
@@ -2210,6 +2264,7 @@ mod tests {
             custom_notifications: false,
             call: matrix_core::RoomCall::default(),
             activity_ms: None,
+            latest_event_id: None,
             encrypted: false,
             public: false,
             can_rename: false,

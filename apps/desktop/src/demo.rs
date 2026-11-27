@@ -947,6 +947,7 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
         // The demo's homeserver names a call service.
         call: matrix_core::RoomCall { via: Some(matrix_core::CallVia::Rtc), ..matrix_core::RoomCall::default() },
         activity_ms: None,
+        latest_event_id: None,
         encrypted: true,
         public: false,
         can_rename: true,

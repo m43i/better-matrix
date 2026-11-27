@@ -370,6 +370,7 @@ mod tests {
                 custom_notifications: false,
                 call: matrix_core::RoomCall::default(),
                 activity_ms: None,
+                latest_event_id: None,
                 encrypted: false,
                 public: false,
                 can_rename: false,
