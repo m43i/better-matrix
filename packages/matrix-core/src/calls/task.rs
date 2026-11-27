@@ -420,6 +420,11 @@ async fn run_direct(
         let (opening, device) = ((sinks.clone(), source.clone()), devices.camera.clone());
         let opened =
             media::blocking(move || media::start_camera(opening.0, preview, device.as_deref(), Some(opening.1)));
+        // A camera that hangs (a stuck driver, a prompt left open) leaves the call going with
+        // the camera off rather than connecting forever; it stops on its own once it opens.
+        let opened = async {
+            tokio::time::timeout(CAMERA_LIMIT, opened).await.unwrap_or(Err(CallError::Stalled("opening the camera")))
+        };
         // A camera can be slow to open (or wait on a permission prompt): a hang-up meanwhile
         // ends the call; the camera, once open, stops on its own.
         let started = tokio::select! {
@@ -700,6 +705,9 @@ async fn direct_loop(
     end
 }
 
+/// How long the camera of a one-to-one video call may take to open before the call goes on
+/// without it.
+const CAMERA_LIMIT: Duration = Duration::from_secs(15);
 /// How long setting up a one-to-one call may take: the connection, then sending the invite or
 /// the answer.
 const SETUP_LIMIT: Duration = Duration::from_secs(20);

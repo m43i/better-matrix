@@ -161,7 +161,8 @@ Date: 2026-11-16
   person (once their device answered, only that device) or, for a pickup elsewhere, the user's
   own other devices (`task::hear`). While it rings, only the caller's ringing device adds
   candidates or hangs up, and only the user's own other devices answer or decline it elsewhere
-  (`task::hear_ringing`). Opening the camera at the start races a hang-up too. A hangup goes
+  (`task::hear_ringing`). Opening the camera at the start races a hang-up too, and has 15 s: a camera that hangs
+  (a stuck driver, a prompt left open) leaves the call going with the camera off. A hangup goes
   out only for a call the other side knows of (it called, or the invite went out). The TURN
   lookup is short and unretried: without an answer, the call goes without TURN. Candidates are
   gathered once, as browsers do (LiveKit's default gathers continually, for its SFU, which keeps
@@ -180,8 +181,7 @@ Date: 2026-11-16
   a row don't add up, and another room's wait holds up nothing here. An invite heard after the user left its room doesn't ring. Under sliding sync the room's events and its room
   keys come through different connections (the to-device long poll), and a call's first events
   are usually the first of a new Megolm session, so they often arrive before their key; dropped
-  as before, a one-to-one call never rang or never connected. A session whose key didn't come
-  isn't waited for again, only tried once more per event (the 256 latest are remembered).
+  as before, a one-to-one call never rang or never connected.
 - **Telling the room:** the first one into a call sends `m.rtc.notification` (the unstable type,
   as Element Call does): `ring` in a direct chat, `notification` in a group, so every call has its
   card in the timeline and group calls don't ring.

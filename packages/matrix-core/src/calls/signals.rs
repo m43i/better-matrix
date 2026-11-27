@@ -176,8 +176,6 @@ struct Queued {
 const KEY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 /// How often a waiting event tries again.
 const KEY_RETRY: std::time::Duration = std::time::Duration::from_millis(250);
-/// How many sessions whose key never came are remembered.
-const KEYLESS_KEPT: usize = 256;
 /// Only events younger than this wait for their key: older ones are past any call (an invite
 /// lives a minute) and a catch-up sync's backlog mustn't hold the queue up.
 const KEY_FRESH_MS: u64 = 2 * 60 * 1000;
@@ -230,34 +228,19 @@ async fn by_room<T, K, R, F>(
 /// Turns one room's queued events into signals, in the order sync delivered them: one still
 /// encrypted waits for its key first (until [`KEY_WAIT`] after it arrived), so an invite that
 /// came before its key still rings, and its candidates and answer don't overtake it. Every event
-/// waits at most that long after arriving, whatever waited before it. A session whose key never
-/// came is tried once more per event, without waiting.
+/// waits at most that long after arriving, whatever waited before it: events of a session whose
+/// key is late wait out the same few seconds together.
 async fn read_room(
     account: AccountId,
     signals: UnboundedSender<Signal>,
     mut queued: tokio::sync::mpsc::UnboundedReceiver<Queued>,
 ) {
-    let mut keyless: std::collections::HashSet<String> = std::collections::HashSet::new();
     while let Some(Queued { raw, room, encrypted, undecrypted, arrived }) = queued.recv().await {
         let (raw, encrypted) = if undecrypted {
-            let session = raw
-                .get_field::<Value>("content")
-                .ok()
-                .flatten()
-                .and_then(|content| content["session_id"].as_str().map(str::to_owned));
-            let deadline = if session.as_ref().is_some_and(|session| keyless.contains(session)) {
-                arrived
-            } else {
-                arrived + KEY_WAIT
-            };
-            match decrypted_by(&room, &raw, deadline).await {
+            match decrypted_by(&room, &raw, arrived + KEY_WAIT).await {
                 Some(decrypted) => (decrypted, true),
                 None => {
                     tracing::debug!("call: an event in {} never got its key", room.room_id());
-                    if keyless.len() >= KEYLESS_KEPT {
-                        keyless.clear();
-                    }
-                    keyless.extend(session);
                     continue;
                 }
             }
