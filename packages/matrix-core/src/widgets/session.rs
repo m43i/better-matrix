@@ -91,19 +91,22 @@ pub(crate) async fn confirm_access(
     Err(Error::Cancelled)
 }
 
-pub(crate) fn url_fields(template: &str) -> Vec<WidgetUrlField> {
-    [
+fn url_fields(template: &str, viewer: &super::Viewer) -> Vec<WidgetUrlField> {
+    let mut fields = Vec::new();
+    for (token, field) in [
         ("$matrix_user_id", WidgetUrlField::UserId),
         ("$matrix_room_id", WidgetUrlField::RoomId),
         ("$matrix_widget_id", WidgetUrlField::WidgetId),
-        ("$matrix_display_name", WidgetUrlField::DisplayName),
+        ("$matrix_display_name", name_field(viewer)),
         ("$matrix_avatar_url", WidgetUrlField::AvatarUrl),
         ("$org.matrix.msc3819.matrix_device_id", WidgetUrlField::DeviceId),
         ("$org.matrix.msc4039.matrix_base_url", WidgetUrlField::Homeserver),
-    ]
-    .into_iter()
-    .filter_map(|(token, field)| template.contains(token).then_some(field))
-    .collect()
+    ] {
+        if template.contains(token) && !fields.contains(&field) {
+            fields.push(field);
+        }
+    }
+    fields
 }
 
 fn origin(url: &str) -> Result<String, Error> {
@@ -723,7 +726,7 @@ pub(crate) async fn run(
     }
     let origin = origin(&widget.url)?;
     let bridged = !browser && widget.url.starts_with("https://");
-    let mut fields = url_fields(template);
+    let mut fields = url_fields(template, &viewer);
     if bridged && !fields.contains(&WidgetUrlField::WidgetId) {
         fields.push(WidgetUrlField::WidgetId);
     }

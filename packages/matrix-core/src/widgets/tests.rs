@@ -24,15 +24,17 @@ async fn synced(server: &Server) -> Account {
 }
 
 fn pinned_widget(content: Value) -> Server {
-    Server::new(move |request| {
-        if request.contains("/state ") {
-            return json!([{
-                "type": LEGACY_TYPE, "state_key": "fixture", "sender": "@a:example.org",
-                "event_id": "$fixture", "origin_server_ts": 1, "content": content,
-            }]);
-        }
-        thread_response(request)
-    })
+    Server::new(move |request| widget_response(request, &content))
+}
+
+fn widget_response(request: &str, content: &Value) -> Value {
+    if request.contains("/state ") {
+        return json!([{
+            "type": LEGACY_TYPE, "state_key": "fixture", "sender": "@a:example.org",
+            "event_id": "$fixture", "origin_server_ts": 1, "content": content,
+        }]);
+    }
+    thread_response(request)
 }
 
 fn viewer() -> Viewer {
@@ -285,6 +287,34 @@ async fn the_preload_prompt_should_show_the_widget_id_added_by_the_bridge() {
     let _ = run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
     let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else { panic!("expected permission dialog") };
     assert_eq!(access.kind, WidgetAccessKind::Open(vec![WidgetUrlField::WidgetId]));
+}
+
+#[tokio::test]
+async fn a_widget_should_disclose_the_matrix_id_when_it_stands_in_for_the_display_name() {
+    let content = json!({
+        "type": "m.custom", "url": "https://board.example.org/?owner=$matrix_display_name&user=$matrix_user_id"
+    });
+    let server = Server::new(move |request| {
+        let mut response = widget_response(request, &content);
+        if request.contains("/sync?") {
+            let events = response["rooms"]["join"][ROOM]["state"]["events"].as_array_mut().unwrap();
+            let member = events.iter_mut().find(|event| event["type"] == "m.room.member").unwrap();
+            member["content"].as_object_mut().unwrap().remove("displayname");
+        }
+        response
+    });
+    let account = synced(&server).await;
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+
+    assert!(matches!(result, Err(Error::Cancelled)));
+    let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else { panic!("expected permission dialog") };
+    assert_eq!(access.kind, WidgetAccessKind::Open(vec![WidgetUrlField::UserId, WidgetUrlField::WidgetId]));
 }
 
 #[test]
