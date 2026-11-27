@@ -2286,8 +2286,8 @@ struct State {
     tasks: JoinSet<Completion>,
     /// Command tasks still running, for [`Command::Cancel`].
     running: HashMap<RequestId, AbortHandle>,
-    /// [`Command::MarkRead`] requests still running: quitting waits a moment for them, so what
-    /// the user read last counts as read on the next start.
+    /// [`Command::MarkRead`] and [`Command::MarkRoomRead`] requests still running: quitting
+    /// waits a moment for them, so what the user read last counts as read on the next start.
     reading: HashSet<RequestId>,
     /// Local live shares, scoped to the destination, including starts still in flight.
     live_shares: HashMap<(AccountId, String), (RequestId, tokio::sync::watch::Sender<()>)>,
@@ -2373,8 +2373,15 @@ impl State {
                 },
             }
         }
-        // The app is quitting: read receipts still on their way finish first (briefly), so the
-        // rooms just read stay read.
+        // The app is quitting. The call under way (or just hung up) leaves, so nobody sees the
+        // user in it for the seconds until the delayed leave would.
+        #[cfg(feature = "native-media")]
+        self.hang_up();
+        self.end_locations(|_, _| true).await;
+        #[cfg(feature = "native-media")]
+        let leaving = self.leaving.any();
+        // Meanwhile, read receipts still on their way finish (briefly), so the rooms just read
+        // stay read.
         let receipts = async {
             while !self.reading.is_empty() {
                 match self.tasks.join_next().await {
@@ -2386,16 +2393,15 @@ impl State {
                 }
             }
         };
-        let _ = tokio::time::timeout(RECEIPTS_WAIT, receipts).await;
-        // The call under way (or just hung up) leaves, so nobody sees the
-        // user in it for the seconds until the delayed leave would.
+        let receipts = tokio::time::timeout(RECEIPTS_WAIT, receipts);
         #[cfg(feature = "native-media")]
-        self.hang_up();
-        self.end_locations(|_, _| true).await;
-        #[cfg(feature = "native-media")]
-        if let Some(task) = self.leaving.any() {
-            let _ = tokio::time::timeout(QUIT_WAIT, task).await;
-        }
+        let _ = tokio::join!(receipts, async {
+            if let Some(task) = leaving {
+                let _ = tokio::time::timeout(QUIT_WAIT, task).await;
+            }
+        });
+        #[cfg(not(feature = "native-media"))]
+        let _ = receipts.await;
     }
 
     fn restore_saved(&mut self) {
@@ -4186,6 +4192,7 @@ impl State {
                 })
             }
             Command::MarkRoomRead { account: id, room_id } => {
+                self.reading.insert(request);
                 let feed = self.feed(&id);
                 let changed = self.account(&id).map(|account| {
                     let (queue, room_id) = (account.organising.clone(), room_id.clone());
