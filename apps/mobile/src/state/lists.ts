@@ -26,14 +26,14 @@ function oneLine(text: string): string {
  * A message as one line of plain text, as the desktop's overview shows it: a spoiler as
  * `[Spoiler]`, never its words.
  */
-export function messageText(message: Message): string {
+export function messageText(message: Message, sender = message.sender_name): string {
   const content = message.content;
 
   switch (content.type) {
     case 'Text':
       return oneLine(spoilerSafeText(content.data.body, content.data.html));
     case 'Emote':
-      return `* ${message.sender_name} ${oneLine(spoilerSafeText(content.data.body, content.data.html))}`;
+      return `* ${sender} ${oneLine(spoilerSafeText(content.data.body, content.data.html))}`;
     case 'Location':
       return content.data.description ?? t('mobile.conversation.location');
     case 'Attachment':
@@ -54,11 +54,11 @@ export function messageText(message: Message): string {
 }
 
 /** "Sender: text", the preview under a conversation's name. */
-export function previewLine(message: Message): string {
+export function previewLine(message: Message, sender = message.sender_name): string {
   // An emote names its sender already.
-  if (message.content.type === 'Emote') return messageText(message);
+  if (message.content.type === 'Emote') return messageText(message, sender);
 
-  return t('overview.preview', { sender: message.sender_name, body: messageText(message) });
+  return t('overview.preview', { sender, body: messageText(message, sender) });
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;

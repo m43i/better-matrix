@@ -31,7 +31,7 @@ const SAVED_SPAN: f32 = 30.0 + 8.0;
 /// The bar across the top of the window, with the search in its middle and the account's saved
 /// messages beside it.
 pub fn top_bar(s: &State, account: &AccountData, p: &Palette, chrome: ChromeInsets) -> El {
-    let placeholder = tf!("search.placeholder", account = account.summary.display_name);
+    let placeholder = tf!("search.placeholder", account = s.settings.person_name(&account.summary.display_name));
     let field = if s.popover == Some(crate::state::Popover::Search) {
         text_input(&s.search.field, font::BODY)
             .key(SEARCH)
@@ -119,7 +119,7 @@ fn saved_button(s: &State, p: &Palette) -> El {
 }
 
 /// One result or member: a picture, a name, and a line under it.
-pub(super) fn person_row(key: String, person: &Person, media: &MediaCache, p: &Palette, query: &str) -> El {
+pub(super) fn person_row(key: String, person: &Person, media: &MediaCache, p: &Palette, query: &str, name: &str) -> El {
     row()
         .key(key)
         .w_full()
@@ -132,12 +132,12 @@ pub(super) fn person_row(key: String, person: &Person, media: &MediaCache, p: &P
         .role("button")
         .focusable(true)
         .cursor(rune::Cursor::Pointer)
-        .child(media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, 28.0))
+        .child(media_avatar(&person.id, name, person.avatar.as_ref(), media, 28.0))
         .child(
             col()
                 .grow(1.0)
                 .min_w(0.0)
-                .child(highlighted(&person.name, query, p))
+                .child(highlighted(name, query, p))
                 .child(highlighted(&person.id, query, p).font(font::META).color(p.text_muted)),
         )
 }
@@ -148,9 +148,10 @@ pub fn members_button(s: &State, account: &AccountData, room: &RoomSummary, p: &
     let mut faces = row().center_y();
     if let Some(members) = account.members.get(&room.room_id) {
         for (index, person) in members.people.iter().take(3).map(|member| &member.person).enumerate() {
-            let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), &s.media, 22.0)
-                .radius(6.0)
-                .border(1.5, p.bg);
+            let face =
+                media_avatar(&person.id, &s.settings.person_name(&person.name), person.avatar.as_ref(), &s.media, 22.0)
+                    .radius(6.0)
+                    .border(1.5, p.bg);
             faces = faces.child(if index == 0 { face } else { face.ml(-6.0) });
         }
     }
@@ -176,7 +177,8 @@ pub fn members_button(s: &State, account: &AccountData, room: &RoomSummary, p: &
 /// The invite dialog: search the directory (or type a user ID) and invite with a press.
 pub fn invite_dialog(s: &State, account: &AccountData, room_id: &str, invited: &[String], p: &Palette) -> El {
     let room = account.room(room_id);
-    let title = tf!("invite.title", room = room.map_or_else(|| room_id.to_owned(), display_name));
+    let title =
+        tf!("invite.title", room = room.map_or_else(|| room_id.to_owned(), |room| display_name(room, &s.settings)));
     let field = text_input(&s.invite_search.field, font::BODY)
         .key("invite-search")
         .single_line()
@@ -209,7 +211,15 @@ pub fn invite_dialog(s: &State, account: &AccountData, room_id: &str, invited: &
                 .on_press(move |s: &mut State| s.invite(&id)),
         };
         list = list.child(
-            person_row(format!("invitee-{}", person.id), person, &s.media, p, s.invite_search.query()).child(trailing),
+            person_row(
+                format!("invitee-{}", person.id),
+                person,
+                &s.media,
+                p,
+                s.invite_search.query(),
+                &s.settings.person_name(&person.name),
+            )
+            .child(trailing),
         );
     }
     let content = col()

@@ -75,6 +75,9 @@ pub struct RoomSummary {
     pub room_id: String,
     /// The computed display name.
     pub name: String,
+    /// The room name is computed from one direct chat partner's display name.
+    #[cfg_attr(feature = "ffi", serde(default))]
+    pub name_from_member: bool,
     /// The room topic, if one is set.
     pub topic: Option<String>,
     /// Group room or direct chat.

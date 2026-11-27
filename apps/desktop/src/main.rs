@@ -2324,6 +2324,34 @@ mod tests {
     }
 
     #[test]
+    fn the_general_name_switch_should_reverse_a_direct_chat_label_without_renaming_it() {
+        const ROOM: &str = "!dm-grace:example.org";
+        let mut rt = runtime(|s| {
+            demo::seed(s);
+            let account = matrix_core::AccountId::new(demo::ADA);
+            let data = s.accounts.get(&account).unwrap();
+            let mut rooms = data.rooms.clone();
+            rooms.iter_mut().find(|room| room.room_id == ROOM).unwrap().name = "Hopper, Grace".into();
+            let list = matrix_core::RoomList { rooms, spaces: data.spaces.clone(), invitations: Vec::new() };
+            s.apply(matrix_core::Event::RoomsUpdated { account, list }, &mut rune::Tx::default());
+            s.open_settings();
+        });
+        let key = format!("room-{ROOM}");
+        let label = |rt: &Runtime<State>| {
+            rt.elements()
+                .into_iter()
+                .find(|element| element.key.as_deref() == Some(&key))
+                .and_then(|element| element.label)
+        };
+        assert_eq!(label(&rt).as_deref(), Some("Hopper, Grace"));
+        press(&mut rt, "reverse-display-names");
+        assert_eq!(label(&rt).as_deref(), Some("Grace, Hopper"));
+        assert_eq!(rt.state.active_account().unwrap().room(ROOM).unwrap().name, "Hopper, Grace");
+        press(&mut rt, "reverse-display-names");
+        assert_eq!(label(&rt).as_deref(), Some("Hopper, Grace"));
+    }
+
+    #[test]
     fn closing_the_window_should_clear_its_focus_for_background_notifications() {
         let mut rt = runtime(demo::seed);
         rt.state.focus_changed(true);

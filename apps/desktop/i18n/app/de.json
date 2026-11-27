@@ -499,6 +499,8 @@
   "settings.close": "Einstellungen schließen",
   "settings.devices_loading": "Geräte werden gesucht …",
   "settings.general": "Allgemein",
+  "settings.reverse_display_names": "Anzeigenamen umkehren",
+  "settings.reverse_display_names_hint": "Zeigt Namen wie „Müller, Anna“ auf diesem Gerät als „Anna, Müller“ an.",
   "settings.gifs": "GIFs aus Links",
   "settings.gifs_hint": "Links zu GIFs von Giphy, Tenor und Imgur in Nachrichten können direkt in der Unterhaltung abgespielt werden.",
   "settings.gifs_off": "Nur den Link zeigen",

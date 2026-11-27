@@ -499,6 +499,8 @@
   "settings.close": "Fermer les réglages",
   "settings.devices_loading": "Recherche des appareils…",
   "settings.general": "Général",
+  "settings.reverse_display_names": "Inverser les noms affichés",
+  "settings.reverse_display_names_hint": "Affiche les noms comme « Dupont, Marie » sous la forme « Marie, Dupont » sur cet appareil.",
   "settings.gifs": "GIF des liens",
   "settings.gifs_hint": "Les liens vers des GIF Giphy, Tenor et Imgur dans les messages peuvent être lus directement dans la conversation.",
   "settings.gifs_off": "Afficher seulement le lien",

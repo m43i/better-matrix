@@ -32,6 +32,7 @@ fn room(room_id: &str) -> RoomSummary {
     RoomSummary {
         room_id: room_id.into(),
         name: room_id.into(),
+        name_from_member: false,
         topic: None,
         kind: RoomKind::Group,
         unread: 2,

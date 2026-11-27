@@ -10,6 +10,7 @@ import type {
   RoomKind,
 } from '@better-matrix/matrix-native/types';
 
+import { personName } from './names';
 import { type Key, locale, t, tp } from '../i18n';
 
 /** `HH:MM` in local time. */
@@ -79,8 +80,8 @@ export function sentAt(at: number, now: number): string {
 }
 
 /** What one room event says. */
-export function roomEventText(event: RoomEvent): string {
-  const name = event.sender.name;
+export function roomEventText(event: RoomEvent, reverse = false): string {
+  const name = personName(event.sender.name, reverse);
   const change = event.change;
 
   switch (change.type) {
@@ -91,23 +92,23 @@ export function roomEventText(event: RoomEvent): string {
     case 'Left':
       return t('event.left', { name });
     case 'Invited':
-      return t('event.invited', { name, target: change.data.name });
+      return t('event.invited', { name, target: personName(change.data.name, reverse) });
     case 'InviteRevoked':
-      return t('event.invite_revoked', { name, target: change.data.name });
+      return t('event.invite_revoked', { name, target: personName(change.data.name, reverse) });
     case 'InviteDeclined':
       return t('event.invite_declined', { name });
     case 'Removed':
-      return t('event.removed', { name, target: change.data.name });
+      return t('event.removed', { name, target: personName(change.data.name, reverse) });
     case 'Banned':
-      return t('event.banned', { name, target: change.data.name });
+      return t('event.banned', { name, target: personName(change.data.name, reverse) });
     case 'Unbanned':
-      return t('event.unbanned', { name, target: change.data.name });
+      return t('event.unbanned', { name, target: personName(change.data.name, reverse) });
     case 'Knocked':
       return t('event.knocked', { name });
     case 'DisplayName':
       return change.data === null
         ? t('event.display_name_removed', { name })
-        : t('event.display_name', { name, new_name: change.data });
+        : t('event.display_name', { name, new_name: personName(change.data, reverse) });
     case 'ProfilePicture':
       return t('event.profile_picture', { name });
     case 'RoomName':
@@ -168,14 +169,14 @@ export function eventPeople(run: readonly RoomEvent[]): Person[] {
 }
 
 /** What a run of joins or leaves says: "Ada, Grace and Linus joined". */
-export function eventRunText(run: readonly RoomEvent[]): string {
+export function eventRunText(run: readonly RoomEvent[], reverse = false): string {
   const first = run[0];
 
   if (!first) return '';
   const people = eventPeople(run);
 
-  if (people.length <= 1) return roomEventText(first);
-  const names = people.map((p) => p.name);
+  if (people.length <= 1) return roomEventText(first, reverse);
+  const names = people.map((p) => personName(p.name, reverse));
   let listed: string;
 
   if (names.length <= EVENT_PEOPLE) {
@@ -248,6 +249,6 @@ export function repliesText(count: number): string {
 }
 
 /** A room's name inside a sentence: `#general`, or a person's name. */
-export function inlineName(room: { name: string; kind: RoomKind }): string {
-  return room.kind === 'Group' ? `#${room.name}` : room.name;
+export function inlineName(room: { name: string; kind: RoomKind }, name = room.name): string {
+  return room.kind === 'Group' ? `#${name}` : name;
 }

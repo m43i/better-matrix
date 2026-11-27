@@ -386,6 +386,7 @@ function room(
   return {
     room_id: id,
     name,
+    name_from_member: false,
     topic,
     kind: 'Group',
     unread,
@@ -431,7 +432,12 @@ function noteToSelf(id: string): RoomSummary {
 }
 
 function dm(id: string, withId: string, name: string, unread: number): RoomSummary {
-  return { ...room(id, name, null, unread, unread), kind: 'Direct', dm_users: [withId] };
+  return {
+    ...room(id, name, null, unread, unread),
+    kind: 'Direct',
+    name_from_member: true,
+    dm_users: [withId],
+  };
 }
 
 function space(id: string, name: string, children: string[], members: string[]): SpaceSummary {

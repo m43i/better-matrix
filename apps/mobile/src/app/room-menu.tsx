@@ -6,6 +6,7 @@
 // Its pages are an explicit state machine (`Page`); edits apply to the account's current scope.
 
 import type { AccountId, NotificationMode, RoomSummary } from '@better-matrix/matrix-native/types';
+import { useRoomName } from '../ui/displayNames';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -139,6 +140,7 @@ function RoomPages({
 }) {
   const store = useAppStore();
   const palette = usePalette();
+  const name = useRoomName(room);
   const id = account.summary.id;
   const scope = account.scope;
   const direct = room.kind === 'Direct';
@@ -158,12 +160,12 @@ function RoomPages({
       <Avatar
         account={id}
         id={room.dm_users[0] ?? room.room_id}
-        name={room.name}
+        name={name}
         media={room.avatar}
         size={36}
       />
       <Text style={[font.header, styles.grow, { color: palette.text }]} numberOfLines={1}>
-        {room.name}
+        {name}
       </Text>
     </View>
   );

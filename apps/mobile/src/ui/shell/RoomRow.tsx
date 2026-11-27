@@ -4,6 +4,7 @@
 // adds the latest message and its time. Tapping opens it; a long press opens its menu.
 
 import type { AccountId, Message, RoomSummary } from '@better-matrix/matrix-native/types';
+import { usePersonName, useRoomName } from '../displayNames';
 import { router } from 'expo-router';
 import { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -58,7 +59,9 @@ export const RoomRow = memo(function RoomRow({
   const direct = room.kind === 'Direct';
   const badge = room.mentions > 0 ? room.mentions : direct && attention ? room.unread : 0;
   const nameColor = muted && !attention ? palette.textMuted : palette.text;
-  const title = room.note_to_self ? t('note_to_self.name') : room.name;
+  const displayName = useRoomName(room);
+  const sender = usePersonName(last?.sender_name ?? '');
+  const title = room.note_to_self ? t('note_to_self.name') : displayName;
   const time = previewAt || last?.timestamp_ms;
 
   const preview =
@@ -68,8 +71,8 @@ export const RoomRow = memo(function RoomRow({
         room.dm_users.length === 1 &&
         room.active_member_count <= 2 &&
         room.dm_users[0] === last.sender_id
-        ? messageText(last)
-        : previewLine(last)
+        ? messageText(last, sender)
+        : previewLine(last, sender)
       : null;
 
   const status = (
@@ -156,7 +159,7 @@ export const RoomRow = memo(function RoomRow({
               <Avatar
                 account={account}
                 id={room.dm_users[0] ?? room.room_id}
-                name={room.name}
+                name={displayName}
                 media={room.avatar}
                 size={COMPACT_AVATAR}
               />

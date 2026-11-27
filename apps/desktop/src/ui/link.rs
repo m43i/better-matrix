@@ -50,13 +50,19 @@ pub fn link_dialog(s: &State, link: &LinkDialog, p: &Palette) -> El {
                 .w_full()
                 .gap(14.0)
                 .center_y()
-                .child(media_avatar(&person.id, &person.name, person.avatar.as_ref(), &s.media, 56.0))
+                .child(media_avatar(
+                    &person.id,
+                    &s.settings.person_name(&person.name),
+                    person.avatar.as_ref(),
+                    &s.media,
+                    56.0,
+                ))
                 .child(text(person.id.clone()).font(font::BODY).color(p.text_muted).grow(1.0).wrap());
             if request.is_some() {
                 who = who.child(text(t!("link.person_loading")).font(font::META).color(p.text_muted));
             }
             (
-                person.name.clone(),
+                s.settings.person_name(&person.name).into_owned(),
                 who,
                 Some(
                     button(t!("members.chat"), ButtonKind::Primary, true, p)
@@ -88,7 +94,7 @@ fn accounts(s: &State, link: &LinkDialog, p: &Palette) -> El {
                 .border(1.0, if picked { p.accent } else { p.divider })
                 .fill(if picked { p.accent.alpha(0.12) } else { p.bg })
                 .role("radio")
-                .label(account.summary.display_name.clone())
+                .label(s.settings.person_name(&account.summary.display_name))
                 .help(id.to_string())
                 .cursor(rune::Cursor::Pointer)
                 .child(account_avatar(&account.summary, &s.media, 20.0))

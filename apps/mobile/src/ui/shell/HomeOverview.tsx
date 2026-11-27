@@ -1,6 +1,7 @@
 // The greeting or space header above the room list in the current scope.
 
 import { router } from 'expo-router';
+import { usePersonName } from '../displayNames';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { t, tp } from '../../i18n';
@@ -17,7 +18,8 @@ export function HomeOverview({ account, caughtUp }: { account: RoomListData; cau
   const palette = usePalette();
   const { summary, spaces, scope } = account;
   const space = scope === 'home' ? undefined : spaces.find((item) => item.room_id === scope.space);
-  const name = space?.name ?? summary.display_name ?? summary.id;
+  const displayName = usePersonName(summary.display_name || summary.id);
+  const name = space?.name ?? displayName;
   const title = space ? space.name : t('overview.welcome', { name: name || summary.id });
 
   const detail = space

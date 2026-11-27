@@ -931,6 +931,7 @@ fn room(id: &str, name: &str, topic: Option<&str>, unread: u64, mentions: u64) -
     RoomSummary {
         room_id: id.into(),
         name: name.into(),
+        name_from_member: false,
         topic: topic.map(Into::into),
         kind: RoomKind::Group,
         unread,
@@ -969,6 +970,7 @@ fn call_card(video: Option<bool>) -> MessageContent {
 fn dm(id: &str, with: &str, name: &str, unread: u64) -> RoomSummary {
     RoomSummary {
         kind: RoomKind::Direct,
+        name_from_member: true,
         dm_users: vec![with.into()],
         member_count: 2,
         active_member_count: 2,

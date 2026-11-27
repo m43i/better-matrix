@@ -76,7 +76,7 @@ pub fn sidebar(s: &State, account: &AccountData, p: &Palette) -> El {
     // The user's own notes, above everything.
     list = list.children(crate::state::note_to_self(account, &scope).map(|room| {
         let selected = open == Some(room.room_id.as_str());
-        col().key(NOTE_TO_SELF_ROW).w_full().child(room_row(room, None, selected, false, &s.media, p))
+        col().key(NOTE_TO_SELF_ROW).w_full().child(room_row(room, None, selected, false, s, p))
     }));
     list = list.children(super::room_discovery::invitations(s, account, p));
     if account.rooms.is_empty() {
@@ -213,7 +213,7 @@ fn section_block(s: &State, view: &SectionView<'_>, open: Option<&str>, drop_at:
             shown += 1;
         }
         let partner = dm_partner(room).and_then(|id| s.active_account().and_then(|account| account.presence.get(id)));
-        block = block.child(room_row(room, partner, selected, dragged == Some(room.room_id.as_str()), &s.media, p));
+        block = block.child(room_row(room, partner, selected, dragged == Some(room.room_id.as_str()), s, p));
     }
     if !is_builtin(&id) && drop_at.is_some_and(|at| at >= shown) && !view.collapsed {
         block = block.child(line());
@@ -245,17 +245,21 @@ fn room_row(
     partner: Option<&PersonPresence>,
     selected: bool,
     dragged: bool,
-    media: &crate::state::MediaCache,
+    s: &State,
     p: &Palette,
 ) -> El {
+    let media = &s.media;
+    let name = s.settings.room_name(room);
     let picture_ready = room.avatar.as_ref().is_some_and(|picture| media.image(picture).is_some());
     let version = (
-        (&room.name, room.unread, room.mentions, room.marked_unread, room.notifications, room.kind, &room.dm_users),
+        (name.as_ref(), room.unread, room.mentions, room.marked_unread, room.notifications, room.kind, &room.dm_users),
         room.note_to_self,
         partner,
         (&room.avatar, picture_ready, selected, dragged, colour_bits(p.sidebar_bg)),
     );
-    rune::memo(format!("room-{}", room.room_id), version, || build_room_row(room, partner, selected, dragged, media, p))
+    rune::memo(format!("room-{}", room.room_id), version, || {
+        build_room_row(room, &name, partner, selected, dragged, media, p)
+    })
 }
 
 /// A colour as its exact bits, for a memo's version: the palette's identity, without formatting
@@ -275,6 +279,7 @@ pub fn dm_partner(room: &RoomSummary) -> Option<&str> {
 
 fn build_room_row(
     room: &RoomSummary,
+    name: &str,
     partner: Option<&PersonPresence>,
     selected: bool,
     dragged: bool,
@@ -310,19 +315,14 @@ fn build_room_row(
         _ if room.note_to_self => el().w(18.0).center().child(icon(&icons::NOTE, 16.0).color(p.sidebar_text_muted)),
         RoomKind::Group => el().w(18.0).center().child(text("#").font(font::NAV).color(p.sidebar_text_muted)),
         RoomKind::Direct => {
-            let face = media_avatar(
-                room.dm_users.first().unwrap_or(&room.room_id),
-                &room.name,
-                room.avatar.as_ref(),
-                media,
-                18.0,
-            );
+            let face =
+                media_avatar(room.dm_users.first().unwrap_or(&room.room_id), name, room.avatar.as_ref(), media, 18.0);
             let ring = if selected { p.sidebar_selected } else { p.sidebar_bg };
             with_presence(face, 18.0, partner, ring, p)
         }
     };
     let (open, menu) = (room.room_id.clone(), room.room_id.clone());
-    let row = nav_row(leading, &room.name, emphasis, status, p)
+    let row = nav_row(leading, name, emphasis, status, p)
         .key(format!("room-{}", room.room_id))
         .opacity(if dragged { 0.35 } else { 1.0 })
         .on_press_tx(crate::state::navigate(move |s| s.select_room(&open)))
@@ -375,9 +375,11 @@ pub fn section_menu(s: &State, account: &AccountData, id: &str, p: &Palette) -> 
 }
 
 /// What is dragged, under the pointer: the room's or section's name.
-pub fn drag_ghost(drag: &crate::state::SidebarDrag, account: &AccountData, p: &Palette) -> El {
+pub fn drag_ghost(s: &State, drag: &crate::state::SidebarDrag, account: &AccountData, p: &Palette) -> El {
     let name = match &drag.item {
-        Dragged::Room(id) => account.room(id).map_or_else(|| id.clone(), super::room::display_name),
+        Dragged::Room(id) => {
+            account.room(id).map_or_else(|| id.clone(), |room| super::room::display_name(room, &s.settings))
+        }
         Dragged::Space(id) => account.space(id).map_or_else(|| id.clone(), |space| space.name.clone()),
         Dragged::Section(id) => match id.as_str() {
             ROOMS => t!("sidebar.rooms").to_owned(),
@@ -443,9 +445,10 @@ pub fn new_chat_panel(s: &State, account: &AccountData, p: &Palette) -> El {
     }
     for person in s.chat_search.people.iter().filter(|person| person.id != me) {
         let id = person.id.clone();
-        let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), &s.media, 28.0);
+        let face =
+            media_avatar(&person.id, &s.settings.person_name(&person.name), person.avatar.as_ref(), &s.media, 28.0);
         list = list.child(
-            new_chat_row(face, person.name.clone(), person.id.clone(), p)
+            new_chat_row(face, s.settings.person_name(&person.name).into_owned(), person.id.clone(), p)
                 .key(format!("new-chat-{id}"))
                 .on_press(move |s: &mut State| s.open_direct_chat(&id)),
         );

@@ -5214,6 +5214,11 @@ impl State {
         self.shell.save_settings(self.settings.clone());
     }
 
+    pub fn set_reverse_display_names(&mut self, enabled: bool) {
+        self.settings.reverse_display_names = enabled;
+        self.shell.save_settings(self.settings.clone());
+    }
+
     /// Lays messages out in classic rows or chat bubbles, in every timeline.
     pub fn set_message_layout(&mut self, layout: MessageLayout) {
         self.settings.message_layout = layout;

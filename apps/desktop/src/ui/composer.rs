@@ -101,7 +101,7 @@ pub fn composer(s: &State, target: ComposerTarget, placeholder: &str, p: &Palett
         .border(1.0, if c.edit.focused { p.text_muted } else { p.divider })
         .fill(p.surface);
     if let Some(reply) = &c.reply_to {
-        frame = frame.child(reply_bar(target, &reply.sender_name, &reply.excerpt, p));
+        frame = frame.child(reply_bar(target, &s.settings.person_name(&reply.sender_name), &reply.excerpt, p));
     }
     if c.editing.is_some() {
         frame = frame.child(edit_bar(target, p));
@@ -192,10 +192,15 @@ fn typing_line(s: &State, p: &Palette) -> El {
     let Some(people) = people else { return line };
     let mut faces = row().center_y();
     for (index, person) in people.iter().take(TYPING_FACES).enumerate() {
-        let face =
-            super::components::media_avatar(&person.id, &person.name, person.avatar.as_ref(), &s.media, TYPING_FACE)
-                .radius(TYPING_FACE / 2.0)
-                .border(1.5, p.bg);
+        let face = super::components::media_avatar(
+            &person.id,
+            &s.settings.person_name(&person.name),
+            person.avatar.as_ref(),
+            &s.media,
+            TYPING_FACE,
+        )
+        .radius(TYPING_FACE / 2.0)
+        .border(1.5, p.bg);
         faces = faces.child(if index == 0 { face } else { face.ml(-5.0) });
     }
     let sentence = match people.as_slice() {

@@ -43,8 +43,8 @@ Date: 2026-11-16
     of its text field. Presets and native date/time pickers set the same optional expiry the
     desktop passes to the engine. The per-account engine task handles the deadline while
     the app is running, and the editor keeps a failed save open for retry (ADR 0008).
-  - _Settings:_ a single column groups preferences and account pages. General holds language
-    and developer tools, Appearance holds theme and message layout, and Messages & media
+  - _Settings:_ a single column groups preferences and account pages. General holds language,
+    display name order and developer tools, Appearance holds theme and message layout, and Messages & media
     holds previews, GIFs, maps and room changes.
   - _Search:_ under each tab's title, as the desktop's top bar: rooms, direct chats and spaces
     by name, then people from the user directory, listed in the tab's place while something is

@@ -38,6 +38,7 @@ export function roomSummary(
   return {
     room_id,
     name,
+    name_from_member: false,
     topic: null,
     kind,
     unread: 0,

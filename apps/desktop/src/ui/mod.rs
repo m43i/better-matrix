@@ -112,7 +112,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             vec![account_menu::account_menu(s, window, &p)]
         }
         (Some(Popover::RoomMenu { room_id, notifications }), Some(account)) => {
-            room_menu::room_menu(account, room_id, *notifications, &p)
+            room_menu::room_menu(s, account, room_id, *notifications, &p)
         }
         (Some(Popover::Search), Some(account)) => {
             let [width, height] = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
@@ -290,7 +290,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         );
     }
     if let (Some(drag), Some(account)) = (&s.dragging, account) {
-        root = root.child(sidebar::drag_ghost(drag, account, &p));
+        root = root.child(sidebar::drag_ghost(s, drag, account, &p));
     }
     root
 }

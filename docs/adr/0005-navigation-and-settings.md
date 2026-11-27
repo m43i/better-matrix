@@ -246,11 +246,15 @@ Date: 2026-11-22
     (`select_button`, `select_option`, `select_menu`; `Popover::Select(SelectFor)`). The list
     draws above the settings modal. The theme, message layout and emoticons use radio rows.
     On/off options use switches with their explanations visible in either state.
-  - The navigation groups preferences and account pages. General holds language, close to tray
-    (desktop) and developer tools. Appearance holds theme, interface size and message layout
+  - The navigation groups preferences and account pages. General holds language, display name
+    order, close to tray (desktop) and developer tools. Appearance holds theme, interface size and message layout
     ([0006](0006-timelines.md)).
     Messages & media holds emoticons, room changes, link previews, GIFs, GIF search and maps
     ([0007](0007-composer-and-media.md)). Settings sit in a single centered column, with switches on the right of their descriptions. Phones use the same General, Appearance, and Messages & media sections (ADR 0010).
+  - **Reverse display names** is off by default. The setting shows a person's display name with
+    two non-empty parts and one comma as `First, Last` when stored as `Last, First`. It also
+    applies to a direct chat whose name comes from its partner. Profile editors and outgoing
+    Matrix events use the original names.
   - Voice & video picks the microphone, speaker and camera by name, for calls and voice
     messages alike (`Settings::devices`, `State::choose_device`); the system's default when
     none is picked or the picked one is gone. The devices list when the section opens

@@ -27,6 +27,16 @@ export default function GeneralScreen() {
           </Fragment>
         ))}
       </ListSection>
+      <ListSection footer={t('settings.reverse_display_names_hint')}>
+        <ListRow
+          testID="reverse-display-names"
+          title={t('settings.reverse_display_names')}
+          toggle={{
+            value: settings.reverseDisplayNames,
+            onChange: (on) => updateSettings(store, { reverseDisplayNames: on }),
+          }}
+        />
+      </ListSection>
       <ListSection title={t('settings.developer')} footer={t('settings.hidden_events_on_hint')}>
         <ListRow
           testID="hidden-events"

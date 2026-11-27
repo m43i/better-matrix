@@ -7,6 +7,7 @@
 // its "(edited)" opens the edit history.
 
 import type { Message } from '@better-matrix/matrix-native/types';
+import { usePersonName } from '../displayNames';
 import { router } from 'expo-router';
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -48,11 +49,11 @@ const ROW_ACTIONS = [{ name: 'activate' }, { name: 'longpress' }];
  * The screen-reader control that opens a message's actions, on a view that holds no other
  * control (a classic row's sender column, a bubble's time): the row itself is none (ADR 0011).
  */
-function actionsControl(message: Message, open: (message: Message) => void) {
+function actionsControl(message: Message, sender: string, open: (message: Message) => void) {
   return {
     accessible: true,
     accessibilityRole: 'button' as const,
-    accessibilityLabel: `${message.sender_name}, ${clockTime(message.timestamp_ms)}`,
+    accessibilityLabel: `${sender}, ${clockTime(message.timestamp_ms)}`,
     accessibilityHint: t('actions.more'),
     accessibilityActions: ROW_ACTIONS,
     onAccessibilityAction: () => open(message),
@@ -95,6 +96,7 @@ function ClassicRow({ message, continues, latestCall, highlighted }: MessageRowP
   const palette = usePalette();
   const { account, openActions } = useTimelineContext();
   const pinned = usePinned(message.event_id);
+  const sender = usePersonName(message.sender_name);
   const shown = useShown(message);
 
   const statusLine =
@@ -136,12 +138,12 @@ function ClassicRow({ message, continues, latestCall, highlighted }: MessageRowP
         highlighted ? { backgroundColor: `${palette.accent}26` } : null,
       ]}
     >
-      <View style={styles.gutter} {...actionsControl(message, openActions)}>
+      <View style={styles.gutter} {...actionsControl(message, sender, openActions)}>
         {continues ? null : (
           <Avatar
             account={account}
             id={message.sender_id}
-            name={message.sender_name}
+            name={sender}
             media={message.sender_avatar}
             size={AVATAR}
           />
@@ -160,7 +162,7 @@ function ClassicRow({ message, continues, latestCall, highlighted }: MessageRowP
               style={[font.bodyStrong, styles.name, { color: identityColor(message.sender_id) }]}
               numberOfLines={1}
             >
-              {message.sender_name}
+              {sender}
             </Text>
             <Text style={[font.meta, { color: palette.textMuted }]}>
               {clockTime(message.timestamp_ms)}
@@ -301,6 +303,7 @@ function BubbleRow({ message, continues, latestCall, highlighted }: MessageRowPr
   const palette = usePalette();
   const { account, unnamed, openActions } = useTimelineContext();
   const pinned = usePinned(message.event_id);
+  const sender = usePersonName(message.sender_name);
   const shown = useShown(message);
   const own = message.sender_id === account;
   const named = !own && !continues && !unnamed.has(message.sender_id);
@@ -340,7 +343,7 @@ function BubbleRow({ message, continues, latestCall, highlighted }: MessageRowPr
             <Avatar
               account={account}
               id={message.sender_id}
-              name={message.sender_name}
+              name={sender}
               media={message.sender_avatar}
               size={AVATAR}
             />
@@ -379,7 +382,7 @@ function BubbleRow({ message, continues, latestCall, highlighted }: MessageRowPr
                 style={[font.section, styles.name, { color: identityColor(message.sender_id) }]}
                 numberOfLines={1}
               >
-                {message.sender_name}
+                {sender}
               </Text>
             ) : null}
             {bubbled ? (
@@ -392,7 +395,10 @@ function BubbleRow({ message, continues, latestCall, highlighted }: MessageRowPr
               said
             )}
             {/* A view, not the text, carries the control: iOS doesn't activate a text's. */}
-            <View style={bubbled ? styles.time : null} {...actionsControl(message, openActions)}>
+            <View
+              style={bubbled ? styles.time : null}
+              {...actionsControl(message, sender, openActions)}
+            >
               <StatusLine
                 message={message}
                 color={bubbled ? palette.bubbleMeta : palette.textMuted}
@@ -410,13 +416,14 @@ function BubbleRow({ message, continues, latestCall, highlighted }: MessageRowPr
 }
 
 function Body({ message, latestCall }: { message: Message; latestCall: boolean }) {
+  const sender = usePersonName(message.sender_name);
   const palette = usePalette();
   const content = message.content;
 
   switch (content.type) {
     case 'Text':
     case 'Emote': {
-      const blocks = prepare(message).blocks;
+      const blocks = prepare(message, sender).blocks;
 
       return blocks ? <RichText blocks={blocks} owner={message.event_id} media={message} /> : null;
     }

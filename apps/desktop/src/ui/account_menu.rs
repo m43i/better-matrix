@@ -45,7 +45,7 @@ pub fn account_menu(s: &State, window: [f32; 2], p: &Palette) -> El {
         };
         let row = menu_row(
             account_avatar(&account.summary, &s.media, 28.0),
-            &account.summary.display_name,
+            &s.settings.person_name(&account.summary.display_name),
             Some(id.as_str()),
             trailing,
             p,
@@ -84,7 +84,7 @@ pub fn account_menu(s: &State, window: [f32; 2], p: &Palette) -> El {
         );
     if let Some(account) = s.active_account() {
         let id = account.summary.id.clone();
-        let title = tf!("accounts.sign_out", name = account.summary.display_name);
+        let title = tf!("accounts.sign_out", name = s.settings.person_name(&account.summary.display_name));
         panel = panel.child(divider(p)).child(
             menu_action(&icons::SIGN_OUT, &title, Tone::Danger, p)
                 .key("menu-sign-out")

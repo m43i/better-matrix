@@ -17,7 +17,7 @@ pub fn overview(s: &State, account: &AccountData, width: f32, sidebar_shown: boo
     let (title, greeting, detail, avatar) = match &scope {
         Scope::Home => (
             t!("common.home").to_owned(),
-            tf!("overview.welcome", name = account.summary.display_name),
+            tf!("overview.welcome", name = s.settings.person_name(&account.summary.display_name)),
             account.summary.id.to_string(),
             account_avatar(&account.summary, &s.media, 52.0),
         ),
@@ -214,16 +214,19 @@ fn room_card(
     let mark = if room.note_to_self {
         room_mark(icon(&icons::NOTE, 18.0).color(p.accent), p)
     } else if room.avatar.is_some() || room.kind == RoomKind::Direct {
-        media_avatar(room.dm_users.first().unwrap_or(&room.room_id), &room.name, room.avatar.as_ref(), &s.media, 34.0)
+        media_avatar(
+            room.dm_users.first().unwrap_or(&room.room_id),
+            &s.settings.room_name(room),
+            room.avatar.as_ref(),
+            &s.media,
+            34.0,
+        )
     } else {
         room_mark(text("#").font(font::HEADER).color(p.accent), p)
     };
-    let name = if room.note_to_self { t!("note_to_self.name") } else { &room.name };
-    let mut titles = col()
-        .grow(1.0)
-        .min_w(0.0)
-        .gap(3.0)
-        .child(text(name.to_owned()).font(font::BODY_STRONG).color(p.text).truncate());
+    let name = if room.note_to_self { t!("note_to_self.name").into() } else { s.settings.room_name(room) };
+    let mut titles =
+        col().grow(1.0).min_w(0.0).gap(3.0).child(text(name.as_ref()).font(font::BODY_STRONG).color(p.text).truncate());
     if let Some(message) = last {
         let body = match &message.content {
             matrix_core::MessageContent::Call(card) => std::borrow::Cow::Borrowed(crate::state::call_title(card)),
@@ -233,9 +236,9 @@ fn room_card(
             body.into_owned()
         } else {
             let sender = if message.sender_id == account.summary.id.as_str() {
-                t!("overview.you")
+                t!("overview.you").into()
             } else {
-                &message.sender_name
+                s.settings.person_name(&message.sender_name)
             };
             tf!("overview.preview", sender = sender, body = body)
         };
@@ -255,7 +258,7 @@ fn room_card(
         .hover(p.hover.alpha(p.hover.a * 2.0))
         .role("button")
         .cursor(rune::Cursor::Pointer)
-        .label(name.to_owned())
+        .label(name)
         .focusable(true)
         .child(mark)
         .child(titles)

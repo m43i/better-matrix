@@ -79,6 +79,7 @@ pub struct Context<'a> {
     pub show_room_changes: bool,
     /// Classic rows or chat bubbles.
     pub layout: MessageLayout,
+    pub settings: &'a crate::state::Settings,
     /// Which message's hover toolbar the pointer is with.
     pub hover: &'a crate::state::MessageHover,
     /// Something floats over the timelines (`State::timeline_covered`): its rows don't hover.
@@ -113,6 +114,7 @@ impl<'a> Context<'a> {
             show_hidden: s.settings.show_hidden_events,
             show_room_changes: s.settings.show_room_changes,
             layout: s.settings.message_layout,
+            settings: &s.settings,
             hover: &s.message_hover,
             covered: false,
         }
@@ -168,7 +170,7 @@ const EVENT_PEOPLE: usize = 4;
 
 /// One room event, or a run of the same kind ("Ada, Grace and 3 more joined"), as a small line
 /// with the people's pictures stacked in front.
-fn room_event_line(key: &str, run: &[&RoomEvent], media: &MediaCache, p: &Palette) -> El {
+fn room_event_line(key: &str, run: &[&RoomEvent], cx: &Context<'_>, p: &Palette) -> El {
     let mut people: Vec<&Person> = Vec::new();
     for event in run {
         if !people.iter().any(|known| known.id == event.sender.id) {
@@ -177,10 +179,11 @@ fn room_event_line(key: &str, run: &[&RoomEvent], media: &MediaCache, p: &Palett
     }
     let mut stack = row().center_y();
     for (index, person) in people.iter().take(EVENT_PEOPLE).enumerate() {
-        let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, EVENT_AVATAR)
+        let name = cx.settings.person_name(&person.name);
+        let face = media_avatar(&person.id, &name, person.avatar.as_ref(), cx.media, EVENT_AVATAR)
             .radius(EVENT_AVATAR / 2.0)
             .border(1.5, p.bg)
-            .help(person.name.clone());
+            .help(name.into_owned());
         stack = stack.child(if index == 0 { face } else { face.ml(-6.0) });
     }
     if people.len() > EVENT_PEOPLE {
@@ -204,10 +207,10 @@ fn room_event_line(key: &str, run: &[&RoomEvent], media: &MediaCache, p: &Palett
             _ => tf!("event.joined_many", names = NAMES),
         };
         let (before, after) = template.split_once(NAMES).unwrap_or((template.as_str(), ""));
-        let names: Vec<&str> = people.iter().map(|person| person.name.as_str()).collect();
+        let names: Vec<_> = people.iter().map(|person| cx.settings.person_name(&person.name)).collect();
         let mut sentence = row().gap(0.0).center_y().flex_wrap().child(muted(before.to_owned()));
         if names.len() <= EVENT_PEOPLE {
-            let (last, rest) = names.split_last().map_or(("", &[][..]), |(last, rest)| (*last, rest));
+            let (last, rest) = names.split_last().map_or(("", &[][..]), |(last, rest)| (last.as_ref(), rest));
             sentence = sentence.child(muted(format!("{}{}{last}", rest.join(", "), t!("list.and"))));
         } else {
             let more = tf!("list.more", count = names.len() - EVENT_PEOPLE);
@@ -217,7 +220,7 @@ fn room_event_line(key: &str, run: &[&RoomEvent], media: &MediaCache, p: &Palett
         }
         line.child(sentence.child(muted(after.to_owned())))
     } else {
-        line.child(muted(room_event_text(run[0])).grow(1.0).wrap())
+        line.child(muted(room_event_text(run[0], cx.settings)).grow(1.0).wrap())
     }
 }
 
@@ -232,7 +235,7 @@ fn hidden_line(key: &str, cx: &Context<'_>, event: &matrix_core::HiddenEvent, p:
         .center_y()
         .child(icon(&icons::CODE, 14.0).color(p.text_muted))
         .child(
-            text(tf!("event.hidden", name = event.sender.name, kind = event.event_type))
+            text(tf!("event.hidden", name = cx.settings.person_name(&event.sender.name), kind = event.event_type))
                 .font(font::META)
                 .color(p.text_muted)
                 .grow(1.0)
@@ -255,20 +258,24 @@ const NAMES: &str = "\u{1}";
 const EVENT_AVATAR: f32 = 18.0;
 
 /// What one room event says, in the user's language.
-pub(super) fn room_event_text(event: &RoomEvent) -> String {
-    let name = event.sender.name.as_str();
+pub(super) fn room_event_text(event: &RoomEvent, settings: &crate::state::Settings) -> String {
+    let name = settings.person_name(&event.sender.name);
     match &event.change {
         RoomChange::Created => tf!("event.created", name = name),
         RoomChange::Joined => tf!("event.joined", name = name),
         RoomChange::Left => tf!("event.left", name = name),
-        RoomChange::Invited(target) => tf!("event.invited", name = name, target = target.name),
-        RoomChange::InviteRevoked(target) => tf!("event.invite_revoked", name = name, target = target.name),
+        RoomChange::Invited(target) => tf!("event.invited", name = name, target = settings.person_name(&target.name)),
+        RoomChange::InviteRevoked(target) => {
+            tf!("event.invite_revoked", name = name, target = settings.person_name(&target.name))
+        }
         RoomChange::InviteDeclined => tf!("event.invite_declined", name = name),
-        RoomChange::Removed(target) => tf!("event.removed", name = name, target = target.name),
-        RoomChange::Banned(target) => tf!("event.banned", name = name, target = target.name),
-        RoomChange::Unbanned(target) => tf!("event.unbanned", name = name, target = target.name),
+        RoomChange::Removed(target) => tf!("event.removed", name = name, target = settings.person_name(&target.name)),
+        RoomChange::Banned(target) => tf!("event.banned", name = name, target = settings.person_name(&target.name)),
+        RoomChange::Unbanned(target) => tf!("event.unbanned", name = name, target = settings.person_name(&target.name)),
         RoomChange::Knocked => tf!("event.knocked", name = name),
-        RoomChange::DisplayName(Some(new_name)) => tf!("event.display_name", name = name, new_name = new_name),
+        RoomChange::DisplayName(Some(new_name)) => {
+            tf!("event.display_name", name = name, new_name = settings.person_name(new_name))
+        }
         RoomChange::DisplayName(None) => tf!("event.display_name_removed", name = name),
         RoomChange::ProfilePicture => tf!("event.profile_picture", name = name),
         RoomChange::RoomName(room) => tf!("event.room_name", name = name, room = room),
@@ -506,7 +513,7 @@ fn run_of(entries: &[crate::state::Entry]) -> Vec<&RoomEvent> {
 fn build_row(cx: &Context<'_>, timeline: &RoomTimeline, key: &str, row: &Row, p: &Palette) -> El {
     let entries = &timeline.entries;
     match row {
-        Row::Start => start(key, cx.room, p),
+        Row::Start => start(key, cx, p),
         Row::HistoryFailed(error) => {
             let timeline_key = cx.key.clone();
             row_el()
@@ -536,7 +543,7 @@ fn build_row(cx: &Context<'_>, timeline: &RoomTimeline, key: &str, row: &Row, p:
         },
         Row::Events { start: from, end } => {
             let run = run_of(&entries[(*from).min(entries.len())..(*end).min(entries.len())]);
-            if run.is_empty() { el().key(key.to_owned()) } else { room_event_line(key, &run, cx.media, p) }
+            if run.is_empty() { el().key(key.to_owned()) } else { room_event_line(key, &run, cx, p) }
         }
         Row::Hidden(entry) => match entries.get(*entry).map(|e| &e.kind) {
             Some(EntryView::Hidden(event)) => hidden_line(key, cx, event, p),
@@ -688,7 +695,8 @@ pub fn timeline(
 
 /// Where the room's visible history begins: its true start, or as far back as its history
 /// visibility lets this user read.
-fn start(key: &str, room: &RoomSummary, p: &Palette) -> El {
+fn start(key: &str, cx: &Context<'_>, p: &Palette) -> El {
+    let room = cx.room;
     let note = match room.history {
         HistoryVisibility::Joined => Some(t!("timeline.start_hidden_joined")),
         HistoryVisibility::Invited => Some(t!("timeline.start_hidden_invited")),
@@ -700,8 +708,13 @@ fn start(key: &str, room: &RoomSummary, p: &Palette) -> El {
         .px(20.0)
         .pb(16.0)
         .gap(6.0)
-        .child(text(display_name(room)).font(font::TITLE).color(p.text))
-        .child(text(tf!("timeline.start", room = inline_name(room))).font(font::BODY).color(p.text_muted).wrap());
+        .child(text(display_name(room, cx.settings)).font(font::TITLE).color(p.text))
+        .child(
+            text(tf!("timeline.start", room = inline_name(room, cx.settings)))
+                .font(font::BODY)
+                .color(p.text_muted)
+                .wrap(),
+        );
     if let Some(note) = note {
         block = block.child(
             row()
@@ -856,7 +869,7 @@ fn message_parts(
         below.push(reactions(cx, message, p));
     }
     if let (true, Some(thread), false) = (interactive, &message.thread, cx.in_thread()) {
-        below.push(thread_link(&message.event_id, thread, cx.media, p));
+        below.push(thread_link(&message.event_id, thread, cx, p));
     }
     // Too narrow a timeline for the readers' column: the indicator takes a line of its own.
     if !cx.in_thread() && !cx.readers_column && is_read(message) {
@@ -917,7 +930,13 @@ fn pinned_label(p: &Palette) -> El {
 /// it opens their person panel.
 fn sender_face(cx: &Context<'_>, key: &str, message: &Message, p: &Palette) -> El {
     let shown = cx.data.presence.get(&message.sender_id);
-    let face = media_avatar(&message.sender_id, &message.sender_name, message.sender_avatar.as_ref(), cx.media, AVATAR);
+    let face = media_avatar(
+        &message.sender_id,
+        &cx.settings.person_name(&message.sender_name),
+        message.sender_avatar.as_ref(),
+        cx.media,
+        AVATAR,
+    );
     // Pressable out to the dot's overhang, which the layout doesn't count.
     let reach = AVATAR + PRESENCE_OVERHANG;
     let face = el()
@@ -930,7 +949,7 @@ fn sender_face(cx: &Context<'_>, key: &str, message: &Message, p: &Palette) -> E
         Some(words) => face.help(words),
         None => face,
     };
-    opens_person(face, message)
+    opens_person(face, message, cx.settings)
 }
 
 /// The column at a room message's right for who has read it, filled or not and as tall as the
@@ -995,7 +1014,7 @@ fn classic_row(
         content
     } else {
         // A long name is cut short, keeping the time beside it within the message's width.
-        let name = text(message.sender_name.clone())
+        let name = text(cx.settings.person_name(&message.sender_name))
             .key(format!("{key}-sender-name"))
             .font(font::BODY_STRONG)
             .color(p.text)
@@ -1009,7 +1028,7 @@ fn classic_row(
             .gap(8.0)
             .center_y()
             .min_w(0.0)
-            .child(opens_person(name, message).focusable(true))
+            .child(opens_person(name, message, cx.settings).focusable(true))
             .children(status_emoji(&message.event_id, cx.data.status_message_of(&message.sender_id)))
             .child(text(clock_time(local_ms(message.timestamp_ms))).font(font::META).color(p.text_muted));
         if let Some(status) = status {
@@ -1116,7 +1135,7 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
 
     let named = !own && !continues && names_sender(cx.room, &message.sender_id);
     let name = named.then(|| {
-        let name = text(message.sender_name.clone())
+        let name = text(cx.settings.person_name(&message.sender_name))
             .key(format!("{key}-sender-name"))
             .font(font::SECTION)
             .color(super::theme::identity_color(&message.sender_id))
@@ -1126,7 +1145,7 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
             .gap(6.0)
             .center_y()
             .min_w(0.0)
-            .child(opens_person(name, message).focusable(true))
+            .child(opens_person(name, message, cx.settings).focusable(true))
             .children(status_emoji(&message.event_id, cx.data.status_message_of(&message.sender_id)))
     });
     let mut time = clock_time(local_ms(message.timestamp_ms));
@@ -1201,7 +1220,7 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
 
 /// The sender's name or picture on a message, opening their person panel rather than the thread.
 /// The name is the keyboard's stop for it; the picture is the same action for the pointer.
-fn opens_person(sender: El, message: &Message) -> El {
+fn opens_person(sender: El, message: &Message, settings: &crate::state::Settings) -> El {
     let person = matrix_core::Person {
         id: message.sender_id.clone(),
         name: message.sender_name.clone(),
@@ -1209,7 +1228,7 @@ fn opens_person(sender: El, message: &Message) -> El {
     };
     sender
         .role("button")
-        .label(message.sender_name.clone())
+        .label(settings.person_name(&message.sender_name))
         .cursor(rune::Cursor::Pointer)
         .on_press(move |s: &mut State| s.show_side(crate::state::SidePanel::Person(person.clone())))
 }
@@ -1379,7 +1398,7 @@ fn under_held_toolbar(cx: &Context<'_>, key: &str, message: &Message) -> bool {
 /// The message a reply answers: who wrote it and an excerpt, behind a bar. Pressing it goes to
 /// that message.
 fn quote_block(cx: &Context<'_>, quote: &Quote, p: &Palette) -> El {
-    let sender = quote.sender_name.clone().unwrap_or_default();
+    let sender = cx.settings.person_name(quote.sender_name.as_deref().unwrap_or_default());
     let body = quote_text(quote);
     let (account, room_id, event_id) = (cx.account.clone(), cx.key.room_id.clone(), quote.event_id.clone());
     row()
@@ -1453,7 +1472,7 @@ fn reactions(cx: &Context<'_>, message: &Message, p: &Palette) -> El {
 
 /// The latest replier's picture, "3 replies" and "Last reply today at 09:51", opening the
 /// thread.
-fn thread_link(root: &str, thread: &ThreadSummary, media: &MediaCache, p: &Palette) -> El {
+fn thread_link(root: &str, thread: &ThreadSummary, cx: &Context<'_>, p: &Palette) -> El {
     let root = root.to_owned();
     let mut link = row()
         .key(format!("thread-link-{root}"))
@@ -1467,7 +1486,13 @@ fn thread_link(root: &str, thread: &ThreadSummary, media: &MediaCache, p: &Palet
         .role("button")
         .cursor(rune::Cursor::Pointer);
     link = match &thread.latest {
-        Some(person) => link.child(media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, 22.0)),
+        Some(person) => link.child(media_avatar(
+            &person.id,
+            &cx.settings.person_name(&person.name),
+            person.avatar.as_ref(),
+            cx.media,
+            22.0,
+        )),
         None => link.child(icon(&icons::THREAD, 18.0).color(p.accent)),
     };
     link = link.child(text(tp!("thread.replies", thread.replies)).font(font::BODY_STRONG).color(p.accent));
@@ -1647,7 +1672,7 @@ fn text_body(message: &Message, plain: &str, rich: Option<&RichText>, cx: &Conte
 /// An emote: the sender's name, then what they do, in italics ("* Ada waves").
 fn emote_body(item: &TimelineItem, body: &str, rich: Option<&RichText>, cx: &Context<'_>, p: &Palette) -> El {
     let event_id = &item.message.event_id;
-    let name = &item.message.sender_name;
+    let name = cx.settings.person_name(&item.message.sender_name);
     match rich {
         Some(rich) => row()
             .gap(4.0)
@@ -1673,7 +1698,13 @@ fn emote_body(item: &TimelineItem, body: &str, rich: Option<&RichText>, cx: &Con
 /// Open the event by ID so a live map follows subsequent timeline diffs.
 fn location_card(message: &Message, location: &matrix_core::Location, cx: &Context<'_>, p: &Palette) -> El {
     let width = (cx.content_width - 2.0).clamp(120.0, 360.0);
-    let face = media_avatar(&message.sender_id, &message.sender_name, message.sender_avatar.as_ref(), cx.media, 36.0);
+    let face = media_avatar(
+        &message.sender_id,
+        &cx.settings.person_name(&message.sender_name),
+        message.sender_avatar.as_ref(),
+        cx.media,
+        36.0,
+    );
     let map = super::location::map_view(
         &cx.key(&format!("location-tile-{}", message.event_id)),
         cx.account,

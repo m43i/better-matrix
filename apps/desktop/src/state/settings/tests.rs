@@ -50,3 +50,20 @@ fn a_message_layout_should_read_back_from_its_id() {
 fn an_unknown_message_layout_should_show_classic_rows() {
     assert_eq!(MessageLayout::from_id("cards"), MessageLayout::Rows);
 }
+
+#[test]
+fn the_default_name_order_should_keep_the_matrix_display_name() {
+    assert_eq!(Settings::default().person_name("Hopper, Grace"), "Hopper, Grace");
+}
+
+#[test]
+fn reversing_a_two_part_display_name_should_keep_both_parts_and_the_comma() {
+    assert_eq!(person_name("  García Márquez, Gabriel José  ", true), "Gabriel José, García Márquez");
+}
+
+#[test]
+fn reversing_names_should_leave_incomplete_and_ambiguous_names_as_entered() {
+    for name in ["Grace Hopper", "Hopper,", ", Grace", "Hopper, Grace, Jr.", "@hopper,grace:example.org"] {
+        assert_eq!(person_name(name, true), name);
+    }
+}

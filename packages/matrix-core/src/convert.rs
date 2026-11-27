@@ -12,6 +12,7 @@ use matrix_sdk::ruma::events::room::message::{
 use matrix_sdk::ruma::events::room::power_levels::RoomPowerLevels;
 use matrix_sdk::ruma::events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, StateEventType};
 use matrix_sdk::{Room, RoomMemberships};
+use matrix_sdk_base::RoomDisplayName;
 
 use crate::Error;
 use crate::model::{
@@ -49,7 +50,8 @@ pub(crate) async fn room_summary(
     meetings: bool,
     _sticky: &crate::calls::StickyMembers,
 ) -> RoomSummary {
-    let name = display_name(room).await;
+    let display = room.display_name().await.ok();
+    let name = display.as_ref().map_or_else(|| room.room_id().to_string(), ToString::to_string);
     let custom = settings.get_user_defined_room_notification_mode(room.room_id()).await;
     let mode = match custom {
         Some(mode) => mode,
@@ -81,6 +83,10 @@ pub(crate) async fn room_summary(
     } else {
         room.direct_targets().iter().filter_map(|t| t.as_user_id()).map(ToString::to_string).collect()
     };
+    let name_from_member = direct
+        && dm_users.len() == 1
+        && room.active_members_count() <= 2
+        && matches!(display, Some(RoomDisplayName::Calculated(_)));
     let avatar = match room.avatar_url() {
         Some(url) => avatar(url),
         None if note_to_self => partner_avatar(room, Some(&room.own_user_id().to_string())).await,
@@ -101,6 +107,7 @@ pub(crate) async fn room_summary(
     RoomSummary {
         room_id: room.room_id().to_string(),
         name,
+        name_from_member,
         avatar,
         member_count: room.joined_members_count(),
         active_member_count: room.active_members_count(),
@@ -589,6 +596,47 @@ mod tests {
         let events = [message("$a"), message("$b"), reaction];
         let latest = latest_message(&room, &events).await;
         assert!(latest.is_some() && latest == messages(&room, &events).await.pop(), "{latest:?}");
+    }
+
+    #[tokio::test]
+    async fn a_direct_chat_named_from_its_partner_should_identify_that_name_source() {
+        let (calculated, explicit) =
+            (direct_room_summary(None).await, direct_room_summary(Some("Design, Support")).await);
+        assert_eq!((calculated.name.as_str(), calculated.name_from_member), ("Hopper, Grace", true));
+        assert_eq!((explicit.name.as_str(), explicit.name_from_member), ("Design, Support", false));
+    }
+
+    async fn direct_room_summary(name: Option<&'static str>) -> RoomSummary {
+        use serde_json::json;
+
+        let server = crate::test_server::Server::new(move |request| {
+            let mut reply = crate::test_server::thread_response(request);
+            if request.contains("/sync?") {
+                reply["account_data"] = json!({"events": [
+                    {"type": "m.direct", "content": {"@b:example.org": ["!room:example.org"]}}
+                ]});
+                let room = &mut reply["rooms"]["join"]["!room:example.org"];
+                room["summary"]["m.heroes"] = json!(["@b:example.org"]);
+                let state = room["state"]["events"].as_array_mut().expect("room state");
+                state.push(json!({
+                    "type": "m.room.member", "state_key": "@b:example.org", "sender": "@b:example.org",
+                    "event_id": "$partner", "origin_server_ts": 0,
+                    "content": {"membership": "join", "displayname": "Hopper, Grace"}
+                }));
+                if let Some(name) = name {
+                    state.push(json!({
+                        "type": "m.room.name", "state_key": "", "sender": "@a:example.org",
+                        "event_id": "$name", "origin_server_ts": 0, "content": {"name": name}
+                    }));
+                }
+            }
+            reply
+        });
+        let account = crate::Account::for_test(&server.url()).await;
+        let client = account.client();
+        client.sync_once(matrix_sdk::config::SyncSettings::default()).await.expect("sync direct chat");
+        let room = client.get_room(matrix_sdk::ruma::room_id!("!room:example.org")).expect("direct chat");
+        room_summary(&room, &client.notification_settings().await, None, false, false, &Default::default()).await
     }
 
     fn audio(json: serde_json::Value) -> Option<AudioDetails> {

@@ -20,6 +20,10 @@ room_id: string,
  */
 name: string, 
 /**
+ * The room name is computed from one direct chat partner's display name.
+ */
+name_from_member: boolean, 
+/**
  * The room topic, if one is set.
  */
 topic: string | null, 

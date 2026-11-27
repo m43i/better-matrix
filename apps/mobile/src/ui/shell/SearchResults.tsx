@@ -5,6 +5,7 @@
 // hosting the search (`onLink`), whose jump outlives this list.
 
 import type { MessageHit, Person } from '@better-matrix/matrix-native/types';
+import { personName } from '../../state/names';
 import { router } from 'expo-router';
 import { useEffect, useMemo } from 'react';
 import { SectionList, StyleSheet, Text } from 'react-native';
@@ -64,6 +65,7 @@ export function SearchResults({
   const palette = usePalette();
   const now = useNow();
   const id = account.summary.id;
+  const reverse = useStore((s) => s.settings.reverseDisplayNames);
   // Rooms preview their newest message as the room lists do: without a pending ignore's person.
   const list = useStore((s) => roomListOf(s, id), shallow);
   // Only what is typed is searched: the tab's list shows while nothing is.
@@ -214,9 +216,12 @@ export function SearchResults({
         return (
           <ListRow
             testID={`search-person-${item.person.id}`}
-            title={item.person.name || item.person.id}
+            title={personName(item.person.name || item.person.id, reverse)}
             titleContent={
-              <SearchHighlight text={item.person.name || item.person.id} query={term} />
+              <SearchHighlight
+                text={personName(item.person.name || item.person.id, reverse)}
+                query={term}
+              />
             }
             subtitle={item.person.id}
             subtitleContent={<SearchHighlight text={item.person.id} query={term} />}
@@ -224,7 +229,7 @@ export function SearchResults({
               <Avatar
                 account={id}
                 id={item.person.id}
-                name={item.person.name || item.person.id}
+                name={personName(item.person.name || item.person.id, reverse)}
                 media={item.person.avatar}
                 size={32}
               />

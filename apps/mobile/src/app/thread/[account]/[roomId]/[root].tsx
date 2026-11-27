@@ -3,6 +3,7 @@
 // timeline has it.
 
 import { Stack, useLocalSearchParams } from 'expo-router';
+import { useRoomName } from '../../../../ui/displayNames';
 import { useMemo } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
@@ -32,6 +33,7 @@ export default function ThreadScreen() {
 
   const palette = usePalette();
   const room = useStore((s) => roomOf(s, account, roomId));
+  const name = useRoomName(room);
 
   const rootMessage = useStore(
     (s) => findMessage(timeline(s, account, roomKey(roomId)).entries, root) ?? null,
@@ -57,7 +59,7 @@ export default function ThreadScreen() {
             <View style={styles.title}>
               <Text style={[font.header, { color: palette.text }]}>{t('thread.title')}</Text>
               <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
-                {inlineName(room)}
+                {inlineName(room, name)}
               </Text>
             </View>
           ),
@@ -69,7 +71,7 @@ export default function ThreadScreen() {
           room.successor ? (
             <SuccessorBanner account={account} successor={room.successor} />
           ) : (
-            <Composer account={account} timelineKey={key} roomName={inlineName(room)} />
+            <Composer account={account} timelineKey={key} roomName={inlineName(room, name)} />
           )
         }
       >

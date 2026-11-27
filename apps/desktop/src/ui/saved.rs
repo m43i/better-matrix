@@ -150,7 +150,13 @@ fn entry(s: &State, owner: &matrix_core::AccountId, account: &AccountData, saved
         .min_h(28.0)
         .gap(6.0)
         .center_y()
-        .child(text(message.sender_name.clone()).font(font::BODY_STRONG).color(p.text).shrink().truncate())
+        .child(
+            text(s.settings.person_name(&message.sender_name))
+                .font(font::BODY_STRONG)
+                .color(p.text)
+                .shrink()
+                .truncate(),
+        )
         .child(text(tf!("saved.in_room", room = room)).font(font::META).color(p.text_muted).grow(1.0).truncate())
         .child(
             icon_button(&icons::UNBOOKMARK, t!("actions.unsave"), false, p.text_muted, p)
@@ -177,8 +183,14 @@ fn entry(s: &State, owner: &matrix_core::AccountId, account: &AccountData, saved
         .items_start()
         .radius(8.0)
         .child(
-            media_avatar(&message.sender_id, &message.sender_name, message.sender_avatar.as_ref(), &s.media, 32.0)
-                .mt(3.0),
+            media_avatar(
+                &message.sender_id,
+                &s.settings.person_name(&message.sender_name),
+                message.sender_avatar.as_ref(),
+                &s.media,
+                32.0,
+            )
+            .mt(3.0),
         )
         .child(body);
     if message.body.is_some() {

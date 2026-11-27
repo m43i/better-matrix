@@ -71,7 +71,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
             RoomKind::Group => el().size(28.0, 28.0).center().child(text("#").font(font::HEADER).color(p.text_muted)),
             RoomKind::Direct => media_avatar(
                 room.dm_users.first().unwrap_or(&room.room_id),
-                &room.name,
+                &s.settings.room_name(room),
                 room.avatar.as_ref(),
                 &s.media,
                 28.0,
@@ -90,7 +90,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
             .focusable(true)
             .cursor(rune::Cursor::Pointer)
             .child(mark)
-            .child(highlighted(&display_name(room), query, p).grow(1.0))
+            .child(highlighted(&display_name(room, &s.settings), query, p).grow(1.0))
             .on_press_tx(crate::state::navigate(move |s| s.open_found_room(&id)))
     };
     // Typing its name offers the note to self until there is one, which is then found as a room.
@@ -155,6 +155,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
                     &s.media,
                     p,
                     query,
+                    &space.name,
                 )
                 .on_press_tx(crate::state::navigate(move |s| s.open_found_space(&id))),
             );
@@ -237,8 +238,15 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
         for person in people {
             let id = person.id.clone();
             list = list.child(
-                person_row(format!("found-person-{id}"), person, &s.media, p, query)
-                    .on_press(move |s: &mut State| s.open_direct_chat(&id)),
+                person_row(
+                    format!("found-person-{id}"),
+                    person,
+                    &s.media,
+                    p,
+                    query,
+                    &s.settings.person_name(&person.name),
+                )
+                .on_press(move |s: &mut State| s.open_direct_chat(&id)),
             );
         }
     }
@@ -257,12 +265,14 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
         messages.sort_by_key(|hit| std::cmp::Reverse(account.search_usage.message(&hit.room_id, &hit.sender)));
         for hit in messages {
             let hit = hit.clone();
-            let room = account.room(&hit.room_id).map_or_else(|| hit.room_id.clone(), display_name);
+            let room =
+                account.room(&hit.room_id).map_or_else(|| hit.room_id.clone(), |room| display_name(room, &s.settings));
             let sender = account
                 .members
                 .get(&hit.room_id)
                 .and_then(|members| members.people.iter().find(|m| m.person.id == hit.sender))
                 .map_or(hit.sender.as_str(), |m| m.person.name.as_str());
+            let sender = s.settings.person_name(sender);
             let meta = format!(
                 "{room} · {sender} · {}",
                 super::timeline::date_label(

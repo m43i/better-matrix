@@ -5,6 +5,7 @@
 // sideways steps through them, round past either end.
 
 import type { Attachment } from '@better-matrix/matrix-native/types';
+import { usePersonName } from '../ui/displayNames';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -88,6 +89,7 @@ export default function PreviewScreen() {
   // An item whose sender the user now ignores shows nothing, not another item (ADR 0011).
   const ignored = useStore((s) => previewIgnored(s, account, key, current));
   const shown = ignored ? null : (gallery[index] ?? null);
+  const sender = usePersonName(shown?.sender_name ?? '');
   const hidden = useStore((s) => shown !== null && previewHidden(s, account, roomId, shown));
   const message = hidden ? null : shown;
   const attachment = message?.content.type === 'Attachment' ? message.content.data : null;
@@ -169,7 +171,7 @@ export default function PreviewScreen() {
           {shown ? (
             <>
               <Text style={[font.bodyStrong, styles.white]} numberOfLines={1}>
-                {shown.sender_name}
+                {sender}
               </Text>
               <Text style={[font.meta, styles.dim]} numberOfLines={1}>
                 {sentAt(shown.timestamp_ms, now)}

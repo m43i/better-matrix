@@ -1,6 +1,7 @@
 // What the settings pages share: whose account a page shows, its heading, and the scrolling page.
 
 import type { AccountId } from '@better-matrix/matrix-native/types';
+import { usePersonName } from '../displayNames';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -65,19 +66,14 @@ export function NoAccount({ title }: { title: string }) {
 export function AccountHeading({ account }: { account: AccountData }) {
   const palette = usePalette();
   const { summary } = account;
+  const name = usePersonName(summary.display_name);
 
   return (
     <View style={styles.heading}>
-      <Avatar
-        account={summary.id}
-        id={summary.id}
-        name={summary.display_name}
-        media={summary.avatar}
-        size={44}
-      />
+      <Avatar account={summary.id} id={summary.id} name={name} media={summary.avatar} size={44} />
       <View style={styles.headingText}>
         <Text style={[font.bodyStrong, { color: palette.text }]} numberOfLines={1}>
-          {summary.display_name}
+          {name}
         </Text>
         <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
           {`${summary.id} · ${summary.homeserver}`}

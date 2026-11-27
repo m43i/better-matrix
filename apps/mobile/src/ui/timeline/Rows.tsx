@@ -2,6 +2,8 @@
 // where visible history starts, a page loading or failed, and a thread's reply count.
 
 import type { HiddenEvent, RoomEvent } from '@better-matrix/matrix-native/types';
+import { usePersonName, useRoomName } from '../displayNames';
+import { personName } from '../../state/names';
 import { router } from 'expo-router';
 import { memo } from 'react';
 import Animated, { useAnimatedStyle, useReducedMotion, withTiming } from 'react-native-reanimated';
@@ -37,6 +39,7 @@ function RoomEventLineView({ events }: { events: RoomEvent[] }) {
   const palette = usePalette();
   const { account } = useTimelineContext();
   const people = eventPeople(events);
+  const reverse = useStore((s) => s.settings.reverseDisplayNames);
 
   return (
     <View style={styles.event}>
@@ -49,7 +52,7 @@ function RoomEventLineView({ events }: { events: RoomEvent[] }) {
             <Avatar
               account={account}
               id={person.id}
-              name={person.name}
+              name={personName(person.name, reverse)}
               media={person.avatar}
               size={FACE}
             />
@@ -68,7 +71,7 @@ function RoomEventLineView({ events }: { events: RoomEvent[] }) {
         ) : null}
       </View>
       <Text style={[font.meta, styles.grow, { color: palette.textMuted }]}>
-        {eventRunText(events)}
+        {eventRunText(events, reverse)}
       </Text>
     </View>
   );
@@ -84,7 +87,8 @@ function HiddenEventLineView({ event }: { event: HiddenEvent }) {
   const palette = usePalette();
   const { account, timelineKey } = useTimelineContext();
   const eventId = event.event_id;
-  const label = t('event.hidden', { name: event.sender.name, kind: event.event_type });
+  const name = usePersonName(event.sender.name);
+  const label = t('event.hidden', { name, kind: event.event_type });
 
   return (
     <Pressable
@@ -153,6 +157,7 @@ export function StartBlock() {
   const palette = usePalette();
   const { account, timelineKey } = useTimelineContext();
   const room = useStore((s) => roomOf(s, account, timelineKey.room_id));
+  const name = useRoomName(room);
 
   if (!room) return null;
 
@@ -165,12 +170,12 @@ export function StartBlock() {
 
   return (
     <View style={styles.start}>
-      <Avatar account={account} id={room.room_id} name={room.name} media={room.avatar} size={56} />
+      <Avatar account={account} id={room.room_id} name={name} media={room.avatar} size={56} />
       <Text style={[font.title, { color: palette.text }]}>
-        {room.kind === 'Group' ? `# ${room.name}` : room.name}
+        {room.kind === 'Group' ? `# ${name}` : name}
       </Text>
       <Text style={[font.body, { color: palette.textMuted }]}>
-        {t('timeline.start', { room: inlineName(room) })}
+        {t('timeline.start', { room: inlineName(room, name) })}
       </Text>
       {hidden ? (
         <View style={styles.hidden}>

@@ -20,6 +20,8 @@ export interface Settings {
   language: Language;
   appearance: Appearance;
   messageLayout: MessageLayout;
+  /** Show a person's "Last, First" display name as "First, Last". */
+  reverseDisplayNames: boolean;
   /** Play GIFs behind Giphy, Tenor and Imgur links inline. */
   showLinkGifs: boolean;
   /**
@@ -54,6 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
   language: 'system',
   appearance: 'system',
   messageLayout: 'rows',
+  reverseDisplayNames: false,
   showLinkGifs: true,
   showMaps: true,
   showLinkPreviews: true,
@@ -82,6 +85,7 @@ const savedSettings = z.object({
   language: z.enum(['system', 'en', 'de', 'fr']).catch(DEFAULT_SETTINGS.language),
   appearance: z.enum(['system', 'light', 'dark']).catch(DEFAULT_SETTINGS.appearance),
   messageLayout: z.enum(['rows', 'bubbles']).catch(DEFAULT_SETTINGS.messageLayout),
+  reverseDisplayNames: z.boolean().catch(DEFAULT_SETTINGS.reverseDisplayNames),
   showLinkGifs: z.boolean().catch(DEFAULT_SETTINGS.showLinkGifs),
   showMaps: z.boolean().catch(DEFAULT_SETTINGS.showMaps),
   showLinkPreviews: z.boolean().catch(DEFAULT_SETTINGS.showLinkPreviews),
