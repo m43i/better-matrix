@@ -1888,10 +1888,14 @@ fn the_calendar_should_reveal_the_status_expiry_picker_from_the_field() {
     let mut rt = runtime(|_| {});
     press(&mut rt, "account-button");
     press(&mut rt, "status-message");
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
     let [x, _, width, _] = element_rect(&rt, "status-message-field");
     assert!(element_rect(&rt, "status-expiry")[0] >= x + width - 0.5);
     assert!(rt.find("status-expiry-picker").is_none());
     press(&mut rt, "status-expiry");
+    rt.settle_all();
+    rt.frame(1.0 / 60.0);
     press(&mut rt, "status-expiry-custom");
     assert!(!rt.state.status_message_ready());
     press(&mut rt, "status-expiry-time");
