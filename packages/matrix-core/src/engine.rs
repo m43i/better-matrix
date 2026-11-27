@@ -5,7 +5,7 @@
 //! never holds up a send on another account. Tasks report what they find with events directly;
 //! anything that changes the engine's own state (an account signing in or out) comes back to
 //! the loop as an [`Outcome`]. Every command ends with exactly one [`Event::Finished`] carrying
-//! its [`RequestId`], and any command can be cancelled with [`Command::Cancel`].
+//! its [`RequestId`], and any command but a read can be cancelled with [`Command::Cancel`].
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -1033,7 +1033,8 @@ pub enum Command {
         /// The verification.
         flow_id: String,
     },
-    /// Stop an earlier command. It finishes with an error saying it was cancelled.
+    /// Stop an earlier command. It finishes with an error saying it was cancelled. Reads
+    /// ([`Command::MarkRead`], [`Command::MarkRoomRead`]) aren't stopped: they keep their order.
     Cancel(RequestId),
     /// Start a call in a room (ending any other): MatrixRTC where the room allows it, else
     /// one-to-one in a direct chat. Reported by [`Event::CallUpdated`] until
@@ -2514,15 +2515,19 @@ impl State {
         })
     }
 
-    /// Stops a running command; it finishes as cancelled.
+    /// Stops a running command; it finishes as cancelled. Reads aren't stopped: they finish.
     fn cancel(&mut self, target: RequestId) {
         if let Some((_, stop)) = self.live_shares.values().find(|(request, _)| *request == target) {
             let _ = stop.send(());
             return;
         }
+        // A read is short and holds its account's line of reads: aborting it while it waits its
+        // turn would let a newer read past an older one still in flight.
+        if self.reading.contains(&target) {
+            return;
+        }
         self.answers.remove(&target);
         self.widget_runs.remove(&target);
-        self.reading.remove(&target);
         if let Some(handle) = self.running.remove(&target) {
             handle.abort();
             self.forget_opening(target);
