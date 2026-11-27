@@ -495,7 +495,11 @@ account: AccountId,
 /**
  * What the user is up to ("🌴 On vacation"); blank clears it too.
  */
-message: string | null, } } | { "type": "LeaveRoom", "data": { 
+message: string | null, 
+/**
+ * Optional time this device should clear the message, in Unix milliseconds.
+ */
+clear_at_ms?: number | null, } } | { "type": "LeaveRoom", "data": { 
 /**
  * Whose room.
  */

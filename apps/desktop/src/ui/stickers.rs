@@ -252,6 +252,7 @@ fn gif_tile(s: &State, target: ComposerTarget, gif: &FoundGif, p: &Palette) -> E
 pub fn gif_key_field(s: &State, key: &str, p: &Palette) -> El {
     let field = field_input(&s.picker.key, t!("picker.key_placeholder"), p)
         .key(key.to_owned())
+        .label(t!("picker.key_title"))
         .on_edit(|s: &mut State| &mut s.picker.key)
         .on_submit(|s: &mut State, _| s.save_gif_key());
     let save = button(t!("picker.save_key"), ButtonKind::Primary, !s.picker.key.text.trim().is_empty(), p)

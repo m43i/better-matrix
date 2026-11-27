@@ -44,6 +44,7 @@ icons! {
     STICKER = "sticker": r#"<path d="M15.5 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h9.5L21 15.5V6a3 3 0 0 0-3-3z"/><path d="M15 21v-3a3 3 0 0 1 3-3h3M9 9h.01M15 9h.01M8.5 14a4.5 4.5 0 0 0 5 1"/>"#;
     SIGMA = "sigma": r#"<path d="M18 7V4H6l6 8-6 8h12v-3"/>"#;
     CLOCK = "clock": r#"<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>"#;
+    CALENDAR = "calendar": r#"<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18m-13 5h.01m4 0h.01m4 0h.01"/>"#;
     HISTORY = "history": r#"<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/>"#;
     PAPERCLIP = "paperclip": r#"<path d="m20.5 11.5-8.4 8.4a5.5 5.5 0 0 1-7.8-7.8l8.4-8.4a3.7 3.7 0 0 1 5.2 5.2l-8.4 8.4a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/>"#;
     SEND = "send": r#"<path d="M21 3 10 14M21 3l-6.5 18-4.5-7-7-4.5z"/>"#;

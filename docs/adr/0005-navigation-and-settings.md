@@ -36,7 +36,9 @@ Date: 2026-11-22
   - The device remembers which account was last used and opens it at launch (ADR 0003).
 - **Overview:** the main pane with no room open.
   - Home greets the user; a space shows its size. Then rooms that want attention (mentions
-    first) and recent conversations.
+    first) and recent conversations sit side by side when the pane is wide and stack in
+    narrow panes. Recent conversations use the same activity as the sidebar and show a
+    message preview when one is available. Home offers shortcuts to New chat and Saved messages.
   - The app opens on it; choosing a scope, the sidebar header's name, and leaving a room land
     on it. Rooms never open by themselves.
   - Home also lists the active account's invitations, including rooms outside spaces. A
@@ -166,6 +168,8 @@ Date: 2026-11-22
 - **Desktop notifications:**
   - `Event::Notification` only when push rules say so, never for the first sync after start.
   - Skipped when the window is focused on that room.
+  - A one-to-one direct chat uses the sender's name as the title. Group conversations use
+    the sender and room. With several accounts the title also identifies the receiving account.
   - Rune's notifier on macOS and Windows, freedesktop on Linux. A click opens the room,
     switching account and scope.
   - On Linux one session-bus connection (zbus), opened by the first notification, shows them
@@ -225,12 +229,12 @@ Date: 2026-11-22
   - Choices with more than a couple of options (language, each account's notifications,
     the ring, devices) are selects: the current choice in a button that opens its list
     (`select_button`, `select_option`, `select_menu`; `Popover::Select(SelectFor)`). The list
-    draws above the settings modal. The theme, the message layout, emoticons, link previews
-    and GIFs stay as radio rows.
-  - General holds the language, link previews and GIFs; Appearance, the theme, the message
-    layout ([0006](0006-timelines.md)), emoticons (sent as emoji or as typed,
-    [0007](0007-composer-and-media.md)) and the interface size. Phones list the theme and the
-    message layout under Preferences.
+    draws above the settings modal. The theme, message layout and emoticons use radio rows.
+    On/off options use switches with their explanations visible in either state.
+  - The navigation groups preferences and account pages. General holds language and developer
+    tools. Appearance holds theme, interface size and message layout ([0006](0006-timelines.md)).
+    Messages & media holds emoticons, room changes, link previews, GIFs, GIF search and maps
+    ([0007](0007-composer-and-media.md)). Settings sit in a single centered column, with switches on the right of their descriptions. Phones use the same General, Appearance, and Messages & media sections (ADR 0010).
   - Voice & video picks the microphone, speaker and camera by name, for calls and voice
     messages alike (`Settings::devices`, `State::choose_device`); the system's default when
     none is picked or the picked one is gone. The devices list when the section opens

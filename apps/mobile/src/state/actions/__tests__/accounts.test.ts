@@ -19,6 +19,7 @@ import {
   requestContactCode,
   serverName,
   setStatus,
+  setStatusMessage,
   SignInFlow,
   signOut,
 } from '../accounts';
@@ -743,6 +744,31 @@ describe('setStatus', () => {
     expect(store.getState().notices.map((n) => n.message)).toContain(
       t('notice.status', { error: 'offline' }),
     );
+  });
+});
+
+describe('status messages', () => {
+  it('should send the trimmed status message and deadline to the engine', async () => {
+    const { store, last, finish } = setup();
+    const deadline = Date.now() + 30 * 60_000;
+    const save = setStatusMessage(store, ADA, '  🌴 Out  ', deadline);
+    expect(last().command).toEqual({
+      type: 'SetStatusMessage',
+      data: { account: ADA, message: '🌴 Out', clear_at_ms: deadline },
+    });
+    finish(last().request);
+    await save;
+  });
+
+  it('should drop a past deadline when saving a new status message', async () => {
+    const { store, last, finish } = setup();
+    const save = setStatusMessage(store, ADA, 'In a meeting', 1);
+    expect(last().command).toEqual({
+      type: 'SetStatusMessage',
+      data: { account: ADA, message: 'In a meeting', clear_at_ms: null },
+    });
+    finish(last().request);
+    await save;
   });
 });
 

@@ -445,6 +445,9 @@ pub enum Command {
         account: AccountId,
         /// What the user is up to ("🌴 On vacation"); blank clears it too.
         message: Option<String>,
+        /// Optional time this device should clear the message, in Unix milliseconds.
+        #[cfg_attr(feature = "ffi", serde(default), ts(optional = nullable))]
+        clear_at_ms: Option<u64>,
     },
     /// Leave a room; an updated [`Event::RoomsUpdated`] follows without it.
     LeaveRoom {
@@ -1450,6 +1453,13 @@ pub enum Event {
         account: AccountId,
         /// One entry per person.
         people: Vec<crate::PersonPresence>,
+    },
+    /// The expiry kept for this account on this device, reported at start and after changes.
+    StatusMessageExpiry {
+        /// Whose.
+        account: AccountId,
+        /// The scheduled clear, if one is set.
+        expiry: Option<crate::status::StatusMessageExpiry>,
     },
     /// A new recovery key, to show the user once.
     RecoveryKey {
@@ -3838,14 +3848,17 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
-            Command::SetStatusMessage { account: id, message } => {
+            Command::SetStatusMessage { account: id, message, clear_at_ms } => {
                 let account = self.account(&id);
                 // Numbered here, as commands arrive: messages settle in the order they were set.
                 self.message_number += 1;
                 let number = self.message_number;
                 Box::pin(async move {
-                    let report = |me| sink.emit(Event::Presence { account: id.clone(), people: vec![me] });
-                    account?.set_status_message(message.as_deref(), number, report).await?;
+                    let report = |me, expiry| {
+                        sink.emit(Event::Presence { account: id.clone(), people: vec![me] });
+                        sink.emit(Event::StatusMessageExpiry { account: id.clone(), expiry });
+                    };
+                    account?.set_status_message(message.as_deref(), clear_at_ms, number, report).await?;
                     Ok(Outcome::Done)
                 })
             }
@@ -4068,6 +4081,11 @@ impl State {
                             keywords,
                             status,
                             own,
+                            account.watch_status_message(
+                                |expiry| sink
+                                    .emit(Event::StatusMessageExpiry { account: account.id().clone(), expiry }),
+                                |me| sink.emit(Event::Presence { account: account.id().clone(), people: vec![me] }),
+                            ),
                             calls,
                             meetings,
                             crate::security::watch(account.clone(), Arc::clone(&sink)),

@@ -305,6 +305,9 @@ pub struct Notification {
     pub room_id: String,
     /// The room's display name.
     pub room_name: String,
+    /// The room is a one-to-one direct chat.
+    #[cfg_attr(feature = "ffi", serde(default))]
+    pub one_to_one: bool,
     /// The event that notified.
     pub event_id: String,
     /// Who sent it.

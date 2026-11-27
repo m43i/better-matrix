@@ -6,7 +6,7 @@ use rune::{Color, El, ScrollSpec, TextEdit, col, el, icon, row, text};
 
 use super::components::{
     ButtonKind, account_avatar, button, choice_row, field_input, icon_button, select_button, select_menu,
-    select_option, setting_group, status_line,
+    select_option, status_line, switch_row,
 };
 use super::icons;
 use super::room_menu::{mode_id, modes};
@@ -23,59 +23,33 @@ use matrix_core::{ContactDetail, ContactKind, OfflineDevice, RecoveryStatus, Ses
 const SHARE: f32 = 0.9;
 
 pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palette) -> El {
-    let nav = SettingsSection::ALL.into_iter().fold(
-        col()
-            .key("settings-nav")
-            .w(220.0)
-            .h_full()
-            .min_h(0.0)
-            // A short window at a large interface size scrolls the sections rather than cut Info off.
-            .scroll(ScrollSpec { stick_bottom: false })
-            .padding(12.0)
-            .gap(2.0)
-            .fill(p.surface.mix(p.bg, 0.5))
-            .border_sides([0.0, 1.0, 0.0, 0.0], p.divider)
-            .child(text(t!("settings.title")).font(font::HEADER).color(p.text).px(10.0).py(8.0)),
-        |nav, item| {
-            let selected = item == section;
-            let glyph = match item {
-                SettingsSection::General => &icons::SETTINGS,
-                SettingsSection::Appearance => &icons::SUN_MOON,
-                SettingsSection::Profile => &icons::USER,
-                SettingsSection::Notifications => &icons::BELL,
-                SettingsSection::Safety => &icons::EYE_OFF,
-                SettingsSection::Account => &icons::SHIELD,
-                SettingsSection::Sessions => &icons::LAPTOP,
-                SettingsSection::VoiceVideo => &icons::MIC,
-                SettingsSection::Info => &icons::INFO,
-            };
-            // Info sits apart from the settings, at the bottom of the list.
-            let nav = if item == SettingsSection::Info { nav.child(el().grow(1.0)) } else { nav };
-            nav.child(
-                row()
-                    .key(format!("settings-{}", item.id()))
-                    .w_full()
-                    .h(36.0)
-                    .px(10.0)
-                    .gap(10.0)
-                    .center_y()
-                    .radius(6.0)
-                    .fill(if selected { p.accent.alpha(0.12) } else { Color::TRANSPARENT })
-                    .hover(p.hover.alpha(p.hover.a * 2.0))
-                    .role("tab")
-                    .cursor(rune::Cursor::Pointer)
-                    .checked(selected)
-                    .focusable(true)
-                    .child(icon(glyph, 18.0).color(if selected { p.accent } else { p.text_muted }))
-                    .child(text(item.label()).font(if selected { font::BODY_STRONG } else { font::BODY }).color(p.text))
-                    .on_press(move |s: &mut State| s.show_settings_section(item)),
-            )
-        },
-    );
+    let [w, h] = window;
+    let nav_width = (w * SHARE * 0.30).clamp(148.0, 220.0);
+    let content_width = w * SHARE - nav_width;
+    let gutter = if content_width >= 600.0 { 28.0 } else { 16.0 };
+    let nav = col()
+        .key("settings-nav")
+        .w(nav_width)
+        .h_full()
+        .min_h(0.0)
+        // A short window at a large interface size scrolls the sections rather than cut Info off.
+        .scroll(ScrollSpec { stick_bottom: false })
+        .padding(10.0)
+        .gap(2.0)
+        .fill(p.sidebar_bg)
+        .border_sides([0.0, 1.0, 0.0, 0.0], p.divider)
+        .child(text(t!("settings.title")).font(font::WORKSPACE).color(p.text).px(10.0).py(10.0))
+        .child(nav_heading(t!("settings.preferences_group"), p))
+        .children(SettingsSection::PREFERENCES.map(|item| nav_item(item, section, p)))
+        .child(nav_heading(t!("settings.account_group"), p).mt(12.0))
+        .children(SettingsSection::ACCOUNT.map(|item| nav_item(item, section, p)))
+        .child(el().min_h(12.0).grow(1.0))
+        .child(nav_item(SettingsSection::Info, section, p));
 
     let body = match section {
         SettingsSection::General => general(s, p),
         SettingsSection::Appearance => appearance(s, p),
+        SettingsSection::MessagesMedia => messages_media(s, p),
         SettingsSection::Profile => profile(s, p),
         SettingsSection::Notifications => notifications(s, p),
         SettingsSection::Safety => safety(s, p),
@@ -87,10 +61,11 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
     let header = row()
         .w_full()
         .h(56.0)
-        .px(24.0)
+        .px(gutter)
         .center_y()
+        .fill(p.surface)
         .border_sides([0.0, 0.0, 1.0, 0.0], p.divider)
-        .child(text(section.label()).font(font::HEADER).color(p.text).grow(1.0))
+        .child(text(section.label()).font(font::WORKSPACE).color(p.text).grow(1.0).min_w(0.0).truncate())
         .child(
             icon_button(&icons::CLOSE, t!("settings.close"), false, p.text_muted, p)
                 .key("settings-close")
@@ -100,16 +75,17 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
         col()
             .key("settings-body")
             .w_full()
+            .items_center()
+            .fill(p.bg)
             .grow(1.0)
             .shrink()
             .min_h(0.0)
             .scroll(ScrollSpec { stick_bottom: false })
             // Scope descendant identities to the section, so Rune cannot tween an old
             // control's colours into an unrelated heading or avatar.
-            .child(body.key(format!("settings-section-{}", section.id())).max_w(640.0).padding(24.0)),
+            .child(body.key(format!("settings-section-{}", section.id())).max_w(840.0).padding(gutter)),
     );
 
-    let [w, h] = window;
     // The border sits on a frame around the clipped panes, so the sidebar's fill can't cover it.
     col()
         .key("settings-modal")
@@ -122,6 +98,84 @@ pub fn settings(s: &State, section: SettingsSection, window: [f32; 2], p: &Palet
         .role("dialog")
         .label(t!("settings.title"))
         .child(row().w_full().h_full().radius(RADIUS - BORDER).clip_rounded(RADIUS - BORDER).child(nav).child(content))
+}
+
+fn nav_heading(title: &str, p: &Palette) -> El {
+    text(title.to_owned()).font(font::META).color(p.text_muted).px(10.0).py(4.0)
+}
+
+fn nav_item(item: SettingsSection, section: SettingsSection, p: &Palette) -> El {
+    let selected = item == section;
+    let glyph = match item {
+        SettingsSection::General => &icons::SETTINGS,
+        SettingsSection::Appearance => &icons::SUN_MOON,
+        SettingsSection::MessagesMedia => &icons::THREAD,
+        SettingsSection::Profile => &icons::USER,
+        SettingsSection::Notifications => &icons::BELL,
+        SettingsSection::Safety => &icons::EYE_OFF,
+        SettingsSection::Account => &icons::SHIELD,
+        SettingsSection::Sessions => &icons::LAPTOP,
+        SettingsSection::VoiceVideo => &icons::MIC,
+        SettingsSection::Info => &icons::INFO,
+    };
+    row()
+        .key(format!("settings-{}", item.id()))
+        .w_full()
+        .min_h(34.0)
+        .px(9.0)
+        .py(6.0)
+        .gap(9.0)
+        .center_y()
+        .radius(7.0)
+        .fill(if selected { p.accent.alpha(0.13) } else { Color::TRANSPARENT })
+        .hover(p.hover.alpha(p.hover.a * 2.0))
+        .role("tab")
+        .cursor(rune::Cursor::Pointer)
+        .checked(selected)
+        .focusable(true)
+        .label(item.label())
+        .child(icon(glyph, 16.0).color(if selected { p.accent } else { p.text_muted }))
+        .child(
+            text(item.label())
+                .font(if selected { font::BODY_STRONG } else { font::BODY })
+                .color(p.text)
+                .grow(1.0)
+                .min_w(0.0)
+                .wrap(),
+        )
+        .on_press(move |s: &mut State| s.show_settings_section(item))
+}
+
+fn cards() -> El {
+    col().w_full().gap(16.0)
+}
+
+fn card(frame: El, p: &Palette) -> El {
+    frame.w_full().padding(16.0).radius(12.0).border(1.0, p.divider).fill(p.surface)
+}
+
+fn setting_icon(glyph: &'static rune::Icon, p: &Palette) -> El {
+    el().size(32.0, 32.0).radius(8.0).fill(p.accent.alpha(0.11)).center().child(icon(glyph, 17.0).color(p.accent))
+}
+
+/// A titled setting with controls below its explanation.
+fn setting_card(glyph: &'static rune::Icon, title: &str, hint: &str, controls: El, p: &Palette) -> El {
+    card(col().gap(14.0), p)
+        .child(
+            row().w_full().gap(11.0).items_start().child(setting_icon(glyph, p)).child(
+                col()
+                    .grow(1.0)
+                    .min_w(0.0)
+                    .gap(4.0)
+                    .child(text(title.to_owned()).font(font::HEADER).color(p.text).wrap())
+                    .child(text(hint.to_owned()).font(font::META).color(p.text_muted).wrap()),
+            ),
+        )
+        .child(controls)
+}
+
+fn switch_card(glyph: &'static rune::Icon, toggle: El, p: &Palette) -> El {
+    card(row().gap(11.0).center_y(), p).py(8.0).child(setting_icon(glyph, p)).child(toggle.grow(1.0).min_w(0.0))
 }
 
 /// The modal's corner radius and border width.
@@ -169,7 +223,7 @@ fn info(s: &State, p: &Palette) -> El {
                 .virtual_rows_version(1),
         );
     }
-    col().w_full().gap(32.0).child(app).child(setting_group(
+    cards().child(app).child(setting_card(
         &icons::PACKAGE,
         t!("info.third_party"),
         t!("info.third_party_hint"),
@@ -198,75 +252,54 @@ fn component_row(component: &third_party::Component, p: &Palette) -> El {
 
 fn general(s: &State, p: &Palette) -> El {
     let languages = select(s, SelectFor::Language, &s.settings.language.label(), None, p);
-    let gifs =
-        [(true, t!("settings.gifs_on"), Some(t!("settings.gifs_on_hint"))), (false, t!("settings.gifs_off"), None)]
-            .into_iter()
-            .fold(col().w_full().gap(8.0), |list, (on, title, hint)| {
-                list.child(
-                    choice_row(title, hint, s.settings.show_link_gifs == on, p)
-                        .key(format!("gifs-{on}"))
-                        .on_press(move |s: &mut State| s.set_show_link_gifs(on)),
-                )
-            });
-    let previews = [
-        (true, t!("settings.previews_on"), Some(t!("settings.previews_on_hint"))),
-        (false, t!("settings.previews_off"), None),
-    ]
-    .into_iter()
-    .fold(col().w_full().gap(8.0), |list, (on, title, hint)| {
+    let hidden = switch_row(
+        t!("settings.hidden_events_on"),
+        Some(t!("settings.hidden_events_on_hint")),
+        s.settings.show_hidden_events,
+        p,
+    )
+    .key("hidden-events")
+    .on_press(|s: &mut State| s.set_show_hidden_events(!s.settings.show_hidden_events));
+    cards()
+        .child(setting_card(&icons::LANGUAGE, t!("settings.language"), t!("settings.language_hint"), languages, p))
+        .child(setting_card(&icons::CODE, t!("settings.developer"), t!("settings.developer_hint"), hidden, p))
+}
+
+fn messages_media(s: &State, p: &Palette) -> El {
+    let emoticons = Emoticons::ALL.into_iter().fold(col().w_full().gap(6.0), |list, emoticons| {
         list.child(
-            choice_row(title, hint, s.settings.show_link_previews == on, p)
-                .key(format!("previews-{on}"))
-                .on_press(move |s: &mut State| s.set_show_link_previews(on)),
+            choice_row(emoticons.label(), Some(emoticons.hint()), s.settings.emoticons == emoticons, p)
+                .key(format!("emoticons-{}", emoticons.id()))
+                .on_press(move |s: &mut State| s.set_emoticons(emoticons)),
         )
     });
-    let maps =
-        [(true, t!("settings.maps_on"), Some(t!("settings.maps_on_hint"))), (false, t!("settings.maps_off"), None)]
-            .into_iter()
-            .fold(col().w_full().gap(8.0), |list, (on, title, hint)| {
-                list.child(
-                    choice_row(title, hint, s.settings.show_maps == on, p)
-                        .key(format!("maps-{on}"))
-                        .on_press(move |s: &mut State| s.set_show_maps(on)),
-                )
-            });
-    let hidden = [
-        (true, t!("settings.hidden_events_on"), Some(t!("settings.hidden_events_on_hint"))),
-        (false, t!("settings.hidden_events_off"), None),
-    ]
-    .into_iter()
-    .fold(col().w_full().gap(8.0), |list, (on, title, hint)| {
-        list.child(
-            choice_row(title, hint, s.settings.show_hidden_events == on, p)
-                .key(format!("hidden-events-{on}"))
-                .on_press(move |s: &mut State| s.set_show_hidden_events(on)),
-        )
-    });
-    let room_changes = [(true, t!("settings.room_changes_on")), (false, t!("settings.room_changes_off"))]
-        .into_iter()
-        .fold(col().w_full().gap(8.0), |list, (on, title)| {
-            list.child(
-                choice_row(title, None, s.settings.show_room_changes == on, p)
-                    .key(format!("room-changes-{on}"))
-                    .on_press(move |s: &mut State| s.set_show_room_changes(on)),
-            )
-        });
-    col()
-        .w_full()
-        .gap(32.0)
-        .child(setting_group(&icons::LANGUAGE, t!("settings.language"), t!("settings.language_hint"), languages, p))
-        .child(setting_group(&icons::LINK, t!("settings.previews"), t!("settings.previews_hint"), previews, p))
-        .child(setting_group(&icons::IMAGE, t!("settings.gifs"), t!("settings.gifs_hint"), gifs, p))
-        .child(setting_group(&icons::KEY, t!("settings.giphy"), t!("settings.giphy_hint"), giphy_key(s, p), p))
-        .child(setting_group(&icons::MAP_PIN, t!("settings.maps"), t!("settings.maps_hint"), maps, p))
-        .child(setting_group(
-            &icons::HISTORY,
-            t!("settings.room_changes"),
-            t!("settings.room_changes_hint"),
-            room_changes,
-            p,
-        ))
-        .child(setting_group(&icons::CODE, t!("settings.developer"), t!("settings.developer_hint"), hidden, p))
+    let room_changes = switch_row(
+        t!("settings.room_changes"),
+        Some(t!("settings.room_changes_hint")),
+        s.settings.show_room_changes,
+        p,
+    )
+    .key("room-changes")
+    .on_press(|s: &mut State| s.set_show_room_changes(!s.settings.show_room_changes));
+    let preview_hint = format!("{} {}", t!("settings.previews_hint"), t!("settings.previews_on_hint"));
+    let previews = switch_row(t!("settings.previews"), Some(&preview_hint), s.settings.show_link_previews, p)
+        .key("previews")
+        .on_press(|s: &mut State| s.set_show_link_previews(!s.settings.show_link_previews));
+    let gif_hint = format!("{} {}", t!("settings.gifs_hint"), t!("settings.gifs_on_hint"));
+    let gifs = switch_row(t!("settings.gifs"), Some(&gif_hint), s.settings.show_link_gifs, p)
+        .key("gifs")
+        .on_press(|s: &mut State| s.set_show_link_gifs(!s.settings.show_link_gifs));
+    let map_hint = format!("{} {}", t!("settings.maps_hint"), t!("settings.maps_on_hint"));
+    let maps = switch_row(t!("settings.maps"), Some(&map_hint), s.settings.show_maps, p)
+        .key("maps")
+        .on_press(|s: &mut State| s.set_show_maps(!s.settings.show_maps));
+    cards()
+        .child(setting_card(&icons::SMILE, t!("settings.emoticons"), t!("settings.emoticons_hint"), emoticons, p))
+        .child(switch_card(&icons::LINK, previews, p))
+        .child(switch_card(&icons::IMAGE, gifs, p))
+        .child(setting_card(&icons::KEY, t!("settings.giphy"), t!("settings.giphy_hint"), giphy_key(s, p), p))
+        .child(switch_card(&icons::MAP_PIN, maps, p))
+        .child(switch_card(&icons::HISTORY, room_changes, p))
 }
 
 /// The user's GIPHY API key for the GIF picker, kept in the keychain: once kept it is never
@@ -306,8 +339,7 @@ fn giphy_key(s: &State, p: &Palette) -> El {
         )
 }
 
-/// How the app looks: the theme, how messages lay out, whether emoticons become emoji, and the
-/// interface size.
+/// How the app looks: the theme, message layout and interface size.
 fn appearance(s: &State, p: &Palette) -> El {
     let themes = Appearance::ALL.into_iter().fold(col().w_full().gap(8.0), |list, appearance| {
         list.child(
@@ -323,20 +355,10 @@ fn appearance(s: &State, p: &Palette) -> El {
                 .on_press(move |s: &mut State| s.set_message_layout(layout)),
         )
     });
-    let emoticons = Emoticons::ALL.into_iter().fold(col().w_full().gap(8.0), |list, emoticons| {
-        list.child(
-            choice_row(emoticons.label(), Some(emoticons.hint()), s.settings.emoticons == emoticons, p)
-                .key(format!("emoticons-{}", emoticons.id()))
-                .on_press(move |s: &mut State| s.set_emoticons(emoticons)),
-        )
-    });
-    col()
-        .w_full()
-        .gap(32.0)
-        .child(setting_group(&icons::SUN_MOON, t!("settings.theme"), t!("settings.theme_hint"), themes, p))
-        .child(setting_group(&icons::CHAT, t!("settings.messages"), t!("settings.messages_hint"), layouts, p))
-        .child(setting_group(&icons::SMILE, t!("settings.emoticons"), t!("settings.emoticons_hint"), emoticons, p))
-        .child(setting_group(&icons::ZOOM, t!("settings.zoom"), t!("settings.zoom_hint"), zoom(s, p), p))
+    cards()
+        .child(setting_card(&icons::SUN_MOON, t!("settings.theme"), t!("settings.theme_hint"), themes, p))
+        .child(setting_card(&icons::THREAD, t!("settings.messages"), t!("settings.messages_hint"), layouts, p))
+        .child(setting_card(&icons::ZOOM, t!("settings.zoom"), t!("settings.zoom_hint"), zoom(s, p), p))
 }
 
 /// Smaller, the current size, larger, and back to the default.
@@ -391,17 +413,9 @@ fn notifications(s: &State, p: &Palette) -> El {
     let (title, hint) =
         ring_choices().into_iter().find(|(on, ..)| *on == s.settings.ring_sound).map_or(("", ""), |(_, t, h)| (t, h));
     let ring = select(s, SelectFor::Ring, title, Some(hint), p);
-    col()
-        .w_full()
-        .gap(32.0)
-        .child(setting_group(&icons::CALL, t!("settings.ring"), t!("settings.ring_hint"), ring, p))
-        .child(setting_group(
-            &icons::BELL,
-            t!("settings.notifications"),
-            t!("settings.notifications_hint"),
-            accounts,
-            p,
-        ))
+    cards()
+        .child(setting_card(&icons::CALL, t!("settings.ring"), t!("settings.ring_hint"), ring, p))
+        .child(setting_card(&icons::BELL, t!("settings.notifications"), t!("settings.notifications_hint"), accounts, p))
 }
 
 /// What the active account keeps away (ADR 0011): where media shows, strangers' invitations
@@ -517,14 +531,12 @@ fn safety(s: &State, p: &Palette) -> El {
             )
         })
     };
-    col()
-        .w_full()
-        .gap(32.0)
+    cards()
         .child(account_heading(account, &s.media, p))
-        .child(setting_group(&icons::IMAGE, t!("safety.media"), t!("safety.media_hint"), media, p))
-        .child(setting_group(&icons::USER_PLUS, t!("safety.strangers"), t!("safety.strangers_hint"), strangers, p))
-        .child(setting_group(&icons::EYE_OFF, t!("safety.pictures"), t!("safety.pictures_hint"), pictures, p))
-        .child(setting_group(&icons::USER_X, t!("safety.ignored"), t!("safety.ignored_hint"), ignored, p))
+        .child(setting_card(&icons::IMAGE, t!("safety.media"), t!("safety.media_hint"), media, p))
+        .child(setting_card(&icons::USER_PLUS, t!("safety.strangers"), t!("safety.strangers_hint"), strangers, p))
+        .child(setting_card(&icons::EYE_OFF, t!("safety.pictures"), t!("safety.pictures_hint"), pictures, p))
+        .child(setting_card(&icons::USER_X, t!("safety.ignored"), t!("safety.ignored_hint"), ignored, p))
 }
 
 /// An account's notification keywords, each with its remove button, then the field adding one.
@@ -597,11 +609,9 @@ fn voice_video(s: &State, p: &Palette) -> El {
     use matrix_core::DeviceKind;
     let group = |kind: DeviceKind, glyph: &'static rune::Icon, title: &str, hint: &str| {
         let current = s.settings.devices.get(kind).unwrap_or(t!("settings.system_default"));
-        setting_group(glyph, title, hint, select(s, SelectFor::Device(kind), current, None, p), p)
+        setting_card(glyph, title, hint, select(s, SelectFor::Device(kind), current, None, p), p)
     };
-    col()
-        .w_full()
-        .gap(32.0)
+    cards()
         .child(group(DeviceKind::Microphone, &icons::MIC, t!("settings.microphone"), t!("settings.microphone_hint")))
         .child(group(DeviceKind::Speaker, &icons::SPEAKER, t!("settings.speaker"), t!("settings.speaker_hint")))
         .child(group(DeviceKind::Camera, &icons::VIDEO, t!("settings.camera"), t!("settings.camera_hint")))
@@ -782,7 +792,7 @@ fn profile(s: &State, p: &Palette) -> El {
         .on_press(State::save_display_name),
     );
 
-    let mut page = col().w_full().gap(32.0).child(picture).child(setting_group(
+    let mut page = cards().child(picture).child(setting_card(
         &icons::PENCIL,
         t!("profile.name"),
         t!("profile.name_hint"),
@@ -803,7 +813,7 @@ fn profile(s: &State, p: &Palette) -> El {
                 continue;
             }
             let section = contact_section(s, kind, details, changeable, p);
-            page = page.child(setting_group(glyph, title, hint, section, p));
+            page = page.child(setting_card(glyph, title, hint, section, p));
         }
     }
     if !changeable && summary.sign_in == SignInMethod::OAuth {
@@ -812,7 +822,7 @@ fn profile(s: &State, p: &Palette) -> El {
                 .key("account-page")
                 .on_press(State::open_account_page),
         );
-        page = page.child(setting_group(
+        page = page.child(setting_card(
             &icons::EXTERNAL,
             t!("profile.account_page"),
             &tf!("profile.account_page_hint", server = summary.homeserver),
@@ -1020,15 +1030,13 @@ fn account(s: &State, p: &Palette) -> El {
         RecoveryStatus::Unknown => status_line(&icons::KEY, t!("recovery.unknown"), p.text_muted, p),
     };
     let oauth = account.summary.sign_in == SignInMethod::OAuth;
-    let mut page = col()
-        .w_full()
-        .gap(32.0)
+    let mut page = cards()
         .child(account_heading(account, &s.media, p))
-        .child(setting_group(&icons::SHIELD, t!("account.session"), t!("account.session_hint"), verification, p))
-        .child(setting_group(&icons::KEY, t!("recovery.title"), t!("recovery.hint"), recovery, p));
+        .child(setting_card(&icons::SHIELD, t!("account.session"), t!("account.session_hint"), verification, p))
+        .child(setting_card(&icons::KEY, t!("recovery.title"), t!("recovery.hint"), recovery, p));
     if let Some(offline) = offline_device(security, p) {
         page =
-            page.child(setting_group(&icons::CLOUD, t!("offline_device.title"), t!("offline_device.hint"), offline, p));
+            page.child(setting_card(&icons::CLOUD, t!("offline_device.title"), t!("offline_device.hint"), offline, p));
     }
     let keys = row()
         .gap(8.0)
@@ -1057,9 +1065,9 @@ fn account(s: &State, p: &Palette) -> El {
             .key("deactivate-account")
             .on_press(State::ask_to_deactivate),
     );
-    page.child(setting_group(&icons::FILE, t!("keys.title"), t!("keys.hint"), keys, p))
-        .child(setting_group(&icons::LOCK, t!("password.title"), password_hint, password, p))
-        .child(setting_group(
+    page.child(setting_card(&icons::FILE, t!("keys.title"), t!("keys.hint"), keys, p))
+        .child(setting_card(&icons::LOCK, t!("password.title"), password_hint, password, p))
+        .child(setting_card(
             &icons::ALERT,
             t!("deactivate.heading"),
             if oauth { t!("deactivate.hint_oauth") } else { t!("deactivate.hint") },
@@ -1111,7 +1119,7 @@ fn sessions(s: &State, p: &Palette) -> El {
             sessions.iter().fold(col().w_full().gap(10.0), |list, session| list.child(session_card(session, p)))
         }
     };
-    let mut page = col().w_full().gap(32.0).child(account_heading(account, &s.media, p));
+    let mut page = cards().child(account_heading(account, &s.media, p));
     // A QR sign-in hands this session's secrets over: OAuth accounts, from a verified session.
     if account.summary.sign_in == SignInMethod::OAuth {
         let verified = account.security.is_some_and(|security| security.session_verified);
@@ -1124,9 +1132,9 @@ fn sessions(s: &State, p: &Palette) -> El {
                 .key("link-device")
                 .on_press(State::link_device),
         );
-        page = page.child(setting_group(&icons::QR, t!("link_device.title"), t!("link_device.hint"), link, p));
+        page = page.child(setting_card(&icons::QR, t!("link_device.title"), t!("link_device.hint"), link, p));
     }
-    page.child(setting_group(&icons::LAPTOP, t!("settings.sessions"), t!("sessions.hint"), list, p))
+    page.child(setting_card(&icons::LAPTOP, t!("settings.sessions"), t!("sessions.hint"), list, p))
 }
 
 fn session_card(session: &Session, p: &Palette) -> El {

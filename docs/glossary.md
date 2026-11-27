@@ -24,6 +24,11 @@ by every session of this app; a dot on the account's avatar shows it. `Status` i
 and shown beside their presence: Matrix presence's `status_msg`. An emoji starting it stands for
 it where space is short. `status_message` in code.
 
+**Status message expiry**
+: The optional time when this device clears the account's status message. The account menu
+offers durations and a custom date and time. The engine keeps the deadline across restarts and checks
+it while the account is running.
+
 **Presence**
 : Whether someone is around (online, away, offline) as their homeserver says, with their status
 message: a dot on their avatar. Unknown when the server shares none, and then nothing shows.
@@ -72,7 +77,7 @@ copy it. An install the app can't place links the release's page instead.
 
 **Overview**
 : The main pane when no room is open: the scope's greeting or size, its unread rooms and recent
-conversations.
+conversations. Home also offers shortcuts for a new chat and saved messages.
 
 **Navigation**
 : The screen, account, scope and room currently shown (`Nav`, with `Location` as a snapshot).

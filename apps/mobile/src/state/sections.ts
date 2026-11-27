@@ -492,6 +492,17 @@ export function unreadRooms(
     .sort((a, b) => b.mentions - a.mentions || b.unread - a.unread);
 }
 
+/** Recent conversations in this scope, including rooms whose preview has yet to arrive. */
+export function recentConversations(
+  account: Pick<AccountData, 'rooms' | 'spaces'> & RecencySource,
+  scope: Scope,
+  now: number,
+): RoomSummary[] {
+  return byRecency(account, roomsInScope(account, scope), now)
+    .filter((room) => activity(account, room, now) > 0 || lastMessage(account, room.room_id))
+    .slice(0, 6);
+}
+
 /** Every direct chat of an account, latest first; the note to self is Home's alone. */
 export function directChats(
   account: Pick<AccountData, 'rooms'> & RecencySource,

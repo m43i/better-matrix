@@ -3,6 +3,8 @@
 //! Matrix presence belongs to the user, not to one device, and one session left online would
 //! show the user online.
 
+use std::{sync::Arc, time::Duration};
+
 use matrix_sdk::ruma::api::client::presence::{get_presence, set_presence};
 use matrix_sdk::ruma::events::GlobalAccountDataEventType;
 use matrix_sdk::ruma::presence::PresenceState;
@@ -14,6 +16,9 @@ use crate::account::Account;
 
 /// The account data event the status is stored in.
 const EVENT_TYPE: &str = "chat.bettermatrix.status";
+const EXPIRY_KEY: &[u8] = b"chat.bettermatrix.status_message_expiry";
+/// Recheck the wall clock after sleep or a clock change, and retry a failed clear.
+const EXPIRY_CHECK: Duration = Duration::from_secs(60);
 
 /// How long announcing presence may take, retries and waits the server asks for included: it
 /// runs between syncs, so a server whose presence is down holds them only briefly. The next sync
@@ -31,6 +36,16 @@ pub enum Status {
     Away,
     /// Shown as offline, while the sessions keep working.
     Hidden,
+}
+
+/// A status message this device will clear at a chosen time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(ts_rs::TS))]
+pub struct StatusMessageExpiry {
+    /// The message that must still be present when it is time to clear.
+    pub message: String,
+    /// The deadline, in milliseconds since the Unix epoch.
+    pub clear_at_ms: u64,
 }
 
 impl Status {
@@ -71,6 +86,9 @@ pub(crate) struct Known {
     /// How many status messages were saved: a read of the user's presence that one went through
     /// during is older than what the save reported.
     messages_saved: u64,
+    expiry_loaded: bool,
+    expiry: Option<StatusMessageExpiry>,
+    expiry_changed: Arc<tokio::sync::Notify>,
 }
 
 impl Account {
@@ -132,8 +150,9 @@ impl Account {
     pub async fn set_status_message(
         &self,
         message: Option<&str>,
+        clear_at_ms: Option<u64>,
         number: u64,
-        report: impl Fn(crate::PersonPresence),
+        report: impl Fn(crate::PersonPresence, Option<StatusMessageExpiry>),
     ) -> Result<(), Error> {
         let me = self.user_id()?;
         let message = crate::people::status_message(message);
@@ -142,22 +161,128 @@ impl Account {
             return Ok(());
         }
         known.message_number = number;
-        let presence = match known.saved {
-            _ if !known.synced => PresenceState::Offline,
-            Some(saved) => saved.status.presence(),
-            None => PresenceState::Online,
-        };
+        let clear_at_ms = clear_at_ms.filter(|at| *at > crate::engine::now_ms());
+        let presence = sync_presence(known.saved.map(|saved| saved.status), known.synced);
         let mut request = set_presence::v3::Request::new(me.clone(), presence.clone());
         request.status_msg = message.clone();
         // Syncs wait for the lock: a server asking to retry later must not hold them up long.
         tokio::time::timeout(ANNOUNCE_WAIT, self.client().send(request)).await.map_err(|_| Error::TimedOut)??;
         known.messages_saved += 1;
-        report(crate::PersonPresence {
-            user_id: me.to_string(),
-            presence: crate::people::presence(&presence),
-            status_message: message,
-        });
-        Ok(())
+        let expiry = clear_at_ms
+            .zip(message.as_ref())
+            .map(|(clear_at_ms, message)| StatusMessageExpiry { message: message.clone(), clear_at_ms });
+        let saved = self.keep_expiry(&mut known, expiry).await;
+        known.expiry_changed.notify_one();
+        report(
+            crate::PersonPresence {
+                user_id: me.to_string(),
+                presence: crate::people::presence(&presence),
+                status_message: message,
+            },
+            known.expiry.clone(),
+        );
+        saved
+    }
+
+    async fn keep_expiry(&self, known: &mut Known, expiry: Option<StatusMessageExpiry>) -> Result<(), Error> {
+        let store = self.client().state_store();
+        let result = if let Some(expiry) = &expiry {
+            let bytes = serde_json::to_vec(expiry).map_err(|error| Error::Storage(error.into()))?;
+            store.set_custom_value_no_read(EXPIRY_KEY, bytes).await
+        } else if !known.expiry_loaded || known.expiry.is_some() {
+            store.remove_custom_value(EXPIRY_KEY).await.map(|_| ())
+        } else {
+            Ok(())
+        };
+        known.expiry_loaded = true;
+        known.expiry = expiry;
+        result.map_err(|error| Error::Storage(std::io::Error::other(error)))
+    }
+
+    /// Lives with the account. With no expiry it waits for a status-message write.
+    pub(crate) async fn watch_status_message(
+        &self,
+        report_expiry: impl Fn(Option<StatusMessageExpiry>),
+        report_presence: impl Fn(crate::PersonPresence),
+    ) {
+        let changed = {
+            let mut known = self.known().await;
+            if !known.expiry_loaded {
+                match self.client().state_store().get_custom_value(EXPIRY_KEY).await {
+                    Ok(bytes) => known.expiry = bytes.and_then(|bytes| serde_json::from_slice(&bytes).ok()),
+                    Err(error) => tracing::warn!(%error, "could not load the status message expiry"),
+                }
+                known.expiry_loaded = true;
+                if known.expiry.is_some() {
+                    report_expiry(known.expiry.clone());
+                }
+            }
+            Arc::clone(&known.expiry_changed)
+        };
+        loop {
+            let wait = {
+                let mut known = self.known().await;
+                if let Some(expiry) = &known.expiry {
+                    let remaining = Duration::from_millis(expiry.clear_at_ms.saturating_sub(crate::engine::now_ms()));
+                    if remaining.is_zero() {
+                        let presence = sync_presence(known.saved.map(|saved| saved.status), known.synced);
+                        match self.expire_status_message(&expiry.message, presence).await {
+                            Ok(shown) => {
+                                known.messages_saved += 1;
+                                if let Err(error) = self.keep_expiry(&mut known, None).await {
+                                    tracing::warn!(%error, "could not forget the status message expiry");
+                                }
+                                report_presence(shown);
+                                report_expiry(None);
+                                None
+                            }
+                            Err(error) => {
+                                tracing::warn!(%error, "could not clear the status message");
+                                Some(EXPIRY_CHECK)
+                            }
+                        }
+                    } else {
+                        Some(remaining.min(EXPIRY_CHECK))
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some(wait) = wait {
+                tokio::select! {
+                    () = changed.notified() => {}
+                    () = tokio::time::sleep(wait) => {}
+                }
+            } else {
+                changed.notified().await;
+            }
+        }
+    }
+
+    /// Read before clearing so a different message from another client survives.
+    async fn expire_status_message(
+        &self,
+        expected: &str,
+        presence: PresenceState,
+    ) -> Result<crate::PersonPresence, Error> {
+        let me = self.user_id()?;
+        let check = async {
+            let current = self.client().send(get_presence::v3::Request::new(me.clone())).await?;
+            let (shown, message) = if current.status_msg.as_deref() == Some(expected) {
+                let request = set_presence::v3::Request::new(me.clone(), presence.clone());
+                self.client().send(request).await?;
+                (presence, None)
+            } else {
+                (current.presence, crate::people::status_message(current.status_msg.as_deref()))
+            };
+            let presence = crate::people::presence(&shown);
+            Ok::<_, Error>(crate::PersonPresence {
+                user_id: me.to_string(),
+                presence,
+                status_message: message.filter(|_| presence != crate::Presence::Unknown),
+            })
+        };
+        tokio::time::timeout(ANNOUNCE_WAIT, check).await.map_err(|_| Error::TimedOut)?
     }
 
     /// `report`s what the user shows as the server says now: at start, and when a sync brings a
@@ -589,7 +714,7 @@ mod tests {
         account.set_status(Status::Away, 10, |_| {}).await.unwrap();
         account.follow_status(&[], &PresenceState::Unavailable, |_| {}).await;
         let (heard, report) = shown();
-        account.set_status_message(Some("  🌴 On vacation "), 1, report).await.unwrap();
+        account.set_status_message(Some("  🌴 On vacation "), None, 1, |me, _| report(me)).await.unwrap();
         let sent = server.sent("/presence/");
         assert_eq!(sent.last(), Some(&json!({ "presence": "unavailable", "status_msg": "🌴 On vacation" })));
         let me = heard.lock().unwrap().pop().unwrap();
@@ -602,9 +727,66 @@ mod tests {
         let account = server.account().await;
         account.follow_status(&[], &PresenceState::Online, |_| {}).await;
         let (heard, report) = shown();
-        account.set_status_message(Some("   "), 1, report).await.unwrap();
+        account.set_status_message(Some("   "), None, 1, |me, _| report(me)).await.unwrap();
         assert_eq!(server.sent("/presence/").last(), Some(&json!({ "presence": "online" })));
         assert_eq!(heard.lock().unwrap().pop().map(|me| me.status_message), Some(None));
+    }
+
+    #[tokio::test]
+    async fn replacing_a_timed_status_message_should_forget_its_deadline() {
+        let server = Homeserver::plain();
+        let account = server.account().await;
+        let clear_at_ms = crate::engine::now_ms() + 60_000;
+        account.set_status_message(Some("Out"), Some(clear_at_ms), 1, |_, _| {}).await.unwrap();
+        let store = account.client().state_store();
+        let saved = store.get_custom_value(EXPIRY_KEY).await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_slice::<StatusMessageExpiry>(&saved).unwrap(),
+            StatusMessageExpiry { message: "Out".into(), clear_at_ms },
+        );
+        account.set_status_message(Some("Back"), None, 2, |_, _| {}).await.unwrap();
+        assert_eq!(store.get_custom_value(EXPIRY_KEY).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn saving_a_status_message_with_a_past_deadline_should_not_store_an_expiry() {
+        let server = Homeserver::plain();
+        let account = server.account().await;
+        account.set_status_message(Some("Out"), Some(1), 1, |_, _| {}).await.unwrap();
+        assert_eq!(account.client().state_store().get_custom_value(EXPIRY_KEY).await.unwrap(), None);
+    }
+
+    /// Start the worker with an overdue deadline loaded from the store, as on a restart.
+    async fn run_overdue_expiry(account: &Account) -> crate::PersonPresence {
+        let expiry = StatusMessageExpiry { message: "Out".into(), clear_at_ms: 1 };
+        let store = account.client().state_store();
+        store.set_custom_value_no_read(EXPIRY_KEY, serde_json::to_vec(&expiry).unwrap()).await.unwrap();
+        let (send, mut receive) = tokio::sync::mpsc::unbounded_channel();
+        let watch = account.watch_status_message(|_| {}, |shown| send.send(shown).unwrap());
+        let shown = tokio::select! {
+            () = watch => unreachable!("the account is still running"),
+            shown = tokio::time::timeout(Duration::from_secs(5), receive.recv()) => shown.unwrap().unwrap(),
+        };
+        assert_eq!(store.get_custom_value(EXPIRY_KEY).await.unwrap(), None);
+        shown
+    }
+
+    #[tokio::test]
+    async fn an_overdue_status_message_should_clear_after_the_device_reopens() {
+        let server = Homeserver::new(Value::Null, Some("Out"), || true);
+        let account = server.account().await;
+        account.follow_status(&[], &PresenceState::Online, |_| {}).await;
+        let shown = run_overdue_expiry(&account).await;
+        assert_eq!(shown.status_message, None);
+        assert_eq!(server.sent("/presence/"), [json!({ "presence": "online" })]);
+    }
+
+    #[tokio::test]
+    async fn an_expiry_should_leave_a_status_message_changed_on_another_client_alone() {
+        let server = Homeserver::new(Value::Null, Some("Back"), || true);
+        let shown = run_overdue_expiry(&server.account().await).await;
+        assert_eq!(shown.status_message.as_deref(), Some("Back"));
+        assert!(server.sent("/presence/").is_empty());
     }
 
     #[tokio::test]
@@ -623,7 +805,7 @@ mod tests {
         let account = server.account().await;
         let read =
             crate::PersonPresence { user_id: "@me:x".into(), presence: crate::Presence::Online, status_message: None };
-        account.set_status_message(Some("Out"), 1, |_| {}).await.unwrap();
+        account.set_status_message(Some("Out"), None, 1, |_, _| {}).await.unwrap();
         let (heard, report) = shown();
         account.report_read_presence(0, read, report).await;
         assert!(heard.lock().unwrap().is_empty());
@@ -677,7 +859,7 @@ mod tests {
     async fn a_status_message_set_before_a_sync_brought_the_status_should_go_out_offline() {
         let server = Homeserver::plain();
         let account = server.account().await;
-        account.set_status_message(Some("Out"), 1, |_| {}).await.unwrap();
+        account.set_status_message(Some("Out"), None, 1, |_, _| {}).await.unwrap();
         assert_eq!(server.sent("/presence/"), vec![json!({ "presence": "offline", "status_msg": "Out" })]);
     }
 
@@ -685,9 +867,9 @@ mod tests {
     async fn an_earlier_status_message_saved_after_a_later_one_should_be_dropped() {
         let server = Homeserver::plain();
         let account = server.account().await;
-        account.set_status_message(None, 2, |_| {}).await.unwrap();
+        account.set_status_message(None, None, 2, |_, _| {}).await.unwrap();
         let (heard, report) = shown();
-        account.set_status_message(Some("Out"), 1, report).await.unwrap();
+        account.set_status_message(Some("Out"), None, 1, |me, _| report(me)).await.unwrap();
         assert_eq!(server.sent("/presence/").len(), 1);
         assert!(heard.lock().unwrap().is_empty());
     }

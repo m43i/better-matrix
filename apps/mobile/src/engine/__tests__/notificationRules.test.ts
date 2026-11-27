@@ -9,6 +9,7 @@ function notification(change: Partial<Notification> = {}): Notification {
     account: ADA,
     room_id: '!r',
     room_name: 'Team',
+    one_to_one: false,
     event_id: '$e',
     sender_name: 'Grace',
     body: 'hi',
@@ -38,6 +39,11 @@ describe('contentOf', () => {
 
   it('a direct chat named after the sender should not repeat the name', () => {
     expect(contentOf(notification({ room_name: 'Grace' })).body).toBe('hi');
+  });
+
+  it('a one-to-one chat should use the sender instead of the computed room name', () => {
+    const content = contentOf(notification({ room_name: 'Grace, Ada', one_to_one: true }));
+    expect([content.title, content.body]).toEqual(['Grace', 'hi']);
   });
 
   it('the same event should notify once', () => {

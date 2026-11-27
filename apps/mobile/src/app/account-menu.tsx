@@ -12,10 +12,14 @@ import { routes } from '../routes';
 import { setStatus, signOut } from '../state/actions/accounts';
 import { setActive } from '../state/actions/core';
 import { shallow, useAppStore, useStore } from '../state/react';
+import { sendTimeText } from '../state/schedule';
 import { hasUnread } from '../state/sections';
+import { activeAccount } from '../state/selectors';
+import { statusMessageDeadline } from '../state/statusMessage';
 import type { State } from '../state/types';
 import { Divider, ListRow, ListSection } from '../ui/components';
 import { AccountAvatar, StatusDot, WithDot } from '../ui/shell/AccountButton';
+import { useNow } from '../ui/shell/useNow';
 import { usePalette } from '../ui/theme';
 
 /** The statuses to choose from, in order, with their stable IDs and titles' catalog keys. */
@@ -51,6 +55,14 @@ export default function AccountMenuScreen() {
   const active = useStore((s) => s.active);
   const current = accounts.find((a) => a.summary.id === active)?.summary;
   const status = useStore((s) => s.accounts.find((a) => a.summary.id === s.active)?.status);
+  const now = useNow();
+  const message = useStore((s) => activeAccount(s)?.statusMessage);
+
+  const clearAt = useStore((s) => {
+    const data = activeAccount(s);
+
+    return data ? statusMessageDeadline(data, now) : null;
+  });
 
   const confirmSignOut = () => {
     if (!current) return;
@@ -73,6 +85,21 @@ export default function AccountMenuScreen() {
 
   return (
     <ScrollView style={{ backgroundColor: palette.bg }} contentContainerStyle={styles.content}>
+      {current ? (
+        <ListSection>
+          <ListRow
+            testID="open-status-message"
+            icon="sticker"
+            title={message ?? t('status_message.set')}
+            subtitle={
+              clearAt === null
+                ? undefined
+                : t('status_message.expires_at', { time: sendTimeText(clearAt, now) })
+            }
+            onPress={() => router.push(routes.statusMessage(current.id))}
+          />
+        </ListSection>
+      ) : null}
       {current && status ? (
         <ListSection title={t('status.heading')}>
           {STATUSES.map((choice, i) => (

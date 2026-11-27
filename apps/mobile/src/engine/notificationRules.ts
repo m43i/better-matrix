@@ -30,15 +30,14 @@ export interface NotificationContent {
 }
 
 /**
- * The notification for `n`: the room as title; the text with its sender, unless the room is
- * named after the sender (a direct chat), which says it once.
+ * A one-to-one direct chat names its sender. Group conversations use the room and sender.
  */
 export function contentOf(n: Notification): NotificationContent {
   return {
     identifier: `${n.account}|${n.event_id}`,
-    title: n.room_name,
+    title: n.one_to_one ? n.sender_name : n.room_name,
     body:
-      n.sender_name === n.room_name
+      n.one_to_one || n.sender_name === n.room_name
         ? n.body
         : t('overview.preview', { sender: n.sender_name, body: n.body }),
     thread: `${n.account}|${n.room_id}`,

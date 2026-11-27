@@ -691,6 +691,24 @@ export function setStatus(store: Store, account: AccountId, status: Status): voi
   });
 }
 
+/** Saves or clears the account's status message. The engine owns its optional expiry. */
+export async function setStatusMessage(
+  store: Store,
+  account: AccountId,
+  text: string,
+  clearAt: number | null,
+): Promise<void> {
+  const message = Array.from(text.trim()).slice(0, 100).join('').trimEnd() || null;
+  await store.run({
+    type: 'SetStatusMessage',
+    data: {
+      account,
+      message,
+      clear_at_ms: message && clearAt !== null && clearAt > Date.now() ? clearAt : null,
+    },
+  });
+}
+
 /** The display name the profile's field starts with: empty when the account has none. */
 export function editableName(account: AccountId, displayName: string): string {
   return displayName === account ? '' : displayName;

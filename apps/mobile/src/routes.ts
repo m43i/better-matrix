@@ -20,6 +20,10 @@ export const routes = {
   register: (server: string): Href => ({ pathname: '/sign-in', params: { server, create: '1' } }),
   /** The account menu, from the avatar in the header: switch or add accounts, settings. */
   accountMenu: (): Href => '/account-menu',
+  statusMessage: (account: AccountId): Href => ({
+    pathname: '/status-message',
+    params: { account },
+  }),
   /** Home and the spaces of the account on screen, from Home's title. */
   spaces: (): Href => '/spaces',
   /** What can be made here (a chat, room, space or section), from the "+" in iOS's tab bar. */
@@ -282,8 +286,9 @@ export const routes = {
     params: { account },
   }),
   settingsInfo: (): Href => '/settings/info',
-  /** This device's preferences: language, appearance, link previews and GIFs. */
-  settingsPreferences: (): Href => '/settings/preferences',
+  settingsGeneral: (): Href => '/settings/general',
+  settingsAppearance: (): Href => '/settings/appearance',
+  settingsMessagesMedia: (): Href => '/settings/messages-media',
   /** The user's own GIPHY API key, for the GIF picker. */
   settingsGiphy: (): Href => '/settings/giphy',
   /** Resetting the account's identity, when the recovery key and every other session are lost. */

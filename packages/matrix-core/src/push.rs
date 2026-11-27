@@ -163,7 +163,13 @@ pub(crate) async fn fetch(
         {
             PushContent::Nothing
         }
-        Ok(NotificationStatus::Event(item)) => content_of(account, room_id, event_id, *item),
+        Ok(NotificationStatus::Event(item)) => {
+            let one_to_one = notifications.get_room(&room).or_else(|| client.get_room(&room)).as_ref().map_or(
+                item.is_direct_message_room && item.joined_members_count == 2,
+                crate::convert::one_to_one_direct_chat,
+            );
+            content_of(account, room_id, event_id, one_to_one, *item)
+        }
         Ok(NotificationStatus::EventFilteredOut | NotificationStatus::EventRedacted) => PushContent::Nothing,
         Ok(NotificationStatus::EventNotFound) => hidden(),
         Err(error) => {
@@ -180,7 +186,13 @@ pub(crate) async fn fetch(
 }
 
 /// What a fetched notification shows.
-fn content_of(account: &AccountId, room_id: &str, event_id: &str, item: NotificationItem) -> PushContent {
+fn content_of(
+    account: &AccountId,
+    room_id: &str,
+    event_id: &str,
+    one_to_one: bool,
+    item: NotificationItem,
+) -> PushContent {
     let sender_name = item.sender_display_name.clone().unwrap_or_else(|| item.event.sender().to_string());
     let room_name = item.room_computed_display_name;
     match item.event {
@@ -196,6 +208,7 @@ fn content_of(account: &AccountId, room_id: &str, event_id: &str, item: Notifica
                 account: account.clone(),
                 room_id: room_id.to_owned(),
                 room_name,
+                one_to_one,
                 event_id: event_id.to_owned(),
                 sender_name,
                 body,

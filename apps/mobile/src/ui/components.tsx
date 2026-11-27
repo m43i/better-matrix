@@ -377,6 +377,7 @@ export function IconButton({
   background,
   size = 40,
   testID,
+  expanded,
 }: {
   icon: IconName;
   onPress: () => void;
@@ -389,6 +390,7 @@ export function IconButton({
   background?: string;
   size?: number;
   testID?: string;
+  expanded?: boolean;
 }) {
   const palette = usePalette();
 
@@ -400,6 +402,7 @@ export function IconButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={hint}
+      accessibilityState={expanded === undefined ? undefined : { expanded }}
       // Screen readers reach the long press's choices as the button's own action.
       accessibilityActions={onLongPress ? [{ name: 'longpress' }] : undefined}
       onAccessibilityAction={(event) => {

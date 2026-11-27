@@ -282,6 +282,10 @@ fn private_join_rule(rule: Option<&matrix_sdk::ruma::events::room::join_rules::J
     matches!(rule, Some(JoinRule::Invite | JoinRule::Knock | JoinRule::Restricted(_) | JoinRule::KnockRestricted(_)))
 }
 
+pub(crate) fn one_to_one_direct_chat(room: &Room) -> bool {
+    room.direct_targets_length() == 1 && room.active_members_count() <= 2
+}
+
 pub(crate) async fn notification(
     account: &AccountId,
     room: &Room,
@@ -301,6 +305,7 @@ pub(crate) async fn notification(
         account: account.clone(),
         room_id: room.room_id().to_string(),
         room_name: display_name(room).await,
+        one_to_one: one_to_one_direct_chat(room),
         event_id: event.event_id.to_string(),
         sender_name: sender_name(room, &event.sender).await,
         body: content(&event.content.msgtype).plain().into_owned(),

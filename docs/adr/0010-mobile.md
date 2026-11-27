@@ -32,10 +32,20 @@ Date: 2026-11-16
     on iOS a `Stack.Toolbar.View` without the shared glass background; on Android one row with
     the title, since the native stack lays a custom title across the whole bar and a right item
     lands at its start), on every phone, opening the
-    **account menu** sheet (switch or add an account, settings, sign out); a dot on it says
+    **account menu** sheet (status message and status, switch or add an account, settings, sign out); a dot on it says
     another account has something new. Home's title is the scope with a chevron, opening the
     **space picker** (the desktop's rail). There is no notification list: the system shows
     notifications, and the header has no bell.
+  - _Overview:_ Home and each space show a greeting or a space summary above the room list.
+    Home offers New chat and Saved messages. Unread rooms and recent conversations sit above
+    the room sections and use the same scope and recency rules as the desktop.
+  - _Status message:_ the account menu opens an editor with the calendar button at the end
+    of its text field. Presets and native date/time pickers set the same optional expiry the
+    desktop passes to the engine. The per-account engine task handles the deadline while
+    the app is running, and the editor keeps a failed save open for retry (ADR 0008).
+  - _Settings:_ a single column groups preferences and account pages. General holds language
+    and developer tools, Appearance holds theme and message layout, and Messages & media
+    holds previews, GIFs, maps and room changes.
   - _Search:_ under each tab's title, as the desktop's top bar: rooms, direct chats and spaces
     by name, then people from the user directory, listed in the tab's place while something is
     typed (`ui/shell/SearchResults`, from the pure `searchResults`), and the tab's list behind it
@@ -238,7 +248,7 @@ Date: 2026-11-16
     the last kept), and changes `giphyKey` as each one is through, so it always shows the key
     last kept; a failure keeps what was shown and says so (saving and removing in words of their own). The form waits meanwhile; the GIF tab asks for it (why, a button to GIPHY's
     developer dashboard, the field) until there is one. A key kept is never shown again, nor put
-    in a field: Preferences → GIF search (`app/settings/giphy.tsx`) says one is saved and offers
+    in a field: Messages & media → GIF search (`app/settings/giphy.tsx`) says one is saved and offers
     Replace (an empty field, Save and Cancel) and Remove, and a key GIPHY refuses opens the
     empty field at once. Trending shows
     for a blank search; a search goes once typing pauses 500 ms or on Search (beta keys allow
@@ -497,7 +507,7 @@ Date: 2026-11-16
     `meeting-command`, `widget-permissions`, `integrations`.
 - **Room changes and the room log** follow the desktop (ADR 0006). Changes only the room log
   lists (`logOnly` in `state/roomLog.ts`, mirroring `RoomChange::log_only`) take no row unless
-  the device setting `showRoomChanges` is on (Preferences, Room changes); left out, they pass
+  the device setting `showRoomChanges` is on (Messages & media, Room changes); left out, they pass
   like an undrawn hidden event, so message groups and runs of joins or leaves continue across
   them. `planTimeline` drops a date divider when nothing drawn (a message, a room event line, a
   hidden event, the start or a thread's reply count) follows it before the next divider; the
@@ -695,6 +705,8 @@ Date: 2026-11-16
     front (`app-active`, a timestamp it writes every 30 s) the extension leaves pushes alone and
     the app keeps them from showing; in the background the app leaves notifications of accounts
     with a pusher to the extension, since the two processes can't agree on what showed.
+  - _Notification wording:_ the app and iOS extension use the sender's name as the title
+    for a one-to-one direct chat. Group notifications show the room and sender.
   - _App:_ pushers follow the accounts, the push token and the settings (_Notifications on this
     device_, and per account when there are several) in `engine/push.ts`, deciding in
     `engine/pushRules.ts`; what this device registered is kept in `pushers.json`, and signing

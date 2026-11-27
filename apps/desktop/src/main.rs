@@ -241,10 +241,14 @@ fn spec() -> AppSpec<State> {
                 demo::seed(s);
                 s.open_settings();
             }),
+            ("demo-settings-messages-media", |s| {
+                demo::seed(s);
+                s.show_settings_section(SettingsSection::MessagesMedia);
+            }),
             ("demo-settings-giphy", |s| {
                 demo::seed(s);
                 s.picker.giphy = state::GifKey::Kept("demo".into());
-                s.open_settings();
+                s.show_settings_section(SettingsSection::MessagesMedia);
             }),
             ("demo-settings-info", |s| {
                 demo::seed(s);
@@ -897,6 +901,14 @@ fn on_key(s: &mut State, key: &KeyEvent, tx: &mut Tx) -> bool {
         }
         Key::Escape if s.modal.is_some() => {
             s.close_modal();
+            true
+        }
+        Key::Escape
+            if s.popover == Some(Popover::AccountSwitcher)
+                && s.status_draft.is_some()
+                && s.status_expiry.picker != state::StatusExpiryPicker::Closed =>
+        {
+            s.close_status_expiry();
             true
         }
         Key::Escape if s.popover.is_some() => {
