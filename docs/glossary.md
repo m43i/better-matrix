@@ -788,7 +788,9 @@ the participant and surface kind, so a camera restarting keeps its pin.
 
 **Self-view**
 : The user's own camera preview. Hiding it changes only the local call layout, not what the
-camera publishes to others.
+camera publishes to others. In a one-to-one video call it floats in a corner of the other
+person's video (`SelfView`): dragged, it snaps to the nearest corner; dragging its inner corner
+resizes it within limits.
 
 **Compact stage**
 : The call stage made small above the room's chat, one video surface at a time with small

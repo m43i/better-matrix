@@ -672,6 +672,12 @@ fn spec() -> AppSpec<State> {
             ("demo-call-gallery", |s| demo::call_gallery(s, 6)),
             ("demo-call-many", |s| demo::call_gallery(s, 30)),
             ("demo-call-direct", |s| demo::call_gallery(s, 2)),
+            ("demo-call-direct-moved", |s| {
+                demo::call_gallery(s, 2);
+                if let Some(call) = s.call.as_mut() {
+                    call.self_view = state::SelfView { corner: state::Corner::TopLeft, scale: 0.4 };
+                }
+            }),
             ("demo-call-no-sidebar", |s| {
                 demo::call(s, true);
                 s.toggle_call_sidebar();

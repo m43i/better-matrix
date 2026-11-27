@@ -572,7 +572,15 @@ call: number,
 /**
  * Why.
  */
-reason: CallEnd, } } | { "type": "CallLevels", "data": Array<[string, number]> } | { "type": "CallMediaFailed", "data": string } | { "type": "CallMediaStopped", "data": MediaToggle } | { "type": "IncomingCall", "data": IncomingCall } | { "type": "PinnedMessages", "data": { 
+reason: CallEnd, } } | { "type": "CallsOffered", "data": { 
+/**
+ * Whose.
+ */
+account: AccountId, 
+/**
+ * Calls are possible.
+ */
+calls: boolean, } } | { "type": "CallLevels", "data": Array<[string, number]> } | { "type": "CallMediaFailed", "data": string } | { "type": "CallMediaStopped", "data": MediaToggle } | { "type": "IncomingCall", "data": IncomingCall } | { "type": "PinnedMessages", "data": { 
 /**
  * Whose room.
  */

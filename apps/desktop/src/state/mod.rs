@@ -81,7 +81,7 @@ pub use admin::{
 };
 pub use attachments::{AttachmentAction, can_open_attachment};
 pub use call::Call;
-pub use call_layout::{CallLayout, CallTile};
+pub use call_layout::{CallLayout, CallTile, Corner, SelfView};
 pub use composer::{Composer, EditTarget, Format, ReplyTarget, VoiceMemo};
 pub use edit_history::EditHistory;
 pub use gifs::GifCache;
@@ -1682,6 +1682,11 @@ impl State {
             Event::Presence { account, people } => self.accounts.set_presence(&account, people),
             Event::StatusMessageExpiry { account, expiry } => self.accounts.set_status_message_expiry(&account, expiry),
             Event::Keywords { account, keywords } => self.accounts.set_keywords(&account, keywords),
+            Event::CallsOffered { account, calls } => {
+                if let Some(data) = self.accounts.get_mut(&account) {
+                    data.calls = calls;
+                }
+            }
             Event::SidebarLayout { account, layout } => {
                 let newer = self
                     .accounts

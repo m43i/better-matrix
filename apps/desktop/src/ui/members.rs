@@ -438,7 +438,7 @@ fn person_actions(account: &AccountData, user_id: &str, me: bool, p: &Palette) -
             .on_press(move |s: &mut State| s.open_direct_chat(&id))
     });
     // Calls go through the direct chat with them, as from the member menu.
-    if account.direct_chat_with(user_id).is_none_or(|room| room.call.via.is_some()) {
+    if account.direct_chat_with(user_id).map_or(account.calls, |room| room.call.via.is_some()) {
         for (video, glyph, label, key) in [
             (false, &icons::CALL, t!("call.start"), "person-call"),
             (true, &icons::VIDEO, t!("call.start_video"), "person-video"),
@@ -519,9 +519,9 @@ pub fn menu(
         return Vec::new();
     };
     // Calls go through the direct chat with them: offered where it allows them, or where a new
-    // one would (a new direct chat of two always does).
+    // one would (where the homeserver allows calls).
     let direct = account.direct_chat_with(user_id);
-    let calls = direct.is_none_or(|room| room.call.via.is_some());
+    let calls = direct.map_or(account.calls, |room| room.call.via.is_some());
     let id = user_id.to_owned();
     let mut panel = popover_panel(p)
         .key("member-menu")

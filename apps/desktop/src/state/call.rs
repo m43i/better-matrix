@@ -9,7 +9,7 @@ use rune::Pixels;
 
 use super::State;
 use super::call_glow::CallGlow;
-use super::call_layout::{self, CallLayout, CallPlan, CallTile, TileGeometry};
+use super::call_layout::{self, CallLayout, CallPlan, CallTile, Corner, Proportions, SelfView, TileGeometry};
 
 /// Loudness (0 to 1) from which someone counts as speaking, for their ring on the stage.
 pub const SPEAKING: f32 = 0.06;
@@ -86,6 +86,10 @@ pub struct Call {
     pub show_self: bool,
     pub full_video: HashMap<CallTile, bool>,
     pub strip: f32,
+    /// Where a one-to-one call's self-view floats, and how large.
+    pub self_view: SelfView,
+    /// How far the user has dragged the self-view from its corner, while they drag it.
+    pub self_drag: Option<[f32; 2]>,
     aspects: HashMap<VideoId, f32>,
     speaker: Speaker,
     pub glow: CallGlow,
@@ -120,6 +124,8 @@ impl Call {
             show_self: true,
             full_video: HashMap::new(),
             strip: 0.24,
+            self_view: SelfView::default(),
+            self_drag: None,
             aspects: HashMap::new(),
             speaker: Speaker::Idle,
             glow: CallGlow::default(),
@@ -243,7 +249,7 @@ impl Call {
             &self.layout,
             self.speaker.current(),
             if compact { 0 } else { self.page },
-            self.strip,
+            Proportions { strip: self.strip, self_view: self.self_view },
             !self.video(),
         );
         if compact && let Some(main) = plan.tiles.first() {
@@ -261,6 +267,41 @@ impl Call {
             }
         }
         plan
+    }
+
+    /// The one-to-one self-view's rectangle and the remote video's it floats over, while the
+    /// stage shows one.
+    pub fn self_view_rects(&self) -> Option<([f32; 4], [f32; 4])> {
+        let plan = self.plan();
+        let own = plan.tiles.iter().find(|tile| tile.inset)?;
+        let main = plan.tiles.iter().find(|tile| !tile.inset)?;
+        Some((own.rect, main.rect))
+    }
+
+    /// Follows the user dragging the self-view `offset` from its corner, keeping it over the
+    /// remote video.
+    pub fn drag_self_view(&mut self, offset: [f32; 2]) {
+        let Some((own, main)) = self.self_view_rects() else { return };
+        let within = |value: f32, axis: usize| {
+            let (low, high) = (main[axis] - own[axis], main[axis] + main[axis + 2] - own[axis] - own[axis + 2]);
+            value.clamp(low.min(0.0), high.max(0.0))
+        };
+        self.self_drag = Some([within(offset[0], 0), within(offset[1], 1)]);
+    }
+
+    /// The user let go of the self-view: it snaps to the remote video's corner nearest where
+    /// it was dropped. A cancelled drag (`None`) puts it back.
+    pub fn drop_self_view(&mut self, dropped: Option<[f32; 2]>) {
+        if let (Some(offset), Some((own, main))) = (dropped, self.self_view_rects()) {
+            let centre = [own[0] + own[2] / 2.0 + offset[0], own[1] + own[3] / 2.0 + offset[1]];
+            self.self_view.corner = Corner::nearest(main, centre);
+        }
+        self.self_drag = None;
+    }
+
+    /// Makes the self-view `scale` of the remote video's width, within its limits.
+    pub fn resize_self_view(&mut self, scale: f32) {
+        self.self_view.scale = SelfView::clamp(scale);
     }
 
     pub fn chat_beside(&self) -> bool {

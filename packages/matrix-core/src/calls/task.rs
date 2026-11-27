@@ -289,7 +289,7 @@ pub(super) fn panicked(panic: &(dyn std::any::Any + Send)) -> CallError {
 /// Which standard a new call in the room speaks, by the same rule its summary shows.
 async fn decide(account: &Account, room: &Room) -> Option<CallVia> {
     let kind = if room.is_direct().await.unwrap_or(false) { crate::RoomKind::Direct } else { crate::RoomKind::Group };
-    crate::convert::room_call(room, kind, account.rtc_service().is_some(), &account.sticky).await.via
+    crate::convert::room_call(room, kind, account.call_services(), &account.sticky).await.via
 }
 
 fn random_id() -> String {
@@ -420,6 +420,11 @@ async fn run_direct(
         let (opening, device) = ((sinks.clone(), source.clone()), devices.camera.clone());
         let opened =
             media::blocking(move || media::start_camera(opening.0, preview, device.as_deref(), Some(opening.1)));
+        // A camera that hangs (a stuck driver, a prompt left open) leaves the call going with
+        // the camera off rather than connecting forever; it stops on its own once it opens.
+        let opened = async {
+            tokio::time::timeout(CAMERA_LIMIT, opened).await.unwrap_or(Err(CallError::Stalled("opening the camera")))
+        };
         // A camera can be slow to open (or wait on a permission prompt): a hang-up meanwhile
         // ends the call; the camera, once open, stops on its own.
         let started = tokio::select! {
@@ -467,6 +472,10 @@ async fn run_direct(
             }
         }
         Ok::<_, CallError>(connection)
+    };
+    // Bounded: a send the server keeps retrying mustn't leave the call calling or connecting.
+    let setup = async {
+        tokio::time::timeout(SETUP_LIMIT, setup).await.unwrap_or(Err(CallError::Stalled("setting up the call")))
     };
     let connection = tokio::select! {
         biased;
@@ -542,6 +551,10 @@ async fn direct_loop(
     let DirectParts { room, me, other, party_id, call_id, callee } = *parts;
     let lifetime = tokio::time::sleep(Duration::from_millis(direct::INVITE_LIFETIME));
     tokio::pin!(lifetime);
+    // Once both sides have described the call, the devices must get through to each other in
+    // time: a connection that never does ends the call rather than leaving it connecting.
+    let connecting = tokio::time::sleep(CONNECT_LIMIT);
+    tokio::pin!(connecting);
     let mut flush = tokio::time::interval(Duration::from_millis(200));
     flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut outgoing: Vec<IceCandidate> = Vec::new();
@@ -553,6 +566,16 @@ async fn direct_loop(
     let end = loop {
         tokio::select! {
             () = &mut lifetime, if connection.peer.is_none() => break Ok(CallEnd::NoAnswer),
+            () = &mut connecting, if connection.peer.is_some() && info.phase == CallPhase::Connecting => {
+                // It may have got through while the loop was busy (a camera switch), its events
+                // still queued: they say so next (and a drop since, reconnecting), and the timer
+                // waits again meanwhile.
+                if !connection.got_through() {
+                    tracing::warn!("call: the one-to-one connection didn't get through");
+                    break Err(CallError::Stalled("connecting to the other device"));
+                }
+                connecting.as_mut().reset(tokio::time::Instant::now() + CONNECT_LIMIT);
+            }
             _ = flush.tick() => {
                 if !outgoing.is_empty() && sending.is_empty() && tokio::time::Instant::now() >= hold_until {
                     let (room, call_id, party_id) = (room.clone(), call_id.to_owned(), party_id.to_owned());
@@ -580,12 +603,20 @@ async fn direct_loop(
                     call.report(info);
                 }
                 Some(PeerEvent::Track(_)) => {}
-                Some(PeerEvent::State(PeerConnectionState::Connected)) => {
-                    info.phase = CallPhase::Connected;
-                    call.report(info);
+                Some(PeerEvent::State(state)) => {
+                    tracing::debug!(?state, "call: one-to-one connection");
+                    let phase = match state {
+                        PeerConnectionState::Connected => CallPhase::Connected,
+                        PeerConnectionState::Failed => break Ok(CallEnd::Failed("the connection failed".into())),
+                        // It may come back on its own; failing, it reports so.
+                        PeerConnectionState::Disconnected if info.phase == CallPhase::Connected => CallPhase::Reconnecting,
+                        _ => info.phase,
+                    };
+                    if phase != info.phase {
+                        info.phase = phase;
+                        call.report(info);
+                    }
                 }
-                Some(PeerEvent::State(PeerConnectionState::Failed)) => break Ok(CallEnd::Failed("the connection failed".into())),
-                Some(PeerEvent::State(_)) => {}
                 None => break Ok(CallEnd::Left),
             },
             // The camera stopped on its own: it shows as off, and the user hears why.
@@ -614,10 +645,16 @@ async fn direct_loop(
                     // stops and starts (letting go of the device while off), the track stays.
                     Control::Toggle(MediaToggle::Camera(on)) => {
                         if let Some(shared) = camera.take() {
+                            // Bounded like the first opening: a camera that hangs is let go,
+                            // rather than holding up the call (its connection, a hang-up).
+                            let set = tokio::time::timeout(CAMERA_LIMIT, set_camera(shared, on, sinks, devices.camera.clone(), call));
                             tokio::select! {
                                 biased;
                                 () = controls.hung_up() => break Ok(CallEnd::HungUp),
-                                shared = set_camera(shared, on, sinks, devices.camera.clone(), call) => *camera = shared,
+                                shared = set => *camera = shared.unwrap_or_else(|_| {
+                                    call.failed(&CallError::Stalled("opening the camera"));
+                                    None
+                                }),
                             }
                             info.camera = shown_camera(camera);
                             call.report(info);
@@ -629,11 +666,12 @@ async fn direct_loop(
                         media::switch_audio_device(audio, devices, kind);
                         // A camera that's off only remembers the pick.
                         if let Some(shared) = camera.take_if(|shared| kind == DeviceKind::Camera && shared.capture.is_running()) {
-                            let switch = switch_camera(shared, sinks, devices.camera.clone());
+                            let switch = tokio::time::timeout(CAMERA_LIMIT, switch_camera(shared, sinks, devices.camera.clone()));
                             tokio::select! {
                                 biased;
                                 () = controls.hung_up() => break Ok(CallEnd::HungUp),
-                                (shared, result) = switch => {
+                                switched = switch => {
+                                    let (shared, result) = switched.unwrap_or((None, Err(CallError::Stalled("opening the camera"))));
                                     *camera = shared;
                                     if let Err(error) = result {
                                         call.failed(&error);
@@ -662,6 +700,12 @@ async fn direct_loop(
                                 Err(error) => break Err(error),
                             },
                         }
+                        // Their answer came: the call connects now, and has its time to.
+                        if info.phase == CallPhase::Calling && connection.peer.is_some() {
+                            connecting.as_mut().reset(tokio::time::Instant::now() + CONNECT_LIMIT);
+                            info.phase = CallPhase::Connecting;
+                            call.report(info);
+                        }
                     }
                     Control::Signal(_) => {}
                 }
@@ -673,6 +717,17 @@ async fn direct_loop(
     }
     end
 }
+
+/// How long the camera of a one-to-one video call may take to open before the call goes on
+/// without it.
+const CAMERA_LIMIT: Duration = Duration::from_secs(15);
+/// How long setting up a one-to-one call may take: the connection, then sending the invite or
+/// the answer.
+const SETUP_LIMIT: Duration = Duration::from_secs(20);
+/// How long picking the other side's answer may take to send.
+const SELECT_LIMIT: Duration = Duration::from_secs(10);
+/// How long a one-to-one call's devices have to get through to each other once it's answered.
+const CONNECT_LIMIT: Duration = Duration::from_secs(30);
 
 /// The camera's preview while it runs.
 fn shown_camera(camera: &Option<Shared>) -> Option<VideoId> {
@@ -809,7 +864,10 @@ async fn direct_signal(
         Heard::Answered { party, sdp } => {
             call.answered(&sdp).await?;
             call.peer = Some(party.clone());
-            direct::select_answer(room, call, &party).await?;
+            let select = direct::select_answer(room, call, &party);
+            tokio::time::timeout(SELECT_LIMIT, select)
+                .await
+                .unwrap_or(Err(CallError::Stalled("picking the answer")))?;
         }
         Heard::Candidates(candidates) => call.candidates(candidates).await,
         Heard::Ended(end) => return Ok(Some(end)),

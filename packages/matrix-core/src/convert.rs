@@ -39,6 +39,15 @@ async fn partner_avatar(room: &Room, partner: Option<&String>) -> Option<MediaRe
     member.avatar_url().map(ToOwned::to_owned).and_then(avatar)
 }
 
+/// What an account's homeserver offers for calls, as rooms' summaries say what calls they allow.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CallServices {
+    /// A LiveKit service, for MatrixRTC calls.
+    pub rtc: bool,
+    /// TURN servers, for one-to-one calls.
+    pub turn: bool,
+}
+
 /// A room as the room list shows it. `settings` are the account's push rules and `note_to_self`
 /// the room its account data names, each read once for the whole list: reading them per room
 /// cost store reads for each, on every sync.
@@ -46,7 +55,7 @@ pub(crate) async fn room_summary(
     room: &Room,
     settings: &NotificationSettings,
     note_to_self: Option<&matrix_sdk::ruma::RoomId>,
-    _rtc_service: bool,
+    _services: CallServices,
     meetings: bool,
     _sticky: &crate::calls::StickyMembers,
 ) -> RoomSummary {
@@ -96,7 +105,7 @@ pub(crate) async fn room_summary(
     #[cfg(feature = "native-media")]
     let call = {
         let mut call =
-            call_in(room, kind, _rtc_service, power.as_ref(), crate::calls::joined_sticky(room, _sticky, false).await);
+            call_in(room, kind, _services, power.as_ref(), crate::calls::joined_sticky(room, _sticky, false).await);
         if note_to_self {
             call.via = None;
         }
@@ -184,11 +193,11 @@ async fn successor(room: &Room) -> Option<crate::Successor> {
 pub(crate) async fn room_call(
     room: &Room,
     kind: RoomKind,
-    rtc_service: bool,
+    services: CallServices,
     sticky: &crate::calls::StickyMembers,
 ) -> crate::calls::RoomCall {
     let sticky = crate::calls::joined_sticky(room, sticky, false).await;
-    call_in(room, kind, rtc_service, room.power_levels().await.ok().as_ref(), sticky)
+    call_in(room, kind, services, room.power_levels().await.ok().as_ref(), sticky)
 }
 
 /// [`room_call`] with the room's power levels already read.
@@ -196,7 +205,7 @@ pub(crate) async fn room_call(
 fn call_in(
     room: &Room,
     kind: RoomKind,
-    rtc_service: bool,
+    services: CallServices,
     power: Option<&RoomPowerLevels>,
     sticky: Vec<crate::calls::Member>,
 ) -> crate::calls::RoomCall {
@@ -210,7 +219,7 @@ fn call_in(
     for member in sticky {
         participants.push(member.user_id);
     }
-    crate::calls::RoomCall { via: crate::calls::via(rtc_service, may_join, one_to_one), participants }
+    crate::calls::RoomCall { via: crate::calls::via(services.rtc, services.turn, may_join, one_to_one), participants }
 }
 
 pub(crate) async fn space_summary(room: &Room) -> SpaceSummary {
@@ -653,7 +662,8 @@ mod tests {
             })
             .await
             .expect("latest event");
-            summaries.push(room_summary(&room, &settings, None, false, false, &Default::default()).await);
+            summaries
+                .push(room_summary(&room, &settings, None, CallServices::default(), false, &Default::default()).await);
         }
         assert_eq!(summaries[0].activity_ms, summaries[1].activity_ms);
         assert_eq!(summaries[0].latest_event_id.as_deref(), Some("$old"));
@@ -691,7 +701,15 @@ mod tests {
         let client = account.client();
         client.sync_once(matrix_sdk::config::SyncSettings::default()).await.expect("sync direct chat");
         let room = client.get_room(matrix_sdk::ruma::room_id!("!room:example.org")).expect("direct chat");
-        room_summary(&room, &client.notification_settings().await, None, false, false, &Default::default()).await
+        room_summary(
+            &room,
+            &client.notification_settings().await,
+            None,
+            CallServices::default(),
+            false,
+            &Default::default(),
+        )
+        .await
     }
 
     fn audio(json: serde_json::Value) -> Option<AudioDetails> {

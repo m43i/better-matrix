@@ -5232,3 +5232,129 @@ fn a_notice_should_go_after_six_seconds() {
     rt.frame(2.0);
     assert!(rt.state.notice.is_none());
 }
+
+/// Drags with the pointer from `from` to `to`, in steps, and lets go.
+fn drag(rt: &mut Runtime<State>, from: (f32, f32), to: (f32, f32)) {
+    rt.pointer_down(from.0, from.1);
+    for step in 1..=10 {
+        let t = step as f32 / 10.0;
+        rt.pointer_move(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(to.0, to.1);
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+}
+
+#[test]
+fn a_one_to_one_self_view_should_sit_in_the_corner_of_the_other_persons_video() {
+    let rt = runtime(|s| demo::call_gallery(s, 2));
+    let (remote, own) = (element_rect(&rt, "call-tile-grace"), element_rect(&rt, "call-tile-you"));
+    assert!(own[2] < remote[2] / 2.0, "the self-view is small: {own:?} over {remote:?}");
+    let (right, bottom) = (remote[0] + remote[2] - own[0] - own[2], remote[1] + remote[3] - own[1] - own[3]);
+    assert!((right - 12.0).abs() < 1.0 && (bottom - 12.0).abs() < 1.0, "{own:?} in {remote:?}");
+}
+
+#[test]
+fn dropping_the_self_view_near_another_corner_should_snap_it_there() {
+    let mut rt = runtime(|s| demo::call_gallery(s, 2));
+    let remote = element_rect(&rt, "call-tile-grace");
+    let start = rt.find("call-tile-you").expect("the self-view");
+    // Dropped a little off the top left corner, it snaps into it.
+    drag(&mut rt, start, (remote[0] + remote[2] * 0.3, remote[1] + remote[3] * 0.35));
+    let call = rt.state.call.as_ref().expect("the call");
+    assert_eq!((call.self_view.corner, call.self_drag), (crate::state::Corner::TopLeft, None));
+    let own = element_rect(&rt, "call-tile-you");
+    assert!((own[0] - remote[0] - 12.0).abs() < 1.0 && (own[1] - remote[1] - 12.0).abs() < 1.0, "{own:?}");
+    assert!(rt.state.call.as_ref().is_some_and(|call| call.layout == crate::state::CallLayout::Auto), "no focus");
+}
+
+#[test]
+fn dragging_the_self_views_grip_should_resize_it_only_so_far() {
+    let mut rt = runtime(|s| demo::call_gallery(s, 2));
+    let before = element_rect(&rt, "call-tile-you")[2];
+    let grip = rt.find("call-self-resize").expect("the grip");
+    // Towards the middle of the video: as large as it gets.
+    drag(&mut rt, grip, (grip.0 - 2000.0, grip.1 - 2000.0));
+    let largest = element_rect(&rt, "call-tile-you")[2];
+    assert!(largest > before, "{before} -> {largest}");
+    assert_eq!(rt.state.call.as_ref().map(|call| call.self_view.scale), Some(0.45));
+    // Back into its corner: as small as it gets, still there.
+    let grip = rt.find("call-self-resize").expect("the grip");
+    drag(&mut rt, grip, (grip.0 + 2000.0, grip.1 + 2000.0));
+    let smallest = element_rect(&rt, "call-tile-you")[2];
+    assert!(smallest < before && smallest >= 96.0, "{before} -> {smallest}");
+}
+
+#[test]
+fn the_self_views_inner_corner_should_show_the_resize_cursor_and_the_rest_the_grab_cursor() {
+    let mut rt = runtime(|s| demo::call_gallery(s, 2));
+    let own = element_rect(&rt, "call-tile-you");
+    // The self-view sits bottom right: its top left corner faces the video's middle.
+    rt.pointer_move(own[0] + 4.0, own[1] + 4.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.cursor(), rune::Cursor::ResizeNwse);
+    rt.pointer_move(own[0] + own[2] / 2.0, own[1] + own[3] / 2.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.cursor(), rune::Cursor::Grab);
+}
+
+#[test]
+fn a_member_without_a_direct_chat_should_offer_calls_only_where_the_server_allows_them() {
+    const IDA: &str = "@ida:example.org";
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        // Someone Ada has no direct chat with yet.
+        let ada = AccountId::new(demo::ADA);
+        let mut members =
+            s.accounts.get(&ada).and_then(|a| a.members.get(demo::DEMO_THREAD.0)).cloned().expect("members");
+        let mut ida = members.people[0].clone();
+        ida.person = matrix_core::Person { id: IDA.into(), name: "Ida".into(), avatar: None };
+        members.people.push(ida);
+        let event = Event::Members { request: None, account: ada, room_id: demo::DEMO_THREAD.0.into(), members };
+        s.apply(event, &mut rune::Tx::default());
+        s.toggle_side(SidePanel::Members);
+        s.toggle_member_menu(IDA);
+    });
+    assert!(rt.state.active_account().is_some_and(|account| account.direct_chat_with(IDA).is_none()));
+    assert!(rt.find("member-menu-call").is_some(), "a new direct chat would allow calls");
+    rt.update(|s, tx| s.apply(Event::CallsOffered { account: AccountId::new(demo::ADA), calls: false }, tx));
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("member-menu-call").is_none(), "no call where the homeserver allows none");
+}
+
+#[test]
+fn the_self_view_should_snap_by_where_it_was_let_go_not_where_it_last_moved() {
+    let mut rt = runtime(|s| demo::call_gallery(s, 2));
+    let start = rt.find("call-tile-you").expect("the self-view");
+    let video = element_rect(&rt, "call-tile-grace");
+    // Last moved near the top left, then let go back near the bottom right without a move.
+    rt.pointer_down(start.0, start.1);
+    rt.pointer_move(video[0] + 60.0, video[1] + 60.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(start.0 - 10.0, start.1);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let call = rt.state.call.as_ref().expect("the call");
+    assert_eq!(call.self_view.corner, crate::state::Corner::BottomRight);
+}
+
+#[test]
+fn resizing_the_self_view_should_follow_the_pointer_without_jumps() {
+    let mut rt = runtime(|s| demo::call_gallery(s, 2));
+    let grip = rt.find("call-self-resize").expect("the grip");
+    let width = |rt: &Runtime<State>| element_rect(rt, "call-tile-you")[2];
+    let before = width(&rt);
+    rt.pointer_down(grip.0, grip.1);
+    // Left and down by about its shape, then a point further down: the width barely changes.
+    rt.pointer_move(grip.0 - 50.0, grip.1 + 28.0);
+    rt.frame(1.0 / 60.0);
+    let one = width(&rt);
+    rt.pointer_move(grip.0 - 50.0, grip.1 + 29.0);
+    rt.frame(1.0 / 60.0);
+    let two = width(&rt);
+    rt.pointer_up(grip.0 - 50.0, grip.1 + 29.0);
+    assert!((one - two).abs() < 2.0, "{before} -> {one} -> {two}");
+}

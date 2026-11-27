@@ -185,3 +185,56 @@ fn compact_chat_should_page_through_every_surface() {
         .collect()
     );
 }
+
+/// A one-to-one video call: the other person's camera, and the user's own.
+fn one_to_one() -> Call {
+    let mut both = info(vec![person("a", Some(1))]);
+    both.via = CallVia::Direct;
+    both.camera = Some(VideoId(2));
+    let mut call = Call::new(both);
+    call.size = [800.0, 450.0];
+    call
+}
+
+#[test]
+fn dropping_the_self_view_should_snap_it_to_the_nearest_corner_of_the_remote_video() {
+    let mut call = one_to_one();
+    let (own, main) = call.self_view_rects().expect("a self-view");
+    // Dragged from the bottom right to near the top left.
+    call.drag_self_view([main[0] + 40.0 - own[0], main[1] + 30.0 - own[1]]);
+    let dragged = call.self_drag;
+    call.drop_self_view(dragged);
+    assert_eq!((call.self_view.corner, call.self_drag), (Corner::TopLeft, None));
+    let (own, main) = call.self_view_rects().expect("a self-view");
+    assert!((own[0] - main[0] - 12.0).abs() < 0.01 && (own[1] - main[1] - 12.0).abs() < 0.01, "{own:?} {main:?}");
+}
+
+#[test]
+fn a_cancelled_drag_should_leave_the_self_view_where_it_was() {
+    let mut call = one_to_one();
+    call.drag_self_view([-500.0, -300.0]);
+    call.drop_self_view(None);
+    assert_eq!((call.self_view.corner, call.self_drag), (Corner::BottomRight, None));
+}
+
+#[test]
+fn a_dragged_self_view_should_stay_over_the_remote_video() {
+    let mut call = one_to_one();
+    let (own, main) = call.self_view_rects().expect("a self-view");
+    call.drag_self_view([5000.0, -5000.0]);
+    let [dx, dy] = call.self_drag.expect("dragging");
+    assert!((own[0] + dx + own[2] - (main[0] + main[2])).abs() < 0.01 && (own[1] + dy - main[1]).abs() < 0.01);
+}
+
+#[test]
+fn resizing_the_self_view_should_stop_at_its_limits() {
+    let mut call = one_to_one();
+    let width = |call: &Call| call.self_view_rects().expect("a self-view").0[2];
+    let normal = width(&call);
+    call.resize_self_view(10.0);
+    let largest = width(&call);
+    call.resize_self_view(0.0);
+    let smallest = width(&call);
+    assert!(largest > normal && normal > smallest, "{smallest} {normal} {largest}");
+    assert_eq!(call.self_view.scale, *call_layout::SELF_VIEW_SCALE.start());
+}

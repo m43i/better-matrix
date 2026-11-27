@@ -60,8 +60,15 @@ Date: 2026-11-16
 - **Which standard:** MatrixRTC where the account's homeserver names a LiveKit transport
   (`Client::rtc_transports`, cached per account) and the user may send call memberships in the
   room (power level for `org.matrix.msc3401.call.member`). Otherwise the one-to-one standard in
-  a direct chat with exactly one other member. Otherwise no call: the room header hides the
-  call buttons (`RoomSummary::call`).
+  a direct chat with exactly one other member, where the homeserver names TURN servers
+  (`voip/turnServer` with URIs, looked up once per account beside the LiveKit lookup,
+  `Account::call_services`): without a relay two devices behind different routers rarely get
+  through. A refusal, or Synapse's empty answer, names none; the network or the server failing
+  for a while (429, 5xx, a token refresh that failed) is asked again, waiting longer each time. Each lookup reports as soon
+  as it answers whether the account can call at all (`Event::CallsOffered`), so a person's
+  profile and member menu offer a call (through a new direct chat) only then. Otherwise no call: the room header hides the call buttons (`RoomSummary::call`) and its
+  video button offers the room's meetings instead (ADR 0012). A one-to-one invite still rings
+  on an account without TURN: the caller's relay is enough.
 - **MatrixRTC session** (`calls::rtc`, `calls::session`), interoperable with Element Call in
   its default "compatibility" mode (checked against matrix-js-sdk's `matrixrtc` and Element
   Call's sources):
@@ -129,8 +136,8 @@ Date: 2026-11-16
        and each membership's lapse, as `Signal::Members` (`StickyMembers::report_to`).
      - Known gaps: a sticky event that arrives only outside the timeline window between two
        snapshots (MSC4354's sync section, which the SDK drops) is seen at the member's next
-       renewal or the next snapshot; a call signal the SDK decrypts only later (its key came
-       after it) isn't replayed, as before; MSC4195 grants use the unstable route, the only one
+       renewal or the next snapshot; a sticky membership the SDK decrypts only later (its key
+       came after it) isn't replayed (call signals are, see below); MSC4195 grants use the unstable route, the only one
        ruma 0.17 and today's deployments have.
      - A sticky member counts wherever a state member does: the call's members
        (`rtc::members`), the room's call participants in its summary, whether a ring's session
@@ -154,11 +161,30 @@ Date: 2026-11-16
   person (once their device answered, only that device) or, for a pickup elsewhere, the user's
   own other devices (`task::hear`). While it rings, only the caller's ringing device adds
   candidates or hangs up, and only the user's own other devices answer or decline it elsewhere
-  (`task::hear_ringing`). Opening the camera at the start races a hang-up too. A hangup goes
+  (`task::hear_ringing`). Opening the camera at the start races a hang-up too, and has 15 s: a camera that hangs
+  (a stuck driver, a prompt left open) leaves the call going with the camera off. Turning it on
+  or switching it later has the same 15 s, after which the camera is let go for the call. A hangup goes
   out only for a call the other side knows of (it called, or the invite went out). The TURN
-  lookup is short and unretried: without an answer, the call goes without TURN. A voice call's
+  lookup is short and unretried: without an answer, the call goes without TURN. Candidates are
+  gathered once, as browsers do (LiveKit's default gathers continually, for its SFU, which keeps
+  a connection that can't get through checking forever, never failing). Once answered (the
+  caller then shows connecting), the devices have 30 s to get through (setting up, with the
+  invite or answer sent, has 20 s; sending the caller's pick of an answer, 10 s), else the call ends as
+  stalled (`CallError::Stalled`); a connection that drops shows reconnecting until it comes
+  back or fails. A voice call's
   offer asks for no video, and an invite counts as a video call only when the caller sends
   video (a video section that only receives is a voice call).
+- **Signals in order, after their keys:** call events (and fresh events the SDK couldn't decrypt
+  yet, up to two minutes old) go through one queue per account, read beside the sync by one
+  reader per room (`signals::read_in_order`), all aborted with the account. One still encrypted
+  waits for its key until 10 s after it arrived (decrypting again every 250 ms), and the events after it wait
+  their turn, so an invite still rings and its candidates and answer don't overtake it; waits in
+  a row don't add up, and another room's wait holds up nothing here; the last try comes at the
+  deadline itself. A MatrixRTC ring heard late doesn't ring once the user joined the call on
+  another device. An invite heard after the user left its room doesn't ring. Under sliding sync the room's events and its room
+  keys come through different connections (the to-device long poll), and a call's first events
+  are usually the first of a new Megolm session, so they often arrive before their key; dropped
+  as before, a one-to-one call never rang or never connected.
 - **Telling the room:** the first one into a call sends `m.rtc.notification` (the unstable type,
   as Element Call does): `ring` in a direct chat, `notification` in a group, so every call has its
   card in the timeline and group calls don't ring.
@@ -237,6 +263,16 @@ Date: 2026-11-16
     stabilized speaker; selecting a tile pins that participant's camera or screen locally.
     Tile identity uses the participant key and surface kind, never `VideoId`, so a camera restart
     preserves the pin. A departed participant or ended pinned share returns to Auto.
+  - **One-to-one self-view:** it floats in a corner of the remote video (not the viewport), in
+    its own camera's shape (`SelfView`, placed by the planner). Dragging it follows the pointer
+    over the video; let go, it snaps to the corner nearest where it was dropped (a cancelled
+    drag puts it back). Dragging its inner corner (the one facing the video's middle, marked only
+    by the resize cursor) resizes it along that corner's diagonal, also with the arrow keys. Its
+    scale (15% to 45%) spans what fits: at most 45% of the video's width and half its height, at
+    least a third of that and 96 points along its longer side, so a portrait camera over a wide
+    video still resizes. A drag never counts as pressing it (which pins it). The
+    remote tile moves its fit button and name clear of the corner the self-view covers. Both
+    last for the call.
   - Screens always show their full image. The main focused surface takes its native aspect;
     portrait cameras default to showing the full frame. Every camera offers Full video / Fill
     tile. Hiding self-view stops its local watch without changing the published camera or screen.
@@ -260,7 +296,7 @@ Date: 2026-11-16
   - Rings show as cards at the top right (`ui::call::rings`), each one line: the caller (a long
     name cut short) and the controls; a notice stacks above them rather than under. Scenes:
     `demo-call-voice`,
-    `demo-call-video`, `demo-call-gallery`, `demo-call-many`, `demo-call-direct`,
+    `demo-call-video`, `demo-call-gallery`, `demo-call-many`, `demo-call-direct`, `demo-call-direct-moved`,
     `demo-call-shares`, `demo-call-focus`, `demo-call-no-sidebar`, `demo-call-layout-menu`, `demo-call-video-chat`,
     `demo-call-ringing`, `demo-call-chat`.
 

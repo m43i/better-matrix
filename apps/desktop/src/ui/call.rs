@@ -8,10 +8,12 @@ use super::components::{account_avatar, icon_button, media_avatar, menu_row, pop
 use super::icons;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf};
-use crate::state::{AccountData, Call, CallLayout, CallTile, Popover, State, VideoOption};
+use crate::state::{AccountData, Call, CallLayout, CallTile, Corner, Popover, SelfView, State, VideoOption};
 
 /// The size of a face on a voice call's stage.
 const FACE: f32 = 96.0;
+/// The size of the self-view's corner that resizes it.
+const RESIZE_CORNER: f32 = 20.0;
 /// The size of a round control button.
 const CONTROL: f32 = 48.0;
 
@@ -138,15 +140,21 @@ pub fn stage(s: &State, account: &AccountData, call: &Call, p: &Palette) -> El {
             }
         },
     );
+    let floating = plan.tiles.iter().any(|placed| placed.inset);
     for placed in &plan.tiles {
         let [x, y, w, h] = placed.rect;
         let tile = if call.video() {
-            video_tile(s, account, call, &placed.key, [w, h], p)
+            let layer = match (placed.inset, floating) {
+                (true, _) => Layer::SelfView,
+                (false, true) => Layer::Under(call.self_view.corner),
+                (false, false) => Layer::Alone,
+            };
+            video_tile(s, account, call, &placed.key, [w, h], layer, p)
         } else {
             voice_tile(s, account, call, &placed.key, [w, h], p)
         };
-        viewport =
-            viewport.child(tile.absolute(x, y).size(w, h).border(if placed.inset { 1.0 } else { 0.0 }, p.divider));
+        let tile = tile.absolute(x, y).size(w, h);
+        viewport = viewport.child(if placed.inset { self_view(tile, call, p) } else { tile });
     }
     if let Some([x, y, w, h]) = plan.divider {
         let beside = plan.strip_beside;
@@ -371,8 +379,89 @@ fn speaking_ring(face: El, p: &Palette) -> El {
     })
 }
 
+/// How a video tile sits among the others: on its own, under the one-to-one self-view (which
+/// covers one of its corners), or as that self-view.
+#[derive(Clone, Copy)]
+enum Layer {
+    Alone,
+    Under(Corner),
+    SelfView,
+}
+
+/// The one-to-one self-view, floating in a corner of the other person's video: dragged, it
+/// follows the pointer and snaps to the nearest corner when let go; dragging its inner corner
+/// resizes it. Nothing marks that corner but the resize cursor over it.
+fn self_view(tile: El, call: &Call, p: &Palette) -> El {
+    let corner = call.self_view.corner;
+    let [dx, dy] = call.self_drag.unwrap_or_default();
+    // The corner facing the middle of the video.
+    let (left, right) = if corner.left() { (None, Some(0.0)) } else { (Some(0.0), None) };
+    let (top, bottom) = if corner.top() { (None, Some(0.0)) } else { (Some(0.0), None) };
+    let grip = el()
+        .key("call-self-resize")
+        .size(RESIZE_CORNER, RESIZE_CORNER)
+        .pin(left, top, right, bottom)
+        .cursor(if corner.left() == corner.top() { rune::Cursor::ResizeNwse } else { rune::Cursor::ResizeNesw })
+        .role("slider")
+        .label(t!("call.resize_self").to_owned())
+        .on_drag(move |s: &mut State, drag, _| {
+            let Some(call) = s.call.as_mut() else { return };
+            let Some((own, main)) = call.self_view_rects() else { return };
+            match drag.phase {
+                // The scale the user chose, which a cancel restores.
+                rune::Phase::Down => drag.data = call.self_view.scale,
+                rune::Phase::Move => {
+                    let aspect = own[2] / own[3].max(1.0);
+                    let start = SelfView { scale: drag.data, ..call.self_view }.place(main, aspect)[2];
+                    // Towards the middle of the video grows it, back towards its corner shrinks
+                    // it: the pointer's travel along the corner's diagonal, which moves a point
+                    // in width and 1/aspect in height per point of width.
+                    let sideways = if corner.left() { drag.dx } else { -drag.dx };
+                    let upright = if corner.top() { drag.dy } else { -drag.dy };
+                    let grow = (sideways + upright / aspect) / (1.0 + 1.0 / (aspect * aspect));
+                    call.resize_self_view(SelfView::scale_for(main, aspect, start + grow));
+                }
+                rune::Phase::Up => {
+                    if drag.cancelled() {
+                        call.resize_self_view(drag.data);
+                    }
+                }
+            }
+        })
+        .on_step(|s: &mut State, delta, _| {
+            if let Some(call) = s.call.as_mut() {
+                call.resize_self_view(call.self_view.scale + delta as f32 * 0.05);
+            }
+        });
+    tile.border(1.0, p.divider)
+        .shadow(4.0, 18.0, Color::BLACK.alpha(0.35))
+        .offset(dx, dy)
+        .cursor(if call.self_drag.is_some() { rune::Cursor::Grabbing } else { rune::Cursor::Grab })
+        .help(t!("call.move_self"))
+        .on_drag(|s: &mut State, drag, _| {
+            let Some(call) = s.call.as_mut() else { return };
+            match drag.phase {
+                rune::Phase::Down => {}
+                rune::Phase::Move => call.drag_self_view([drag.dx, drag.dy]),
+                rune::Phase::Up => {
+                    let dropped = (!drag.cancelled()).then(|| call.self_drag.unwrap_or_default());
+                    call.drop_self_view(dropped);
+                }
+            }
+        })
+        .child(grip)
+}
+
 /// One surface: shared content is always fitted, while cameras offer a full-frame view.
-fn video_tile(s: &State, account: &AccountData, call: &Call, key: &CallTile, size: [f32; 2], p: &Palette) -> El {
+fn video_tile(
+    s: &State,
+    account: &AccountData,
+    call: &Call,
+    key: &CallTile,
+    size: [f32; 2],
+    layer: Layer,
+    p: &Palette,
+) -> El {
     let name = tile_name(s, call, key);
     let focus = key.clone();
     let mut cell = el()
@@ -399,8 +488,15 @@ fn video_tile(s: &State, account: &AccountData, call: &Call, key: &CallTile, siz
             (size[1] * 0.45).clamp(24.0, 72.0),
         ))),
     };
-    if !key.screen() && pixels.is_some() {
+    // The self-view fills its own camera's shape: nothing to fit.
+    if !key.screen() && pixels.is_some() && !matches!(layer, Layer::SelfView) {
         let fit = key.clone();
+        // Clear of the self-view floating over this tile's top right.
+        let pin = if matches!(layer, Layer::Under(Corner::TopRight)) {
+            (Some(6.0), Some(6.0), None, None)
+        } else {
+            (None, Some(6.0), Some(6.0), None)
+        };
         cell = cell.child(
             icon_button(
                 &icons::EXTERNAL,
@@ -410,14 +506,20 @@ fn video_tile(s: &State, account: &AccountData, call: &Call, key: &CallTile, siz
                 p,
             )
             .key(format!("{}-fit", tile_key(key)))
-            .pin(None, Some(6.0), Some(6.0), None)
+            .pin(pin.0, pin.1, pin.2, pin.3)
             .fill(Color::BLACK.alpha(0.5))
             .help(if full { t!("call.crop_video") } else { t!("call.full_video") })
             .on_press(move |s: &mut State| s.toggle_call_fit(fit.clone())),
         );
     }
+    // Clear of the self-view floating over this tile's bottom left.
+    let label_at = if matches!(layer, Layer::Under(Corner::BottomLeft)) {
+        (None, None, Some(10.0), Some(10.0))
+    } else {
+        (Some(10.0), None, None, Some(10.0))
+    };
     let mut label = row()
-        .pin(Some(10.0), None, None, Some(10.0))
+        .pin(label_at.0, label_at.1, label_at.2, label_at.3)
         .h(26.0)
         .px(10.0)
         .gap(6.0)
