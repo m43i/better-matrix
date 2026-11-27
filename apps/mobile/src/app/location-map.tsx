@@ -108,14 +108,21 @@ export default function LocationMapScreen() {
   // The camera follows the focused person as their live place moves, until the user moves the map.
   const [following, setFollowing] = useState(true);
   const [latitude, longitude] = [focused?.latitude, focused?.longitude];
+  // Where the camera was last sent: a choice's own move (with its zoom) isn't chased by a second.
+  const aimed = useRef('');
 
   useEffect(() => {
-    if (following && latitude != null && longitude != null)
-      camera.current?.easeTo({ center: [longitude, latitude], duration: 500 });
+    if (!following || latitude == null || longitude == null) return;
+    const point = `${latitude},${longitude}`;
+
+    if (point === aimed.current) return;
+    aimed.current = point;
+    camera.current?.easeTo({ center: [longitude, latitude], duration: 500 });
   }, [following, latitude, longitude]);
 
   const centre = (pin: MapPin) => {
     setFollowing(true);
+    aimed.current = `${pin.latitude},${pin.longitude}`;
     camera.current?.easeTo({
       center: [pin.longitude, pin.latitude],
       zoom: STREET_ZOOM,

@@ -514,8 +514,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   - The card sits below the message text; pressing it opens the link. Its image loads like the
     other media on screen, as a 160-pixel thumbnail; one that fails to load is left out.
     Settings → Messages & media → Link previews turns them off (on by default).
-- **Linked GIFs:** each holds at most 48 MiB of frames (beyond that, its first frame only), and
-  at most 16 play.
+- **Linked GIFs:** each holds at most 48 MiB of frames, and at most 16 play. A GIF whose frames
+  outgrow that keeps every other frame, each shown as long as the pair it stands for, until they
+  fit (a single frame too big shows still), so a long GIF plays at a lower frame rate rather than
+  freezing.
   - Past 128 MiB of frames across them, those off screen are forgotten, the one shown longest
     ago first, and fetched again if they come back; those on screen keep theirs. Each frame is
     still copied into the picture as it shows: Rune's `Pixels::set` takes an owned buffer.

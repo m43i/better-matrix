@@ -229,7 +229,8 @@ pub fn viewer(s: &State, viewer: &MapViewer, window: [f32; 2], p: &Palette) -> E
     let size = [(window[0] - 48.0).clamp(320.0, VIEWER_MAX[0]), (window[1] - 64.0).clamp(280.0, VIEWER_MAX[1])];
     let now = crate::state::now_ms();
     let pins = s.map_pins(viewer, now);
-    let focused = pins.iter().find(|pin| pin.message.event_id == viewer.focus);
+    let focus = s.map_focus(viewer);
+    let focused = pins.iter().find(|pin| Some(pin.message.sender_id.as_str()) == focus);
     let link = focused.and_then(|pin| matrix_core::geo::web_link(&pin.location.geo_uri));
     let bar = row()
         .key("location-viewer-bar")
@@ -362,10 +363,12 @@ fn moving_map(
     }
     // The focused pin last, over the others.
     let mut ordered: Vec<&MapPin<'_>> = pins.iter().collect();
-    ordered.sort_by_key(|pin| pin.message.event_id == viewer.focus);
+    let focus = s.map_focus(viewer);
+    ordered.sort_by_key(|pin| Some(pin.message.sender_id.as_str()) == focus);
     for pin in ordered {
         let [x, y] = place(pin.at);
-        map = map.child(marker(s, viewer, pin, p).absolute(x - PIN / 2.0, y - PIN_TIP));
+        let focused = Some(pin.message.sender_id.as_str()) == focus;
+        map = map.child(marker(s, pin, focused, p).absolute(x - PIN / 2.0, y - PIN_TIP));
     }
     map.child(
         text(t!("location.credit")).font(font::BADGE).color(p.text_muted).fill(p.surface.alpha(0.85)).px(4.0).pin(
@@ -385,9 +388,8 @@ const PIN_TIP: f32 = PIN + 8.0 + 6.0;
 
 /// A person's pin: their avatar in a ring, over a dot on the very spot. The focused one is in the
 /// accent.
-fn marker(s: &State, viewer: &MapViewer, pin: &MapPin<'_>, p: &Palette) -> El {
+fn marker(s: &State, pin: &MapPin<'_>, focused: bool, p: &Palette) -> El {
     let message = pin.message;
-    let focused = message.event_id == viewer.focus;
     let ring = if focused { p.accent } else { p.surface };
     let face = super::components::media_avatar(
         &message.sender_id,
@@ -455,8 +457,10 @@ fn people(s: &State, viewer: &MapViewer, pins: &[MapPin<'_>], now: u64, map: [f3
         .shrink()
         .min_h(0.0)
         .scroll(rune::ScrollSpec { stick_bottom: false });
+    let focus = s.map_focus(viewer);
     for pin in pins {
-        list = list.child(person_row(s, viewer, pin, now, p));
+        let focused = Some(pin.message.sender_id.as_str()) == focus;
+        list = list.child(person_row(s, viewer, pin, focused, now, p));
     }
     col()
         .key("map-people")
@@ -480,9 +484,8 @@ fn until_label(until: u64, now: u64) -> String {
     if local_ms(until) / 86_400_000 == local_ms(now) / 86_400_000 { clock_time(local_ms(until)) } else { when(until) }
 }
 
-fn person_row(s: &State, viewer: &MapViewer, pin: &MapPin<'_>, now: u64, p: &Palette) -> El {
+fn person_row(s: &State, viewer: &MapViewer, pin: &MapPin<'_>, focused: bool, now: u64, p: &Palette) -> El {
     let message = pin.message;
-    let focused = message.event_id == viewer.focus;
     let own = message.sender_id == viewer.account.as_str();
     let name = if own { t!("call.you").to_owned() } else { s.settings.person_name(&message.sender_name).into_owned() };
     let when = match pin.location.live_until.filter(|_| pin.live(now)) {

@@ -94,12 +94,14 @@ pub(crate) async fn share(
         return Err(Error::Location("Insufficient permission to share live location".into()));
     }
     let mut latest = first;
+    let mut renewing = false;
     loop {
         let mut info = BeaconInfoEventContent::new(None, timeout, true, None);
         let ends = if renews { timeout.saturating_sub(RENEW_EARLY).max(timeout / 2) } else { timeout };
         let until = tokio::time::Instant::now() + ends;
         let before = beacon_id(&room).await?;
-        if stopped.has_changed().unwrap_or(true) {
+        // A renewal looked for a stop just before; one since stops the fresh beacon's run at once.
+        if !renewing && stopped.has_changed().unwrap_or(true) {
             return Ok(());
         }
         let id = room.send_state_event_for_key(room.own_user_id(), info.clone()).await?.event_id;
@@ -134,9 +136,16 @@ pub(crate) async fn share(
             _ = tokio::time::sleep_until(until) => (Ok(()), true),
             result = run => (result, false),
         };
-        // The fresh beacon replaces this one in the room's state: nothing to stop.
         if renews && ran_out {
-            continue;
+            // Only a share still ours carries on: another device may have stopped or replaced it.
+            if !owns_server_state(&room, &id, &info).await? {
+                return result;
+            }
+            // The fresh beacon replaces this one in the room's state: nothing to stop.
+            if !stopped.has_changed().unwrap_or(true) {
+                renewing = true;
+                continue;
+            }
         }
         if info.is_live() && owns_server_state(&room, &id, &info).await? {
             info.stop();
@@ -262,12 +271,17 @@ mod tests {
         assert_eq!(place.live_until, Some(u64::from(now.0) + 900000));
     }
 
-    #[tokio::test]
-    async fn a_share_until_stopped_should_carry_on_in_a_fresh_beacon_from_the_latest_fix() {
-        let (sent, mut requests) = mpsc::unbounded_channel();
-        let server = crate::test_server::Server::new(move |request| {
+    /// A homeserver for renewing shares: each beacon gets its own ID, and the room's current beacon
+    /// is the latest one sent unless `current` says otherwise. Sends `(state, body)` of each
+    /// beacon event to `sent`.
+    fn renewing_server(
+        sent: mpsc::UnboundedSender<(bool, Value)>,
+        current: std::sync::Arc<std::sync::Mutex<String>>,
+    ) -> crate::test_server::Server {
+        let beacons = std::sync::atomic::AtomicUsize::new(0);
+        crate::test_server::Server::new(move |request| {
             if request.starts_with("GET ") && request.contains("beacon_info") {
-                return json!({"event_id":"$beacon"});
+                return json!({"event_id":current.lock().unwrap().clone()});
             }
             if request.starts_with("GET ") && request.contains("/state/m.room.encryption") {
                 return json!({"errcode":"M_NOT_FOUND","error":"Room is unencrypted"});
@@ -275,8 +289,17 @@ mod tests {
             if request.starts_with("PUT ") && request.contains("org.matrix.msc3672.beacon") {
                 let (headers, body) = request.split_once("\r\n\r\n").unwrap();
                 let state = headers.lines().next().unwrap().contains("/state/");
-                sent.send((state, serde_json::from_str::<Value>(body).unwrap())).unwrap();
-                return json!({"event_id":if state {"$beacon"} else {"$fix"}});
+                let body: Value = serde_json::from_str(body).unwrap();
+                sent.send((state, body.clone())).unwrap();
+                if !state {
+                    return json!({"event_id":"$fix"});
+                }
+                if body["live"] == false {
+                    return json!({"event_id":"$stop"});
+                }
+                let id = format!("$beacon{}", beacons.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1);
+                *current.lock().unwrap() = id.clone();
+                return json!({"event_id":id});
             }
             let mut response = crate::test_server::thread_response(request);
             if request.contains("/sync?") {
@@ -286,21 +309,29 @@ mod tests {
                 }));
             }
             response
-        });
+        })
+    }
+
+    async fn next(requests: &mut mpsc::UnboundedReceiver<(bool, Value)>) -> (bool, Value) {
+        tokio::time::timeout(Duration::from_secs(10), requests.recv()).await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_share_until_stopped_should_carry_on_in_a_fresh_beacon_from_the_latest_fix() {
+        let (sent, mut requests) = mpsc::unbounded_channel();
+        let current = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let server = renewing_server(sent, current);
         let account = crate::Account::for_test(&server.url()).await;
         account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.unwrap();
         let room = account.joined_room("!room:example.org").unwrap();
         let (answers, rx) = mpsc::unbounded_channel();
         let (stop, stopped) = tokio::sync::watch::channel(());
-        let beacons = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let counted = std::sync::Arc::clone(&beacons);
+        let beacons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let heard = std::sync::Arc::clone(&beacons);
         let task =
-            tokio::spawn(share(room, "geo:1,2".into(), (Duration::from_secs(2), true), rx, stopped, move |_| {
-                counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tokio::spawn(share(room, "geo:1,2".into(), (Duration::from_secs(2), true), rx, stopped, move |id| {
+                heard.lock().unwrap().push(id);
             }));
-        async fn next(requests: &mut mpsc::UnboundedReceiver<(bool, Value)>) -> (bool, Value) {
-            tokio::time::timeout(Duration::from_secs(10), requests.recv()).await.unwrap().unwrap()
-        }
         let (state, start) = next(&mut requests).await;
         assert!(state && start["live"] == true);
         assert_eq!(next(&mut requests).await.1["org.matrix.msc3488.location"]["uri"], "geo:1,2");
@@ -314,14 +345,35 @@ mod tests {
         assert_eq!(fix["org.matrix.msc3488.location"]["uri"], "geo:3,4");
         // Each beacon is announced once its first fix went.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        while beacons.load(std::sync::atomic::Ordering::Relaxed) < 2 && tokio::time::Instant::now() < deadline {
+        while beacons.lock().unwrap().len() < 2 && tokio::time::Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        assert_eq!(beacons.load(std::sync::atomic::Ordering::Relaxed), 2);
+        assert_eq!(*beacons.lock().unwrap(), ["$beacon1", "$beacon2"]);
         stop.send(()).unwrap();
         task.await.unwrap().unwrap();
         let (state, end) = next(&mut requests).await;
         assert!(state && end["live"] == false);
+    }
+
+    #[tokio::test]
+    async fn a_share_stopped_on_another_device_should_not_be_renewed() {
+        let (sent, mut requests) = mpsc::unbounded_channel();
+        let current = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let server = renewing_server(sent, std::sync::Arc::clone(&current));
+        let account = crate::Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.unwrap();
+        let room = account.joined_room("!room:example.org").unwrap();
+        let (_answers, rx) = mpsc::unbounded_channel();
+        let (_stop, stopped) = tokio::sync::watch::channel(());
+        let task = tokio::spawn(share(room, "geo:1,2".into(), (Duration::from_secs(2), true), rx, stopped, |_| {}));
+        let (state, start) = next(&mut requests).await;
+        assert!(state && start["live"] == true);
+        assert!(!next(&mut requests).await.0);
+        // Another device stops the share (its own stop is the room's beacon now), and no fix
+        // comes before renewal is due.
+        *current.lock().unwrap() = "$stopped-elsewhere".into();
+        tokio::time::timeout(Duration::from_secs(10), task).await.unwrap().unwrap().unwrap();
+        assert!(requests.try_recv().is_err(), "nothing more was sent");
     }
 
     #[tokio::test]

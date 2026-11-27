@@ -163,6 +163,10 @@ fn play(bytes: Arc<[u8]>, out: &Pixels, stop: &AtomicBool, paused: &AtomicBool, 
     let mut stride = 1usize;
     for (index, frame) in decoder.into_frames().enumerate() {
         let Ok(frame) = frame else { break };
+        // Stopped: let go now, rather than decode frames that are only left out.
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
         let (numerator, denominator) = frame.delay().numer_denom_ms();
         let delay = Duration::from_millis(u64::from(numerator / denominator.max(1)).max(20));
         if index % stride != 0 {

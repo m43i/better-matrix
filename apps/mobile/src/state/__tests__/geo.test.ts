@@ -147,6 +147,21 @@ describe('mapPins', () => {
     expect(pins.map((pin) => pin.message.event_id)).toEqual(['$a']);
   });
 
+  it('should let an ended live share give way to its sender’s newer place', () => {
+    const entries = [
+      place('$first', '@a', NOW - HOUR, 'geo:1,2', NOW - 60_000),
+      place('$renewed', '@a', NOW - 120_000, 'geo:1,2', NOW + HOUR),
+    ];
+
+    expect(ids(entries, '$first')).toEqual(['$renewed']);
+  });
+
+  it('should show an ended live share that was opened when its sender has nothing newer', () => {
+    expect(ids([place('$ended', '@a', NOW - HOUR, 'geo:1,2', NOW - 60_000)], '$ended')).toEqual([
+      '$ended',
+    ]);
+  });
+
   it('should always show the focused place, however old', () => {
     expect(ids([place('$old', '@a', NOW - 3 * RECENT_PLACE_MS)], '$old')).toEqual(['$old']);
   });

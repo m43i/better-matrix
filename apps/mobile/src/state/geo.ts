@@ -106,8 +106,9 @@ export function isLive(location: Location, now: number): boolean {
 
 /**
  * The pins a conversation's map shows (the desktop's `map_pins`): of the loaded location
- * messages with coordinates, each sender's newest, kept while it is live or under a day old. The
- * focused message is always shown, in place of its sender's newest. Newest first.
+ * messages with coordinates, each sender's newest that is a live share still running or a place
+ * under a day old; and the focused message in place of its sender's, unless it is a live share
+ * that has ended (then their newest stands, or it shows alone when they have none). Newest first.
  */
 export function mapPins(
   entries: readonly TimelineEntry[],
@@ -130,24 +131,27 @@ export function mapPins(
     const pin = { message, location, ...point };
 
     if (message.event_id === focusEventId) focus = pin;
+
+    // A live share stays while it runs and goes once it ends; a place stays a day.
+    const recent =
+      location.live_until != null
+        ? isLive(location, now)
+        : now - message.timestamp_ms <= RECENT_PLACE_MS;
+
+    if (!recent) continue;
     const held = newest.get(message.sender_id);
 
     if (!held || held.message.timestamp_ms < message.timestamp_ms)
       newest.set(message.sender_id, pin);
   }
 
-  if (focus) newest.set(focus.message.sender_id, focus);
+  if (focus) {
+    const ended = focus.location.live_until != null && !isLive(focus.location, now);
 
-  return [...newest.values()]
-    .filter((pin) => {
-      if (pin === focus) return true;
+    if (!ended || !newest.has(focus.message.sender_id)) newest.set(focus.message.sender_id, focus);
+  }
 
-      // A live share stays while it runs and goes once it ends; a place stays a day.
-      if (pin.location.live_until != null) return isLive(pin.location, now);
-
-      return now - pin.message.timestamp_ms <= RECENT_PLACE_MS;
-    })
-    .sort((a, b) => b.message.timestamp_ms - a.message.timestamp_ms);
+  return [...newest.values()].sort((a, b) => b.message.timestamp_ms - a.message.timestamp_ms);
 }
 
 /** What a pin's row says under the name: until when it is live, else where and when it was shared. */
