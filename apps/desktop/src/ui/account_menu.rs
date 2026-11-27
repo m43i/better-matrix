@@ -138,7 +138,7 @@ fn status_message(s: &State, account: &AccountData, p: &Palette) -> El {
                     .children(clear)
                     .on_press(State::edit_status_message),
             )
-            .children(account.status_message_clear_at().map(|at| {
+            .children(account.status_message_clear_at().filter(|at| *at > crate::state::now_ms()).map(|at| {
                 text(tf!("status_message.expires_at", time = when(at)))
                     .font(font::META)
                     .color(p.text_muted)
@@ -162,7 +162,8 @@ fn status_message(s: &State, account: &AccountData, p: &Palette) -> El {
         .on_press(|s: &mut State| s.toggle_popover(Popover::Emoji(EmojiFor::StatusMessage)));
     let expiry = &s.status_expiry;
     let picking = expiry.picker != StatusExpiryPicker::Closed;
-    let current = match expiry.choice {
+    let choice = expiry.choice.current(crate::state::now_ms());
+    let current = match choice {
         StatusExpiry::At(at) => when(at),
         other => other.label().to_owned(),
     };
@@ -171,7 +172,7 @@ fn status_message(s: &State, account: &AccountData, p: &Palette) -> El {
         &icons::CALENDAR,
         &expiry_label,
         picking,
-        if expiry.choice == StatusExpiry::Never { p.text_muted } else { p.accent },
+        if choice == StatusExpiry::Never { p.text_muted } else { p.accent },
         p,
     )
     .key("status-expiry")
@@ -187,7 +188,7 @@ fn status_message(s: &State, account: &AccountData, p: &Palette) -> El {
         .preserve_focus_on_press(true)
         .child(field().w_full().focus_within_ring(1.0, -1.0, p.accent).child(emoji).child(input).child(calendar));
     if picking {
-        section = section.child(expiry_picker(s, ready, p));
+        section = section.child(expiry_picker(s, choice, ready, p));
     } else {
         let mut suggestions = col()
             .w_full()
@@ -213,7 +214,7 @@ fn status_message(s: &State, account: &AccountData, p: &Palette) -> El {
     )
 }
 
-fn expiry_picker(s: &State, ready: bool, p: &Palette) -> El {
+fn expiry_picker(s: &State, choice: StatusExpiry, ready: bool, p: &Palette) -> El {
     let expiry = &s.status_expiry;
     let label = text(t!("status_message.expiry_label")).font(font::SECTION).color(p.text).px(6.0).grow(1.0);
     let picker =
@@ -222,8 +223,8 @@ fn expiry_picker(s: &State, ready: bool, p: &Palette) -> El {
         picker.child(label.py(4.0)).child(
             col().w_full().focus_group().role("listbox").label(t!("status_message.expiry_label")).children(
                 StatusExpiry::OPTIONS.into_iter().map(|option| {
-                    let selected = expiry.choice == option
-                        || (matches!(expiry.choice, StatusExpiry::At(_)) && option == StatusExpiry::Custom);
+                    let selected =
+                        choice == option || (matches!(choice, StatusExpiry::At(_)) && option == StatusExpiry::Custom);
                     select_option(option.label(), None, selected, p)
                         .key(format!("status-expiry-{}", option.id()))
                         .on_press(move |s: &mut State| s.choose_status_expiry(option))

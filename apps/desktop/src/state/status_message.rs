@@ -76,8 +76,16 @@ impl Expiry {
         }
     }
 
+    pub fn current(self, now_ms: u64) -> Self {
+        match self {
+            Self::At(at) if at <= now_ms => Self::Never,
+            _ => self,
+        }
+    }
+
     fn deadline(self, now: &DateTime<Local>) -> Option<u64> {
-        let minutes = match self {
+        let now = u64::try_from(now.timestamp_millis()).ok()?;
+        let minutes = match self.current(now) {
             Self::Never | Self::Custom => return None,
             Self::At(at) => return Some(at),
             Self::HalfHour => 30,
@@ -85,7 +93,7 @@ impl Expiry {
             Self::FourHours => 240,
             Self::Day => 1440,
         };
-        u64::try_from(now.timestamp_millis()).ok().map(|now| now + minutes * 60_000)
+        Some(now + minutes * 60_000)
     }
 }
 
@@ -140,7 +148,7 @@ impl State {
         let Some(account) = self.active_account() else { return };
         let (id, message) = (account.summary.id.clone(), account.status_message().unwrap_or_default().to_owned());
         self.status_expiry = ExpiryDraft {
-            choice: account.status_message_clear_at().map_or(Expiry::Never, Expiry::At),
+            choice: account.status_message_clear_at().map_or(Expiry::Never, Expiry::At).current(super::now_ms()),
             ..ExpiryDraft::default()
         };
         self.status_edit = TextEdit::new(message);

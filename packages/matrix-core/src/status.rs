@@ -161,6 +161,7 @@ impl Account {
             return Ok(());
         }
         known.message_number = number;
+        let clear_at_ms = clear_at_ms.filter(|at| *at > crate::engine::now_ms());
         let presence = sync_presence(known.saved.map(|saved| saved.status), known.synced);
         let mut request = set_presence::v3::Request::new(me.clone(), presence.clone());
         request.status_msg = message.clone();
@@ -274,10 +275,11 @@ impl Account {
             } else {
                 (current.presence, crate::people::status_message(current.status_msg.as_deref()))
             };
+            let presence = crate::people::presence(&shown);
             Ok::<_, Error>(crate::PersonPresence {
                 user_id: me.to_string(),
-                presence: crate::people::presence(&shown),
-                status_message: message,
+                presence,
+                status_message: message.filter(|_| presence != crate::Presence::Unknown),
             })
         };
         tokio::time::timeout(ANNOUNCE_WAIT, check).await.map_err(|_| Error::TimedOut)?
@@ -734,15 +736,24 @@ mod tests {
     async fn replacing_a_timed_status_message_should_forget_its_deadline() {
         let server = Homeserver::plain();
         let account = server.account().await;
-        account.set_status_message(Some("Out"), Some(42), 1, |_, _| {}).await.unwrap();
+        let clear_at_ms = crate::engine::now_ms() + 60_000;
+        account.set_status_message(Some("Out"), Some(clear_at_ms), 1, |_, _| {}).await.unwrap();
         let store = account.client().state_store();
         let saved = store.get_custom_value(EXPIRY_KEY).await.unwrap().unwrap();
         assert_eq!(
             serde_json::from_slice::<StatusMessageExpiry>(&saved).unwrap(),
-            StatusMessageExpiry { message: "Out".into(), clear_at_ms: 42 },
+            StatusMessageExpiry { message: "Out".into(), clear_at_ms },
         );
         account.set_status_message(Some("Back"), None, 2, |_, _| {}).await.unwrap();
         assert_eq!(store.get_custom_value(EXPIRY_KEY).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn saving_a_status_message_with_a_past_deadline_should_not_store_an_expiry() {
+        let server = Homeserver::plain();
+        let account = server.account().await;
+        account.set_status_message(Some("Out"), Some(1), 1, |_, _| {}).await.unwrap();
+        assert_eq!(account.client().state_store().get_custom_value(EXPIRY_KEY).await.unwrap(), None);
     }
 
     /// Start the worker with an overdue deadline loaded from the store, as on a restart.

@@ -1030,9 +1030,7 @@ fn account(s: &State, p: &Palette) -> El {
         RecoveryStatus::Unknown => status_line(&icons::KEY, t!("recovery.unknown"), p.text_muted, p),
     };
     let oauth = account.summary.sign_in == SignInMethod::OAuth;
-    let mut page = col()
-        .w_full()
-        .gap(32.0)
+    let mut page = cards()
         .child(account_heading(account, &s.media, p))
         .child(setting_card(&icons::SHIELD, t!("account.session"), t!("account.session_hint"), verification, p))
         .child(setting_card(&icons::KEY, t!("recovery.title"), t!("recovery.hint"), recovery, p));

@@ -735,6 +735,21 @@ fn adding_a_deadline_should_send_an_unchanged_status_message() {
 }
 
 #[test]
+fn a_deadline_that_passed_during_an_edit_should_not_clear_the_new_status_message() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    apply(&mut s, Event::AccountAdded(account(id.as_str())));
+    s.edit_status_message();
+    s.status_edit.text = "In a meeting".into();
+    s.status_expiry.choice = StatusExpiry::At(1);
+    s.save_status_message();
+    assert!(matches!(
+        &drain(&mut commands)[..],
+        [(_, Command::SetStatusMessage { message: Some(message), clear_at_ms: None, .. })] if message == "In a meeting"
+    ));
+}
+
+#[test]
 fn a_long_status_message_should_be_cut_at_the_longest_length() {
     let (mut s, _) = state();
     let id = AccountId::new("@a:example.org");

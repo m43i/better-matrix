@@ -88,6 +88,8 @@ Date: 2026-11-22
     most once a minute and at the deadline. Once due it reads Matrix presence and clears only
     a matching message, using the same lock as manual writes. Failed requests retry a minute
     later. A deadline that passed while the app was closed is handled when the account starts again.
+    Editing a message drops a past deadline. Matrix presence exposes the text without a write
+    identifier, so a different client saving identical text is indistinguishable from the original.
 - **Presence of others:** `Event::Presence` carries `PersonPresence` (presence and status
   message) for the people an account learns about: at start, from this device's store, for the
   people in the user's direct chats, before syncing starts; then whoever's presence a
