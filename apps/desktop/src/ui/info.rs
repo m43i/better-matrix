@@ -78,7 +78,7 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .padding(20.0)
         .gap(10.0)
         .items_center()
-        .child(media_avatar(&room.room_id, &room.name, room.avatar.as_ref(), &s.media, 72.0))
+        .child(media_avatar(&room.room_id, &s.settings.room_name(room), room.avatar.as_ref(), &s.media, 72.0))
         .child(text(super::room::display_name(room, &s.settings)).font(font::HEADER).color(p.text).wrap())
         .children(topic);
     let room_id = room.room_id.clone();

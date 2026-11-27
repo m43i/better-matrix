@@ -873,7 +873,7 @@ fn message_parts(
     }
     // Too narrow a timeline for the readers' column: the indicator takes a line of its own.
     if !cx.in_thread() && !cx.readers_column && is_read(message) {
-        let indicator = super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, p);
+        let indicator = super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, cx.settings, p);
         below.push(row().w_full().justify_end().child(indicator));
     }
     Parts { inside, below }
@@ -965,7 +965,15 @@ fn readers_cell(cx: &Context<'_>, message: &Message, p: &Palette) -> Option<El> 
         .self_end()
         .justify_end();
     if is_read(message) {
-        readers = readers.child(super::readers::indicator(cx.data, cx.key, message, cx.reader_faces, cx.media, p));
+        readers = readers.child(super::readers::indicator(
+            cx.data,
+            cx.key,
+            message,
+            cx.reader_faces,
+            cx.media,
+            cx.settings,
+            p,
+        ));
     }
     Some(readers)
 }

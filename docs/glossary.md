@@ -465,6 +465,10 @@ the server, edited under each account in Settings, Notifications (`Event::Keywor
 : The modal for this device's preferences (language, appearance) and each account's default
 notification mode, in sections (`SettingsSection`).
 
+**Reverse display names**
+: The General setting that shows a person's `Last, First` display name as `First, Last` on this
+device. It is off by default. See [ADR 0005](adr/0005-navigation-and-settings.md).
+
 **Appearance** (settings section)
 : The settings section for how the app looks: the theme (light, dark or the system's;
 `Appearance`), the message layout and the interface size. On phones these sit under Preferences,
