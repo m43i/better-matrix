@@ -125,6 +125,17 @@ impl Receipts {
         }
     }
 
+    /// The whole room was marked read: positions held back in it are older, and are dropped.
+    pub fn supersede(&mut self, account: &AccountId, room_id: &str) {
+        self.timelines.retain(|(owner, key), sent| {
+            if owner != account || key.room_id != room_id {
+                return true;
+            }
+            sent.pending = None;
+            !sent.closed || sent.in_flight.is_some()
+        });
+    }
+
     /// The app is quitting: every position held back goes now, even beside a receipt in flight
     /// (the server keeps the later of two receipts). The engine waits a moment for them.
     pub fn flush(&mut self) -> Vec<Command> {
@@ -205,6 +216,21 @@ mod tests {
         receipts.sent(&account, &key, RequestId(1));
         receipts.finished(RequestId(1), true, now);
         assert!(receipts.due(now + INTERVAL).is_empty());
+        assert!(receipts.timelines.is_empty());
+    }
+
+    #[test]
+    fn marking_the_room_read_should_drop_its_queued_receipts() {
+        let (mut receipts, now) = (Receipts::default(), Instant::now());
+        let account = AccountId::new("@a:example.org");
+        let key = TimelineKey::room("!room:example.org");
+        receipts.update(account.clone(), key.clone(), Some("$1".into()), true, now);
+        receipts.sent(&account, &key, RequestId(1));
+        receipts.update(account.clone(), key.clone(), Some("$2".into()), true, now);
+        receipts.forget(&account, &key);
+        receipts.supersede(&account, "!room:example.org");
+        receipts.finished(RequestId(1), true, now);
+        assert!(receipts.due(now).is_empty());
         assert!(receipts.timelines.is_empty());
     }
 

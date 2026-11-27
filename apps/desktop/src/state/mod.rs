@@ -4696,6 +4696,9 @@ impl State {
             )
         } else if before.unread > 0 || before.mentions > 0 {
             self.accounts.mark_read(&account, &room_id);
+            // Reading to the latest message supersedes positions held back in the room, which
+            // would otherwise follow it and move the marker back.
+            self.receipts.supersede(&account, &room_id);
             let undo = accounts::RoomUndo::Read {
                 marked: before.marked_unread,
                 unread: before.unread,
