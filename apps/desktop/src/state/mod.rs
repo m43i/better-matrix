@@ -4690,6 +4690,8 @@ impl State {
         // Reading a room with unread messages needs a receipt; one only marked loses the mark.
         let (command, undo) = if unread {
             self.accounts.set_marked(&account, &room_id, true);
+            // A receipt held back would clear the mark once it went (the SDK clears it on any).
+            self.receipts.supersede(&account, &room_id);
             (
                 Command::SetUnread { account: account.clone(), room_id, unread },
                 accounts::RoomUndo::Mark(before.marked_unread),

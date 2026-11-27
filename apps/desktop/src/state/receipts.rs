@@ -125,7 +125,8 @@ impl Receipts {
         }
     }
 
-    /// The whole room was marked read: positions held back in it are older, and are dropped.
+    /// The whole room was marked read (positions held back in it are older) or unread (they would
+    /// take the mark away): they are dropped.
     pub fn supersede(&mut self, account: &AccountId, room_id: &str) {
         self.timelines.retain(|(owner, key), sent| {
             if owner != account || key.room_id != room_id {

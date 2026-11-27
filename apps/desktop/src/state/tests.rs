@@ -7289,6 +7289,21 @@ fn marking_a_room_unread_should_draw_attention_to_it_and_tell_the_server() {
 }
 
 #[test]
+fn marking_a_room_unread_should_drop_the_receipt_held_back_for_it() {
+    let (mut s, mut commands) = state();
+    let id = AccountId::new("@a:example.org");
+    with_summaries(&mut s, &id, vec![RoomSummary { unread: 0, ..room("!r:x") }]);
+    let (key, now) = (TimelineKey::room("!r:x"), std::time::Instant::now());
+    s.receipts.update(id.clone(), key.clone(), Some("$1".into()), true, now);
+    s.receipts.sent(&id, &key, RequestId(1));
+    s.receipts.update(id.clone(), key.clone(), Some("$2".into()), true, now);
+    s.set_unread("!r:x", true);
+    drain(&mut commands);
+    s.quitting();
+    assert!(!all_commands(&mut commands).iter().any(|c| matches!(c, Command::MarkRead { .. })));
+}
+
+#[test]
 fn marking_a_room_with_unread_messages_read_should_clear_its_counts_and_read_it() {
     let (mut s, mut commands) = state();
     let id = AccountId::new("@a:example.org");
