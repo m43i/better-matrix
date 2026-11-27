@@ -851,7 +851,7 @@ dependencies = [
 
 [[package]]
 name = "better-matrix-cli"
-version = "0.0.18"
+version = "0.0.19"
 dependencies = [
  "clap",
  "clap_complete",
@@ -868,7 +868,7 @@ dependencies = [
 
 [[package]]
 name = "better-matrix-desktop"
-version = "0.0.18"
+version = "0.0.19"
 dependencies = [
  "async-channel",
  "async-io",
@@ -5516,7 +5516,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "matrix-core"
-version = "0.0.18"
+version = "0.0.19"
 dependencies = [
  "ashpd",
  "base64 0.22.1",
@@ -5554,7 +5554,7 @@ dependencies = [
 
 [[package]]
 name = "matrix-ffi"
-version = "0.0.18"
+version = "0.0.19"
 dependencies = [
  "jni 0.21.1",
  "livekit",
