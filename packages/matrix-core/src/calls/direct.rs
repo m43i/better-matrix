@@ -158,6 +158,11 @@ impl Direct {
         }
     }
 
+    /// Whether the connection is through now, whatever its events still on their way say.
+    pub fn connected(&self) -> bool {
+        self.pc.connection_state() == PeerConnectionState::Connected
+    }
+
     pub fn close(&self) {
         self.pc.close();
     }
