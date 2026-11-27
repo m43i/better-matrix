@@ -158,7 +158,18 @@ jobs:
       # No Rust cache: one saved from a tag's run can't be restored by any other, and these
       # release builds share nothing with CI's test builds.
       - name: Build
+        if: runner.os != 'Windows'
         run: cargo build -p better-matrix-desktop --release --locked
+      - if: runner.os == 'Windows'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          bun run build:windows --release
+          New-Item -ItemType Directory -Force target/release | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/better-matrix.exe target/release/
       # The executable is signed before packaging, so the installer and the self-update's ZIP
       # both carry the signed one; the installer is signed after.
       - name: Upload the executable for signing

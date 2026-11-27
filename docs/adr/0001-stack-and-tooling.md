@@ -59,8 +59,9 @@ Date: 2026-11-14
     `cargo-xwin` (clang-cl, lld-link).
   - Windows release builds use the GUI subsystem: no console window.
   - Windows links the MSVC runtime statically to match libwebrtc. Pin MapLibre Native FFI to
-    `0.202610.3`, whose Windows archive also uses `/MT`. Upgrading past that version requires
-    checking that the Windows archive uses the same runtime as libwebrtc.
+    `0.202610.3`, whose Windows archive also uses `/MT`. Use `bun run build:windows` for local
+    and release builds. It verifies the Windows archive's checksum and uses `llvm-ar` to remove
+    its SQLite object, so MapLibre and matrix-rust-sdk use the same bundled SQLite.
   - Linux releases include separate x86_64 and aarch64 `bm` archives. Build the CLI in a
     separate Cargo invocation so it uses the engine without the desktop media features
     ([0013](0013-command-line.md)).
