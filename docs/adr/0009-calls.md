@@ -267,9 +267,11 @@ Date: 2026-11-16
     its own camera's shape (`SelfView`, placed by the planner). Dragging it follows the pointer
     over the video; let go, it snaps to the corner nearest where it was dropped (a cancelled
     drag puts it back). Dragging its inner corner (the one facing the video's middle, marked only
-    by the resize cursor) resizes it from 15% to 45% of the video's width (never under 96 points,
-    nor more than half the video either way), also with the arrow keys. A drag never counts as pressing it (which pins it). The remote tile moves its fit
-    button and name clear of the corner the self-view covers. Both last for the call.
+    by the resize cursor) resizes it along that corner's diagonal from 15% to 45% of the video's
+    width (never under 96 points along its longer side, nor more than half the video either
+    way), also with the arrow keys. A drag never counts as pressing it (which pins it). The
+    remote tile moves its fit button and name clear of the corner the self-view covers. Both
+    last for the call.
   - Screens always show their full image. The main focused surface takes its native aspect;
     portrait cameras default to showing the full frame. Every camera offers Full video / Fill
     tile. Hiding self-view stops its local watch without changing the published camera or screen.

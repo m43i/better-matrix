@@ -183,6 +183,13 @@ fn a_self_view_should_grow_and_shrink_only_within_its_limits() {
 }
 
 #[test]
+fn a_portrait_self_view_over_a_short_video_should_still_resize() {
+    let size = [600.0, 337.5];
+    let width = |scale| direct(ASPECT, 9.0 / 16.0, size, SelfView { scale, ..SelfView::default() }).tiles[1].rect[2];
+    assert!(width(0.0) < width(5.0), "{} {}", width(0.0), width(5.0));
+}
+
+#[test]
 fn a_self_view_should_stay_inside_a_tiny_remote_video() {
     for size in [[1.0, 1.0], [20.0, 20.0], [120.0, 60.0]] {
         for corner in [Corner::TopLeft, Corner::BottomRight] {

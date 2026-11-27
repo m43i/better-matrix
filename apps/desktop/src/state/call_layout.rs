@@ -68,8 +68,8 @@ impl Corner {
 
 /// The smallest and largest self-view, as a share of the remote video's width.
 pub const SELF_VIEW_SCALE: std::ops::RangeInclusive<f32> = 0.15..=0.45;
-/// Narrower than this, the self-view shows too little to be worth it.
-const SELF_VIEW_MIN_WIDTH: f32 = 96.0;
+/// Smaller than this along its longer side, the self-view shows too little to be worth it.
+const SELF_VIEW_MIN: f32 = 96.0;
 
 /// Where a one-to-one call's self-view floats over the remote video, and how large it is.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -97,8 +97,9 @@ impl SelfView {
         let [x, y, w, h] = main;
         let aspect = if aspect.is_finite() && aspect > 0.0 { aspect } else { ASPECT };
         let room = [(w - 2.0 * GAP).max(0.0), (h - 2.0 * GAP).max(0.0)];
+        // The minimum holds for the longer side: a portrait camera's is its height.
         let width = (w * Self::clamp(self.scale))
-            .max(SELF_VIEW_MIN_WIDTH)
+            .max(SELF_VIEW_MIN * aspect.min(1.0))
             .min(w * 0.5)
             .min(h * 0.5 * aspect)
             .min(room[0])
