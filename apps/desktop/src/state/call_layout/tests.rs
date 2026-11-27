@@ -190,6 +190,25 @@ fn a_portrait_self_view_over_a_short_video_should_still_resize() {
 }
 
 #[test]
+fn a_portrait_self_view_held_back_by_the_videos_height_should_still_resize() {
+    let size = [800.0, 400.0];
+    let width = |scale| direct(ASPECT, 9.0 / 16.0, size, SelfView { scale, ..SelfView::default() }).tiles[1].rect[2];
+    let (smallest, normal, largest) = (width(0.0), width(0.25), width(5.0));
+    assert!(smallest < normal && normal < largest, "{smallest} {normal} {largest}");
+}
+
+#[test]
+fn a_width_should_turn_back_into_the_scale_that_gives_it() {
+    let main = [0.0, 0.0, 800.0, 450.0];
+    for aspect in [ASPECT, 9.0 / 16.0] {
+        for scale in [0.15, 0.25, 0.4, 0.45] {
+            let width = SelfView { scale, ..SelfView::default() }.place(main, aspect)[2];
+            assert!((SelfView::scale_for(main, aspect, width) - scale).abs() < 0.001, "{aspect} {scale}");
+        }
+    }
+}
+
+#[test]
 fn a_self_view_should_stay_inside_a_tiny_remote_video() {
     for size in [[1.0, 1.0], [20.0, 20.0], [120.0, 60.0]] {
         for corner in [Corner::TopLeft, Corner::BottomRight] {

@@ -407,10 +407,8 @@ fn self_view(tile: El, call: &Call, p: &Palette) -> El {
         .on_drag(move |s: &mut State, drag, _| {
             let Some(call) = s.call.as_mut() else { return };
             let Some((own, main)) = call.self_view_rects() else { return };
-            let across = main[2].max(1.0);
             match drag.phase {
-                // The scale the user chose, which a cancel restores; the width shown may differ
-                // from it where a limit holds it.
+                // The scale the user chose, which a cancel restores.
                 rune::Phase::Down => drag.data = call.self_view.scale,
                 rune::Phase::Move => {
                     let aspect = own[2] / own[3].max(1.0);
@@ -421,7 +419,7 @@ fn self_view(tile: El, call: &Call, p: &Palette) -> El {
                     let sideways = if corner.left() { drag.dx } else { -drag.dx };
                     let upright = if corner.top() { drag.dy } else { -drag.dy };
                     let grow = (sideways + upright / aspect) / (1.0 + 1.0 / (aspect * aspect));
-                    call.resize_self_view((start + grow) / across);
+                    call.resize_self_view(SelfView::scale_for(main, aspect, start + grow));
                 }
                 rune::Phase::Up => {
                     if drag.cancelled() {

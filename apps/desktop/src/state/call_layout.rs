@@ -91,19 +91,43 @@ impl SelfView {
         if scale.is_finite() { scale.clamp(*SELF_VIEW_SCALE.start(), *SELF_VIEW_SCALE.end()) } else { 0.25 }
     }
 
+    /// The narrowest and widest the self-view may be over `main` (the remote video) for a
+    /// camera of `aspect`: at most 45% of the video's width, half its height, and inside it;
+    /// at least a third of that and [`SELF_VIEW_MIN`] along its longer side (unless the video
+    /// is too small for even that). The scales span this range, so a camera whose shape the
+    /// video's height limits still resizes.
+    fn widths(main: [f32; 2], aspect: f32) -> (f32, f32) {
+        let [w, h] = main;
+        let room = [(w - 2.0 * GAP).max(0.0), (h - 2.0 * GAP).max(0.0)];
+        let widest = (w * SELF_VIEW_SCALE.end()).min(h * 0.5 * aspect).min(room[0]).min(room[1] * aspect);
+        let ratio = SELF_VIEW_SCALE.start() / SELF_VIEW_SCALE.end();
+        let narrowest = (widest * ratio).max(SELF_VIEW_MIN * aspect.min(1.0)).min(widest);
+        (narrowest, widest)
+    }
+
+    /// Where `scale` falls between the smallest scale (0) and the largest (1).
+    fn share(scale: f32) -> f32 {
+        let (low, high) = (*SELF_VIEW_SCALE.start(), *SELF_VIEW_SCALE.end());
+        (Self::clamp(scale) - low) / (high - low)
+    }
+
+    /// The scale that makes the self-view `width` wide over `main` for a camera of `aspect`:
+    /// how a resize by the pointer turns into a scale.
+    pub fn scale_for(main: [f32; 4], aspect: f32, width: f32) -> f32 {
+        let aspect = if aspect.is_finite() && aspect > 0.0 { aspect } else { ASPECT };
+        let (narrowest, widest) = Self::widths([main[2], main[3]], aspect);
+        let share = if widest > narrowest { (width - narrowest) / (widest - narrowest) } else { 0.0 };
+        let (low, high) = (*SELF_VIEW_SCALE.start(), *SELF_VIEW_SCALE.end());
+        Self::clamp(low + share.clamp(0.0, 1.0) * (high - low))
+    }
+
     /// The self-view's rectangle in the corner of `main` (the remote video), for a camera of
-    /// `aspect`: never more than half the video either way, nor outside it.
+    /// `aspect`: never outside it.
     pub fn place(self, main: [f32; 4], aspect: f32) -> [f32; 4] {
         let [x, y, w, h] = main;
         let aspect = if aspect.is_finite() && aspect > 0.0 { aspect } else { ASPECT };
-        let room = [(w - 2.0 * GAP).max(0.0), (h - 2.0 * GAP).max(0.0)];
-        // The minimum holds for the longer side: a portrait camera's is its height.
-        let width = (w * Self::clamp(self.scale))
-            .max(SELF_VIEW_MIN * aspect.min(1.0))
-            .min(w * 0.5)
-            .min(h * 0.5 * aspect)
-            .min(room[0])
-            .min(room[1] * aspect);
+        let (narrowest, widest) = Self::widths([w, h], aspect);
+        let width = narrowest + (widest - narrowest) * Self::share(self.scale);
         let height = width / aspect;
         let left = if self.corner.left() { x + GAP } else { x + w - GAP - width };
         let top = if self.corner.top() { y + GAP } else { y + h - GAP - height };
