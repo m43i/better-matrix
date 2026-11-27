@@ -5323,3 +5323,20 @@ fn a_member_without_a_direct_chat_should_offer_calls_only_where_the_server_allow
     rt.frame(1.0 / 60.0);
     assert!(rt.find("member-menu-call").is_none(), "no call where the homeserver allows none");
 }
+
+#[test]
+fn the_self_view_should_snap_by_where_it_was_let_go_not_where_it_last_moved() {
+    let mut rt = runtime(|s| demo::call_gallery(s, 2));
+    let start = rt.find("call-tile-you").expect("the self-view");
+    let video = element_rect(&rt, "call-tile-grace");
+    // Last moved near the top left, then let go back near the bottom right without a move.
+    rt.pointer_down(start.0, start.1);
+    rt.pointer_move(video[0] + 60.0, video[1] + 60.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(start.0 - 10.0, start.1);
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+    let call = rt.state.call.as_ref().expect("the call");
+    assert_eq!(call.self_view.corner, crate::state::Corner::BottomRight);
+}
