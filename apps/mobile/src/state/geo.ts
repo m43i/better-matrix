@@ -157,6 +157,24 @@ export function mapPins(
   return [...newest.values()].sort((a, b) => b.message.timestamp_ms - a.message.timestamp_ms);
 }
 
+/** When a pin leaves the map (unless it is the opened card's): as its live share ends, or a day after it was shared. */
+export function leavesAt(pin: MapPin): number {
+  return pin.location.live_until ?? pin.message.timestamp_ms + RECENT_PLACE_MS;
+}
+
+/** When the next pin on the map leaves it after `now`, if any does. */
+export function nextLeave(pins: readonly MapPin[], now: number): number | null {
+  let next: number | null = null;
+
+  for (const pin of pins) {
+    const at = leavesAt(pin);
+
+    if (at > now && (next === null || at < next)) next = at;
+  }
+
+  return next;
+}
+
 /** What a pin's row says under the name: until when it is live, else where and when it was shared. */
 export function pinDetail(pin: MapPin, now: number): string {
   const until = pin.location.live_until;

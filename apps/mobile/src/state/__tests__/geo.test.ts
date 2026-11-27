@@ -8,6 +8,7 @@ import {
   mapPins,
   pinDetail,
   googleMapsLink,
+  nextLeave,
   RECENT_PLACE_MS,
 } from '../geo';
 import { clockTime, sentAt } from '../timelineText';
@@ -169,6 +170,16 @@ describe('mapPins', () => {
     expect(ids([place('$ended', '@a', NOW - HOUR, 'geo:1,2', NOW - 60_000)], '$ended')).toEqual([
       '$ended',
     ]);
+  });
+
+  it('should know when the next pin leaves the map', () => {
+    const pins = mapPins(
+      [place('$live', '@a', NOW, 'geo:1,2', NOW + 90_000), place('$place', '@b', NOW - HOUR)],
+      '$none',
+      NOW,
+    );
+
+    expect(nextLeave(pins, NOW)).toBe(NOW + 90_000);
   });
 
   it('should always show the focused place, however old', () => {

@@ -224,7 +224,10 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   related beacon events. "Until stopped" still names an end on each beacon, 24 days on: JavaScript timers (Element
   Web's among them) overflow past 2^31 − 1 ms, so a longer timeout would end the share at once
   there. A minute before it, the share carries on in a fresh beacon from the latest fix (a new
-  card; `LiveLocationStarted` again, so Stop stops the newest). An orderly quit stops the share. Only a device fix
+  card; `LiveLocationStarted` again, so Stop stops the newest), but only while the beacon is
+  still the room's: renewal checks the server before writing, and after, that the fresh beacon
+  replaced the old (`unsigned.replaces_state`, trusted when the server omits it) and is still
+  current, else it stops the fresh beacon if still its own, so a stop from another device stands. An orderly quit stops the share. Only a device fix
   can start one in a room where the sender may publish both events. Room permissions let an
   admin set their level together. The picker can stop the current share, and each viewer can
   stop its own beacon. On Android the foreground service starts when sharing is requested and

@@ -30,6 +30,7 @@ import {
   isLive,
   type MapPin,
   mapPins,
+  nextLeave,
   pinDetail,
 } from '../state/geo';
 import { findMessage } from '../state/messages';
@@ -74,7 +75,10 @@ export default function LocationMapScreen() {
   const router = useRouter();
   const palette = usePalette();
   const insets = useSafeAreaInsets();
-  const now = useNow();
+  // The minute's clock, and the moment a pin last left the map: a live share's pin goes as it ends.
+  const minute = useNow();
+  const [moment, setMoment] = useState(() => Date.now());
+  const now = Math.max(minute, moment);
   const shown = useStore((s) => s.settings.showMaps);
   const entries = useStore((s) => timeline(s, account, keyOf(roomId, thread)).entries);
   const opened = useMemo(() => findMessage(entries, eventId), [entries, eventId]);
@@ -84,6 +88,15 @@ export default function LocationMapScreen() {
     () => mapPins(entries, eventId, now, ignored),
     [entries, eventId, now, ignored],
   );
+
+  const leaves = nextLeave(pins, now);
+
+  useEffect(() => {
+    if (leaves == null) return;
+    const timer = setTimeout(() => setMoment(Date.now()), leaves - now + 1);
+
+    return () => clearTimeout(timer);
+  }, [leaves, now]);
 
   // Who is focused, by sender (the card's, until another is picked): their pin stays focused as
   // their place moves.
@@ -154,7 +167,8 @@ export default function LocationMapScreen() {
     </>
   );
 
-  if (!opened)
+  // The opened card went (redacted, say): the map still shows whoever else is on it.
+  if (!opened && pins.length === 0)
     return (
       <>
         {header}
