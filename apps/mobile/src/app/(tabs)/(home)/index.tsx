@@ -15,12 +15,14 @@ import { routes } from '../../../routes';
 import { toggleSection } from '../../../state/actions/shell';
 import { shallow, useAppStore, useStore } from '../../../state/react';
 import {
+  activity,
   FAVOURITES,
   hasUnread,
   isBuiltin,
   lastMessage,
   LOW_PRIORITY,
   noteToSelf,
+  recentConversations,
   ROOMS,
   sameScope,
   scopeKey,
@@ -37,6 +39,7 @@ import { CallBar } from '../../../ui/call/CallBar';
 import { EmptyState, Touchable } from '../../../ui/components';
 import { Icon } from '../../../ui/icons';
 import { CreateFab } from '../../../ui/shell/CreateFab';
+import { HomeOverview } from '../../../ui/shell/HomeOverview';
 import { InvitationRow } from '../../../ui/shell/InvitationRow';
 import { ScopeTitle } from '../../../ui/shell/ScopeTitle';
 import { RoomRow } from '../../../ui/shell/RoomRow';
@@ -48,6 +51,8 @@ import { usePalette } from '../../../ui/theme';
 
 /** The group of conversations wanting attention, above the sections; collapsible like them. */
 const UNREAD = 'unread';
+
+const RECENT = 'recent';
 
 /** Invitations waiting for an answer, first of all, as the desktop's fixed section. */
 const INVITATIONS = 'invitations';
@@ -116,6 +121,21 @@ function listSections(account: RoomListData, now: number): ListSection[] {
     });
   }
 
+  const recent = recentConversations(account, scope, now);
+
+  if (recent.length > 0) {
+    const closed = collapsed.has(RECENT);
+    out.push({
+      id: RECENT,
+      key: RECENT,
+      title: t('overview.recent'),
+      collapsed: closed,
+      own: false,
+      attention: 0,
+      data: closed ? [] : recent,
+    });
+  }
+
   for (const view of sections(account, scope, now)) {
     // The built-in sections show once they hold something; the user's always do.
     if (isBuiltin(view.id) && view.rooms.length === 0) continue;
@@ -174,6 +194,10 @@ export default function HomeScreen() {
       <EndedSessions />
       <SecurityBanner />
       <CallBar />
+      <HomeOverview
+        account={account}
+        caughtUp={account.roomsLoaded && !list.some((section) => section.id === UNREAD)}
+      />
       {notes ? (
         <RoomRow account={id} room={notes} last={lastMessage(account, notes.room_id)} now={now} />
       ) : null}
@@ -211,7 +235,7 @@ export default function HomeScreen() {
                 count={section.attention}
                 onToggle={() => toggleSection(store, id, scope, section.id)}
                 onMenu={
-                  section.id === INVITATIONS
+                  section.id === INVITATIONS || section.id === RECENT
                     ? undefined
                     : () => router.push(routes.sectionMenu(id, section.id))
                 }
@@ -224,13 +248,16 @@ export default function HomeScreen() {
                 </Text>
               ) : null
             }
-            renderItem={({ item }) =>
+            renderItem={({ item, section }) =>
               isInvitation(item) ? (
                 <InvitationRow account={id} invitation={item} />
               ) : (
                 <RoomRow
                   account={id}
                   room={item}
+                  detailed={section.id === RECENT || section.id === UNREAD}
+                  overview={section.id === RECENT || section.id === UNREAD ? section.id : undefined}
+                  previewAt={section.id === RECENT ? activity(account, item, now) : undefined}
                   last={lastMessage(account, item.room_id)}
                   now={now}
                 />

@@ -94,6 +94,7 @@ function Routes({ scene }: { scene: SceneName | null }) {
           <Stack.Screen name="thread/[account]/[roomId]/[root]" />
           <Stack.Screen name="room-info/[account]/[roomId]" />
           <Stack.Screen name="account-menu" options={fittedSheet} />
+          <Stack.Screen name="status-message" options={{ presentation: 'modal' }} />
           <Stack.Screen name="create" options={fittedSheet} />
           <Stack.Screen name="spaces" options={sheet} />
           <Stack.Screen name="room-menu" options={fittedSheet} />

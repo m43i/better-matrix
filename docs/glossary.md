@@ -25,8 +25,8 @@ and shown beside their presence: Matrix presence's `status_msg`. An emoji starti
 it where space is short. `status_message` in code.
 
 **Status message expiry**
-: The optional time when this device clears the account's status message. The desktop account menu
-offers durations and a local clock time. The engine keeps the deadline across restarts and checks
+: The optional time when this device clears the account's status message. The account menu
+offers durations and a custom date and time. The engine keeps the deadline across restarts and checks
 it while the account is running.
 
 **Presence**

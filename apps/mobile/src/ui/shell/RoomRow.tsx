@@ -10,7 +10,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
 import { routes } from '../../routes';
-import { listTime, previewLine } from '../../state/lists';
+import { listTime, messageText, previewLine } from '../../state/lists';
 import { wantsAttention } from '../../state/sections';
 import { font } from '../../theme/palette';
 import { Avatar } from '../Avatar';
@@ -31,6 +31,8 @@ export const RoomRow = memo(function RoomRow({
   last,
   now,
   detailed = false,
+  overview,
+  previewAt,
   query,
   onPress,
 }: {
@@ -42,6 +44,10 @@ export const RoomRow = memo(function RoomRow({
   now: number;
   /** Show the latest message and its time under the name. */
   detailed?: boolean;
+  /** The same room can also appear in an Overview section. */
+  overview?: 'unread' | 'recent';
+  /** The latest known activity when the message preview is still loading. */
+  previewAt?: number;
   query?: string;
   /** Instead of opening the room (the search screen closes itself first). */
   onPress?: () => void;
@@ -52,6 +58,19 @@ export const RoomRow = memo(function RoomRow({
   const direct = room.kind === 'Direct';
   const badge = room.mentions > 0 ? room.mentions : direct && attention ? room.unread : 0;
   const nameColor = muted && !attention ? palette.textMuted : palette.text;
+  const title = room.note_to_self ? t('note_to_self.name') : room.name;
+  const time = previewAt || last?.timestamp_ms;
+
+  const preview =
+    detailed && last
+      ? overview &&
+        direct &&
+        room.dm_users.length === 1 &&
+        room.active_member_count <= 2 &&
+        room.dm_users[0] === last.sender_id
+        ? messageText(last)
+        : previewLine(last)
+      : null;
 
   const status = (
     <>
@@ -67,15 +86,15 @@ export const RoomRow = memo(function RoomRow({
       style={[attention ? font.navStrong : font.nav, styles.name, { color: nameColor }]}
       numberOfLines={1}
     >
-      {query ? <SearchHighlight text={room.name} query={query} /> : room.name}
+      {query ? <SearchHighlight text={title} query={query} /> : title}
     </Text>
   );
 
   return (
     <Touchable
-      testID={`room-${room.room_id}`}
+      testID={overview ? `overview-${overview}-${room.room_id}` : `room-${room.room_id}`}
       accessibilityRole="button"
-      accessibilityLabel={room.name}
+      accessibilityLabel={title}
       accessibilityHint={t('mobile.shell.room_hint')}
       onPress={onPress ?? (() => router.push(routes.room(account, room.room_id)))}
       onLongPress={() => router.push(routes.roomMenu(account, room.room_id))}
@@ -84,24 +103,34 @@ export const RoomRow = memo(function RoomRow({
     >
       {detailed ? (
         <>
-          <Avatar
-            account={account}
-            id={room.dm_users[0] ?? room.room_id}
-            name={room.name}
-            media={room.avatar}
-            size={DETAILED_AVATAR}
-          />
+          {room.note_to_self || (!direct && !room.avatar) ? (
+            <View style={[styles.detailedMark, { backgroundColor: palette.bubbleOwn }]}>
+              {room.note_to_self ? (
+                <Icon name="note" size={18} color={palette.accent} />
+              ) : (
+                <Text style={[styles.hash, { color: palette.accent }]}>#</Text>
+              )}
+            </View>
+          ) : (
+            <Avatar
+              account={account}
+              id={room.dm_users[0] ?? room.room_id}
+              name={title}
+              media={room.avatar}
+              size={DETAILED_AVATAR}
+            />
+          )}
           <View style={styles.text}>
             <View style={styles.line}>
               {name}
               {status}
-              {last ? (
+              {time === undefined ? null : (
                 <Text
                   style={[font.meta, { color: attention ? palette.accent : palette.textMuted }]}
                 >
-                  {listTime(last.timestamp_ms, now)}
+                  {listTime(time, now)}
                 </Text>
-              ) : null}
+              )}
             </View>
             <View style={styles.line}>
               <Text
@@ -112,7 +141,7 @@ export const RoomRow = memo(function RoomRow({
                 ]}
                 numberOfLines={1}
               >
-                {last ? previewLine(last) : ''}
+                {preview ?? ''}
               </Text>
               <Badge count={badge} mention={room.mentions > 0} />
             </View>
@@ -170,6 +199,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     minHeight: 52,
+  },
+  detailedMark: {
+    width: DETAILED_AVATAR,
+    height: DETAILED_AVATAR,
+    borderRadius: 8,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   text: { flex: 1, gap: 1 },
   line: { flexDirection: 'row', alignItems: 'center', gap: 6 },

@@ -90,6 +90,32 @@ describe('apply', () => {
     expect(state.accounts[0]!.rooms.map((r) => r.room_id)).toEqual(['!a:x']);
   });
 
+  it('should keep the account’s own status message when presence includes other people', () => {
+    const after = apply(signedIn(ADA), {
+      type: 'Presence',
+      data: {
+        account: ADA,
+        people: [
+          { user_id: GRACE, presence: 'Online', status_message: 'Away for lunch' },
+          { user_id: ADA, presence: 'Away', status_message: 'In a meeting' },
+        ],
+      },
+    });
+
+    expect(after.accounts[0]?.statusMessage).toBe('In a meeting');
+  });
+
+  it('should keep an expiry for the account the engine named', () => {
+    const expiry = { message: 'In a meeting', clear_at_ms: 42 };
+
+    const after = apply(signedIn(ADA, GRACE), {
+      type: 'StatusMessageExpiry',
+      data: { account: GRACE, expiry },
+    });
+
+    expect(after.accounts.map((account) => account.statusMessageExpiry)).toEqual([null, expiry]);
+  });
+
   it('should go back home when the space in scope is left', () => {
     let state = signedIn(ADA);
     state = { ...state, accounts: [{ ...state.accounts[0]!, scope: { space: '!s:x' } }] };

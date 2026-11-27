@@ -164,7 +164,7 @@ function hobbyVerified(): EngineEvent[] {
 }
 
 export const scenes = {
-  home: { about: 'Home: sections, unread rooms, direct messages' },
+  home: { about: 'Home: Overview, recent conversations, unread rooms and sections' },
   'search-ranked': {
     about: 'Search: usage favors design and Kai; try g for rooms or a for people',
     events: [
@@ -594,19 +594,31 @@ export const scenes = {
     about: 'Leaving a space, choosing which of its rooms to leave too',
     routes: [routes.leaveSpace(ADA, WORK_SPACE)],
   },
+  'status-message': {
+    about: 'Editing a status message with a calendar button for expiry',
+    routes: [routes.accountMenu(), routes.statusMessage(ADA)],
+  },
   settings: { about: 'Settings', routes: [routes.settings()] },
   'settings-giphy': {
-    about: 'Preferences: entering the user’s own GIPHY key',
-    routes: [routes.settings(), routes.settingsPreferences(), routes.settingsGiphy()],
+    about: 'Messages & media: entering the user’s own GIPHY key',
+    routes: [routes.settings(), routes.settingsMessagesMedia(), routes.settingsGiphy()],
   },
   'settings-giphy-saved': {
-    about: 'Preferences: a GIPHY key saved, offered only to replace or remove',
+    about: 'Messages & media: a GIPHY key saved, offered only to replace or remove',
     setup: (store) => showGiphyKey(store, 'demo-key'),
-    routes: [routes.settings(), routes.settingsPreferences(), routes.settingsGiphy()],
+    routes: [routes.settings(), routes.settingsMessagesMedia(), routes.settingsGiphy()],
   },
   'settings-preferences': {
-    about: 'Language and appearance',
-    routes: [routes.settings(), routes.settingsPreferences()],
+    about: 'General settings: language and developer tools',
+    routes: [routes.settings(), routes.settingsGeneral()],
+  },
+  'settings-appearance': {
+    about: 'Theme and message layout',
+    routes: [routes.settings(), routes.settingsAppearance()],
+  },
+  'settings-messages-media': {
+    about: 'Link previews, GIFs, maps and room changes',
+    routes: [routes.settings(), routes.settingsMessagesMedia()],
   },
   'settings-notifications': {
     about: 'Notification defaults',

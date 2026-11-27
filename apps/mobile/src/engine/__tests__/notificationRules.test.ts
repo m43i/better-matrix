@@ -41,6 +41,11 @@ describe('contentOf', () => {
     expect(contentOf(notification({ room_name: 'Grace' })).body).toBe('hi');
   });
 
+  it('a one-to-one chat should use the sender instead of the computed room name', () => {
+    const content = contentOf(notification({ room_name: 'Grace, Ada', one_to_one: true }));
+    expect([content.title, content.body]).toEqual(['Grace', 'hi']);
+  });
+
   it('the same event should notify once', () => {
     expect(contentOf(notification()).identifier).toBe(contentOf(notification()).identifier);
   });

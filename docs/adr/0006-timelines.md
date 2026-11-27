@@ -358,7 +358,7 @@ see who is typing there.
     widgets pinned or taken off) are
     `RoomChange::log_only` and go to the room log. A device setting brings them back into
     timelines ("Room changes", `Settings::show_room_changes` in the desktop's Messages & media settings,
-    `showRoomChanges` in the phone's Preferences; off by default), replanning them like hidden
+    `showRoomChanges` in the phone's Messages & media; off by default), replanning them like hidden
     events. A change left out is passed over like an undrawn hidden event: it doesn't break a run
     of joins or a sender's group of messages.
   - The room log (`SidePanel::Log`, "Room log" in the room's info; a pushed screen on phones)
@@ -378,7 +378,7 @@ see who is typing there.
   has no `RoomChange` for, events that didn't parse, membership events that changed nothing)
   is `EntryKind::Hidden` with its sender, type and event ID, so diff indices stay true. Whether
   they show is a setting on this device ("Show hidden events", off by default; the desktop's
-  General settings, the phone's Preferences), not an engine mode: turning it on plans the rows
+  General settings on both apps), not an engine mode: turning it on plans the rows
   again (`Accounts::replan_timelines` on the desktop) and each shows as a small line, "Grace
   sent m.room.server_acl", whose source button (a press on phones) opens its source. Hidden
   entries that don't show don't break a run of joins; ones that show do. Events the SDK's

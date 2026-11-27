@@ -234,7 +234,7 @@ Date: 2026-11-22
   - The navigation groups preferences and account pages. General holds language and developer
     tools. Appearance holds theme, interface size and message layout ([0006](0006-timelines.md)).
     Messages & media holds emoticons, room changes, link previews, GIFs, GIF search and maps
-    ([0007](0007-composer-and-media.md)). Settings sit in a single centered column, with switches on the right of their descriptions. Phones list the theme and message layout under Preferences.
+    ([0007](0007-composer-and-media.md)). Settings sit in a single centered column, with switches on the right of their descriptions. Phones use the same General, Appearance, and Messages & media sections (ADR 0010).
   - Voice & video picks the microphone, speaker and camera by name, for calls and voice
     messages alike (`Settings::devices`, `State::choose_device`); the system's default when
     none is picked or the picked one is gone. The devices list when the section opens

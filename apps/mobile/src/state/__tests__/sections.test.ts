@@ -28,6 +28,7 @@ import {
   noteToSelf,
   orderedSpaces,
   priorityIn,
+  recentConversations,
   ROOMS,
   roomsInScope,
   sectionOf,
@@ -42,6 +43,16 @@ import type { AccountData } from '../types';
 const NOW = 1_800_000_000_000;
 
 const EMPTY: SidebarLayout = { scopes: {}, changed_at: 0 };
+
+it('the Overview should show recent rooms before their latest messages arrive', () => {
+  const account = accountWith([
+    room('!old', { activity_ms: NOW - 1_000 }),
+    room('!quiet'),
+    room('!new', { activity_ms: NOW - 500 }),
+  ]);
+
+  expect(ids(recentConversations(account, 'home', NOW))).toEqual(['!new', '!old']);
+});
 
 function accountWith(
   rooms: RoomSummary[],

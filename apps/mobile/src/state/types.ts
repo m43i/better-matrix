@@ -32,6 +32,7 @@ import type {
   SidebarLayout,
   SpaceSummary,
   Status,
+  StatusMessageExpiry,
   ThreadInfo,
   TimelineEntry,
   VerificationStep,
@@ -124,6 +125,10 @@ export interface AccountData {
   status: Status;
   /** The status as last saved: what a choice that fails to save falls back to. */
   savedStatus: Status;
+  /** What this account's own presence says, from the engine. */
+  statusMessage: string | null;
+  /** The status message this device is scheduled to clear. */
+  statusMessageExpiry: StatusMessageExpiry | null;
   /** The words that notify the user wherever they are written, once the engine reports them. */
   keywords: string[] | null;
   /**

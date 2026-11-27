@@ -65,7 +65,7 @@ Date: 2026-11-22
     reads; the next sync or change sets it again. Hidden is not affected. Servers with presence
     switched off accept the status but show nobody's.
 - **Status message:** what the user says they are up to ("🌴 On vacation"), Matrix presence's
-  `status_msg`. An emoji is the message's first character. The desktop can set an optional expiry.
+  `status_msg`. An emoji is the message's first character. Both apps can set an optional expiry.
   - The message lives in Matrix presence, where other clients set and show the same field.
     `Command::SetStatusMessage` puts it with the presence of the status that holds
     (Online when none was ever set), under the status's lock, so an announcement running
@@ -75,7 +75,7 @@ Date: 2026-11-22
     numbers messages as commands arrive and drops one whose task runs after a later one's; the
     user's `Event::Presence` is sent under the same lock. Saving gives up after 20 s, as syncs
     wait for the lock. Blank clears it; the apps trim it and keep at most 100 characters.
-  - Written in the account menu: its first row shows the message (× clears it); pressed, the
+  - On the desktop the account menu shows its message in the first row (× clears it); pressed, the
     menu becomes a field with an emoji button (the picker takes the menu's place and returns to
     it), a calendar button at the right of the field, four suggestions that fill the field, and
     Save. The calendar opens a clear-after picker with presets and an optional date for a custom
@@ -83,6 +83,9 @@ Date: 2026-11-22
     over what the engine reports, until the request saving the latest
     choice finishes (`saving_status_message`); then it shows as last reported, so a failure falls
     back with a notice and an earlier save finishing late changes nothing.
+  - On mobile the status message opens an editor from the account menu. The calendar reveals
+    the presets and native selectors for a custom date and time. The editor closes after the
+    engine confirms the save.
   - The account's local SDK store keeps its expiry across restarts. Its engine task waits for
     a write when nothing is scheduled. While an expiry is pending it checks the wall clock at
     most once a minute and at the deadline. Once due it reads Matrix presence and clears only

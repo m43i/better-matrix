@@ -1,5 +1,4 @@
-// The way to every settings page, as the You tab and the Settings page list it: the account's
-// pages (for the account on screen), then this device's preferences and the app's info.
+// The settings index groups device preferences and pages for the account on screen.
 
 import { router } from 'expo-router';
 
@@ -13,8 +12,37 @@ export function SettingsRows() {
 
   return (
     <>
+      <ListSection title={t('settings.preferences_group')}>
+        <ListRow
+          testID="open-general"
+          icon="settings"
+          title={t('settings.general')}
+          onPress={() => router.push(routes.settingsGeneral())}
+        />
+        <Divider inset={52} />
+        <ListRow
+          testID="open-appearance"
+          icon="tune"
+          title={t('settings.appearance')}
+          onPress={() => router.push(routes.settingsAppearance())}
+        />
+        <Divider inset={52} />
+        <ListRow
+          testID="open-messages-media"
+          icon="chat"
+          title={t('settings.messages_media')}
+          onPress={() => router.push(routes.settingsMessagesMedia())}
+        />
+        <Divider inset={52} />
+        <ListRow
+          testID="open-notifications"
+          icon="bell"
+          title={t('settings.notifications')}
+          onPress={() => router.push(routes.settingsNotifications())}
+        />
+      </ListSection>
       {active ? (
-        <ListSection>
+        <ListSection title={t('settings.account_group')}>
           <ListRow
             testID="open-profile"
             icon="user"
@@ -23,24 +51,17 @@ export function SettingsRows() {
           />
           <Divider inset={52} />
           <ListRow
-            testID="open-notifications"
-            icon="bell"
-            title={t('settings.notifications')}
-            onPress={() => router.push(routes.settingsNotifications())}
+            testID="open-safety"
+            icon="safety"
+            title={t('settings.safety')}
+            onPress={() => router.push(routes.settingsSafety(active))}
           />
           <Divider inset={52} />
           <ListRow
             testID="open-account"
             icon="shield"
-            title={t('mobile.accounts.security_title')}
+            title={t('settings.account')}
             onPress={() => router.push(routes.settingsAccount(active))}
-          />
-          <Divider inset={52} />
-          <ListRow
-            testID="open-safety"
-            icon="safety"
-            title={t('settings.safety')}
-            onPress={() => router.push(routes.settingsSafety(active))}
           />
           <Divider inset={52} />
           <ListRow
@@ -52,13 +73,6 @@ export function SettingsRows() {
         </ListSection>
       ) : null}
       <ListSection>
-        <ListRow
-          testID="open-preferences"
-          icon="tune"
-          title={t('mobile.accounts.preferences')}
-          onPress={() => router.push(routes.settingsPreferences())}
-        />
-        <Divider inset={52} />
         <ListRow
           testID="open-info"
           icon="info"

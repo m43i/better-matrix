@@ -323,6 +323,24 @@ export function answer(
       return [];
     case 'SetStatus':
       return [{ type: 'Status', data: command.data }];
+    case 'SetStatusMessage': {
+      const { account, message, clear_at_ms } = command.data;
+
+      return [
+        {
+          type: 'Presence',
+          data: {
+            account,
+            people: [{ user_id: account, presence: 'Online', status_message: message }],
+          },
+        },
+        {
+          type: 'StatusMessageExpiry',
+          data: { account, expiry: message && clear_at_ms ? { message, clear_at_ms } : null },
+        },
+      ];
+    }
+
     case 'ListImagePacks':
       return [
         {

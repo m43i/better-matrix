@@ -134,8 +134,7 @@ pub struct Shown {
 }
 
 /// The text of a notification for `content`, as `apps/mobile/src/engine/notificationRules.ts`
-/// words it: the room as title; the message with its sender, unless the room is named after
-/// the sender (a direct chat).
+/// words it: the sender as title in a one-to-one direct chat, and the room in a group.
 pub fn shown(content: &PushContent, strings: &PushStrings) -> Option<Shown> {
     let fill = |template: &str, pairs: &[(&str, &str)]| {
         pairs.iter().fold(template.to_owned(), |text, (name, value)| text.replace(&format!("{{{{{name}}}}}"), value))
@@ -143,8 +142,8 @@ pub fn shown(content: &PushContent, strings: &PushStrings) -> Option<Shown> {
     let thread = |account: &matrix_core::AccountId, room: &str| format!("{account}|{room}");
     match content {
         PushContent::Message(n) => Some(Shown {
-            title: n.room_name.clone(),
-            body: if n.sender_name == n.room_name {
+            title: if n.one_to_one { n.sender_name.clone() } else { n.room_name.clone() },
+            body: if n.one_to_one || n.sender_name == n.room_name {
                 n.body.clone()
             } else {
                 fill(&strings.preview, &[("sender", &n.sender_name), ("body", &n.body)])
@@ -345,6 +344,15 @@ mod tests {
     #[test]
     fn a_direct_chat_named_after_the_sender_should_not_repeat_the_name() {
         assert_eq!(shown(&message("Grace", "Grace"), &PushStrings::default()).unwrap().body, "hi");
+    }
+
+    #[test]
+    fn a_one_to_one_chat_should_use_the_sender_instead_of_the_computed_room_name() {
+        let mut content = message("Grace", "Grace, Ada");
+        let PushContent::Message(notification) = &mut content else { unreachable!() };
+        notification.one_to_one = true;
+        let shown = shown(&content, &PushStrings::default()).unwrap();
+        assert_eq!((shown.title.as_str(), shown.body.as_str()), ("Grace", "hi"));
     }
 
     #[test]

@@ -114,6 +114,8 @@ function newAccount(summary: AccountSummary): AccountData {
     sidebarLoaded: false,
     status: 'Online',
     savedStatus: 'Online',
+    statusMessage: null,
+    statusMessageExpiry: null,
     keywords: null,
     safety: DEFAULT_SAFETY,
     savedSafety: DEFAULT_SAFETY,
@@ -648,6 +650,23 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
         status: event.data.status,
         savedStatus: event.data.status,
       }));
+    case 'Presence': {
+      const own = event.data.people.find((person) => person.user_id === event.data.account);
+
+      return own
+        ? updateAccount(state, event.data.account, (a) =>
+            a.statusMessage === own.status_message
+              ? a
+              : { ...a, statusMessage: own.status_message },
+          )
+        : state;
+    }
+
+    case 'StatusMessageExpiry':
+      return updateAccount(state, event.data.account, (a) => ({
+        ...a,
+        statusMessageExpiry: event.data.expiry,
+      }));
     case 'Safety':
       return updateAccount(state, event.data.account, (a) =>
         withSafety(a, event.data.safety, a.pendingSafety),
@@ -826,9 +845,6 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'MediaFailed':
     case 'CallMediaStopped':
     case 'PushContent':
-    // Presence dots and status messages are desktop-only for now.
-    case 'Presence':
-    case 'StatusMessageExpiry':
       return state;
     // Answers its search alone (`store.run`), into the picker that asked.
     case 'GifsFound':
