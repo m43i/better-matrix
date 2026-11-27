@@ -1619,14 +1619,19 @@ pub(crate) fn voice_info(message: &Outgoing) -> Option<matrix_sdk::attachment::A
     }))
 }
 
-/// Whether a request failed for a while rather than for good: the network, or the server
-/// overloaded or failing (429, 5xx).
+/// Whether a request failed for a while rather than for good: the network, the server
+/// overloaded or failing (429, 5xx), or refreshing the token (a session that really ended
+/// signs the account out, which stops the asking), also behind the SDK's cached errors.
 #[cfg(feature = "native-media")]
 fn transient(error: &matrix_sdk::HttpError) -> bool {
-    matches!(error, matrix_sdk::HttpError::Reqwest(_))
-        || error.as_client_api_error().is_some_and(|api| {
+    use matrix_sdk::HttpError;
+    match error {
+        HttpError::Reqwest(_) | HttpError::RefreshToken(_) => true,
+        HttpError::Cached(inner) => transient(inner),
+        _ => error.as_client_api_error().is_some_and(|api| {
             api.status_code.is_server_error() || api.status_code == matrix_sdk::reqwest::StatusCode::TOO_MANY_REQUESTS
-        })
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -1684,6 +1689,14 @@ mod tests {
         });
         let account = Account::for_test(&server.url()).await;
         assert!(account.discover_turn().await, "asked again after the failure");
+    }
+
+    #[cfg(feature = "native-media")]
+    #[test]
+    fn a_failed_token_refresh_should_count_as_failing_for_a_while() {
+        let refresh = matrix_sdk::HttpError::RefreshToken(matrix_sdk::RefreshTokenError::RefreshTokenRequired);
+        assert!(transient(&refresh));
+        assert!(transient(&matrix_sdk::HttpError::Cached(Arc::new(refresh))));
     }
 
     /// An account on a store shared with another client, as the engine and a push share one.

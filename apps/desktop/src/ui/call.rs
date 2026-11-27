@@ -416,10 +416,11 @@ fn self_view(tile: El, call: &Call, p: &Palette) -> El {
                     let aspect = own[2] / own[3].max(1.0);
                     let start = SelfView { scale: drag.data, ..call.self_view }.place(main, aspect)[2];
                     // Towards the middle of the video grows it, back towards its corner shrinks
-                    // it, along whichever way the pointer went further.
+                    // it: the pointer's travel along the corner's diagonal, which moves a point
+                    // in width and 1/aspect in height per point of width.
                     let sideways = if corner.left() { drag.dx } else { -drag.dx };
-                    let upright = if corner.top() { drag.dy } else { -drag.dy } * aspect;
-                    let grow = if sideways.abs() >= upright.abs() { sideways } else { upright };
+                    let upright = if corner.top() { drag.dy } else { -drag.dy };
+                    let grow = (sideways + upright / aspect) / (1.0 + 1.0 / (aspect * aspect));
                     call.resize_self_view((start + grow) / across);
                 }
                 rune::Phase::Up => {

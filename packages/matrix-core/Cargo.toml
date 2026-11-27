@@ -69,6 +69,10 @@ server = []
 # talk to the engine as JSON (the mobile bridge, `packages/matrix-ffi`).
 ffi = ["dep:ts-rs"]
 
+[dev-dependencies]
+# A paused clock, for tests of waits.
+tokio = { workspace = true, features = ["test-util"] }
+
 [lints]
 workspace = true
 

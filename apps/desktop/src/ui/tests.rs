@@ -5340,3 +5340,21 @@ fn the_self_view_should_snap_by_where_it_was_let_go_not_where_it_last_moved() {
     let call = rt.state.call.as_ref().expect("the call");
     assert_eq!(call.self_view.corner, crate::state::Corner::BottomRight);
 }
+
+#[test]
+fn resizing_the_self_view_should_follow_the_pointer_without_jumps() {
+    let mut rt = runtime(|s| demo::call_gallery(s, 2));
+    let grip = rt.find("call-self-resize").expect("the grip");
+    let width = |rt: &Runtime<State>| element_rect(rt, "call-tile-you")[2];
+    let before = width(&rt);
+    rt.pointer_down(grip.0, grip.1);
+    // Left and down by about its shape, then a point further down: the width barely changes.
+    rt.pointer_move(grip.0 - 50.0, grip.1 + 28.0);
+    rt.frame(1.0 / 60.0);
+    let one = width(&rt);
+    rt.pointer_move(grip.0 - 50.0, grip.1 + 29.0);
+    rt.frame(1.0 / 60.0);
+    let two = width(&rt);
+    rt.pointer_up(grip.0 - 50.0, grip.1 + 29.0);
+    assert!((one - two).abs() < 2.0, "{before} -> {one} -> {two}");
+}

@@ -64,7 +64,7 @@ Date: 2026-11-16
   (`voip/turnServer` with URIs, looked up once per account beside the LiveKit lookup,
   `Account::call_services`): without a relay two devices behind different routers rarely get
   through. A refusal, or Synapse's empty answer, names none; the network or the server failing
-  for a while (429, 5xx) is asked again, waiting longer each time. Each lookup reports as soon
+  for a while (429, 5xx, a token refresh that failed) is asked again, waiting longer each time. Each lookup reports as soon
   as it answers whether the account can call at all (`Event::CallsOffered`), so a person's
   profile and member menu offer a call (through a new direct chat) only then. Otherwise no call: the room header hides the call buttons (`RoomSummary::call`) and its
   video button offers the room's meetings instead (ADR 0012). A one-to-one invite still rings
@@ -173,11 +173,11 @@ Date: 2026-11-16
   offer asks for no video, and an invite counts as a video call only when the caller sends
   video (a video section that only receives is a voice call).
 - **Signals in order, after their keys:** call events (and fresh events the SDK couldn't decrypt
-  yet, up to two minutes old) go through one queue per account, read beside the sync
-  (`signals::read_in_order`) and aborted with the account. One still encrypted waits for its
-  key until 10 s after it arrived (decrypting again every 250 ms), and the events after it wait
+  yet, up to two minutes old) go through one queue per account, read beside the sync by one
+  reader per room (`signals::read_in_order`), all aborted with the account. One still encrypted
+  waits for its key until 10 s after it arrived (decrypting again every 250 ms), and the events after it wait
   their turn, so an invite still rings and its candidates and answer don't overtake it; waits in
-  a row don't add up. An invite heard after the user left its room doesn't ring. Under sliding sync the room's events and its room
+  a row don't add up, and another room's wait holds up nothing here. An invite heard after the user left its room doesn't ring. Under sliding sync the room's events and its room
   keys come through different connections (the to-device long poll), and a call's first events
   are usually the first of a new Megolm session, so they often arrive before their key; dropped
   as before, a one-to-one call never rang or never connected. A session whose key didn't come
