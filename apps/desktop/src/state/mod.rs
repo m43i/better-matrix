@@ -81,7 +81,7 @@ pub use admin::{
 };
 pub use attachments::{AttachmentAction, can_open_attachment};
 pub use call::Call;
-pub use call_layout::{CallLayout, CallTile};
+pub use call_layout::{CallLayout, CallTile, Corner, SelfView};
 pub use composer::{Composer, EditTarget, Format, ReplyTarget, VoiceMemo};
 pub use edit_history::EditHistory;
 pub use gifs::GifCache;

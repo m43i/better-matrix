@@ -42,7 +42,15 @@ async fn synced(server: &crate::test_server::Server) -> Account {
 async fn summary(account: &Account) -> crate::RoomSummary {
     let room = account.joined_room(ROOM).expect("room");
     let settings = account.client().notification_settings().await;
-    crate::convert::room_summary(&room, &settings, None, false, false, &account.sticky).await
+    crate::convert::room_summary(
+        &room,
+        &settings,
+        None,
+        crate::convert::CallServices::default(),
+        false,
+        &account.sticky,
+    )
+    .await
 }
 
 fn tags(names: &[&str]) -> Value {
@@ -392,7 +400,15 @@ async fn a_room_should_offer_meetings_where_the_server_names_a_jitsi_server() {
     let account = synced(&server).await;
     let room = account.joined_room(ROOM).expect("room");
     let settings = account.client().notification_settings().await;
-    let summary = crate::convert::room_summary(&room, &settings, None, false, true, &account.sticky).await;
+    let summary = crate::convert::room_summary(
+        &room,
+        &settings,
+        None,
+        crate::convert::CallServices::default(),
+        true,
+        &account.sticky,
+    )
+    .await;
     assert!(summary.can_start_meeting);
 }
 

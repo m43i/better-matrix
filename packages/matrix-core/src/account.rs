@@ -75,6 +75,8 @@ pub struct Account {
     session_changes: Arc<Mutex<Option<broadcast::Receiver<SessionChange>>>>,
     /// The LiveKit service the homeserver names for calls, once looked up.
     rtc: Arc<Mutex<Option<String>>>,
+    /// Whether the homeserver names TURN servers, for one-to-one calls, once looked up.
+    turn: Arc<std::sync::atomic::AtomicBool>,
     /// The Jitsi server the homeserver names for meetings, once looked up (`crate::widgets::meetings`).
     pub(crate) meeting_server: Arc<Mutex<Option<String>>>,
     /// The user's status as this session knows it (`crate::status`).
@@ -461,6 +463,7 @@ impl Account {
             client,
             session_changes: Arc::new(Mutex::new(None)),
             rtc: Arc::new(Mutex::new(None)),
+            turn: Arc::default(),
             meeting_server: Arc::default(),
             status: Arc::default(),
             status_saves: Arc::default(),
@@ -505,6 +508,7 @@ impl Account {
             client,
             session_changes: Arc::new(Mutex::new(None)),
             rtc: Arc::new(Mutex::new(None)),
+            turn: Arc::default(),
             meeting_server: Arc::default(),
             status: Arc::default(),
             status_saves: Arc::default(),
@@ -665,6 +669,7 @@ impl Account {
             client,
             session_changes: Arc::new(Mutex::new(Some(changes))),
             rtc: Arc::default(),
+            turn: Arc::default(),
             meeting_server: Arc::default(),
             status: Arc::default(),
             status_saves: Arc::default(),
@@ -795,6 +800,37 @@ impl Account {
     /// The LiveKit service the homeserver names for calls, if it named one yet.
     pub(crate) fn rtc_service(&self) -> Option<String> {
         self.rtc.lock().ok().and_then(|rtc| rtc.clone())
+    }
+
+    /// What the homeserver offers for calls, as far as it said yet.
+    pub(crate) fn call_services(&self) -> crate::convert::CallServices {
+        crate::convert::CallServices {
+            rtc: self.rtc_service().is_some(),
+            turn: self.turn.load(std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+
+    /// Looks up whether the homeserver names TURN servers, without which one-to-one calls aren't
+    /// offered. True when it names some. A server that refuses (none configured) names none; an
+    /// unreachable one is asked again until it answers, as [`Account::discover_rtc`] does.
+    #[cfg(feature = "native-media")]
+    pub(crate) async fn discover_turn(&self) -> bool {
+        use matrix_sdk::ruma::api::client::voip::get_turn_server_info;
+        let mut wait = std::time::Duration::from_secs(2);
+        let found = loop {
+            match self.client.send(get_turn_server_info::v3::Request::new()).await {
+                Ok(turn) => break !turn.uris.is_empty(),
+                // Only the network failing is asked again: a refusal, or Synapse's empty answer
+                // when it has no TURN servers (which doesn't read as one), names none.
+                Err(matrix_sdk::HttpError::Reqwest(_)) => {
+                    tokio::time::sleep(wait).await;
+                    wait = (wait * 2).min(std::time::Duration::from_secs(60));
+                }
+                Err(_) => break false,
+            }
+        };
+        self.turn.store(found, std::sync::atomic::Ordering::Relaxed);
+        found
     }
 
     /// The Jitsi server the homeserver names for meetings, if it named one yet.
@@ -956,9 +992,9 @@ impl Account {
                     note_to_self = self.marked_note_to_self().await;
                 }
                 if let Some(settings) = &settings {
-                    let (rtc, marked) = (self.rtc_service().is_some(), note_to_self.as_deref());
+                    let (services, marked) = (self.call_services(), note_to_self.as_deref());
                     let meetings = self.meeting_server().is_some();
-                    let summary = convert::room_summary(room, settings, marked, rtc, meetings, &self.sticky).await;
+                    let summary = convert::room_summary(room, settings, marked, services, meetings, &self.sticky).await;
                     moved |= self::changed(&mut cache.rooms, id, summary);
                 }
             }
@@ -1583,6 +1619,39 @@ pub(crate) fn voice_info(message: &Outgoing) -> Option<matrix_sdk::attachment::A
 mod tests {
     use super::*;
 
+    /// What an account learns of TURN from a homeserver answering `voip/turnServer` with `turn`.
+    #[cfg(feature = "native-media")]
+    async fn turn_from(turn: serde_json::Value) -> (bool, crate::convert::CallServices) {
+        let server = crate::test_server::Server::new(move |request| {
+            if request.contains("/voip/turnServer") {
+                turn.clone()
+            } else {
+                crate::test_server::thread_response(request)
+            }
+        });
+        let account = Account::for_test(&server.url()).await;
+        let found = account.discover_turn().await;
+        (found, account.call_services())
+    }
+
+    #[cfg(feature = "native-media")]
+    #[tokio::test]
+    async fn a_homeserver_naming_turn_servers_should_offer_one_to_one_calls() {
+        let turn = serde_json::json!({
+            "uris": ["turn:turn.example.org:3478?transport=udp"], "username": "u", "password": "p", "ttl": 86400
+        });
+        assert_eq!(turn_from(turn).await, (true, crate::convert::CallServices { rtc: false, turn: true }));
+    }
+
+    #[cfg(feature = "native-media")]
+    #[tokio::test]
+    async fn a_homeserver_without_turn_servers_should_offer_no_one_to_one_calls() {
+        // Synapse answers an empty object when it has none; others refuse.
+        assert_eq!(turn_from(serde_json::json!({})).await, (false, crate::convert::CallServices::default()));
+        let refused = serde_json::json!({ "errcode": "M_NOT_FOUND", "error": "no TURN" });
+        assert!(!turn_from(refused).await.0);
+    }
+
     /// An account on a store shared with another client, as the engine and a push share one.
     async fn sharing(server: &str, dir: &Path, holder: Holder) -> Account {
         let sessions = Sessions::new(dir, Arc::new(crate::secrets::MemorySecrets::default()));
@@ -1602,6 +1671,7 @@ mod tests {
             client,
             session_changes: Arc::new(Mutex::new(None)),
             rtc: Arc::new(Mutex::new(None)),
+            turn: Arc::default(),
             meeting_server: Arc::default(),
             status: Arc::default(),
             status_saves: Arc::default(),

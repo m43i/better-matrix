@@ -456,12 +456,28 @@ mod tests {
         let marked = RoomId::parse("!room:example.org").expect("id");
         let room = account.client().get_room(&marked).expect("room");
         let settings = account.client().notification_settings().await;
-        let summary = crate::convert::room_summary(&room, &settings, Some(&marked), true, false, &account.sticky).await;
+        let summary = crate::convert::room_summary(
+            &room,
+            &settings,
+            Some(&marked),
+            crate::convert::CallServices { rtc: true, turn: true },
+            false,
+            &account.sticky,
+        )
+        .await;
         assert!(summary.note_to_self);
         assert_eq!(summary.kind, crate::RoomKind::Direct);
         assert!(summary.dm_users.is_empty());
         assert_eq!(summary.call.via, None);
-        let unmarked = crate::convert::room_summary(&room, &settings, None, true, false, &account.sticky).await;
+        let unmarked = crate::convert::room_summary(
+            &room,
+            &settings,
+            None,
+            crate::convert::CallServices { rtc: true, turn: true },
+            false,
+            &account.sticky,
+        )
+        .await;
         assert!(!unmarked.note_to_self);
         assert_eq!(unmarked.kind, crate::RoomKind::Group);
     }

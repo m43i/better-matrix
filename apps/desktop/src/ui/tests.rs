@@ -5232,3 +5232,70 @@ fn a_notice_should_go_after_six_seconds() {
     rt.frame(2.0);
     assert!(rt.state.notice.is_none());
 }
+
+/// Drags with the pointer from `from` to `to`, in steps, and lets go.
+fn drag(rt: &mut Runtime<State>, from: (f32, f32), to: (f32, f32)) {
+    rt.pointer_down(from.0, from.1);
+    for step in 1..=10 {
+        let t = step as f32 / 10.0;
+        rt.pointer_move(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(to.0, to.1);
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+}
+
+#[test]
+fn a_one_to_one_self_view_should_sit_in_the_corner_of_the_other_persons_video() {
+    let rt = runtime(|s| demo::call_gallery(s, 2));
+    let (remote, own) = (element_rect(&rt, "call-tile-grace"), element_rect(&rt, "call-tile-you"));
+    assert!(own[2] < remote[2] / 2.0, "the self-view is small: {own:?} over {remote:?}");
+    let (right, bottom) = (remote[0] + remote[2] - own[0] - own[2], remote[1] + remote[3] - own[1] - own[3]);
+    assert!((right - 12.0).abs() < 1.0 && (bottom - 12.0).abs() < 1.0, "{own:?} in {remote:?}");
+}
+
+#[test]
+fn dropping_the_self_view_near_another_corner_should_snap_it_there() {
+    let mut rt = runtime(|s| demo::call_gallery(s, 2));
+    let remote = element_rect(&rt, "call-tile-grace");
+    let start = rt.find("call-tile-you").expect("the self-view");
+    // Dropped a little off the top left corner, it snaps into it.
+    drag(&mut rt, start, (remote[0] + remote[2] * 0.3, remote[1] + remote[3] * 0.35));
+    let call = rt.state.call.as_ref().expect("the call");
+    assert_eq!((call.self_view.corner, call.self_drag), (crate::state::Corner::TopLeft, None));
+    let own = element_rect(&rt, "call-tile-you");
+    assert!((own[0] - remote[0] - 12.0).abs() < 1.0 && (own[1] - remote[1] - 12.0).abs() < 1.0, "{own:?}");
+    assert!(rt.state.call.as_ref().is_some_and(|call| call.layout == crate::state::CallLayout::Auto), "no focus");
+}
+
+#[test]
+fn dragging_the_self_views_grip_should_resize_it_only_so_far() {
+    let mut rt = runtime(|s| demo::call_gallery(s, 2));
+    let before = element_rect(&rt, "call-tile-you")[2];
+    let grip = rt.find("call-self-resize").expect("the grip");
+    // Towards the middle of the video: as large as it gets.
+    drag(&mut rt, grip, (grip.0 - 2000.0, grip.1 - 2000.0));
+    let largest = element_rect(&rt, "call-tile-you")[2];
+    assert!(largest > before, "{before} -> {largest}");
+    assert_eq!(rt.state.call.as_ref().map(|call| call.self_view.scale), Some(0.45));
+    // Back into its corner: as small as it gets, still there.
+    let grip = rt.find("call-self-resize").expect("the grip");
+    drag(&mut rt, grip, (grip.0 + 2000.0, grip.1 + 2000.0));
+    let smallest = element_rect(&rt, "call-tile-you")[2];
+    assert!(smallest < before && smallest >= 96.0, "{before} -> {smallest}");
+}
+
+#[test]
+fn the_self_views_inner_corner_should_show_the_resize_cursor_and_the_rest_the_grab_cursor() {
+    let mut rt = runtime(|s| demo::call_gallery(s, 2));
+    let own = element_rect(&rt, "call-tile-you");
+    // The self-view sits bottom right: its top left corner faces the video's middle.
+    rt.pointer_move(own[0] + 4.0, own[1] + 4.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.cursor(), rune::Cursor::ResizeNwse);
+    rt.pointer_move(own[0] + own[2] / 2.0, own[1] + own[3] / 2.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.cursor(), rune::Cursor::Grab);
+}

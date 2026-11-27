@@ -4303,8 +4303,10 @@ impl State {
                 // up every account's commands. The account shows before anything about it.
                 let sliding_sync = self.sliding_sync;
                 let watch_ready = self.pause_for_watch.then(|| Arc::new(WatchSync::new()));
+                // The terminal's watch waits on it too.
+                #[cfg(feature = "command-line")]
+                let watched = watch_ready.clone();
                 let started = {
-                    let watch_ready = watch_ready.clone();
                     let (account, sink, feed) = (account.clone(), Arc::clone(&self.sink), feed.clone());
                     tokio::spawn(async move {
                         // The safety choices as this device stored them, before any room or
@@ -4348,12 +4350,14 @@ impl State {
                         };
                         let status = account
                             .report_status(|status| sink.emit(Event::Status { account: account.id().clone(), status }));
-                        // Once the homeserver names a call service, rooms offer MatrixRTC calls.
+                        // Once the homeserver names a call service, rooms offer MatrixRTC calls; once
+                        // it names TURN servers, direct chats offer one-to-one calls.
                         #[cfg(feature = "native-media")]
                         let calls = {
                             let (account, feed) = (account.clone(), feed.clone());
                             async move {
-                                if account.discover_rtc().await {
+                                let (rtc, turn) = tokio::join!(account.discover_rtc(), account.discover_turn());
+                                if rtc || turn {
                                     feed.refresh(None).await;
                                 }
                             }
@@ -4417,7 +4421,7 @@ impl State {
                 let running = Running {
                     account,
                     #[cfg(feature = "command-line")]
-                    watch_ready,
+                    watch_ready: watched,
                     usage,
                     background,
                     flows,
@@ -7016,6 +7020,77 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         assert!(scanned, "the phone scanned the desktop's code");
+    }
+
+    /// Two people on one homeserver without a call service (MatrixRTC) call each other the
+    /// one-to-one way and both end up connected, over loopback. The server must name TURN
+    /// servers (Synapse's `turn_uris` and `turn_shared_secret`; none need to answer).
+    /// `BM_LIVE_HOMESERVER=http://127.0.0.1:8008 cargo test -p matrix-core -- --ignored live_direct_call`.
+    #[cfg(feature = "native-media")]
+    #[test]
+    #[ignore = "needs a homeserver with open registration and TURN, and audio devices"]
+    fn live_direct_call_should_connect_both_sides() {
+        let Ok(server) = std::env::var("BM_LIVE_HOMESERVER") else { return };
+        let (caller, caller_events) = start_as("live-call-ada", false);
+        let (callee, callee_events) = start_as("live-call-grace", false);
+        let ada = register_live(&caller, &caller_events, &server, "ada");
+        let grace = register_live(&callee, &callee_events, &server, "grace");
+        let (opened, seen) =
+            run(&caller, &caller_events, Command::OpenDirectChat { account: ada.clone(), user_id: grace.to_string() });
+        opened.expect("a direct chat");
+        let room_id = seen
+            .into_iter()
+            .find_map(|e| match e {
+                Event::DirectChat { room_id, .. } => Some(room_id),
+                _ => None,
+            })
+            .expect("the direct chat's room");
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        let wait = |events: &std_mpsc::Receiver<Event>, what: &str, mut found: Box<dyn FnMut(&Event) -> bool>| loop {
+            assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+            if let Ok(event) = events.recv_timeout(Duration::from_millis(200)) {
+                if let Event::CallEnded { reason, .. } = &event {
+                    panic!("the call ended waiting for {what}: {reason:?}");
+                }
+                if found(&event) {
+                    return;
+                }
+            }
+        };
+        let invited = room_id.clone();
+        wait(
+            &callee_events,
+            "the invitation",
+            Box::new(
+                move |e| matches!(e, Event::RoomsUpdated { list, .. } if list.invitations.iter().any(|i| i.room_id == invited)),
+            ),
+        );
+        let join = Command::JoinRoom { account: grace.clone(), room_id: room_id.clone(), via: Vec::new() };
+        run(&callee, &callee_events, join).0.expect("joined");
+        // Ada's summary offers the one-to-one call once Grace is in.
+        let here = room_id.clone();
+        wait(
+            &caller_events,
+            "a one-to-one call to be offered",
+            Box::new(move |e| {
+                matches!(e, Event::RoomsUpdated { list, .. }
+                    if list.rooms.iter().any(|r| r.room_id == here && r.call.via == Some(crate::calls::CallVia::Direct)))
+            }),
+        );
+        caller.send(Command::StartCall { account: ada, room_id: room_id.clone(), video: false });
+        wait(&callee_events, "the ring", Box::new(|e| matches!(e, Event::IncomingCall(_))));
+        callee.send(Command::AnswerCall { account: grace, room_id, video: false });
+        let connected =
+            |e: &Event| matches!(e, Event::CallUpdated(info) if info.phase == crate::calls::CallPhase::Connected);
+        wait(&callee_events, "Grace to connect", Box::new(connected));
+        wait(&caller_events, "Ada to connect", Box::new(connected));
+        caller.send(Command::HangUp);
+        let left = |e: &Event| matches!(e, Event::CallEnded { .. });
+        let mut ended = false;
+        while !ended && std::time::Instant::now() < deadline {
+            ended = callee_events.recv_timeout(Duration::from_millis(200)).is_ok_and(|e| left(&e));
+        }
+        assert!(ended, "Grace hears Ada hang up");
     }
 
     #[test]

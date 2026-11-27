@@ -93,11 +93,16 @@ pub(crate) fn listen(
             }
         })
     };
+    // Call events, and fresh events the SDK couldn't decrypt yet, in the order they came: one
+    // queue per account, read beside the sync (which waits for its handlers). It ends with the
+    // handler, which holds its only sender.
+    let (queue, queued) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(read_in_order(account.clone(), signals.clone(), queued));
     let timeline = {
-        let (account, signals, sticky) = (account.clone(), signals.clone(), sticky.clone());
+        let sticky = sticky.clone();
         client.add_event_handler(
             move |raw: Raw<AnySyncTimelineEvent>, room: matrix_sdk::Room, encryption: Option<EncryptionInfo>| {
-                let (account, signals, sticky) = (account.clone(), signals.clone(), sticky.clone());
+                let (queue, sticky) = (queue.clone(), sticky.clone());
                 async move {
                     // Most events are none of these: only theirs are read whole.
                     let kind = raw.get_field::<String>("type").ok().flatten().unwrap_or_default();
@@ -107,13 +112,10 @@ pub(crate) fn listen(
                         sticky_heard(&room, &event, trusted, &sticky);
                         return;
                     }
-                    if !concerns_calls(&kind) {
-                        return;
-                    }
-                    let Ok(event) = raw.deserialize_as_unchecked::<Value>() else { return };
-                    let encrypted = encryption.is_some();
-                    for signal in timeline_signals(&account, room.room_id().as_str(), &event, encrypted) {
-                        let _ = signals.send(signal);
+                    let sent = raw.get_field::<u64>("origin_server_ts").ok().flatten().unwrap_or_default();
+                    let undecrypted = kind == "m.room.encrypted" && awaits_key(sent, crate::engine::now_ms());
+                    if concerns_calls(&kind) || undecrypted {
+                        let _ = queue.send(Queued { raw, room, encrypted: encryption.is_some(), undecrypted });
                     }
                 }
             },
@@ -152,6 +154,92 @@ pub(crate) fn listen(
         })
     };
     vec![to_device, timeline, state]
+}
+
+/// A timeline event the calls read in order: a call event, or a fresh one still encrypted.
+struct Queued {
+    raw: Raw<AnySyncTimelineEvent>,
+    room: matrix_sdk::Room,
+    /// It came encrypted (and was decrypted).
+    encrypted: bool,
+    /// The SDK couldn't decrypt it yet: its key may still be on its way.
+    undecrypted: bool,
+}
+
+/// How long a call event that came before its key waits for it. Under sliding sync the key
+/// comes through the other connection (the to-device long poll), often a moment after the
+/// room's events; a call's first events are usually the first of a new session.
+const KEY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+/// How often a waiting event tries again.
+const KEY_RETRY: std::time::Duration = std::time::Duration::from_millis(250);
+/// Only events younger than this wait for their key: older ones are past any call (an invite
+/// lives a minute) and a catch-up sync's backlog mustn't hold the queue up.
+const KEY_FRESH_MS: u64 = 2 * 60 * 1000;
+
+/// Whether an undecryptable event sent at `sent` (ms since the epoch) is fresh enough to wait
+/// for its key at `now`.
+fn awaits_key(sent: u64, now: u64) -> bool {
+    now.saturating_sub(sent) < KEY_FRESH_MS
+}
+
+/// Turns the queued events into signals, in the order sync delivered them: one still encrypted
+/// waits (up to [`KEY_WAIT`]) for its key first, so an invite that came before its key still
+/// rings, and its candidates and answer don't overtake it. A session whose key never came isn't
+/// waited for again.
+async fn read_in_order(
+    account: AccountId,
+    signals: UnboundedSender<Signal>,
+    mut queued: tokio::sync::mpsc::UnboundedReceiver<Queued>,
+) {
+    let mut keyless: std::collections::HashSet<String> = std::collections::HashSet::new();
+    while let Some(Queued { raw, room, encrypted, undecrypted }) = queued.recv().await {
+        let (raw, encrypted) = if undecrypted {
+            let session = raw
+                .get_field::<Value>("content")
+                .ok()
+                .flatten()
+                .and_then(|content| content["session_id"].as_str().map(str::to_owned));
+            if session.as_ref().is_some_and(|session| keyless.contains(session)) {
+                continue;
+            }
+            match decrypted_soon(&room, &raw).await {
+                Some(decrypted) => (decrypted, true),
+                None => {
+                    tracing::debug!("call: an event in {} never got its key", room.room_id());
+                    keyless.extend(session);
+                    continue;
+                }
+            }
+        } else {
+            (raw, encrypted)
+        };
+        let kind = raw.get_field::<String>("type").ok().flatten().unwrap_or_default();
+        if !concerns_calls(&kind) {
+            continue;
+        }
+        let Ok(event) = raw.deserialize_as_unchecked::<Value>() else { continue };
+        for signal in timeline_signals(&account, room.room_id().as_str(), &event, encrypted) {
+            let _ = signals.send(signal);
+        }
+    }
+}
+
+/// An event the SDK couldn't decrypt, decrypted once its key came; `None` if it didn't come in
+/// time.
+async fn decrypted_soon(room: &matrix_sdk::Room, raw: &Raw<AnySyncTimelineEvent>) -> Option<Raw<AnySyncTimelineEvent>> {
+    let deadline = tokio::time::Instant::now() + KEY_WAIT;
+    loop {
+        // Without its key the SDK answers with the event still unreadable, not an error.
+        if let Ok(event) = room.decrypt_event(raw.cast_ref_unchecked(), None).await
+            && event.encryption_info().is_some()
+        {
+            return Some(event.into_raw());
+        }
+        if tokio::time::Instant::now() + KEY_RETRY > deadline {
+            return None;
+        }
+        tokio::time::sleep(KEY_RETRY).await;
+    }
 }
 
 /// A matrix_2_0 membership (or the redaction of one) heard from the timeline: kept, and the
@@ -271,6 +359,15 @@ fn direct_event(kind: &str, content: &Value) -> Option<DirectEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_fresh_undecryptable_event_should_wait_for_its_key() {
+        let now = 10_000_000;
+        assert!(awaits_key(now - 1_000, now));
+        assert!(!awaits_key(now - KEY_FRESH_MS, now));
+        // A sender's clock running ahead still counts as fresh.
+        assert!(awaits_key(now + 5_000, now));
+    }
 
     fn account() -> AccountId {
         AccountId::new("@me:example.org")

@@ -35,6 +35,96 @@ pub enum CallLayout {
     Focus(Option<CallTile>),
 }
 
+/// A corner of the remote video, where a one-to-one call's self-view floats.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Corner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    #[default]
+    BottomRight,
+}
+
+impl Corner {
+    pub fn left(self) -> bool {
+        matches!(self, Self::TopLeft | Self::BottomLeft)
+    }
+
+    pub fn top(self) -> bool {
+        matches!(self, Self::TopLeft | Self::TopRight)
+    }
+
+    /// The corner of `rect` nearest `point`: where a self-view dropped there snaps to.
+    pub fn nearest(rect: [f32; 4], point: [f32; 2]) -> Self {
+        let [x, y, w, h] = rect;
+        match (point[0] < x + w / 2.0, point[1] < y + h / 2.0) {
+            (true, true) => Self::TopLeft,
+            (false, true) => Self::TopRight,
+            (true, false) => Self::BottomLeft,
+            (false, false) => Self::BottomRight,
+        }
+    }
+}
+
+/// The smallest and largest self-view, as a share of the remote video's width.
+pub const SELF_VIEW_SCALE: std::ops::RangeInclusive<f32> = 0.15..=0.45;
+/// Narrower than this, the self-view shows too little to be worth it.
+const SELF_VIEW_MIN_WIDTH: f32 = 96.0;
+
+/// Where a one-to-one call's self-view floats over the remote video, and how large it is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelfView {
+    pub corner: Corner,
+    /// Its width as a share of the remote video's, within [`SELF_VIEW_SCALE`].
+    pub scale: f32,
+}
+
+impl Default for SelfView {
+    fn default() -> Self {
+        Self { corner: Corner::default(), scale: 0.25 }
+    }
+}
+
+impl SelfView {
+    /// A scale the self-view may take.
+    pub fn clamp(scale: f32) -> f32 {
+        if scale.is_finite() { scale.clamp(*SELF_VIEW_SCALE.start(), *SELF_VIEW_SCALE.end()) } else { 0.25 }
+    }
+
+    /// The self-view's rectangle in the corner of `main` (the remote video), for a camera of
+    /// `aspect`: never more than half the video either way, nor outside it.
+    pub fn place(self, main: [f32; 4], aspect: f32) -> [f32; 4] {
+        let [x, y, w, h] = main;
+        let aspect = if aspect.is_finite() && aspect > 0.0 { aspect } else { ASPECT };
+        let room = [(w - 2.0 * GAP).max(0.0), (h - 2.0 * GAP).max(0.0)];
+        let width = (w * Self::clamp(self.scale))
+            .max(SELF_VIEW_MIN_WIDTH)
+            .min(w * 0.5)
+            .min(h * 0.5 * aspect)
+            .min(room[0])
+            .min(room[1] * aspect);
+        let height = width / aspect;
+        let left = if self.corner.left() { x + GAP } else { x + w - GAP - width };
+        let top = if self.corner.top() { y + GAP } else { y + h - GAP - height };
+        // A video smaller than the margins keeps it inside all the same.
+        [left.clamp(x, (x + w - width).max(x)), top.clamp(y, (y + h - height).max(y)), width, height]
+    }
+}
+
+/// The shares of the viewport the user set: the participant strip's and the self-view's.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Proportions {
+    /// The participant strip's share of the viewport, 0.18 to 0.4.
+    pub strip: f32,
+    pub self_view: SelfView,
+}
+
+impl Default for Proportions {
+    fn default() -> Self {
+        Self { strip: 0.24, self_view: SelfView::default() }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TileGeometry {
     pub key: CallTile,
@@ -148,7 +238,7 @@ pub fn plan(
     layout: &CallLayout,
     speaker: Option<&str>,
     page: usize,
-    strip: f32,
+    proportions: Proportions,
     voice: bool,
 ) -> CallPlan {
     let [w, h] = size;
@@ -184,16 +274,16 @@ pub fn plan(
     if others.is_empty() {
         return CallPlan::single(main.key.clone(), size, main.aspect);
     }
-    // A one-to-one camera call keeps a small self-view over the remote participant.
+    // A one-to-one camera call keeps a small self-view in a corner of the remote video, which
+    // the user moves and resizes.
     if !main.key.screen() && others.len() == 1 && others[0].key == CallTile::Camera(String::new()) {
-        let width = (w * 0.24).clamp(80.0, 200.0).min(w * 0.4).min(h * 0.4 * ASPECT);
-        let height = width / ASPECT;
+        let main_rect = fitted(bounds, main.aspect);
         return CallPlan {
             tiles: vec![
-                PlacedTile { key: main.key.clone(), rect: fitted(bounds, main.aspect), inset: false },
+                PlacedTile { key: main.key.clone(), rect: main_rect, inset: false },
                 PlacedTile {
                     key: others[0].key.clone(),
-                    rect: [(w - width - GAP).max(0.0), (h - height - GAP).max(0.0), width, height],
+                    rect: proportions.self_view.place(main_rect, others[0].aspect),
                     inset: true,
                 },
             ],
@@ -202,7 +292,7 @@ pub fn plan(
         };
     }
     let beside = w / h >= 1.5 && w >= 640.0;
-    let fraction = strip.clamp(0.18, 0.4);
+    let fraction = proportions.strip.clamp(0.18, 0.4);
     let (main_bounds, strip_bounds, divider) = if beside {
         let width = (w * fraction).max(160.0).min(w * 0.4);
         let edge = w - width - GAP;

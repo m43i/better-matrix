@@ -62,7 +62,9 @@ impl Direct {
             .unwrap_or_default();
         let mut config = RtcConfiguration::default();
         config.ice_servers = ice_servers;
-        config.continual_gathering_policy = ContinualGatheringPolicy::GatherContinually;
+        // Gathered once, as browsers do: gathering continually (LiveKit's default, for its SFU)
+        // keeps a connection that can't get through checking forever, never failing.
+        config.continual_gathering_policy = ContinualGatheringPolicy::GatherOnce;
         config.ice_transport_type = IceTransportsType::All;
         let pc = LkRuntime::instance()
             .pc_factory()
