@@ -89,7 +89,8 @@ export default function LocationMapScreen() {
   // their place moves.
   const [picked, setPicked] = useState<string | null>(null);
   const focusedSender = picked ?? opened?.sender_id;
-  const focused = pins.find((pin) => pin.message.sender_id === focusedSender);
+  // Whoever has the newest place stands in once the focused person's leaves the map.
+  const focused = pins.find((pin) => pin.message.sender_id === focusedSender) ?? pins[0];
   const camera = useRef<CameraRef>(null);
   const [cardHeight, setCardHeight] = useState(0);
   const [failedStyle, setFailedStyle] = useState('');
@@ -98,12 +99,10 @@ export default function LocationMapScreen() {
   const externalIcon = useToolbarIcon('external', tint);
   const closeIcon = useToolbarIcon('close', tint);
 
-  // Where the map first looks, once there is a place (the focused one's, else anyone's until it
-  // has one); later moves are the camera's own.
+  // Where the map first looks, once there is a place; later moves are the camera's own.
   const [start, setStart] = useState<[number, number] | null>(null);
-  const first = focused ?? pins[0];
 
-  if (!start && first) setStart([first.longitude, first.latitude]);
+  if (!start && focused) setStart([focused.longitude, focused.latitude]);
 
   // The camera follows the focused person as their live place moves, until the user moves the map.
   const [following, setFollowing] = useState(true);

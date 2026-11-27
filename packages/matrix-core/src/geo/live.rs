@@ -94,17 +94,27 @@ pub(crate) async fn share(
         return Err(Error::Location("Insufficient permission to share live location".into()));
     }
     let mut latest = first;
-    let mut renewing = false;
+    // The beacon a renewal replaces, while the renewal is under way.
+    let mut renewing: Option<matrix_sdk::ruma::OwnedEventId> = None;
     loop {
         let mut info = BeaconInfoEventContent::new(None, timeout, true, None);
         let ends = if renews { timeout.saturating_sub(RENEW_EARLY).max(timeout / 2) } else { timeout };
         let until = tokio::time::Instant::now() + ends;
         let before = beacon_id(&room).await?;
         // A renewal looked for a stop just before; one since stops the fresh beacon's run at once.
-        if !renewing && stopped.has_changed().unwrap_or(true) {
+        if renewing.is_none() && stopped.has_changed().unwrap_or(true) {
             return Ok(());
         }
         let id = room.send_state_event_for_key(room.own_user_id(), info.clone()).await?.event_id;
+        // Another device may have stopped the share between the check and this write, which then
+        // undid it: the fresh beacon carries on only if it replaced ours, and stops otherwise.
+        if let Some(previous) = renewing.take()
+            && replaced(&room, &id).await?.as_deref() != Some(previous.as_str())
+        {
+            info.stop();
+            room.send_state_event_for_key(room.own_user_id(), info).await?;
+            return Ok(());
+        }
         let publish = |uri: String| room.send(BeaconEventContent::new(id.clone(), uri, None));
         let latest = &mut latest;
         let run = async {
@@ -143,7 +153,7 @@ pub(crate) async fn share(
             }
             // The fresh beacon replaces this one in the room's state: nothing to stop.
             if !stopped.has_changed().unwrap_or(true) {
-                renewing = true;
+                renewing = Some(id);
                 continue;
             }
         }
@@ -153,6 +163,15 @@ pub(crate) async fn share(
         }
         return result;
     }
+}
+
+/// The state event `id` replaced, as the server says (`unsigned.replaces_state`); `None` when it
+/// doesn't say.
+async fn replaced(room: &Room, id: &matrix_sdk::ruma::EventId) -> Result<Option<String>, Error> {
+    use matrix_sdk::ruma::api::client::room::get_room_event::v3;
+    let reply = room.client().send(v3::Request::new(room.room_id().to_owned(), id.to_owned())).await?;
+    let unsigned = reply.event.get_field::<serde_json::Value>("unsigned").ok().flatten();
+    Ok(unsigned.and_then(|unsigned| unsigned.get("replaces_state")?.as_str().map(str::to_owned)))
 }
 
 /// State writes share a key across devices. Check the server before stopping, since sync may
@@ -277,11 +296,29 @@ mod tests {
     fn renewing_server(
         sent: mpsc::UnboundedSender<(bool, Value)>,
         current: std::sync::Arc<std::sync::Mutex<String>>,
+        stop_after_check: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> crate::test_server::Server {
         let beacons = std::sync::atomic::AtomicUsize::new(0);
+        // What each beacon replaced in the room's state.
+        let replaced = std::sync::Mutex::new(std::collections::HashMap::<String, String>::new());
         crate::test_server::Server::new(move |request| {
             if request.starts_with("GET ") && request.contains("beacon_info") {
-                return json!({"event_id":current.lock().unwrap().clone()});
+                let answer = json!({"event_id":current.lock().unwrap().clone()});
+                // Another device's stop lands just after this check.
+                if stop_after_check.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                    *current.lock().unwrap() = "$stopped-elsewhere".into();
+                }
+                return answer;
+            }
+            if request.starts_with("GET ") && request.contains("/event/") {
+                let path = request.split_whitespace().nth(1).unwrap();
+                let id = path.rsplit('/').next().unwrap().replace("%24", "$");
+                let replaces = replaced.lock().unwrap().get(&id).cloned();
+                return json!({
+                    "type":"org.matrix.msc3672.beacon_info","state_key":"@a:example.org","event_id":id,
+                    "sender":"@a:example.org","origin_server_ts":0,"content":{},
+                    "unsigned":{"replaces_state":replaces}
+                });
             }
             if request.starts_with("GET ") && request.contains("/state/m.room.encryption") {
                 return json!({"errcode":"M_NOT_FOUND","error":"Room is unencrypted"});
@@ -298,7 +335,8 @@ mod tests {
                     return json!({"event_id":"$stop"});
                 }
                 let id = format!("$beacon{}", beacons.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1);
-                *current.lock().unwrap() = id.clone();
+                let previous = std::mem::replace(&mut *current.lock().unwrap(), id.clone());
+                replaced.lock().unwrap().insert(id.clone(), previous);
                 return json!({"event_id":id});
             }
             let mut response = crate::test_server::thread_response(request);
@@ -320,7 +358,7 @@ mod tests {
     async fn a_share_until_stopped_should_carry_on_in_a_fresh_beacon_from_the_latest_fix() {
         let (sent, mut requests) = mpsc::unbounded_channel();
         let current = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-        let server = renewing_server(sent, current);
+        let server = renewing_server(sent, current, Default::default());
         let account = crate::Account::for_test(&server.url()).await;
         account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.unwrap();
         let room = account.joined_room("!room:example.org").unwrap();
@@ -356,10 +394,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_stop_from_another_device_during_renewal_should_end_the_share() {
+        let (sent, mut requests) = mpsc::unbounded_channel();
+        let current = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let interfere = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let server = renewing_server(sent, current, std::sync::Arc::clone(&interfere));
+        let account = crate::Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.unwrap();
+        let room = account.joined_room("!room:example.org").unwrap();
+        let (_answers, rx) = mpsc::unbounded_channel();
+        let (_stop, stopped) = tokio::sync::watch::channel(());
+        let task = tokio::spawn(share(room, "geo:1,2".into(), (Duration::from_secs(2), true), rx, stopped, |_| {}));
+        assert!(next(&mut requests).await.0);
+        assert!(!next(&mut requests).await.0);
+        interfere.store(true, std::sync::atomic::Ordering::Relaxed);
+        // The renewal's write undid the other device's stop: it stops again, sending no fix.
+        let (state, renewed) = next(&mut requests).await;
+        assert!(state && renewed["live"] == true);
+        let (state, end) = next(&mut requests).await;
+        assert!(state && end["live"] == false, "{end}");
+        tokio::time::timeout(Duration::from_secs(10), task).await.unwrap().unwrap().unwrap();
+        assert!(requests.try_recv().is_err(), "nothing more was sent");
+    }
+
+    #[tokio::test]
     async fn a_share_stopped_on_another_device_should_not_be_renewed() {
         let (sent, mut requests) = mpsc::unbounded_channel();
         let current = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-        let server = renewing_server(sent, std::sync::Arc::clone(&current));
+        let server = renewing_server(sent, std::sync::Arc::clone(&current), Default::default());
         let account = crate::Account::for_test(&server.url()).await;
         account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.unwrap();
         let room = account.joined_room("!room:example.org").unwrap();

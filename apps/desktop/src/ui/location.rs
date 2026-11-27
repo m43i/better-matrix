@@ -534,5 +534,10 @@ fn person_row(s: &State, viewer: &MapViewer, pin: &MapPin<'_>, focused: bool, no
         )
         .children(stop)
         .on_press(move |s: &mut State| s.focus_map_pin(sender.clone()));
-    watch_expiry(row, pin.location)
+    // Redrawn as it leaves the map, even while nothing else changes.
+    let leaves = pin.leaves_at();
+    if leaves > now {
+        return row.on_layout_tx(move |s: &mut State, _, tx| s.watch_location_expiry(leaves + 1, tx));
+    }
+    row
 }

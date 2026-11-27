@@ -86,12 +86,17 @@ impl MapPin<'_> {
     pub fn live(&self, now: u64) -> bool {
         self.location.live_until.is_some_and(|until| until > now)
     }
+
+    /// When it leaves the map (unless it is the opened card's): as its live share ends, or a day
+    /// after it was shared.
+    pub fn leaves_at(&self) -> u64 {
+        self.location.live_until.unwrap_or_else(|| self.message.timestamp_ms.saturating_add(RECENT_MS))
+    }
 }
 
 /// The places a map viewer shows, newest first: each sender's newest place in the conversation
 /// that is a live share still running or a place shared within a day; and the focused message's
-/// place in place of its sender's, unless it is a live share that has ended (then their newest
-/// stands, or it shows alone when they have none).
+/// place in place of its sender's, unless it is a live share that has ended and theirs is newer.
 pub fn map_pins<'a>(messages: impl IntoIterator<Item = &'a Message>, focus: &str, now: u64) -> Vec<MapPin<'a>> {
     let mut pins: Vec<MapPin<'a>> = Vec::new();
     let mut focused = None;
@@ -106,7 +111,7 @@ pub fn map_pins<'a>(messages: impl IntoIterator<Item = &'a Message>, focus: &str
         // where they are.
         let recent = match location.live_until {
             Some(_) => pin.live(now),
-            None => message.timestamp_ms.saturating_add(RECENT_MS) >= now,
+            None => pin.leaves_at() >= now,
         };
         if !recent {
             continue;
@@ -120,7 +125,8 @@ pub fn map_pins<'a>(messages: impl IntoIterator<Item = &'a Message>, focus: &str
     if let Some(pin) = focused {
         let ended = pin.location.live_until.is_some() && !pin.live(now);
         match pins.iter_mut().find(|known| known.message.sender_id == pin.message.sender_id) {
-            Some(known) if !ended => *known = pin,
+            // An ended share gives way only to a newer place of theirs.
+            Some(known) if !ended || known.message.timestamp_ms < pin.message.timestamp_ms => *known = pin,
             Some(_) => {}
             None => pins.push(pin),
         }
@@ -312,27 +318,33 @@ impl State {
         map_pins(timeline.messages().filter(|message| !data.ignores(&message.sender_id)), &viewer.opened, now)
     }
 
-    /// Whom the map viewer is about: the person chosen on it, else the opened card's sender.
-    /// Their pin is the focused one, following them from an ended live share to a newer place.
+    /// Whom the map viewer is about (a sender's user ID): the person chosen on it, else the opened
+    /// card's sender, while they have a place on the map; else whoever shared the newest place
+    /// still on it. Their pin is the focused one, following them from an ended live share to a
+    /// newer place.
     pub fn map_focus<'s>(&'s self, viewer: &'s MapViewer) -> Option<&'s str> {
-        if let Some(chosen) = &viewer.chosen {
-            return Some(chosen);
-        }
-        let timeline = self.accounts.get(&viewer.account)?.timeline(&viewer.key)?;
-        timeline.messages().find(|message| message.event_id == viewer.opened).map(|message| message.sender_id.as_str())
+        let opened = || {
+            let timeline = self.accounts.get(&viewer.account)?.timeline(&viewer.key)?;
+            timeline
+                .messages()
+                .find(|message| message.event_id == viewer.opened)
+                .map(|message| message.sender_id.as_str())
+        };
+        let wanted = viewer.chosen.as_deref().or_else(opened);
+        let pins = self.map_pins(viewer, super::now_ms());
+        let pin = pins.iter().find(|pin| Some(pin.message.sender_id.as_str()) == wanted).or(pins.first())?;
+        Some(pin.message.sender_id.as_str())
     }
 
-    /// Where the map viewer centres (latitude, longitude): on the focused person, or, once their
-    /// place has left the map (a live share ended), on the newest place still on it; `None` while
-    /// none is.
+    /// Where the map viewer centres (latitude, longitude): on the focused person ([`Self::map_focus`]);
+    /// `None` while no place is on the map.
     pub fn map_center(&self, viewer: &MapViewer) -> Option<(f64, f64)> {
         match viewer.camera {
             Camera::Free { latitude, longitude } => Some((latitude, longitude)),
             Camera::Following => {
-                let focus = self.map_focus(viewer);
+                let focus = self.map_focus(viewer)?;
                 let pins = self.map_pins(viewer, super::now_ms());
-                let focused = pins.iter().find(|pin| Some(pin.message.sender_id.as_str()) == focus);
-                focused.or(pins.first()).map(|pin| pin.at)
+                pins.iter().find(|pin| pin.message.sender_id == focus).map(|pin| pin.at)
             }
         }
     }
@@ -624,6 +636,13 @@ mod tests {
             shared("$renewed", "@a:x", 2 * MINUTE, Some(NOW + MINUTE)),
         ];
         assert_eq!(ids(&map_pins(&messages, "$first", NOW)), ["$renewed"]);
+    }
+
+    #[test]
+    fn an_opened_live_share_that_ended_should_not_give_way_to_an_older_place() {
+        let messages =
+            [shared("$older", "@a:x", 60 * MINUTE, None), shared("$ended", "@a:x", 30 * MINUTE, Some(NOW - MINUTE))];
+        assert_eq!(ids(&map_pins(&messages, "$ended", NOW)), ["$ended"]);
     }
 
     #[test]

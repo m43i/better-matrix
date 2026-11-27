@@ -5430,3 +5430,12 @@ fn a_notice_that_something_worked_should_not_look_like_an_error() {
     press(&mut rt, "update-copy");
     assert_eq!(rt.state.notice.as_ref().map(|notice| notice.kind), Some(crate::state::NoticeKind::Done));
 }
+
+#[test]
+fn a_place_on_the_map_viewer_should_wake_the_view_as_it_leaves() {
+    let rt = runtime(demo::location_map);
+    let viewer = rt.state.map_viewer().expect("the map viewer");
+    let pins = rt.state.map_pins(viewer, crate::state::now_ms());
+    let ada = pins.iter().find(|pin| pin.message.event_id == "$ada-place").expect("Ada's place");
+    assert!(rt.state.location_expiries.contains(&(ada.leaves_at() + 1)));
+}

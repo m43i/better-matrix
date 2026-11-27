@@ -1054,8 +1054,9 @@ pub struct State {
     reveal_thumbnail: bool,
     /// Accounts whose sidebar layout changed while a save was under way.
     layout_unsaved: HashSet<AccountId>,
-    /// What [`State::clock`] read when the view last showed it.
-    location_expiries: std::collections::BTreeSet<u64>,
+    /// When places on screen end (a live share runs out, a place leaves the map viewer): the view
+    /// wakes then to show it.
+    pub(crate) location_expiries: std::collections::BTreeSet<u64>,
     clock_shown: Option<(Option<u64>, Option<u64>, Option<u64>)>,
     /// The entries of each open timeline its view shows, by ID; one not reported yet counts
     /// its newest entries.

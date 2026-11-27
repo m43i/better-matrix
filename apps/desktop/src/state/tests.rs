@@ -8345,3 +8345,15 @@ fn a_chosen_persons_live_share_should_leave_the_map_once_it_ends() {
     assert!(!pins.contains(&"$grace-live"), "{pins:?}");
     assert!(pins.contains(&"$place"), "the opened card stays: {pins:?}");
 }
+
+#[test]
+fn the_map_should_turn_to_the_newest_place_once_the_chosen_persons_leaves() {
+    let mut s = map_viewer();
+    s.focus_map_pin("@grace:example.org".into());
+    if let Some(data) = s.accounts.get_mut(&AccountId::new("@ada:example.org")) {
+        data.safety.ignored.push("@grace:example.org".into());
+    }
+    let viewer = s.map_viewer().unwrap();
+    assert_eq!(s.map_focus(viewer), Some("@ada:example.org"));
+    assert_eq!(s.map_center(viewer), Some((52.5136, 13.3721)));
+}

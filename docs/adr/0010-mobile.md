@@ -303,7 +303,8 @@ Date: 2026-11-16
   A location card opens the conversation's map (`app/location-map.tsx`, full screen under a
   native header with Open in Google Maps and an X): one MapLibre map with everyone's recent
   place as an avatar pin, the desktop's rules (`mapPins`: each sender's newest place in the room
-  or thread, a live share while it runs or a place under a day old, and always the card's own), and a card floating at
+  or thread, a live share while it runs or a place under a day old, and the card's own in its
+  sender's stead unless it is an ended live share they have a newer place than), and a card floating at
   the bottom listing them (until when a live share runs, else when it was shared; Stop sharing
   on the user's own). The card's place is centred at street level; a row or pin centres its
   person, and the button at the top right comes back to them. Pins follow the timeline, and the

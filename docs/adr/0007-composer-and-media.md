@@ -233,7 +233,11 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   zoom. Both clients use the app’s bundled light and dark street styles with OpenFreeMap vector tiles. The sender’s avatar
   marks the place. A location card opens the **map viewer**: one map, near the window's size,
   of every recent place in that conversation (each sender's newest: a live share while it runs,
-  a place shared within a day, and always the card's own, focused and centred at street level). A list over the map
+  a place shared within a day), and the opened card's own place in its sender's stead, however
+  old, unless it is a live share that ended while they have a newer place (a renewed share's).
+  The map centres on that person at street level, and on whoever has the newest place once
+  theirs leaves; choosing someone on the map moves the focus without keeping their place past
+  its time. A list over the map
   names who is there; choosing someone (a row or a pin) turns the map to them. The desktop drags
   the map and zooms with the wheel (toward the pointer) or buttons, from MapLibre snapshots of the
   map's size (`geo::framed_map`), placing pins by Web Mercator (`geo::project`); while a moved

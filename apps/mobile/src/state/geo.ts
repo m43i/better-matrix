@@ -108,7 +108,7 @@ export function isLive(location: Location, now: number): boolean {
  * The pins a conversation's map shows (the desktop's `map_pins`): of the loaded location
  * messages with coordinates, each sender's newest that is a live share still running or a place
  * under a day old; and the focused message in place of its sender's, unless it is a live share
- * that has ended (then their newest stands, or it shows alone when they have none). Newest first.
+ * that has ended and theirs is newer. Newest first.
  */
 export function mapPins(
   entries: readonly TimelineEntry[],
@@ -147,8 +147,11 @@ export function mapPins(
 
   if (focus) {
     const ended = focus.location.live_until != null && !isLive(focus.location, now);
+    const theirs = newest.get(focus.message.sender_id);
 
-    if (!ended || !newest.has(focus.message.sender_id)) newest.set(focus.message.sender_id, focus);
+    // An ended share gives way only to a newer place of theirs.
+    if (!ended || !theirs || theirs.message.timestamp_ms < focus.message.timestamp_ms)
+      newest.set(focus.message.sender_id, focus);
   }
 
   return [...newest.values()].sort((a, b) => b.message.timestamp_ms - a.message.timestamp_ms);

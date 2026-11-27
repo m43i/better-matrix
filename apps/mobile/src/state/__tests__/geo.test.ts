@@ -156,6 +156,15 @@ describe('mapPins', () => {
     expect(ids(entries, '$first')).toEqual(['$renewed']);
   });
 
+  it('should not let an opened live share that ended give way to an older place', () => {
+    const entries = [
+      place('$older', '@a', NOW - HOUR),
+      place('$ended', '@a', NOW - HOUR / 2, 'geo:1,2', NOW - 60_000),
+    ];
+
+    expect(ids(entries, '$ended')).toEqual(['$ended']);
+  });
+
   it('should show an ended live share that was opened when its sender has nothing newer', () => {
     expect(ids([place('$ended', '@a', NOW - HOUR, 'geo:1,2', NOW - 60_000)], '$ended')).toEqual([
       '$ended',
