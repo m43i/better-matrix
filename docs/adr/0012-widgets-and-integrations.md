@@ -128,6 +128,8 @@ Date: 2026-11-25
   lists granted access for the current origin and can reset both grants and denials, closing its
   running page first. The grant key encodes the room and widget IDs by length and uses the
   canonical origin. Older colon-delimited grants are ignored, so those widgets ask again.
+  A meeting identity decision records the provider and the approved fields separately from
+  widget API grants. A different provider or an additional field requires a new answer.
   File downloads are described as
   what they are: files the account can open.
   - Camera and microphone: only a meeting's page, on the approved host (its own; iOS `prompt`,

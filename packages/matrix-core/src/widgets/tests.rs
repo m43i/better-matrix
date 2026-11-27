@@ -104,7 +104,10 @@ async fn resetting_jitsi_permissions_should_clear_the_grant_for_the_canonical_or
     let store = account.client().state_store();
     let origin = "https://meet.example.org";
     let key = grants_key(ROOM, "fixture", origin);
-    let grants = json!({ "asked": [IDENTITY], "granted": [IDENTITY] });
+    let grants = json!({
+        "asked": [], "granted": [],
+        "meeting_identity": { "kind": "Jitsi", "fields": ["DisplayName", "AvatarUrl", "RoomId"], "allowed": true },
+    });
     store.set_custom_value_no_read(&key, serde_json::to_vec(&grants).unwrap()).await.unwrap();
     let (answer, answers) = mpsc::unbounded_channel();
     answer.send(Answer::Continue).unwrap();
@@ -171,12 +174,19 @@ async fn a_jitsi_meeting_should_ask_again_if_only_a_legacy_decision_was_saved() 
 }
 
 #[tokio::test]
-async fn a_dimension_meeting_should_disclose_the_profile_fields_it_requests() {
+async fn a_dimension_meeting_should_ask_again_when_the_viewer_adds_a_display_name() {
     let server = pinned_widget(json!({
         "type": "m.custom", "name": "Class",
         "url": "https://dimension.example/widgets/bigbluebutton?meetingId=m1&meetingPassword=pw"
     }));
     let account = synced(&server).await;
+    // The account previously used its Matrix ID in place of a display name.
+    let prior = json!({
+        "asked": [], "granted": [],
+        "meeting_identity": { "kind": "Dimension", "fields": ["AvatarUrl"], "allowed": true },
+    });
+    let key = grants_key(ROOM, "fixture", "https://dimension.example");
+    account.client().state_store().set_custom_value_no_read(&key, serde_json::to_vec(&prior).unwrap()).await.unwrap();
     let (answer, answers) = mpsc::unbounded_channel();
     drop(answer);
     let (send, mut events) = mpsc::unbounded_channel();
@@ -196,6 +206,28 @@ async fn a_dimension_meeting_should_disclose_the_profile_fields_it_requests() {
             ..identity("https://dimension.example")
         }]
     );
+}
+
+#[tokio::test]
+async fn a_meeting_should_ask_for_identity_again_if_only_the_widget_api_was_allowed() {
+    let server = pinned_widget(json!({
+        "type": "m.custom", "name": "Class",
+        "url": "https://dimension.example/widgets/bigbluebutton?meetingId=m1&meetingPassword=pw"
+    }));
+    let account = synced(&server).await;
+    let prior = json!({ "asked": [IDENTITY], "granted": [IDENTITY] });
+    let key = grants_key(ROOM, "fixture", "https://dimension.example");
+    account.client().state_store().set_custom_value_no_read(&key, serde_json::to_vec(&prior).unwrap()).await.unwrap();
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+
+    assert!(matches!(result, Err(Error::Cancelled)));
+    assert!(matches!(events.try_recv().unwrap(), Event::WidgetPermissions { .. }));
 }
 
 #[tokio::test]

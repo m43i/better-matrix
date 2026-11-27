@@ -24,8 +24,8 @@ use crate::engine::{Answer, Event, EventSink, RequestId};
 use crate::{Account, Error};
 
 /// The data a widget asks to put in its URL.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ffi", derive(ts_rs::TS))]
 pub enum WidgetUrlField {
     /// The Matrix user ID.
     UserId,
@@ -232,6 +232,54 @@ pub(crate) fn describe(capability: &str) -> WidgetPermission {
 pub(crate) struct Grants {
     pub asked: Vec<String>,
     pub granted: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    meeting_identity: Option<MeetingIdentityDecision>,
+}
+
+/// The two meeting flows that can ask for the viewer's identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum MeetingIdentityKind {
+    Jitsi,
+    Dimension,
+}
+
+impl MeetingIdentityKind {
+    fn for_place(place: &meetings::Place) -> Option<Self> {
+        match place {
+            meetings::Place::Jitsi(meetings::Jitsi { auth: true, .. }) => Some(Self::Jitsi),
+            meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { .. }) => Some(Self::Dimension),
+            _ => None,
+        }
+    }
+
+    fn fields(self, viewer: &super::Viewer) -> Vec<WidgetUrlField> {
+        let mut fields = vec![WidgetUrlField::AvatarUrl];
+        if name_field(viewer) == WidgetUrlField::DisplayName {
+            fields.insert(0, WidgetUrlField::DisplayName);
+        }
+        if self == Self::Jitsi {
+            fields.push(WidgetUrlField::RoomId);
+        }
+        fields
+    }
+}
+
+/// The user's decision for a meeting provider and the fields they were shown together.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct MeetingIdentityDecision {
+    kind: MeetingIdentityKind,
+    fields: Vec<WidgetUrlField>,
+    allowed: bool,
+}
+
+impl MeetingIdentityDecision {
+    fn answer(&self, kind: MeetingIdentityKind, fields: &[WidgetUrlField]) -> Option<bool> {
+        (self.kind == kind && fields.iter().all(|field| self.fields.contains(field))).then_some(self.allowed)
+    }
+
+    fn disclosure(origin: &str, fields: Vec<WidgetUrlField>) -> WidgetPermission {
+        WidgetPermission { disclosed: Some(fields), ..identity(origin) }
+    }
 }
 
 impl Grants {
@@ -309,17 +357,17 @@ pub(crate) async fn manage_permissions(
     let origin = permission_origin(place.as_ref(), &widget.url)?;
     let key = grants_key(&room_id, &widget_id, &origin);
     let saved = account.grants(&key).await;
-    let permissions = saved
-        .granted
-        .iter()
-        .map(|name| {
-            if name == IDENTITY {
-                place.as_ref().map_or_else(|| identity(&origin), |place| meeting_identity(place, &viewer, &origin))
-            } else {
-                describe(name)
-            }
-        })
-        .collect();
+    let permissions = match place.as_ref() {
+        Some(place) => saved
+            .meeting_identity
+            .filter(|saved| saved.allowed && MeetingIdentityKind::for_place(place) == Some(saved.kind))
+            .map(|saved| MeetingIdentityDecision::disclosure(&origin, saved.fields))
+            .into_iter()
+            .collect(),
+        None => {
+            saved.granted.iter().map(|name| if name == IDENTITY { identity(&origin) } else { describe(name) }).collect()
+        }
+    };
     let access = access_for(&account, &viewer, &widget, origin, WidgetAccessKind::Saved(permissions))?;
     confirm_access(&*sink, request, access, &mut answers).await?;
     let store = account.client().state_store();
@@ -392,16 +440,17 @@ impl Ask<'_> {
     async fn identity(
         &self,
         origin: &str,
-        permission: WidgetPermission,
+        kind: MeetingIdentityKind,
+        fields: Vec<WidgetUrlField>,
         widget: &str,
         answers: &mut mpsc::UnboundedReceiver<Answer>,
     ) -> Result<bool, Error> {
         let key = grants_key(self.room_id, self.widget_id, origin);
         let mut grants = self.account.grants(&key).await;
-        if let Some(granted) = grants.answer(&[IDENTITY.to_owned()]) {
-            return Ok(!granted.is_empty());
+        if let Some(answer) = grants.meeting_identity.as_ref().and_then(|saved| saved.answer(kind, &fields)) {
+            return Ok(answer);
         }
-        let permissions = vec![permission];
+        let permissions = vec![MeetingIdentityDecision::disclosure(origin, fields.clone())];
         // The run's only question.
         let question = 1;
         self.sink.emit(Event::WidgetPermissions {
@@ -419,10 +468,10 @@ impl Ask<'_> {
                 None => return Err(Error::Cancelled),
             }
         };
-        let granted: Vec<String> = granted.into_iter().filter(|name| name == IDENTITY).collect();
-        grants.remember(&[IDENTITY.to_owned()], &granted);
+        let allowed = granted.iter().any(|name| name == IDENTITY);
+        grants.meeting_identity = Some(MeetingIdentityDecision { kind, fields, allowed });
         self.account.keep_grants(&key, &grants).await;
-        Ok(!granted.is_empty())
+        Ok(allowed)
     }
 }
 
@@ -607,17 +656,6 @@ fn name_field(viewer: &super::Viewer) -> WidgetUrlField {
     if viewer.display_name == viewer.user_id { WidgetUrlField::UserId } else { WidgetUrlField::DisplayName }
 }
 
-fn meeting_identity(place: &meetings::Place, viewer: &super::Viewer, origin: &str) -> WidgetPermission {
-    let mut fields = vec![WidgetUrlField::AvatarUrl];
-    if name_field(viewer) == WidgetUrlField::DisplayName {
-        fields.insert(0, WidgetUrlField::DisplayName);
-    }
-    if matches!(place, meetings::Place::Jitsi(_)) {
-        fields.push(WidgetUrlField::RoomId);
-    }
-    WidgetPermission { disclosed: Some(fields), ..identity(origin) }
-}
-
 /// Whether a page message is the widget asking who the user is.
 fn asks_identity(message: &Value) -> bool {
     message["api"] == "fromWidget" && message["action"] == "get_openid" && message.get("response").is_none()
@@ -662,14 +700,9 @@ pub(crate) async fn run(
         }
         // Who learns the user's Matrix ID by joining: a Jitsi server that checks who joins, or
         // Dimension making the join link. Only if they let it, named by that origin.
-        let identity = if matches!(
-            &place,
-            meetings::Place::Jitsi(meetings::Jitsi { auth: true, .. })
-                | meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { .. })
-        ) {
+        let identity = if let Some(kind) = MeetingIdentityKind::for_place(&place) {
             let ask = Ask { account: &account, room_id: &room_id, widget_id: &widget_id, request, sink: &sink };
-            let permission = meeting_identity(&place, &viewer, &permission_site);
-            ask.identity(&permission_site, permission, &widget.name, &mut answers).await?
+            ask.identity(&permission_site, kind, kind.fields(&viewer), &widget.name, &mut answers).await?
         } else {
             false
         };
