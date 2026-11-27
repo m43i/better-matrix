@@ -2043,7 +2043,6 @@ impl Engine {
             tasks: JoinSet::new(),
             running: HashMap::new(),
             reading: HashSet::new(),
-            receipts_turn: Arc::default(),
             widget_runs: HashMap::new(),
             live_shares: HashMap::new(),
             http: crate::links::http_client().map_err(|e| e.to_string()),
@@ -2087,6 +2086,8 @@ struct Running {
     opening: HashMap<TimelineKey, RequestId>,
     /// Rooms whose keys were fetched from the backup this run; after verification, all again.
     keys_fetched: HashSet<String>,
+    /// The end of the last read this account sent ([`Running::next_read`]).
+    last_read: Option<tokio::sync::oneshot::Receiver<()>>,
     /// The account's room list: every re-read of rooms goes through it.
     feed: RoomFeed,
     /// The handlers hearing the account's call signals.
@@ -2140,6 +2141,15 @@ impl Running {
     /// when the user moved on before its last receipt went out.
     fn reading_timeline(&self, key: &TimelineKey) -> Option<Arc<matrix_sdk_ui::timeline::Timeline>> {
         self.timelines.get(key).map(|(timeline, _)| Arc::clone(timeline)).or_else(|| self.warm_timeline(key))
+    }
+
+    /// A place in this account's line of reads (receipts and room-list reads): they go one at a
+    /// time, in the order the app sent them, as some servers (Conduwuit) let a late older
+    /// fully-read marker overwrite a newer one. The read waits for the first value, then holds
+    /// the second until it is done (dropped, also when cancelled).
+    fn next_read(&mut self) -> (Option<tokio::sync::oneshot::Receiver<()>>, tokio::sync::oneshot::Sender<()>) {
+        let (done, finished) = tokio::sync::oneshot::channel();
+        (self.last_read.replace(finished), done)
     }
 
     /// A warm timeline for `key`, to open again. It stays in the warm set until it is open, so
@@ -2290,9 +2300,6 @@ struct State {
     /// [`Command::MarkRead`] and [`Command::MarkRoomRead`] requests still running: quitting
     /// waits a moment for them, so what the user read last counts as read on the next start.
     reading: HashSet<RequestId>,
-    /// Read receipts go one at a time, in the order sent: some servers (Conduwuit) let a late
-    /// older fully-read marker overwrite a newer one.
-    receipts_turn: Arc<tokio::sync::Mutex<()>>,
     /// Local live shares, scoped to the destination, including starts still in flight.
     live_shares: HashMap<(AccountId, String), (RequestId, tokio::sync::watch::Sender<()>)>,
     /// Widget runs ([`Command::RunWidget`] and the like), by the account they act for: signing
@@ -2960,10 +2967,13 @@ impl State {
             }
             Command::MarkRead { account, key, event_id, fully_read } => {
                 self.reading.insert(request);
-                let timeline = self.accounts.get(&account).and_then(|running| running.reading_timeline(&key));
-                let turn = Arc::clone(&self.receipts_turn);
+                let (timeline, turn) = self
+                    .accounts
+                    .get_mut(&account)
+                    .map(|running| (running.reading_timeline(&key), Some(running.next_read())))
+                    .unwrap_or_default();
                 Box::pin(async move {
-                    let _turn = turn.lock().await;
+                    let _done = wait_turn(turn).await;
                     if let Some(timeline) = timeline {
                         mark_timeline_read(&timeline, event_id.as_deref(), fully_read && key.thread.is_none()).await?;
                     }
@@ -4201,9 +4211,13 @@ impl State {
             Command::MarkRoomRead { account: id, room_id } => {
                 self.reading.insert(request);
                 let feed = self.feed(&id);
+                let turn = self.accounts.get_mut(&id).map(Running::next_read);
                 let changed = self.account(&id).map(|account| {
                     let (queue, room_id) = (account.organising.clone(), room_id.clone());
-                    queue.run(async move { account.mark_room_read(&room_id).await })
+                    queue.run(async move {
+                        let _done = wait_turn(turn).await;
+                        account.mark_room_read(&room_id).await
+                    })
                 });
                 Box::pin(async move {
                     changed?.await?;
@@ -4403,6 +4417,7 @@ impl State {
                     warm: Vec::new(),
                     opening: HashMap::new(),
                     keys_fetched: HashSet::new(),
+                    last_read: None,
                     feed,
                     handlers,
                     sends: HashMap::new(),
@@ -5272,6 +5287,19 @@ impl RoomFeed {
     }
 }
 
+/// Waits for the read before this one ([`Running::next_read`]), and gives back what tells the
+/// next one this is done, to hold until it is.
+async fn wait_turn(
+    turn: Option<(Option<tokio::sync::oneshot::Receiver<()>>, tokio::sync::oneshot::Sender<()>)>,
+) -> Option<tokio::sync::oneshot::Sender<()>> {
+    let (before, done) = turn?;
+    if let Some(before) = before {
+        // Sent, or dropped: either way that read is over.
+        let _ = before.await;
+    }
+    Some(done)
+}
+
 async fn mark_timeline_read(
     timeline: &matrix_sdk_ui::timeline::Timeline,
     event_id: Option<&str>,
@@ -5932,6 +5960,7 @@ mod tests {
             warm: Vec::new(),
             opening: HashMap::from([(TimelineKey::room("!room:example.org"), RequestId(3))]),
             keys_fetched: HashSet::new(),
+            last_read: None,
             feed,
             handlers: Vec::new(),
             sends: HashMap::new(),
@@ -5940,37 +5969,62 @@ mod tests {
         assert!(running.opening.is_empty());
     }
 
-    #[tokio::test]
-    async fn a_receipt_for_a_timeline_just_closed_should_go_through_its_warm_copy() {
-        let server = crate::test_server::Server::new(crate::test_server::thread_response);
+    /// A running account with a room synced, keeping `warm` warm.
+    async fn running_with(
+        server: &crate::test_server::Server,
+        warm: impl FnOnce(&Account) -> Vec<(TimelineKey, Arc<matrix_sdk_ui::timeline::Timeline>)>,
+    ) -> Running {
         let account = Account::for_test(&server.url()).await;
         account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
-        let key = TimelineKey::room("!room:example.org");
-        let timeline = Arc::new(account.timeline(&key).await.expect("timeline"));
         let sink: Arc<dyn EventSink> = Arc::new(|_| {});
         let (usage, worker) = crate::search::Usage::start(account.clone(), Arc::clone(&sink));
         let feed = RoomFeed { account: account.clone(), sink, cache: Arc::default() };
-        let running = Running {
+        Running {
             #[cfg(feature = "command-line")]
             watch_ready: None,
+            warm: warm(&account),
             account,
             usage,
             background: vec![worker],
             flows: crate::security::Flows::default(),
             timelines: HashMap::new(),
-            warm: vec![(key.clone(), Arc::clone(&timeline))],
             opening: HashMap::new(),
             keys_fetched: HashSet::new(),
+            last_read: None,
             feed,
             handlers: Vec::new(),
             sends: HashMap::new(),
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn a_receipt_for_a_timeline_just_closed_should_go_through_its_warm_copy() {
+        let server = crate::test_server::Server::new(crate::test_server::thread_response);
+        let key = TimelineKey::room("!room:example.org");
+        let account = Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
+        let timeline = Arc::new(account.timeline(&key).await.expect("timeline"));
+        let running = running_with(&server, |_| vec![(key.clone(), Arc::clone(&timeline))]).await;
         let reading = running.reading_timeline(&key).expect("the warm timeline");
         assert!(Arc::ptr_eq(&reading, &timeline));
         // Opening it again leaves it reachable until the open completes.
         assert!(running.warm_timeline(&key).is_some());
         assert!(running.reading_timeline(&key).is_some());
         assert!(running.reading_timeline(&TimelineKey::room("!other:example.org")).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_read_should_wait_for_the_one_sent_before_it() {
+        let server = crate::test_server::Server::new(crate::test_server::thread_response);
+        let mut running = running_with(&server, |_| Vec::new()).await;
+        let (first, second) = (running.next_read(), running.next_read());
+        // The newer one is polled first, as spawned tasks may be.
+        let mut second = std::pin::pin!(wait_turn(Some(second)));
+        assert!(futures_util::poll!(&mut second).is_pending());
+        let first = wait_turn(Some(first)).await.expect("the first read's turn");
+        assert!(futures_util::poll!(&mut second).is_pending());
+        drop(first);
+        assert!(second.await.is_some());
     }
 
     #[test]
