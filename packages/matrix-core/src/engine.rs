@@ -2377,11 +2377,11 @@ impl State {
         // user in it for the seconds until the delayed leave would.
         #[cfg(feature = "native-media")]
         self.hang_up();
-        self.end_locations(|_, _| true).await;
+        let locations = self.end_locations(|_, _| true);
         #[cfg(feature = "native-media")]
         let leaving = self.leaving.any();
-        // Meanwhile, read receipts still on their way finish (briefly), so the rooms just read
-        // stay read.
+        // Meanwhile (all at once, inside the app's wait for the engine), live locations stop and
+        // read receipts still on their way finish, so the rooms just read stay read.
         let receipts = async {
             while !self.reading.is_empty() {
                 match self.tasks.join_next().await {
@@ -2395,13 +2395,13 @@ impl State {
         };
         let receipts = tokio::time::timeout(RECEIPTS_WAIT, receipts);
         #[cfg(feature = "native-media")]
-        let _ = tokio::join!(receipts, async {
+        let _ = tokio::join!(receipts, locations, async {
             if let Some(task) = leaving {
                 let _ = tokio::time::timeout(QUIT_WAIT, task).await;
             }
         });
         #[cfg(not(feature = "native-media"))]
-        let _ = receipts.await;
+        let _ = tokio::join!(receipts, locations);
     }
 
     fn restore_saved(&mut self) {
@@ -2511,6 +2511,7 @@ impl State {
         }
         self.answers.remove(&target);
         self.widget_runs.remove(&target);
+        self.reading.remove(&target);
         if let Some(handle) = self.running.remove(&target) {
             handle.abort();
             self.forget_opening(target);
