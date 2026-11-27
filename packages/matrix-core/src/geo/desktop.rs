@@ -107,10 +107,8 @@ fn snapshot(
     zoom: u8,
     style: &str,
 ) -> mln::Result<Vec<u8>> {
-    let runtime = mln::RuntimeHandle::create(Some(&mln::RuntimeOptions {
-        cache_path: &cache.to_string_lossy(),
-        asset_path: "",
-    }))?;
+    let runtime =
+        mln::RuntimeHandle::create(&mln::RuntimeOptions { cache_path: &cache.to_string_lossy(), asset_path: "" })?;
     let options = mln::MapOptions { map_mode: mln::MapMode::Static, ..mln::MapOptions::new(extent) };
     let (map, ready) = runtime.create_map(&options)?;
     wait_for_map(ready)?;
