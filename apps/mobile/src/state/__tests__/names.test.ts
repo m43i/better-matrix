@@ -36,10 +36,15 @@ describe('roomName', () => {
 
 describe('mentionName', () => {
   it('should keep the mention prefix with the displayed name', () => {
-    expect(mentionName('@Hopper, Grace', true)).toBe('@Grace, Hopper');
+    expect(mentionName('@Hopper, Grace', '@grace:x', true)).toBe('@Grace, Hopper');
   });
 
   it('should keep the user ID when there is no display label', () => {
-    expect(mentionName('@hopper,grace:example.org', true)).toBe('@hopper,grace:example.org');
+    const id = '@hopper,grace:example.org';
+    expect(mentionName(id, id, true)).toBe(id);
+  });
+
+  it('should reverse a mention label whose display name contains a colon', () => {
+    expect(mentionName('@Hopper: Ops, Grace', '@grace:x', true)).toBe('@Grace, Hopper: Ops');
   });
 });

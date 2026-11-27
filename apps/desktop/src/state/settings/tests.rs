@@ -67,3 +67,14 @@ fn reversing_names_should_leave_incomplete_and_ambiguous_names_as_entered() {
         assert_eq!(person_name(name, true), name);
     }
 }
+
+#[test]
+fn a_mention_display_name_with_a_colon_should_still_reverse() {
+    assert_eq!(mention_name("@Hopper: Ops, Grace", "@grace:x", true), "@Grace, Hopper: Ops");
+}
+
+#[test]
+fn a_mention_whose_label_is_its_user_id_should_stay_as_entered() {
+    let id = "@hopper,grace:x";
+    assert_eq!(mention_name(id, id, true), id);
+}

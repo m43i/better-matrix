@@ -65,7 +65,10 @@ function SuggestionRow({ account, suggestion }: { account: AccountId; suggestion
   switch (suggestion.type) {
     case 'pill': {
       const user = suggestion.pill.id.startsWith('user:');
-      const label = user ? mentionName(suggestion.pill.label, reverse) : suggestion.pill.label;
+
+      const label = user
+        ? mentionName(suggestion.pill.label, suggestion.pill.id.slice('user:'.length), reverse)
+        : suggestion.pill.label;
 
       return (
         <>

@@ -29,7 +29,7 @@ pub fn highlights(value: &str, positions: &[usize], p: &Palette) -> El {
 }
 
 /// Local name matching accepts the display label and the original room name.
-pub(super) fn room_match_rank(room: &RoomSummary, query: &str, settings: &Settings) -> Option<usize> {
+fn room_match_rank(room: &RoomSummary, query: &str, settings: &Settings) -> Option<usize> {
     let original = fuzzy_match(&room.name, query).map(|matched| matched.rank);
     let shown = settings.room_name(room);
     if shown == room.name {

@@ -1007,6 +1007,18 @@ fn forwarding_should_separate_rooms_and_direct_messages() {
     assert!(rooms.1 < direct.1);
 }
 
+#[test]
+fn forwarding_should_find_a_room_when_its_query_starts_with_a_hash() {
+    let rt = runtime(|s| {
+        s.start_forward(TimelineKey::room(demo::DEMO_THREAD.0), demo::DEMO_THREAD.1.into());
+        let Some(crate::state::Modal::Forward { search, .. }) = &mut s.modal else {
+            panic!("forward picker");
+        };
+        search.insert("#general");
+    });
+    assert!(rt.find(&format!("forward-room-{}", demo::DEMO_THREAD.0)).is_some());
+}
+
 fn readers_runtime() -> Runtime<State> {
     runtime(demo::read_receipts)
 }

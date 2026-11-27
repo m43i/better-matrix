@@ -20,10 +20,10 @@ export function roomName(room: RoomSummary, reverse: boolean): string {
 }
 
 /** Keep a mention's leading @ with the displayed name. */
-export function mentionName(label: string, reverse: boolean): string {
-  if (!label.startsWith('@')) return personName(label, reverse);
+export function mentionName(label: string, userId: string, reverse: boolean): string {
+  if (label === userId || label === `@${userId}`) return label;
 
-  if (label.includes(':')) return label;
+  if (!label.startsWith('@')) return personName(label, reverse);
 
   return `@${personName(label.slice(1), reverse)}`;
 }

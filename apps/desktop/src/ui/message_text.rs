@@ -204,11 +204,14 @@ impl MentionLabels {
             .iter()
             .filter_map(|mark| {
                 let Mark::Pill(id) = &mark.mark else { return None };
-                if !id.starts_with("user:") || mark.start < line.start || mark.end > line.end {
+                let user_id = id.strip_prefix("user:")?;
+                if mark.start < line.start || mark.end > line.end {
                     return None;
                 }
                 let range = mark.start - line.start..mark.end - line.start;
-                let std::borrow::Cow::Owned(label) = mention_name(&words[range.clone()], true) else { return None };
+                let std::borrow::Cow::Owned(label) = mention_name(&words[range.clone()], user_id, true) else {
+                    return None;
+                };
                 Some((range, label))
             })
             .collect();

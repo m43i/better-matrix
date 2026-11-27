@@ -286,11 +286,11 @@ pub(crate) fn person_name(name: &str, reverse: bool) -> Cow<'_, str> {
 }
 
 /// Keep a mention's leading @ with the displayed name.
-pub(crate) fn mention_name(label: &str, reverse: bool) -> Cow<'_, str> {
+pub(crate) fn mention_name<'a>(label: &'a str, user_id: &str, reverse: bool) -> Cow<'a, str> {
+    if label == user_id || label.strip_prefix('@') == Some(user_id) {
+        return Cow::Borrowed(label);
+    }
     if let Some(name) = label.strip_prefix('@') {
-        if label.contains(':') {
-            return Cow::Borrowed(label);
-        }
         if let Cow::Owned(shown) = person_name(name, reverse) {
             return format!("@{shown}").into();
         }

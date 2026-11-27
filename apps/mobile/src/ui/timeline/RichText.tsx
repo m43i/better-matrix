@@ -333,7 +333,9 @@ function Pill({ inline }: { inline: Extract<Inline, { type: 'mention' }> }) {
   const { account, timelineKey, shown } = useTimelineContext();
   const me = inline.kind === 'user' && inline.id === account;
   const reverse = useStore((s) => s.settings.reverseDisplayNames);
-  const name = inline.kind === 'user' ? mentionName(inline.label, reverse) : inline.label;
+
+  const name =
+    inline.kind === 'user' ? mentionName(inline.label, inline.id, reverse) : inline.label;
 
   const label = inline.kind === 'user' && !name.startsWith('@') ? `@${name}` : name;
 
