@@ -808,14 +808,14 @@ fn adding_a_deadline_should_send_an_unchanged_status_message() {
     let me = person_presence(id.as_str(), matrix_core::Presence::Online, Some("Out"));
     apply(&mut s, Event::Presence { account: id, people: vec![me] });
     s.edit_status_message();
-    s.choose_status_expiry(StatusExpiry::HalfHour);
+    s.choose_status_expiry(StatusExpiry::Hour);
     let before = now_ms();
     s.save_status_message();
     let sent = drain(&mut commands);
     assert!(matches!(
         &sent[..],
         [(_, Command::SetStatusMessage { message: Some(message), clear_at_ms: Some(at), .. })]
-            if message == "Out" && (before + 1_800_000..=now_ms() + 1_800_000).contains(at)
+            if message == "Out" && (before + 3_600_000..=now_ms() + 3_600_000).contains(at)
     ));
 }
 
@@ -4108,6 +4108,25 @@ fn paging_a_call_should_stop_hidden_videos_and_start_visible_ones() {
             && new
                 .iter()
                 .all(|id| dispatched.iter().any(|c| matches!(c, Command::WatchVideo { video, .. } if video == id)))
+    );
+}
+
+#[test]
+fn a_call_in_a_window_off_screen_should_not_stream_its_video() {
+    let (mut s, mut commands) = state();
+    let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
+    s.select_room("!one:x");
+    apply(&mut s, Event::CallUpdated(Box::new(call_info(&id, "!one:x", Some(7)))));
+    drain(&mut commands);
+    s.window_visible = false;
+    s.sync_watching();
+    assert!(all_commands(&mut commands).contains(&Command::UnwatchVideo(matrix_core::VideoId(7))));
+    s.window_visible = true;
+    s.sync_watching();
+    assert!(
+        all_commands(&mut commands)
+            .iter()
+            .any(|c| matches!(c, Command::WatchVideo { video: matrix_core::VideoId(7), .. }))
     );
 }
 

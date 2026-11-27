@@ -177,14 +177,17 @@ Date: 2026-11-14
     the labels are in `.github/labels.yml`). The packaging lives in `packaging/`, runnable
     locally.
 - **Desktop self-updates** (macOS arm64 and Windows x86_64 release builds):
-  - A shell worker checks GitHub's latest stable release at startup and hourly. Offline checks
+  - A shell worker checks GitHub's latest stable release at startup and hourly by the wall
+    clock (it looks at the clock at least every five minutes, so a laptop that slept checks soon
+    after waking; the monotonic clock stops during sleep on some systems). Offline checks
     are quiet; prereleases, equal/older versions and releases without a matching archive and
     SHA-256 digest are ignored. SemVer precedence decides what is newer.
   - A newer release downloads as soon as a check finds it: the immutable asset ID over HTTPS,
     with GitHub's SHA-256 digest verified before extracting it. This trusts the repository's
     release permissions and GitHub HTTPS; it is not a separate signing key. Only then does the
     rail show the update icon, which restarts into the release: restarting stays the user's
-    action. A download that fails is retried at the next check; until then the icon offers the
+    action. Restarting checks once more first and stages a release published since, so a copy
+    several releases behind goes straight to the newest, never through the ones between. A download that fails is retried at the next check; until then the icon offers the
     release's page.
   - Stage beside the install, in the updater's own `.better-matrix-update-staging` folder, so
     permissions and disk failures surface before quitting. A staged release stays until a newer

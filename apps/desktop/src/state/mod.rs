@@ -1116,6 +1116,9 @@ pub struct State {
     pub drop_hover: bool,
     /// Whether the window has keyboard focus; notifications for the open room are skipped then.
     pub window_focused: bool,
+    /// Whether the window is on screen (not hidden, minimised or covered whole), as the last poll
+    /// saw it: a call's videos convert no frames while it isn't.
+    pub window_visible: bool,
     /// The selected rail tile's halo: breathing a while after the user turns to the window.
     pub breath: breath::Breath,
     /// The latest error worth telling the user about; dismissable.
@@ -1228,6 +1231,7 @@ impl State {
             settings,
             drop_hover: false,
             window_focused: true,
+            window_visible: true,
             breath: breath::Breath::Asked,
             notice: None,
             pending_link: None,
@@ -1986,13 +1990,14 @@ impl State {
     }
 
     /// Diffs watches against the visible call plan, so hidden pages and hidden self-view
-    /// convert no frames. A call outside the current room watches nothing.
+    /// convert no frames. A call outside the current room, or in a window that isn't on screen,
+    /// watches nothing.
     pub fn sync_watching(&mut self) {
         let layout_menu = self.call_here().is_some_and(|call| call.video() && !call.compact());
         if !layout_menu && self.popover == Some(Popover::CallLayout) {
             self.popover = None;
         }
-        let shows = self.call_here().is_some();
+        let shows = self.window_visible && self.call_here().is_some();
         let Some(call) = self.call.as_mut() else { return };
         // Called every frame: the plan is worked out again only when what it reads changed.
         let key = (shows, call.videos_key());
@@ -2502,7 +2507,10 @@ impl State {
             }
             self.accounts.timeline_closed(&account, &key);
             self.timelines_ready.remove(&(account.clone(), key.clone()));
-            self.receipts.forget(&account, &key);
+            // What was read last goes before the close, while the engine still has it open.
+            if let Some(command) = self.receipts.forget(&account, &key) {
+                self.dispatch(command, Purpose::Read);
+            }
             self.on_screen.remove(&(account.clone(), key.clone()));
             self.engine.send(Command::CloseTimeline { account, key });
         }
@@ -2729,6 +2737,8 @@ impl State {
     /// when that changed what shows.
     pub fn animate(&mut self, clock: f64, tx: &mut Tx) -> bool {
         let (focused, still) = (self.window_focused, self.reduced_motion.get());
+        // Each change of visibility wakes this poll once.
+        self.window_visible = tx.window_visible();
         // A memo whose microphone failed ends now, with why, rather than on send.
         let mut ended = false;
         for target in [ComposerTarget::Room, ComposerTarget::Thread] {
@@ -5908,7 +5918,10 @@ impl State {
             }
             _ => self.notice_shown = Some((message.clone(), std::time::Instant::now())),
         }
-        tx.wake_after(std::time::Duration::from_millis(500));
+        // Woken once, when it is due, rather than polling while it shows.
+        if let Some((_, since)) = &self.notice_shown {
+            tx.wake_after(SHOWN_FOR.saturating_sub(since.elapsed()));
+        }
         false
     }
 

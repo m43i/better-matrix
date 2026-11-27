@@ -1,6 +1,6 @@
 //! Desktop updates: a serial worker checks on startup and hourly. On macOS and Windows the app
-//! updates itself: it downloads a newer release right away, and restarts into it when the user
-//! asks; helpers wait for a clean process exit before replacing the install. Linux installs belong to their package manager, so the app
+//! updates itself: it downloads a newer release right away, and restarts into the newest one when
+//! the user asks; helpers wait for a clean process exit before replacing the install. Linux installs belong to their package manager, so the app
 //! offers the command that updates the way it was installed.
 
 use super::Shell;

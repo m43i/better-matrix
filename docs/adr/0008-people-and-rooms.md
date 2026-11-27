@@ -78,7 +78,8 @@ Date: 2026-11-22
   - On the desktop the account menu shows its message in the first row (× clears it); pressed, the
     menu becomes a field with an emoji button (the picker takes the menu's place and returns to
     it), a calendar button at the right of the field, four suggestions that fill the field, and
-    Save. The calendar opens a clear-after picker with presets and an optional date for a custom
+    Save. The calendar opens a clear-after picker with presets (in one hour, today: the next local
+    midnight, this week: the midnight ending Sunday) and an optional date for a custom
     local time. Escape stops writing. The message shows at once,
     over what the engine reports, until the request saving the latest
     choice finishes (`saving_status_message`); then it shows as last reported, so a failure falls

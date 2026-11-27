@@ -470,7 +470,10 @@ see who is typing there.
     Scrolling receipts are coalesced at 500 ms per open timeline, with the first fully-read
     acknowledgement sent as soon as the preceding request finishes. Only one receipt request
     per timeline is in flight, including across quick close/reopen; failures retry the latest
-    position after two seconds. Warm rows wait for the SDK subscription's first snapshot before
+    position after two seconds. Closing a timeline sends the position it still held back (before
+    `CloseTimeline`, or once the receipt in flight finishes, without retrying), and the engine
+    takes a receipt for a closed timeline through its warm copy, so leaving a room right after
+    reading it doesn't leave its last messages unread on the server. Warm rows wait for the SDK subscription's first snapshot before
     sending. Viewport progress and visible-marker metadata do not change the row-plan revision;
     dismissing the marker does.
     `ReadBoundary` reports the existing fully-read event (or receipt fallback) independently of

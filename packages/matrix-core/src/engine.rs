@@ -501,9 +501,10 @@ pub enum Command {
         /// Which timeline.
         key: TimelineKey,
     },
-    /// Mark an open timeline read up to a displayed event with a read receipt, which the server
-    /// counts unread messages from in every session. Does nothing when it is closed or already
-    /// read.
+    /// Mark a timeline read up to a displayed event with a read receipt, which the server
+    /// counts unread messages from in every session. A timeline closed since still takes it while
+    /// it is kept warm, so the last receipt of a room the user just left isn't lost. Does nothing
+    /// when it is cold or already read.
     MarkRead {
         /// Whose room.
         account: AccountId,
@@ -2133,6 +2134,16 @@ impl Running {
         }
     }
 
+    /// The timeline a read receipt goes through: the open one, or the warm one it left behind
+    /// when the user moved on before its last receipt went out.
+    fn reading_timeline(&self, key: &TimelineKey) -> Option<Arc<matrix_sdk_ui::timeline::Timeline>> {
+        self.timelines
+            .get(key)
+            .map(|(timeline, _)| timeline)
+            .or_else(|| self.warm.iter().find(|(warm, _)| warm == key).map(|(_, timeline)| timeline))
+            .map(Arc::clone)
+    }
+
     /// A warm timeline for `key`, taken out of the warm set.
     fn take_warm(&mut self, key: &TimelineKey) -> Option<Arc<matrix_sdk_ui::timeline::Timeline>> {
         let index = self.warm.iter().position(|(warm, _)| warm == key)?;
@@ -2921,9 +2932,9 @@ impl State {
                 })
             }
             Command::MarkRead { account, key, event_id, fully_read } => {
-                let timeline = self.open_timeline(&account, &key);
+                let timeline = self.accounts.get(&account).and_then(|running| running.reading_timeline(&key));
                 Box::pin(async move {
-                    if let Ok(timeline) = timeline {
+                    if let Some(timeline) = timeline {
                         mark_timeline_read(&timeline, event_id.as_deref(), fully_read && key.thread.is_none()).await?;
                     }
                     Ok(Outcome::Done)
@@ -5894,6 +5905,36 @@ mod tests {
         };
         running.forget_opening(RequestId(3));
         assert!(running.opening.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_receipt_for_a_timeline_just_closed_should_go_through_its_warm_copy() {
+        let server = crate::test_server::Server::new(crate::test_server::thread_response);
+        let account = Account::for_test(&server.url()).await;
+        account.client().sync_once(SyncSettings::default().timeout(Duration::ZERO)).await.expect("sync room");
+        let key = TimelineKey::room("!room:example.org");
+        let timeline = Arc::new(account.timeline(&key).await.expect("timeline"));
+        let sink: Arc<dyn EventSink> = Arc::new(|_| {});
+        let (usage, worker) = crate::search::Usage::start(account.clone(), Arc::clone(&sink));
+        let feed = RoomFeed { account: account.clone(), sink, cache: Arc::default() };
+        let running = Running {
+            #[cfg(feature = "command-line")]
+            watch_ready: None,
+            account,
+            usage,
+            background: vec![worker],
+            flows: crate::security::Flows::default(),
+            timelines: HashMap::new(),
+            warm: vec![(key.clone(), Arc::clone(&timeline))],
+            opening: HashMap::new(),
+            keys_fetched: HashSet::new(),
+            feed,
+            handlers: Vec::new(),
+            sends: HashMap::new(),
+        };
+        let reading = running.reading_timeline(&key).expect("the warm timeline");
+        assert!(Arc::ptr_eq(&reading, &timeline));
+        assert!(running.reading_timeline(&TimelineKey::room("!other:example.org")).is_none());
     }
 
     #[test]

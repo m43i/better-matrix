@@ -230,6 +230,12 @@ fn spec() -> AppSpec<State> {
                 s.toggle_popover(Popover::AccountSwitcher);
                 s.edit_status_message();
             }),
+            ("demo-status-expiry", |s| {
+                demo::seed(s);
+                s.toggle_popover(Popover::AccountSwitcher);
+                s.edit_status_message();
+                s.toggle_status_expiry();
+            }),
             ("demo-compose", demo::compose),
             ("demo-add-account", |s| {
                 demo::seed(s);

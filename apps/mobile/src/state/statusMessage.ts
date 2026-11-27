@@ -3,20 +3,40 @@
 import type { AccountData } from './types';
 
 export const STATUS_DURATIONS = [
-  { id: 'never', label: 'status_message.expiry_never', minutes: null },
-  { id: 'half-hour', label: 'schedule.half_hour', minutes: 30 },
-  { id: 'hour', label: 'schedule.hour', minutes: 60 },
-  { id: 'four-hours', label: 'status_message.expiry_four_hours', minutes: 240 },
-  { id: 'day', label: 'status_message.expiry_day', minutes: 1440 },
+  { id: 'never', label: 'status_message.expiry_never' },
+  { id: 'hour', label: 'schedule.hour' },
+  { id: 'today', label: 'status_message.expiry_today' },
+  { id: 'week', label: 'status_message.expiry_week' },
 ] as const;
 
 export type StatusExpiry = (typeof STATUS_DURATIONS)[number] | { at: number };
 
-/** A preset counts from Save. A past deadline is discarded when saving a new message. */
+/**
+ * A preset counts from Save: an hour later, the next local midnight ("today"), or the local
+ * midnight that starts next Monday ("this week", so the end of Sunday). A past deadline is
+ * discarded when saving a new message.
+ */
 export function clearStatusAt(expiry: StatusExpiry, now: number): number | null {
   if ('at' in expiry) return expiry.at > now ? expiry.at : null;
 
-  return expiry.minutes === null ? null : now + expiry.minutes * 60_000;
+  switch (expiry.id) {
+    case 'never':
+      return null;
+    case 'hour':
+      return now + 60 * 60_000;
+    case 'today':
+      return dayStart(now, 1);
+    case 'week':
+      // getDay: Sunday is 0. Monday is 7 days off on a Monday, 1 on a Sunday.
+      return dayStart(now, 7 - ((new Date(now).getDay() + 6) % 7));
+  }
+}
+
+/** The local midnight `days` days after the day of `now`. */
+function dayStart(now: number, days: number): number {
+  const date = new Date(now);
+
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days).getTime();
 }
 
 /** Display the saved deadline only while it belongs to the status message on screen. */
