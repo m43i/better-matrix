@@ -200,7 +200,7 @@ async fn check_renewal(
     let unsigned = reply.event.get_field::<serde_json::Value>("unsigned").ok().flatten().unwrap_or_default();
     let replaced = if let Some(replaced) = unsigned.get("replaces_state").and_then(|id| id.as_str()) {
         replaced == previous.as_str()
-    } else if let Some(content) = unsigned.get("prev_content") {
+    } else if let Some(content) = unsigned.get("prev_content").filter(|content| !content.is_null()) {
         content["live"] == true && content["org.matrix.msc3488.ts"].as_u64() == Some(started_at)
     } else {
         return Renewal::Unverified(Error::Location("The homeserver can't confirm the live location share".into()));
@@ -350,6 +350,8 @@ mod tests {
     enum Replaced {
         Says,
         SaysContent,
+        /// `prev_content: null`, and no `replaces_state`.
+        NullContent,
         Omits,
         Fails,
     }
@@ -390,6 +392,7 @@ mod tests {
                 let unsigned = match answers {
                     Replaced::Says => json!({"replaces_state":previous}),
                     Replaced::SaysContent => json!({"prev_content":content}),
+                    Replaced::NullContent => json!({"prev_content":null}),
                     Replaced::Omits => json!({}),
                     Replaced::Fails => return json!({"errcode":"M_FORBIDDEN","error":"Not now"}),
                 };
@@ -543,6 +546,7 @@ mod tests {
         for (meanwhile, answers) in [
             (None, Replaced::Fails),
             (None, Replaced::Omits),
+            (None, Replaced::NullContent),
             (Some(Meanwhile::CheckFailsAfterRenewal), Replaced::Says),
         ] {
             let (_server, mut requests, _fixes, _stop, task, _) = renewing_share(meanwhile, answers).await;
