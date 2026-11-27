@@ -400,9 +400,11 @@ see who is typing there.
   thumbnails and drawn by `media_avatar`.
   - Fallback initials: first letters of the display name's first two words, one for a single
     word, or the user ID's local part's first letter, never the server. Below 24 pt, one letter.
-- **Linked GIFs:** Giphy, Tenor (share pages, via `og:image`), Imgur and direct `.gif` links
-  resolve in `matrix_core::links`. The engine fetches them with a size limit (1 MiB page, 15
-  MiB GIF).
+- **Linked GIFs:** Giphy, Tenor (share pages, via `og:image`, in any language Tenor shares
+  them in: `view/…`, `de/view/…`, `pt-BR/view/…`), Imgur and direct `.gif` links resolve in
+  `matrix_core::links` (mirrored by the phones' `state/links.ts`). The engine fetches them with
+  a size limit (1 MiB page, 15 MiB GIF). Only GIF files play: a link to WebP or MP4 media
+  isn't a GIF link and gets a link card.
   - A message with a GIF link shows its other text, then the GIF like an attachment, link
     hidden; a bare link shows the GIF alone. Prepared once on arrival (`TimelineItem::gif`).
   - Its frame is always `GIF_HEIGHT` (160 points) tall, a placeholder of that height until the

@@ -1724,15 +1724,58 @@ fn berlin_map(s: &mut State) {
     s.media.measure();
 }
 
+/// The map viewer on Kai's place, with Grace sharing live and Ada's own place nearby: three
+/// people on one map, the window's map picture seeded as the media worker would draw it.
 pub fn location_map(s: &mut State) {
     message_features(s);
     berlin_map(s);
-    s.modal = Some(crate::state::Modal::LocationMap {
-        account: AccountId::new(ADA),
-        key: TimelineKey::room(DEMO_THREAD.0),
-        event_id: "$place".into(),
-        zoom: matrix_core::geo::MAP_ZOOM,
-    });
+    let now = crate::state::now_ms();
+    let place = |id: &str, sender: &str, name: &str, ago_minutes: u64, geo_uri: &str, live_until| Message {
+        event_id: id.into(),
+        sender_id: sender.into(),
+        sender_name: name.into(),
+        timestamp_ms: now - ago_minutes * 60_000,
+        content: MessageContent::Location(matrix_core::Location {
+            live_until,
+            geo_uri: geo_uri.into(),
+            description: None,
+            map: matrix_core::geo::map(geo_uri),
+        }),
+        ..Message::default()
+    };
+    let entries = [
+        place("$grace-live", GRACE, "Grace Hopper", 12, "geo:52.5171,13.3892", Some(now + 48 * 60_000)),
+        place("$ada-place", ADA, "Ada Lovelace", 95, "geo:52.5136,13.3721", None),
+    ]
+    .map(|message| TimelineEntry { id: message.event_id.clone(), kind: EntryKind::Message(Box::new(message)) });
+    apply(
+        s,
+        Event::TimelineChanged {
+            account: AccountId::new(ADA),
+            key: TimelineKey::room(DEMO_THREAD.0),
+            diffs: vec![TimelineDiff::Append(entries.into())],
+        },
+    );
+    for (dark, jpeg) in [
+        (false, include_bytes!("../assets/demo/location-viewer-light.jpg").as_slice()),
+        (true, include_bytes!("../assets/demo/location-viewer-dark.jpg").as_slice()),
+    ] {
+        // The picture the viewer asks for in the default 1200 × 760 window.
+        let frame = crate::state::MapFrame {
+            latitude: 52.516275,
+            longitude: 13.377704,
+            zoom: matrix_core::geo::MAP_ZOOM,
+            width: 1152,
+            height: 640,
+        };
+        let bytes: std::sync::Arc<[u8]> = jpeg.into();
+        s.media.loaded(frame.media(dark), bytes.clone(), Some((frame.width, frame.height)));
+        if let Some(image) = s.media.decode(bytes) {
+            let _ = image.wait();
+        }
+    }
+    s.media.measure();
+    s.open_location_map(AccountId::new(ADA), TimelineKey::room(DEMO_THREAD.0), "$place".into());
 }
 
 /// The location dialog with a place found and chosen.

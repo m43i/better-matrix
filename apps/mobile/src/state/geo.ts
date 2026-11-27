@@ -1,4 +1,12 @@
-import type { MediaRef } from '@better-matrix/matrix-native/types';
+import type {
+  Location,
+  MediaRef,
+  Message,
+  TimelineEntry,
+} from '@better-matrix/matrix-native/types';
+
+import { t } from '../i18n';
+import { clockTime, sentAt } from './timelineText';
 
 /** How close maps are drawn (the engine's `MAP_ZOOM`). */
 const MAP_ZOOM = 15;
@@ -82,4 +90,80 @@ export function coordinatesText(uri: string): string | null {
   const place = coordinates(uri);
 
   return place ? `${trimNumber(place.latitude)}, ${trimNumber(place.longitude)}` : null;
+}
+
+/** How long a place someone shared stays on a conversation's map once it stops being live. */
+export const RECENT_PLACE_MS = 24 * 60 * 60 * 1000;
+
+/** One person's place on a conversation's map. */
+export interface MapPin {
+  /** The location message, whose sender the pin shows. */
+  message: Message;
+  location: Location;
+  latitude: number;
+  longitude: number;
+}
+
+/** A live share that hasn't ended at `now`. */
+export function isLive(location: Location, now: number): boolean {
+  return location.live_until != null && location.live_until > now;
+}
+
+/**
+ * The pins a conversation's map shows (the desktop's `map_pins`): of the loaded location
+ * messages with coordinates, each sender's newest, kept while it is live or under a day old. The
+ * focused message is always shown, in place of its sender's newest. Newest first.
+ */
+export function mapPins(
+  entries: readonly TimelineEntry[],
+  focusEventId: string,
+  now: number,
+): MapPin[] {
+  const newest = new Map<string, MapPin>();
+  let focus: MapPin | null = null;
+
+  for (const entry of entries) {
+    if (entry.kind.type !== 'Message') continue;
+    const message = entry.kind.data;
+
+    if (message.content.type !== 'Location') continue;
+    const location = message.content.data;
+    const point = coordinates(location.geo_uri);
+
+    if (!point) continue;
+    const pin = { message, location, ...point };
+
+    if (message.event_id === focusEventId) focus = pin;
+    const held = newest.get(message.sender_id);
+
+    if (!held || held.message.timestamp_ms < message.timestamp_ms)
+      newest.set(message.sender_id, pin);
+  }
+
+  if (focus) newest.set(focus.message.sender_id, focus);
+
+  return [...newest.values()]
+    .filter(
+      (pin) =>
+        pin === focus ||
+        isLive(pin.location, now) ||
+        now - pin.message.timestamp_ms <= RECENT_PLACE_MS,
+    )
+    .sort((a, b) => b.message.timestamp_ms - a.message.timestamp_ms);
+}
+
+/** What a pin's row says under the name: until when it is live, else where and when it was shared. */
+export function pinDetail(pin: MapPin, now: number): string {
+  const until = pin.location.live_until;
+
+  if (until != null && until > now) {
+    // A share until stopped ends weeks on: name the day when it isn't today.
+    const today = new Date(until).toDateString() === new Date(now).toDateString();
+
+    return t('location.live_until', { time: today ? clockTime(until) : sentAt(until, now) });
+  }
+
+  const when = sentAt(pin.message.timestamp_ms, now);
+
+  return pin.location.description ? `${pin.location.description} · ${when}` : when;
 }

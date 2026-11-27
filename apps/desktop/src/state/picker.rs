@@ -361,13 +361,13 @@ impl State {
     /// still there, so it shows as kept again.
     pub fn gif_key_not_kept(&mut self, key: Option<String>, previous: Option<String>, error: &str) {
         let Some(key) = key else {
-            self.notice = Some(crate::i18n::tf!("notice.gif_key_remove", error = error));
+            self.notice = Some(super::Notice::problem(crate::i18n::tf!("notice.gif_key_remove", error = error)));
             if let (GifKey::Missing, Some(previous)) = (&self.picker.giphy, previous) {
                 self.gif_key_changed(GifKey::Kept(previous));
             }
             return;
         };
-        self.notice = Some(crate::i18n::tf!("notice.gif_key", error = error));
+        self.notice = Some(super::Notice::problem(crate::i18n::tf!("notice.gif_key", error = error)));
         // Not kept: it works until the app quits, and Settings says so; a newer key is left be.
         if self.picker.giphy == GifKey::Kept(key.clone()) {
             self.picker.giphy = GifKey::Session(key);

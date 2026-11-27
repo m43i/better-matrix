@@ -212,8 +212,9 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             s.accounts.get(&list.account).map(|account| saved::saved(s, list, account, window, &p))
         }
         Some(Modal::Poll) => Some(poll::form(s, &p)),
-        Some(Modal::LocationMap { account, key, event_id, zoom }) => {
-            Some(location::viewer(s, account, key, event_id, *zoom, &p))
+        Some(Modal::LocationMap(viewer)) => {
+            let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
+            Some(location::viewer(s, viewer, window, &p))
         }
         Some(Modal::Location) => Some(location::dialog_for(s, &p)),
         Some(Modal::Packs) => pack_manager::dialog_for(s, &p),
@@ -237,11 +238,31 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         Some(other) => security::dialog_for(other, &p),
         None => None,
     };
+    // The top right corner: a notice (it goes by itself), then the calls ringing, one under the
+    // other so neither hides the other. It belongs to the topmost layer over the window (the
+    // preview, a dialog, or the window itself), so it stays in reach while a dialog holds the
+    // pointer, and paints over that layer's menus.
+    let notice = s.notice.as_ref().map(|notice| toast(notice, &p));
+    let rings = call::rings(s, &p);
+    let corner = (notice.is_some() || rings.is_some()).then(|| {
+        col()
+            .key("corner")
+            .pin(None, Some(56.0 + banner_height), Some(20.0), None)
+            .gap(12.0)
+            .items_end()
+            .raise()
+            .children(notice)
+            .children(rings)
+    });
     // The preview goes over everything, dialogs included.
     let preview = s.preview.as_ref().map(|preview| {
         let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
         preview::preview(s, preview, window, &p)
     });
+    let (mut corner, dialog_corner) = match (&preview, &dialog) {
+        (None, Some(_)) => (None, corner),
+        _ => (corner, None),
+    };
     if let Some(dialog) = dialog {
         // A dialog stays inside the window, its content scrolling when the window is short.
         let window = cx.layout_size("root").unwrap_or([1200.0, 760.0]);
@@ -260,14 +281,15 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
                         .max_w((window[0] - 16.0).max(280.0))
                         .max_h((window[1] - 48.0).max(200.0))
                         .on_press(|_: &mut State| {}),
-                ),
+                )
+                .children(dialog_corner),
         );
     }
     if let Some(select) = select {
         root = root.child(scrim()).child(select);
     }
     if let Some(preview) = preview {
-        root = root.child(preview);
+        root = root.child(preview.children(corner.take()));
         if let (Some(Popover::AttachmentMenu { at }), Some(preview)) = (&s.popover, &s.preview)
             && !s.preview_held()
         {
@@ -275,21 +297,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
             root = root.children(attachments::menu(&preview.account, &preview.attachment, *at, window, &p));
         }
     }
-    // The top right corner: a notice (it goes by itself), then the calls ringing, one under the
-    // other so neither hides the other.
-    let notice = s.notice.as_deref().map(|message| toast(message, &p));
-    let rings = call::rings(s, &p);
-    if notice.is_some() || rings.is_some() {
-        root = root.child(
-            col()
-                .key("corner")
-                .pin(None, Some(56.0 + banner_height), Some(20.0), None)
-                .gap(12.0)
-                .items_end()
-                .children(notice)
-                .children(rings),
-        );
-    }
+    root = root.children(corner);
     if let (Some(drag), Some(account)) = (&s.dragging, account) {
         root = root.child(sidebar::drag_ghost(s, drag, account, &p));
     }
@@ -338,8 +346,15 @@ fn unverified_bar(p: &Palette) -> El {
         )
 }
 
-/// A message at the window's top right, under the search bar: what went wrong, and a way to close it.
-fn toast(message: &str, p: &Palette) -> El {
+/// A message at the window's top right, under the search bar: what went wrong (or worked), and a
+/// way to close it.
+fn toast(notice: &crate::state::Notice, p: &Palette) -> El {
+    use crate::state::NoticeKind;
+    let (glyph, color) = match notice.kind {
+        NoticeKind::Problem => (&icons::ALERT, p.danger),
+        NoticeKind::Info => (&icons::INFO, p.accent),
+        NoticeKind::Done => (&icons::CHECK, p.success),
+    };
     row()
         .key("notice")
         .max_w(420.0)
@@ -352,9 +367,9 @@ fn toast(message: &str, p: &Palette) -> El {
         .fill(p.surface)
         .border(1.0, p.divider)
         .shadow(4.0, 24.0, Color::BLACK.alpha(0.35))
-        .role("alert")
-        .child(rune::icon(&icons::ALERT, 18.0).color(p.danger))
-        .child(text(message.to_owned()).font(font::BODY).color(p.text).shrink().wrap())
+        .role(if notice.kind == NoticeKind::Problem { "alert" } else { "status" })
+        .child(rune::icon(glyph, 18.0).color(color))
+        .child(text(notice.message.clone()).font(font::BODY).color(p.text).shrink().wrap())
         .child(
             components::icon_button(&icons::CLOSE, t!("common.dismiss"), false, p.text_muted, p)
                 .key("dismiss-notice")

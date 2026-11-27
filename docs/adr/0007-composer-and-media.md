@@ -219,15 +219,25 @@ screenshots, voice memos, and images, PDFs, videos and recordings that open larg
   `geo:` URI, a pin asset (MSC3488) and the place's name as its body (else its coordinates).
   The picker uses a permitted device fix or a labelled approximate position from GeoJS, which
   receives the public IP when the picker needs an estimate. Search and typed coordinates remain
-  available. Sending a place takes an explicit action. Live location is a separate 15-minute
-  room share using Element’s MSC3672 beacon info and related beacon events. Only a device fix
+  available. Sending a place takes an explicit action. Live location is a separate room share
+  for 1 hour, 1 day or until stopped (`LiveDuration`), using Element’s MSC3672 beacon info and
+  related beacon events. "Until stopped" still names an end, 24 days on: JavaScript timers (Element
+  Web's among them) overflow past 2^31 − 1 ms, so a longer timeout would end the share at once
+  there. An orderly quit stops the share either way. Only a device fix
   can start one in a room where the sender may publish both events. Room permissions let an
   admin set their level together. The picker can stop the current share, and each viewer can
   stop its own beacon. On Android the foreground service starts when sharing is requested and
   holds the latest fix until the first Matrix send succeeds.
   Desktop renders MapLibre Native snapshots off the UI thread, cached by coordinates, style and
   zoom. Both clients use the app’s bundled light and dark street styles with OpenFreeMap vector tiles. The sender’s avatar
-  marks the place. The in-app map dialog offers zoom and an explicit Google Maps action.
+  marks the place. A location card opens the **map viewer**: one map, near the window's size,
+  of every recent place in that conversation (each sender's newest, if still live or shared within
+  a day, and always the card's own, focused and centred at street level). A list over the map
+  names who is there; choosing someone (a row or a pin) turns the map to them. The desktop drags
+  the map and zooms with the wheel (toward the pointer) or buttons, from MapLibre snapshots of the
+  map's size (`geo::framed_map`), placing pins by Web Mercator (`geo::project`); while a moved
+  map's snapshot renders, the last one stays, moved and scaled into place. The phones use MapLibre's
+  own interactive map. The viewer's bar opens the focused place in Google Maps.
   Turning off maps suppresses the renderer and tile requests. Nominatim still searches only on
   submit, with cached results and a one-second interval between requests.
 - **Scheduled messages** (MSC4140 delayed events, `matrix_core::scheduled`): the button beside

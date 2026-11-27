@@ -42,6 +42,8 @@ import {
   KAI,
   PASSWORD_SERVER,
   LAB,
+  mapEvents,
+  PARTY_MESSAGE,
   READ_BY_SIX,
   RELEASES,
   ring,
@@ -68,6 +70,8 @@ export interface Scene {
   settings?: Partial<Settings>;
   /** Events after the seed. */
   events?: EngineEvent[];
+  /** Events after those that depend on when the scene opens (`now`), such as recent places. */
+  eventsAt?: (now: number) => EngineEvent[];
   /** Changes on this device after the events (the account or scope on screen, a draft). */
   setup?: (store: Store) => void;
   /** The screens to open, in order, over the tabs; made as the scene opens when they need to be. */
@@ -422,9 +426,10 @@ export const scenes = {
     routes: [routes.room(ADA, GENERAL), routes.messageActions(ADA, GENERAL, STICKER_MESSAGE)],
   },
   'location-map': {
-    about: 'A shared place on its map',
+    about: 'Grace’s party place on #releases’ map, with Kai sharing live, Ada’s and Alan’s places',
+    eventsAt: mapEvents,
     setup: general,
-    routes: [routes.room(ADA, RELEASES), routes.locationMap(ADA, RELEASES, `$demo-${GRACE}-2`)],
+    routes: [routes.room(ADA, RELEASES), routes.locationMap(ADA, RELEASES, PARTY_MESSAGE)],
   },
   location: {
     about: 'Sharing a place: the phone’s position or one found by name',
@@ -927,6 +932,7 @@ export function sceneEvents(scene: Scene): EngineEvent[] {
   return [
     ...(scene.seeded === false ? [{ type: 'Restoring' as const, data: [] }] : seedEvents()),
     ...(scene.events ?? []),
+    ...(scene.eventsAt?.(Date.now()) ?? []),
   ];
 }
 

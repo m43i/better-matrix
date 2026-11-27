@@ -1,6 +1,6 @@
-// A shared place opens by event ID so the sheet follows live timeline updates.
+// A shared place opens its conversation's map by event ID, so the map follows live updates.
 import type { Location, Message, Person } from '@better-matrix/matrix-native/types';
-import { Camera, Map, Marker } from '@maplibre/maplibre-react-native';
+import { Camera, Map } from '@maplibre/maplibre-react-native';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -22,6 +22,11 @@ import darkMap from '../../../../../packages/matrix-core/maps/dark.json';
 import lightMap from '../../../../../packages/matrix-core/maps/light.json';
 
 const stylesByTheme = { dark: JSON.stringify(darkMap), light: JSON.stringify(lightMap) };
+
+/** The map style for the light or dark theme, as MapLibre takes it. */
+export function mapStyle(theme: 'dark' | 'light'): string {
+  return stylesByTheme[theme];
+}
 
 export function locationTitle(location: Location | undefined, now: number) {
   const until = location?.live_until;
@@ -75,13 +80,11 @@ export function MapView({
   account,
   uri,
   person,
-  interactive = false,
   zoom = 15,
 }: {
   account: string;
   uri?: string;
   person: Person;
-  interactive?: boolean;
   zoom?: number;
 }) {
   const p = usePalette();
@@ -102,29 +105,25 @@ export function MapView({
   if (!shown) return null;
 
   return (
-    <View
-      pointerEvents={interactive ? 'auto' : 'none'}
-      style={[styles.map, { backgroundColor: p.surface }]}
-    >
+    <View pointerEvents="none" style={[styles.map, { backgroundColor: p.surface }]}>
       {center ? (
         <>
           <Map
             style={StyleSheet.absoluteFill}
-            mapStyle={stylesByTheme[style]}
+            mapStyle={mapStyle(style)}
             androidView="texture"
-            attribution={interactive}
+            attribution={false}
             logo={false}
-            compass={interactive}
+            compass={false}
             scaleBar={false}
-            dragPan={interactive}
-            touchZoom={interactive}
+            dragPan={false}
+            touchZoom={false}
             onDidFailLoadingMap={() => setFailedStyle(style)}
             onDidFinishLoadingMap={() => setFailedStyle('')}
           >
             <Camera center={center} zoom={zoom} duration={0} />
-            {interactive && <Marker lngLat={center}>{pin}</Marker>}
           </Map>
-          {!interactive && pin}
+          {pin}
           <Text style={[styles.credit, { color: p.textMuted, backgroundColor: p.surface }]}>
             {t('location.credit')}
           </Text>

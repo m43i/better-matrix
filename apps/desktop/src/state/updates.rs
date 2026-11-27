@@ -63,7 +63,7 @@ impl State {
         if let Some(Release { upgrade: Upgrade::Command(command), .. }) = self.update.release() {
             tx.copy(command.clone());
             self.popover = None;
-            self.notice = Some(t!("update.copied").to_owned());
+            self.notice = Some(super::Notice::done(t!("update.copied").to_owned()));
         }
     }
 
@@ -73,13 +73,13 @@ impl State {
             let url = url.clone();
             self.popover = None;
             if let Err(error) = tx.open_url(&url) {
-                self.notice = Some(tf!("notice.browser", error = error));
+                self.notice = Some(super::Notice::problem(tf!("notice.browser", error = error)));
             }
         }
     }
 
     pub fn update_interrupted(&mut self) {
-        self.notice = Some(t!("update.incomplete").to_owned());
+        self.notice = Some(super::Notice::problem(t!("update.incomplete").to_owned()));
     }
 
     /// The restart failed. The updater offers the release's page, stages it afresh, and the rail
@@ -88,7 +88,7 @@ impl State {
         if matches!(self.update, Update::Installing(_)) {
             self.update = Update::Current;
         }
-        self.notice = Some(tf!("update.failed", error = error));
+        self.notice = Some(super::Notice::problem(tf!("update.failed", error = error)));
     }
 }
 

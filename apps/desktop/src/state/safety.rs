@@ -51,7 +51,7 @@ impl State {
     /// A change failed: the account shows the saved choices again, with the changes still
     /// being saved.
     pub(super) fn safety_failed(&mut self, account: &AccountId, request: RequestId, error: &str) {
-        self.notice = Some(tf!("notice.safety", error = error));
+        self.notice = Some(super::Notice::problem(tf!("notice.safety", error = error)));
         self.accounts.safety_settled(account, request);
         self.safety_changed();
     }
@@ -189,7 +189,7 @@ impl State {
         if matches!(&self.modal, Some(Modal::Report(form)) if form.sending == Some(request)) {
             self.modal = None;
         }
-        self.notice = Some(t!("report.sent").to_owned());
+        self.notice = Some(super::Notice::done(t!("report.sent").to_owned()));
         if let Some((account, user_id)) = ignore {
             self.set_safety(&account, SafetyChange::Ignore { user_id, ignored: true });
         }
@@ -202,7 +202,7 @@ impl State {
         {
             form.sending = None;
         }
-        self.notice = Some(tf!("notice.report", error = error));
+        self.notice = Some(super::Notice::problem(tf!("notice.report", error = error)));
     }
 
     /// Whether a message's media waits for a press in the active account's timeline.

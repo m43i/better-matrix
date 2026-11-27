@@ -178,7 +178,7 @@ impl State {
             && let super::slash::Parsed::Command { command, .. } = super::slash::parse(&self.composer(target).edit.text)
             && !command.sends_message()
         {
-            self.notice = Some(tf!("slash.not_scheduled", command = command.name()));
+            self.notice = Some(super::Notice::problem(tf!("slash.not_scheduled", command = command.name())));
             return;
         }
         let (Some(account), Some(key)) = (self.nav.account.clone(), self.composer_key(target)) else { return };

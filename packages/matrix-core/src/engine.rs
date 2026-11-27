@@ -248,7 +248,7 @@ pub enum Command {
         /// Explicitly request access to the desktop device position, without an IP fallback.
         request_access: bool,
     },
-    /// Share a fresh device fix in the room for 15 minutes. This request stays open for
+    /// Share a fresh device fix in the room for `duration`. This request stays open for
     /// further fixes and an early stop. Beacon state events always belong to the room.
     ShareLiveLocation {
         /// Sending account.
@@ -257,6 +257,8 @@ pub enum Command {
         room_id: String,
         /// The first device fix.
         geo_uri: String,
+        /// How long the share runs unless stopped sooner.
+        duration: crate::LiveDuration,
     },
     /// Find places by name on OpenStreetMap, for sharing a location; answered by
     /// [`Event::PlacesFound`]. Send it when the user asks, never as they type.
@@ -3136,7 +3138,7 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
-            Command::ShareLiveLocation { account, room_id, geo_uri } => {
+            Command::ShareLiveLocation { account, room_id, geo_uri, duration } => {
                 let room = self.account(&account).and_then(|owner| owner.joined_room(&room_id));
                 let destination = (account, room_id);
                 if let std::collections::hash_map::Entry::Vacant(entry) = self.live_shares.entry(destination) {
@@ -3144,7 +3146,7 @@ impl State {
                     entry.insert((request, stop));
                     let answers = self.answers_for(request);
                     Box::pin(async move {
-                        crate::geo::live::share(room?, geo_uri, answers, stopped, |event_id| {
+                        crate::geo::live::share(room?, geo_uri, duration.timeout(), answers, stopped, |event_id| {
                             sink.emit(Event::LiveLocationStarted { request, event_id })
                         })
                         .await?;
@@ -6889,7 +6891,12 @@ mod tests {
             {
             }
         }
-        let request = engine.send(Command::ShareLiveLocation { account, room_id, geo_uri: "geo:1,2".into() });
+        let request = engine.send(Command::ShareLiveLocation {
+            account,
+            room_id,
+            geo_uri: "geo:1,2".into(),
+            duration: crate::LiveDuration::Hour,
+        });
         let mut beacon = None;
         let deadline = std::time::Instant::now() + Duration::from_secs(45);
         loop {

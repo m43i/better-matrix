@@ -86,6 +86,44 @@ pub fn styled_map(geo_uri: &str, dark: bool, zoom: u8) -> Option<MediaRef> {
     )))
 }
 
+/// A street map `width` × `height` points around `latitude`, `longitude`, for a map the user
+/// moves: the size is part of the reference, so each size is its own picture.
+///
+/// ```
+/// use matrix_core::geo::framed_map;
+/// assert_ne!(framed_map(52.5, 13.4, 12, true, 800, 600), framed_map(52.5, 13.4, 12, true, 640, 400));
+/// ```
+pub fn framed_map(latitude: f64, longitude: f64, zoom: u8, dark: bool, width: u32, height: u32) -> MediaRef {
+    MediaRef(format!(
+        "{MAP_PREFIX}{},{},{zoom},{},{width}x{height}",
+        trim_number(latitude),
+        trim_number(longitude),
+        if dark { "dark" } else { "light" }
+    ))
+}
+
+/// The side of the world map at zoom 0, in points: MapLibre's tile size.
+const WORLD: f64 = 512.0;
+
+/// Where a place lies on the Web Mercator world map at `zoom`, in points from its top left
+/// corner, as MapLibre draws it.
+pub fn project(latitude: f64, longitude: f64, zoom: f64) -> (f64, f64) {
+    let size = WORLD * zoom.exp2();
+    let latitude = latitude.clamp(-85.051_128, 85.051_128).to_radians();
+    let x = (longitude + 180.0) / 360.0 * size;
+    let y = (1.0 - (latitude.tan() + 1.0 / latitude.cos()).ln() / std::f64::consts::PI) / 2.0 * size;
+    (x, y)
+}
+
+/// The latitude and longitude at a point of the world map at `zoom`: [`project`] undone.
+pub fn unproject(x: f64, y: f64, zoom: f64) -> (f64, f64) {
+    let size = WORLD * zoom.exp2();
+    let longitude = (x / size * 360.0 - 180.0).rem_euclid(360.0);
+    let longitude = if longitude > 180.0 { longitude - 360.0 } else { longitude };
+    let n = std::f64::consts::PI * (1.0 - 2.0 * y.clamp(0.0, size) / size);
+    (n.sinh().atan().to_degrees(), longitude)
+}
+
 /// Open this place in Google Maps.
 pub fn web_link(geo_uri: &str) -> Option<String> {
     let (lat, lon) = coordinates(geo_uri)?;
@@ -190,6 +228,29 @@ mod tests {
     #[test]
     fn a_geo_uri_with_an_altitude_should_still_name_its_place() {
         assert_eq!(coordinates("geo:-33.8688,151.2093,58"), Some((-33.8688, 151.2093)));
+    }
+
+    #[test]
+    fn a_framed_map_should_name_its_size_after_its_style() {
+        assert_eq!(framed_map(52.5, 13.4, 12, true, 800, 600).0, "map:52.5,13.4,12,dark,800x600");
+    }
+
+    #[test]
+    fn a_projected_place_should_unproject_to_itself() {
+        let (x, y) = project(52.516275, 13.377704, 15.0);
+        let (latitude, longitude) = unproject(x, y, 15.0);
+        assert!((latitude - 52.516275).abs() < 1e-9 && (longitude - 13.377704).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_zoom_step_should_double_the_distance_between_places() {
+        let distance = |zoom| project(52.5, 13.4, zoom).0 - project(52.5, 13.3, zoom).0;
+        assert!((distance(11.0) - 2.0 * distance(10.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_equator_and_prime_meridian_should_lie_at_the_world_maps_centre() {
+        assert_eq!(project(0.0, 0.0, 0.0), (256.0, 256.0));
     }
 
     #[test]

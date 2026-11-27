@@ -1,4 +1,16 @@
-import { coordinates, coordinatesText, geoUri, mapOf, navigationLink } from '../geo';
+import type { Message, MessageContent, TimelineEntry } from '@better-matrix/matrix-native/types';
+
+import {
+  coordinates,
+  coordinatesText,
+  geoUri,
+  mapOf,
+  mapPins,
+  pinDetail,
+  navigationLink,
+  RECENT_PLACE_MS,
+} from '../geo';
+import { clockTime, sentAt } from '../timelineText';
 
 // The engine's `geo.rs` reads and writes the same (its doc tests).
 describe('coordinates', () => {
@@ -53,5 +65,107 @@ describe('navigationLink', () => {
 describe('coordinatesText', () => {
   it('should show the coordinates as people read them', () => {
     expect(coordinatesText('geo:-0.0000001,2')).toBe('0, 2');
+  });
+});
+
+describe('mapPins', () => {
+  const NOW = 1_800_000_000_000;
+  const HOUR = 3_600_000;
+
+  const place = (
+    id: string,
+    sender: string,
+    at: number,
+    geo = 'geo:52.5,13.4',
+    liveUntil?: number,
+  ): TimelineEntry => {
+    const content: MessageContent = {
+      type: 'Location',
+      data: { geo_uri: geo, description: null, map: null, live_until: liveUntil },
+    };
+
+    const message: Message = {
+      event_id: id,
+      sender_id: sender,
+      sender_name: sender,
+      sender_avatar: null,
+      content,
+      edited: false,
+      editable: false,
+      pending: false,
+      timestamp_ms: at,
+      reactions: [],
+      reply_to: null,
+      thread: null,
+      highlighted: false,
+    };
+
+    return { id, kind: { type: 'Message', data: message } };
+  };
+
+  const ids = (entries: TimelineEntry[], focus = '$none') =>
+    mapPins(entries, focus, NOW).map((pin) => pin.message.event_id);
+
+  it('should keep only the newest place of each sender', () => {
+    expect(ids([place('$old', '@a', NOW - 2 * HOUR), place('$new', '@a', NOW - HOUR)])).toEqual([
+      '$new',
+    ]);
+  });
+
+  it('should list the pins newest first', () => {
+    expect(ids([place('$b', '@b', NOW - HOUR), place('$a', '@a', NOW - 3 * HOUR)])).toEqual([
+      '$b',
+      '$a',
+    ]);
+  });
+
+  it('should leave out a place shared more than a day ago', () => {
+    expect(ids([place('$old', '@a', NOW - RECENT_PLACE_MS - 1)])).toEqual([]);
+  });
+
+  it('should keep an old live share that is still live', () => {
+    expect(ids([place('$live', '@a', NOW - 2 * RECENT_PLACE_MS, 'geo:1,2', NOW + HOUR)])).toEqual([
+      '$live',
+    ]);
+  });
+
+  it('should leave out an old live share that has ended', () => {
+    expect(ids([place('$ended', '@a', NOW - 2 * RECENT_PLACE_MS, 'geo:1,2', NOW - 1)])).toEqual([]);
+  });
+
+  it('should always show the focused place, however old', () => {
+    expect(ids([place('$old', '@a', NOW - 3 * RECENT_PLACE_MS)], '$old')).toEqual(['$old']);
+  });
+
+  it('should show the focused place in place of its sender’s newest', () => {
+    expect(
+      ids([place('$focus', '@a', NOW - 2 * HOUR), place('$newer', '@a', NOW - HOUR)], '$focus'),
+    ).toEqual(['$focus']);
+  });
+
+  it('should leave out places without coordinates', () => {
+    expect(ids([place('$waiting', '@a', NOW - HOUR, '')])).toEqual([]);
+  });
+
+  it('should read the pin’s coordinates from its geo URI', () => {
+    const [pin] = mapPins([place('$a', '@a', NOW, 'geo:52.52,13.38;u=5')], '$a', NOW);
+    expect([pin?.latitude, pin?.longitude]).toEqual([52.52, 13.38]);
+  });
+
+  it('should say until when a live share runs', () => {
+    const until = NOW + HOUR;
+    const [pin] = mapPins([place('$live', '@a', NOW, 'geo:1,2', until)], '$live', NOW);
+    expect(pin && pinDetail(pin, NOW)).toBe(`Live until ${clockTime(until)}`);
+  });
+
+  it('should name the day a live share ends when it is not today', () => {
+    const until = NOW + 20 * 24 * HOUR;
+    const [pin] = mapPins([place('$live', '@a', NOW, 'geo:1,2', until)], '$live', NOW);
+    expect(pin && pinDetail(pin, NOW)).toBe(`Live until ${sentAt(until, NOW)}`);
+  });
+
+  it('should say when a place that is not live was shared', () => {
+    const [pin] = mapPins([place('$a', '@a', NOW - HOUR)], '$a', NOW);
+    expect(pin && pinDetail(pin, NOW)).toBe(sentAt(NOW - HOUR, NOW));
   });
 });

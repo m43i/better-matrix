@@ -156,6 +156,9 @@ Date: 2026-11-16
     (`ListSection`, `ListRow`).
   - _Switches:_ UISwitch on iOS, Material 3's Compose switch on Android (`ui/Toggle`), since
     React Native's Android switch is Material 2's.
+  - _Notices_ (`ui/Notices`) show over everything, sheets and modals included: iOS presents
+    those in windows above the root view, so there the notice sits in react-native-screens'
+    `FullWindowOverlay`; on Android they are views under the root's last child, the notice.
 - **Translations:** the desktop's catalogs are reused as they are, with a mobile catalog per
   area of the app layered on top (`src/i18n/mobile/<area>.<locale>.json`); a test fails when
   German or French lacks a mobile key or a placeholder.
@@ -290,12 +293,21 @@ Date: 2026-11-16
     their `alt`.
 - **Locations.** The foreground location permission supplies a device fix. Without one the
   picker shows a labelled GeoJS IP estimate. A one-time location follows the composer's reply
-  or thread. Live sharing belongs to the room. A user-initiated expo-location task continues delivering fixes while the phone is locked
+  or thread. Live sharing belongs to the room and runs for the length picked under "Share live
+  location" (an hour, a day, or until stopped: `LiveDuration`, each choice starting at once). A
+  user-initiated expo-location task continues delivering fixes while the phone is locked
   or another app is open. Android shows a foreground service notification and iOS shows its
-  background location indicator. The engine ends each share on stop or expiry. The last
-  share unregisters the watch. A headless restart discards an orphaned watch.
-  The map sheet follows the selected event and can open the system navigation handler.
-  Turning off maps keeps the place and coordinates available without loading tiles.
+  background location indicator. The engine ends each share on stop or expiry; the watch has no
+  length of its own, and the last share to finish unregisters it. A headless restart discards an
+  orphaned watch.
+  A location card opens the conversation's map (`app/location-map.tsx`, full screen under a
+  native header with Open in navigation app and an X): one MapLibre map with everyone's recent
+  place as an avatar pin, the desktop's rules (`mapPins`: each sender's newest place in the room
+  or thread, while live or under a day old, and always the card's own), and a card floating at
+  the bottom listing them (until when a live share runs, else when it was shared; Stop sharing
+  on the user's own). The card's place is centred at street level; a row or pin centres its
+  person, and the button at the top right comes back to them. Pins follow the timeline.
+  Turning off maps keeps the places and coordinates available without loading tiles.
 - **Scheduled messages** (MSC4140): a long press on Send (text, or a command that makes a
   message: `/me`, `/plain`, `/spoiler`, the faces; not an edit, not with attachments, which
   upload at once; anything else says why and keeps the draft, `scheduleProblem`, checked again

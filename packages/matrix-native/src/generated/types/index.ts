@@ -37,6 +37,7 @@ export type { Invitation } from "./Invitation";
 export type { JoinRule } from "./JoinRule";
 export type { KeyImport } from "./KeyImport";
 export type { LinkPreview } from "./LinkPreview";
+export type { LiveDuration } from "./LiveDuration";
 export type { Location } from "./Location";
 export type { LoginMethods } from "./LoginMethods";
 export type { LoginRequest } from "./LoginRequest";

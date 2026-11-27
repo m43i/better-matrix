@@ -1252,7 +1252,6 @@
   "location.estimated": "Approximate location (IP)",
   "location.current": "Current location",
   "location.use_device": "Use my location",
-  "location.start_live": "Share live for 15 minutes",
   "location.live": "Live location",
   "location.ended": "Location sharing ended",
   "location.stop": "Stop sharing",
@@ -1262,5 +1261,13 @@
   "location.zoom_in": "Zoom in",
   "location.zoom_out": "Zoom out",
   "location.no_fix": "Could not get a device location.",
-  "location.tracking": "Sharing your location with your selected rooms."
+  "location.tracking": "Sharing your location with your selected rooms.",
+  "location.viewer_title": "Location",
+  "location.on_map": "On the map",
+  "location.live_until": "Live until {{time}}",
+  "location.share_live": "Share live location",
+  "location.live_hour": "1 hour",
+  "location.live_day": "1 day",
+  "location.live_always": "Until I stop",
+  "location.recenter": "Center on the selected location"
 }

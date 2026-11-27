@@ -7,8 +7,6 @@ use matrix_sdk::{
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-const DURATION: Duration = Duration::from_secs(15 * 60);
-
 /// Element includes both endpoints when it selects fixes for a beacon.
 pub(crate) fn window(
     start: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch,
@@ -76,6 +74,7 @@ pub(crate) fn permitted(
 pub(crate) async fn share(
     room: Room,
     first: String,
+    duration: Duration,
     mut answers: mpsc::UnboundedReceiver<Answer>,
     mut stopped: tokio::sync::watch::Receiver<()>,
     started: impl FnOnce(String),
@@ -88,8 +87,8 @@ pub(crate) async fn share(
     ) {
         return Err(Error::Location("Insufficient permission to share live location".into()));
     }
-    let mut info = BeaconInfoEventContent::new(None, DURATION, true, None);
-    let until = tokio::time::Instant::now() + DURATION;
+    let mut info = BeaconInfoEventContent::new(None, duration, true, None);
+    let until = tokio::time::Instant::now() + duration;
     let before = beacon_id(&room).await?;
     if stopped.has_changed().unwrap_or(true) {
         return Ok(());
@@ -277,10 +276,11 @@ mod tests {
         let room = account.joined_room("!room:example.org").unwrap();
         let (answers, rx) = mpsc::unbounded_channel();
         let (stop, stopped) = tokio::sync::watch::channel(());
-        let task = tokio::spawn(share(room, "geo:1,2".into(), rx, stopped, |_| {}));
+        let task =
+            tokio::spawn(share(room, "geo:1,2".into(), crate::LiveDuration::Hour.timeout(), rx, stopped, |_| {}));
         let (state, start) = tokio::time::timeout(Duration::from_secs(10), requests.recv()).await.unwrap().unwrap();
         assert!(state && start["live"] == true);
-        assert_eq!(start["timeout"], 900000);
+        assert_eq!(start["timeout"], 3_600_000);
         for geo in ["geo:1,2", "geo:3,4"] {
             if geo == "geo:3,4" {
                 answers.send(Answer::LocationFix(geo.into())).unwrap();

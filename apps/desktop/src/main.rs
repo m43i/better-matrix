@@ -81,6 +81,10 @@ fn spec() -> AppSpec<State> {
             ("demo-upload-thumbnails", demo::upload_thumbnails),
             ("demo-location", demo::location),
             ("demo-location-map", demo::location_map),
+            ("demo-location-map-light", |s| {
+                demo::location_map(s);
+                s.settings.appearance = Appearance::Light;
+            }),
             ("demo-edit-history", demo::edit_history),
             ("demo-stickers", |s| {
                 demo::typing(s, "");
@@ -833,7 +837,13 @@ fn spec() -> AppSpec<State> {
             ("demo-stress", demo::stress),
             ("demo-toast", |s| {
                 demo::seed(s);
-                s.notice = Some("Could not send the message: the server is unreachable.".into());
+                s.notice =
+                    Some(crate::state::Notice::problem("Could not send the message: the server is unreachable."));
+            }),
+            ("demo-toast-dialog", |s| {
+                demo::seed(s);
+                s.open_settings();
+                s.notice = Some(crate::state::Notice::done(crate::i18n::t!("update.copied")));
             }),
             ("demo-room-menu", |s| {
                 demo::seed(s);

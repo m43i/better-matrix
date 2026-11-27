@@ -77,10 +77,15 @@ pub(crate) async fn draw(cache: &Path, media: &MediaRef, size: MediaSize) -> Res
     } else {
         include_str!("../../maps/light.json")
     };
-    let (width, height) = match size {
-        MediaSize::Original => (640, 400),
-        MediaSize::Thumbnail { width, height } => (width.clamp(32, 2048), height.clamp(32, 2048)),
+    // A framed map names its own size; other maps take the size asked for.
+    let framed =
+        parts.next().and_then(|size| size.split_once('x')).and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)));
+    let (width, height) = match (framed, size) {
+        (Some(framed), _) => framed,
+        (None, MediaSize::Original) => (640, 400),
+        (None, MediaSize::Thumbnail { width, height }) => (width, height),
     };
+    let (width, height): (u32, u32) = (width.clamp(32, 2048), height.clamp(32, 2048));
     tokio::fs::create_dir_all(cache).await.map_err(Error::Storage)?;
     let cache = cache.join("maplibre.db");
     // Each offscreen session owns a graphics device. Bound concurrent snapshots while scrolling.
@@ -161,6 +166,22 @@ mod tests {
             assert!(pixels.pixels().map(|p| p.0).collect::<std::collections::HashSet<_>>().len() > 50);
             if let Ok(dir) = std::env::var("MAP_PROOF_DIR") {
                 std::fs::write(Path::new(&dir).join(if dark { "dark.png" } else { "light.png" }), png).unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a GPU and OpenFreeMap"]
+    async fn a_framed_map_should_render_at_the_size_it_names() {
+        let cache = std::env::temp_dir().join("better-matrix-maplibre-test");
+        for dark in [false, true] {
+            let media = crate::geo::framed_map(52.516275, 13.377704, 15, dark, 1152, 640);
+            let png = draw(&cache, &media, MediaSize::Thumbnail { width: 480, height: 280 }).await.unwrap();
+            let pixels = image::load_from_memory(&png).unwrap().into_rgba8();
+            assert_eq!(pixels.dimensions(), (1152, 640));
+            if let Ok(dir) = std::env::var("MAP_PROOF_DIR") {
+                let name = if dark { "framed-dark.png" } else { "framed-light.png" };
+                std::fs::write(Path::new(&dir).join(name), png).unwrap();
             }
         }
     }

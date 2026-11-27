@@ -775,6 +775,64 @@ export function stickerEvents(): EngineEvent[] {
   ];
 }
 
+/** Grace's place for the release party in #releases, which the map scene opens. */
+export const PARTY_MESSAGE = `$demo-${GRACE}-2`;
+
+/**
+ * People's places in #releases around the party, relative to `now` so they count as recent: Kai
+ * sharing live, Ada's own place, and Alan's from earlier today, with an older one of Alan's that
+ * the map leaves out.
+ */
+export function mapEvents(now: number): EngineEvent[] {
+  const minutes = (n: number) => n * 60_000;
+
+  const shared = (
+    id: string,
+    sender: string,
+    name: string,
+    geoUri: string,
+    description: string | null,
+    ago: number,
+    liveFor?: number,
+  ): Message => ({
+    ...blank(),
+    event_id: id,
+    sender_id: sender,
+    sender_name: name,
+    content: {
+      type: 'Location',
+      data: {
+        geo_uri: geoUri,
+        description,
+        map: mapOf(geoUri),
+        live_until: liveFor === undefined ? undefined : now + liveFor,
+      },
+    },
+    timestamp_ms: now - ago,
+  });
+
+  const list = [
+    shared('$map-alan-old', ALAN, 'Alan Turing', 'geo:52.5096,13.3759', null, minutes(60 * 30)),
+    shared('$map-alan', ALAN, 'Alan Turing', 'geo:52.5142,13.3726', 'Tiergarten', minutes(190)),
+    shared('$map-ada', ADA, 'Ada Lovelace', 'geo:52.5151,13.3818', null, minutes(35)),
+    shared('$map-kai', KAI, 'Kai', 'geo:52.5183,13.3755', null, minutes(12), minutes(48)),
+  ];
+
+  return [
+    {
+      type: 'TimelineChanged',
+      data: {
+        account: ADA,
+        key: { room_id: RELEASES, thread: null },
+        diffs: list.map((message) => ({
+          type: 'PushBack' as const,
+          data: { id: message.event_id, kind: { type: 'Message' as const, data: message } },
+        })),
+      },
+    },
+  ];
+}
+
 function work(): Fixture {
   const room0 = general();
 

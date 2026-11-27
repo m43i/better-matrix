@@ -167,7 +167,7 @@ impl State {
                 return None;
             }
             Parsed::Unknown(name) => {
-                self.notice = Some(tf!("slash.unknown", name = name));
+                self.notice = Some(super::Notice::problem(tf!("slash.unknown", name = name)));
                 return Some(Vec::new());
             }
             Parsed::Command { command, len } => (command, len),
@@ -185,11 +185,15 @@ impl State {
         // A command that acts rather than sends reads its arguments as plain words: a spoiler
         // there would show (a topic, a name) to everyone.
         if !command.sends_message() && self.composer(target).spoiler_after(len) {
-            self.notice = Some(tf!("slash.no_spoiler", command = command.name()));
+            self.notice = Some(super::Notice::problem(tf!("slash.no_spoiler", command = command.name())));
             return Some(Vec::new());
         }
         if needs_arguments && arguments.is_empty() {
-            self.notice = Some(tf!("slash.usage", command = command.name(), arguments = command.arguments()));
+            self.notice = Some(super::Notice::problem(tf!(
+                "slash.usage",
+                command = command.name(),
+                arguments = command.arguments()
+            )));
             return Some(Vec::new());
         }
         match command {
@@ -254,8 +258,11 @@ impl State {
                         self.composer_mut(target).clear();
                     }
                     None => {
-                        self.notice =
-                            Some(tf!("slash.usage", command = command.name(), arguments = command.arguments()));
+                        self.notice = Some(super::Notice::problem(tf!(
+                            "slash.usage",
+                            command = command.name(),
+                            arguments = command.arguments()
+                        )));
                     }
                 }
                 Some(Vec::new())
@@ -271,7 +278,11 @@ impl State {
                     self.composer_mut(target).clear();
                     self.open_typed_link(&link);
                 } else {
-                    self.notice = Some(tf!("slash.usage", command = command.name(), arguments = command.arguments()));
+                    self.notice = Some(super::Notice::problem(tf!(
+                        "slash.usage",
+                        command = command.name(),
+                        arguments = command.arguments()
+                    )));
                 }
                 Some(Vec::new())
             }
@@ -281,7 +292,7 @@ impl State {
                     self.composer_mut(target).clear();
                     self.start_meeting_in(&room_id);
                 } else {
-                    self.notice = Some(t!("slash.meet_unavailable").to_owned());
+                    self.notice = Some(super::Notice::problem(t!("slash.meet_unavailable").to_owned()));
                 }
                 Some(Vec::new())
             }

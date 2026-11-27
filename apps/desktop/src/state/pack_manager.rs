@@ -245,7 +245,7 @@ impl State {
             sticker: form.sticker,
         };
         if !matrix_core::packs::valid_shortcode(&image.shortcode) {
-            self.notice = Some(t!("packs.invalid_shortcode").to_owned());
+            self.notice = Some(super::Notice::problem(t!("packs.invalid_shortcode").to_owned()));
             if let Some(manager) = &mut self.pack_manager {
                 manager.image = Some(form);
             }
@@ -386,8 +386,10 @@ impl State {
             manager.busy = None;
         }
         match error {
-            Some(error) => self.notice = Some(crate::i18n::tf!("notice.pack_edit", error = error)),
-            None if added => self.notice = Some(t!("packs.added").to_owned()),
+            Some(error) => {
+                self.notice = Some(super::Notice::problem(crate::i18n::tf!("notice.pack_edit", error = error)))
+            }
+            None if added => self.notice = Some(super::Notice::done(t!("packs.added").to_owned())),
             None => {}
         }
         let mut wanted: Vec<String> = Vec::new();

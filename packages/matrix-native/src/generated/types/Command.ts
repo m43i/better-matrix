@@ -7,6 +7,7 @@ import type { ContactKind } from "./ContactKind";
 import type { DeviceKind } from "./DeviceKind";
 import type { DirectoryKind } from "./DirectoryKind";
 import type { Draft } from "./Draft";
+import type { LiveDuration } from "./LiveDuration";
 import type { LoginRequest } from "./LoginRequest";
 import type { MediaRef } from "./MediaRef";
 import type { MediaSize } from "./MediaSize";
@@ -251,7 +252,11 @@ room_id: string,
 /**
  * The first device fix.
  */
-geo_uri: string, } } | { "type": "SearchPlaces", "data": { 
+geo_uri: string, 
+/**
+ * How long the share runs unless stopped sooner.
+ */
+duration: LiveDuration, } } | { "type": "SearchPlaces", "data": { 
 /**
  * What to look for.
  */

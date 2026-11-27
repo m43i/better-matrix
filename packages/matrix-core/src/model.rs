@@ -1039,6 +1039,31 @@ pub struct Place {
     pub map: Option<MediaRef>,
 }
 
+/// How long a live location share runs ([`Command::ShareLiveLocation`](crate::Command)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub enum LiveDuration {
+    /// An hour.
+    Hour,
+    /// A day.
+    Day,
+    /// Until the sharer stops it. Its beacon still names an end, 24 days on: longer timers
+    /// overflow other clients' (JavaScript's `setTimeout` takes at most 2^31 − 1 ms).
+    UntilStopped,
+}
+
+impl LiveDuration {
+    /// The beacon's timeout.
+    pub fn timeout(self) -> std::time::Duration {
+        const HOUR: u64 = 60 * 60;
+        std::time::Duration::from_secs(match self {
+            Self::Hour => HOUR,
+            Self::Day => 24 * HOUR,
+            Self::UntilStopped => 24 * 24 * HOUR,
+        })
+    }
+}
+
 /// A call's card in the timeline. Whether the call is still under way is the room's
 /// ([`RoomSummary::call`]), not the card's.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

@@ -46,7 +46,7 @@ pub fn dialog_for(modal: &Modal, p: &Palette) -> Option<El> {
         | Modal::PublicRooms { .. }
         | Modal::Poll
         | Modal::Location
-        | Modal::LocationMap { .. }
+        | Modal::LocationMap(_)
         | Modal::Packs
         | Modal::EditHistory(_)
         | Modal::Report(_)

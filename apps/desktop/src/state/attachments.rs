@@ -124,7 +124,7 @@ impl State {
                             Err(rune::CopyImageError::TooLarge) => t!("attachment.copy_too_large").to_owned(),
                             Err(error) => error.to_string(),
                         };
-                        s.notice = Some(tf!("notice.copy_image", error = error));
+                        s.notice = Some(super::Notice::problem(tf!("notice.copy_image", error = error)));
                     });
                 } else {
                     self.dispatch(

@@ -54,7 +54,7 @@ impl State {
     /// ready, the link waits for the first room list.
     pub fn open_permalink(&mut self, link: &str) {
         let Some(permalink) = Permalink::parse(link) else {
-            self.notice = Some(t!("link.invalid").to_owned());
+            self.notice = Some(super::Notice::problem(t!("link.invalid").to_owned()));
             return;
         };
         self.follow(permalink);
@@ -276,7 +276,7 @@ impl State {
             LinkStep::Previewing(waiting) if *waiting == request => dialog.step = LinkStep::NoPreview,
             LinkStep::Joining { request: waiting, preview } if *waiting == request => {
                 dialog.step = preview.take().map_or(LinkStep::NoPreview, LinkStep::Preview);
-                self.notice = Some(tf!("notice.join", error = error));
+                self.notice = Some(super::Notice::problem(tf!("notice.join", error = error)));
             }
             LinkStep::Person { request: waiting, .. } if *waiting == Some(request) => *waiting = None,
             _ => {}

@@ -444,8 +444,18 @@ using a room's pack everywhere (`Modal::Packs`, `Command::EditImagePack`).
 : A place a message shares (`m.location`), shown on a MapLibre map with the sender’s avatar pin.
 
 **Live location**
-: A time-limited room share whose avatar pin follows the sender’s device. Element-compatible beacon
-updates refer to the state event that started the share.
+: A room share for 1 hour, 1 day or until stopped (`LiveDuration`) whose avatar pin follows the
+sender’s device. Element-compatible beacon updates refer to the state event that started the share.
+
+**Map viewer**
+: The window-sized map a location card opens (`Modal::LocationMap`, `MapViewer`): every recent
+place in the conversation as avatar **pins** (`MapPin`), a list of who is there, and the focused
+place it centres on (ADR 0007).
+
+**Toast**
+: The short message at the window's top right (`State::notice`, a `Notice` of a `NoticeKind`;
+`notices` on the phones): what went wrong, something to know, or that something worked (ADR 0005).
+Not to be confused with a **Notice** message.
 
 **Scheduled message**
 : A message the server holds to send later (MSC4140's delayed events), encrypted like any

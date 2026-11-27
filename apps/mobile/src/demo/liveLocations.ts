@@ -1,8 +1,23 @@
 // The demo homeserver aggregates each device update onto its original room beacon.
 import type { Engine } from '@better-matrix/matrix-native/client';
-import type { Command, Message, TimelineEntry } from '@better-matrix/matrix-native/types';
+import type {
+  Command,
+  LiveDuration,
+  Message,
+  TimelineEntry,
+} from '@better-matrix/matrix-native/types';
 import { mapOf } from '../state/geo';
 import { applyDiffs, roomKey } from '../state/timeline';
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/** How long a beacon runs, as the engine's `LiveDuration::timeout` sets it. */
+export const LIVE_DURATION_MS: Record<LiveDuration, number> = {
+  Hour: HOUR_MS,
+  Day: 24 * HOUR_MS,
+  // Until stopped still names an end, 24 days on: other clients' timers take no longer.
+  UntilStopped: 24 * 24 * HOUR_MS,
+};
 
 export function demoLiveLocations(engine: Engine, finish: (request: number) => void) {
   const rooms = new Map<string, TimelineEntry[]>();
@@ -70,7 +85,7 @@ export function demoLiveLocations(engine: Engine, finish: (request: number) => v
     if (command.type === 'ShareLiveLocation') {
       const { account, room_id: room, geo_uri } = command.data;
       const now = Date.now();
-      const duration = 15 * 60 * 1000;
+      const duration = LIVE_DURATION_MS[command.data.duration];
 
       const message: Message = {
         event_id: `$beacon-${request}`,
