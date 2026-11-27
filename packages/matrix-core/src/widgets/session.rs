@@ -263,6 +263,22 @@ fn grants_key(room_id: &str, widget_id: &str, origin: &str) -> Vec<u8> {
     format!("bettermatrix.widget_grants:{room_id}:{widget_id}:{origin}").into_bytes()
 }
 
+/// The site's canonical origin and any older spelling used to store Jitsi grants.
+fn permission_origin(place: Option<&meetings::Place>, url: &str) -> Result<(String, Option<String>), Error> {
+    match place {
+        Some(meetings::Place::Jitsi(jitsi)) => {
+            let previous = format!("https://{}", jitsi.domain);
+            let canonical = origin(&previous)?;
+            let legacy = (previous != canonical).then_some(previous);
+            Ok((canonical, legacy))
+        }
+        Some(meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { api, .. })) => {
+            Ok((origin(api)?, None))
+        }
+        _ => Ok((origin(url)?, None)),
+    }
+}
+
 impl Account {
     async fn grants(&self, key: &[u8]) -> Grants {
         let stored = self.client().state_store().get_custom_value(key).await;
@@ -274,6 +290,16 @@ impl Account {
             // Not kept, the user is asked again next time.
             let _ = self.client().state_store().set_custom_value_no_read(key, bytes).await;
         }
+    }
+
+    async fn grants_with_legacy(&self, key: &[u8], legacy_key: Option<&[u8]>) -> Grants {
+        let saved = self.grants(key).await;
+        if saved.asked.is_empty()
+            && let Some(legacy_key) = legacy_key
+        {
+            return self.grants(legacy_key).await;
+        }
+        saved
     }
 }
 
@@ -289,22 +315,18 @@ pub(crate) async fn manage_permissions(
     let (widget, content, viewer) = account.widget(&room_id, &widget_id, super::Freshness::Server).await?;
     let template = content["url"].as_str().unwrap_or_default();
     let place = meetings::place(&widget.kind, template, &content["data"]);
-    let origin = match &place {
-        Some(meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { api, .. })) => origin(api)?,
-        _ => origin(&widget.url)?,
-    };
+    let (origin, legacy) = permission_origin(place.as_ref(), &widget.url)?;
     let key = grants_key(&room_id, &widget_id, &origin);
-    let saved = account.grants(&key).await;
+    let legacy_key = legacy.as_deref().map(|origin| grants_key(&room_id, &widget_id, origin));
+    let saved = account.grants_with_legacy(&key, legacy_key.as_deref()).await;
     let permissions =
         saved.granted.iter().map(|name| if name == IDENTITY { identity(&origin) } else { describe(name) }).collect();
     let access = access_for(&account, &viewer, &widget, origin, WidgetAccessKind::Saved(permissions))?;
     confirm_access(&*sink, request, access, &mut answers).await?;
-    account
-        .client()
-        .state_store()
-        .remove_custom_value(&key)
-        .await
-        .map_err(|error| Error::Account(error.to_string()))?;
+    let store = account.client().state_store();
+    for key in legacy_key.iter().chain(std::iter::once(&key)) {
+        store.remove_custom_value(key).await.map_err(|error| Error::Account(error.to_string()))?;
+    }
     Ok(())
 }
 
@@ -373,11 +395,13 @@ impl Ask<'_> {
     async fn identity(
         &self,
         origin: &str,
+        legacy: Option<&str>,
         widget: &str,
         answers: &mut mpsc::UnboundedReceiver<Answer>,
     ) -> Result<bool, Error> {
         let key = grants_key(self.room_id, self.widget_id, origin);
-        let mut grants = self.account.grants(&key).await;
+        let legacy_key = legacy.map(|origin| grants_key(self.room_id, self.widget_id, origin));
+        let mut grants = self.account.grants_with_legacy(&key, legacy_key.as_deref()).await;
         if let Some(granted) = grants.answer(&[IDENTITY.to_owned()]) {
             return Ok(!granted.is_empty());
         }
@@ -613,31 +637,28 @@ pub(crate) async fn run(
     let template = content.get("url").and_then(Value::as_str).unwrap_or_default();
     let data = content.get("data").cloned().unwrap_or(Value::Null);
     if let Some(place) = meetings::place(&widget.kind, template, &data) {
+        let (origin, legacy) = permission_origin(Some(&place), &widget.url)?;
         if matches!(place, meetings::Place::Jitsi(_)) {
             let access = access_for(
                 &account,
                 &viewer,
                 &widget,
-                origin(&widget.url)?,
+                origin.clone(),
                 WidgetAccessKind::Open(vec![WidgetUrlField::DisplayName]),
             )?;
             confirm_access(&*sink, request, access, &mut answers).await?;
         }
         // Who learns the user's Matrix ID by joining: a Jitsi server that checks who joins, or
         // Dimension making the join link. Only if they let it, named by that origin.
-        let learner = match &place {
-            meetings::Place::Jitsi(jitsi) if jitsi.auth => Some(format!("https://{}", jitsi.domain)),
-            meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { api, .. }) => {
-                url::Url::parse(api).ok().map(|api| api.origin().ascii_serialization())
-            }
-            _ => None,
-        };
-        let identity = match learner {
-            Some(origin) => {
-                let ask = Ask { account: &account, room_id: &room_id, widget_id: &widget_id, request, sink: &sink };
-                ask.identity(&origin, &widget.name, &mut answers).await?
-            }
-            None => false,
+        let identity = if matches!(
+            &place,
+            meetings::Place::Jitsi(meetings::Jitsi { auth: true, .. })
+                | meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { .. })
+        ) {
+            let ask = Ask { account: &account, room_id: &room_id, widget_id: &widget_id, request, sink: &sink };
+            ask.identity(&origin, legacy.as_deref(), &widget.name, &mut answers).await?
+        } else {
+            false
         };
         let url = account.join_url(&place, &viewer, identity).await?;
         if browser || matches!(place, meetings::Place::Hosted { .. }) {

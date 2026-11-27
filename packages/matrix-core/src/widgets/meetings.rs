@@ -286,8 +286,8 @@ impl Account {
         Ok(jwt(&payload))
     }
 
-    /// Starts a Jitsi meeting in the room: pins it as Element does. Its widget ID.
-    pub(crate) async fn start_meeting(&self, room_id: &str, video: bool) -> Result<String, Error> {
+    /// Pins a new Jitsi meeting under the widget ID reserved by the engine.
+    pub(crate) async fn start_meeting(&self, room_id: &str, id: &str, video: bool) -> Result<(), Error> {
         let room = self.room(room_id)?;
         let http = self.client().http_client().clone();
         // Only where the homeserver names a Jitsi server (rooms offer meetings only there).
@@ -300,7 +300,6 @@ impl Account {
         let auth = jitsi_auth(&http, &domain).await;
         // A checking server needs the conference to name the room it belongs to.
         let conference = if auth { base32(room_id.as_bytes()) } else { conference_name() };
-        let id = random_text(24, b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789");
         let room_name = room.cached_display_name().map(|name| name.to_string()).unwrap_or_default();
         let mut url = format!(
             "{ELEMENT_JITSI}?confId={}#conferenceDomain=$domain&conferenceId=$conferenceId&isAudioOnly=$isAudioOnly\
@@ -329,9 +328,14 @@ impl Account {
             "data": data,
             "creatorUserId": self.user_id()?.as_str(),
         });
-        room.send_state_event_raw(LEGACY_TYPE, &id, content).await?;
-        Ok(id)
+        room.send_state_event_raw(LEGACY_TYPE, id, content).await?;
+        Ok(())
     }
+}
+
+/// Allocates a widget ID before a meeting's run starts.
+pub(crate) fn new_meeting_id() -> String {
+    random_text(24, b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
 }
 
 /// The Jitsi server the homeserver's well-known file names, if any.

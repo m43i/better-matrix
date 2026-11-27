@@ -903,6 +903,7 @@ dependencies = [
  "tracing-subscriber",
  "tray-icon",
  "url",
+ "webkit2gtk",
  "windows",
  "windows-future",
  "wry",

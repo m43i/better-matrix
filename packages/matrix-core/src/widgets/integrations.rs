@@ -50,7 +50,9 @@ pub(crate) fn named_manager(known: &Value) -> Option<Manager> {
             (url.scheme() == "https" && url.username().is_empty() && url.password().is_none() && url.host().is_some())
                 .then(|| url.to_string())
         };
-        Some(Manager { api: web("api_url")?.trim_end_matches('/').to_owned(), ui: web("ui_url")? })
+        let api = web("api_url")?;
+        let ui = if manager["ui_url"].is_null() { api.clone() } else { web("ui_url")? };
+        Some(Manager { api: api.trim_end_matches('/').to_owned(), ui })
     })
 }
 
@@ -292,6 +294,7 @@ pub(crate) async fn answer_request(account: &Account, room: &Room, asked: &Value
 
 /// Does what one request asks.
 async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Result<(Value, After), Error> {
+    use matrix_sdk::ruma::events::room::member::MembershipState;
     use matrix_sdk::ruma::{Int, UserId};
     let user = || -> Result<&UserId, Error> {
         let user = asked["user_id"].as_str().ok_or_else(|| Error::Integrations("missing user_id".to_owned()))?;
@@ -302,20 +305,20 @@ async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Res
         "membership_state" => (state_content(room, "m.room.member", user()?.as_str()).await, After::Nothing),
         "invite" => {
             let user = user()?;
-            if !matches!(
-                state_content(room, "m.room.member", user.as_str()).await["membership"].as_str(),
-                Some("join" | "invite")
-            ) {
+            if !room
+                .get_member(user)
+                .await?
+                .is_some_and(|member| matches!(member.membership(), MembershipState::Join | MembershipState::Invite))
+            {
                 room.invite_user_by_id(user).await?;
             }
             done
         }
         "kick" => {
             let user = user()?;
-            if matches!(
-                state_content(room, "m.room.member", user.as_str()).await["membership"].as_str(),
-                Some("join" | "invite" | "knock")
-            ) {
+            if room.get_member(user).await?.is_some_and(|member| {
+                matches!(member.membership(), MembershipState::Join | MembershipState::Invite | MembershipState::Knock)
+            }) {
                 room.kick_user(user, asked["reason"].as_str()).await?;
             }
             done
@@ -330,13 +333,8 @@ async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Res
             let level = asked["level"].as_i64().ok_or_else(|| Error::Integrations("missing level".to_owned()))?;
             let user = user()?;
             let level = Int::new_saturating(level);
-            use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
-            let already_greater = asked["ignoreIfGreater"] == true
-                && match room.get_user_power_level(user).await? {
-                    UserPowerLevel::Int(current) => current > level,
-                    _ => true,
-                };
-            if !already_greater {
+            let keeps_level = asked["ignoreIfGreater"] == true && room.get_user_power_level(user).await? >= level;
+            if !keeps_level {
                 room.update_power_levels(vec![(user, level)]).await?;
             }
             done
@@ -354,7 +352,12 @@ async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Res
                 return Err(Error::Integrations("account widgets aren't supported".to_owned()));
             }
             let id = asked["widget_id"].as_str().ok_or_else(|| Error::Integrations("missing widget_id".to_owned()))?;
-            room.send_state_event_raw(super::LEGACY_TYPE, id, widget_content(asked)?).await?;
+            let content = widget_content(asked)?;
+            if asked["url"].is_null() {
+                account.remove_widget(room.room_id().as_str(), id).await?;
+            } else {
+                room.send_state_event_raw(super::LEGACY_TYPE, id, content).await?;
+            }
             (json!({ "success": true }), After::Widgets)
         }
         "can_send_event" => {

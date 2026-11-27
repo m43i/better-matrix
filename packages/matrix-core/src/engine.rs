@@ -3395,12 +3395,20 @@ impl State {
                 })
             }
             Command::StartMeeting { account: id, room_id, video, browser } => {
-                self.widget_runs.insert(request, WidgetRun::Other(id.clone()));
+                let widget_id = crate::widgets::meetings::new_meeting_id();
+                self.widget_runs.insert(
+                    request,
+                    WidgetRun::Page(WidgetTarget {
+                        account: id.clone(),
+                        room: room_id.clone(),
+                        widget: widget_id.clone(),
+                    }),
+                );
                 let account = self.account(&id);
                 let answers = self.answers_for(request);
                 Box::pin(async move {
                     let account = account?;
-                    let widget_id = account.start_meeting(&room_id, video).await?;
+                    account.start_meeting(&room_id, &widget_id, video).await?;
                     // Started, even when the list can't be read again: retrying would start another.
                     if let Some(widgets) = account.widgets_after_write(&room_id).await {
                         sink.emit(Event::Widgets { account: id, room_id: room_id.clone(), widgets });

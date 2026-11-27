@@ -123,7 +123,8 @@ Date: 2026-11-25
   own (`PermissionKind::Identity`, its subject the origin that would learn it, not the
   widget's room-set name); refused, the widget gets `blocked`. The widget's permissions action
   lists granted access for the current origin and can reset both grants and denials, closing its
-  running page first. File downloads are described as
+  running page first. Jitsi grants use the canonical origin and reset clears any grants saved under
+  the older spelling of the configured domain. File downloads are described as
   what they are: files the account can open.
   - Camera and microphone: only a meeting's page, on the approved host (its own; iOS `prompt`,
     WebKit asking per site; Android `grantIfSameHostElseDeny` with the host in its own setting,
@@ -138,7 +139,8 @@ Date: 2026-11-25
     still meet WebKit's per-site prompt). Phones log
     a failed load by its code only (its address may carry a token).
 - **Integration manager** (`Command::OpenIntegrations`, `widgets::integrations`): the first
-  valid HTTPS entry in the homeserver's well-known file (`m.integrations`, 2xx). When none is
+  valid HTTPS entry in the homeserver's well-known file (`m.integrations`, 2xx). If it supplies
+  only an API URL, the app also uses that URL for its page. When none is
   configured, the app offers Element's hosted manager. The origin, account and room are shown for
   confirmation before contacting either provider. An OpenID token
   registered at it (`/register?v=1.1`) gives a token, kept per account and manager and checked
@@ -156,7 +158,8 @@ Date: 2026-11-25
   as `better-matrix --widget-window` (wry and tao; WebKitGTK on Linux, WKWebView on macOS,
   WebView2 on Windows), one process per run, JSON lines over stdin and stdout
   (`platform::widget_window`). It forwards the bridge's messages (token, origin and filter
-  checked again in Rust), reports each document's start and load, posts the engine's after
+  checked again in Rust), reports each document's start and load and WebKitGTK navigation
+  failures, posts the engine's after
   load, reloads on a repeated `open`, sends pages opening new windows and navigations off the
   page's origin to the browser (wry can't tell frames from the page there, so another site's
   frame opens in the browser too, and a top-level `data:`/`blob:` document may appear but gets
