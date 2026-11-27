@@ -13,8 +13,8 @@ use super::room_menu::{mode_id, modes};
 use super::theme::{Palette, font};
 use crate::i18n::{Language, t, tf};
 use crate::state::{
-    AccountData, Appearance, ContactStep, Emoticons, GifKey, MediaCache, MessageLayout, Popover, SelectFor,
-    SettingsSection, State, Zoom,
+    AccountData, Appearance, ContactStep, Emoticons, GifKey, MessageLayout, Popover, SelectFor, SettingsSection, State,
+    Zoom,
 };
 use crate::third_party;
 use matrix_core::{ContactDetail, ContactKind, OfflineDevice, RecoveryStatus, Session, SignInMethod};
@@ -252,6 +252,14 @@ fn component_row(component: &third_party::Component, p: &Palette) -> El {
 
 fn general(s: &State, p: &Palette) -> El {
     let languages = select(s, SelectFor::Language, &s.settings.language.label(), None, p);
+    let reverse_display_names = switch_row(
+        t!("settings.reverse_display_names"),
+        Some(t!("settings.reverse_display_names_hint")),
+        s.settings.reverse_display_names,
+        p,
+    )
+    .key("reverse-display-names")
+    .on_press(|s: &mut State| s.set_reverse_display_names(!s.settings.reverse_display_names));
     let (close_label, close_hint) = if cfg!(target_os = "macos") {
         (t!("settings.close_to_menu_bar"), t!("settings.close_to_menu_bar_hint"))
     } else {
@@ -270,6 +278,7 @@ fn general(s: &State, p: &Palette) -> El {
     .on_press(|s: &mut State| s.set_show_hidden_events(!s.settings.show_hidden_events));
     cards()
         .child(setting_card(&icons::LANGUAGE, t!("settings.language"), t!("settings.language_hint"), languages, p))
+        .child(switch_card(&icons::USER, reverse_display_names, p))
         .child(switch_card(&icons::CLOSE, close_to_tray, p))
         .child(setting_card(&icons::CODE, t!("settings.developer"), t!("settings.developer_hint"), hidden, p))
 }
@@ -408,7 +417,7 @@ fn notifications(s: &State, p: &Palette) -> El {
         let summary = &account.summary;
         let heading = row().gap(10.0).center_y().child(account_avatar(summary, &s.media, 28.0)).child(
             col()
-                .child(text(summary.display_name.clone()).font(font::BODY_STRONG).color(p.text))
+                .child(text(s.settings.person_name(&summary.display_name)).font(font::BODY_STRONG).color(p.text))
                 .child(text(summary.id.to_string()).font(font::META).color(p.text_muted)),
         );
         let (title, hint) = modes()
@@ -541,7 +550,7 @@ fn safety(s: &State, p: &Palette) -> El {
         })
     };
     cards()
-        .child(account_heading(account, &s.media, p))
+        .child(account_heading(s, account, p))
         .child(setting_card(&icons::IMAGE, t!("safety.media"), t!("safety.media_hint"), media, p))
         .child(setting_card(&icons::USER_PLUS, t!("safety.strangers"), t!("safety.strangers_hint"), strangers, p))
         .child(setting_card(&icons::EYE_OFF, t!("safety.pictures"), t!("safety.pictures_hint"), pictures, p))
@@ -740,11 +749,11 @@ pub fn backdrop() -> El {
 }
 
 /// Whose account the page shows, with avatar, name and ID.
-fn account_heading(account: &AccountData, media: &MediaCache, p: &Palette) -> El {
+fn account_heading(s: &State, account: &AccountData, p: &Palette) -> El {
     let summary = &account.summary;
-    row().gap(12.0).center_y().child(account_avatar(summary, media, 40.0)).child(
+    row().gap(12.0).center_y().child(account_avatar(summary, &s.media, 40.0)).child(
         col()
-            .child(text(summary.display_name.clone()).font(font::BODY_STRONG).color(p.text))
+            .child(text(s.settings.person_name(&summary.display_name)).font(font::BODY_STRONG).color(p.text))
             .child(text(format!("{} · {}", summary.id, summary.homeserver)).font(font::META).color(p.text_muted)),
     )
 }
@@ -762,7 +771,9 @@ fn profile(s: &State, p: &Palette) -> El {
             .min_w(0.0)
             .child(
                 col()
-                    .child(text(summary.display_name.clone()).font(font::HEADER).color(p.text).truncate())
+                    .child(
+                        text(s.settings.person_name(&summary.display_name)).font(font::HEADER).color(p.text).truncate(),
+                    )
                     .child(text(summary.id.to_string()).font(font::META).color(p.text_muted)),
             )
             .child(
@@ -1040,7 +1051,7 @@ fn account(s: &State, p: &Palette) -> El {
     };
     let oauth = account.summary.sign_in == SignInMethod::OAuth;
     let mut page = cards()
-        .child(account_heading(account, &s.media, p))
+        .child(account_heading(s, account, p))
         .child(setting_card(&icons::SHIELD, t!("account.session"), t!("account.session_hint"), verification, p))
         .child(setting_card(&icons::KEY, t!("recovery.title"), t!("recovery.hint"), recovery, p));
     if let Some(offline) = offline_device(security, p) {
@@ -1128,7 +1139,7 @@ fn sessions(s: &State, p: &Palette) -> El {
             sessions.iter().fold(col().w_full().gap(10.0), |list, session| list.child(session_card(session, p)))
         }
     };
-    let mut page = cards().child(account_heading(account, &s.media, p));
+    let mut page = cards().child(account_heading(s, account, p));
     // A QR sign-in hands this session's secrets over: OAuth accounts, from a verified session.
     if account.summary.sign_in == SignInMethod::OAuth {
         let verified = account.security.is_some_and(|security| security.session_verified);

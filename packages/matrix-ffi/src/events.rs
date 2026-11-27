@@ -97,6 +97,7 @@ pub(crate) fn next_batch(cache_dir: &Path, first: Event, queued: &mpsc::Receiver
 /// One event as the app receives it.
 pub(crate) fn to_json(cache_dir: &Path, event: Event) -> Option<String> {
     let json = match event {
+        Event::CommandError(..) | Event::TerminalResult(..) | Event::SyncReady(_) => return None,
         Event::MediaLoaded { request, media, size, bytes } => {
             let bridged = match write_media(cache_dir, &media, size, &bytes) {
                 Ok(path) => BridgeEvent::MediaFile { request, media, size, path: path_string(&path) },

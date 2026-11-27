@@ -374,7 +374,7 @@ export async function handlePush(payload: Notifications.NotificationTaskPayload)
     );
   }
 
-  const shown = pushContentOf(content);
+  const shown = pushContentOf(content, settings.reverseDisplayNames);
 
   if (!shown || !notified.mark(target.account, target.event_id)) return;
   await presentContent(shown);

@@ -10,6 +10,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { t, tp } from '../i18n';
+import { usePersonName } from '../ui/displayNames';
+import { personName } from '../state/names';
 import { findPerson, joinRoom, previewRoom } from '../state/actions/links';
 import { openDirectChat } from '../state/actions/people';
 import {
@@ -40,6 +42,7 @@ export default function LinkScreen() {
   const palette = usePalette();
   const link = useMemo(() => parsePermalink(params.uri ?? ''), [params.uri]);
   const accounts = useStore((s) => s.accounts.map((a) => a.summary), shallow);
+  const reverse = useStore((s) => s.settings.reverseDisplayNames);
 
   const [account, setAccount] = useState<AccountId | null>(() =>
     linkAccount(store.getState(), params.account ?? null),
@@ -196,12 +199,12 @@ export default function LinkScreen() {
                   <Avatar
                     account={summary.id}
                     id={summary.id}
-                    name={summary.display_name}
+                    name={personName(summary.display_name, reverse)}
                     media={summary.avatar}
                     size={28}
                   />
                 }
-                title={summary.display_name}
+                title={personName(summary.display_name, reverse)}
                 subtitle={summary.id}
                 selected={summary.id === account}
                 onPress={() => choose(summary.id)}
@@ -267,7 +270,7 @@ function PersonHead({
   person: Person | null;
 }) {
   const palette = usePalette();
-  const name = person?.name ?? id;
+  const name = usePersonName(person?.name ?? id);
 
   return (
     <View style={styles.head}>

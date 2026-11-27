@@ -6,6 +6,7 @@ import * as Notifications from 'expo-notifications';
 import { Fragment, useEffect, useState } from 'react';
 
 import { t } from '../../i18n';
+import { personName } from '../../state/names';
 import { setDefaultNotificationMode } from '../../state/actions/accounts';
 import { updateSettings } from '../../state/actions/core';
 import { accountPushOn, setAccountPush, setPushEnabled } from '../../state/actions/push';
@@ -39,6 +40,7 @@ function useNotificationsAllowed(): boolean | null {
 export default function NotificationsScreen() {
   const store = useAppStore();
   const ringSound = useStore((s) => s.settings.ringSound);
+  const reverse = useStore((s) => s.settings.reverseDisplayNames);
   const accounts = useStore((s) => s.accounts.map((a) => a.summary), shallow);
 
   const push = useStore(
@@ -83,7 +85,11 @@ export default function NotificationsScreen() {
       {accounts.map((summary, index) => (
         <Fragment key={summary.id}>
           <ListSection
-            title={accounts.length > 1 ? summary.display_name : t('settings.notifications')}
+            title={
+              accounts.length > 1
+                ? personName(summary.display_name, reverse)
+                : t('settings.notifications')
+            }
             footer={
               index === accounts.length - 1 ? t('mobile.accounts.notifications_hint') : undefined
             }
@@ -95,12 +101,12 @@ export default function NotificationsScreen() {
                     <Avatar
                       account={summary.id}
                       id={summary.id}
-                      name={summary.display_name}
+                      name={personName(summary.display_name, reverse)}
                       media={summary.avatar}
                       size={28}
                     />
                   }
-                  title={summary.display_name}
+                  title={personName(summary.display_name, reverse)}
                   subtitle={summary.id}
                 />
                 <Divider />

@@ -12,6 +12,7 @@ import type {
 
 import { locale, t } from '../i18n';
 import { spoilerSafeText } from './html';
+import { roomName } from './names';
 import { fuzzyMatch } from './search';
 import { byRecency } from './sections';
 import { hides } from './selectors';
@@ -26,14 +27,14 @@ function oneLine(text: string): string {
  * A message as one line of plain text, as the desktop's overview shows it: a spoiler as
  * `[Spoiler]`, never its words.
  */
-export function messageText(message: Message): string {
+export function messageText(message: Message, sender = message.sender_name): string {
   const content = message.content;
 
   switch (content.type) {
     case 'Text':
       return oneLine(spoilerSafeText(content.data.body, content.data.html));
     case 'Emote':
-      return `* ${message.sender_name} ${oneLine(spoilerSafeText(content.data.body, content.data.html))}`;
+      return `* ${sender} ${oneLine(spoilerSafeText(content.data.body, content.data.html))}`;
     case 'Location':
       return content.data.description ?? t('mobile.conversation.location');
     case 'Attachment':
@@ -54,11 +55,11 @@ export function messageText(message: Message): string {
 }
 
 /** "Sender: text", the preview under a conversation's name. */
-export function previewLine(message: Message): string {
+export function previewLine(message: Message, sender = message.sender_name): string {
   // An emote names its sender already.
-  if (message.content.type === 'Emote') return messageText(message);
+  if (message.content.type === 'Emote') return messageText(message, sender);
 
-  return t('overview.preview', { sender: message.sender_name, body: messageText(message) });
+  return t('overview.preview', { sender, body: messageText(message, sender) });
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -196,17 +197,24 @@ export function searchResults(
   found: readonly Person[],
   now: number,
   messages: MessageHit[] = [],
+  reverse = false,
 ): SearchResults {
   const me = account.summary.id;
 
   const recency = new Map(byRecency(account, account.rooms, now).map((r, i) => [r.room_id, i]));
 
-  const ranked = <T extends { name: string; room_id: string }>(items: readonly T[]): T[] =>
+  const ranked = <T extends { name: string; room_id: string }>(
+    items: readonly T[],
+    displayName?: (item: T) => string,
+  ): T[] =>
     items
       .flatMap((item) => {
-        const match = fuzzyMatch(item.name, term);
+        const shown = displayName?.(item) ?? item.name;
+        const original = fuzzyMatch(item.name, term);
+        const display = shown === item.name ? null : fuzzyMatch(shown, term);
+        const rank = Math.min(original?.rank ?? Infinity, display?.rank ?? Infinity);
 
-        return match ? [{ item, rank: match.rank }] : [];
+        return Number.isFinite(rank) ? [{ item, rank }] : [];
       })
       .sort(
         (a, b) =>
@@ -225,7 +233,10 @@ export function searchResults(
       !account.rooms.some((r) => r.note_to_self) &&
       fuzzyMatch(t('note_to_self.name'), term) !== null,
     rooms: ranked(account.rooms.filter((r) => r.kind === 'Group')),
-    direct: ranked(account.rooms.filter((r) => r.kind === 'Direct')),
+    direct: ranked(
+      account.rooms.filter((r) => r.kind === 'Direct'),
+      (room) => roomName(room, reverse),
+    ),
     spaces: ranked(account.spaces),
     people: found
       .filter((person) => person.id !== me)

@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
+import { usePersonName } from '../displayNames';
 import { font } from '../../theme/palette';
 import { Avatar } from '../Avatar';
 import { Touchable } from '../components';
@@ -31,15 +32,16 @@ export function PersonRow({
   onPress?: () => void;
   testID?: string;
 }) {
+  const name = usePersonName(person.name);
   const under = subtitle ?? (person.name !== person.id ? person.id : null);
   const palette = usePalette();
 
   const body = (
     <View style={styles.row}>
-      <Avatar account={account} id={person.id} name={person.name} media={person.avatar} size={40} />
+      <Avatar account={account} id={person.id} name={name} media={person.avatar} size={40} />
       <View style={styles.text}>
         <Text style={[font.body, { color: palette.text }]} numberOfLines={1}>
-          {person.name}
+          {name}
         </Text>
         {under !== null ? (
           <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
@@ -58,7 +60,7 @@ export function PersonRow({
       testID={testID}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={person.name}
+      accessibilityLabel={name}
     >
       {body}
     </Touchable>
@@ -82,20 +84,21 @@ export function MemberRow({
 }) {
   const palette = usePalette();
   const { person } = member;
+  const name = usePersonName(person.name);
 
   const body = (
     <View style={styles.row}>
       <Avatar
         account={account}
         id={person.id}
-        name={person.name}
+        name={name}
         media={person.avatar}
         size={40}
         presence={member.presence}
       />
       <View style={styles.text}>
         <Text style={[font.body, { color: palette.text }]} numberOfLines={1}>
-          {person.name}
+          {name}
         </Text>
         {me ? (
           <Text style={[font.meta, { color: palette.textMuted }]}>{t('mobile.people.you')}</Text>
@@ -120,7 +123,7 @@ export function MemberRow({
       testID={`member-${person.id}`}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={person.name}
+      accessibilityLabel={name}
     >
       {body}
     </Touchable>

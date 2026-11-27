@@ -11,6 +11,7 @@ import type {
   ThreadInfo,
 } from '@better-matrix/matrix-native/types';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useRoomName } from '../../../ui/displayNames';
 import * as Sharing from 'expo-sharing';
 import { useEffect, useState } from 'react';
 import { Alert, FlatList, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -67,6 +68,7 @@ export default function RoomInfoScreen() {
   const router = useRouter();
   const palette = usePalette();
   const room = useStore((s) => roomOf(s, account, roomId));
+  const name = useRoomName(room);
   const members = useStore((s) => accountOf(s, account)?.members[roomId]);
   const widgetCount = useStore((s) => roomWidgetCount(s, account, roomId));
   // Threads people the user ignores started stay out of the list (ADR 0011).
@@ -216,12 +218,12 @@ export default function RoomInfoScreen() {
         <Avatar
           account={account}
           id={direct ? (room.dm_users[0] ?? room.room_id) : room.room_id}
-          name={room.name}
+          name={name}
           media={room.avatar}
           size={84}
         />
         <Text style={[font.title, styles.center, { color: palette.text }]} selectable>
-          {room.name}
+          {name}
         </Text>
         <Text
           testID="info-topic"

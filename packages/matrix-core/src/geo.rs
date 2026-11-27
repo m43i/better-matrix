@@ -5,7 +5,7 @@ use crate::model::{MediaRef, Place};
 use matrix_sdk::reqwest;
 use std::sync::OnceLock;
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(all(feature = "native-media", not(any(target_os = "android", target_os = "ios"))))]
 pub(crate) mod desktop;
 pub(crate) mod live;
 

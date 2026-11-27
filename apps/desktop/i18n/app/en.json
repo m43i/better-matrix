@@ -499,6 +499,8 @@
   "settings.close": "Close settings",
   "settings.devices_loading": "Looking for devices…",
   "settings.general": "General",
+  "settings.reverse_display_names": "Reverse display names",
+  "settings.reverse_display_names_hint": "Show names such as “Doe, Jane” as “Jane, Doe” on this device.",
   "settings.gifs": "GIFs from links",
   "settings.gifs_hint": "Links to Giphy, Tenor and Imgur GIFs in messages can play right in the conversation.",
   "settings.gifs_off": "Show only the link",

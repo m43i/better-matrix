@@ -863,6 +863,7 @@ export function demoEngine(resolveMedia: MediaResolver): Engine {
   const newRoom = (roomId: string, name: string, topic: string | null): RoomSummary => ({
     room_id: roomId,
     name,
+    name_from_member: false,
     topic,
     kind: 'Group',
     unread: 0,

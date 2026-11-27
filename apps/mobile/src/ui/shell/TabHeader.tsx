@@ -6,6 +6,7 @@
 // share one row, the picture at its end.
 
 import { router, Stack } from 'expo-router';
+import { usePersonName } from '../displayNames';
 import type { ReactNode } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -28,8 +29,9 @@ function ProfileButton() {
     s.accounts.some((a) => a.summary.id !== s.active && hasUnread(a, 'home')),
   );
 
+  const name = usePersonName(summary?.display_name || summary?.id || '');
+
   if (!summary) return null;
-  const name = summary.display_name || summary.id;
 
   return (
     <Pressable

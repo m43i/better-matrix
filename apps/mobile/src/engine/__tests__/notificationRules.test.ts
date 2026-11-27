@@ -46,6 +46,13 @@ describe('contentOf', () => {
     expect([content.title, content.body]).toEqual(['Grace', 'hi']);
   });
 
+  it('a notification should show the reordered sender name and retain its event target', () => {
+    const raw = notification({ sender_name: 'Hopper, Grace' });
+    const content = contentOf(raw, true);
+    expect(content.body).toBe('Grace, Hopper: hi');
+    expect(content.data).toEqual(contentOf(raw).data);
+  });
+
   it('the same event should notify once', () => {
     expect(contentOf(notification()).identifier).toBe(contentOf(notification()).identifier);
   });

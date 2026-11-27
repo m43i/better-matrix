@@ -2195,6 +2195,7 @@ mod tests {
         RoomSummary {
             room_id: id.into(),
             name: id.into(),
+            name_from_member: false,
             topic: None,
             kind: RoomKind::Group,
             unread: 0,

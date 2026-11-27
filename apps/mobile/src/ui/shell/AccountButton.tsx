@@ -3,6 +3,7 @@
 // desktop's rail shows it.
 
 import type { AccountSummary, Status } from '@better-matrix/matrix-native/types';
+import { usePersonName } from '../displayNames';
 import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -77,16 +78,11 @@ export function AccountAvatar({
   status?: Status;
 }) {
   const palette = usePalette();
+  const name = usePersonName(summary.display_name || summary.id);
 
   return (
     <View style={{ width: size, height: size }}>
-      <Avatar
-        account={summary.id}
-        id={summary.id}
-        name={summary.display_name || summary.id}
-        media={summary.avatar}
-        size={size}
-      />
+      <Avatar account={summary.id} id={summary.id} name={name} media={summary.avatar} size={size} />
       {status ? (
         <View style={styles.status}>
           <StatusDot status={status} size={Math.max(10, size * 0.36)} ring={palette.bg} />

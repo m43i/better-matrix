@@ -171,7 +171,7 @@ pub fn panel(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
                     move |s: &State, i| match member_at(s, &room_id, found.get(i)) {
                         Some(member) => {
                             let shown = s.active_account().and_then(|account| account.presence.get(&member.person.id));
-                            member_row(member, shown, member.person.id == me, &s.media, &palette)
+                            member_row(member, shown, member.person.id == me, s, &palette)
                         }
                         None => el(),
                     },
@@ -188,7 +188,7 @@ pub fn panel(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
         .border_sides([0.0, 0.0, 0.0, 1.0], p.divider)
         .child(header)
         .child(search)
-        .children(members.and_then(|members| outsiders(members, &s.media, p)))
+        .children(members.and_then(|members| outsiders(members, s, p)))
         .child(count)
         .child(divider(p))
         .child(col().w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list))
@@ -196,7 +196,7 @@ pub fn panel(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
 
 /// Those asking to join and those banned, with what the user may do about them: above the
 /// members, in a list of its own that scrolls when long. `None` when there is nothing to show.
-fn outsiders(members: &Members, media: &crate::state::MediaCache, p: &Palette) -> Option<El> {
+fn outsiders(members: &Members, s: &State, p: &Palette) -> Option<El> {
     let may = |action, member: &RoomMember| members.may(action, member);
     let answering = members.knocking.iter().filter(|m| may(Moderation::Admit, m) || may(Moderation::Deny, m));
     let unbanning = members.banned.iter().filter(|m| may(Moderation::Unban, m));
@@ -227,7 +227,7 @@ fn outsiders(members: &Members, media: &crate::state::MediaCache, p: &Palette) -
                     );
                 }
             }
-            list = list.child(outsider_row(member, "knock", actions, media, p));
+            list = list.child(outsider_row(member, "knock", actions, s, p));
         }
     }
     if !unbanning.is_empty() {
@@ -239,7 +239,7 @@ fn outsiders(members: &Members, media: &crate::state::MediaCache, p: &Palette) -
                 .px(12.0)
                 .key(format!("unban-{}", member.person.id))
                 .on_press(move |s: &mut State| s.moderate(&id, Moderation::Unban));
-            list = list.child(outsider_row(member, "banned", vec![unban], media, p));
+            list = list.child(outsider_row(member, "banned", vec![unban], s, p));
         }
     }
     Some(
@@ -254,15 +254,10 @@ fn outsiders(members: &Members, media: &crate::state::MediaCache, p: &Palette) -
 }
 
 /// Someone asking to join or banned: their picture, name and ID, and the buttons for them.
-fn outsider_row(
-    member: &RoomMember,
-    kind: &str,
-    actions: Vec<El>,
-    media: &crate::state::MediaCache,
-    p: &Palette,
-) -> El {
+fn outsider_row(member: &RoomMember, kind: &str, actions: Vec<El>, s: &State, p: &Palette) -> El {
     let person = &member.person;
-    let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, 32.0).radius(16.0);
+    let face = media_avatar(&person.id, &s.settings.person_name(&person.name), person.avatar.as_ref(), &s.media, 32.0)
+        .radius(16.0);
     row()
         .key(format!("{kind}-{}", person.id))
         .w_full()
@@ -276,7 +271,7 @@ fn outsider_row(
             col()
                 .grow(1.0)
                 .min_w(0.0)
-                .child(text(person.name.clone()).font(font::BODY).color(p.text).truncate())
+                .child(text(s.settings.person_name(&person.name)).font(font::BODY).color(p.text).truncate())
                 .child(text(person.id.clone()).font(font::META).color(p.text_muted).truncate()),
         )
         .children(actions)
@@ -312,7 +307,13 @@ pub fn person(s: &State, account: &AccountData, room: &RoomSummary, shown_as: &P
     let person = own.as_ref().or(member.map(|member| &member.person)).unwrap_or(shown_as);
     let listed = member.map(|member| listed_presence(member, me));
     let shown = account.presence.get(&person.id).or(listed.as_ref());
-    let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), &s.media, PERSON_PICTURE);
+    let face = media_avatar(
+        &person.id,
+        &s.settings.person_name(&person.name),
+        person.avatar.as_ref(),
+        &s.media,
+        PERSON_PICTURE,
+    );
     let mut head = col()
         .w_full()
         .padding(20.0)
@@ -320,7 +321,7 @@ pub fn person(s: &State, account: &AccountData, room: &RoomSummary, shown_as: &P
         .items_center()
         .child(with_presence(face, PERSON_PICTURE, shown, p.bg, p).mb(8.0))
         .child(
-            text(person.name.clone())
+            text(s.settings.person_name(&person.name))
                 .key("person-name")
                 .font(font::HEADER)
                 .color(p.text)
@@ -454,20 +455,15 @@ fn person_actions(account: &AccountData, user_id: &str, me: bool, p: &Palette) -
 }
 
 /// One member: their picture with a presence dot, their name, a badge when verified, their role.
-fn member_row(
-    member: &RoomMember,
-    shown: Option<&PersonPresence>,
-    me: bool,
-    media: &crate::state::MediaCache,
-    p: &Palette,
-) -> El {
+fn member_row(member: &RoomMember, shown: Option<&PersonPresence>, me: bool, s: &State, p: &Palette) -> El {
     let person = &member.person;
     // What the engine reported since is newer than the list.
     let listed = listed_presence(member, me);
     let shown = shown.unwrap_or(&listed);
-    let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, 36.0).radius(18.0);
+    let face = media_avatar(&person.id, &s.settings.person_name(&person.name), person.avatar.as_ref(), &s.media, 36.0)
+        .radius(18.0);
     let face = with_presence(face, 36.0, Some(shown), p.bg, p);
-    let name = text(person.name.clone()).font(font::BODY).color(p.text).truncate();
+    let name = text(s.settings.person_name(&person.name)).font(font::BODY).color(p.text).truncate();
     let who = match &shown.status_message {
         Some(message) => col()
             .grow(1.0)
@@ -502,7 +498,7 @@ fn member_row(
         .role("button")
         .cursor(rune::Cursor::Pointer)
         .focusable(true)
-        .label(person.name.clone())
+        .label(s.settings.person_name(&person.name))
         .on_press(move |s: &mut State| s.toggle_member_menu(&id))
 }
 
@@ -530,7 +526,14 @@ pub fn menu(
     let mut panel = popover_panel(p)
         .key("member-menu")
         .w(260.0)
-        .child(text(person.name.clone()).font(font::SECTION).color(p.text_muted).px(12.0).py(6.0).truncate())
+        .child(
+            text(s.settings.person_name(&person.name))
+                .font(font::SECTION)
+                .color(p.text_muted)
+                .px(12.0)
+                .py(6.0)
+                .truncate(),
+        )
         .child({
             let id = id.clone();
             menu_action(&icons::CHAT, t!("members.chat"), Tone::Normal, p)
@@ -592,7 +595,7 @@ pub fn menu(
     // Keeping them away: on every room, not this one alone.
     panel = panel.child(divider(p));
     {
-        let (id, name) = (id.clone(), person.name.clone());
+        let (id, name) = (id.clone(), s.settings.person_name(&person.name).into_owned());
         panel = panel.child(
             menu_action(&icons::FLAG, t!("report.action"), Tone::Normal, p)
                 .key("member-menu-report")
@@ -607,7 +610,7 @@ pub fn menu(
                 .on_press(move |s: &mut State| s.stop_ignoring(&owner, &id)),
         );
     } else {
-        let name = person.name.clone();
+        let name = s.settings.person_name(&person.name).into_owned();
         panel = panel.child(
             menu_action(&icons::USER_X, t!("safety.ignore"), Tone::Danger, p)
                 .key("member-menu-ignore")
@@ -616,7 +619,7 @@ pub fn menu(
     }
     let mut panels = vec![col().child(panel).anchored(anchor.to_owned(), Side::Left, Align::Start, 6.0)];
     match submenu {
-        Some(MemberSubmenu::Invite) => panels.push(invite_menu(account, &room.room_id, user_id, p)),
+        Some(MemberSubmenu::Invite) => panels.push(invite_menu(s, account, &room.room_id, user_id, p)),
         Some(MemberSubmenu::Role) => {
             if let Some(member) = member {
                 panels.push(role_menu(member, &roles, custom, p));
@@ -628,12 +631,12 @@ pub fn menu(
 }
 
 /// The account's other group rooms, to invite the member to.
-fn invite_menu(account: &AccountData, current: &str, user_id: &str, p: &Palette) -> El {
+fn invite_menu(s: &State, account: &AccountData, current: &str, user_id: &str, p: &Palette) -> El {
     let mut list = col().w_full();
     for room in account.rooms.iter().filter(|room| room.kind == RoomKind::Group && room.room_id != current) {
         let (room_id, id) = (room.room_id.clone(), user_id.to_owned());
         list = list.child(
-            menu_row(menu_icon(&icons::PLUS, p), &super::room::display_name(room), None, None, p)
+            menu_row(menu_icon(&icons::PLUS, p), &super::room::display_name(room, &s.settings), None, None, p)
                 .key(format!("member-invite-{}", room.room_id))
                 .on_press(move |s: &mut State| s.invite_member_to(&room_id, &id)),
         );

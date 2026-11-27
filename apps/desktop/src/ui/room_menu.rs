@@ -38,7 +38,7 @@ pub fn mode_id(mode: NotificationMode) -> &'static str {
 }
 
 /// The menu, and its submenu when open: both are drawn as popovers.
-pub fn room_menu(account: &AccountData, room_id: &str, notifications_open: bool, p: &Palette) -> Vec<El> {
+pub fn room_menu(s: &State, account: &AccountData, room_id: &str, notifications_open: bool, p: &Palette) -> Vec<El> {
     let Some(room) = account.room(room_id) else { return Vec::new() };
     let (leave_label, leave_icon) = match room.kind {
         RoomKind::Group => (t!("room_menu.leave"), &icons::LEAVE),
@@ -66,7 +66,7 @@ pub fn room_menu(account: &AccountData, room_id: &str, notifications_open: bool,
     let menu = popover_panel(p)
         .w(260.0)
         .key("room-menu")
-        .child(text(room.name.clone()).font(font::SECTION).color(p.text_muted).px(12.0).py(6.0).truncate())
+        .child(text(s.settings.room_name(room)).font(font::SECTION).color(p.text_muted).px(12.0).py(6.0).truncate())
         .child(
             menu_action(unread_icon, unread_label, Tone::Normal, p)
                 .key("room-menu-unread")

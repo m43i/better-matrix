@@ -1,6 +1,7 @@
 // A message shown outside its timeline (a pinned or saved message), with the same avatar, text
 // scale and row layout as the conversation, and one action at its top right.
 import type { AccountId, MessagePreview } from '@better-matrix/matrix-native/types';
+import { usePersonName } from '../displayNames';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
@@ -36,6 +37,7 @@ export function PreviewRow({
   action?: PreviewAction;
 }) {
   const palette = usePalette();
+  const sender = usePersonName(message.sender_name);
   const body = message.body ?? t('message.unavailable');
 
   return (
@@ -45,27 +47,27 @@ export function PreviewRow({
         onPress={onOpen}
         disabled={message.body === null}
         accessibilityRole="button"
-        accessibilityLabel={message.sender_name ? `${message.sender_name}: ${body}` : body}
+        accessibilityLabel={sender ? `${sender}: ${body}` : body}
         accessibilityHint={t('message.open')}
         style={styles.row}
       >
         <Avatar
           account={account}
           id={message.sender_id}
-          name={message.sender_name}
+          name={sender}
           media={message.sender_avatar}
         />
         <View style={[styles.content, action ? styles.withAction : null]}>
-          {message.sender_name || place ? (
+          {sender || place ? (
             <Text numberOfLines={1}>
-              {message.sender_name ? (
+              {sender ? (
                 <Text style={[font.bodyStrong, { color: identityColor(message.sender_id) }]}>
-                  {message.sender_name}
+                  {sender}
                 </Text>
               ) : null}
               {place ? (
                 <Text style={[font.meta, { color: palette.textMuted }]}>
-                  {message.sender_name ? '  ' : ''}
+                  {sender ? '  ' : ''}
                   {place}
                 </Text>
               ) : null}

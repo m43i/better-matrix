@@ -167,13 +167,13 @@ async fn beacon_id(room: &Room) -> Result<Option<matrix_sdk::ruma::OwnedEventId>
     Ok(state.and_then(|event| event.deserialize().ok()?.event_id().map(ToOwned::to_owned)))
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(all(feature = "native-media", not(any(target_os = "android", target_os = "ios"))))]
 async fn next_desktop_fix() -> Result<String, Error> {
     tokio::time::sleep(Duration::from_secs(15)).await;
     super::desktop::position(false).await
 }
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(not(feature = "native-media"), target_os = "android", target_os = "ios"))]
 async fn next_desktop_fix() -> Result<String, Error> {
     std::future::pending().await
 }

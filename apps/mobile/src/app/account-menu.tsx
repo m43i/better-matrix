@@ -4,6 +4,7 @@
 // screen.
 
 import type { AccountSummary, Status } from '@better-matrix/matrix-native/types';
+import { personName } from '../state/names';
 import { router } from 'expo-router';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -52,6 +53,7 @@ export default function AccountMenuScreen() {
   const store = useAppStore();
   const palette = usePalette();
   const accounts = useStore(accountEntries, sameEntries);
+  const reverse = useStore((s) => s.settings.reverseDisplayNames);
   const active = useStore((s) => s.active);
   const current = accounts.find((a) => a.summary.id === active)?.summary;
   const status = useStore((s) => s.accounts.find((a) => a.summary.id === s.active)?.status);
@@ -67,7 +69,7 @@ export default function AccountMenuScreen() {
   const confirmSignOut = () => {
     if (!current) return;
     Alert.alert(
-      t('accounts.sign_out', { name: current.display_name }),
+      t('accounts.sign_out', { name: personName(current.display_name || current.id, reverse) }),
       t('mobile.accounts.sign_out_hint'),
       [
         { text: t('common.cancel'), style: 'cancel' },
@@ -131,7 +133,7 @@ export default function AccountMenuScreen() {
             {i > 0 ? <Divider inset={66} /> : null}
             <ListRow
               testID={`switch-${summary.id}`}
-              title={summary.display_name || summary.id}
+              title={personName(summary.display_name || summary.id, reverse)}
               subtitle={summary.id}
               leading={
                 <WithDot on={summary.id !== active && unread} size={36}>
@@ -179,7 +181,9 @@ export default function AccountMenuScreen() {
             <ListRow
               testID="account-menu-sign-out"
               icon="signOut"
-              title={t('accounts.sign_out', { name: current.display_name || current.id })}
+              title={t('accounts.sign_out', {
+                name: personName(current.display_name || current.id, reverse),
+              })}
               danger
               chevron={false}
               onPress={confirmSignOut}

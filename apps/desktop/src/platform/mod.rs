@@ -483,6 +483,7 @@ const MAPS: &str = "maps";
 const EMOTICONS: &str = "emoticons";
 const ZOOM: &str = "zoom";
 const CLOSE_TO_TRAY: &str = "close_to_tray";
+const REVERSE_DISPLAY_NAMES: &str = "reverse_display_names";
 const RING_SOUND: &str = "ring_sound";
 const PLAYBACK_SPEED: &str = "playback_speed";
 const MICROPHONE: &str = "microphone";
@@ -525,6 +526,7 @@ fn save(
 
 fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::prefs::PrefsError> {
     prefs.set(CLOSE_TO_TRAY, &settings.close_to_tray)?;
+    prefs.set(REVERSE_DISPLAY_NAMES, &settings.reverse_display_names)?;
     prefs.set(LANGUAGE, &settings.language.id())?;
     prefs.set(APPEARANCE, &settings.appearance.id())?;
     prefs.set(MESSAGE_LAYOUT, &settings.message_layout.id())?;
@@ -554,6 +556,7 @@ pub fn load_settings(prefs: &Prefs) -> Settings {
             .map_or_else(MessageLayout::default, |id| MessageLayout::from_id(&id)),
         zoom: prefs.get::<u16>(ZOOM).map_or_else(Zoom::default, Zoom::from_percent),
         close_to_tray: prefs.get::<bool>(CLOSE_TO_TRAY).unwrap_or(true),
+        reverse_display_names: prefs.get::<bool>(REVERSE_DISPLAY_NAMES).unwrap_or(false),
         show_link_gifs: prefs.get::<bool>(LINK_GIFS).unwrap_or(true),
         show_link_previews: prefs.get::<bool>(LINK_PREVIEWS).unwrap_or(true),
         show_maps: prefs.get::<bool>(MAPS).unwrap_or(true),

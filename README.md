@@ -78,6 +78,26 @@ mkdir -p ~/.local/bin && curl -fLo ~/.local/bin/better-matrix "https://github.co
 AppImages need FUSE 2 (`libfuse2`, called `fuse2` or `fuse-libs` on some distributions). Without it,
 start it with `--appimage-extract-and-run`.
 
+### Command line (Linux servers)
+
+The release's `better-matrix-cli-linux-x86_64.tar.gz` and
+`better-matrix-cli-linux-aarch64.tar.gz` contain `bm`. Extract the archive and put `bm`
+on your PATH. To build and install the CLI from this checkout, run
+`cargo install --path apps/cli --locked`.
+
+```sh
+bm auth login '@alice:example.org'
+bm rooms list
+bm messages send '#ops:example.org' 'Deploy complete'
+bm --json mentions watch
+bm skill
+```
+
+The CLI has its own sessions and supports end-to-end encryption, including restoring a recovery
+key with `bm auth recovery restore`. Use `bm help` for commands or `bm skill` to install the
+offline command references for coding agents. See the [CLI reference](apps/cli/skill/references/cli.md)
+for scripting and exit codes.
+
 ### macOS (Apple silicon)
 
 Download

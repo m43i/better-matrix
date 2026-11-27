@@ -2,6 +2,7 @@
 // desktop's info panels list them.
 
 import type { AttachmentKind, SharedFile, ThreadInfo } from '@better-matrix/matrix-native/types';
+import { usePersonName } from '../displayNames';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { tp } from '../../i18n';
@@ -14,6 +15,7 @@ import { when } from './labels';
 /** A thread: who started it, its first message, its replies and when the last came. */
 export function ThreadRow({ thread, onPress }: { thread: ThreadInfo; onPress: () => void }) {
   const palette = usePalette();
+  const sender = usePersonName(thread.sender_name);
   const replies = tp('thread.replies', thread.replies);
   const meta = thread.latest_at === null ? replies : `${replies} · ${when(thread.latest_at)}`;
 
@@ -26,7 +28,7 @@ export function ThreadRow({ thread, onPress }: { thread: ThreadInfo; onPress: ()
     >
       <View style={styles.thread}>
         <Text style={[font.bodyStrong, { color: palette.text }]} numberOfLines={1}>
-          {thread.sender_name}
+          {sender}
         </Text>
         <Text style={[font.body, { color: palette.text }]} numberOfLines={2}>
           {thread.body}
@@ -55,6 +57,7 @@ export function FileRow({
   onPress: () => void;
 }) {
   const palette = usePalette();
+  const sender = usePersonName(file.sender_name);
 
   return (
     <Touchable
@@ -74,7 +77,7 @@ export function FileRow({
             {file.attachment.name}
           </Text>
           <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={1}>
-            {`${file.sender_name} · ${when(file.timestamp)}`}
+            {`${sender} · ${when(file.timestamp)}`}
           </Text>
         </View>
         {busy ? <ActivityIndicator color={palette.textMuted} /> : null}

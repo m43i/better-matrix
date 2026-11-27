@@ -7,6 +7,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { pathOf } from '../../engine/boot';
 import { t } from '../../i18n';
+import { usePersonName } from '../../ui/displayNames';
 import {
   editableName,
   listContactDetails,
@@ -33,6 +34,7 @@ export default function ProfileScreen() {
   const prompt = usePrompt();
   const summary = account?.summary;
   const id = summary?.id ?? null;
+  const displayName = usePersonName(summary?.display_name ?? '');
   const [name, setName] = useState(summary ? editableName(summary.id, summary.display_name) : '');
   const [savingName, setSavingName] = useState(false);
   const [savingAvatar, setSavingAvatar] = useState(false);
@@ -101,12 +103,12 @@ export default function ProfileScreen() {
         <Avatar
           account={summary.id}
           id={summary.id}
-          name={summary.display_name}
+          name={displayName}
           media={summary.avatar}
           size={96}
         />
         <Text style={[font.header, { color: palette.text }]} numberOfLines={1}>
-          {summary.display_name}
+          {displayName}
         </Text>
         <Text style={[font.meta, { color: palette.textMuted }]} selectable>
           {summary.id}

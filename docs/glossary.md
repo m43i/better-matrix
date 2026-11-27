@@ -465,6 +465,10 @@ the server, edited under each account in Settings, Notifications (`Event::Keywor
 : The modal for this device's preferences (language, appearance) and each account's default
 notification mode, in sections (`SettingsSection`).
 
+**Reverse display names**
+: The General setting that shows a person's `Last, First` display name as `First, Last` on this
+device. It is off by default. See [ADR 0005](adr/0005-navigation-and-settings.md).
+
 **Appearance** (settings section)
 : The settings section for how the app looks: the theme (light, dark or the system's;
 `Appearance`), the message layout and the interface size. On phones these sit under Preferences,
@@ -902,6 +906,11 @@ memos), emptied at launch and exit (`Shell::scratch`).
 : A named starting state for a headless render (`--scene demo-space`), built from the demo
 fixtures.
 On phones, `bettermatrix://demo/<scene>` opens one in a dev build (`apps/mobile/src/demo`).
+
+**CLI**
+: The Better Matrix terminal client, installed as `bm`. It uses the engine with its own
+account stores, and supplies JSON results and foreground watches for scripts. See
+[ADR 0013](adr/0013-command-line.md).
 
 **Headless**
 : Running the UI without a window: `--snap` renders a PNG, `--tree` dumps the element tree, and

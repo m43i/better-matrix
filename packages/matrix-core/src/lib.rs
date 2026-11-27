@@ -57,6 +57,8 @@ mod source;
 mod test_server;
 mod thumbnail;
 pub use thumbnail::upload_thumbnail;
+#[cfg(feature = "command-line")]
+pub mod terminal;
 mod timeline;
 mod timeline_bootstrap;
 mod tls;
@@ -305,6 +307,20 @@ pub enum Error {
     /// The server accepted a login but the client reports no user.
     #[error("the server accepted the login but reported no user ID")]
     NoUserId,
+    /// A terminal sign-in completed as a different account.
+    #[error("expected to sign in as {expected}, but the server signed in {actual}")]
+    UnexpectedAccount {
+        /// The selected user.
+        expected: AccountId,
+        /// The user the server authorized.
+        actual: String,
+    },
+    /// The server returned a new device when the old one was being resumed.
+    #[error("the server returned a different device while resuming this session")]
+    UnexpectedDevice,
+    /// A suspended account could not take back its store and device.
+    #[error("could not resume the saved device on this homeserver")]
+    ResumeStore,
     /// A QR code couldn't be drawn or read.
     #[error("could not read or draw the QR code: {0}")]
     QrCode(String),

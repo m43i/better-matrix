@@ -222,20 +222,10 @@ pub(crate) async fn reject(room: &Room, call_id: &str, party_id: &str) {
     let _ = send(room, "m.call.reject", base(call_id, party_id)).await;
 }
 
-/// Whether an offer is a video call: it has a video section that is on and that the caller
-/// sends on (one only asking to receive video is a voice call).
-pub(crate) fn has_video(sdp: &str) -> bool {
-    let mut sections = sdp.split("\nm=").skip(1);
-    sections.any(|section| {
-        let lines: Vec<&str> = section.lines().map(str::trim).collect();
-        let on = lines.first().is_some_and(|first| first.starts_with("video ") && !first.starts_with("video 0 "));
-        on && !lines.iter().any(|line| matches!(*line, "a=recvonly" | "a=inactive"))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calls::has_video;
 
     #[test]
     fn an_offer_with_video_turned_off_should_count_as_voice() {

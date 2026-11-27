@@ -609,7 +609,16 @@ export const scenes = {
     routes: [routes.settings(), routes.settingsMessagesMedia(), routes.settingsGiphy()],
   },
   'settings-preferences': {
-    about: 'General settings: language and developer tools',
+    about: 'General settings: language, display name order and developer tools',
+    setup: (store) =>
+      store.update((s) => ({
+        ...s,
+        accounts: s.accounts.map((account) =>
+          account.summary.id === ADA
+            ? { ...account, summary: { ...account.summary, display_name: 'Lovelace, Ada' } }
+            : account,
+        ),
+      })),
     routes: [routes.settings(), routes.settingsGeneral()],
   },
   'settings-appearance': {

@@ -29,6 +29,7 @@ pub fn dialog_for(s: &State, history: &EditHistory, p: &Palette) -> El {
                             revealed: &s.revealed,
                             media: &s.media,
                             pictures: s.shows_pictures_of(&history.account, &history.room_id, &history.event_id),
+                            reverse_display_names: s.settings.reverse_display_names,
                         };
                         formatted(&format!("edit-{}", version.event_id), &rich, look, p)
                     }

@@ -9,6 +9,7 @@ import type {
   ThreadSummary,
 } from '@better-matrix/matrix-native/types';
 import { Image } from 'expo-image';
+import { usePersonName } from '../displayNames';
 import { router } from 'expo-router';
 import { memo, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -37,6 +38,7 @@ import { openLink } from './open';
 export function QuoteBlock({ quote }: { quote: Quote }) {
   const palette = usePalette();
   const { scrollTo } = useTimelineContext();
+  const sender = usePersonName(quote.sender_name ?? '');
 
   return (
     <Pressable
@@ -48,7 +50,7 @@ export function QuoteBlock({ quote }: { quote: Quote }) {
       <View style={styles.quoteText}>
         {quote.sender_name ? (
           <Text style={[font.meta, styles.quoteSender, { color: palette.text }]} numberOfLines={1}>
-            {quote.sender_name}
+            {sender}
           </Text>
         ) : null}
         <Text style={[font.meta, { color: palette.textMuted }]} numberOfLines={2}>

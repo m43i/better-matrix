@@ -72,8 +72,9 @@ function parseText(body: string, html: string | null): Prepared {
  * once per text: a message replaced for a receipt or a reaction keeps the same parse, so the
  * views drawing its blocks needn't redraw.
  */
-export function prepare(message: Message): Prepared {
-  const known = prepared.get(message);
+export function prepare(message: Message, sender = message.sender_name): Prepared {
+  const canMemo = message.content.type !== 'Emote' || sender === message.sender_name;
+  const known = canMemo ? prepared.get(message) : undefined;
 
   if (known) return known;
   let result = NOT_TEXT;
@@ -92,7 +93,7 @@ export function prepare(message: Message): Prepared {
   } else if (message.content.type === 'Emote') {
     // An emote reads as "* Ada waves": the sender's name before the action.
     const { body, html } = message.content.data;
-    const key = `e${message.sender_name.length}:${message.sender_name}${textKey(body, html)}`;
+    const key = `e${sender.length}:${sender}${textKey(body, html)}`;
     const kept = parsed.get(key);
 
     if (kept) {
@@ -100,7 +101,7 @@ export function prepare(message: Message): Prepared {
     } else {
       const text = parseText(body, html);
       result = {
-        blocks: emoteBlocks(message.sender_name, text.blocks ?? []),
+        blocks: emoteBlocks(sender, text.blocks ?? []),
         gif: null,
         link: text.link,
       };
@@ -108,7 +109,7 @@ export function prepare(message: Message): Prepared {
     }
   }
 
-  prepared.set(message, result);
+  if (canMemo) prepared.set(message, result);
 
   return result;
 }

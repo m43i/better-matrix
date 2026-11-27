@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
+import { usePersonName } from '../displayNames';
 import { routes } from '../../routes';
 import { coordinates, coordinatesText } from '../../state/geo';
 import { useStore } from '../../state/react';
@@ -85,11 +86,12 @@ export function MapView({
 }) {
   const p = usePalette();
   const shown = useStore((s) => s.settings.showMaps);
+  const name = usePersonName(person.name);
   const point = coordinates(uri ?? '');
 
   const pin = (
     <View style={[styles.pin, { borderColor: p.accent }]}>
-      <Avatar account={account} id={person.id} name={person.name} media={person.avatar} size={36} />
+      <Avatar account={account} id={person.id} name={name} media={person.avatar} size={36} />
     </View>
   );
 

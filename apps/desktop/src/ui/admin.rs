@@ -23,8 +23,8 @@ pub fn dialog_for(s: &State, modal: &Modal, window: [f32; 2], p: &Palette) -> Op
     Some(match modal {
         Modal::RoomForm { form, fields } => room_form(account, form, fields, p),
         Modal::RoomSettings(dialog) => room_settings(s, dialog, window, p),
-        Modal::SpaceRooms { space, .. } => space_rooms(account, space, p),
-        Modal::LeaveSpace { space, chosen, .. } => leave_space(account, space, chosen, p),
+        Modal::SpaceRooms { space, .. } => space_rooms(s, account, space, p),
+        Modal::LeaveSpace { space, chosen, .. } => leave_space(s, account, space, chosen, p),
         Modal::MemberLevel { name, edit, .. } => member_level(s, name, edit, p),
         _ => return None,
     })
@@ -693,15 +693,15 @@ fn advanced(settings: &RoomSettings, p: &Palette) -> El {
 // ----- a space's rooms -------------------------------------------------------------------------
 
 /// A room's or subspace's name as the account knows it, or its ID.
-fn child_name(account: &AccountData, room_id: &str) -> String {
+fn child_name(s: &State, account: &AccountData, room_id: &str) -> String {
     account
         .room(room_id)
-        .map(super::room::display_name)
+        .map(|room| super::room::display_name(room, &s.settings))
         .or_else(|| account.space(room_id).map(|space| space.name.clone()))
         .unwrap_or_else(|| room_id.to_owned())
 }
 
-fn space_rooms(account: &AccountData, space_id: &str, p: &Palette) -> El {
+fn space_rooms(s: &State, account: &AccountData, space_id: &str, p: &Palette) -> El {
     let Some(space) = account.space(space_id) else { return el() };
     let last = space.children.len().saturating_sub(1);
     let mut listed = col().key("space-rooms-list").w_full().gap(2.0);
@@ -731,7 +731,7 @@ fn space_rooms(account: &AccountData, space_id: &str, p: &Palette) -> El {
                 .radius(8.0)
                 .hover(p.hover.alpha(p.hover.a * 2.0))
                 .child(
-                    text(child_name(account, child))
+                    text(child_name(s, account, child))
                         .font(font::BODY)
                         .color(if joined { p.text } else { p.text_muted })
                         .grow(1.0)
@@ -775,7 +775,7 @@ fn space_rooms(account: &AccountData, space_id: &str, p: &Palette) -> El {
                 .gap(10.0)
                 .center_y()
                 .child(
-                    text(super::room::display_name(room))
+                    text(super::room::display_name(room, &s.settings))
                         .font(font::BODY)
                         .color(p.text)
                         .grow(1.0)
@@ -800,7 +800,7 @@ fn space_rooms(account: &AccountData, space_id: &str, p: &Palette) -> El {
 
 // ----- leaving a space -------------------------------------------------------------------------
 
-fn leave_space(account: &AccountData, space_id: &str, chosen: &[String], p: &Palette) -> El {
+fn leave_space(s: &State, account: &AccountData, space_id: &str, chosen: &[String], p: &Palette) -> El {
     let name = account.space(space_id).map(|space| space.name.clone()).unwrap_or_default();
     let children = joined_children(account, space_id);
     let mut content =
@@ -820,7 +820,7 @@ fn leave_space(account: &AccountData, space_id: &str, chosen: &[String], p: &Pal
             let id = (*child).to_owned();
             let checked = chosen.iter().any(|c| c == child);
             list.child(
-                pick_row(None, &child_name(account, child), checked, p)
+                pick_row(None, &child_name(s, account, child), checked, p)
                     .key(format!("leave-with-{child}"))
                     .on_press(move |s: &mut State| s.toggle_leave_with(&id)),
             )

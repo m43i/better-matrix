@@ -18,6 +18,7 @@ import {
 
 import { t } from '../../i18n';
 import { type Block, type Inline, type Marks } from '../../state/html';
+import { mentionName } from '../../state/names';
 import { revealMedia } from '../../state/actions/safety';
 import { useAppStore, useStore } from '../../state/react';
 import { inlinePicture } from '../../state/selectors';
@@ -331,9 +332,12 @@ function Pill({ inline }: { inline: Extract<Inline, { type: 'mention' }> }) {
   const store = useAppStore();
   const { account, timelineKey, shown } = useTimelineContext();
   const me = inline.kind === 'user' && inline.id === account;
+  const reverse = useStore((s) => s.settings.reverseDisplayNames);
 
-  const label =
-    inline.kind === 'user' && !inline.label.startsWith('@') ? `@${inline.label}` : inline.label;
+  const name =
+    inline.kind === 'user' ? mentionName(inline.label, inline.id, reverse) : inline.label;
+
+  const label = inline.kind === 'user' && !name.startsWith('@') ? `@${name}` : name;
 
   return (
     <Text

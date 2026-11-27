@@ -335,11 +335,12 @@ impl Account {
     /// one came, when the sync sent another presence (it was asked for before a save here, and
     /// may have reached the server after the save's announcement), or when this session hasn't
     /// announced it yet (the first sync, an announcement that failed). Syncing as offline leaves
-    /// a session's presence as it was, so hiding needs this on every session.
+    /// a session's presence as it was, so hiding needs this on every UI session. Terminal sync
+    /// passes no presence to apply saved status without announcing it.
     pub(crate) async fn follow_status(
         &self,
         account_data: &[Raw<matrix_sdk::ruma::events::AnyGlobalAccountDataEvent>],
-        sent: &PresenceState,
+        sent: Option<&PresenceState>,
         report: impl Fn(Status),
     ) {
         let synced = account_data
@@ -353,8 +354,10 @@ impl Account {
             known.saved = came;
         }
         known.synced = true;
-        let raced = known.saved.is_some_and(|saved| saved.status.presence() != *sent);
-        self.settle(&mut known, came.is_some() || raced).await;
+        if let Some(sent) = sent {
+            let raced = known.saved.is_some_and(|saved| saved.status.presence() != *sent);
+            self.settle(&mut known, came.is_some() || raced).await;
+        }
         if let Some(came) = came {
             report(came.status);
         }
@@ -615,7 +618,7 @@ mod tests {
     async fn a_save_older_than_a_synced_status_should_keep_the_synced_one() {
         let server = Homeserver::new(json!({ "status": "Hidden", "changed_at": 50 }), None, || true);
         let account = server.account().await;
-        account.follow_status(&sync(&account).await.account_data, &PresenceState::Offline, |_| {}).await;
+        account.follow_status(&sync(&account).await.account_data, Some(&PresenceState::Offline), |_| {}).await;
         let (heard, report) = reports();
         account.set_status(Status::Online, 10, report).await.unwrap();
         assert_eq!(*heard.lock().unwrap(), vec![Status::Hidden]);
@@ -628,7 +631,7 @@ mod tests {
         let account = server.account().await;
         account.set_status(Status::Hidden, 10, |_| {}).await.unwrap();
         let (heard, report) = reports();
-        account.follow_status(&sync(&account).await.account_data, &PresenceState::Offline, report).await;
+        account.follow_status(&sync(&account).await.account_data, Some(&PresenceState::Offline), report).await;
         assert!(heard.lock().unwrap().is_empty());
         assert_eq!(account.status().await, Some(Status::Hidden));
         assert_eq!(server.presence(), vec![json!("offline")]);
@@ -639,7 +642,7 @@ mod tests {
         let server = Homeserver::plain();
         let account = server.account().await;
         account.set_status(Status::Hidden, 10, |_| {}).await.unwrap();
-        account.follow_status(&sync(&account).await.account_data, &PresenceState::Offline, |_| {}).await;
+        account.follow_status(&sync(&account).await.account_data, Some(&PresenceState::Offline), |_| {}).await;
         assert_eq!(account.status().await, Some(Status::Hidden));
         assert_eq!(server.presence(), vec![json!("offline")]);
     }
@@ -649,7 +652,7 @@ mod tests {
         let server = Homeserver::plain();
         let account = server.account().await;
         account.set_status(Status::Hidden, 10, |_| {}).await.unwrap();
-        account.follow_status(&[], &PresenceState::Online, |_| {}).await;
+        account.follow_status(&[], Some(&PresenceState::Online), |_| {}).await;
         assert_eq!(server.presence(), vec![json!("offline"), json!("offline")]);
     }
 
@@ -659,7 +662,7 @@ mod tests {
         let account = server.account().await;
         account.set_status(Status::Hidden, 10, |_| {}).await.unwrap();
         account.sync_failed(&PresenceState::Online).await;
-        account.follow_status(&[], &PresenceState::Offline, |_| {}).await;
+        account.follow_status(&[], Some(&PresenceState::Offline), |_| {}).await;
         assert_eq!(server.presence(), vec![json!("offline"), json!("offline")]);
     }
 
@@ -669,7 +672,7 @@ mod tests {
         let account = server.account().await;
         account.set_status(Status::Hidden, 10, |_| {}).await.unwrap();
         account.sync_failed(&PresenceState::Offline).await;
-        account.follow_status(&[], &PresenceState::Offline, |_| {}).await;
+        account.follow_status(&[], Some(&PresenceState::Offline), |_| {}).await;
         assert_eq!(server.presence(), vec![json!("offline")]);
     }
 
@@ -678,7 +681,7 @@ mod tests {
         let server = Homeserver::new(json!({ "status": "Hidden", "changed_at": 5 }), None, || true);
         let account = server.account().await;
         let (heard, report) = reports();
-        account.follow_status(&sync(&account).await.account_data, &PresenceState::Offline, report).await;
+        account.follow_status(&sync(&account).await.account_data, Some(&PresenceState::Offline), report).await;
         assert_eq!(*heard.lock().unwrap(), vec![Status::Hidden]);
         assert_eq!(server.presence(), vec![json!("offline")]);
     }
@@ -688,7 +691,7 @@ mod tests {
         let server = Homeserver::plain();
         let account = server.account().await;
         let (heard, report) = reports();
-        account.follow_status(&[], &PresenceState::Offline, report).await;
+        account.follow_status(&[], Some(&PresenceState::Offline), report).await;
         assert!(heard.lock().unwrap().is_empty() && server.presence().is_empty());
     }
 
@@ -699,11 +702,11 @@ mod tests {
         let server =
             Homeserver::new(json!({ "status": "Hidden" }), None, move || reads.fetch_add(1, Ordering::Relaxed) > 0);
         let account = server.account().await;
-        account.follow_status(&sync(&account).await.account_data, &PresenceState::Offline, |_| {}).await;
+        account.follow_status(&sync(&account).await.account_data, Some(&PresenceState::Offline), |_| {}).await;
         assert!(server.presence().is_empty());
-        account.follow_status(&[], &PresenceState::Offline, |_| {}).await;
+        account.follow_status(&[], Some(&PresenceState::Offline), |_| {}).await;
         assert_eq!(server.presence().len(), 1);
-        account.follow_status(&[], &PresenceState::Offline, |_| {}).await;
+        account.follow_status(&[], Some(&PresenceState::Offline), |_| {}).await;
         assert_eq!(server.presence().len(), 1, "announced once it went through");
     }
 
@@ -712,7 +715,7 @@ mod tests {
         let server = Homeserver::plain();
         let account = server.account().await;
         account.set_status(Status::Away, 10, |_| {}).await.unwrap();
-        account.follow_status(&[], &PresenceState::Unavailable, |_| {}).await;
+        account.follow_status(&[], Some(&PresenceState::Unavailable), |_| {}).await;
         let (heard, report) = shown();
         account.set_status_message(Some("  🌴 On vacation "), None, 1, |me, _| report(me)).await.unwrap();
         let sent = server.sent("/presence/");
@@ -725,7 +728,7 @@ mod tests {
     async fn a_blank_status_message_should_clear_it() {
         let server = Homeserver::plain();
         let account = server.account().await;
-        account.follow_status(&[], &PresenceState::Online, |_| {}).await;
+        account.follow_status(&[], Some(&PresenceState::Online), |_| {}).await;
         let (heard, report) = shown();
         account.set_status_message(Some("   "), None, 1, |me, _| report(me)).await.unwrap();
         assert_eq!(server.sent("/presence/").last(), Some(&json!({ "presence": "online" })));
@@ -775,7 +778,7 @@ mod tests {
     async fn an_overdue_status_message_should_clear_after_the_device_reopens() {
         let server = Homeserver::new(Value::Null, Some("Out"), || true);
         let account = server.account().await;
-        account.follow_status(&[], &PresenceState::Online, |_| {}).await;
+        account.follow_status(&[], Some(&PresenceState::Online), |_| {}).await;
         let shown = run_overdue_expiry(&account).await;
         assert_eq!(shown.status_message, None);
         assert_eq!(server.sent("/presence/"), [json!({ "presence": "online" })]);

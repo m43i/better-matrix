@@ -112,7 +112,7 @@ async function ensureChannel(): Promise<void> {
 }
 
 async function present(n: Notification): Promise<void> {
-  await presentContent(contentOf(n));
+  await presentContent(contentOf(n, appStore?.getState().settings.reverseDisplayNames));
 }
 
 /** Shows a notification now (also from a push task with no screen). */

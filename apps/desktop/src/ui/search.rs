@@ -6,7 +6,7 @@ use super::people::person_row;
 use super::room::display_name;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf, tp};
-use crate::state::{AccountData, SearchFilter, SearchStatus, State};
+use crate::state::{AccountData, SearchFilter, SearchStatus, Settings, State};
 use matrix_core::search::fuzzy_match;
 use matrix_core::{DirectoryKind, LinkTarget, Permalink, Person, RoomKind, RoomSummary};
 use rune::{Align, El, ScrollSpec, Side, Span, col, el, icon, row, text};
@@ -26,6 +26,17 @@ pub fn highlights(value: &str, positions: &[usize], p: &Palette) -> El {
         .map(|(_, (byte, c))| Span::new(byte, byte + c.len_utf8()).color(p.accent).weight(700.0))
         .collect();
     rune::rich(value.to_owned(), spans).font(font::BODY).color(p.text).truncate()
+}
+
+/// Local name matching accepts the display label and the original room name.
+fn room_match_rank(room: &RoomSummary, query: &str, settings: &Settings) -> Option<usize> {
+    let original = fuzzy_match(&room.name, query).map(|matched| matched.rank);
+    let shown = settings.room_name(room);
+    if shown == room.name {
+        return original;
+    }
+    let display = fuzzy_match(&shown, query).map(|matched| matched.rank);
+    original.into_iter().chain(display).min()
 }
 
 /// The search's results under the field: a typed link or address to open, rooms, direct chats
@@ -71,7 +82,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
             RoomKind::Group => el().size(28.0, 28.0).center().child(text("#").font(font::HEADER).color(p.text_muted)),
             RoomKind::Direct => media_avatar(
                 room.dm_users.first().unwrap_or(&room.room_id),
-                &room.name,
+                &s.settings.room_name(room),
                 room.avatar.as_ref(),
                 &s.media,
                 28.0,
@@ -90,7 +101,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
             .focusable(true)
             .cursor(rune::Cursor::Pointer)
             .child(mark)
-            .child(highlighted(&display_name(room), query, p).grow(1.0))
+            .child(highlighted(&display_name(room, &s.settings), query, p).grow(1.0))
             .on_press_tx(crate::state::navigate(move |s| s.open_found_room(&id)))
     };
     // Typing its name offers the note to self until there is one, which is then found as a room.
@@ -103,7 +114,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
             .rooms
             .iter()
             .filter(|room| !query.is_empty() && filter.includes(SearchFilter::Rooms) && room.kind == kind)
-            .filter_map(|room| fuzzy_match(&room.name, query).map(|matched| (room, matched.rank)))
+            .filter_map(|room| room_match_rank(room, query, &s.settings).map(|rank| (room, rank)))
             .collect();
         found.sort_by_key(|(room, rank)| (std::cmp::Reverse(account.search_usage.room(&room.room_id)), *rank));
         found.truncate(RESULTS);
@@ -155,6 +166,7 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
                     &s.media,
                     p,
                     query,
+                    &space.name,
                 )
                 .on_press_tx(crate::state::navigate(move |s| s.open_found_space(&id))),
             );
@@ -237,8 +249,15 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
         for person in people {
             let id = person.id.clone();
             list = list.child(
-                person_row(format!("found-person-{id}"), person, &s.media, p, query)
-                    .on_press(move |s: &mut State| s.open_direct_chat(&id)),
+                person_row(
+                    format!("found-person-{id}"),
+                    person,
+                    &s.media,
+                    p,
+                    query,
+                    &s.settings.person_name(&person.name),
+                )
+                .on_press(move |s: &mut State| s.open_direct_chat(&id)),
             );
         }
     }
@@ -257,12 +276,14 @@ pub fn search_results(s: &State, account: &AccountData, p: &Palette, available: 
         messages.sort_by_key(|hit| std::cmp::Reverse(account.search_usage.message(&hit.room_id, &hit.sender)));
         for hit in messages {
             let hit = hit.clone();
-            let room = account.room(&hit.room_id).map_or_else(|| hit.room_id.clone(), display_name);
+            let room =
+                account.room(&hit.room_id).map_or_else(|| hit.room_id.clone(), |room| display_name(room, &s.settings));
             let sender = account
                 .members
                 .get(&hit.room_id)
                 .and_then(|members| members.people.iter().find(|m| m.person.id == hit.sender))
                 .map_or(hit.sender.as_str(), |m| m.person.name.as_str());
+            let sender = s.settings.person_name(sender);
             let meta = format!(
                 "{room} · {sender} · {}",
                 super::timeline::date_label(

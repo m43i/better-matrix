@@ -110,6 +110,7 @@ pub use sections::{
     DIRECT, FAVOURITES, INVITATIONS, LOW_PRIORITY, ROOMS, SectionView, is_builtin, note_to_self, ordered_spaces,
     sections,
 };
+pub(crate) use settings::mention_name;
 pub use settings::{Appearance, Emoticons, MessageLayout, PlaybackSpeed, Settings, SettingsSection, Zoom};
 pub use sign_in::{Asked, SignInForm, SignInStep};
 pub use status_message::{
@@ -1345,6 +1346,7 @@ impl State {
             Event::Finished { request, result } => self.finish(request, result),
             // The sign-in in progress takes its account from `AccountAdded`.
             Event::SignedIn { .. } => {}
+            Event::CommandError(..) | Event::TerminalResult(..) | Event::SyncReady(_) => {}
             Event::HomeserverDiscovered { request, homeserver } => {
                 if self.sign_in.step == SignInStep::Discovering(request) {
                     self.continue_sign_in(homeserver);
@@ -1799,14 +1801,15 @@ impl State {
                     && self.nav.account.as_ref() == Some(&notification.account)
                     && self.active_room_id() == Some(notification.room_id.as_str());
                 if !looking {
+                    let sender = self.settings.person_name(&notification.sender_name);
                     let conversation = if notification.one_to_one {
-                        notification.sender_name
+                        sender.into_owned()
                     } else {
-                        tf!("notify.message_in_room", sender = notification.sender_name, room = notification.room_name)
+                        tf!("notify.message_in_room", sender = sender, room = notification.room_name)
                     };
                     let title = match self.accounts.get(&notification.account) {
                         Some(account) if self.accounts.iter().nth(1).is_some() => {
-                            format!("{conversation} · {}", account.summary.display_name)
+                            format!("{conversation} · {}", self.settings.person_name(&account.summary.display_name))
                         }
                         _ => conversation,
                     };
@@ -5210,6 +5213,11 @@ impl State {
 
     pub fn set_close_to_tray(&mut self, enabled: bool) {
         self.settings.close_to_tray = enabled;
+        self.shell.save_settings(self.settings.clone());
+    }
+
+    pub fn set_reverse_display_names(&mut self, enabled: bool) {
+        self.settings.reverse_display_names = enabled;
         self.shell.save_settings(self.settings.clone());
     }
 

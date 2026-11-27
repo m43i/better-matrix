@@ -24,6 +24,14 @@ fn older_settings_should_close_to_the_tray_by_default() {
 }
 
 #[test]
+fn the_reverse_display_names_setting_should_survive_loading_preferences() {
+    let settings = Settings { reverse_display_names: true, ..Settings::fixed_english() };
+    let mut prefs = Prefs::memory();
+    write_settings(&mut prefs, &settings).unwrap();
+    assert!(load_settings(&prefs).reverse_display_names);
+}
+
+#[test]
 fn quitting_during_a_settings_save_should_preserve_the_latest_close_preference() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("prefs.json");

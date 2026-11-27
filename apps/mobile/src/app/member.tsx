@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../i18n';
+import { usePersonName } from '../ui/displayNames';
 import { routes } from '../routes';
 import { invite, listAllMembers, moderate, openDirectChat } from '../state/actions/people';
 import { setIgnored } from '../state/actions/safety';
@@ -68,6 +69,7 @@ export default function MemberScreen() {
     if (userId !== account) loadIdentity(store, account, userId);
   }, [store, account, userId]);
   const member = memberOf(members, userId);
+  const displayName = usePersonName(member?.person.name ?? userId);
 
   if (!members || !member) return null;
   const { person } = member;
@@ -101,7 +103,7 @@ export default function MemberScreen() {
   const inviteTo = (target: string, name: string) => {
     setOpen('none');
     invite(store, account, target, person.id).then(
-      () => Alert.alert(t('mobile.people.invited_to', { name: person.name, room: name })),
+      () => Alert.alert(t('mobile.people.invited_to', { name: displayName, room: name })),
       () => {},
     );
   };
@@ -129,14 +131,14 @@ export default function MemberScreen() {
     const [title, body, confirm] =
       action.type === 'Kick'
         ? [
-            t('confirm.kick_title', { name: person.name }),
+            t('confirm.kick_title', { name: displayName }),
             t('confirm.kick_body'),
             t('confirm.kick'),
           ]
         : action.type === 'Ban'
-          ? [t('confirm.ban_title', { name: person.name }), t('confirm.ban_body'), t('confirm.ban')]
+          ? [t('confirm.ban_title', { name: displayName }), t('confirm.ban_body'), t('confirm.ban')]
           : [
-              t('confirm.promote_title', { name: person.name }),
+              t('confirm.promote_title', { name: displayName }),
               t('confirm.promote_body'),
               t('confirm.promote'),
             ];
@@ -154,7 +156,7 @@ export default function MemberScreen() {
       return;
     }
 
-    Alert.alert(t('confirm.ignore_title', { name: person.name }), t('mobile.safety.ignore_body'), [
+    Alert.alert(t('confirm.ignore_title', { name: displayName }), t('mobile.safety.ignore_body'), [
       { text: t('common.cancel'), style: 'cancel' },
       {
         text: t('safety.ignore'),
@@ -205,14 +207,14 @@ export default function MemberScreen() {
         <Avatar
           account={account}
           id={person.id}
-          name={person.name}
+          name={displayName}
           media={person.avatar}
           size={72}
           presence={member.presence}
         />
         <View style={styles.name}>
           <Text style={[font.title, { color: palette.text }]} numberOfLines={2}>
-            {person.name}
+            {displayName}
           </Text>
           {verified ? (
             <View testID="member-verified" accessible accessibilityLabel={t('members.verified')}>
@@ -231,7 +233,7 @@ export default function MemberScreen() {
         <View style={styles.warning} testID="member-identity-changed">
           <Icon name="alert" size={20} color={palette.warning} />
           <Text style={[font.body, styles.warningText, { color: palette.text }]}>
-            {t('mobile.people.identity_changed', { name: person.name })}
+            {t('mobile.people.identity_changed', { name: displayName })}
           </Text>
         </View>
       ) : null}
@@ -255,7 +257,7 @@ export default function MemberScreen() {
                   testID="member-verify"
                   icon="shield"
                   title={t('mobile.people.verify')}
-                  subtitle={t('mobile.people.verify_hint', { name: person.name })}
+                  subtitle={t('mobile.people.verify_hint', { name: displayName })}
                   onPress={verify}
                   chevron={false}
                 />

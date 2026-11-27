@@ -7,6 +7,8 @@ import { Image } from 'expo-image';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../../i18n';
+import { mentionName, personName } from '../../state/names';
+import { useStore } from '../../state/react';
 import type { Suggestion } from '../../state/suggestions';
 import { font } from '../../theme/palette';
 import { Avatar } from '../Avatar';
@@ -58,16 +60,23 @@ export function Suggestions({
 
 function SuggestionRow({ account, suggestion }: { account: AccountId; suggestion: Suggestion }) {
   const palette = usePalette();
+  const reverse = useStore((s) => s.settings.reverseDisplayNames);
 
   switch (suggestion.type) {
-    case 'pill':
+    case 'pill': {
+      const user = suggestion.pill.id.startsWith('user:');
+
+      const label = user
+        ? mentionName(suggestion.pill.label, suggestion.pill.id.slice('user:'.length), reverse)
+        : suggestion.pill.label;
+
       return (
         <>
           {suggestion.face ? (
             <Avatar
               account={account}
               id={suggestion.face.id}
-              name={suggestion.face.name}
+              name={personName(suggestion.face.name, user && reverse)}
               media={suggestion.face.media}
               size={28}
             />
@@ -77,13 +86,15 @@ function SuggestionRow({ account, suggestion }: { account: AccountId; suggestion
             </View>
           )}
           <Text style={[font.bodyStrong, styles.label, { color: palette.text }]} numberOfLines={1}>
-            {suggestion.pill.label}
+            {label}
           </Text>
           <Text style={[font.meta, styles.detail, { color: palette.textMuted }]} numberOfLines={1}>
             {suggestion.detail ?? (suggestion.face ? '' : t('mobile.composer.mention_everyone'))}
           </Text>
         </>
       );
+    }
+
     case 'emote':
       return (
         <>

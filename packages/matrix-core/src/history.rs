@@ -245,7 +245,7 @@ impl Account {
 }
 
 /// The file a message carries, if it is a file, image, video or audio message.
-fn attachment(event: &Value) -> Option<Attachment> {
+pub(crate) fn attachment(event: &Value) -> Option<Attachment> {
     if event["type"] != "m.room.message" {
         return None;
     }

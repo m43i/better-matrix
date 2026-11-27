@@ -68,6 +68,26 @@ fn an_unfiltered_search_should_show_each_kind_in_its_section() {
 }
 
 #[test]
+fn a_direct_chat_should_be_searchable_in_both_name_orders() {
+    const ROOM: &str = "!dm-grace:example.org";
+    let mut rt = runtime(|s| {
+        demo::search(s);
+        let id = matrix_core::AccountId::new(demo::ADA);
+        let account = s.accounts.get(&id).unwrap();
+        let (mut rooms, spaces) = (account.rooms.clone(), account.spaces.clone());
+        rooms.iter_mut().find(|room| room.room_id == ROOM).unwrap().name = "Hopper, Grace".into();
+        s.accounts.set_room_list(&id, matrix_core::RoomList { rooms, spaces, ..Default::default() });
+        s.settings.reverse_display_names = true;
+        s.search.field = rune::TextEdit::new("Grace, Hopper");
+    });
+    let key = format!("found-room-{ROOM}");
+    assert!(rt.find(&key).is_some());
+    rt.update(|s, _| s.search.field = rune::TextEdit::new("Hopper, Grace"));
+    rt.frame(0.0);
+    assert!(rt.find(&key).is_some());
+}
+
+#[test]
 fn a_room_filter_should_hide_other_kinds_and_its_chip_should_clear_it() {
     let mut rt = runtime(|s| {
         demo::search(s);

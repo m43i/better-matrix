@@ -78,8 +78,8 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .padding(20.0)
         .gap(10.0)
         .items_center()
-        .child(media_avatar(&room.room_id, &room.name, room.avatar.as_ref(), &s.media, 72.0))
-        .child(text(super::room::display_name(room)).font(font::HEADER).color(p.text).wrap())
+        .child(media_avatar(&room.room_id, &s.settings.room_name(room), room.avatar.as_ref(), &s.media, 72.0))
+        .child(text(super::room::display_name(room, &s.settings)).font(font::HEADER).color(p.text).wrap())
         .children(topic);
     let room_id = room.room_id.clone();
     let (leave_label, leave_icon) = match room.kind {
@@ -170,7 +170,7 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
 }
 
 /// The room's threads, but those started by people the user ignores; pressing one opens it.
-pub fn threads(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
+pub fn threads(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
     let listed: Option<Vec<_>> = account
         .threads
         .get(&room.room_id)
@@ -199,7 +199,12 @@ pub fn threads(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
                     .cursor(rune::Cursor::Pointer)
                     .focusable(true)
                     .label(thread.body.clone())
-                    .child(text(thread.sender_name.clone()).font(font::BODY_STRONG).color(p.text).truncate())
+                    .child(
+                        text(s.settings.person_name(&thread.sender_name))
+                            .font(font::BODY_STRONG)
+                            .color(p.text)
+                            .truncate(),
+                    )
                     .child(text(thread.body.clone()).font(font::BODY).color(p.text).max_lines(2))
                     .child(text(meta).font(font::META).color(p.accent))
                     .on_press(move |s: &mut State| s.open_listed_thread(&root)),
@@ -231,9 +236,9 @@ pub fn files(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) 
                 AttachmentKind::File => &icons::FILE,
             };
             let detail = if held {
-                format!("{} · {}", file.sender_name, t!("safety.hidden_media_press"))
+                format!("{} · {}", s.settings.person_name(&file.sender_name), t!("safety.hidden_media_press"))
             } else {
-                format!("{} · {}", file.sender_name, when(file.timestamp))
+                format!("{} · {}", s.settings.person_name(&file.sender_name), when(file.timestamp))
             };
             let (opened, key, id) =
                 (file.attachment.clone(), matrix_core::TimelineKey::room(&room.room_id), file.event_id.clone());
@@ -303,10 +308,13 @@ pub fn pins(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -
                     matrix_core::TimelineKey { room_id: room.room_id.clone(), thread: pin.thread.clone() };
                 let event_id = pin.event_id.clone();
                 let (key, id) = (matrix_core::TimelineKey::room(&room.room_id), pin.event_id.clone());
-                let mut header =
-                    row().w_full().min_h(28.0).gap(4.0).center_y().child(
-                        text(pin.sender_name.clone()).font(font::BODY_STRONG).color(p.text).grow(1.0).truncate(),
-                    );
+                let mut header = row().w_full().min_h(28.0).gap(4.0).center_y().child(
+                    text(s.settings.person_name(&pin.sender_name))
+                        .font(font::BODY_STRONG)
+                        .color(p.text)
+                        .grow(1.0)
+                        .truncate(),
+                );
                 if room.can_pin {
                     header = header.child(
                         icon_button(&icons::UNPIN, t!("actions.unpin"), false, p.text_muted, p)
@@ -334,8 +342,14 @@ pub fn pins(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -
                     .items_start()
                     .border_sides([0.0, 0.0, 1.0, 0.0], p.divider)
                     .child(
-                        media_avatar(&pin.sender_id, &pin.sender_name, pin.sender_avatar.as_ref(), &s.media, 32.0)
-                            .mt(3.0),
+                        media_avatar(
+                            &pin.sender_id,
+                            &s.settings.person_name(&pin.sender_name),
+                            pin.sender_avatar.as_ref(),
+                            &s.media,
+                            32.0,
+                        )
+                        .mt(3.0),
                     )
                     .child(body);
                 if pin.body.is_some() {
@@ -449,14 +463,23 @@ fn log_row(s: &State, id: &str, event: &matrix_core::RoomEvent, p: &Palette) -> 
         .py(8.0)
         .gap(10.0)
         .items_start()
-        .child(media_avatar(&event.sender.id, &event.sender.name, event.sender.avatar.as_ref(), &s.media, 28.0).mt(2.0))
+        .child(
+            media_avatar(
+                &event.sender.id,
+                &s.settings.person_name(&event.sender.name),
+                event.sender.avatar.as_ref(),
+                &s.media,
+                28.0,
+            )
+            .mt(2.0),
+        )
         .child(
             col()
                 .grow(1.0)
                 .min_w(0.0)
                 .gap(2.0)
                 .child(
-                    text(super::timeline::room_event_text(event))
+                    text(super::timeline::room_event_text(event, &s.settings))
                         .font(font::BODY)
                         .color(p.text)
                         .wrap()

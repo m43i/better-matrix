@@ -1,6 +1,16 @@
 import { DEFAULT_SETTINGS, parseSettings } from '../settings';
 
 describe('parseSettings', () => {
+  it('older settings should preserve Matrix display name order', () => {
+    expect(parseSettings(JSON.stringify({ language: 'en' })).reverseDisplayNames).toBe(false);
+  });
+
+  it('the enabled name order preference should be read back', () => {
+    expect(parseSettings(JSON.stringify({ reverseDisplayNames: true })).reverseDisplayNames).toBe(
+      true,
+    );
+  });
+
   it('push should be on for every account by default', () => {
     expect([parseSettings(null).pushEnabled, parseSettings(null).pushOff]).toEqual([true, []]);
   });

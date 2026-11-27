@@ -54,12 +54,13 @@ pub fn indicator(
     message: &Message,
     faces: usize,
     media: &MediaCache,
+    settings: &crate::state::Settings,
     p: &Palette,
 ) -> El {
     let mut stack = row().center_y();
     for (index, receipt) in message.read_receipts.iter().take(faces).enumerate() {
         let person = account.reader(&key.room_id, &receipt.user_id);
-        let face = media_avatar(&person.id, &person.name, person.avatar.as_ref(), media, FACE)
+        let face = media_avatar(&person.id, &settings.person_name(&person.name), person.avatar.as_ref(), media, FACE)
             .radius(FACE / 2.0)
             .border(1.5, p.bg);
         stack = stack.child(if index == 0 { face } else { face.ml(-FACE_OVERLAP) });
@@ -126,11 +127,12 @@ pub fn panels(
                     return el();
                 };
                 let person = account.reader(&row_target.room_id, &receipt.user_id);
+                let name = s.settings.person_name(&person.name);
                 let mut details = col()
                     .grow(1.0)
                     .min_w(0.0)
                     .gap(2.0)
-                    .child(text(person.name.clone()).font(font::BODY).color(palette.text).truncate());
+                    .child(text(name.as_ref()).font(font::BODY).color(palette.text).truncate());
                 if let Some(at) = receipt.timestamp_ms {
                     details = details.child(
                         text(when(at))
@@ -152,9 +154,9 @@ pub fn panels(
                     .role("button")
                     .cursor(Cursor::Pointer)
                     .focusable(true)
-                    .label(person.name.clone())
+                    .label(name.as_ref())
                     .help(person.id.clone())
-                    .child(media_avatar(&person.id, &person.name, person.avatar.as_ref(), &s.media, 32.0).radius(16.0))
+                    .child(media_avatar(&person.id, &name, person.avatar.as_ref(), &s.media, 32.0).radius(16.0))
                     .child(details)
                     .on_press(move |s: &mut State| s.toggle_reader_menu(&user_id))
             },

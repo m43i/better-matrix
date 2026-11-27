@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 
 import { t, tp } from '../../i18n';
+import { usePersonName } from '../displayNames';
 import { routes } from '../../routes';
 import {
   addAttachments,
@@ -111,6 +112,7 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
   const palette = usePalette();
   const router = useRouter();
   const state = useStore((s) => composer(s, account, timelineKey));
+  const replyName = usePersonName(state.replyTo?.sender_name ?? '');
   const direct = useStore((s) => room(s, account, timelineKey.room_id)?.kind === 'Direct');
   const roomId = timelineKey.room_id;
   const thread = timelineKey.thread;
@@ -537,7 +539,7 @@ export function Composer({ account, timelineKey, roomName }: ComposerProps) {
       {state.replyTo && !editing ? (
         <Banner
           icon="reply"
-          title={t('composer.reply_to', { name: state.replyTo.sender_name })}
+          title={t('composer.reply_to', { name: replyName })}
           quote={excerpt(state.replyTo)}
           cancelLabel={t('composer.reply_cancel')}
           onCancel={() => cancelReply(store, account, timelineKey)}

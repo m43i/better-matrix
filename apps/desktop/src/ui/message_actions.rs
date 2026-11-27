@@ -249,6 +249,7 @@ pub fn dialog(s: &State, p: &Palette) -> Option<El> {
                     );
                     for room in rooms.iter().filter(|room| room.kind == kind) {
                         let id = room.room_id.clone();
+                        let name = s.settings.room_name(room);
                         let leading = match kind {
                             RoomKind::Group => rune::el()
                                 .size(28.0, 28.0)
@@ -256,7 +257,7 @@ pub fn dialog(s: &State, p: &Palette) -> Option<El> {
                                 .child(text("#").font(font::HEADER).color(p.text_muted)),
                             RoomKind::Direct => media_avatar(
                                 room.dm_users.first().unwrap_or(&room.room_id),
-                                &room.name,
+                                &name,
                                 room.avatar.as_ref(),
                                 &s.media,
                                 28.0,
@@ -273,9 +274,9 @@ pub fn dialog(s: &State, p: &Palette) -> Option<El> {
                                 .hover(p.hover)
                                 .role("button")
                                 .focusable(sending.is_none())
-                                .label(room.name.clone())
+                                .label(name.as_ref())
                                 .child(leading)
-                                .child(text(room.name.clone()).font(font::BODY).color(p.text).grow(1.0).truncate())
+                                .child(text(name).font(font::BODY).color(p.text).grow(1.0).truncate())
                                 .on_press(move |s: &mut State| s.forward_to(id.clone())),
                         );
                     }

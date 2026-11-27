@@ -355,6 +355,7 @@ mod tests {
             .map(|room_id| RoomSummary {
                 room_id: (*room_id).into(),
                 name: (*room_id).into(),
+                name_from_member: false,
                 topic: None,
                 kind: RoomKind::Group,
                 unread: 0,

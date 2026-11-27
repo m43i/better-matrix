@@ -1,6 +1,8 @@
 //! This device's settings: language, appearance, message layout and interface size. Account-wide settings (notification defaults)
 //! live on the homeserver and arrive through the engine instead.
 
+use std::borrow::Cow;
+
 use crate::i18n::{Language, t};
 
 /// Light, dark, or whatever the system uses.
@@ -164,6 +166,8 @@ pub struct Settings {
     pub appearance: Appearance,
     pub message_layout: MessageLayout,
     pub zoom: Zoom,
+    /// Show a person's "Last, First" display name as "First, Last".
+    pub reverse_display_names: bool,
     /// Keep the app running in the system tray when its window closes.
     pub close_to_tray: bool,
     /// Play GIFs linked from Giphy, Tenor and Imgur. Loading them contacts those sites.
@@ -237,6 +241,7 @@ impl Default for Settings {
             appearance: Appearance::default(),
             message_layout: MessageLayout::default(),
             zoom: Zoom::default(),
+            reverse_display_names: false,
             close_to_tray: true,
             show_link_gifs: true,
             show_link_previews: true,
@@ -256,6 +261,42 @@ impl Settings {
     pub fn fixed_english() -> Self {
         Self { language: Language::Locale("en"), ..Self::default() }
     }
+
+    pub fn person_name<'a>(&self, name: &'a str) -> Cow<'a, str> {
+        person_name(name, self.reverse_display_names)
+    }
+
+    pub fn room_name<'a>(&self, room: &'a matrix_core::RoomSummary) -> Cow<'a, str> {
+        person_name(&room.name, self.reverse_display_names && room.name_from_member)
+    }
+}
+
+/// Format a person's name for display. The original name remains available to the engine and profile editor.
+pub(crate) fn person_name(name: &str, reverse: bool) -> Cow<'_, str> {
+    if reverse
+        && !(name.starts_with('@') && name.contains(':'))
+        && let Some((last, first)) = name.split_once(',')
+    {
+        let (last, first) = (last.trim(), first.trim());
+        if !last.is_empty() && !first.is_empty() && !first.contains(',') {
+            return format!("{first}, {last}").into();
+        }
+    }
+    Cow::Borrowed(name)
+}
+
+/// Keep a mention's leading @ with the displayed name.
+pub(crate) fn mention_name<'a>(label: &'a str, user_id: &str, reverse: bool) -> Cow<'a, str> {
+    if label == user_id || label.strip_prefix('@') == Some(user_id) {
+        return Cow::Borrowed(label);
+    }
+    if let Some(name) = label.strip_prefix('@') {
+        if let Cow::Owned(shown) = person_name(name, reverse) {
+            return format!("@{shown}").into();
+        }
+        return Cow::Borrowed(label);
+    }
+    person_name(label, reverse)
 }
 
 /// A section of the settings modal. New sections are new variants.

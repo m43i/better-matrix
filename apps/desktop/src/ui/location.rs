@@ -216,7 +216,7 @@ pub fn viewer(s: &State, account: &AccountId, key: &TimelineKey, event_id: &str,
         content = watch_expiry(content.key("location-viewer-content"), location);
         let face = super::components::media_avatar(
             &message.sender_id,
-            &message.sender_name,
+            &s.settings.person_name(&message.sender_name),
             message.sender_avatar.as_ref(),
             &s.media,
             36.0,

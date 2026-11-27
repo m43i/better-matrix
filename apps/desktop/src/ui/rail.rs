@@ -112,7 +112,7 @@ pub fn rail(s: &State, account: Option<&AccountData>, p: &Palette) -> El {
             .child(highlighted_tile(face, open, s.window_focused, p))
             .role("button")
             .cursor(rune::Cursor::Pointer)
-            .label(tf!("rail.switch_account", name = account.summary.display_name))
+            .label(tf!("rail.switch_account", name = s.settings.person_name(&account.summary.display_name)))
             .focusable(true)
             .on_press(|s: &mut State| s.toggle_popover(Popover::AccountSwitcher))
             .child(status_dot(account.status, 14.0, p.rail_bg, p).absolute(TILE - 10.0, TILE - 10.0));

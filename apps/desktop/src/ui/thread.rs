@@ -36,7 +36,7 @@ pub fn thread_panel(
                 .grow(1.0)
                 .min_w(0.0)
                 .child(text(t!("thread.title")).font(font::HEADER).color(p.text))
-                .child(text(inline_name(room)).font(font::META).color(p.text_muted).truncate()),
+                .child(text(inline_name(room, &s.settings)).font(font::META).color(p.text_muted).truncate()),
         )
         .child(
             icon_button(&icons::CLOSE, t!("thread.close"), false, p.text_muted, p)

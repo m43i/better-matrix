@@ -214,7 +214,7 @@ pub fn stage(s: &State, account: &AccountData, call: &Call, p: &Palette) -> El {
     if !call.compact() {
         content = content.child(layout_controls(s, call, p));
     }
-    if let Some(status) = status(call) {
+    if let Some(status) = status(s, call) {
         content = content.child(text(status).key("call-status").font(font::BODY).color(p.text_muted));
     }
     content = content.child(viewport);
@@ -245,12 +245,12 @@ pub fn stage(s: &State, account: &AccountData, call: &Call, p: &Palette) -> El {
 }
 
 /// What the stage says above the people, while the call isn't simply under way.
-fn status(call: &Call) -> Option<String> {
+fn status(s: &State, call: &Call) -> Option<String> {
     let info = &call.info;
     match info.phase {
         CallPhase::Calling => {
             let name = info.participants.first().map_or("", |person| person.person.name.as_str());
-            Some(tf!("call.calling", name = name))
+            Some(tf!("call.calling", name = s.settings.person_name(name)))
         }
         CallPhase::Connecting => Some(t!("call.connecting").to_owned()),
         CallPhase::Reconnecting => Some(t!("call.reconnecting").to_owned()),
@@ -263,16 +263,21 @@ fn participant<'a>(call: &'a Call, key: &CallTile) -> Option<&'a matrix_core::Ca
     call.info.participants.iter().find(|person| person.key == key.participant())
 }
 
-fn tile_name(call: &Call, key: &CallTile) -> String {
-    let name = participant(call, key).map_or_else(|| t!("call.you").to_owned(), |person| person.person.name.clone());
+fn tile_name(s: &State, call: &Call, key: &CallTile) -> String {
+    let name = participant(call, key)
+        .map_or_else(|| t!("call.you").to_owned(), |person| s.settings.person_name(&person.person.name).into_owned());
     if key.screen() { tf!("call.screen_of", name = name) } else { name }
 }
 
 fn tile_avatar(s: &State, account: &AccountData, call: &Call, key: &CallTile, size: f32) -> El {
     match participant(call, key) {
-        Some(person) => {
-            media_avatar(&person.person.id, &person.person.name, person.person.avatar.as_ref(), &s.media, size)
-        }
+        Some(person) => media_avatar(
+            &person.person.id,
+            &s.settings.person_name(&person.person.name),
+            person.person.avatar.as_ref(),
+            &s.media,
+            size,
+        ),
         None => account_avatar(&account.summary, &s.media, size),
     }
 }
@@ -295,7 +300,7 @@ fn voice_tile(s: &State, account: &AccountData, call: &Call, key: &CallTile, bou
             .max_w(160.0)
             .gap(6.0)
             .center_y()
-            .child(text(tile_name(call, key)).font(font::BODY_STRONG).color(p.text).truncate())
+            .child(text(tile_name(s, call, key)).font(font::BODY_STRONG).color(p.text).truncate())
             .children(muted(call, key).then(|| icon(&icons::MIC_OFF, 14.0).color(p.text_muted))),
     )
 }
@@ -368,7 +373,7 @@ fn speaking_ring(face: El, p: &Palette) -> El {
 
 /// One surface: shared content is always fitted, while cameras offer a full-frame view.
 fn video_tile(s: &State, account: &AccountData, call: &Call, key: &CallTile, size: [f32; 2], p: &Palette) -> El {
-    let name = tile_name(call, key);
+    let name = tile_name(s, call, key);
     let focus = key.clone();
     let mut cell = el()
         .key(tile_key(key))
@@ -590,7 +595,7 @@ pub fn call_bar(s: &State, p: &Palette) -> Option<El> {
         return None;
     }
     let room = s.accounts.get(&call.info.account).and_then(|account| account.room(&call.info.room_id));
-    let name = room.map_or_else(|| call.info.room_id.clone(), super::room::display_name);
+    let name = room.map_or_else(|| call.info.room_id.clone(), |room| super::room::display_name(room, &s.settings));
     let info = &call.info;
     Some(
         row()

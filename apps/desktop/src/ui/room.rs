@@ -16,7 +16,7 @@ use super::theme::{Palette, font};
 use super::thread::thread_panel;
 use super::timeline::{Context, timeline};
 use crate::i18n::{t, tf, tp};
-use crate::state::{AccountData, ComposerTarget, EmojiFor, PaneLayout, Popover, RichText, SidePanel, State};
+use crate::state::{AccountData, ComposerTarget, EmojiFor, PaneLayout, Popover, RichText, Settings, SidePanel, State};
 
 pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<State>, layout: &PaneLayout) -> El {
     let Some(room) = s.active_room_id().and_then(|id| account.room(id)) else {
@@ -43,7 +43,13 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
             .child(timeline(&cx, account.timeline(&key), "timeline", &s.near_top, Some(&s.at_bottom), p))
             // A room that was replaced takes no more messages: the way to the new one shows instead.
             .child(super::admin::successor_banner(s, room, p).unwrap_or_else(|| {
-                composer(s, ComposerTarget::Room, &tf!("composer.placeholder", room = inline_name(room)), p, ui)
+                composer(
+                    s,
+                    ComposerTarget::Room,
+                    &tf!("composer.placeholder", room = inline_name(room, &s.settings)),
+                    p,
+                    ui,
+                )
             }))
     };
     let body = match s.call_here() {
@@ -94,7 +100,7 @@ pub fn room_pane(s: &State, account: &AccountData, p: &Palette, ui: &mut Cx<Stat
         Some(SidePanel::Info) => Some(super::info::overview(s, room, p)),
         Some(SidePanel::Person(person)) => Some(super::members::person(s, account, room, person, p)),
         Some(SidePanel::Members) => Some(super::members::panel(s, account, room, p)),
-        Some(SidePanel::Threads) => Some(super::info::threads(account, room, p)),
+        Some(SidePanel::Threads) => Some(super::info::threads(s, account, room, p)),
         Some(SidePanel::Pins) => Some(super::info::pins(s, account, room, p)),
         Some(SidePanel::Log) => Some(super::info::log(account, room, p)),
         Some(SidePanel::Files) => Some(super::info::files(s, account, room, p)),
@@ -116,17 +122,17 @@ pub fn picking<'a>(s: &'a State, key: &TimelineKey) -> Option<&'a str> {
 }
 
 /// The room's name inside a sentence: `#general`, or a person's name.
-pub fn inline_name(room: &RoomSummary) -> String {
+pub fn inline_name(room: &RoomSummary, settings: &Settings) -> String {
     match room.kind {
         RoomKind::Group => format!("#{}", room.name),
-        RoomKind::Direct => room.name.clone(),
+        RoomKind::Direct => settings.room_name(room).into_owned(),
     }
 }
 
-pub fn display_name(room: &RoomSummary) -> String {
+pub fn display_name(room: &RoomSummary, settings: &Settings) -> String {
     match room.kind {
         RoomKind::Group => format!("# {}", room.name),
-        RoomKind::Direct => room.name.clone(),
+        RoomKind::Direct => settings.room_name(room).into_owned(),
     }
 }
 
@@ -134,7 +140,8 @@ pub fn display_name(room: &RoomSummary) -> String {
 /// members, its pinned messages when it has any, and its info at the right.
 fn header(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette, layout: &PaneLayout) -> El {
     let info_open = s.side == Some(SidePanel::Info);
-    let name = text(display_name(room)).key("room-name").font(font::HEADER).color(p.text).shrink().truncate();
+    let name =
+        text(display_name(room, &s.settings)).key("room-name").font(font::HEADER).color(p.text).shrink().truncate();
     // A direct chat says what its person shows: their dot, then "Away · 🌴 On vacation".
     let shown = super::sidebar::dm_partner(room).and_then(|id| account.presence.get(id));
     let presence = shown.and_then(|shown| {
@@ -253,6 +260,7 @@ pub fn topic_look<'a>(s: &'a State, account: &'a AccountData, room: &'a RoomSumm
         revealed: &s.revealed,
         media: &s.media,
         pictures: true,
+        reverse_display_names: s.settings.reverse_display_names,
     }
 }
 

@@ -4,6 +4,7 @@
 // to that message.
 
 import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { useRoomName } from '../../../ui/displayNames';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -36,6 +37,7 @@ export default function RoomScreen() {
 
   const palette = usePalette();
   const room = useStore((s) => roomOf(s, account, roomId));
+  const name = useRoomName(room);
   const loaded = useStore((s) => accountOf(s, account)?.roomsLoaded ?? true);
   const key = useMemo(() => roomKey(roomId), [roomId]);
 
@@ -56,7 +58,7 @@ export default function RoomScreen() {
     <>
       <Stack.Screen
         options={{
-          title: room.name,
+          title: name,
           headerTitle: () => (
             <Pressable
               onPress={() => router.push(routes.roomInfo(account, roomId))}
@@ -68,7 +70,7 @@ export default function RoomScreen() {
               <Avatar
                 account={account}
                 id={room.room_id}
-                name={room.name}
+                name={name}
                 media={room.avatar}
                 size={28}
               />
@@ -76,7 +78,7 @@ export default function RoomScreen() {
                 style={[font.header, styles.titleText, { color: palette.text }]}
                 numberOfLines={1}
               >
-                {room.name}
+                {name}
               </Text>
             </Pressable>
           ),
@@ -88,7 +90,7 @@ export default function RoomScreen() {
           room.successor ? (
             <SuccessorBanner account={account} successor={room.successor} />
           ) : (
-            <Composer account={account} timelineKey={key} roomName={inlineName(room)} />
+            <Composer account={account} timelineKey={key} roomName={inlineName(room, name)} />
           )
         }
       >
