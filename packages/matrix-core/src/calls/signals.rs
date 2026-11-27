@@ -265,17 +265,29 @@ async fn decrypted_by(
     raw: &Raw<AnySyncTimelineEvent>,
     deadline: tokio::time::Instant,
 ) -> Option<Raw<AnySyncTimelineEvent>> {
-    loop {
+    tried_until(deadline, || async {
         // Without its key the SDK answers with the event still unreadable, not an error.
-        if let Ok(event) = room.decrypt_event(raw.cast_ref_unchecked(), None).await
-            && event.encryption_info().is_some()
-        {
-            return Some(event.into_raw());
+        let event = room.decrypt_event(raw.cast_ref_unchecked(), None).await.ok()?;
+        event.encryption_info().is_some().then(|| event.into_raw())
+    })
+    .await
+}
+
+/// Tries `attempt` every [`KEY_RETRY`] until it gives something or `deadline` passes; the last
+/// try comes at the deadline itself.
+async fn tried_until<T, F: std::future::Future<Output = Option<T>>>(
+    deadline: tokio::time::Instant,
+    mut attempt: impl FnMut() -> F,
+) -> Option<T> {
+    loop {
+        if let Some(found) = attempt().await {
+            return Some(found);
         }
-        if tokio::time::Instant::now() + KEY_RETRY > deadline {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
             return None;
         }
-        tokio::time::sleep(KEY_RETRY).await;
+        tokio::time::sleep_until((now + KEY_RETRY).min(deadline)).await;
     }
 }
 
@@ -396,6 +408,18 @@ fn direct_event(kind: &str, content: &Value) -> Option<DirectEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_key_coming_just_before_the_deadline_should_still_count() {
+        let start = tokio::time::Instant::now();
+        // The key comes 9.9 s in: between the last regular try and the deadline.
+        let key_at = start + std::time::Duration::from_millis(9_900);
+        let found = tried_until(start + KEY_WAIT, || async { (tokio::time::Instant::now() >= key_at).then_some(()) });
+        assert_eq!(found.await, Some(()));
+        let late = start + KEY_WAIT + std::time::Duration::from_millis(1);
+        let missed = tried_until(start + KEY_WAIT, || async { (tokio::time::Instant::now() >= late).then_some(()) });
+        assert_eq!(missed.await, None);
+    }
 
     #[tokio::test(start_paused = true)]
     async fn a_room_waiting_for_a_key_should_hold_up_only_its_own_events() {

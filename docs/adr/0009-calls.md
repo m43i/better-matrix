@@ -162,7 +162,8 @@ Date: 2026-11-16
   own other devices (`task::hear`). While it rings, only the caller's ringing device adds
   candidates or hangs up, and only the user's own other devices answer or decline it elsewhere
   (`task::hear_ringing`). Opening the camera at the start races a hang-up too, and has 15 s: a camera that hangs
-  (a stuck driver, a prompt left open) leaves the call going with the camera off. A hangup goes
+  (a stuck driver, a prompt left open) leaves the call going with the camera off. Turning it on
+  or switching it later has the same 15 s, after which the camera is let go for the call. A hangup goes
   out only for a call the other side knows of (it called, or the invite went out). The TURN
   lookup is short and unretried: without an answer, the call goes without TURN. Candidates are
   gathered once, as browsers do (LiveKit's default gathers continually, for its SFU, which keeps
@@ -178,7 +179,9 @@ Date: 2026-11-16
   reader per room (`signals::read_in_order`), all aborted with the account. One still encrypted
   waits for its key until 10 s after it arrived (decrypting again every 250 ms), and the events after it wait
   their turn, so an invite still rings and its candidates and answer don't overtake it; waits in
-  a row don't add up, and another room's wait holds up nothing here. An invite heard after the user left its room doesn't ring. Under sliding sync the room's events and its room
+  a row don't add up, and another room's wait holds up nothing here; the last try comes at the
+  deadline itself. A MatrixRTC ring heard late doesn't ring once the user joined the call on
+  another device. An invite heard after the user left its room doesn't ring. Under sliding sync the room's events and its room
   keys come through different connections (the to-device long poll), and a call's first events
   are usually the first of a new Megolm session, so they often arrive before their key; dropped
   as before, a one-to-one call never rang or never connected.

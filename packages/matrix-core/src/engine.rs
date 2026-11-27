@@ -2614,8 +2614,13 @@ impl State {
                 // Only an account that can join the session hears it ring.
                 let Some(found) = self.accounts.get(&account).map(|r| &r.account) else { return };
                 let me = found.id().to_string();
-                // A ring whose caller already left (it came late, in a catch-up sync) is over.
-                let live = room_of(found, &room_id).is_some_and(|room| call_under_way(&room, &found.sticky));
+                // A ring whose caller already left (it came late, in a catch-up sync, or waited
+                // for its key) is over, as is one the user answered elsewhere or a room they left.
+                let live = room_of(found, &room_id).is_some_and(|room| {
+                    room.state() == matrix_sdk::RoomState::Joined
+                        && call_under_way(&room, &found.sticky)
+                        && !joined_elsewhere(&room, &found.sticky)
+                });
                 if until <= now_ms()
                     || me == caller
                     || ours(&account, &room_id)

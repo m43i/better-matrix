@@ -639,10 +639,16 @@ async fn direct_loop(
                     // stops and starts (letting go of the device while off), the track stays.
                     Control::Toggle(MediaToggle::Camera(on)) => {
                         if let Some(shared) = camera.take() {
+                            // Bounded like the first opening: a camera that hangs is let go,
+                            // rather than holding up the call (its connection, a hang-up).
+                            let set = tokio::time::timeout(CAMERA_LIMIT, set_camera(shared, on, sinks, devices.camera.clone(), call));
                             tokio::select! {
                                 biased;
                                 () = controls.hung_up() => break Ok(CallEnd::HungUp),
-                                shared = set_camera(shared, on, sinks, devices.camera.clone(), call) => *camera = shared,
+                                shared = set => *camera = shared.unwrap_or_else(|_| {
+                                    call.failed(&CallError::Stalled("opening the camera"));
+                                    None
+                                }),
                             }
                             info.camera = shown_camera(camera);
                             call.report(info);
@@ -654,11 +660,12 @@ async fn direct_loop(
                         media::switch_audio_device(audio, devices, kind);
                         // A camera that's off only remembers the pick.
                         if let Some(shared) = camera.take_if(|shared| kind == DeviceKind::Camera && shared.capture.is_running()) {
-                            let switch = switch_camera(shared, sinks, devices.camera.clone());
+                            let switch = tokio::time::timeout(CAMERA_LIMIT, switch_camera(shared, sinks, devices.camera.clone()));
                             tokio::select! {
                                 biased;
                                 () = controls.hung_up() => break Ok(CallEnd::HungUp),
-                                (shared, result) = switch => {
+                                switched = switch => {
+                                    let (shared, result) = switched.unwrap_or((None, Err(CallError::Stalled("opening the camera"))));
                                     *camera = shared;
                                     if let Err(error) = result {
                                         call.failed(&error);
