@@ -818,11 +818,15 @@ impl Account {
         use matrix_sdk::ruma::api::client::voip::get_turn_server_info;
         let mut wait = std::time::Duration::from_secs(2);
         let found = loop {
-            match self.client.send(get_turn_server_info::v3::Request::new()).await {
+            // A few tries each time, so a failure comes back here to wait longer between them.
+            let request = get_turn_server_info::v3::Request::new();
+            match self.client.send(request).with_request_config(matrix_sdk::config::RequestConfig::short_retry()).await
+            {
                 Ok(turn) => break !turn.uris.is_empty(),
-                // Only the network failing is asked again: a refusal, or Synapse's empty answer
-                // when it has no TURN servers (which doesn't read as one), names none.
-                Err(matrix_sdk::HttpError::Reqwest(_)) => {
+                // The network failing, or the server failing for a while, is asked again: a
+                // refusal, or Synapse's empty answer when it has no TURN servers (which doesn't
+                // read as one), names none.
+                Err(error) if transient(&error) => {
                     tokio::time::sleep(wait).await;
                     wait = (wait * 2).min(std::time::Duration::from_secs(60));
                 }
@@ -1615,6 +1619,16 @@ pub(crate) fn voice_info(message: &Outgoing) -> Option<matrix_sdk::attachment::A
     }))
 }
 
+/// Whether a request failed for a while rather than for good: the network, or the server
+/// overloaded or failing (429, 5xx).
+#[cfg(feature = "native-media")]
+fn transient(error: &matrix_sdk::HttpError) -> bool {
+    matches!(error, matrix_sdk::HttpError::Reqwest(_))
+        || error.as_client_api_error().is_some_and(|api| {
+            api.status_code.is_server_error() || api.status_code == matrix_sdk::reqwest::StatusCode::TOO_MANY_REQUESTS
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1650,6 +1664,26 @@ mod tests {
         assert_eq!(turn_from(serde_json::json!({})).await, (false, crate::convert::CallServices::default()));
         let refused = serde_json::json!({ "errcode": "M_NOT_FOUND", "error": "no TURN" });
         assert!(!turn_from(refused).await.0);
+    }
+
+    #[cfg(feature = "native-media")]
+    #[tokio::test]
+    async fn a_turn_service_failing_for_a_while_should_be_asked_again() {
+        // More failures in a row than the SDK's own tries for one request.
+        let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = Arc::clone(&asked);
+        let server = crate::test_server::Server::new(move |request| {
+            if !request.contains("/voip/turnServer") {
+                return crate::test_server::thread_response(request);
+            }
+            if count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 4 {
+                serde_json::json!({ "uris": ["turn:turn.example.org"], "username": "u", "password": "p", "ttl": 60 })
+            } else {
+                serde_json::json!({ crate::test_server::SERVER_ERROR_STATUS: true, "errcode": "M_UNKNOWN", "error": "down" })
+            }
+        });
+        let account = Account::for_test(&server.url()).await;
+        assert!(account.discover_turn().await, "asked again after the failure");
     }
 
     /// An account on a store shared with another client, as the engine and a push share one.

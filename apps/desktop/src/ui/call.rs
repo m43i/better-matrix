@@ -8,7 +8,7 @@ use super::components::{account_avatar, icon_button, media_avatar, menu_row, pop
 use super::icons;
 use super::theme::{Palette, font};
 use crate::i18n::{t, tf};
-use crate::state::{AccountData, Call, CallLayout, CallTile, Corner, Popover, State, VideoOption};
+use crate::state::{AccountData, Call, CallLayout, CallTile, Corner, Popover, SelfView, State, VideoOption};
 
 /// The size of a face on a voice call's stage.
 const FACE: f32 = 96.0;
@@ -409,14 +409,18 @@ fn self_view(tile: El, call: &Call, p: &Palette) -> El {
             let Some((own, main)) = call.self_view_rects() else { return };
             let across = main[2].max(1.0);
             match drag.phase {
-                rune::Phase::Down => drag.data = own[2] / across,
+                // The scale the user chose, which a cancel restores; the width shown may differ
+                // from it where a limit holds it.
+                rune::Phase::Down => drag.data = call.self_view.scale,
                 rune::Phase::Move => {
+                    let aspect = own[2] / own[3].max(1.0);
+                    let start = SelfView { scale: drag.data, ..call.self_view }.place(main, aspect)[2];
                     // Towards the middle of the video grows it, back towards its corner shrinks
                     // it, along whichever way the pointer went further.
                     let sideways = if corner.left() { drag.dx } else { -drag.dx };
-                    let upright = if corner.top() { drag.dy } else { -drag.dy } * own[2] / own[3].max(1.0);
+                    let upright = if corner.top() { drag.dy } else { -drag.dy } * aspect;
                     let grow = if sideways.abs() >= upright.abs() { sideways } else { upright };
-                    call.resize_self_view(drag.data + grow / across);
+                    call.resize_self_view((start + grow) / across);
                 }
                 rune::Phase::Up => {
                     if drag.cancelled() {

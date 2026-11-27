@@ -5299,3 +5299,27 @@ fn the_self_views_inner_corner_should_show_the_resize_cursor_and_the_rest_the_gr
     rt.frame(1.0 / 60.0);
     assert_eq!(rt.cursor(), rune::Cursor::Grab);
 }
+
+#[test]
+fn a_member_without_a_direct_chat_should_offer_calls_only_where_the_server_allows_them() {
+    const IDA: &str = "@ida:example.org";
+    let mut rt = runtime(|s| {
+        s.select_room(demo::DEMO_THREAD.0);
+        // Someone Ada has no direct chat with yet.
+        let ada = AccountId::new(demo::ADA);
+        let mut members =
+            s.accounts.get(&ada).and_then(|a| a.members.get(demo::DEMO_THREAD.0)).cloned().expect("members");
+        let mut ida = members.people[0].clone();
+        ida.person = matrix_core::Person { id: IDA.into(), name: "Ida".into(), avatar: None };
+        members.people.push(ida);
+        let event = Event::Members { request: None, account: ada, room_id: demo::DEMO_THREAD.0.into(), members };
+        s.apply(event, &mut rune::Tx::default());
+        s.toggle_side(SidePanel::Members);
+        s.toggle_member_menu(IDA);
+    });
+    assert!(rt.state.active_account().is_some_and(|account| account.direct_chat_with(IDA).is_none()));
+    assert!(rt.find("member-menu-call").is_some(), "a new direct chat would allow calls");
+    rt.update(|s, tx| s.apply(Event::CallsOffered { account: AccountId::new(demo::ADA), calls: false }, tx));
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("member-menu-call").is_none(), "no call where the homeserver allows none");
+}

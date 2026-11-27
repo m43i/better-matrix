@@ -816,6 +816,7 @@ fn add_account(s: &mut State, user_id: &str, name: &str, server: &str, sign_in: 
         invitations: Vec::new(),
     };
     apply(s, Event::RoomsUpdated { account: account.clone(), list });
+    apply(s, Event::CallsOffered { account: account.clone(), calls: true });
     for (room, messages) in fixture.rooms {
         if let Some(last) = messages.last() {
             apply(

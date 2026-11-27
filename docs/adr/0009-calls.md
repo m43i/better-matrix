@@ -63,8 +63,10 @@ Date: 2026-11-16
   a direct chat with exactly one other member, where the homeserver names TURN servers
   (`voip/turnServer` with URIs, looked up once per account beside the LiveKit lookup,
   `Account::call_services`): without a relay two devices behind different routers rarely get
-  through. A refusal, or Synapse's empty answer, names none; only a network failure is asked
-  again. Otherwise no call: the room header hides the call buttons (`RoomSummary::call`) and its
+  through. A refusal, or Synapse's empty answer, names none; the network or the server failing
+  for a while (429, 5xx) is asked again, waiting longer each time. Each lookup reports as soon
+  as it answers whether the account can call at all (`Event::CallsOffered`), so a person's
+  profile and member menu offer a call (through a new direct chat) only then. Otherwise no call: the room header hides the call buttons (`RoomSummary::call`) and its
   video button offers the room's meetings instead (ADR 0012). A one-to-one invite still rings
   on an account without TURN: the caller's relay is enough.
 - **MatrixRTC session** (`calls::rtc`, `calls::session`), interoperable with Element Call in
@@ -164,20 +166,22 @@ Date: 2026-11-16
   lookup is short and unretried: without an answer, the call goes without TURN. Candidates are
   gathered once, as browsers do (LiveKit's default gathers continually, for its SFU, which keeps
   a connection that can't get through checking forever, never failing). Once answered (the
-  caller then shows connecting), the devices have 30 s to get through, else the call ends as
+  caller then shows connecting), the devices have 30 s to get through (setting up, with the
+  invite or answer sent, has 20 s; sending the caller's pick of an answer, 10 s), else the call ends as
   stalled (`CallError::Stalled`); a connection that drops shows reconnecting until it comes
   back or fails. A voice call's
   offer asks for no video, and an invite counts as a video call only when the caller sends
   video (a video section that only receives is a voice call).
 - **Signals in order, after their keys:** call events (and fresh events the SDK couldn't decrypt
   yet, up to two minutes old) go through one queue per account, read beside the sync
-  (`signals::read_in_order`). One still encrypted waits up to 10 s for its key (decrypting again
-  every 250 ms), and the events after it wait their turn, so an invite still rings and its
-  candidates and answer don't overtake it. Under sliding sync the room's events and its room
+  (`signals::read_in_order`) and aborted with the account. One still encrypted waits for its
+  key until 10 s after it arrived (decrypting again every 250 ms), and the events after it wait
+  their turn, so an invite still rings and its candidates and answer don't overtake it; waits in
+  a row don't add up. An invite heard after the user left its room doesn't ring. Under sliding sync the room's events and its room
   keys come through different connections (the to-device long poll), and a call's first events
   are usually the first of a new Megolm session, so they often arrive before their key; dropped
   as before, a one-to-one call never rang or never connected. A session whose key didn't come
-  isn't waited for again.
+  isn't waited for again, only tried once more per event (the 256 latest are remembered).
 - **Telling the room:** the first one into a call sends `m.rtc.notification` (the unstable type,
   as Element Call does): `ring` in a direct chat, `notification` in a group, so every call has its
   card in the timeline and group calls don't ring.

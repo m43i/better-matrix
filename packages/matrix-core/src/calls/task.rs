@@ -468,6 +468,10 @@ async fn run_direct(
         }
         Ok::<_, CallError>(connection)
     };
+    // Bounded: a send the server keeps retrying mustn't leave the call calling or connecting.
+    let setup = async {
+        tokio::time::timeout(SETUP_LIMIT, setup).await.unwrap_or(Err(CallError::Stalled("setting up the call")))
+    };
     let connection = tokio::select! {
         biased;
         () = controls.hung_up() => None,
@@ -696,6 +700,11 @@ async fn direct_loop(
     end
 }
 
+/// How long setting up a one-to-one call may take: the connection, then sending the invite or
+/// the answer.
+const SETUP_LIMIT: Duration = Duration::from_secs(20);
+/// How long picking the other side's answer may take to send.
+const SELECT_LIMIT: Duration = Duration::from_secs(10);
 /// How long a one-to-one call's devices have to get through to each other once it's answered.
 const CONNECT_LIMIT: Duration = Duration::from_secs(30);
 
@@ -834,7 +843,10 @@ async fn direct_signal(
         Heard::Answered { party, sdp } => {
             call.answered(&sdp).await?;
             call.peer = Some(party.clone());
-            direct::select_answer(room, call, &party).await?;
+            let select = direct::select_answer(room, call, &party);
+            tokio::time::timeout(SELECT_LIMIT, select)
+                .await
+                .unwrap_or(Err(CallError::Stalled("picking the answer")))?;
         }
         Heard::Candidates(candidates) => call.candidates(candidates).await,
         Heard::Ended(end) => return Ok(Some(end)),

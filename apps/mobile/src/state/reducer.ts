@@ -848,6 +848,8 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'MediaFailed':
     case 'CallMediaStopped':
     case 'PushContent':
+    // The phone offers calls only through a direct chat's own summary.
+    case 'CallsOffered':
       return state;
     // Answers its search alone (`store.run`), into the picker that asked.
     case 'GifsFound':

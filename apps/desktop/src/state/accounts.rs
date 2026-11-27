@@ -798,6 +798,8 @@ pub struct AccountData {
     heard_at: HashMap<String, u64>,
     /// How encryption stands on this device; `None` until the engine reports.
     pub security: Option<matrix_core::Security>,
+    /// The homeserver allows calls, so a new direct chat would (`Event::CallsOffered`).
+    pub calls: bool,
     /// The signed-in sessions, once listed.
     pub sessions: Option<Vec<matrix_core::Session>>,
     /// What the user knows of other people's identities, by user ID, once asked: `None` for
@@ -895,6 +897,7 @@ impl AccountData {
             latest: HashMap::new(),
             heard_at: HashMap::new(),
             security: None,
+            calls: false,
             sessions: None,
             identities: HashMap::new(),
             contacts: None,

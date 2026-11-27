@@ -70,13 +70,14 @@ pub(crate) struct IceCandidate {
     pub sdp_m_line_index: i32,
 }
 
-/// Starts hearing an account's call signals; the handles stop it.
+/// Starts hearing an account's call signals; the handles stop it, and the task reading them in
+/// order (which the account's teardown aborts, so nothing queued is heard after it).
 pub(crate) fn listen(
     client: &Client,
     account: &AccountId,
     signals: &UnboundedSender<Signal>,
     sticky: &super::StickyMembers,
-) -> Vec<EventHandlerHandle> {
+) -> (Vec<EventHandlerHandle>, tokio::task::AbortHandle) {
     let to_device = {
         let (account, signals) = (account.clone(), signals.clone());
         client.add_event_handler(move |raw: Raw<AnyToDeviceEvent>, encryption: Option<EncryptionInfo>| {
@@ -94,10 +95,9 @@ pub(crate) fn listen(
         })
     };
     // Call events, and fresh events the SDK couldn't decrypt yet, in the order they came: one
-    // queue per account, read beside the sync (which waits for its handlers). It ends with the
-    // handler, which holds its only sender.
+    // queue per account, read beside the sync (which waits for its handlers).
     let (queue, queued) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(read_in_order(account.clone(), signals.clone(), queued));
+    let reader = tokio::spawn(read_in_order(account.clone(), signals.clone(), queued)).abort_handle();
     let timeline = {
         let sticky = sticky.clone();
         client.add_event_handler(
@@ -115,7 +115,8 @@ pub(crate) fn listen(
                     let sent = raw.get_field::<u64>("origin_server_ts").ok().flatten().unwrap_or_default();
                     let undecrypted = kind == "m.room.encrypted" && awaits_key(sent, crate::engine::now_ms());
                     if concerns_calls(&kind) || undecrypted {
-                        let _ = queue.send(Queued { raw, room, encrypted: encryption.is_some(), undecrypted });
+                        let (encrypted, arrived) = (encryption.is_some(), tokio::time::Instant::now());
+                        let _ = queue.send(Queued { raw, room, encrypted, undecrypted, arrived });
                     }
                 }
             },
@@ -153,7 +154,7 @@ pub(crate) fn listen(
             }
         })
     };
-    vec![to_device, timeline, state]
+    (vec![to_device, timeline, state], reader)
 }
 
 /// A timeline event the calls read in order: a call event, or a fresh one still encrypted.
@@ -164,6 +165,9 @@ struct Queued {
     encrypted: bool,
     /// The SDK couldn't decrypt it yet: its key may still be on its way.
     undecrypted: bool,
+    /// When sync delivered it: its wait for a key counts from then, so waits in a row don't
+    /// add up.
+    arrived: tokio::time::Instant,
 }
 
 /// How long a call event that came before its key waits for it. Under sliding sync the key
@@ -172,6 +176,8 @@ struct Queued {
 const KEY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 /// How often a waiting event tries again.
 const KEY_RETRY: std::time::Duration = std::time::Duration::from_millis(250);
+/// How many sessions whose key never came are remembered.
+const KEYLESS_KEPT: usize = 256;
 /// Only events younger than this wait for their key: older ones are past any call (an invite
 /// lives a minute) and a catch-up sync's backlog mustn't hold the queue up.
 const KEY_FRESH_MS: u64 = 2 * 60 * 1000;
@@ -183,29 +189,35 @@ fn awaits_key(sent: u64, now: u64) -> bool {
 }
 
 /// Turns the queued events into signals, in the order sync delivered them: one still encrypted
-/// waits (up to [`KEY_WAIT`]) for its key first, so an invite that came before its key still
-/// rings, and its candidates and answer don't overtake it. A session whose key never came isn't
-/// waited for again.
+/// waits for its key first (until [`KEY_WAIT`] after it arrived), so an invite that came before
+/// its key still rings, and its candidates and answer don't overtake it. Every event waits at
+/// most that long after arriving, whatever waited before it. A session whose key never came is
+/// tried once more per event, without waiting.
 async fn read_in_order(
     account: AccountId,
     signals: UnboundedSender<Signal>,
     mut queued: tokio::sync::mpsc::UnboundedReceiver<Queued>,
 ) {
     let mut keyless: std::collections::HashSet<String> = std::collections::HashSet::new();
-    while let Some(Queued { raw, room, encrypted, undecrypted }) = queued.recv().await {
+    while let Some(Queued { raw, room, encrypted, undecrypted, arrived }) = queued.recv().await {
         let (raw, encrypted) = if undecrypted {
             let session = raw
                 .get_field::<Value>("content")
                 .ok()
                 .flatten()
                 .and_then(|content| content["session_id"].as_str().map(str::to_owned));
-            if session.as_ref().is_some_and(|session| keyless.contains(session)) {
-                continue;
-            }
-            match decrypted_soon(&room, &raw).await {
+            let deadline = if session.as_ref().is_some_and(|session| keyless.contains(session)) {
+                arrived
+            } else {
+                arrived + KEY_WAIT
+            };
+            match decrypted_by(&room, &raw, deadline).await {
                 Some(decrypted) => (decrypted, true),
                 None => {
                     tracing::debug!("call: an event in {} never got its key", room.room_id());
+                    if keyless.len() >= KEYLESS_KEPT {
+                        keyless.clear();
+                    }
                     keyless.extend(session);
                     continue;
                 }
@@ -224,10 +236,13 @@ async fn read_in_order(
     }
 }
 
-/// An event the SDK couldn't decrypt, decrypted once its key came; `None` if it didn't come in
-/// time.
-async fn decrypted_soon(room: &matrix_sdk::Room, raw: &Raw<AnySyncTimelineEvent>) -> Option<Raw<AnySyncTimelineEvent>> {
-    let deadline = tokio::time::Instant::now() + KEY_WAIT;
+/// An event the SDK couldn't decrypt, decrypted once its key came; `None` if it didn't come by
+/// `deadline` (tried at least once, even past it).
+async fn decrypted_by(
+    room: &matrix_sdk::Room,
+    raw: &Raw<AnySyncTimelineEvent>,
+    deadline: tokio::time::Instant,
+) -> Option<Raw<AnySyncTimelineEvent>> {
     loop {
         // Without its key the SDK answers with the event still unreadable, not an error.
         if let Ok(event) = room.decrypt_event(raw.cast_ref_unchecked(), None).await

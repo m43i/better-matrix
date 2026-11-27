@@ -1650,6 +1650,15 @@ pub enum Event {
         /// Why.
         reason: crate::calls::CallEnd,
     },
+    /// Whether an account can call at all: its homeserver names a call service (MatrixRTC) or
+    /// TURN servers (one-to-one calls), so a new direct chat would allow calls. Reported as each
+    /// lookup answers; until then, none.
+    CallsOffered {
+        /// Whose.
+        account: AccountId,
+        /// Calls are possible.
+        calls: bool,
+    },
     /// How loud each participant is now, 0 to 255, by participant key (the user's own under
     /// the empty key); every 100 ms during a MatrixRTC call.
     CallLevels(Vec<(String, u8)>),
@@ -2646,14 +2655,13 @@ impl State {
                 match event {
                     DirectEvent::Invite { call_id, party_id, sdp, lifetime, invitee } => {
                         let fresh = sent.saturating_add(*lifetime) > now_ms();
-                        // An invite to nobody in particular rings only in a direct chat.
-                        let direct = self
-                            .accounts
-                            .get(account)
-                            .and_then(|r| room_of(&r.account, room_id))
-                            .is_some_and(|room| !room.direct_targets().is_empty());
+                        // An invite to nobody in particular rings only in a direct chat; none rings
+                        // in a room the user left meanwhile (it may have waited for its key).
+                        let room = self.accounts.get(account).and_then(|r| room_of(&r.account, room_id));
+                        let joined = room.as_ref().is_some_and(|room| room.state() == matrix_sdk::RoomState::Joined);
+                        let direct = room.is_some_and(|room| !room.direct_targets().is_empty());
                         let for_me = invitee.as_deref().map_or(direct, |invitee| invitee == me);
-                        if fresh && for_me && *sender != me && !ours(account, room_id) {
+                        if fresh && joined && for_me && *sender != me && !ours(account, room_id) {
                             let invite = crate::calls::Invite {
                                 call_id: call_id.clone(),
                                 party_id: party_id.clone(),
@@ -4295,7 +4303,8 @@ impl State {
                 #[cfg(feature = "native-media")]
                 account.sticky.report_to(account.id().clone(), self.signals.clone());
                 #[cfg(feature = "native-media")]
-                let mut handlers = crate::calls::listen(account.client(), account.id(), &self.signals, &account.sticky);
+                let (mut handlers, calls_reader) =
+                    crate::calls::listen(account.client(), account.id(), &self.signals, &account.sticky);
                 #[cfg(not(feature = "native-media"))]
                 let mut handlers = Vec::new();
                 handlers.extend(crate::security::listen(&account, &flows, self.scans_qr, &self.sink));
@@ -4351,15 +4360,26 @@ impl State {
                         let status = account
                             .report_status(|status| sink.emit(Event::Status { account: account.id().clone(), status }));
                         // Once the homeserver names a call service, rooms offer MatrixRTC calls; once
-                        // it names TURN servers, direct chats offer one-to-one calls.
+                        // it names TURN servers, direct chats offer one-to-one calls. Each lookup
+                        // tells as soon as it answers, whatever the other waits on.
                         #[cfg(feature = "native-media")]
                         let calls = {
-                            let (account, feed) = (account.clone(), feed.clone());
+                            let (account, feed, sink) = (account.clone(), feed.clone(), Arc::clone(&sink));
                             async move {
-                                let (rtc, turn) = tokio::join!(account.discover_rtc(), account.discover_turn());
-                                if rtc || turn {
-                                    feed.refresh(None).await;
-                                }
+                                let offered = |found: bool| {
+                                    let (account, feed, sink) = (&account, &feed, &sink);
+                                    async move {
+                                        let services = account.call_services();
+                                        let calls = services.rtc || services.turn;
+                                        sink.emit(Event::CallsOffered { account: account.id().clone(), calls });
+                                        if found {
+                                            feed.refresh(None).await;
+                                        }
+                                    }
+                                };
+                                let rtc = async { offered(account.discover_rtc().await).await };
+                                let turn = async { offered(account.discover_turn().await).await };
+                                tokio::join!(rtc, turn);
                             }
                         };
                         #[cfg(not(feature = "native-media"))]
@@ -4417,7 +4437,10 @@ impl State {
                     })
                 };
                 let (usage, usage_worker) = crate::search::Usage::start(account.clone(), Arc::clone(&self.sink));
-                let background = vec![tokens.abort_handle(), started.abort_handle(), usage_worker];
+                #[cfg_attr(not(feature = "native-media"), expect(unused_mut, reason = "only calls add to it"))]
+                let mut background = vec![tokens.abort_handle(), started.abort_handle(), usage_worker];
+                #[cfg(feature = "native-media")]
+                background.push(calls_reader);
                 let running = Running {
                     account,
                     #[cfg(feature = "command-line")]
