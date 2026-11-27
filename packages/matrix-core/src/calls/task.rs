@@ -567,9 +567,10 @@ async fn direct_loop(
         tokio::select! {
             () = &mut lifetime, if connection.peer.is_none() => break Ok(CallEnd::NoAnswer),
             () = &mut connecting, if connection.peer.is_some() && info.phase == CallPhase::Connecting => {
-                // It may have got through while the loop was busy (a camera switch), its event
-                // still queued: that event says so next, and the timer waits again meanwhile.
-                if !connection.connected() {
+                // It may have got through while the loop was busy (a camera switch), its events
+                // still queued: they say so next (and a drop since, reconnecting), and the timer
+                // waits again meanwhile.
+                if !connection.got_through() {
                     tracing::warn!("call: the one-to-one connection didn't get through");
                     break Err(CallError::Stalled("connecting to the other device"));
                 }

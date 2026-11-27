@@ -41,6 +41,8 @@ pub(crate) struct Direct {
     /// The other side's party, once it answered.
     pub peer: Option<String>,
     pc: PeerConnection,
+    /// The connection got through at least once, as WebRTC said, ahead of its queued events.
+    reached: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Their candidates that came before their description.
     early: Vec<IceCandidate>,
     described: bool,
@@ -82,10 +84,15 @@ impl Direct {
         pc.on_track(Some(Box::new(move |event: TrackEvent| {
             let _ = sender.send(PeerEvent::Track(event.track));
         })));
+        let reached = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reaching = std::sync::Arc::clone(&reached);
         pc.on_connection_state_change(Some(Box::new(move |state| {
+            if state == PeerConnectionState::Connected {
+                reaching.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             let _ = events.send(PeerEvent::State(state));
         })));
-        Ok(Self { call_id, party_id, peer: None, pc, early: Vec::new(), described: false })
+        Ok(Self { call_id, party_id, peer: None, pc, reached, early: Vec::new(), described: false })
     }
 
     /// Sends the user's media: the microphone, and the camera when there is one.
@@ -158,9 +165,10 @@ impl Direct {
         }
     }
 
-    /// Whether the connection is through now, whatever its events still on their way say.
-    pub fn connected(&self) -> bool {
-        self.pc.connection_state() == PeerConnectionState::Connected
+    /// Whether the connection got through at least once, whatever its events still on their
+    /// way say (it may have dropped since, and be coming back).
+    pub fn got_through(&self) -> bool {
+        self.reached.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn close(&self) {
