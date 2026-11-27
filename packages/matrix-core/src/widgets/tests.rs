@@ -95,6 +95,29 @@ fn a_checking_jitsi_server_should_get_the_jwt_in_the_query() {
 }
 
 #[tokio::test]
+async fn a_room_derived_jitsi_conference_should_disclose_the_room_before_asking_for_identity() {
+    let server = pinned_widget(json!({
+        "type": "jitsi", "url": "https://app.element.io/jitsi.html",
+        "data": {"domain": "meet.example.org", "conferenceId": base32(ROOM.as_bytes()), "auth": "openidtoken-jwt"}
+    }));
+    let account = synced(&server).await;
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+
+    assert!(matches!(result, Err(Error::Cancelled)));
+    let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else {
+        panic!("expected opening confirmation")
+    };
+    assert_eq!(access.kind, WidgetAccessKind::Open(vec![WidgetUrlField::DisplayName, WidgetUrlField::RoomId]));
+    assert!(events.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn resetting_jitsi_permissions_should_clear_the_grant_for_the_canonical_origin() {
     let server = pinned_widget(json!({
         "type": "jitsi", "url": "https://app.element.io/jitsi.html", "name": "Jitsi",

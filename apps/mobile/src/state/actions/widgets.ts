@@ -3,8 +3,7 @@
 // events (its page, the engine's messages for the page, a permission request, the integration
 // manager's terms), answers them, and cancels the run when the screen goes. The page's main frame
 // says when it has loaded (`WidgetLoaded`, which starts the engine's side) and its messages come
-// with the run's `token` from the page's origin. Opening a widget in the browser instead is
-// `openWidgetInBrowser`.
+// with the run's `token` from the page's origin. The same run requests a browser handoff.
 
 import type {
   AccountId,
@@ -42,8 +41,10 @@ export type WidgetView =
    * the page (the engine sends it again to load the page again).
    */
   | { type: 'page'; page: WidgetPage; load: number }
-  /** The engine opens the widget in the browser instead (a page on plain HTTP): the screen goes. */
+  /** The widget's address, awaiting handoff to the system browser. */
   | { type: 'browser'; url: string }
+  /** The operating system refused the browser handoff. */
+  | { type: 'browser-failed' }
   /** The run is over (the widget or manager closed itself): the screen goes. */
   | { type: 'ended' }
   /** It failed, with why. */
@@ -115,7 +116,7 @@ export class WidgetRun {
     private readonly store: Store,
     private readonly account: AccountId,
     private readonly roomId: string,
-    private readonly target: WidgetTarget,
+    private target: WidgetTarget,
     readonly token: string,
     /** Whether to ask the user about each new host a meeting moves to (Android). */
     private readonly askHosts: boolean,
@@ -131,10 +132,21 @@ export class WidgetRun {
     };
   };
 
+  get opensInBrowser(): boolean {
+    return this.target.type === 'widget' && this.target.browser === true;
+  }
+
+  /** Restart the widget in the browser, keeping that target for retry. */
+  openInBrowser(): void {
+    if (this.target.type !== 'widget' || this.target.browser) return;
+    this.target = { ...this.target, browser: true };
+    this.start();
+  }
+
   /** The operating system refused the browser handoff. Keep the launch open for retry. */
-  browserFailed(error: string): void {
+  browserFailed(): void {
     if (this.current.view.type === 'browser')
-      this.set({ view: { type: 'failed', error }, asking: null });
+      this.set({ view: { type: 'browser-failed' }, asking: null });
   }
 
   private set(change: Partial<WidgetRunSnapshot>): void {
@@ -439,7 +451,7 @@ export class WidgetRun {
     this.leavePage();
 
     // After a browser handoff, the screen handles the result independently of the engine.
-    if (this.current.view.type !== 'browser' && this.current.view.type !== 'failed')
+    if (this.current.view.type !== 'browser' && this.current.view.type !== 'browser-failed')
       this.set({ view: { type: 'ended' }, asking: null });
   }
 
@@ -459,76 +471,4 @@ export class WidgetRun {
       asking: null,
     });
   }
-}
-
-/**
- * The user's answer to a widget run's permission request outside the web view: allow them all,
- * deny them all, or `null` when the question was dismissed (the run is cancelled).
- */
-export type PermissionAnswer = boolean | null;
-
-/**
- * Opens one of a room's widgets in the browser with `open` (`RunWidget` with `browser`): a
- * meeting's address is the one that joins it. A meeting on a server that checks who joins may
- * first ask to confirm the user's identity to it (`WidgetPermissions`): `ask` puts it to the user,
- * and the run is answered, or cancelled when the question is dismissed, so it never hangs. A
- * question the engine withdraws (nothing asked) gets no answer.
- */
-export async function openWidgetInBrowser(
-  store: Store,
-  account: AccountId,
-  roomId: string,
-  widgetId: string,
-  open: (url: string) => void,
-  ask: (widget: string, permissions: WidgetPermission[]) => Promise<PermissionAnswer>,
-  confirm?: (access: WidgetAccess) => Promise<boolean>,
-): Promise<void> {
-  const command = { account, room_id: roomId, widget_id: widgetId, browser: true };
-
-  // The questions the engine withdrew, by number, and the one showing: only its answer counts.
-  const withdrawn = new Set<number>();
-  let showing: number | null = null;
-
-  const run = store.run({ type: 'RunWidget', data: command }, (event) => {
-    if (event.type === 'OpenUrl') open(event.data.url);
-    else if (event.type === 'WidgetAccess') {
-      void (confirm?.(event.data.access) ?? Promise.resolve(false)).then((allowed) => {
-        if (allowed) answerRequest(store, run.request, { type: 'Continue' });
-        else store.send({ type: 'Cancel', data: run.request }, { quiet: true });
-      });
-    } else if (event.type === 'WidgetPermissions') {
-      const { question } = event.data;
-      const capabilities = event.data.permissions.map((permission) => permission.capability);
-
-      // Nothing asked: the engine withdrew that question (an alert can't be taken back, but its
-      // answer is dropped).
-      if (capabilities.length === 0) {
-        withdrawn.add(question);
-
-        return;
-      }
-
-      showing = question;
-
-      void ask(event.data.widget, event.data.permissions).then((allowed) => {
-        if (withdrawn.has(question) || showing !== question) return;
-        showing = null;
-
-        if (allowed === null) {
-          store.send({ type: 'Cancel', data: run.request }, { quiet: true });
-
-          return;
-        }
-
-        const answer = {
-          type: 'WidgetPermissions' as const,
-          data: { question, granted: allowed ? capabilities : [] },
-        };
-
-        store.send({ type: 'Answer', data: { request: run.request, answer } }, { quiet: true });
-      });
-    }
-  });
-
-  await run;
 }

@@ -688,14 +688,14 @@ pub(crate) async fn run(
     let data = content.get("data").cloned().unwrap_or(Value::Null);
     if let Some(place) = meetings::place(&widget.kind, template, &data) {
         let permission_site = permission_origin(Some(&place), &widget.url)?;
-        if matches!(place, meetings::Place::Jitsi(_)) {
-            let access = access_for(
-                &account,
-                &viewer,
-                &widget,
-                permission_site.clone(),
-                WidgetAccessKind::Open(vec![name_field(&viewer)]),
-            )?;
+        if let meetings::Place::Jitsi(jitsi) = &place {
+            let mut fields = vec![name_field(&viewer)];
+            // A checking server's conference can name the room even without an OpenID token.
+            if jitsi.conference.eq_ignore_ascii_case(&meetings::base32(room_id.as_bytes())) {
+                fields.push(WidgetUrlField::RoomId);
+            }
+            let access =
+                access_for(&account, &viewer, &widget, permission_site.clone(), WidgetAccessKind::Open(fields))?;
             confirm_access(&*sink, request, access, &mut answers).await?;
         }
         // Who learns the user's Matrix ID by joining: a Jitsi server that checks who joins, or

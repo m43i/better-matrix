@@ -111,8 +111,9 @@ Date: 2026-11-25
   before loading a generic widget or handing its URL to a browser. The prompt identifies the
   origin, room and Matrix account, and names any Matrix context placed in the URL, including
   the widget ID added by the bridge. Jitsi's confirmation discloses whether the meeting receives
-  the display name or the Matrix ID it uses in its place. BigBlueButton confirms the resolved
-  meeting origin before opening the page. Widget API permissions and meeting identity access
+  the display name or the Matrix ID it uses in its place, and the room ID if the conference
+  name encodes it. BigBlueButton confirms the resolved meeting origin before opening the page.
+  Widget API permissions and meeting identity access
   are requested separately. Meeting identity prompts name the profile and room fields sent
   with the identity.
 - **Permissions:** what a widget asks for arrives as `Event::WidgetPermissions`, numbered within
@@ -193,8 +194,9 @@ Date: 2026-11-25
     `demo-widget-permissions`, `demo-integration-terms`.
 - **Phones** run HTTPS widgets and Jitsi and BigBlueButton meetings in an in-app web view
   (`app/widget.tsx`, `WidgetRun`). They hand off HTTP pages and hosted Teams and Zoom meetings
-  to the browser. A refused handoff keeps the widget screen open for retry. Android's video
-  chooser pages through meeting options. See [0010](0010-mobile.md).
+  to the browser. Both automatic handoffs and explicit **Open in browser** actions run through
+  the widget screen. A refused handoff keeps it open for retry and omits the destination URL
+  from the error. Android's video chooser pages through meeting options. See [0010](0010-mobile.md).
 
 ## Consequences
 

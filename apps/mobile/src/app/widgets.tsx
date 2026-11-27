@@ -14,7 +14,6 @@ import { widgetSections } from '../state/widgets';
 import { Button, Divider, EmptyState, ListRow, ListSection } from '../ui/components';
 import { useToolbarIcon } from '../ui/shell/toolbarIcon';
 import { headerTint, usePalette } from '../ui/theme';
-import { openWidgetInSystemBrowser } from '../ui/widgets/browser';
 import { openWidget } from '../ui/widgets/launch';
 
 export default function WidgetsScreen() {
@@ -36,7 +35,7 @@ export default function WidgetsScreen() {
     openWidget(router, account, roomId, { type: 'widget', widgetId: widget.id });
 
   const inBrowser = (widget: Widget) =>
-    openWidgetInSystemBrowser(store, account, roomId, widget.id);
+    openWidget(router, account, roomId, { type: 'widget', widgetId: widget.id, browser: true });
 
   const askToRemove = (widget: Widget) =>
     Alert.alert(

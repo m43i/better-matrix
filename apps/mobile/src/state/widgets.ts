@@ -23,17 +23,23 @@ import { t } from '../i18n';
 
 /** What the widget screen runs: one of the room's widgets, a new meeting, or integrations. */
 export type WidgetTarget =
-  | { type: 'widget' | 'permissions'; widgetId: string }
+  | { type: 'widget'; widgetId: string; browser?: true }
+  | { type: 'permissions'; widgetId: string }
   | { type: 'meeting'; video: boolean }
   | { type: 'integrations' };
 
-/** The command that runs `target` in the app's web view. */
+/** The command that runs `target` in the widget screen or hands it off to the browser. */
 export function runCommand(account: AccountId, roomId: string, target: WidgetTarget): Command {
   switch (target.type) {
     case 'widget':
       return {
         type: 'RunWidget',
-        data: { account, room_id: roomId, widget_id: target.widgetId, browser: false },
+        data: {
+          account,
+          room_id: roomId,
+          widget_id: target.widgetId,
+          browser: target.browser === true,
+        },
       };
     case 'permissions':
       return {

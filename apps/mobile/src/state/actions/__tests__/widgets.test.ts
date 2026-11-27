@@ -4,10 +4,7 @@ import type { WidgetPage } from '@better-matrix/matrix-native/types';
 import { ADA, summary } from '../../../test/fixtures';
 import { Store } from '../../store';
 import type { WidgetTarget } from '../../widgets';
-import { openWidgetInBrowser, type PermissionAnswer, WidgetRun } from '../widgets';
-
-/** The capability asking to confirm the user's identity (MSC1960's OpenID). */
-const IDENTITY = 'org.matrix.msc1960.openid';
+import { WidgetRun } from '../widgets';
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -329,11 +326,25 @@ describe('WidgetRun', () => {
   it('should retain the retry state if the browser refuses before the engine finishes', async () => {
     const { engine, run, request, finish } = setup();
     engine.emit({ type: 'OpenUrl', data: { request, url: 'https://zoom.us/j/123456789' } });
-    run.browserFailed('Browser unavailable');
+    run.browserFailed();
     finish();
     await flush();
 
-    expect(run.snapshot().view).toEqual({ type: 'failed', error: 'Browser unavailable' });
+    expect(run.snapshot().view).toEqual({ type: 'browser-failed' });
+  });
+
+  it('should switch the active widget to the browser and keep that destination on retry', () => {
+    const { run, request, commands } = setup();
+    run.openInBrowser();
+
+    const browser = {
+      type: 'RunWidget',
+      data: { account: ADA, room_id: '!r:x', widget_id: 'w1', browser: true },
+    };
+
+    expect(commands()).toEqual([{ type: 'Cancel', data: request }, browser]);
+    run.start();
+    expect(commands().at(-1)).toEqual(browser);
   });
 
   it('should start over when the main frame leaves the page’s origin', () => {
@@ -574,147 +585,5 @@ describe('WidgetRun', () => {
     run.cancel();
     show();
     expect(run.snapshot().view).toEqual({ type: 'starting' });
-  });
-});
-
-describe('opening a widget in the browser', () => {
-  function browse(answer: PermissionAnswer = true) {
-    const { engine, sent } = detachedEngine();
-    const store = new Store(engine);
-    const opened: string[] = [];
-    const asked: string[] = [];
-
-    const done = openWidgetInBrowser(
-      store,
-      ADA,
-      '!r:x',
-      'w1',
-      (url) => opened.push(url),
-      async (widget) => {
-        asked.push(widget);
-
-        return answer;
-      },
-    );
-
-    const request = sent[0]!.request;
-
-    const askIdentity = () =>
-      engine.emit({
-        type: 'WidgetPermissions',
-        data: {
-          request,
-          question: 1,
-          widget: 'Standup',
-          permissions: [
-            { capability: IDENTITY, kind: 'Identity', subject: 'https://jitsi.example' },
-          ],
-        },
-      });
-
-    const commands = () => sent.slice(1).map((s) => s.command);
-
-    return { engine, sent, done, opened, asked, request, askIdentity, commands };
-  }
-
-  it('should open the address the engine gives', async () => {
-    const { engine, sent, done, opened, request } = browse();
-    expect(sent[0]?.command).toEqual({
-      type: 'RunWidget',
-      data: { account: ADA, room_id: '!r:x', widget_id: 'w1', browser: true },
-    });
-    engine.emit({ type: 'OpenUrl', data: { request, url: 'https://meet.example/x?jwt=1' } });
-    engine.emit({ type: 'Finished', data: { request, result: { Ok: null } } });
-    await done;
-    expect(opened).toEqual(['https://meet.example/x?jwt=1']);
-  });
-
-  it('should grant what the meeting server asked for once allowed', async () => {
-    const { askIdentity, commands, request, asked } = browse(true);
-    askIdentity();
-    await flush();
-    expect([asked, commands()]).toEqual([
-      ['Standup'],
-      [
-        {
-          type: 'Answer',
-          data: {
-            request,
-            answer: { type: 'WidgetPermissions', data: { question: 1, granted: [IDENTITY] } },
-          },
-        },
-      ],
-    ]);
-  });
-
-  it('should grant nothing once denied', async () => {
-    const { askIdentity, commands, request } = browse(false);
-    askIdentity();
-    await flush();
-    expect(commands()).toEqual([
-      {
-        type: 'Answer',
-        data: {
-          request,
-          answer: { type: 'WidgetPermissions', data: { question: 1, granted: [] } },
-        },
-      },
-    ]);
-  });
-
-  it('should drop the answer to a question the engine withdrew', async () => {
-    const { engine, askIdentity, commands, request } = browse(true);
-    askIdentity();
-    engine.emit({
-      type: 'WidgetPermissions',
-      data: { request, question: 1, widget: 'Standup', permissions: [] },
-    });
-    await flush();
-    expect(commands()).toEqual([]);
-  });
-
-  it('should drop the answer to a question a newer one replaced', async () => {
-    const { engine, request, commands } = browse(true);
-    const permissions = [{ capability: IDENTITY, kind: 'Identity' as const, subject: null }];
-
-    engine.emit({
-      type: 'WidgetPermissions',
-      data: { request, question: 1, widget: 'Standup', permissions },
-    });
-
-    engine.emit({
-      type: 'WidgetPermissions',
-      data: { request, question: 2, widget: 'Standup', permissions },
-    });
-
-    await flush();
-
-    const answered = commands().map((c) =>
-      c.type === 'Answer' && c.data.answer.type === 'WidgetPermissions'
-        ? c.data.answer.data.question
-        : null,
-    );
-
-    expect(answered).toEqual([2]);
-  });
-
-  it('should still answer a question when the engine withdraws another', async () => {
-    const { engine, askIdentity, commands, request } = browse(true);
-    askIdentity();
-
-    engine.emit({
-      type: 'WidgetPermissions',
-      data: { request, question: 7, widget: 'Standup', permissions: [] },
-    });
-
-    await flush();
-    expect(commands().length).toBe(1);
-  });
-
-  it('should cancel the run when the question was dismissed', async () => {
-    const { askIdentity, commands, request } = browse(null);
-    askIdentity();
-    await flush();
-    expect(commands()).toEqual([{ type: 'Cancel', data: request }]);
   });
 });
