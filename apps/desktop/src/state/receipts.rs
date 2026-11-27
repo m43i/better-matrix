@@ -125,11 +125,12 @@ impl Receipts {
         }
     }
 
-    /// The whole room was marked read (positions held back in it are older) or unread (they would
-    /// take the mark away): they are dropped.
+    /// The whole room was marked read (positions held back on its main timeline are older) or
+    /// unread (they would take the mark away): they are dropped. Threads keep theirs: neither
+    /// reads them nor is touched by them.
     pub fn supersede(&mut self, account: &AccountId, room_id: &str) {
         self.timelines.retain(|(owner, key), sent| {
-            if owner != account || key.room_id != room_id {
+            if owner != account || key.room_id != room_id || key.thread.is_some() {
                 return true;
             }
             sent.pending = None;
@@ -233,6 +234,17 @@ mod tests {
         receipts.finished(RequestId(1), true, now);
         assert!(receipts.due(now).is_empty());
         assert!(receipts.timelines.is_empty());
+    }
+
+    #[test]
+    fn marking_the_room_read_should_keep_a_threads_queued_receipt() {
+        let (mut receipts, now) = (Receipts::default(), Instant::now());
+        let account = AccountId::new("@a:example.org");
+        let key = TimelineKey { room_id: "!room:example.org".into(), thread: Some("$root".into()) };
+        receipts.update(account.clone(), key.clone(), Some("$1".into()), false, now);
+        receipts.update(account.clone(), key, Some("$2".into()), false, now);
+        receipts.supersede(&account, "!room:example.org");
+        assert_eq!(receipts.due(now + INTERVAL).len(), 1);
     }
 
     #[test]
