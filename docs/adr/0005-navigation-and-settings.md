@@ -177,8 +177,8 @@ Date: 2026-11-22
     by notification id. A thread and connection per notification, waiting for its click, piled
     up with the notification history. A failed show closes the connection (ending its
     listener) and the next notification opens a new one; the listener skips messages it can't
-    read and ends only with its connection. On Wayland it forwards the clicked notification's
-    activation token when the service sends one. The action's label is a catalog key.
+    read and ends only with its connection. It forwards the clicked notification's activation
+    token when the service sends one. The action's label is a catalog key.
 - **Wants attention:** one rule (`wants_attention`) for sidebar, rail and account menu.
   - Unread messages or mentions, or only mentions for mentions-only and muted rooms; and any
     room marked unread, whatever its mode.

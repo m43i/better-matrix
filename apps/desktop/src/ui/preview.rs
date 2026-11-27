@@ -343,14 +343,34 @@ fn controls(player: Option<&video::Player>, width: f32, p: &Palette) -> El {
         (&icons::SPEAKER, t!("preview.mute"))
     };
     let width = width.max(320.0);
-    let time_width = rune::text::advance(&time, font::META).ceil();
-    let scrubber_width = width - 2.0 * ACTION - 3.0 * CONTROLS_GAP - time_width;
-    let mut kit = Kit::neutral(true);
-    kit.c.bg_accent = p.accent;
-    kit.c.border_focus = p.accent;
-    kit.c.layer_03 = Color::WHITE.alpha(0.25);
-    kit.c.knob = p.accent;
-    kit.c.border_base = Color::WHITE;
+    let scrubber_width = rune::memo::layout_with("preview-seek-space", |rect| rect[2]).unwrap_or_else(|| {
+        let time_width = rune::text::measure(&time, &[], font::META, None).0;
+        width - 2.0 * ACTION - 3.0 * CONTROLS_GAP - time_width
+    });
+    let time_label = text(time.clone()).key("preview-time").font(font::META).color(Color::WHITE.alpha(0.85));
+
+    thread_local! {
+        static KIT: std::cell::RefCell<Kit> = std::cell::RefCell::new({
+            let mut kit = Kit::neutral(true);
+            kit.c.layer_03 = Color::WHITE.alpha(0.25);
+            kit.c.border_base = Color::WHITE;
+            kit
+        });
+    }
+    let slider = KIT.with_borrow_mut(|kit| {
+        kit.c.bg_accent = p.accent;
+        kit.c.border_focus = p.accent;
+        kit.c.knob = p.accent;
+        Slider::new("preview-seek", progress)
+            .width(scrubber_width)
+            .control_size(ControlSize::Mini)
+            .label(t!("audio.seek"))
+            .hide_label()
+            .value_text(time)
+            .disabled(player.duration().is_none())
+            .on_change(|s: &mut State, value, _| s.seek_video(f64::from(value)))
+            .build(kit)
+    });
 
     row()
         .key("preview-controls")
@@ -359,18 +379,8 @@ fn controls(player: Option<&video::Player>, width: f32, p: &Palette) -> El {
         .gap(CONTROLS_GAP)
         .center_y()
         .child(action(glyph, label, "preview-play").on_press(State::toggle_preview_playback))
-        .child(text(time.clone()).w(time_width).font(font::META).color(Color::WHITE.alpha(0.85)))
-        .child(
-            Slider::new("preview-seek", progress)
-                .width(scrubber_width)
-                .control_size(ControlSize::Mini)
-                .label(t!("audio.seek"))
-                .hide_label()
-                .value_text(time)
-                .disabled(player.duration().is_none())
-                .on_change(|s: &mut State, value, _| s.seek_video(f64::from(value)))
-                .build(&kit),
-        )
+        .child(time_label)
+        .child(row().key("preview-seek-space").grow(1.0).min_w(12.0).center_y().child(slider.shrink()))
         .child(action(sound, sound_label, "preview-sound").on_press(State::toggle_video_sound))
 }
 

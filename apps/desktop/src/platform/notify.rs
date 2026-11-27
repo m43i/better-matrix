@@ -44,11 +44,7 @@ impl Notifier for Recording {
 fn open_room(app: &AppHandle<State>, account: String, room_id: String, token: Option<String>) {
     let account = matrix_core::AccountId::new(account);
     app.update(crate::state::navigate(move |s| s.open_room(&account, &room_id)));
-    if let Some(token) = token {
-        app.activate(token);
-    } else {
-        app.open();
-    }
+    app.activate(token.unwrap_or_default());
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

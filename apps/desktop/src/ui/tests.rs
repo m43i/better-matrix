@@ -5177,3 +5177,25 @@ fn copying_a_previewed_image_should_put_the_original_on_the_clipboard() {
     let pixels = image::load_from_memory(content.image().expect("an image was copied").png()).unwrap();
     assert_eq!((pixels.width(), pixels.height()), (256, 256));
 }
+
+#[test]
+fn an_account_file_dialog_answer_should_be_canceled_after_switching_accounts() {
+    let pickers: [fn(&mut State, &mut rune::Tx); 3] =
+        [State::pick_avatar, State::import_room_keys, State::export_room_keys];
+    for pick in pickers {
+        let mut rt = runtime(|_| {});
+        let other = AccountId::new("@ada:hobby.chat");
+        assert_ne!(rt.state.nav.account.as_ref(), Some(&other));
+        rt.update(pick);
+        rt.frame(0.0);
+        rt.update(|s, _| s.select_account(&other));
+        rt.frame(0.0);
+
+        rt.resolve_file_dialog(Some(std::env::temp_dir().join("selected.file"))).unwrap();
+        rt.frame(0.0);
+
+        assert_eq!(rt.state.notice.as_deref(), Some(crate::i18n::t!("dialog.destination_changed")));
+        assert!(!rt.state.profile.saving_avatar);
+        assert!(!matches!(rt.state.modal, Some(crate::state::Modal::KeyFile(_))));
+    }
+}

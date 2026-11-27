@@ -204,3 +204,19 @@ fn setting_the_video_sliders_accessible_value_should_seek_to_that_fraction() {
     };
     assert_eq!(player.progress(), 0.375);
 }
+
+#[test]
+fn a_video_slider_should_use_the_space_between_the_time_and_sound_button() {
+    let mut state = State::detached();
+    demo::preview_video(&mut state);
+    state.settings.zoom = crate::state::Zoom::from_percent(150);
+    let mut rt = Runtime::new(state, crate::ui::view, (720.0, 480.0), Env::new(true, 1.5));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+
+    let [time_x, _, time_w, _] = rt.presented("preview-time").unwrap().0;
+    let [seek_x, _, seek_w, _] = rt.presented("preview-seek").unwrap().0;
+    let [sound_x, _, _, _] = rt.presented("preview-sound").unwrap().0;
+    assert!(seek_x >= time_x + time_w && seek_x + seek_w <= sound_x);
+}
