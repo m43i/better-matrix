@@ -8308,9 +8308,12 @@ fn choosing_a_person_should_centre_the_map_on_them_at_street_level() {
     let mut s = map_viewer();
     s.drag_map(rune::Phase::Up, 300.0, 0.0);
     s.zoom_map(-3, (0.0, 0.0));
-    s.focus_map_pin("$grace-live".into());
+    s.focus_map_pin("@grace:example.org".into());
     let viewer = s.map_viewer().unwrap();
-    assert_eq!((viewer.focus.as_str(), viewer.camera, viewer.zoom), ("$grace-live", Camera::Following, 15));
+    assert_eq!(
+        (viewer.chosen.as_deref(), viewer.camera, viewer.zoom),
+        (Some("@grace:example.org"), Camera::Following, 15)
+    );
     assert_eq!(s.map_center(viewer), Some((52.5171, 13.3892)));
 }
 
@@ -8330,4 +8333,15 @@ fn the_map_should_leave_out_the_places_of_people_the_user_ignores() {
     let viewer = s.map_viewer().unwrap();
     let pins: Vec<&str> = s.map_pins(viewer, now_ms()).iter().map(|pin| pin.message.event_id.as_str()).collect();
     assert_eq!(pins, ["$ada-place", "$place"]);
+}
+
+#[test]
+fn a_chosen_persons_live_share_should_leave_the_map_once_it_ends() {
+    let mut s = map_viewer();
+    s.focus_map_pin("@grace:example.org".into());
+    let viewer = s.map_viewer().unwrap();
+    let later = now_ms() + 2 * 60 * 60_000;
+    let pins: Vec<&str> = s.map_pins(viewer, later).iter().map(|pin| pin.message.event_id.as_str()).collect();
+    assert!(!pins.contains(&"$grace-live"), "{pins:?}");
+    assert!(pins.contains(&"$place"), "the opened card stays: {pins:?}");
 }

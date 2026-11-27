@@ -5382,7 +5382,7 @@ fn the_map_viewer_should_show_everyone_who_shared_a_place_lately() {
 fn pressing_a_person_on_the_map_should_turn_the_map_to_them() {
     let mut rt = runtime(demo::location_map);
     press(&mut rt, "map-person-$grace-live");
-    assert_eq!(rt.state.map_viewer().map(|viewer| viewer.focus.as_str()), Some("$grace-live"));
+    assert_eq!(rt.state.map_viewer().and_then(|viewer| viewer.chosen.as_deref()), Some("@grace:example.org"));
 }
 
 #[test]

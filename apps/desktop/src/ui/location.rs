@@ -398,7 +398,7 @@ fn marker(s: &State, pin: &MapPin<'_>, focused: bool, p: &Palette) -> El {
         &s.media,
         PIN - 6.0,
     );
-    let event_id = message.event_id.clone();
+    let sender = message.sender_id.clone();
     col()
         .key(format!("map-pin-{}", message.event_id))
         .w(PIN)
@@ -417,7 +417,7 @@ fn marker(s: &State, pin: &MapPin<'_>, focused: bool, p: &Palette) -> El {
         )
         .child(el().size(2.0, 8.0).fill(ring))
         .child(el().size(12.0, 12.0).radius(6.0).fill(p.accent).border(2.0, Color::WHITE))
-        .on_press(move |s: &mut State| s.focus_map_pin(event_id.clone()))
+        .on_press(move |s: &mut State| s.focus_map_pin(sender.clone()))
 }
 
 /// The map's buttons, at its bottom right: back to the focused place once moved away, and zoom.
@@ -507,7 +507,7 @@ fn person_row(s: &State, viewer: &MapViewer, pin: &MapPin<'_>, focused: bool, no
         .then(|| s.live_share(&viewer.account, &viewer.key.room_id, Some(&message.event_id)))
         .flatten()
         .map(|request| stop_button(request, p));
-    let event_id = message.event_id.clone();
+    let sender = message.sender_id.clone();
     let row = row()
         .key(format!("map-person-{}", message.event_id))
         .w_full()
@@ -533,6 +533,6 @@ fn person_row(s: &State, viewer: &MapViewer, pin: &MapPin<'_>, focused: bool, no
             ),
         )
         .children(stop)
-        .on_press(move |s: &mut State| s.focus_map_pin(event_id.clone()));
+        .on_press(move |s: &mut State| s.focus_map_pin(sender.clone()));
     watch_expiry(row, pin.location)
 }

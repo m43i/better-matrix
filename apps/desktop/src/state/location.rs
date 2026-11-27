@@ -24,8 +24,11 @@ pub struct MapViewer {
     pub account: AccountId,
     /// The conversation (room or thread) whose places it shows.
     pub key: TimelineKey,
-    /// The message whose place the viewer is about: the card it opened from, or a pin chosen since.
-    pub focus: String,
+    /// The card it opened from: its place shows however old.
+    pub opened: String,
+    /// Whom it is about, chosen on the map since (a sender's user ID); the opened card's sender
+    /// until then.
+    pub chosen: Option<String>,
     pub camera: Camera,
     pub zoom: u8,
     /// How far the map is being dragged, in points; zero between drags.
@@ -278,7 +281,8 @@ impl State {
         self.modal = Some(Modal::LocationMap(Box::new(MapViewer {
             account,
             key,
-            focus: event_id,
+            opened: event_id,
+            chosen: None,
             camera: Camera::Following,
             zoom: matrix_core::geo::MAP_ZOOM,
             drag: (0.0, 0.0),
@@ -305,33 +309,39 @@ impl State {
     pub fn map_pins(&self, viewer: &MapViewer, now: u64) -> Vec<MapPin<'_>> {
         let Some(data) = self.accounts.get(&viewer.account) else { return Vec::new() };
         let Some(timeline) = data.timeline(&viewer.key) else { return Vec::new() };
-        map_pins(timeline.messages().filter(|message| !data.ignores(&message.sender_id)), &viewer.focus, now)
+        map_pins(timeline.messages().filter(|message| !data.ignores(&message.sender_id)), &viewer.opened, now)
     }
 
-    /// Whom the map viewer is about: the focused message's sender. Their pin is the focused one,
-    /// following them from an ended live share to a newer place.
-    pub fn map_focus<'s>(&'s self, viewer: &MapViewer) -> Option<&'s str> {
+    /// Whom the map viewer is about: the person chosen on it, else the opened card's sender.
+    /// Their pin is the focused one, following them from an ended live share to a newer place.
+    pub fn map_focus<'s>(&'s self, viewer: &'s MapViewer) -> Option<&'s str> {
+        if let Some(chosen) = &viewer.chosen {
+            return Some(chosen);
+        }
         let timeline = self.accounts.get(&viewer.account)?.timeline(&viewer.key)?;
-        timeline.messages().find(|message| message.event_id == viewer.focus).map(|message| message.sender_id.as_str())
+        timeline.messages().find(|message| message.event_id == viewer.opened).map(|message| message.sender_id.as_str())
     }
 
-    /// Where the map viewer centres (latitude, longitude); `None` while the focused person has no
-    /// place on it.
+    /// Where the map viewer centres (latitude, longitude): on the focused person, or, once their
+    /// place has left the map (a live share ended), on the newest place still on it; `None` while
+    /// none is.
     pub fn map_center(&self, viewer: &MapViewer) -> Option<(f64, f64)> {
         match viewer.camera {
             Camera::Free { latitude, longitude } => Some((latitude, longitude)),
             Camera::Following => {
-                let focus = self.map_focus(viewer)?;
+                let focus = self.map_focus(viewer);
                 let pins = self.map_pins(viewer, super::now_ms());
-                pins.iter().find(|pin| pin.message.sender_id == focus).map(|pin| pin.at)
+                let focused = pins.iter().find(|pin| Some(pin.message.sender_id.as_str()) == focus);
+                focused.or(pins.first()).map(|pin| pin.at)
             }
         }
     }
 
-    /// Turns the map viewer to a place: centred on it, at street level.
-    pub fn focus_map_pin(&mut self, event_id: String) {
+    /// Turns the map viewer to someone (a sender's user ID): centred on their place, at street
+    /// level.
+    pub fn focus_map_pin(&mut self, sender: String) {
         if let Some(viewer) = self.map_viewer_mut() {
-            viewer.focus = event_id;
+            viewer.chosen = Some(sender);
             viewer.camera = Camera::Following;
             viewer.zoom = matrix_core::geo::MAP_ZOOM;
         }
