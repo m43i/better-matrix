@@ -79,7 +79,7 @@ export function prepare(message: Message, sender = message.sender_name): Prepare
   if (known) return known;
   let result = NOT_TEXT;
 
-  if (message.content.type === 'Text') {
+  if (message.content.type === 'Text' || message.content.type === 'Notice') {
     const { body, html } = message.content.data;
     const key = textKey(body, html);
     const kept = parsed.get(key);
@@ -161,6 +161,7 @@ export function cardLink(item: Prepared, gifsShown: boolean): string | null {
  */
 export function messageText(message: Message): string | null {
   switch (message.content.type) {
+    case 'Notice':
     case 'Text': {
       const { body, html } = message.content.data;
 
@@ -245,17 +246,20 @@ export function messageActions(
   const hasText = text !== null && text.trim() !== '';
 
   return {
-    forward: sent && (content.type === 'Text' || content.type === 'Attachment'),
+    forward:
+      sent &&
+      (content.type === 'Text' || content.type === 'Notice' || content.type === 'Attachment'),
     link: sent && content.type !== 'Call',
     pin: sent && readable && canPin,
     save: sent && readable,
-    translate: content.type === 'Text' && hasText,
+    translate: (content.type === 'Text' || content.type === 'Notice') && hasText,
     // A call's card takes no reactions: the timeline keeps none on it.
     react: sent && readable,
     reply: sent && readable,
     thread: sent && readable && !inThread,
     copy:
       (content.type === 'Text' ||
+        content.type === 'Notice' ||
         content.type === 'Emote' ||
         content.type === 'Location' ||
         content.type === 'Poll') &&

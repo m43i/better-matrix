@@ -58,8 +58,10 @@ fn copy_button(source: &EventSource, p: &Palette) -> El {
 pub fn widgets(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
     let listed = account.widgets.get(&room.room_id);
     let menu_open = s.popover == Some(Popover::WidgetsMenu);
+    let failed = account.widget_errors.contains_key(&room.room_id);
     let count = match listed {
         Some(listed) => tp!("widgets.count", listed.widgets.len()),
+        None if failed => t!("widgets.title").to_owned(),
         None => t!("info.loading").to_owned(),
     };
     let top = row()
@@ -70,7 +72,7 @@ pub fn widgets(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette
         .gap(10.0)
         .center_y()
         .child(text(count).key("widget-count").font(font::SECTION).color(p.text_muted).grow(1.0).truncate())
-        .child(
+        .children((room.can_start_meeting || listed.is_some_and(|widgets| widgets.can_add)).then(|| {
             el().key(WIDGETS_MENU)
                 .size(38.0, 38.0)
                 .radius(19.0)
@@ -84,8 +86,8 @@ pub fn widgets(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette
                 .label(t!("widgets.menu").to_owned())
                 .help(t!("widgets.menu").to_owned())
                 .child(icon(&icons::PLUS, 18.0).color(p.text_muted))
-                .on_press(State::toggle_widgets_menu),
-        );
+                .on_press(State::toggle_widgets_menu)
+        }));
     let mut list = col().w_full();
     match listed {
         Some(listed) if listed.widgets.is_empty() => {
@@ -108,15 +110,99 @@ pub fn widgets(s: &State, account: &AccountData, room: &RoomSummary, p: &Palette
         }
         None => {}
     }
-    let content = col().w_full().child(top).child(divider(p)).child(list);
-    super::info::frame("widgets-panel", t!("widgets.title"), content, None, p)
+    let manage =
+        super::info::link_row(&icons::PACKAGE, t!("widgets.integrations_open"), None, "widget-integrations", p)
+            .on_press(|s: &mut State| {
+                s.open_integrations();
+            });
+    let error = failed.then(|| {
+        col()
+            .w_full()
+            .px(16.0)
+            .py(8.0)
+            .gap(8.0)
+            .child(text(t!("widgets.load_failed")).font(font::BODY).color(p.text_muted).wrap())
+            .child(
+                super::components::button(t!("common.try_again"), super::components::ButtonKind::Secondary, true, p)
+                    .key("widgets-retry")
+                    .on_press(|s: &mut State| s.show_side(crate::state::SidePanel::Widgets)),
+            )
+    });
+    let launch_error = account.widget_launch_errors.get(&room.room_id).map(|(error, _)| {
+        col()
+            .w_full()
+            .px(16.0)
+            .py(8.0)
+            .gap(8.0)
+            .child(text(error.clone()).font(font::BODY).color(p.text_muted).wrap())
+            .child(
+                super::components::button(t!("common.try_again"), super::components::ButtonKind::Secondary, true, p)
+                    .key("widget-launch-retry")
+                    .on_press(State::retry_widget),
+            )
+    });
+    let content = col()
+        .w_full()
+        .child(top)
+        .children(error)
+        .children(launch_error)
+        .child(divider(p))
+        .child(list)
+        .children(listed.map(|listed| integrations(listed, account, room, p)));
+    super::info::frame(
+        "widgets-panel",
+        t!("widgets.integrations"),
+        content,
+        Some(col().w_full().child(divider(p)).child(manage)),
+        p,
+    )
+}
+
+fn integrations(listed: &matrix_core::Widgets, account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
+    let mut content = col().w_full();
+    if !listed.services.is_empty() {
+        content = content.child(text(t!("widgets.services")).font(font::SECTION).color(p.text_muted).px(16.0).py(8.0));
+        for id in &listed.services {
+            let person = account
+                .members
+                .get(&room.room_id)
+                .and_then(|members| members.people.iter().find(|member| member.person.id == *id))
+                .map_or_else(
+                    || matrix_core::Person { id: id.clone(), name: id.clone(), avatar: None },
+                    |member| member.person.clone(),
+                );
+            content = content.child(
+                super::info::link_row(&icons::PACKAGE, &person.name, None, &format!("integration-service-{id}"), p)
+                    .on_press(move |s: &mut State| s.show_side(crate::state::SidePanel::Person(person.clone()))),
+            );
+        }
+    }
+    if !listed.bridges.is_empty() {
+        content = content.child(text(t!("widgets.bridges")).font(font::SECTION).color(p.text_muted).px(16.0).py(8.0));
+        for bridge in &listed.bridges {
+            let destination = bridge
+                .network
+                .as_ref()
+                .map_or_else(|| bridge.channel.clone(), |network| format!("{network} · {}", bridge.channel));
+            content = content.child(
+                col()
+                    .key(format!("integration-bridge-{}", bridge.id))
+                    .px(16.0)
+                    .py(8.0)
+                    .gap(2.0)
+                    .child(text(bridge.protocol.clone()).font(font::BODY).color(p.text).wrap())
+                    .child(text(destination).font(font::META).color(p.text_muted).wrap().selectable(true)),
+            );
+        }
+    }
+    content
 }
 
 /// The panel's plus, which the menu of what can be added hangs from.
 pub const WIDGETS_MENU: &str = "widgets-menu-button";
 
-/// What can be added to the room shown: a meeting where the homeserver offers them, a widget
-/// where the user may pin one, and bots and integrations.
+/// What can be added to the room shown: a meeting where the homeserver offers them, and a
+/// widget where the user may pin one.
 pub fn widgets_menu(account: &AccountData, room: &RoomSummary, p: &Palette) -> El {
     let can_add = account.widgets.get(&room.room_id).is_some_and(|listed| listed.can_add);
     let room_id = room.room_id.clone();
@@ -132,14 +218,7 @@ pub fn widgets_menu(account: &AccountData, room: &RoomSummary, p: &Palette) -> E
             menu_action(&icons::LAYOUT, t!("widgets.add"), Tone::Normal, p)
                 .key("widget-add")
                 .on_press(move |s: &mut State| s.start_add_widget(&room_id))
-        }))
-        .child(
-            menu_action(&icons::PACKAGE, t!("widgets.integrations_open"), Tone::Normal, p)
-                .key("widget-integrations")
-                .on_press(|s: &mut State| {
-                    s.open_integrations();
-                }),
-        );
+        }));
     col().child(panel).anchored(WIDGETS_MENU, rune::Side::Bottom, rune::Align::End, 6.0)
 }
 
@@ -188,11 +267,22 @@ fn remove_button(widget: &Widget, room: &RoomSummary, p: &Palette) -> Option<El>
     })
 }
 
+fn permissions_button(widget: &Widget, p: &Palette) -> El {
+    let id = widget.id.clone();
+    icon_button(&icons::SETTINGS, t!("widgets.manage_permissions"), false, p.text_muted, p)
+        .key(format!("widget-permissions-{id}"))
+        .help(t!("widgets.manage_permissions"))
+        .on_press(move |s: &mut State| s.manage_widget_permissions(&id))
+}
+
 /// A meeting: a press joins it in the browser, which its muted "Join" says.
 fn meeting_row(meeting: &Widget, room: &RoomSummary, p: &Palette) -> El {
     let id = meeting.id.clone();
     let join = text(t!("call.join")).key(format!("widget-join-{}", meeting.id)).font(font::META).color(p.text_muted);
-    let trailing = std::iter::once(join).chain(remove_button(meeting, room, p)).collect();
+    let permissions =
+        matches!(meeting.meeting, Some(matrix_core::Meeting::Jitsi | matrix_core::Meeting::BigBlueButton))
+            .then(|| permissions_button(meeting, p));
+    let trailing = std::iter::once(join).chain(permissions).chain(remove_button(meeting, room, p)).collect();
     row_with(meeting, &icons::MEETING, trailing, p)
         .help(tf!("widgets.join_meeting_named", name = meeting.name))
         .on_press(move |s: &mut State| {
@@ -209,7 +299,7 @@ fn widget_row(widget: &Widget, room: &RoomSummary, p: &Palette) -> El {
         .on_press(move |s: &mut State| {
             s.run_widget(&in_browser, true);
         });
-    let trailing = std::iter::once(open).chain(remove_button(widget, room, p)).collect();
+    let trailing = [open, permissions_button(widget, p)].into_iter().chain(remove_button(widget, room, p)).collect();
     row_with(widget, &icons::LAYOUT, trailing, p).on_press(move |s: &mut State| {
         s.run_widget(&pressed, false);
     })

@@ -31,6 +31,7 @@ export function messageText(message: Message, sender = message.sender_name): str
   const content = message.content;
 
   switch (content.type) {
+    case 'Notice':
     case 'Text':
       return oneLine(spoilerSafeText(content.data.body, content.data.html));
     case 'Emote':

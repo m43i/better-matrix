@@ -462,11 +462,13 @@ Date: 2026-11-16
   shapes: "Show hidden events" is a switch in Preferences (`Settings::showHiddenEvents`), and
   the timeline plan gives each hidden event a line that opens its source; "View source" in a
   message's sheet opens `app/event-source.tsx` (selectable JSON, Copy JSON). A room's details
-  lead to `app/widgets.tsx`: one plain list, meetings first (a muted "Join"), a tap runs one
+  lead to `app/widgets.tsx` through the **Integrations** row. Widgets are listed meetings first (a muted "Join"), a tap runs one
   in the app (a meeting joins), a long press offers Open, Open in browser and Remove; the
   header's + is a native menu with Start a meeting (where the room offers one,
-  `RoomSummary::can_start_meeting`, ADR 0012), Add widget and Bots and integrations. Widgets run
-  in an in-app web view (`react-native-webview`, `app/widget.tsx`), meetings included (ADR
+  `RoomSummary::can_start_meeting`, ADR 0012) and Add widget. Manage integrations is a separate row.
+  Widgets run
+  in an in-app web view (`react-native-webview`, `app/widget.tsx`). Teams and Zoom join links open
+  in the system browser (ADR
   0012): `WidgetRun` (`state/actions/widgets.ts`) starts the run with `store.run`, answers the
   page, the permissions (a sheet with a switch each; an empty question withdraws it) and the
   terms (shown in the screen, with links), and cancels the run when the screen closes. The

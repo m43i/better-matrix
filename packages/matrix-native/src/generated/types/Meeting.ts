@@ -3,4 +3,4 @@
 /**
  * A video meeting a widget holds.
  */
-export type Meeting = "Jitsi" | "BigBlueButton";
+export type Meeting = "Jitsi" | "BigBlueButton" | "Teams" | "Zoom";

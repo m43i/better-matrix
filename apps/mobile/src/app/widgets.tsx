@@ -1,8 +1,4 @@
-// A room's widgets (from its details): web apps pinned to the room, in one list, its meetings
-// first. A tap runs one in the app (the widget screen; a meeting is joined); a long press offers
-// Open, Open in browser and, for whoever may, Remove (with a confirmation). The header's + is a
-// native menu: Start a meeting (where the room can start one, `can_start_meeting`), Add widget
-// (for whoever may add widgets) and Bots and integrations (the integration manager).
+// The room's Integrations screen, opened from Room info.
 
 import type { AccountId, Widget } from '@better-matrix/matrix-native/types';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -15,7 +11,7 @@ import { listWidgets, removeWidget } from '../state/actions/developer';
 import { useAppStore, useStore } from '../state/react';
 import { account as accountOf, canStartMeeting } from '../state/selectors';
 import { widgetSections } from '../state/widgets';
-import { Divider, EmptyState, ListRow } from '../ui/components';
+import { Button, Divider, EmptyState, ListRow, ListSection } from '../ui/components';
 import { useToolbarIcon } from '../ui/shell/toolbarIcon';
 import { headerTint, usePalette } from '../ui/theme';
 import { openWidgetInSystemBrowser } from '../ui/widgets/browser';
@@ -32,7 +28,7 @@ export default function WidgetsScreen() {
   const plus = useToolbarIcon('plus', headerTint(palette));
   const meetingIcon = useToolbarIcon('meeting', palette.text);
   const widgetIcon = useToolbarIcon('widgets', palette.text);
-  const botIcon = useToolbarIcon('package', palette.text);
+  const failed = useStore((s) => accountOf(s, account)?.widgetErrors[roomId] ?? false);
 
   useEffect(() => listWidgets(store, account, roomId), [store, account, roomId]);
 
@@ -56,11 +52,15 @@ export default function WidgetsScreen() {
       ],
     );
 
+  const permissions = (widget: Widget) =>
+    openWidget(router, account, roomId, { type: 'permissions', widgetId: widget.id });
+
   const actions = (widget: Widget) => {
     if (Platform.OS === 'ios') {
       const options = [
         t('mobile.widgets.open'),
         t('mobile.widgets.open_browser'),
+        t('widgets.manage_permissions'),
         ...(widget.can_remove ? [t('widgets.remove')] : []),
         t('common.cancel'),
       ];
@@ -71,67 +71,123 @@ export default function WidgetsScreen() {
           message: widget.host,
           options,
           cancelButtonIndex: options.length - 1,
-          destructiveButtonIndex: widget.can_remove ? 2 : undefined,
+          destructiveButtonIndex: widget.can_remove ? 3 : undefined,
         },
         (index) => {
           if (index === 0) open(widget);
           else if (index === 1) inBrowser(widget);
-          else if (index === 2 && widget.can_remove) askToRemove(widget);
+          else if (index === 2) permissions(widget);
+          else if (index === 3 && widget.can_remove) askToRemove(widget);
         },
       );
 
       return;
     }
 
-    // Android's alert holds three buttons: a tap already opens the widget here.
+    const browserActions = () =>
+      Alert.alert(widget.name, widget.host, [
+        { text: t('common.cancel'), style: 'cancel' },
+        ...(widget.can_remove
+          ? [{ text: t('widgets.remove'), onPress: () => askToRemove(widget) }]
+          : []),
+        { text: t('mobile.widgets.open_browser'), onPress: () => inBrowser(widget) },
+      ]);
+
     Alert.alert(widget.name, widget.host, [
       { text: t('common.cancel'), style: 'cancel' },
+      { text: t('widgets.manage_permissions'), onPress: () => permissions(widget) },
       ...(widget.can_remove
-        ? [{ text: t('widgets.remove'), onPress: () => askToRemove(widget) }]
-        : [{ text: t('mobile.widgets.open'), onPress: () => open(widget) }]),
-      { text: t('mobile.widgets.open_browser'), onPress: () => inBrowser(widget) },
+        ? [{ text: t('widgets.more'), onPress: browserActions }]
+        : [{ text: t('mobile.widgets.open_browser'), onPress: () => inBrowser(widget) }]),
     ]);
   };
 
   return (
     <>
-      <Stack.Screen options={{ title: t('widgets.title') }} />
-      <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Menu icon={plus} accessibilityLabel={t('widgets.add')}>
-          <Stack.Toolbar.MenuAction
-            icon={meetingIcon}
-            hidden={!canStart}
-            onPress={() => openWidget(router, account, roomId, { type: 'meeting', video: true })}
-          >
-            {t('mobile.widgets.start_meeting')}
-          </Stack.Toolbar.MenuAction>
-          <Stack.Toolbar.MenuAction
-            icon={widgetIcon}
-            hidden={!listed?.can_add}
-            onPress={() => router.push(routes.addWidget(account, roomId))}
-          >
-            {t('widgets.add')}
-          </Stack.Toolbar.MenuAction>
-          <Stack.Toolbar.MenuAction
-            icon={botIcon}
-            onPress={() => openWidget(router, account, roomId, { type: 'integrations' })}
-          >
-            {t('mobile.widgets.integrations')}
-          </Stack.Toolbar.MenuAction>
-        </Stack.Toolbar.Menu>
-      </Stack.Toolbar>
+      <Stack.Screen options={{ title: t('widgets.integrations') }} />
+      {canStart || listed?.can_add ? (
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Menu icon={plus} accessibilityLabel={t('widgets.add')}>
+            <Stack.Toolbar.MenuAction
+              icon={meetingIcon}
+              hidden={!canStart}
+              onPress={() => openWidget(router, account, roomId, { type: 'meeting', video: true })}
+            >
+              {t('mobile.widgets.start_meeting')}
+            </Stack.Toolbar.MenuAction>
+            <Stack.Toolbar.MenuAction
+              icon={widgetIcon}
+              hidden={!listed?.can_add}
+              onPress={() => router.push(routes.addWidget(account, roomId))}
+            >
+              {t('widgets.add')}
+            </Stack.Toolbar.MenuAction>
+          </Stack.Toolbar.Menu>
+        </Stack.Toolbar>
+      ) : null}
       <FlatList<Widget>
         testID="widgets"
         contentInsetAdjustmentBehavior="automatic"
         data={[...meetings, ...others]}
         keyExtractor={(widget) => widget.id}
         ItemSeparatorComponent={() => <Divider inset={52} />}
+        ListHeaderComponent={
+          failed ? (
+            <>
+              <EmptyState icon="alert" title={t('widgets.load_failed')} />
+              <Button
+                title={t('common.try_again')}
+                testID="widgets-retry"
+                kind="secondary"
+                onPress={() => listWidgets(store, account, roomId)}
+              />
+            </>
+          ) : undefined
+        }
         ListEmptyComponent={
-          listed === undefined ? (
+          failed ? undefined : listed === undefined ? (
             <EmptyState loading title={t('info.loading')} />
           ) : (
             <EmptyState icon="widgets" title={t('widgets.none')} />
           )
+        }
+        ListFooterComponent={
+          <>
+            {(listed?.services ?? []).length ? (
+              <ListSection title={t('widgets.services')}>
+                {listed?.services?.map((userId) => (
+                  <ListRow
+                    key={userId}
+                    icon="package"
+                    title={userId}
+                    onPress={() => router.push(routes.member(account, roomId, userId))}
+                  />
+                ))}
+              </ListSection>
+            ) : null}
+            {(listed?.bridges ?? []).length ? (
+              <ListSection title={t('widgets.bridges')}>
+                {listed?.bridges?.map((bridge) => (
+                  <ListRow
+                    key={bridge.id}
+                    icon="package"
+                    title={bridge.protocol}
+                    subtitle={
+                      bridge.network ? [bridge.network, bridge.channel].join(' · ') : bridge.channel
+                    }
+                  />
+                ))}
+              </ListSection>
+            ) : null}
+            <ListSection>
+              <ListRow
+                testID="widget-integrations"
+                icon="package"
+                title={t('widgets.integrations_open')}
+                onPress={() => openWidget(router, account, roomId, { type: 'integrations' })}
+              />
+            </ListSection>
+          </>
         }
         renderItem={({ item }) => (
           <ListRow

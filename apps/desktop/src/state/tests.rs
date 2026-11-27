@@ -7081,7 +7081,7 @@ fn opening_the_widgets_panel_should_list_the_rooms_widgets() {
 fn listed_widgets_should_be_kept_for_their_room() {
     let (mut s, _commands) = state();
     let id = signed_in_with(&mut s, matrix_core::SignInMethod::Password);
-    let widgets = matrix_core::Widgets { widgets: Vec::new(), can_add: true };
+    let widgets = matrix_core::Widgets { can_add: true, ..Default::default() };
     apply(&mut s, Event::Widgets { account: id.clone(), room_id: "!one:x".into(), widgets: widgets.clone() });
     assert_eq!(s.accounts.get(&id).and_then(|data| data.widgets.get("!one:x")), Some(&widgets));
 }

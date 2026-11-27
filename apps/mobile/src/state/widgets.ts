@@ -10,6 +10,8 @@ import type {
   Command,
   RoomSummary,
   Widget,
+  WidgetAccess,
+  WidgetUrlField,
   WidgetBridge,
   WidgetPage,
   WidgetPermission,
@@ -21,7 +23,7 @@ import { t } from '../i18n';
 
 /** What the widget screen runs: one of the room's widgets, a new meeting, or integrations. */
 export type WidgetTarget =
-  | { type: 'widget'; widgetId: string }
+  | { type: 'widget' | 'permissions'; widgetId: string }
   | { type: 'meeting'; video: boolean }
   | { type: 'integrations' };
 
@@ -32,6 +34,11 @@ export function runCommand(account: AccountId, roomId: string, target: WidgetTar
       return {
         type: 'RunWidget',
         data: { account, room_id: roomId, widget_id: target.widgetId, browser: false },
+      };
+    case 'permissions':
+      return {
+        type: 'ManageWidgetPermissions',
+        data: { account, room_id: roomId, widget_id: target.widgetId },
       };
     case 'meeting':
       return {
@@ -94,6 +101,54 @@ export function widgetSections(widgets: Widgets | undefined): WidgetSections {
     (widget.meeting === null ? others : meetings).push(widget);
 
   return { meetings, others };
+}
+
+const urlFields = {
+  UserId: 'widgets.field.user_id',
+  RoomId: 'widgets.field.room_id',
+  DisplayName: 'widgets.field.display_name',
+  AvatarUrl: 'widgets.field.avatar_url',
+  DeviceId: 'widgets.field.device_id',
+  Homeserver: 'widgets.field.homeserver',
+} satisfies Record<WidgetUrlField, Parameters<typeof t>[0]>;
+
+export function accessContext(access: WidgetAccess): string {
+  return t('widgets.access_context', {
+    site: access.origin,
+    room: access.room,
+    user: access.user_id,
+  });
+}
+
+export function accessText(access: WidgetAccess) {
+  const { kind, name } = access;
+
+  switch (kind.type) {
+    case 'Open':
+      return {
+        title: t('widgets.open_title', { widget: name }),
+        body: kind.data.length
+          ? t('widgets.open_shares', {
+              fields: kind.data.map((field) => t(urlFields[field])).join(', '),
+            })
+          : t('widgets.open_site'),
+        action: t('common.continue'),
+      };
+    case 'Manager':
+      return {
+        title: t('widgets.integrations_open'),
+        body: t(kind.data.hosted ? 'widgets.manager_hosted' : 'widgets.manager_configured'),
+        action: t('common.continue'),
+      };
+    case 'Saved':
+      return {
+        title: t('widgets.permissions_title', { widget: name }),
+        body: kind.data.length
+          ? kind.data.map(permissionText).join('\n')
+          : t('widgets.no_saved_permissions'),
+        action: t('widgets.reset_permissions'),
+      };
+  }
 }
 
 /** What a widget permission allows, in words. */

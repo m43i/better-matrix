@@ -432,7 +432,12 @@ pub(crate) fn content(msgtype: &MessageType) -> MessageContent {
     let thumbnail = |source: Option<&MediaSource>| source.and_then(MediaRef::of);
     let attachment = match msgtype {
         MessageType::Text(c) => return text(&c.body, &c.formatted),
-        MessageType::Notice(c) => return text(&c.body, &c.formatted),
+        MessageType::Notice(c) => {
+            return MessageContent::Notice {
+                body: c.body.clone(),
+                html: c.formatted.as_ref().filter(|f| f.format == MessageFormat::Html).map(|f| f.body.clone()),
+            };
+        }
         MessageType::Emote(c) => {
             return MessageContent::Emote {
                 body: c.body.clone(),
@@ -511,6 +516,23 @@ mod tests {
         let mut message: RoomMessageEventContent = serde_json::from_value(content).expect("a message");
         message.msgtype.sanitize(HtmlSanitizerMode::Compat, RemoveReplyFallback::Yes);
         super::content(&message.msgtype)
+    }
+
+    #[test]
+    fn a_received_notice_should_keep_its_message_type() {
+        let content = as_the_timeline_reads(serde_json::json!({
+            "msgtype": "m.notice",
+            "body": "Build passed",
+            "format": "org.matrix.custom.html",
+            "formatted_body": "<strong>Build passed</strong>"
+        }));
+        assert_eq!(
+            content,
+            MessageContent::Notice {
+                body: "Build passed".to_owned(),
+                html: Some("<strong>Build passed</strong>".to_owned()),
+            }
+        );
     }
 
     #[test]

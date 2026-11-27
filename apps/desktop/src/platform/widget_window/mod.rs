@@ -89,6 +89,8 @@ pub enum FromHelper {
     OpenUrl { url: String },
     /// The window closed.
     Closed,
+    /// The window could not be created or its page could not be loaded.
+    Failed,
 }
 
 /// One protocol line: the message as JSON, then a newline.
@@ -260,14 +262,12 @@ impl Helper {
         let _ = to.send(open);
         let failed = app.clone();
         let spawned = std::thread::Builder::new().name("widget-window".into()).spawn(move || {
-            if let Err(error) = serve(&app, request, &from_app) {
-                let error = error.to_string();
-                app.update(move |s: &mut State, _| s.widget_window_failed(request, error));
+            if serve(&app, request, &from_app).is_err() {
+                app.update(move |s: &mut State, _| s.widget_window_failed(request));
             }
         });
-        if let Err(error) = spawned {
-            let error = error.to_string();
-            failed.update(move |s: &mut State, _| s.widget_window_failed(request, error));
+        if spawned.is_err() {
+            failed.update(move |s: &mut State, _| s.widget_window_failed(request));
         }
         Self { to }
     }
@@ -313,11 +313,18 @@ fn serve(app: &AppHandle<State>, request: RequestId, from_app: &mpsc::Receiver<T
                     reader.update(move |s: &mut State, _| s.widget_posted(request, message));
                 }
                 Some(FromHelper::OpenUrl { url }) => reader.update(move |s: &mut State, tx| s.open_link(&url, tx)),
-                Some(FromHelper::Closed) => break,
+                Some(FromHelper::Closed) => {
+                    reader.update(move |s: &mut State, _| s.widget_window_closed(request));
+                    return;
+                }
+                Some(FromHelper::Failed) => {
+                    reader.update(move |s: &mut State, _| s.widget_window_failed(request));
+                    return;
+                }
                 None => {}
             }
         }
-        reader.update(move |s: &mut State, _| s.widget_window_closed(request));
+        reader.update(move |s: &mut State, _| s.widget_window_failed(request));
     });
     if let Err(error) = read {
         let _ = child.kill();

@@ -31,6 +31,10 @@ pub enum Meeting {
     Jitsi,
     /// A BigBlueButton meeting.
     BigBlueButton,
+    /// A configured Microsoft Teams meeting.
+    Teams,
+    /// A configured Zoom meeting.
+    Zoom,
 }
 
 /// The server older Jitsi widgets meant when they named none.
@@ -49,6 +53,8 @@ pub(crate) enum Place {
     Jitsi(Jitsi),
     /// A BigBlueButton meeting.
     BigBlueButton(BigBlueButton),
+    /// A hosted meeting opened with its original join link.
+    Hosted { meeting: Meeting, url: url::Url },
 }
 
 /// A Jitsi conference.
@@ -79,6 +85,7 @@ impl Place {
         match self {
             Self::Jitsi(_) => Meeting::Jitsi,
             Self::BigBlueButton(_) => Meeting::BigBlueButton,
+            Self::Hosted { meeting, .. } => *meeting,
         }
     }
 
@@ -89,6 +96,7 @@ impl Place {
             Self::Jitsi(jitsi) => jitsi.url(&viewer.display_name, None),
             Self::BigBlueButton(BigBlueButton::Room(url)) => Some(url.clone()),
             Self::BigBlueButton(BigBlueButton::Dimension { .. }) => None,
+            Self::Hosted { url, .. } => Some(url.to_string()),
         }
     }
 }
@@ -141,6 +149,17 @@ pub(crate) fn place(kind: &str, template: &str, data: &Value) -> Option<Place> {
         }
         return Some(Place::Jitsi(Jitsi { domain, conference, audio_only, auth }));
     }
+    if let Some((meeting, url)) = hosted_meeting(template).or_else(|| {
+        ["joinUrl", "conferenceUrl"].into_iter().filter_map(text).filter_map(hosted_meeting).find(|(meeting, _)| {
+            match meeting {
+                Meeting::Teams => matches!(kind, "teams" | "m.teams" | "microsoft-teams"),
+                Meeting::Zoom => matches!(kind, "zoom" | "m.zoom"),
+                _ => false,
+            }
+        })
+    }) {
+        return Some(Place::Hosted { meeting, url });
+    }
     let web = |url: &str| {
         url::Url::parse(url).ok().filter(|url| matches!(url.scheme(), "https" | "http")).map(|url| url.to_string())
     };
@@ -166,6 +185,33 @@ pub(crate) fn place(kind: &str, template: &str, data: &Value) -> Option<Place> {
         meeting_id: meeting_id.clone(),
         password: password.clone(),
     }))
+}
+
+/// Recognizes published provider join URLs without trusting a room-set widget type or name.
+fn hosted_meeting(value: &str) -> Option<(Meeting, url::Url)> {
+    let url = url::Url::parse(value).ok()?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() || url.port().is_some() {
+        return None;
+    }
+    let host = url.host_str()?;
+    let path = url.path();
+    let has_join_path = |prefixes: &[&str]| {
+        prefixes.iter().any(|prefix| path.strip_prefix(prefix).is_some_and(|rest| !rest.is_empty()))
+    };
+    let meeting = if matches!(host, "teams.microsoft.com" | "teams.cloud.microsoft" | "teams.live.com")
+        && has_join_path(&["/l/meetup-join/", "/meet/"])
+    {
+        Meeting::Teams
+    } else if ["zoom.us", "zoom.com", "zoomgov.com"]
+        .into_iter()
+        .any(|base| host == base || host.strip_suffix(base).is_some_and(|left| left.ends_with('.')))
+        && has_join_path(&["/j/", "/my/", "/wc/join/", "/w/"])
+    {
+        Meeting::Zoom
+    } else {
+        return None;
+    };
+    Some((meeting, url))
 }
 
 /// A URL's query and fragment parameters, decoded.
@@ -194,6 +240,7 @@ impl Account {
                 jitsi.url(&viewer.display_name, jwt.as_deref()).ok_or_else(|| Error::Meeting(jitsi.domain.clone()))
             }
             Place::BigBlueButton(BigBlueButton::Room(url)) => Ok(url.clone()),
+            Place::Hosted { url, .. } => Ok(url.to_string()),
             Place::BigBlueButton(BigBlueButton::Dimension { .. }) if !identity => Err(Error::Cancelled),
             Place::BigBlueButton(BigBlueButton::Dimension { api, meeting_id, password }) => {
                 let body = json!({

@@ -203,6 +203,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         Some(Modal::Source(view)) => Some(developer::source(view, &p)),
         Some(Modal::WidgetPrompt(_)) => s.widget_prompt().map(|prompt| match prompt {
             WidgetPrompt::Permissions(asked) => widgets::permissions(asked, &p),
+            prompt @ WidgetPrompt::Access { access, .. } => widgets::access(prompt.key(), access, &p),
             terms @ WidgetPrompt::Terms { policies, .. } => widgets::terms(terms.key(), policies, &p),
         }),
         Some(Modal::Forward { .. } | Modal::Translate(_)) => message_actions::dialog(s, &p),

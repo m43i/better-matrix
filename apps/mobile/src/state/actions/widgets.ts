@@ -11,6 +11,7 @@ import type {
   Answer,
   Policy,
   RequestId,
+  WidgetAccess,
   WidgetPage,
   WidgetPermission,
 } from '@better-matrix/matrix-native/types';
@@ -33,6 +34,7 @@ import { answerRequest } from './accounts';
 export type WidgetView =
   /** Waiting for the page (pinning a meeting, asking the integration manager). */
   | { type: 'starting' }
+  | { type: 'access'; access: WidgetAccess }
   /** The integration manager's terms, to agree to before it opens. */
   | { type: 'terms'; policies: Policy[] }
   /**
@@ -55,6 +57,7 @@ export interface PermissionAsk {
   question: number;
   widget: string;
   permissions: WidgetPermission[];
+  context?: WidgetAccess;
 }
 
 export interface WidgetRunSnapshot {
@@ -93,6 +96,7 @@ export class WidgetRun {
     askingCapture: null,
   };
   private request: RequestId | null = null;
+  private access: WidgetAccess | undefined;
   private readonly listeners = new Set<() => void>();
   /** The engine's messages that came while no page was loaded, in order. */
   private outbox: string[] = [];
@@ -136,11 +140,16 @@ export class WidgetRun {
   /** Starts the run (again, after a failure); one under way is cancelled first. */
   start(): void {
     this.cancel();
+    this.access = undefined;
 
     const run = this.store.run(runCommand(this.account, this.roomId, this.target), (event) => {
       if (this.request !== run.request) return;
 
       switch (event.type) {
+        case 'WidgetAccess':
+          this.access = event.data.access;
+          this.set({ view: { type: 'access', access: event.data.access } });
+          break;
         case 'WidgetPage': {
           // Again for the same run: load the page again, its document and what waited gone.
           const page = event.data.page;
@@ -166,7 +175,13 @@ export class WidgetRun {
           // Nothing asked: the engine withdrew that question (the page started over).
           if (permissions.length === 0) {
             if (this.current.asking?.question === question) this.set({ asking: null });
-          } else this.set({ asking: { request: run.request, question, widget, permissions } });
+          } else {
+            const ask: PermissionAsk = { request: run.request, question, widget, permissions };
+
+            if (this.access) ask.context = this.access;
+            this.set({ asking: ask });
+          }
+
           break;
         }
 
@@ -388,6 +403,13 @@ export class WidgetRun {
     this.set({ asking: null });
   }
 
+  /** Confirms the action currently shown. */
+  confirmAccess(): void {
+    if (this.request === null || this.current.view.type !== 'access') return;
+    answerRequest(this.store, this.request, { type: 'Continue' });
+    this.set({ view: { type: 'starting' } });
+  }
+
   /** Agrees to the integration manager's terms. */
   agree(): void {
     if (this.request === null || this.current.view.type !== 'terms') return;
@@ -452,6 +474,7 @@ export async function openWidgetInBrowser(
   widgetId: string,
   open: (url: string) => void,
   ask: (widget: string, permissions: WidgetPermission[]) => Promise<PermissionAnswer>,
+  confirm?: (access: WidgetAccess) => Promise<boolean>,
 ): Promise<void> {
   const command = { account, room_id: roomId, widget_id: widgetId, browser: true };
 
@@ -461,7 +484,12 @@ export async function openWidgetInBrowser(
 
   const run = store.run({ type: 'RunWidget', data: command }, (event) => {
     if (event.type === 'OpenUrl') open(event.data.url);
-    else if (event.type === 'WidgetPermissions') {
+    else if (event.type === 'WidgetAccess') {
+      void (confirm?.(event.data.access) ?? Promise.resolve(false)).then((allowed) => {
+        if (allowed) answerRequest(store, run.request, { type: 'Continue' });
+        else store.send({ type: 'Cancel', data: run.request }, { quiet: true });
+      });
+    } else if (event.type === 'WidgetPermissions') {
       const { question } = event.data;
       const capabilities = event.data.permissions.map((permission) => permission.capability);
 

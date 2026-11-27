@@ -109,7 +109,7 @@ fn the_panels_plus_should_open_its_menu() {
 
 #[test]
 fn the_panel_should_open_the_integration_manager() {
-    let (mut rt, mut commands) = sending(menu_open);
+    let (mut rt, mut commands) = sending(demo::widgets);
     press(&mut rt, "widget-integrations");
     assert!(sent(&mut commands).iter().any(|(_, command)| matches!(command, Command::OpenIntegrations { .. })));
 }
@@ -122,7 +122,7 @@ fn the_panel_should_start_a_meeting() {
 }
 
 #[test]
-fn allowing_should_grant_the_permissions_left_ticked() {
+fn allowing_should_grant_only_the_permission_ticked() {
     let (mut rt, mut commands) = sending(demo::widget_permissions);
     let id = shown_id(&rt);
     press(&mut rt, &format!("widget-permission-{id}-0"));
@@ -131,15 +131,7 @@ fn allowing_should_grant_the_permissions_left_ticked() {
         Command::Answer { answer: Answer::WidgetPermissions { granted, .. }, .. } => Some(granted),
         _ => None,
     });
-    assert_eq!(
-        granted,
-        Some(vec![
-            "org.matrix.msc2762.send.event:m.room.message".to_owned(),
-            "org.matrix.msc2762.receive.state_event:m.room.member".to_owned(),
-            "org.matrix.msc4039.download_file".to_owned(),
-            "io.element.requires_client".to_owned(),
-        ])
-    );
+    assert_eq!(granted, Some(vec!["org.matrix.msc2762.receive.event:m.room.message".to_owned()]));
 }
 
 #[test]
@@ -235,25 +227,19 @@ fn room_with_widgets(s: &mut State) {
 }
 
 #[test]
-fn a_room_with_widgets_should_open_them_from_its_header() {
+fn a_room_should_open_integrations_from_room_info() {
     let mut rt = runtime(room_with_widgets);
-    press(&mut rt, crate::ui::room::WIDGETS);
+    press(&mut rt, crate::ui::people::INFO);
+    press(&mut rt, "info-widgets");
     assert_eq!(rt.state.side, Some(crate::state::SidePanel::Widgets));
     assert!(rt.find("widgets-panel").is_some());
 }
 
 #[test]
-fn the_header_widgets_button_should_close_the_panel_it_opened() {
-    let mut rt = runtime(demo::widgets);
-    press(&mut rt, crate::ui::room::WIDGETS);
-    assert_eq!(rt.state.side, None);
-}
-
-#[test]
-fn a_room_without_widgets_should_have_no_widgets_button_in_its_header() {
-    let rt = runtime(|s| s.select_room(demo::DEMO_THREAD.0));
+fn a_room_with_widgets_should_have_no_dedicated_header_button() {
+    let rt = runtime(room_with_widgets);
     assert!(rt.find("room-header").is_some());
-    assert!(rt.find(crate::ui::room::WIDGETS).is_none());
+    assert!(rt.find("room-widgets").is_none());
 }
 
 #[test]
@@ -386,7 +372,11 @@ fn the_panel_should_not_start_meetings_where_none_are_offered() {
 fn none_listed(s: &mut State, can_add: bool) {
     demo::widgets(s);
     let account = s.nav.account.clone().expect("an account");
-    s.accounts.set_widgets(&account, demo::DEMO_THREAD.0.into(), matrix_core::Widgets { widgets: Vec::new(), can_add });
+    s.accounts.set_widgets(
+        &account,
+        demo::DEMO_THREAD.0.into(),
+        matrix_core::Widgets { can_add, ..Default::default() },
+    );
 }
 
 #[test]

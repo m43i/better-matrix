@@ -10,7 +10,7 @@
 //!   ([`WidgetPrompt`]): queued until answered or their run ends, the oldest shown
 //!   ([`Modal::WidgetPrompt`]) whenever no other dialog shows.
 
-use matrix_core::{AccountId, Answer, Command, Policy, RequestId, Widget, WidgetPage, WidgetPermission};
+use matrix_core::{AccountId, Answer, Command, Policy, RequestId, Widget, WidgetAccess, WidgetPage, WidgetPermission};
 
 use super::{Modal, Popover, Purpose, State};
 use crate::i18n::{t, tf};
@@ -26,7 +26,9 @@ pub struct WidgetPermissions {
     pub widget: String,
     /// What it asks for, in the order asked.
     pub permissions: Vec<WidgetPermission>,
-    /// Which of them the user grants, by index; all to begin with.
+    /// The destination and account shown before opening.
+    pub context: Option<WidgetAccess>,
+    /// Which of them the user grants, by index.
     pub granted: Vec<bool>,
 }
 
@@ -60,8 +62,61 @@ impl State {
     pub fn run_widget(&mut self, widget_id: &str, browser: bool) -> Option<RequestId> {
         self.popover = None;
         let (account, room_id) = self.widget_room()?;
-        let command = Command::RunWidget { account, room_id, widget_id: widget_id.to_owned(), browser };
-        Some(self.dispatch(command, Purpose::WidgetRun { closed: false }))
+        let command = Command::RunWidget {
+            account: account.clone(),
+            room_id: room_id.clone(),
+            widget_id: widget_id.to_owned(),
+            browser,
+        };
+        Some(self.launch_widget(account, room_id, command))
+    }
+
+    fn launch_widget(&mut self, account: AccountId, room: String, command: Command) -> RequestId {
+        if let Some(data) = self.accounts.get_mut(&account) {
+            data.widget_launch_errors.remove(&room);
+        }
+        let request = self.dispatch(command.clone(), Purpose::WidgetRun { closed: false });
+        self.widget_launches.insert(request, (account, room, command));
+        request
+    }
+
+    /// Retries the failed launch for the integrations panel showing.
+    pub fn retry_widget(&mut self) {
+        let Some((account, room)) = self.widget_room() else { return };
+        if let Some((_, command)) =
+            self.accounts.get_mut(&account).and_then(|data| data.widget_launch_errors.remove(&room))
+        {
+            self.launch_widget(account, room, command);
+        }
+    }
+
+    /// Shows the permissions saved for a widget.
+    pub fn manage_widget_permissions(&mut self, widget_id: &str) {
+        let Some((account, room_id)) = self.widget_room() else { return };
+        let command = Command::ManageWidgetPermissions { account, room_id, widget_id: widget_id.to_owned() };
+        self.dispatch(command, Purpose::WidgetRun { closed: false });
+    }
+
+    /// Queues the confirmation for the destination or saved access of a widget.
+    pub(super) fn widget_access(&mut self, request: RequestId, access: WidgetAccess) {
+        if self.widget_running(request) {
+            self.widget_contexts.insert(request, access.clone());
+            self.widget_prompts.push(WidgetPrompt::Access { request, access });
+            self.settle_widget_prompts();
+        }
+    }
+
+    /// Continues or cancels the action whose confirmation is showing.
+    pub fn confirm_widget_access(&mut self, key: PromptKey, confirmed: bool) {
+        match self.take_widget_prompt(key) {
+            Some(WidgetPrompt::Access { request, .. }) if confirmed => {
+                self.dispatch(Command::Answer { request, answer: Answer::Continue }, Purpose::WidgetAnswer);
+            }
+            Some(WidgetPrompt::Access { request, .. }) => self.stop_widget_run(request),
+            Some(other) => self.widget_prompts.insert(0, other),
+            None => {}
+        }
+        self.settle_widget_prompts();
     }
 
     /// Opens or closes the widgets panel's menu of what can be added.
@@ -129,7 +184,8 @@ impl State {
     pub fn open_integrations(&mut self) -> Option<RequestId> {
         self.popover = None;
         let (account, room_id) = self.widget_room()?;
-        Some(self.dispatch(Command::OpenIntegrations { account, room_id }, Purpose::WidgetRun { closed: false }))
+        let command = Command::OpenIntegrations { account: account.clone(), room_id: room_id.clone() };
+        Some(self.launch_widget(account, room_id, command))
     }
 
     /// Whether `request` is a widget run still going that the user hasn't closed.
@@ -174,7 +230,7 @@ impl State {
         }
     }
 
-    /// A widget asks to be allowed to do things: the user chooses, everything ticked at first.
+    /// A widget asks to be allowed to do things: the user chooses what to grant.
     /// Asking for nothing takes back the question numbered `question`.
     pub(super) fn widget_permissions_asked(
         &mut self,
@@ -194,12 +250,13 @@ impl State {
         if !self.widget_running(request) {
             return;
         }
-        let granted = vec![true; permissions.len()];
+        let granted = vec![false; permissions.len()];
         self.widget_prompts.push(WidgetPrompt::Permissions(WidgetPermissions {
             request,
             question,
             widget,
             permissions,
+            context: self.widget_contexts.get(&request).cloned(),
             granted,
         }));
         self.settle_widget_prompts();
@@ -310,9 +367,10 @@ impl State {
     /// Closes the widget question showing unanswered: a widget gets none of what it asked for,
     /// and the terms, not agreed to, keep the integration manager shut.
     pub(super) fn dismiss_widget_prompt(&mut self) {
-        match self.widget_prompt().map(|prompt| (prompt.key(), matches!(prompt, WidgetPrompt::Terms { .. }))) {
-            Some((key, false)) => self.answer_widget_permissions(key, false),
-            Some((key, true)) => self.decline_integration_terms(key),
+        match self.widget_prompt() {
+            Some(prompt @ WidgetPrompt::Permissions(_)) => self.answer_widget_permissions(prompt.key(), false),
+            Some(prompt @ WidgetPrompt::Terms { .. }) => self.decline_integration_terms(prompt.key()),
+            Some(prompt @ WidgetPrompt::Access { .. }) => self.confirm_widget_access(prompt.key(), false),
             None => {}
         }
     }
@@ -325,11 +383,20 @@ impl State {
     }
 
     /// A run's window couldn't open: the run stops, and says why.
-    pub fn widget_window_failed(&mut self, request: RequestId, error: String) {
+    pub fn widget_window_failed(&mut self, request: RequestId) {
         if self.shell.widget_windows().forget(request) {
-            self.notice = Some(tf!("notice.widget_window", error = error));
+            self.widget_launch_failed(request, t!("widgets.window_failed").to_owned());
             self.stop_widget_run(request);
         }
+    }
+
+    fn widget_launch_failed(&mut self, request: RequestId, error: String) {
+        if let Some((account, room, command)) = self.widget_launches.remove(&request)
+            && let Some(data) = self.accounts.get_mut(&account)
+        {
+            data.widget_launch_errors.insert(room, (error.clone(), command));
+        }
+        self.notice = Some(tf!("notice.widget_run", error = error));
     }
 
     /// Stops a run the user is done with; its cancelled finish says nothing.
@@ -347,9 +414,12 @@ impl State {
     pub(super) fn widget_run_finished(&mut self, request: RequestId, closed: bool, error: Option<String>) {
         self.shell.widget_windows().close(request);
         self.drop_widget_dialogs(request);
-        if let (false, Some(error)) = (closed, error) {
-            self.notice = Some(tf!("notice.widget_run", error = error));
+        if let (false, Some(error)) = (closed, error)
+            && error != matrix_core::Error::Cancelled.to_string()
+        {
+            self.widget_launch_failed(request, error);
         }
+        self.widget_launches.remove(&request);
     }
 
     /// What was asked of the widget windows, headless.
@@ -360,6 +430,7 @@ impl State {
 
     /// Closes and forgets the questions a run asked; the next one queued shows.
     fn drop_widget_dialogs(&mut self, request: RequestId) {
+        self.widget_contexts.remove(&request);
         self.widget_prompts.retain(|prompt| prompt.request() != request);
         self.settle_widget_prompts();
     }
@@ -381,6 +452,8 @@ pub enum VideoOption {
 pub enum WidgetPrompt {
     /// What it asks to be allowed to do.
     Permissions(WidgetPermissions),
+    /// The widget run is waiting for confirmation to proceed.
+    Access { request: RequestId, access: WidgetAccess },
     /// The integration manager's terms, to agree to before it opens.
     Terms { request: RequestId, policies: Vec<Policy> },
 }
@@ -395,6 +468,7 @@ impl WidgetPrompt {
     pub fn key(&self) -> PromptKey {
         match self {
             Self::Permissions(asked) => asked.key(),
+            Self::Access { request, .. } => PromptKey { request: *request, question: Some(0) },
             Self::Terms { request, .. } => PromptKey { request: *request, question: None },
         }
     }

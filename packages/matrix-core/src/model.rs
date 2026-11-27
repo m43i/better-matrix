@@ -749,12 +749,19 @@ impl TimelineKey {
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
 #[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
 pub enum MessageContent {
-    /// Text, notices and emotes.
+    /// An ordinary text message.
     Text {
         /// The plain-text body, always present.
         body: String,
         /// The sender's formatting as Matrix HTML (`org.matrix.custom.html`), if any. Untrusted:
         /// render it through a sanitising parser.
+        html: Option<String>,
+    },
+    /// An automated or informational notice.
+    Notice {
+        /// The plain-text body.
+        body: String,
+        /// The sender's untrusted Matrix HTML, as for text messages.
         html: Option<String>,
     },
     /// An uploaded file, image, video or audio clip.
@@ -1089,7 +1096,9 @@ impl MessageContent {
     pub fn plain(&self) -> std::borrow::Cow<'_, str> {
         use std::borrow::Cow;
         match self {
-            Self::Text { body, html } | Self::Emote { body, html } => match html.as_deref() {
+            Self::Text { body, html } | Self::Notice { body, html } | Self::Emote { body, html } => match html
+                .as_deref()
+            {
                 Some(html) if crate::html::holds_spoiler(html) => Cow::Owned(crate::html::shown_text(body, Some(html))),
                 _ => Cow::Borrowed(body),
             },

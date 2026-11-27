@@ -1,4 +1,4 @@
-// A widget asking for permissions, over its page: each permission in words with a switch (all on
+// A widget asking for permissions, over its page: each permission in words with a switch (off
 // to start), then Allow (what is switched on) or Deny (nothing). A sheet on iOS, a full-screen
 // dialog on Android; going back denies them all. The engine remembers the answer for the widget.
 
@@ -8,7 +8,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { t } from '../../i18n';
 import type { PermissionAsk } from '../../state/actions/widgets';
-import { permissionText } from '../../state/widgets';
+import { accessContext, permissionText } from '../../state/widgets';
 import { font } from '../../theme/palette';
 import { Button, ListRow, ListSection } from '../components';
 import { usePalette } from '../theme';
@@ -23,9 +23,7 @@ export function PermissionSheet({
 }) {
   const palette = usePalette();
 
-  const [allowed, setAllowed] = useState(
-    () => new Set(ask.permissions.map((permission) => permission.capability)),
-  );
+  const [allowed, setAllowed] = useState(() => new Set<string>());
 
   const toggle = (capability: string, on: boolean) =>
     setAllowed((current) => {
@@ -60,6 +58,11 @@ export function PermissionSheet({
             <Text style={[font.header, styles.title, { color: palette.text }]}>
               {t('mobile.widgets.permissions_title', { widget: ask.widget })}
             </Text>
+            {ask.context ? (
+              <Text style={[font.body, styles.title, { color: palette.textMuted }]}>
+                {accessContext(ask.context)}
+              </Text>
+            ) : null}
             <ListSection>
               {ask.permissions.map((permission) => (
                 <ListRow
@@ -78,6 +81,7 @@ export function PermissionSheet({
           <View style={styles.buttons}>
             <Button
               testID="widget-permissions-allow"
+              disabled={allowed.size === 0}
               title={t('mobile.widgets.allow')}
               onPress={() =>
                 onAnswer(

@@ -212,9 +212,9 @@ fn a_window_that_couldnt_open_should_cancel_the_run_and_say_why() {
     let (mut s, mut commands) = state();
     let request = board_open(&mut s);
     sent(&mut commands);
-    s.widget_window_failed(request, "no web view".into());
+    s.widget_window_failed(request);
     assert_eq!(sent(&mut commands), [Command::Cancel(request)]);
-    assert!(s.notice.as_deref().is_some_and(|notice| notice.contains("no web view")));
+    assert!(s.notice.is_some());
 }
 
 #[test]
@@ -243,10 +243,12 @@ fn asked(s: &mut State) -> RequestId {
 }
 
 #[test]
-fn asked_permissions_should_all_be_ticked_at_first() {
+fn asked_permissions_should_all_be_off_at_first() {
     let (mut s, _commands) = state();
     asked(&mut s);
-    assert!(matches!(s.widget_prompt(), Some(WidgetPrompt::Permissions(asked)) if asked.granted == [true, true, true]));
+    assert!(
+        matches!(s.widget_prompt(), Some(WidgetPrompt::Permissions(asked)) if asked.granted == [false, false, false])
+    );
 }
 
 #[test]
@@ -260,7 +262,7 @@ fn allowing_should_grant_only_the_ticked_permissions() {
         sent(&mut commands),
         [Command::Answer {
             request,
-            answer: Answer::WidgetPermissions { question: QUESTION, granted: vec!["one".into(), "three".into()] }
+            answer: Answer::WidgetPermissions { question: QUESTION, granted: vec!["two".into()] }
         }]
     );
 }
@@ -452,7 +454,7 @@ fn a_widgets_question_another_dialog_replaced_should_come_back() {
     s.poll(&mut Tx::default());
     assert!(matches!(
         s.widget_prompt(),
-        Some(WidgetPrompt::Permissions(asked)) if asked.request == request && asked.granted == [true, false, true]
+        Some(WidgetPrompt::Permissions(asked)) if asked.request == request && asked.granted == [false, true, false]
     ));
 }
 
@@ -552,7 +554,9 @@ fn a_tick_for_a_question_no_longer_showing_should_change_nothing() {
     let request = asked(&mut s);
     let stale = PromptKey { request, question: Some(QUESTION + 1) };
     s.toggle_widget_permission(stale, 0);
-    assert!(matches!(s.widget_prompt(), Some(WidgetPrompt::Permissions(asked)) if asked.granted == [true, true, true]));
+    assert!(
+        matches!(s.widget_prompt(), Some(WidgetPrompt::Permissions(asked)) if asked.granted == [false, false, false])
+    );
 }
 
 #[test]

@@ -82,6 +82,26 @@ function setup(target: WidgetTarget = { type: 'widget', widgetId: 'w1' }, askHos
 }
 
 describe('WidgetRun', () => {
+  it('should wait for explicit confirmation before continuing a widget launch', () => {
+    const { engine, request, run, commands } = setup();
+
+    const access = {
+      name: 'Board',
+      origin: PAGE_ORIGIN,
+      room: 'Release',
+      user_id: ADA,
+      kind: { type: 'Open' as const, data: ['RoomId' as const] },
+    };
+
+    engine.emit({ type: 'WidgetAccess', data: { request, access } });
+    expect(run.snapshot().view).toEqual({ type: 'access', access });
+    expect(commands()).toEqual([]);
+    run.confirmAccess();
+    expect(commands()).toEqual([
+      { type: 'Answer', data: { request, answer: { type: 'Continue' } } },
+    ]);
+  });
+
   it('should run the widget in the app', () => {
     const { sent } = setup();
     expect(sent[0]?.command).toEqual({

@@ -689,7 +689,9 @@ impl TimelineItem {
             _ => None,
         };
         let (rich, gif) = match &message.content {
-            MessageContent::Emote { body, html } => (rich_body(body, html.as_deref()), None),
+            MessageContent::Notice { body, html } | MessageContent::Emote { body, html } => {
+                (rich_body(body, html.as_deref()), None)
+            }
             MessageContent::Text { body, html } => {
                 let hides = html.as_deref().is_some_and(matrix_core::html::holds_spoiler);
                 let gif = matrix_core::links::find_gif_link(body).filter(|_| !hides).map(|url| {
@@ -826,6 +828,10 @@ pub struct AccountData {
     pub files: HashMap<String, Vec<matrix_core::SharedFile>>,
     /// Rooms' widgets, by room ID, once listed for the info panel.
     pub widgets: HashMap<String, matrix_core::Widgets>,
+    /// Failed integration lists, by room.
+    pub widget_errors: HashMap<String, String>,
+    /// A failed widget launch and its retry, by room.
+    pub widget_launch_errors: HashMap<String, (String, matrix_core::Command)>,
     /// Rooms' and spaces' settings, by room ID, as last read for the room settings.
     pub room_settings: HashMap<String, matrix_core::RoomSettings>,
     /// Shared pinned-message previews by room, including unavailable placeholders.
@@ -906,6 +912,8 @@ impl AccountData {
             threads: HashMap::new(),
             files: HashMap::new(),
             widgets: HashMap::new(),
+            widget_errors: HashMap::new(),
+            widget_launch_errors: HashMap::new(),
             room_settings: HashMap::new(),
             pins: HashMap::new(),
             pin_errors: HashMap::new(),
@@ -1510,7 +1518,7 @@ impl Accounts {
         self.list.iter().find(|account| &account.summary.id == id)
     }
 
-    fn get_mut(&mut self, id: &AccountId) -> Option<&mut AccountData> {
+    pub(super) fn get_mut(&mut self, id: &AccountId) -> Option<&mut AccountData> {
         self.list.iter_mut().find(|account| &account.summary.id == id)
     }
 
@@ -1871,6 +1879,7 @@ impl Accounts {
 
     pub fn set_widgets(&mut self, id: &AccountId, room_id: String, widgets: matrix_core::Widgets) {
         if let Some(account) = self.get_mut(id) {
+            account.widget_errors.remove(&room_id);
             account.widgets.insert(room_id, widgets);
         }
     }

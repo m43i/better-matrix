@@ -1038,6 +1038,7 @@ fn classic_row(
             .center_y()
             .min_w(0.0)
             .child(opens_person(name, message, cx.settings).focusable(true))
+            .children(service_badge(cx, message, p))
             .children(status_emoji(&message.event_id, cx.data.status_message_of(&message.sender_id)))
             .child(text(clock_time(local_ms(message.timestamp_ms))).font(font::META).color(p.text_muted));
         if let Some(status) = status {
@@ -1107,7 +1108,10 @@ fn in_bubble(item: &TimelineItem, cx: &Context<'_>) -> bool {
     let gif = item.gif.as_ref().is_some_and(|gif| cx.show_gifs && !cx.gifs.has_failed(&gif.url));
     !gif && matches!(
         item.message.content,
-        MessageContent::Text { .. } | MessageContent::Redacted | MessageContent::Undecryptable
+        MessageContent::Text { .. }
+            | MessageContent::Notice { .. }
+            | MessageContent::Redacted
+            | MessageContent::Undecryptable
     )
 }
 
@@ -1155,6 +1159,7 @@ fn bubble_row(cx: &Context<'_>, key: &str, item: &TimelineItem, continues: bool,
             .center_y()
             .min_w(0.0)
             .child(opens_person(name, message, cx.settings).focusable(true))
+            .children(service_badge(cx, message, p))
             .children(status_emoji(&message.event_id, cx.data.status_message_of(&message.sender_id)))
     });
     let mut time = clock_time(local_ms(message.timestamp_ms));
@@ -1558,10 +1563,24 @@ fn linked_gif(url: &str, max_width: f32, gifs: &GifCache, p: &Palette) -> El {
     }
 }
 
+fn service_badge(cx: &Context<'_>, message: &Message, p: &Palette) -> Option<El> {
+    let listed = cx.data.widgets.get(&cx.room.room_id)?;
+    listed
+        .services
+        .iter()
+        .any(|id| id == &message.sender_id)
+        .then(|| text(t!("widgets.service")).font(font::META).color(p.text_muted).shrink().truncate())
+}
+
 fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Palette) -> El {
     let media = cx.media;
     match (&item.message.content, &item.rich) {
         (MessageContent::Text { body, .. }, rich) => text_body(&item.message, body, rich.as_ref(), cx, p),
+        (MessageContent::Notice { body, .. }, rich) => col()
+            .w_full()
+            .pl(8.0)
+            .border_sides([0.0, 0.0, 0.0, 2.0], p.divider)
+            .child(text_body(&item.message, body, rich.as_ref(), cx, p)),
         (MessageContent::Emote { body, .. }, rich) => emote_body(item, body, rich.as_ref(), cx, p),
         (MessageContent::Location(location), _) => location_card(&item.message, location, cx, p),
         (MessageContent::Attachment(attachment), _)

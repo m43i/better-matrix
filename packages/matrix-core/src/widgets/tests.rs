@@ -232,8 +232,9 @@ fn an_integration_managers_terms_should_be_read_in_english() {
 
 #[test]
 fn a_manager_setting_a_widget_without_a_url_should_remove_it() {
-    assert_eq!(widget_content(&json!({"widget_id": "w", "url": null})), json!({}));
-    let set = widget_content(&json!({"widget_id": "w", "type": "m.custom", "url": "https://w.example", "name": "W"}));
+    assert_eq!(widget_content(&json!({"widget_id": "w", "url": null})).unwrap(), json!({}));
+    let set = widget_content(&json!({"widget_id": "w", "type": "m.custom", "url": "https://w.example", "name": "W"}))
+        .unwrap();
     assert_eq!(set, json!({"type": "m.custom", "url": "https://w.example", "name": "W", "data": {}}));
 }
 
@@ -369,4 +370,72 @@ fn an_answer_to_a_replaced_drivers_question_should_load_the_page_again() {
     assert_eq!(handshake.heard(&announcement(), "ready", start), Step::Hold);
     assert_eq!(handshake.grace_over(), Step::Restart("ready".to_owned()));
     assert_eq!(handshake.heard(&fallback_answer(), "", start + std::time::Duration::from_secs(3)), Step::Reload);
+}
+
+#[test]
+fn a_manager_widget_write_should_reject_a_missing_or_invalid_url() {
+    for content in [json!({}), json!({"url": 3}), json!({"url": "javascript:noop"})] {
+        assert!(widget_content(&content).is_err());
+    }
+}
+
+#[tokio::test]
+async fn a_widget_should_wait_for_confirmation_before_proceeding() {
+    use crate::{Answer, Event, RequestId, WidgetAccess, WidgetAccessKind};
+    let (sent, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let (answer, mut answers) = tokio::sync::mpsc::unbounded_channel();
+    let sink = move |event| {
+        sent.send(event).unwrap();
+    };
+    let request = RequestId(1);
+    let access = WidgetAccess {
+        name: "Board".into(),
+        origin: "https://board.example".into(),
+        user_id: "@ada:example.org".into(),
+        room: "Release".into(),
+        kind: WidgetAccessKind::Open(Vec::new()),
+    };
+    let waiting = super::session::confirm_access(&sink, request, access, &mut answers);
+    tokio::pin!(waiting);
+    assert!(futures_util::poll!(&mut waiting).is_pending());
+    assert!(matches!(events.try_recv(), Ok(Event::WidgetAccess { request: RequestId(1), .. })));
+    answer.send(Answer::Agree).unwrap();
+    assert!(futures_util::poll!(&mut waiting).is_pending());
+    answer.send(Answer::Continue).unwrap();
+    assert!(waiting.await.is_ok());
+}
+
+#[test]
+fn a_zoom_join_link_should_be_a_meeting() {
+    let content = json!({"type": "m.custom", "url": "https://example.zoom.us/j/123456789?pwd=example"});
+    let shown = widget("zoom", &content, None, &Viewer::default()).expect("widget");
+    assert_eq!(shown.meeting, Some(Meeting::Zoom));
+    assert_eq!(shown.url, content["url"].as_str().unwrap());
+}
+
+#[test]
+fn a_teams_join_link_should_be_a_meeting() {
+    let content = json!({"type": "m.custom", "url": "https://teams.microsoft.com/l/meetup-join/example/0"});
+    assert_eq!(widget("teams", &content, None, &Viewer::default()).unwrap().meeting, Some(Meeting::Teams));
+}
+
+#[test]
+fn a_widget_cannot_declare_an_unrelated_host_to_be_a_meeting_provider() {
+    let content = json!({"type": "zoom", "url": "https://zoom.us.example.org/j/123"});
+    assert_eq!(widget("zoom", &content, None, &Viewer::default()).unwrap().meeting, None);
+}
+
+#[test]
+fn only_advertised_service_accounts_and_bridge_destinations_should_be_listed() {
+    let state = [
+        json!({"type": "io.element.functional_members", "state_key": "", "content": {
+            "service_members": ["@service:example.org", "not a Matrix ID"]
+        }}),
+        json!({"type": "uk.half-shot.bridge", "state_key": "destination", "content": {
+            "protocol": {"displayname": "Slack"}, "channel": {"displayname": "#releases"}
+        }}),
+    ];
+    let (services, bridges) = super::room_integrations(&state);
+    assert_eq!(services, ["@service:example.org"]);
+    assert_eq!(bridges[0].channel, "#releases");
 }

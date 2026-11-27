@@ -1067,6 +1067,8 @@ pub struct State {
     /// Running widgets' questions, oldest first, until answered or their run ends; the oldest
     /// shows whenever no other dialog does.
     widget_prompts: Vec<WidgetPrompt>,
+    widget_contexts: HashMap<RequestId, matrix_core::WidgetAccess>,
+    widget_launches: HashMap<RequestId, (AccountId, String, Command)>,
     /// What the emoji picker searches for.
     pub emoji_search: TextEdit,
     /// The account whose status message is being written in the account menu, while one is.
@@ -1201,6 +1203,8 @@ impl State {
             message_hover: MessageHover::default(),
             modal: None,
             widget_prompts: Vec::new(),
+            widget_contexts: HashMap::new(),
+            widget_launches: HashMap::new(),
             emoji_search: TextEdit::default(),
             status_draft: None,
             status_edit: TextEdit::default(),
@@ -1908,6 +1912,7 @@ impl State {
                 }
             }
             Event::WidgetPage { request, page } => self.widget_page(request, page),
+            Event::WidgetAccess { request, access } => self.widget_access(request, access),
             Event::WidgetMessage { request, message } => self.widget_message(request, message),
             Event::WidgetPermissions { request, question, widget, permissions } => {
                 self.widget_permissions_asked(request, question, widget, permissions);
@@ -2419,13 +2424,17 @@ impl State {
                 match panel {
                     SidePanel::Threads => self.accounts.set_threads(&account, room_id, Vec::new()),
                     SidePanel::Files => self.accounts.set_files(&account, room_id, Vec::new()),
-                    SidePanel::Widgets => self.accounts.set_widgets(&account, room_id, matrix_core::Widgets::default()),
+                    SidePanel::Widgets => {
+                        if let Some(data) = self.accounts.get_mut(&account) {
+                            data.widget_errors.insert(room_id, error.clone());
+                        }
+                    }
                     SidePanel::Pins => {
                         self.accounts.pins_failed(&account, room_id, error.clone());
                     }
                     SidePanel::Info | SidePanel::Members | SidePanel::Log | SidePanel::Person(_) => {}
                 }
-                if panel != SidePanel::Pins {
+                if !matches!(panel, SidePanel::Pins | SidePanel::Widgets) {
                     self.notice = Some(tf!("notice.side", error = error));
                 }
             }

@@ -39,7 +39,7 @@ pub(super) fn frame(key: &str, title: &str, content: El, footer: Option<El>, p: 
 }
 
 /// A row leading somewhere: an icon, a title, a detail at the end.
-fn link_row(glyph: &'static rune::Icon, title: &str, detail: Option<String>, key: &str, p: &Palette) -> El {
+pub(super) fn link_row(glyph: &'static rune::Icon, title: &str, detail: Option<String>, key: &str, p: &Palette) -> El {
     let mut entry = row()
         .key(key.to_owned())
         .w_full()
@@ -134,7 +134,7 @@ pub fn overview(s: &State, room: &RoomSummary, p: &Palette) -> El {
         .child(
             link_row(
                 &icons::LAYOUT,
-                t!("widgets.title"),
+                t!("widgets.integrations"),
                 s.active_account()
                     .and_then(|account| super::room::widget_count(account, room))
                     .map(|count| count.to_string()),

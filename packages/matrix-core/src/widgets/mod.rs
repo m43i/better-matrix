@@ -30,7 +30,7 @@ pub use meetings::Meeting;
 
 /// The state type Element writes widgets as, and the one this app writes.
 pub(crate) const LEGACY_TYPE: &str = "im.vector.modular.widgets";
-/// The specced state type, read too.
+/// A proposed state type, read for compatibility.
 pub(crate) const SPEC_TYPE: &str = "m.widget";
 /// Both, as the room's state holds them.
 pub(crate) const TYPES: [&str; 2] = [LEGACY_TYPE, SPEC_TYPE];
@@ -67,6 +67,26 @@ pub struct Widgets {
     pub widgets: Vec<Widget>,
     /// Whether the user's power level lets them add a widget (as the type Element writes).
     pub can_add: bool,
+    /// Matrix IDs explicitly marked as providing a service in this room.
+    #[cfg_attr(feature = "ffi", serde(default, skip_serializing_if = "Vec::is_empty"))]
+    pub services: Vec<String>,
+    /// Connections advertised by bridges in room state.
+    #[cfg_attr(feature = "ffi", serde(default, skip_serializing_if = "Vec::is_empty"))]
+    pub bridges: Vec<RoomBridge>,
+}
+
+/// An external destination advertised in a room's bridge state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct RoomBridge {
+    /// The bridge's state key.
+    pub id: String,
+    /// The external service.
+    pub protocol: String,
+    /// The external channel or conversation.
+    pub channel: String,
+    /// The network or workspace, when supplied.
+    pub network: Option<String>,
 }
 
 /// Who a widget's template variables describe.
@@ -124,7 +144,8 @@ impl Account {
             })
             .collect();
         widgets.sort_by_cached_key(|widget| widget.name.to_lowercase());
-        Ok(Widgets { widgets, can_add: may_send(LEGACY_TYPE) })
+        let (services, bridges) = room_integrations(&self.extra_state(&room).await);
+        Ok(Widgets { widgets, can_add: may_send(LEGACY_TYPE), services, bridges })
     }
 
     /// One of the room's widgets, its state content, and who its variables describe.
@@ -330,7 +351,56 @@ pub(crate) struct ExtraState {
 
 /// The state types the room list's sliding sync leaves out that the app reads: widgets, and a
 /// room's image packs (`crate::packs`).
-pub(crate) const EXTRA_STATE: [&str; 4] = [LEGACY_TYPE, SPEC_TYPE, "m.room.image_pack", "im.ponies.room_emotes"];
+const BRIDGE_TYPES: [&str; 2] = ["m.bridge", "uk.half-shot.bridge"];
+const MEMBER_HINT_TYPES: [&str; 2] = ["m.member_hints", "io.element.functional_members"];
+
+pub(crate) const EXTRA_STATE: [&str; 8] = [
+    LEGACY_TYPE,
+    SPEC_TYPE,
+    "m.room.image_pack",
+    "im.ponies.room_emotes",
+    BRIDGE_TYPES[0],
+    BRIDGE_TYPES[1],
+    MEMBER_HINT_TYPES[0],
+    MEMBER_HINT_TYPES[1],
+];
+
+fn room_integrations(events: &[Value]) -> (Vec<String>, Vec<RoomBridge>) {
+    use matrix_sdk::ruma::UserId;
+    let mut services = std::collections::BTreeSet::new();
+    let mut bridges = std::collections::BTreeMap::new();
+    for event in events {
+        let Some(kind) = event["type"].as_str() else { continue };
+        let content = &event["content"];
+        if MEMBER_HINT_TYPES.contains(&kind) && event["state_key"] == "" {
+            if let Some(members) = content["service_members"].as_array() {
+                services.extend(members.iter().filter_map(Value::as_str).filter(|id| <&UserId>::try_from(*id).is_ok()));
+            }
+        } else if BRIDGE_TYPES.contains(&kind)
+            && let Some(id) = event["state_key"].as_str()
+            && let Some(protocol) = bridge_name(&content["protocol"])
+            && let Some(channel) = bridge_name(&content["channel"])
+        {
+            if let Some(bot) = content["bridgebot"].as_str().filter(|id| <&UserId>::try_from(*id).is_ok()) {
+                services.insert(bot);
+            }
+            let network = bridge_name(&content["network"]).map(str::to_owned);
+            let bridge =
+                RoomBridge { id: id.to_owned(), protocol: protocol.to_owned(), channel: channel.to_owned(), network };
+            if kind == BRIDGE_TYPES[0] || !bridges.contains_key(id) {
+                bridges.insert(id, bridge);
+            }
+        }
+    }
+    (services.into_iter().map(str::to_owned).collect(), bridges.into_values().collect())
+}
+
+fn bridge_name(value: &Value) -> Option<&str> {
+    value["displayname"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .or_else(|| value["id"].as_str().filter(|id| !id.is_empty()))
+}
 
 /// Of the server's and the store's copies of each state event (by type and state key), the
 /// newer: the store's may be older (kept from before sliding sync, which brings no such state)
@@ -482,7 +552,12 @@ pub(crate) fn changed_rooms(updates: &matrix_sdk::sync::RoomUpdates) -> (Vec<Str
         kind: std::borrow::Cow<'a, str>,
     }
     let kind = |json: &str| serde_json::from_str::<Typed<'_>>(json).map(|event| event.kind.into_owned()).ok();
-    let is_widget = |json: &str| kind(json).is_some_and(|kind| TYPES.contains(&kind.as_str()));
+    let is_widget = |json: &str| {
+        kind(json).is_some_and(|kind| {
+            let kind = kind.as_str();
+            TYPES.contains(&kind) || BRIDGE_TYPES.contains(&kind) || MEMBER_HINT_TYPES.contains(&kind)
+        })
+    };
     let (mut widgets, mut redacted) = (Vec::new(), Vec::new());
     for (room_id, update) in &updates.joined {
         let state = match &update.state {

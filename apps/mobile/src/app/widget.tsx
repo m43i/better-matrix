@@ -7,7 +7,7 @@
 // or whose page fails to load, says so or closes. Only the app opens this screen: every run needs
 // its one-time launch (`openWidget`), so a link opens nothing.
 
-import type { AccountId, Policy } from '@better-matrix/matrix-native/types';
+import type { AccountId, Policy, WidgetAccess } from '@better-matrix/matrix-native/types';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -17,7 +17,7 @@ import { widgetTarget } from '../routes';
 import { WidgetRun } from '../state/actions/widgets';
 import { useAppStore, useStore } from '../state/react';
 import { account as accountOf } from '../state/selectors';
-import type { WidgetTarget } from '../state/widgets';
+import { accessContext, accessText, type WidgetTarget } from '../state/widgets';
 import { font } from '../theme/palette';
 import { openInBrowser } from '../ui/accounts/browser';
 import { Button, EmptyState, IconButton, ListRow, ListSection } from '../ui/components';
@@ -33,6 +33,7 @@ export default function WidgetScreen() {
     account: AccountId;
     roomId: string;
     widgetId?: string;
+    permissions?: string;
     meeting?: string;
     integrations?: string;
     launch?: string;
@@ -160,6 +161,12 @@ function Running({
       <View style={[styles.screen, { backgroundColor: palette.bg }]} testID="widget">
         {view.type === 'page' ? (
           <WidgetPageView key={view.load} run={run} page={view.page} captureHost={captureHost} />
+        ) : view.type === 'access' ? (
+          <AccessPrompt
+            access={view.access}
+            onConfirm={() => run.confirmAccess()}
+            onCancel={() => router.back()}
+          />
         ) : view.type === 'terms' ? (
           <Terms policies={view.policies} onAgree={() => run.agree()} />
         ) : view.type === 'failed' ? (
@@ -191,6 +198,34 @@ function Running({
         />
       ) : null}
     </>
+  );
+}
+
+function AccessPrompt({
+  access,
+  onConfirm,
+  onCancel,
+}: {
+  access: WidgetAccess;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const palette = usePalette();
+  const { title, body, action } = accessText(access);
+
+  return (
+    <ScrollView contentContainerStyle={styles.terms} testID="widget-access">
+      <Text style={[font.header, { color: palette.text }]}>{title}</Text>
+      <Text style={[font.body, { color: palette.textMuted }]}>{accessContext(access)}</Text>
+      <Text style={[font.body, { color: palette.text }]}>{body}</Text>
+      <Button testID="widget-access-confirm" title={action} onPress={onConfirm} />
+      <Button
+        testID="widget-access-cancel"
+        title={t('common.cancel')}
+        kind="secondary"
+        onPress={onCancel}
+      />
+    </ScrollView>
   );
 }
 

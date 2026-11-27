@@ -59,9 +59,8 @@ pub fn run() -> ExitCode {
     };
     match show(&url, &title, bridge) {
         Ok(never) => match never {},
-        Err(error) => {
-            eprintln!("better-matrix: could not show the widget window: {error}");
-            say(&FromHelper::Closed);
+        Err(_) => {
+            say(&FromHelper::Failed);
             ExitCode::FAILURE
         }
     }
@@ -188,8 +187,9 @@ fn show(url: &str, title: &str, bridge: Bridge) -> Result<std::convert::Infallib
                     } else {
                         webview.load_url(&url)
                     };
-                    if let Err(error) = loading {
-                        eprintln!("better-matrix: the widget window could not load its page: {error}");
+                    if loading.is_err() {
+                        say(&FromHelper::Failed);
+                        *flow = ControlFlow::Exit;
                     }
                 }
                 None => eprintln!("better-matrix: the widget's address has no origin"),

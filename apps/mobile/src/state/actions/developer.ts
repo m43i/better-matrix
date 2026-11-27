@@ -29,19 +29,14 @@ export async function viewSource(
 
 /** Lists a room's widgets into `AccountState.widgets`; failing, the list stops loading, empty. */
 export function listWidgets(store: Store, account: AccountId, roomId: string): void {
-  attempt(store, { type: 'ListWidgets', data: { account, room_id: roomId } }, 'notice.side').catch(
-    () => {
-      store.update((s) =>
-        updateAccount(s, account, (a) => ({
-          ...a,
-          widgets: {
-            ...a.widgets,
-            [roomId]: a.widgets[roomId] ?? { widgets: [], can_add: false },
-          },
-        })),
-      );
-    },
-  );
+  store.run({ type: 'ListWidgets', data: { account, room_id: roomId } }).catch(() => {
+    store.update((s) =>
+      updateAccount(s, account, (a) => ({
+        ...a,
+        widgetErrors: { ...a.widgetErrors, [roomId]: true },
+      })),
+    );
+  });
 }
 
 /** Pins a web page to the room; the room's widgets are listed again once it shows. */

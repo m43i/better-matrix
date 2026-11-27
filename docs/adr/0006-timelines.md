@@ -17,6 +17,11 @@ see who is typing there.
 
 ## Decision
 
+- Matrix notices (`m.notice`) keep their own `MessageContent::Notice` kind and show a muted
+  leading rule in the timeline. They retain formatting and ordinary message actions. A room
+  can separately identify a sender as a service account through member hints or bridge state
+  (ADR 0012).
+
 - **Source:** matrix-sdk-ui's `Timeline`, on the SDK's event cache (history on disk, gaps
   tracked).
   - The engine follows only open timelines (`Command::OpenTimeline` / `CloseTimeline`) and

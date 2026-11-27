@@ -110,8 +110,10 @@ pub use source::EventSource;
 pub use status::Status;
 pub use store::StoreLayout;
 pub use widgets::meetings::Meeting;
-pub use widgets::session::{PermissionKind, WidgetBridge, WidgetPage, WidgetPermission};
-pub use widgets::{Widget, Widgets};
+pub use widgets::session::{
+    PermissionKind, WidgetAccess, WidgetAccessKind, WidgetBridge, WidgetPage, WidgetPermission, WidgetUrlField,
+};
+pub use widgets::{RoomBridge, Widget, Widgets};
 
 /// Shown to other devices and in the server's session list.
 pub const DEVICE_DISPLAY_NAME: &str = "Better Matrix";

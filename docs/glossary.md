@@ -259,7 +259,7 @@ whoever may change the room's state adds and removes them. See
 [ADR 0012](adr/0012-widgets-and-integrations.md).
 
 **Meeting**
-: A video conference pinned to a room as a widget, Jitsi or BigBlueButton (`Meeting`,
+: A video conference pinned to a room as a widget, such as Jitsi, BigBlueButton, Microsoft Teams or Zoom (`Meeting`,
 `Widget::meeting`), joined as itself rather than through Element's page; not a call, which the
 app runs natively. The room offers Join meeting while one is pinned. See
 [ADR 0012](adr/0012-widgets-and-integrations.md).
@@ -279,10 +279,25 @@ app closes it. See [ADR 0012](adr/0012-widgets-and-integrations.md).
 and remembered per room and widget (`WidgetPermission`, `Grants`). See
 [ADR 0012](adr/0012-widgets-and-integrations.md).
 
+**Integrations**
+: The Room info entry listing the room's widgets, meetings, service accounts and advertised
+bridge destinations, with an action to open the integration manager (ADR 0012).
+
+**Service account**
+: A Matrix user ID the room identifies as providing a service through member hints or bridge
+state. The timeline can label it independently of the message's type.
+
+**Bridge destination**
+: The external network and channel advertised by the bridge in room state (`RoomBridge`).
+
+**Notice**
+: An informational message (`m.notice`; `MessageContent::Notice`) shown with a leading rule
+in the timeline (ADR 0006).
+
 **Integration manager**
 : The page that adds bots, bridges and widgets to a room (Element's, Dimension), named by the
-homeserver's well-known file and run like a widget (`Command::OpenIntegrations`). "Bots and
-integrations" in the widgets panel. See [ADR 0012](adr/0012-widgets-and-integrations.md).
+homeserver's well-known file and run like a widget (`Command::OpenIntegrations`). Opened with
+**Manage integrations** in Integrations. See [ADR 0012](adr/0012-widgets-and-integrations.md).
 
 **Attachment preview**
 : An image, PDF, video or audio clip shown full size over the window, with download, close and
