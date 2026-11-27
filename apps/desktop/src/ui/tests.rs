@@ -1236,6 +1236,17 @@ fn a_linked_gif_should_leave_the_readers_column_clear_in_the_narrowest_window() 
 }
 
 #[test]
+fn a_linked_gif_in_a_notice_should_fit_inside_its_ruled_body() {
+    let mut rt = readers_runtime();
+    let content = MessageContent::Notice { body: "https://x.org/a.gif".into(), html: None };
+    set_continued_message(&mut rt, content, 0);
+    let column = readers_column_start(&mut rt);
+    let body = rt.presented("notice-$continued").expect("the notice body").0;
+    let gif = rt.presented("gif-https://x.org/a.gif").expect("the GIF").0;
+    assert!(gif[0] > body[0] && gif[0] + gif[2] <= column);
+}
+
+#[test]
 fn a_file_card_should_leave_the_readers_column_clear_in_the_narrowest_window() {
     let mut rt = runtime(|s| s.select_room(demo::DEMO_THREAD.0));
     let column = readers_column_start(&mut rt);

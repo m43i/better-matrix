@@ -383,6 +383,23 @@ async fn an_equal_bot_power_level_should_succeed_without_writing_room_state() {
 }
 
 #[tokio::test]
+async fn a_manager_should_get_the_full_membership_content_of_a_bot_missing_from_sync() {
+    let member = json!({"membership": "join", "displayname": "Release bot", "com.example.service": true});
+    let expected = member.clone();
+    let server = Server::new(move |request| {
+        if request.contains("/state/m.room.member/") {
+            return member.clone();
+        }
+        thread_response(request)
+    });
+    let account = synced(&server).await;
+    let room = account.joined_room(ROOM).unwrap();
+    let asked = json!({"action": "membership_state", "room_id": ROOM, "user_id": "@bot:example.org"});
+
+    assert_eq!(answer_request(&account, &room, &asked).await, (expected, After::Nothing));
+}
+
+#[tokio::test]
 async fn a_manager_should_kick_a_bot_whose_membership_was_not_in_the_sync() {
     let kicked = Arc::new(AtomicBool::new(false));
     let captured = Arc::clone(&kicked);

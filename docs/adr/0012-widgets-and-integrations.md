@@ -155,8 +155,8 @@ Date: 2026-11-25
   plumbing state, reading and setting room widgets (account widgets aren't supported), whether
   the user may send an event, encryption, sending integration state (`SENDABLE`: widgets, their
   layout, bot options, plumbing; never messages or the room's settings), and closing. Its
-  replies are never taken as requests. Invite, kick and bot power changes read the current
-  room state from the homeserver. Widget changes list the room's widgets again.
+  replies are never taken as requests. Membership queries, invite, kick and bot power changes
+  read the current room state from the homeserver. Widget changes list the room's widgets again.
 - **Desktop:** a widget runs in its own window from a web-view helper: the same binary started
   as `better-matrix --widget-window` (wry and tao; WebKitGTK on Linux, WKWebView on macOS,
   WebView2 on Windows), one process per run, JSON lines over stdin and stdout

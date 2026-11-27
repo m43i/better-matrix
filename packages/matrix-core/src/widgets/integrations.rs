@@ -304,7 +304,10 @@ async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Res
     };
     let done = (json!({ "success": true }), After::Nothing);
     Ok(match action {
-        "membership_state" => (state_content(room, "m.room.member", user()?.as_str()).await, After::Nothing),
+        "membership_state" => {
+            let content = account.membership_content(room, user()?).await?;
+            (json!(content), After::Nothing)
+        }
         "invite" => {
             let user = user()?;
             if !matches!(account.membership(room, user).await?, Some(MembershipState::Join | MembershipState::Invite)) {

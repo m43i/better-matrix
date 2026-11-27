@@ -836,6 +836,11 @@ fn message_parts(
     if let Some(quote) = &message.reply_to {
         inside.push(quote_block(cx, quote, said));
     }
+    const NOTICE_RULE: f32 = 2.0;
+    const NOTICE_PADDING: f32 = 8.0;
+    let notice = matches!(message.content, MessageContent::Notice { .. });
+    let body_start = inside.len();
+    let body_width = if notice { (cx.content_width - NOTICE_RULE - NOTICE_PADDING).max(0.0) } else { cx.content_width };
     // A GIF link shows as the GIF, below the rest of the message (if any) like an attachment.
     // Held back, it keeps its Show even when an earlier download failed: Show tries again.
     match item.gif.as_ref().filter(|gif| cx.show_gifs && (cx.hides(message) || !cx.gifs.has_failed(&gif.url))) {
@@ -844,18 +849,28 @@ fn message_parts(
                 let caption = text_body(message, &rest.plain, rest.rich.as_ref(), cx, said);
                 // At the right, the caption hugs its words, so they end where the GIF does.
                 inside.push(if cx.on_right(message) {
-                    col().self_end().max_w(cx.content_width).child(caption)
+                    col().self_end().max_w(body_width).child(caption)
                 } else {
                     caption
                 });
             }
             inside.push(if cx.hides(message) {
-                hidden_media(cx, &message.event_id, gif_frame(None, cx.content_width), said)
+                hidden_media(cx, &message.event_id, gif_frame(None, body_width), said)
             } else {
-                linked_gif(&gif.url, cx.content_width, cx.gifs, said)
+                linked_gif(&gif.url, body_width, cx.gifs, said)
             });
         }
         None => inside.push(message_body(item, cx, latest_call, said)),
+    }
+    if notice {
+        let ruled = col()
+            .key(cx.key(&format!("notice-{}", message.event_id)))
+            .w_full()
+            .gap(4.0)
+            .pl(NOTICE_PADDING)
+            .border_sides([0.0, 0.0, 0.0, NOTICE_RULE], said.divider)
+            .children(inside.drain(body_start..));
+        inside.push(ruled);
     }
     // A link's card, below the text, once the homeserver described the page.
     if let Some((url, card)) =
@@ -1575,12 +1590,9 @@ fn service_badge(cx: &Context<'_>, message: &Message, p: &Palette) -> Option<El>
 fn message_body(item: &TimelineItem, cx: &Context<'_>, latest_call: bool, p: &Palette) -> El {
     let media = cx.media;
     match (&item.message.content, &item.rich) {
-        (MessageContent::Text { body, .. }, rich) => text_body(&item.message, body, rich.as_ref(), cx, p),
-        (MessageContent::Notice { body, .. }, rich) => col()
-            .w_full()
-            .pl(8.0)
-            .border_sides([0.0, 0.0, 0.0, 2.0], p.divider)
-            .child(text_body(&item.message, body, rich.as_ref(), cx, p)),
+        (MessageContent::Text { body, .. } | MessageContent::Notice { body, .. }, rich) => {
+            text_body(&item.message, body, rich.as_ref(), cx, p)
+        }
         (MessageContent::Emote { body, .. }, rich) => emote_body(item, body, rich.as_ref(), cx, p),
         (MessageContent::Location(location), _) => location_card(&item.message, location, cx, p),
         (MessageContent::Attachment(attachment), _)

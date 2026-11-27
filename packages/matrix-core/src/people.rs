@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use futures_util::StreamExt;
 use matrix_sdk::RoomMemberships;
 use matrix_sdk::ruma::api::client::profile::{AvatarUrl, DisplayName};
-use matrix_sdk::ruma::events::presence::PresenceEvent;
+use matrix_sdk::ruma::events::{AnyStateEventContent, presence::PresenceEvent, room::member::RoomMemberEventContent};
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::ruma::{OwnedUserId, RoomId, UserId};
 
@@ -370,17 +370,27 @@ impl Account {
         room: &matrix_sdk::Room,
         user: &UserId,
     ) -> Result<Option<matrix_sdk::ruma::events::room::member::MembershipState>, Error> {
+        self.membership_content(room, user)
+            .await?
+            .map(|content| {
+                content.deserialize_as_unchecked::<RoomMemberEventContent>().map(|content| content.membership)
+            })
+            .transpose()
+            .map_err(|error| matrix_sdk::Error::from(error).into())
+    }
+
+    /// The homeserver's full membership event content, including extension fields.
+    pub(crate) async fn membership_content(
+        &self,
+        room: &matrix_sdk::Room,
+        user: &UserId,
+    ) -> Result<Option<Raw<AnyStateEventContent>>, Error> {
         use matrix_sdk::ruma::api::client::state::get_state_event_for_key::v3::Request;
         use matrix_sdk::ruma::api::error::ErrorKind;
         use matrix_sdk::ruma::events::StateEventType;
-        use matrix_sdk::ruma::events::room::member::RoomMemberEventContent;
         let request = Request::new(room.room_id().to_owned(), StateEventType::RoomMember, user.to_string());
         match self.client().send(request).await {
-            Ok(response) => response
-                .into_content()
-                .deserialize_as_unchecked::<RoomMemberEventContent>()
-                .map(|content| Some(content.membership))
-                .map_err(|error| matrix_sdk::Error::from(error).into()),
+            Ok(response) => Ok(Some(response.into_content())),
             Err(error) if error.client_api_error_kind() == Some(&ErrorKind::NotFound) => Ok(None),
             Err(error) => Err(error.into()),
         }
