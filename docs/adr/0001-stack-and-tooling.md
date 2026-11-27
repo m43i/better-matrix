@@ -58,6 +58,9 @@ Date: 2026-11-14
   - `bun run build:windows` builds natively on Windows and cross-compiles elsewhere with
     `cargo-xwin` (clang-cl, lld-link).
   - Windows release builds use the GUI subsystem: no console window.
+  - Windows links the MSVC runtime statically to match libwebrtc. Pin MapLibre Native FFI to
+    `0.202610.3`, whose Windows archive also uses `/MT`. Upgrading past that version requires
+    checking that the Windows archive uses the same runtime as libwebrtc.
   - Linux releases include separate x86_64 and aarch64 `bm` archives. Build the CLI in a
     separate Cargo invocation so it uses the engine without the desktop media features
     ([0013](0013-command-line.md)).

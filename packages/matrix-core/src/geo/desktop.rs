@@ -88,7 +88,8 @@ pub(crate) async fn draw(cache: &Path, media: &MediaRef, size: MediaSize) -> Res
     let permit = RENDERER.acquire().await.map_err(|_| Error::Cancelled)?;
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let pixels = snapshot(&cache, mln::LogicalSize::new(width, height), mln::LatLng::new(lat, lon), zoom, style)
+        let extent = mln::LogicalExtent::new(width, height, 1.0);
+        let pixels = snapshot(&cache, extent, mln::LatLng::new(lat, lon), zoom, style)
             .map_err(|e| Error::Location(e.to_string()))?;
         let image = image::RgbaImage::from_raw(width, height, pixels).ok_or(Error::MessageUnavailable)?;
         let mut bytes = std::io::Cursor::new(Vec::new());
@@ -99,38 +100,38 @@ pub(crate) async fn draw(cache: &Path, media: &MediaRef, size: MediaSize) -> Res
     .map_err(|e| Error::Location(e.to_string()))?
 }
 
-fn snapshot(cache: &Path, size: mln::LogicalSize, center: mln::LatLng, zoom: u8, style: &str) -> mln::Result<Vec<u8>> {
-    let runtime = mln::RuntimeHandle::create(Some(&mln::RuntimeOptions {
-        cache_path: &cache.to_string_lossy(),
-        asset_path: "",
-    }))?;
-    let options = mln::MapOptions {
-        map_mode: mln::MapMode::Static,
-        ..mln::MapOptions::new(mln::LogicalExtent::new(size.width, size.height, 1.0))
-    };
+fn snapshot(
+    cache: &Path,
+    extent: mln::LogicalExtent,
+    center: mln::LatLng,
+    zoom: u8,
+    style: &str,
+) -> mln::Result<Vec<u8>> {
+    let runtime =
+        mln::RuntimeHandle::create(&mln::RuntimeOptions { cache_path: &cache.to_string_lossy(), asset_path: "" })?;
+    let options = mln::MapOptions { map_mode: mln::MapMode::Static, ..mln::MapOptions::new(extent) };
     let (map, ready) = runtime.create_map(&options)?;
-    ready.wait()?;
-    let (session, attached) = map.attach_offscreen(
-        &mln::OffscreenDescriptor::new(size),
+    wait_for_map(ready)?;
+    let device = mln::GraphicsDeviceHandle::create(None)?;
+    let (session, attached) = map.attach_graphics_device_texture(
+        &device,
+        &mln::GraphicsDeviceTextureDescriptor::new(extent),
         &mln::RenderSessionAttachOptions::new(mln::RenderDriverKind::CoreWorker),
-        None,
     )?;
-    attached.wait()?;
+    wait_for_map(attached)?;
     map.discarding().set_style_json(style)?;
     map.discarding().update_camera(&mln::CameraUpdate {
         camera: mln::CameraOptions { center: Some(center), zoom: Some(f64::from(zoom)), ..Default::default() },
         ..Default::default()
     })?;
-    map.request_still_image()?
-        .wait_timeout(Duration::from_secs(30))
-        .map_err(|_| mln::Error::invalid_argument("Map timed out"))??;
-    let image = session.read_texture()?.wait()?;
-    let row = size.width as usize * 4;
+    wait_for_map(map.request_still_image()?)?;
+    let image = wait_for_map(session.read_texture()?)?;
+    let row = extent.width as usize * 4;
     let stride = image.info.stride as usize;
-    if image.info.width != size.width
-        || image.info.height != size.height
+    if image.info.width != extent.width
+        || image.info.height != extent.height
         || stride < row
-        || image.data.len() != stride * size.height as usize
+        || image.data.len() != stride * extent.height as usize
     {
         return Err(mln::Error::invalid_argument("Unexpected map texture dimensions"));
     }
@@ -138,6 +139,10 @@ fn snapshot(cache: &Path, size: mln::LogicalSize, center: mln::LatLng, zoom: u8,
         return Ok(image.data);
     }
     Ok(image.data.chunks_exact(stride).flat_map(|line| line[..row].iter().copied()).collect())
+}
+
+fn wait_for_map<T>(completion: mln::NativeFuture<T>) -> mln::Result<T> {
+    completion.wait(Duration::from_secs(30)).map_err(|_| mln::Error::invalid_argument("Map timed out"))?
 }
 
 #[cfg(test)]
