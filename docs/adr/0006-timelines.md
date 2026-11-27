@@ -476,7 +476,8 @@ see who is typing there.
     stays reachable while it reopens, so leaving a room right after reading it doesn't leave its
     last messages unread on the server. Quitting (`App::on_quit`) sends every position held
     back, and the engine waits up to two seconds for read receipts (and room-list reads) in flight,
-    alongside leaving a call, before it stops. Warm rows wait for the SDK subscription's first snapshot before
+    alongside leaving a call, before it stops. The engine sends read receipts one at a time, in
+    order, as some servers (Conduwuit) let a late older fully-read marker overwrite a newer one. Warm rows wait for the SDK subscription's first snapshot before
     sending. Viewport progress and visible-marker metadata do not change the row-plan revision;
     dismissing the marker does.
     `ReadBoundary` reports the existing fully-read event (or receipt fallback) independently of

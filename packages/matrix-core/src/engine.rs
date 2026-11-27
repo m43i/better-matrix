@@ -2043,6 +2043,7 @@ impl Engine {
             tasks: JoinSet::new(),
             running: HashMap::new(),
             reading: HashSet::new(),
+            receipts_turn: Arc::default(),
             widget_runs: HashMap::new(),
             live_shares: HashMap::new(),
             http: crate::links::http_client().map_err(|e| e.to_string()),
@@ -2289,6 +2290,9 @@ struct State {
     /// [`Command::MarkRead`] and [`Command::MarkRoomRead`] requests still running: quitting
     /// waits a moment for them, so what the user read last counts as read on the next start.
     reading: HashSet<RequestId>,
+    /// Read receipts go one at a time, in the order sent: some servers (Conduwuit) let a late
+    /// older fully-read marker overwrite a newer one.
+    receipts_turn: Arc<tokio::sync::Mutex<()>>,
     /// Local live shares, scoped to the destination, including starts still in flight.
     live_shares: HashMap<(AccountId, String), (RequestId, tokio::sync::watch::Sender<()>)>,
     /// Widget runs ([`Command::RunWidget`] and the like), by the account they act for: signing
@@ -2957,7 +2961,9 @@ impl State {
             Command::MarkRead { account, key, event_id, fully_read } => {
                 self.reading.insert(request);
                 let timeline = self.accounts.get(&account).and_then(|running| running.reading_timeline(&key));
+                let turn = Arc::clone(&self.receipts_turn);
                 Box::pin(async move {
+                    let _turn = turn.lock().await;
                     if let Some(timeline) = timeline {
                         mark_timeline_read(&timeline, event_id.as_deref(), fully_read && key.thread.is_none()).await?;
                     }

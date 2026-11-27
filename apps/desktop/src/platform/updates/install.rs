@@ -41,7 +41,13 @@ impl Install {
 
     /// Downloads `release`, checks its digest (and on macOS its signature), and unpacks it beside
     /// the install, ready to swap in at [`Install::hand_over`]. Dropping the result removes it.
-    pub fn stage(&self, client: &reqwest::blocking::Client, release: &Release) -> Result<Staged, String> {
+    /// The download gives up after `limit`.
+    pub fn stage(
+        &self,
+        client: &reqwest::blocking::Client,
+        release: &Release,
+        limit: Duration,
+    ) -> Result<Staged, String> {
         let Upgrade::Archive { asset_id, digest } = &release.upgrade else {
             return Err("This release installs outside the app".into());
         };
@@ -51,7 +57,7 @@ impl Install {
         let work = tempfile::Builder::new().tempdir_in(&root).map_err(writable)?;
         let archive = work.path().join("release.zip");
         let mut file = File::create(&archive).map_err(|error| error.to_string())?;
-        release::download(client, *asset_id, digest, &mut file)?;
+        release::download(client, *asset_id, digest, &mut file, limit)?;
         file.sync_all().map_err(|error| error.to_string())?;
         drop(file);
         let app = match self.platform {

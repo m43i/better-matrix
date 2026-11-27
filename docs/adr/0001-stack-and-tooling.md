@@ -188,7 +188,8 @@ Date: 2026-11-14
     rail show the update icon, which restarts into the release: restarting stays the user's
     action. Restarting checks once more first and stages a release published since, so a copy
     several releases behind goes straight to the newest, never through the ones between. If that
-    check or download fails, the restart still goes into what is staged (newer than what runs)
+    check or download fails, or the download takes over 90 seconds, the restart still goes into
+    what is staged (newer than what runs)
     rather than leaving the user unable to update on a flaky network. A download that fails is retried at the next check; until then the icon offers the
     release's page.
   - Stage beside the install, in the updater's own `.better-matrix-update-staging` folder, so

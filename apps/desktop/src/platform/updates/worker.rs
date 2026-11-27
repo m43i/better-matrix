@@ -14,6 +14,11 @@ use super::{Release, Upgrade, linux, release};
 use crate::state::State;
 
 const HOUR: Duration = Duration::from_secs(60 * 60);
+/// How long a download in the background may take.
+const DOWNLOAD_LIMIT: Duration = Duration::from_secs(15 * 60);
+/// How long the restart waits for a release newer than the one staged before it restarts into
+/// the staged one instead.
+const RESTART_DOWNLOAD_LIMIT: Duration = Duration::from_secs(90);
 /// The longest the worker sleeps at once, so a wall clock that jumped (sleep, a time change)
 /// is noticed soon.
 const GLANCE: Duration = Duration::from_secs(5 * 60);
@@ -41,11 +46,11 @@ pub fn start(app: AppHandle<State>, cache: PathBuf) -> Option<Sender<Release>> {
             let client = release::client()?;
             let mut schedule = Schedule::new(SystemTime::now());
             let mut staged = None::<Staged>;
-            let refresh = |staged: &mut Option<Staged>| match release::check(&client, &target) {
+            let refresh = |staged: &mut Option<Staged>, limit: Duration| match release::check(&client, &target) {
                 Ok(Some(release)) => match &install {
                     // Only a newer release than the one waiting replaces it, once staged.
                     Some(install) if staged.as_ref().is_none_or(|ready| newer(&release.version, &ready.version)) => {
-                        match install.stage(&client, &release) {
+                        match install.stage(&client, &release, limit) {
                             Ok(ready) => {
                                 *staged = Some(ready);
                                 app.update(move |s, _| s.update_ready(release));
@@ -69,7 +74,7 @@ pub fn start(app: AppHandle<State>, cache: PathBuf) -> Option<Sender<Release>> {
             };
             loop {
                 if schedule.due(SystemTime::now()) {
-                    refresh(&mut staged);
+                    refresh(&mut staged, DOWNLOAD_LIMIT);
                 }
                 match receiver.recv_timeout(schedule.wait(SystemTime::now())) {
                     // The user restarts into the newest release: one published since the last
@@ -77,7 +82,7 @@ pub fn start(app: AppHandle<State>, cache: PathBuf) -> Option<Sender<Release>> {
                     // never restarts into one that is already outdated.
                     Ok(_) => {
                         let Some(install) = &install else { continue };
-                        refresh(&mut staged);
+                        refresh(&mut staged, RESTART_DOWNLOAD_LIMIT);
                         let Some(ready) = &staged else {
                             app.update(|s, _| s.update_failed("the update is not downloaded".into()));
                             continue;

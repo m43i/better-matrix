@@ -107,11 +107,18 @@ fn valid_digest(digest: &str) -> bool {
     digest.strip_prefix("sha256:").is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-pub fn download(client: &Client, asset_id: u64, digest: &str, file: &mut std::fs::File) -> Result<(), String> {
+/// Downloads a release asset, giving up after `limit`.
+pub fn download(
+    client: &Client,
+    asset_id: u64,
+    digest: &str,
+    file: &mut std::fs::File,
+    limit: Duration,
+) -> Result<(), String> {
     let response = client
         .get(format!("{REPOSITORY}/releases/assets/{asset_id}"))
         .header("Accept", "application/octet-stream")
-        .timeout(Duration::from_secs(15 * 60))
+        .timeout(limit)
         .send()
         .and_then(|response| response.error_for_status())
         .map_err(|error| error.to_string())?;

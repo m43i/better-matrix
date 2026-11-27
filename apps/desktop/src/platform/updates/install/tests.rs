@@ -71,7 +71,7 @@ fn staging_a_release_should_unpack_it_beside_the_install_until_dropped() {
     let found = release::select(metadata, "0.0.16", &release::Target::Archive(Platform::Windows)).unwrap().unwrap();
     let folder = tempfile::tempdir().unwrap();
     let install = Install { platform: Platform::Windows, target: folder.path().join("better-matrix.exe") };
-    let staged = install.stage(&client, &found).unwrap();
+    let staged = install.stage(&client, &found, Duration::from_secs(60)).unwrap();
     assert_eq!(staged.version, "0.0.17");
     assert!(fs::metadata(&staged.app).unwrap().len() > 1_000_000, "the executable is unpacked");
     let work = staged.app.parent().unwrap().to_owned();
