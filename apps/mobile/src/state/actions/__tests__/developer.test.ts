@@ -58,7 +58,8 @@ it('should stop loading a room’s widgets when listing them failed', async () =
   engine.emit({ type: 'Finished', data: { request: sent[0]!.request, result: { Err: 'nope' } } });
   await Promise.resolve();
   await Promise.resolve();
-  expect(store.getState().accounts[0]?.widgets['!r:x']).toEqual({ widgets: [], can_add: false });
+  expect(store.getState().accounts[0]?.widgetErrors['!r:x']).toBe(true);
+  expect(store.getState().accounts[0]?.widgets['!r:x']).toBeUndefined();
 });
 
 it('should add a widget with its name and address trimmed', () => {

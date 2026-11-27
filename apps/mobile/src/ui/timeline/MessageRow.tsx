@@ -16,6 +16,7 @@ import { t } from '../../i18n';
 import { cardLink, isLocal, marksMention, prepare } from '../../state/messages';
 import { routes } from '../../routes';
 import { useStore } from '../../state/react';
+import { account as accountOf } from '../../state/selectors';
 import { Icon } from '../icons';
 import { clockTime } from '../../state/timelineText';
 import { font, identityColor } from '../../theme/palette';
@@ -73,6 +74,7 @@ const ROW_GAP = 10;
 /** The kinds of content a chat bubble holds: words. */
 const BUBBLED: ReadonlySet<Message['content']['type']> = new Set([
   'Text',
+  'Notice',
   'Redacted',
   'Undecryptable',
 ]);
@@ -164,6 +166,7 @@ function ClassicRow({ message, continues, latestCall, highlighted }: MessageRowP
             >
               {sender}
             </Text>
+            <ServiceLabel sender={message.sender_id} />
             <Text style={[font.meta, { color: palette.textMuted }]}>
               {clockTime(message.timestamp_ms)}
             </Text>
@@ -205,18 +208,24 @@ function Said({
   latestCall: boolean;
   shown: ReturnType<typeof useShown>;
 }) {
+  const palette = usePalette();
+
+  const body = gif ? (
+    <>
+      {gif.rest ? <RichText blocks={gif.rest} owner={message.event_id} media={message} /> : null}
+      <LinkedGif key={gif.url} url={gif.url} message={message} />
+    </>
+  ) : (
+    <Body message={message} latestCall={latestCall} />
+  );
+
   return (
     <>
       {message.reply_to ? <QuoteBlock quote={message.reply_to} /> : null}
-      {gif ? (
-        <>
-          {gif.rest ? (
-            <RichText blocks={gif.rest} owner={message.event_id} media={message} />
-          ) : null}
-          <LinkedGif key={gif.url} url={gif.url} message={message} />
-        </>
+      {message.content.type === 'Notice' ? (
+        <View style={[styles.noticeBody, { borderLeftColor: palette.textMuted }]}>{body}</View>
       ) : (
-        <Body message={message} latestCall={latestCall} />
+        body
       )}
       {link ? <LinkCard key={link} url={link} message={message} /> : null}
     </>
@@ -378,12 +387,15 @@ function BubbleRow({ message, continues, latestCall, highlighted }: MessageRowPr
             ]}
           >
             {named ? (
-              <Text
-                style={[font.section, styles.name, { color: identityColor(message.sender_id) }]}
-                numberOfLines={1}
-              >
-                {sender}
-              </Text>
+              <View style={styles.meta}>
+                <Text
+                  style={[font.section, styles.name, { color: identityColor(message.sender_id) }]}
+                  numberOfLines={1}
+                >
+                  {sender}
+                </Text>
+                <ServiceLabel sender={message.sender_id} />
+              </View>
             ) : null}
             {bubbled ? (
               <InBubble>
@@ -415,17 +427,33 @@ function BubbleRow({ message, continues, latestCall, highlighted }: MessageRowPr
   );
 }
 
+function ServiceLabel({ sender }: { sender: string }) {
+  const { account, timelineKey } = useTimelineContext();
+  const palette = usePalette();
+
+  const service = useStore((s) =>
+    accountOf(s, account)?.widgets[timelineKey.room_id]?.services?.includes(sender),
+  );
+
+  return service ? (
+    <Text style={[font.meta, { color: palette.textMuted }]}>{t('widgets.service')}</Text>
+  ) : null;
+}
+
 function Body({ message, latestCall }: { message: Message; latestCall: boolean }) {
   const sender = usePersonName(message.sender_name);
   const palette = usePalette();
   const content = message.content;
 
   switch (content.type) {
+    case 'Notice':
     case 'Text':
     case 'Emote': {
       const blocks = prepare(message, sender).blocks;
 
-      return blocks ? <RichText blocks={blocks} owner={message.event_id} media={message} /> : null;
+      if (!blocks) return null;
+
+      return <RichText blocks={blocks} owner={message.event_id} media={message} />;
     }
 
     case 'Location':
@@ -454,6 +482,7 @@ function Body({ message, latestCall }: { message: Message; latestCall: boolean }
 }
 
 const styles = StyleSheet.create({
+  noticeBody: { borderLeftWidth: 2, paddingLeft: 8 },
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',

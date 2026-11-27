@@ -3,14 +3,14 @@
 // events (its page, the engine's messages for the page, a permission request, the integration
 // manager's terms), answers them, and cancels the run when the screen goes. The page's main frame
 // says when it has loaded (`WidgetLoaded`, which starts the engine's side) and its messages come
-// with the run's `token` from the page's origin. Opening a widget in the browser instead is
-// `openWidgetInBrowser`.
+// with the run's `token` from the page's origin. The same run requests a browser handoff.
 
 import type {
   AccountId,
   Answer,
   Policy,
   RequestId,
+  WidgetAccess,
   WidgetPage,
   WidgetPermission,
 } from '@better-matrix/matrix-native/types';
@@ -33,6 +33,7 @@ import { answerRequest } from './accounts';
 export type WidgetView =
   /** Waiting for the page (pinning a meeting, asking the integration manager). */
   | { type: 'starting' }
+  | { type: 'access'; access: WidgetAccess }
   /** The integration manager's terms, to agree to before it opens. */
   | { type: 'terms'; policies: Policy[] }
   /**
@@ -40,8 +41,10 @@ export type WidgetView =
    * the page (the engine sends it again to load the page again).
    */
   | { type: 'page'; page: WidgetPage; load: number }
-  /** The engine opens the widget in the browser instead (a page on plain HTTP): the screen goes. */
+  /** The widget's address, awaiting handoff to the system browser. */
   | { type: 'browser'; url: string }
+  /** The operating system refused the browser handoff. */
+  | { type: 'browser-failed' }
   /** The run is over (the widget or manager closed itself): the screen goes. */
   | { type: 'ended' }
   /** It failed, with why. */
@@ -55,6 +58,7 @@ export interface PermissionAsk {
   question: number;
   widget: string;
   permissions: WidgetPermission[];
+  context?: WidgetAccess;
 }
 
 export interface WidgetRunSnapshot {
@@ -93,6 +97,7 @@ export class WidgetRun {
     askingCapture: null,
   };
   private request: RequestId | null = null;
+  private access: WidgetAccess | undefined;
   private readonly listeners = new Set<() => void>();
   /** The engine's messages that came while no page was loaded, in order. */
   private outbox: string[] = [];
@@ -111,7 +116,7 @@ export class WidgetRun {
     private readonly store: Store,
     private readonly account: AccountId,
     private readonly roomId: string,
-    private readonly target: WidgetTarget,
+    private target: WidgetTarget,
     readonly token: string,
     /** Whether to ask the user about each new host a meeting moves to (Android). */
     private readonly askHosts: boolean,
@@ -127,6 +132,23 @@ export class WidgetRun {
     };
   };
 
+  get opensInBrowser(): boolean {
+    return this.target.type === 'widget' && this.target.browser === true;
+  }
+
+  /** Restart the widget in the browser, keeping that target for retry. */
+  openInBrowser(): void {
+    if (this.target.type !== 'widget' || this.target.browser) return;
+    this.target = { ...this.target, browser: true };
+    this.start();
+  }
+
+  /** The operating system refused the browser handoff. Keep the launch open for retry. */
+  browserFailed(): void {
+    if (this.current.view.type === 'browser')
+      this.set({ view: { type: 'browser-failed' }, asking: null });
+  }
+
   private set(change: Partial<WidgetRunSnapshot>): void {
     this.current = { ...this.current, ...change };
 
@@ -136,11 +158,16 @@ export class WidgetRun {
   /** Starts the run (again, after a failure); one under way is cancelled first. */
   start(): void {
     this.cancel();
+    this.access = undefined;
 
     const run = this.store.run(runCommand(this.account, this.roomId, this.target), (event) => {
       if (this.request !== run.request) return;
 
       switch (event.type) {
+        case 'WidgetAccess':
+          this.access = event.data.access;
+          this.set({ view: { type: 'access', access: event.data.access } });
+          break;
         case 'WidgetPage': {
           // Again for the same run: load the page again, its document and what waited gone.
           const page = event.data.page;
@@ -166,7 +193,13 @@ export class WidgetRun {
           // Nothing asked: the engine withdrew that question (the page started over).
           if (permissions.length === 0) {
             if (this.current.asking?.question === question) this.set({ asking: null });
-          } else this.set({ asking: { request: run.request, question, widget, permissions } });
+          } else {
+            const ask: PermissionAsk = { request: run.request, question, widget, permissions };
+
+            if (this.access) ask.context = this.access;
+            this.set({ asking: ask });
+          }
+
           break;
         }
 
@@ -388,6 +421,13 @@ export class WidgetRun {
     this.set({ asking: null });
   }
 
+  /** Confirms the action currently shown. */
+  confirmAccess(): void {
+    if (this.request === null || this.current.view.type !== 'access') return;
+    answerRequest(this.store, this.request, { type: 'Continue' });
+    this.set({ view: { type: 'starting' } });
+  }
+
   /** Agrees to the integration manager's terms. */
   agree(): void {
     if (this.request === null || this.current.view.type !== 'terms') return;
@@ -410,8 +450,9 @@ export class WidgetRun {
     this.request = null;
     this.leavePage();
 
-    // Opened in the browser: the screen is going already.
-    if (this.current.view.type !== 'browser') this.set({ view: { type: 'ended' }, asking: null });
+    // After a browser handoff, the screen handles the result independently of the engine.
+    if (this.current.view.type !== 'browser' && this.current.view.type !== 'browser-failed')
+      this.set({ view: { type: 'ended' }, asking: null });
   }
 
   private failed(request: RequestId, cause: unknown): void {
@@ -430,70 +471,4 @@ export class WidgetRun {
       asking: null,
     });
   }
-}
-
-/**
- * The user's answer to a widget run's permission request outside the web view: allow them all,
- * deny them all, or `null` when the question was dismissed (the run is cancelled).
- */
-export type PermissionAnswer = boolean | null;
-
-/**
- * Opens one of a room's widgets in the browser with `open` (`RunWidget` with `browser`): a
- * meeting's address is the one that joins it. A meeting on a server that checks who joins may
- * first ask to confirm the user's identity to it (`WidgetPermissions`): `ask` puts it to the user,
- * and the run is answered, or cancelled when the question is dismissed, so it never hangs. A
- * question the engine withdraws (nothing asked) gets no answer.
- */
-export async function openWidgetInBrowser(
-  store: Store,
-  account: AccountId,
-  roomId: string,
-  widgetId: string,
-  open: (url: string) => void,
-  ask: (widget: string, permissions: WidgetPermission[]) => Promise<PermissionAnswer>,
-): Promise<void> {
-  const command = { account, room_id: roomId, widget_id: widgetId, browser: true };
-
-  // The questions the engine withdrew, by number, and the one showing: only its answer counts.
-  const withdrawn = new Set<number>();
-  let showing: number | null = null;
-
-  const run = store.run({ type: 'RunWidget', data: command }, (event) => {
-    if (event.type === 'OpenUrl') open(event.data.url);
-    else if (event.type === 'WidgetPermissions') {
-      const { question } = event.data;
-      const capabilities = event.data.permissions.map((permission) => permission.capability);
-
-      // Nothing asked: the engine withdrew that question (an alert can't be taken back, but its
-      // answer is dropped).
-      if (capabilities.length === 0) {
-        withdrawn.add(question);
-
-        return;
-      }
-
-      showing = question;
-
-      void ask(event.data.widget, event.data.permissions).then((allowed) => {
-        if (withdrawn.has(question) || showing !== question) return;
-        showing = null;
-
-        if (allowed === null) {
-          store.send({ type: 'Cancel', data: run.request }, { quiet: true });
-
-          return;
-        }
-
-        const answer = {
-          type: 'WidgetPermissions' as const,
-          data: { question, granted: allowed ? capabilities : [] },
-        };
-
-        store.send({ type: 'Answer', data: { request: run.request, answer } }, { quiet: true });
-      });
-    }
-  });
-
-  await run;
 }

@@ -324,12 +324,19 @@ export const routes = {
 };
 
 /** What the widget screen runs, as route params (`widgetTarget` reads them back). */
-type WidgetParams = { widgetId: string } | { meeting: 'video' | 'voice' } | { integrations: '1' };
+type WidgetParams =
+  | { widgetId: string; permissions?: '1'; browser?: '1' }
+  | { meeting: 'video' | 'voice' }
+  | { integrations: '1' };
 
 function widgetParams(target: WidgetTarget): WidgetParams {
   switch (target.type) {
     case 'widget':
-      return { widgetId: target.widgetId };
+      return target.browser
+        ? { widgetId: target.widgetId, browser: '1' }
+        : { widgetId: target.widgetId };
+    case 'permissions':
+      return { widgetId: target.widgetId, permissions: '1' };
     case 'meeting':
       return { meeting: target.video ? 'video' : 'voice' };
     case 'integrations':
@@ -340,10 +347,20 @@ function widgetParams(target: WidgetTarget): WidgetParams {
 /** What `routes.widget` put in its params, if they name something to run. */
 export function widgetTarget(params: {
   widgetId?: string;
+  permissions?: string;
+  browser?: string;
   meeting?: string;
   integrations?: string;
 }): WidgetTarget | null {
-  if (params.widgetId) return { type: 'widget', widgetId: params.widgetId };
+  const { widgetId } = params;
+
+  if (widgetId) {
+    if (params.permissions === '1') return { type: 'permissions', widgetId };
+
+    return params.browser === '1'
+      ? { type: 'widget', widgetId, browser: true }
+      : { type: 'widget', widgetId };
+  }
 
   if (params.meeting === 'video' || params.meeting === 'voice')
     return { type: 'meeting', video: params.meeting === 'video' };

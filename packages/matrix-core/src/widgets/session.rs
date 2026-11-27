@@ -23,6 +23,108 @@ use super::meetings;
 use crate::engine::{Answer, Event, EventSink, RequestId};
 use crate::{Account, Error};
 
+/// The data a widget asks to put in its URL.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ffi", derive(ts_rs::TS))]
+pub enum WidgetUrlField {
+    /// The Matrix user ID.
+    UserId,
+    /// The Matrix room ID.
+    RoomId,
+    /// The widget ID.
+    WidgetId,
+    /// The user's display name.
+    DisplayName,
+    /// The user's avatar URL.
+    AvatarUrl,
+    /// The current device ID.
+    DeviceId,
+    /// The account's homeserver URL.
+    Homeserver,
+}
+
+/// Which action asks for confirmation before a widget run can proceed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+#[cfg_attr(feature = "ffi", serde(tag = "type", content = "data"))]
+pub enum WidgetAccessKind {
+    /// Load the widget's website, with the Matrix context the URL contains.
+    Open(Vec<WidgetUrlField>),
+    /// Connect to a room's integration manager.
+    Manager {
+        /// Whether this is the optional hosted Element service.
+        hosted: bool,
+    },
+    /// Inspect the current origin's saved grants and reset its decisions.
+    Saved(Vec<WidgetPermission>),
+}
+
+/// The context of an action the user must confirm before it runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
+pub struct WidgetAccess {
+    /// The widget's name, if applicable.
+    pub name: String,
+    /// The site's scheme, host and port. No query or fragment.
+    pub origin: String,
+    /// The signed-in Matrix user.
+    pub user_id: String,
+    /// The room's name or ID.
+    pub room: String,
+    /// The action and the data needed to describe it.
+    pub kind: WidgetAccessKind,
+}
+
+/// Emits a confirmation and waits for an answer to this stage of the run.
+pub(crate) async fn confirm_access(
+    sink: &dyn EventSink,
+    request: RequestId,
+    access: WidgetAccess,
+    answers: &mut mpsc::UnboundedReceiver<Answer>,
+) -> Result<(), Error> {
+    sink.emit(Event::WidgetAccess { request, access });
+    while let Some(answer) = answers.recv().await {
+        if matches!(answer, Answer::Continue) {
+            return Ok(());
+        }
+    }
+    Err(Error::Cancelled)
+}
+
+fn url_fields(template: &str, viewer: &super::Viewer) -> Vec<WidgetUrlField> {
+    let mut fields = Vec::new();
+    for (token, field) in [
+        ("$matrix_user_id", WidgetUrlField::UserId),
+        ("$matrix_room_id", WidgetUrlField::RoomId),
+        ("$matrix_widget_id", WidgetUrlField::WidgetId),
+        ("$matrix_display_name", name_field(viewer)),
+        ("$matrix_avatar_url", WidgetUrlField::AvatarUrl),
+        ("$org.matrix.msc3819.matrix_device_id", WidgetUrlField::DeviceId),
+        ("$org.matrix.msc4039.matrix_base_url", WidgetUrlField::Homeserver),
+    ] {
+        if template.contains(token) && !fields.contains(&field) {
+            fields.push(field);
+        }
+    }
+    fields
+}
+
+fn origin(url: &str) -> Result<String, Error> {
+    url::Url::parse(url).map(|url| url.origin().ascii_serialization()).map_err(|_| Error::InvalidWidgetUrl)
+}
+
+fn access_for(
+    account: &Account,
+    viewer: &super::Viewer,
+    widget: &super::Widget,
+    origin: String,
+    kind: WidgetAccessKind,
+) -> Result<WidgetAccess, Error> {
+    let room = account.room(&viewer.room_id)?;
+    let room = room.cached_display_name().map_or_else(|| viewer.room_id.clone(), |name| name.to_string());
+    Ok(WidgetAccess { name: widget.name.clone(), origin, user_id: viewer.user_id.clone(), room, kind })
+}
+
 /// A widget's page for the app to show.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(serde::Serialize, serde::Deserialize, ts_rs::TS))]
@@ -63,6 +165,9 @@ pub struct WidgetPermission {
     /// What it allows it for: an event type (`m.room.message`, `m.room.message#m.text`, a state
     /// type and key), when it names one.
     pub subject: Option<String>,
+    /// Other fields sent to a server that receives a meeting identity.
+    #[cfg_attr(feature = "ffi", serde(default, skip_serializing_if = "Option::is_none"), ts(optional))]
+    pub disclosed: Option<Vec<WidgetUrlField>>,
 }
 
 /// What a widget permission allows.
@@ -122,7 +227,7 @@ pub(crate) fn describe(capability: &str) -> WidgetPermission {
             };
             (kind, None)
         });
-    WidgetPermission { capability: capability.to_owned(), kind, subject }
+    WidgetPermission { capability: capability.to_owned(), kind, subject, disclosed: None }
 }
 
 /// What the user granted a widget before: what it asked for then, and what of it they allowed.
@@ -130,6 +235,54 @@ pub(crate) fn describe(capability: &str) -> WidgetPermission {
 pub(crate) struct Grants {
     pub asked: Vec<String>,
     pub granted: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    meeting_identity: Option<MeetingIdentityDecision>,
+}
+
+/// The two meeting flows that can ask for the viewer's identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum MeetingIdentityKind {
+    Jitsi,
+    Dimension,
+}
+
+impl MeetingIdentityKind {
+    fn for_place(place: &meetings::Place) -> Option<Self> {
+        match place {
+            meetings::Place::Jitsi(meetings::Jitsi { auth: true, .. }) => Some(Self::Jitsi),
+            meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { .. }) => Some(Self::Dimension),
+            _ => None,
+        }
+    }
+
+    fn fields(self, viewer: &super::Viewer) -> Vec<WidgetUrlField> {
+        let mut fields = vec![WidgetUrlField::AvatarUrl];
+        if name_field(viewer) == WidgetUrlField::DisplayName {
+            fields.insert(0, WidgetUrlField::DisplayName);
+        }
+        if self == Self::Jitsi {
+            fields.push(WidgetUrlField::RoomId);
+        }
+        fields
+    }
+}
+
+/// The user's decision for a meeting provider and the fields they were shown together.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct MeetingIdentityDecision {
+    kind: MeetingIdentityKind,
+    fields: Vec<WidgetUrlField>,
+    allowed: bool,
+}
+
+impl MeetingIdentityDecision {
+    fn answer(&self, kind: MeetingIdentityKind, fields: &[WidgetUrlField]) -> Option<bool> {
+        (self.kind == kind && fields.iter().all(|field| self.fields.contains(field))).then_some(self.allowed)
+    }
+
+    fn disclosure(origin: &str, fields: Vec<WidgetUrlField>) -> WidgetPermission {
+        WidgetPermission { disclosed: Some(fields), ..identity(origin) }
+    }
 }
 
 impl Grants {
@@ -162,9 +315,20 @@ impl Grants {
 }
 
 /// Where a widget's grants are kept in the account's store: per room, widget and the origin its
-/// page is on, so a widget moved to another site asks again.
-fn grants_key(room_id: &str, widget_id: &str, origin: &str) -> Vec<u8> {
-    format!("bettermatrix.widget_grants:{room_id}:{widget_id}:{origin}").into_bytes()
+/// page is on, so a widget moved to another site asks again. The old colon-delimited keys can
+/// name more than one widget, so they are never read.
+pub(super) fn grants_key(room_id: &str, widget_id: &str, origin: &str) -> Vec<u8> {
+    format!("bettermatrix.widget_grants.v2:{}:{}:{room_id}{widget_id}{origin}", room_id.len(), widget_id.len())
+        .into_bytes()
+}
+
+/// The canonical origin that would receive the widget's permissions.
+fn permission_origin(place: Option<&meetings::Place>, url: &str) -> Result<String, Error> {
+    match place {
+        Some(meetings::Place::Jitsi(jitsi)) => origin(&format!("https://{}", jitsi.domain)),
+        Some(meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { api, .. })) => origin(api),
+        _ => origin(url),
+    }
 }
 
 impl Account {
@@ -179,6 +343,39 @@ impl Account {
             let _ = self.client().state_store().set_custom_value_no_read(key, bytes).await;
         }
     }
+}
+
+/// Shows saved grants for this widget's current origin, then clears the saved decisions on confirmation.
+pub(crate) async fn manage_permissions(
+    account: Account,
+    room_id: String,
+    widget_id: String,
+    request: RequestId,
+    sink: Arc<dyn EventSink>,
+    mut answers: mpsc::UnboundedReceiver<Answer>,
+) -> Result<(), Error> {
+    let (widget, content, viewer) = account.widget(&room_id, &widget_id, super::Freshness::Server).await?;
+    let template = content["url"].as_str().unwrap_or_default();
+    let place = meetings::place(&widget.kind, template, &content["data"]);
+    let origin = permission_origin(place.as_ref(), &widget.url)?;
+    let key = grants_key(&room_id, &widget_id, &origin);
+    let saved = account.grants(&key).await;
+    let permissions = match place.as_ref() {
+        Some(place) => saved
+            .meeting_identity
+            .filter(|saved| saved.allowed && MeetingIdentityKind::for_place(place) == Some(saved.kind))
+            .map(|saved| MeetingIdentityDecision::disclosure(&origin, saved.fields))
+            .into_iter()
+            .collect(),
+        None => {
+            saved.granted.iter().map(|name| if name == IDENTITY { identity(&origin) } else { describe(name) }).collect()
+        }
+    };
+    let access = access_for(&account, &viewer, &widget, origin, WidgetAccessKind::Saved(permissions))?;
+    confirm_access(&*sink, request, access, &mut answers).await?;
+    let store = account.client().state_store();
+    store.remove_custom_value(&key).await.map_err(|error| Error::Account(error.to_string()))?;
+    Ok(())
 }
 
 /// The URL a widget-API page opens at: the widget's, naming the widget and, as the parent it
@@ -246,15 +443,17 @@ impl Ask<'_> {
     async fn identity(
         &self,
         origin: &str,
+        kind: MeetingIdentityKind,
+        fields: Vec<WidgetUrlField>,
         widget: &str,
         answers: &mut mpsc::UnboundedReceiver<Answer>,
     ) -> Result<bool, Error> {
         let key = grants_key(self.room_id, self.widget_id, origin);
         let mut grants = self.account.grants(&key).await;
-        if let Some(granted) = grants.answer(&[IDENTITY.to_owned()]) {
-            return Ok(!granted.is_empty());
+        if let Some(answer) = grants.meeting_identity.as_ref().and_then(|saved| saved.answer(kind, &fields)) {
+            return Ok(answer);
         }
-        let permissions = vec![identity(origin)];
+        let permissions = vec![MeetingIdentityDecision::disclosure(origin, fields.clone())];
         // The run's only question.
         let question = 1;
         self.sink.emit(Event::WidgetPermissions {
@@ -272,10 +471,10 @@ impl Ask<'_> {
                 None => return Err(Error::Cancelled),
             }
         };
-        let granted: Vec<String> = granted.into_iter().filter(|name| name == IDENTITY).collect();
-        grants.remember(&[IDENTITY.to_owned()], &granted);
+        let allowed = granted.iter().any(|name| name == IDENTITY);
+        grants.meeting_identity = Some(MeetingIdentityDecision { kind, fields, allowed });
         self.account.keep_grants(&key, &grants).await;
-        Ok(!granted.is_empty())
+        Ok(allowed)
     }
 }
 
@@ -455,6 +654,11 @@ pub(crate) fn identity(origin: &str) -> WidgetPermission {
     WidgetPermission { subject: Some(origin.to_owned()), ..describe(IDENTITY) }
 }
 
+/// The field that supplies the name, including the fallback when the account has no name.
+fn name_field(viewer: &super::Viewer) -> WidgetUrlField {
+    if viewer.display_name == viewer.user_id { WidgetUrlField::UserId } else { WidgetUrlField::DisplayName }
+}
+
 /// Whether a page message is the widget asking who the user is.
 fn asks_identity(message: &Value) -> bool {
     message["api"] == "fromWidget" && message["action"] == "get_openid" && message.get("response").is_none()
@@ -486,24 +690,31 @@ pub(crate) async fn run(
     let template = content.get("url").and_then(Value::as_str).unwrap_or_default();
     let data = content.get("data").cloned().unwrap_or(Value::Null);
     if let Some(place) = meetings::place(&widget.kind, template, &data) {
+        let permission_site = permission_origin(Some(&place), &widget.url)?;
+        if let meetings::Place::Jitsi(jitsi) = &place {
+            let mut fields = vec![name_field(&viewer)];
+            // A checking server's conference can name the room even without an OpenID token.
+            if jitsi.conference.eq_ignore_ascii_case(&meetings::base32(room_id.as_bytes())) {
+                fields.push(WidgetUrlField::RoomId);
+            }
+            let access =
+                access_for(&account, &viewer, &widget, permission_site.clone(), WidgetAccessKind::Open(fields))?;
+            confirm_access(&*sink, request, access, &mut answers).await?;
+        }
         // Who learns the user's Matrix ID by joining: a Jitsi server that checks who joins, or
         // Dimension making the join link. Only if they let it, named by that origin.
-        let learner = match &place {
-            meetings::Place::Jitsi(jitsi) if jitsi.auth => Some(format!("https://{}", jitsi.domain)),
-            meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { api, .. }) => {
-                url::Url::parse(api).ok().map(|api| api.origin().ascii_serialization())
-            }
-            _ => None,
-        };
-        let identity = match learner {
-            Some(origin) => {
-                let ask = Ask { account: &account, room_id: &room_id, widget_id: &widget_id, request, sink: &sink };
-                ask.identity(&origin, &widget.name, &mut answers).await?
-            }
-            None => false,
+        let identity = if let Some(kind) = MeetingIdentityKind::for_place(&place) {
+            let ask = Ask { account: &account, room_id: &room_id, widget_id: &widget_id, request, sink: &sink };
+            ask.identity(&permission_site, kind, kind.fields(&viewer), &widget.name, &mut answers).await?
+        } else {
+            false
         };
         let url = account.join_url(&place, &viewer, identity).await?;
-        if browser {
+        if matches!(place, meetings::Place::BigBlueButton(_)) {
+            let access = access_for(&account, &viewer, &widget, origin(&url)?, WidgetAccessKind::Open(Vec::new()))?;
+            confirm_access(&*sink, request, access, &mut answers).await?;
+        }
+        if browser || !url.starts_with("https://") || matches!(place, meetings::Place::Hosted { .. }) {
             sink.emit(Event::OpenUrl { request, url });
             return Ok(());
         }
@@ -513,18 +724,21 @@ pub(crate) async fn run(
         while answers.recv().await.is_some() {}
         return Ok(());
     }
-    if browser {
-        sink.emit(Event::OpenUrl { request, url: widget.url });
-        return Ok(());
+    let origin = origin(&widget.url)?;
+    let bridged = !browser && widget.url.starts_with("https://");
+    let mut fields = url_fields(template, &viewer);
+    if bridged && !fields.contains(&WidgetUrlField::WidgetId) {
+        fields.push(WidgetUrlField::WidgetId);
     }
+    let access = access_for(&account, &viewer, &widget, origin.clone(), WidgetAccessKind::Open(fields))?;
+    confirm_access(&*sink, request, access, &mut answers).await?;
     // The widget API only over HTTPS: on HTTP, whoever is on the way could stand in for the page
     // and use what the user granted it. Such a widget opens in the browser.
-    if !widget.url.starts_with("https://") {
+    if !bridged {
         sink.emit(Event::OpenUrl { request, url: widget.url });
         return Ok(());
     }
     let url = api_url(&widget.url, &widget_id).ok_or(Error::InvalidWidgetUrl)?;
-    let origin = url::Url::parse(&url).map_err(|_| Error::InvalidWidgetUrl)?.origin().ascii_serialization();
     // Element starts talking once the page loaded, unless the widget says it will say when it
     // is ready (`waitForIframeLoad: false`, then `content_loaded`). Widgets say so beside their
     // URL; some older ones in their data.

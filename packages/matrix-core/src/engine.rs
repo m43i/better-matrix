@@ -693,6 +693,15 @@ pub enum Command {
         /// Whether to open it in the browser rather than the app.
         browser: bool,
     },
+    /// Inspect a room widget's saved permissions and reset them if the user confirms.
+    ManageWidgetPermissions {
+        /// Whose room.
+        account: AccountId,
+        /// The room.
+        room_id: String,
+        /// The widget.
+        widget_id: String,
+    },
     /// Start a Jitsi meeting in a room: pin it as Element does (the room's widgets are listed
     /// again), then run it as [`Command::RunWidget`] does.
     StartMeeting {
@@ -1370,6 +1379,13 @@ pub enum Event {
         request: RequestId,
         /// The page.
         page: crate::WidgetPage,
+    },
+    /// Confirm a widget action before opening a page, connecting a provider, or resetting grants.
+    WidgetAccess {
+        /// The run.
+        request: RequestId,
+        /// The action the user can confirm.
+        access: crate::WidgetAccess,
     },
     /// Post a message into a running widget's page, as its bridge says.
     WidgetMessage {
@@ -2218,6 +2234,28 @@ pub(crate) fn now_ms() -> u64 {
     matrix_sdk::ruma::MilliSecondsSinceUnixEpoch::now().get().into()
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct WidgetTarget {
+    account: AccountId,
+    room: String,
+    widget: String,
+}
+
+enum WidgetRun {
+    Page(WidgetTarget),
+    Permissions(WidgetTarget),
+    Other(AccountId),
+}
+
+impl WidgetRun {
+    fn account(&self) -> &AccountId {
+        match self {
+            Self::Page(target) | Self::Permissions(target) => &target.account,
+            Self::Other(account) => account,
+        }
+    }
+}
+
 struct State {
     layout: StoreLayout,
     sessions: Sessions,
@@ -2242,7 +2280,7 @@ struct State {
     live_shares: HashMap<(AccountId, String), (RequestId, tokio::sync::watch::Sender<()>)>,
     /// Widget runs ([`Command::RunWidget`] and the like), by the account they act for: signing
     /// it out ends them.
-    widget_runs: HashMap<RequestId, AccountId>,
+    widget_runs: HashMap<RequestId, WidgetRun>,
     /// For linked files and call services; shared by every account, carries no credentials.
     http: Result<matrix_sdk::reqwest::Client, String>,
     /// Where the accounts' call signals go, for [`State::run`] to route.
@@ -2450,7 +2488,7 @@ impl State {
     /// Ends the widget runs acting for an account that is going.
     fn end_widget_runs(&mut self, account: &AccountId) {
         let runs: Vec<RequestId> =
-            self.widget_runs.iter().filter(|(_, owner)| *owner == account).map(|(request, _)| *request).collect();
+            self.widget_runs.iter().filter(|(_, run)| run.account() == account).map(|(request, _)| *request).collect();
         for request in runs {
             self.cancel(request);
         }
@@ -2699,6 +2737,20 @@ impl State {
                 return;
             }
             Command::Answer { request: asking, answer } => {
+                if matches!(answer, Answer::Continue)
+                    && let Some(WidgetRun::Permissions(target)) = self.widget_runs.get(&asking)
+                {
+                    let open: Vec<_> = self
+                        .widget_runs
+                        .iter()
+                        .filter_map(|(request, run)| {
+                            matches!(run, WidgetRun::Page(page) if page == target).then_some(*request)
+                        })
+                        .collect();
+                    for request in open {
+                        self.cancel(request);
+                    }
+                }
                 if let Some(answers) = self.answers.get(&asking) {
                     let _ = answers.send(answer);
                 }
@@ -3310,7 +3362,17 @@ impl State {
                 })
             }
             Command::RunWidget { account: id, room_id, widget_id, browser } => {
-                self.widget_runs.insert(request, id.clone());
+                let target = WidgetTarget { account: id.clone(), room: room_id.clone(), widget: widget_id.clone() };
+                if self.widget_runs.values().any(|run| matches!(run, WidgetRun::Permissions(edit) if edit == &target)) {
+                    self.sink.emit(Event::Finished {
+                        request,
+                        result: Err(
+                            Error::Account("finish managing the widget's permissions first".to_owned()).to_string()
+                        ),
+                    });
+                    return;
+                }
+                self.widget_runs.insert(request, WidgetRun::Page(target));
                 let account = self.account(&id);
                 let answers = self.answers_for(request);
                 Box::pin(async move {
@@ -3321,13 +3383,32 @@ impl State {
                     Ok(Outcome::Done)
                 })
             }
+            Command::ManageWidgetPermissions { account: id, room_id, widget_id } => {
+                let target = WidgetTarget { account: id.clone(), room: room_id.clone(), widget: widget_id.clone() };
+                self.widget_runs.insert(request, WidgetRun::Permissions(target));
+                let account = self.account(&id);
+                let answers = self.answers_for(request);
+                Box::pin(async move {
+                    crate::widgets::session::manage_permissions(account?, room_id, widget_id, request, sink, answers)
+                        .await?;
+                    Ok(Outcome::Done)
+                })
+            }
             Command::StartMeeting { account: id, room_id, video, browser } => {
-                self.widget_runs.insert(request, id.clone());
+                let widget_id = crate::widgets::meetings::new_meeting_id();
+                self.widget_runs.insert(
+                    request,
+                    WidgetRun::Page(WidgetTarget {
+                        account: id.clone(),
+                        room: room_id.clone(),
+                        widget: widget_id.clone(),
+                    }),
+                );
                 let account = self.account(&id);
                 let answers = self.answers_for(request);
                 Box::pin(async move {
                     let account = account?;
-                    let widget_id = account.start_meeting(&room_id, video).await?;
+                    account.start_meeting(&room_id, &widget_id, video).await?;
                     // Started, even when the list can't be read again: retrying would start another.
                     if let Some(widgets) = account.widgets_after_write(&room_id).await {
                         sink.emit(Event::Widgets { account: id, room_id: room_id.clone(), widgets });
@@ -3340,7 +3421,7 @@ impl State {
                 })
             }
             Command::OpenIntegrations { account: id, room_id } => {
-                self.widget_runs.insert(request, id.clone());
+                self.widget_runs.insert(request, WidgetRun::Other(id.clone()));
                 let account = self.account(&id);
                 let answers = self.answers_for(request);
                 Box::pin(async move {

@@ -43,6 +43,8 @@ enum Wake {
     App(ToHelper),
     /// The page started loading (`false`) or finished (`true`).
     Loaded(bool),
+    /// The native web view failed to load the page.
+    LoadFailed,
     /// The app is gone: stdin ended.
     Orphaned,
 }
@@ -59,9 +61,8 @@ pub fn run() -> ExitCode {
     };
     match show(&url, &title, bridge) {
         Ok(never) => match never {},
-        Err(error) => {
-            eprintln!("better-matrix: could not show the widget window: {error}");
-            say(&FromHelper::Closed);
+        Err(_) => {
+            say(&FromHelper::Failed);
             ExitCode::FAILURE
         }
     }
@@ -87,6 +88,7 @@ fn show(url: &str, title: &str, bridge: Bridge) -> Result<std::convert::Infallib
     let token = token().map_err(|error| error.to_string())?;
     let event_loop = EventLoopBuilder::<Wake>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    let failure = proxy.clone();
     let listener = proxy.clone();
     std::thread::Builder::new().name("widget-window-stdin".into()).spawn(move || {
         for line in std::io::stdin().lines() {
@@ -111,7 +113,6 @@ fn show(url: &str, title: &str, bridge: Bridge) -> Result<std::convert::Infallib
     // Each address handed to the browser once: a page can't open tab after tab by itself.
     let handed: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
     let mut builder = WebViewBuilder::new_with_web_context(&mut context)
-        .with_url(url)
         .with_ipc_handler(move |request| {
             if origin(&request.uri().to_string()).as_deref() != Some(from_page.borrow().as_str()) {
                 return;
@@ -128,7 +129,12 @@ fn show(url: &str, title: &str, bridge: Bridge) -> Result<std::convert::Infallib
             stays
         })
         .with_on_page_load_handler(move |event, _| {
-            let _ = proxy.send_event(Wake::Loaded(matches!(event, PageLoadEvent::Finished)));
+            let finished = matches!(event, PageLoadEvent::Finished);
+            // On Windows Wry reports Finished even when navigation fails. WebView2's
+            // completion callback below distinguishes success from failure.
+            if !cfg!(target_os = "windows") || !finished {
+                let _ = proxy.send_event(Wake::Loaded(finished));
+            }
         })
         .with_permission_handler(|kind| match kind {
             PermissionKind::Microphone
@@ -146,18 +152,47 @@ fn show(url: &str, title: &str, bridge: Bridge) -> Result<std::convert::Infallib
     }
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     let webview = builder.build(&window)?;
+    #[cfg(target_os = "windows")]
+    super::native_load::watch(&webview, move |loaded| {
+        let _ = failure.send_event(if loaded { Wake::Loaded(true) } else { Wake::LoadFailed });
+    })?;
+    #[cfg(target_os = "macos")]
+    let delegate = super::native_load::watch(&webview, move || {
+        let _ = failure.send_event(Wake::LoadFailed);
+    })?;
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let webview = {
         use tao::platform::unix::WindowExtUnix;
-        use wry::WebViewBuilderExtUnix;
+        use webkit2gtk::{NetworkError, PolicyError, WebViewExt};
+        use wry::{WebViewBuilderExtUnix, WebViewExtUnix};
         let vbox = window.default_vbox().ok_or("the window has no box for its web view")?;
-        builder.build_gtk(vbox)?
+        let webview = builder.build_gtk(vbox)?;
+        webview.webview().connect_load_failed(move |_, _, _, error| {
+            // WebKit reports cancelled loads when a new URL replaces them and when the
+            // navigation policy hands them to the browser. Those are deliberate.
+            if error.matches(NetworkError::Cancelled) || error.matches(PolicyError::FrameLoadInterruptedByPolicyChange)
+            {
+                return false;
+            }
+            let _ = failure.send_event(Wake::LoadFailed);
+            true
+        });
+        webview
     };
+    // Attach the native callbacks before the first navigation. A failure can arrive before
+    // the page has anything to load.
+    webview.load_url(url)?;
     let mut loaded = false;
     let mut waiting: Vec<String> = Vec::new();
     event_loop.run(move |event, _, flow| {
+        #[cfg(target_os = "macos")]
+        let _keep_navigation_delegate = &delegate; // WKWebView's delegate reference is weak.
         *flow = ControlFlow::Wait;
         match event {
+            Event::UserEvent(Wake::LoadFailed) => {
+                say(&FromHelper::Failed);
+                *flow = ControlFlow::Exit;
+            }
             Event::UserEvent(Wake::Loaded(finished)) => {
                 loaded = finished;
                 say(if loaded { &FromHelper::Loaded } else { &FromHelper::Loading });
@@ -188,8 +223,9 @@ fn show(url: &str, title: &str, bridge: Bridge) -> Result<std::convert::Infallib
                     } else {
                         webview.load_url(&url)
                     };
-                    if let Err(error) = loading {
-                        eprintln!("better-matrix: the widget window could not load its page: {error}");
+                    if loading.is_err() {
+                        say(&FromHelper::Failed);
+                        *flow = ControlFlow::Exit;
                     }
                 }
                 None => eprintln!("better-matrix: the widget's address has no origin"),

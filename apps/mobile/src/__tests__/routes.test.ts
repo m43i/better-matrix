@@ -4,6 +4,10 @@ import type { WidgetTarget } from '../state/widgets';
 /** Each thing the widget screen runs, with the params its route carries for it. */
 const RUNS: Array<[WidgetTarget, Record<string, string>]> = [
   [{ type: 'widget', widgetId: 'w1' }, { widgetId: 'w1' }],
+  [
+    { type: 'widget', widgetId: 'w1', browser: true },
+    { widgetId: 'w1', browser: '1' },
+  ],
   [{ type: 'meeting', video: true }, { meeting: 'video' }],
   [{ type: 'meeting', video: false }, { meeting: 'voice' }],
   [{ type: 'integrations' }, { integrations: '1' }],

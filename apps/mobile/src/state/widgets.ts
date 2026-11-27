@@ -10,6 +10,8 @@ import type {
   Command,
   RoomSummary,
   Widget,
+  WidgetAccess,
+  WidgetUrlField,
   WidgetBridge,
   WidgetPage,
   WidgetPermission,
@@ -21,17 +23,28 @@ import { t } from '../i18n';
 
 /** What the widget screen runs: one of the room's widgets, a new meeting, or integrations. */
 export type WidgetTarget =
-  | { type: 'widget'; widgetId: string }
+  | { type: 'widget'; widgetId: string; browser?: true }
+  | { type: 'permissions'; widgetId: string }
   | { type: 'meeting'; video: boolean }
   | { type: 'integrations' };
 
-/** The command that runs `target` in the app's web view. */
+/** The command that runs `target` in the widget screen or hands it off to the browser. */
 export function runCommand(account: AccountId, roomId: string, target: WidgetTarget): Command {
   switch (target.type) {
     case 'widget':
       return {
         type: 'RunWidget',
-        data: { account, room_id: roomId, widget_id: target.widgetId, browser: false },
+        data: {
+          account,
+          room_id: roomId,
+          widget_id: target.widgetId,
+          browser: target.browser === true,
+        },
+      };
+    case 'permissions':
+      return {
+        type: 'ManageWidgetPermissions',
+        data: { account, room_id: roomId, widget_id: target.widgetId },
       };
     case 'meeting':
       return {
@@ -96,6 +109,55 @@ export function widgetSections(widgets: Widgets | undefined): WidgetSections {
   return { meetings, others };
 }
 
+const urlFields = {
+  UserId: 'widgets.field.user_id',
+  RoomId: 'widgets.field.room_id',
+  WidgetId: 'widgets.field.widget_id',
+  DisplayName: 'widgets.field.display_name',
+  AvatarUrl: 'widgets.field.avatar_url',
+  DeviceId: 'widgets.field.device_id',
+  Homeserver: 'widgets.field.homeserver',
+} satisfies Record<WidgetUrlField, Parameters<typeof t>[0]>;
+
+export function accessContext(access: WidgetAccess): string {
+  return t('widgets.access_context', {
+    site: access.origin,
+    room: access.room,
+    user: access.user_id,
+  });
+}
+
+export function accessText(access: WidgetAccess) {
+  const { kind, name } = access;
+
+  switch (kind.type) {
+    case 'Open':
+      return {
+        title: t('widgets.open_title', { widget: name }),
+        body: kind.data.length
+          ? t('widgets.open_shares', {
+              fields: kind.data.map((field) => t(urlFields[field])).join(', '),
+            })
+          : t('widgets.open_site'),
+        action: t('common.continue'),
+      };
+    case 'Manager':
+      return {
+        title: t('widgets.integrations_open'),
+        body: t(kind.data.hosted ? 'widgets.manager_hosted' : 'widgets.manager_configured'),
+        action: t('common.continue'),
+      };
+    case 'Saved':
+      return {
+        title: t('widgets.permissions_title', { widget: name }),
+        body: kind.data.length
+          ? kind.data.map(permissionText).join('\n')
+          : t('widgets.no_saved_permissions'),
+        action: t('widgets.reset_permissions'),
+      };
+  }
+}
+
 /** What a widget permission allows, in words. */
 export function permissionText(permission: WidgetPermission): string {
   const subject = permission.subject;
@@ -135,6 +197,12 @@ export function permissionText(permission: WidgetPermission): string {
       return t('mobile.widgets.permission_stay_in_app');
     case 'Identity':
       // The subject is the server that will learn who the user is.
+      if (subject !== null && permission.disclosed?.length)
+        return t('widgets.permission.identity_shares', {
+          subject,
+          fields: permission.disclosed.map((field) => t(urlFields[field])).join(', '),
+        });
+
       return subject === null
         ? t('mobile.widgets.permission.identity')
         : t('mobile.widgets.permission.identity_to', { subject });

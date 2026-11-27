@@ -321,7 +321,7 @@ export default function RoomInfoScreen() {
         <Divider inset={52} />
         <ListRow
           icon="widgets"
-          title={t('widgets.title')}
+          title={t('widgets.integrations')}
           value={widgetCount === undefined ? undefined : String(widgetCount)}
           testID="info-widgets"
           onPress={() => router.push(routes.widgets(account, roomId))}

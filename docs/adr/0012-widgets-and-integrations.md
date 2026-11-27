@@ -6,7 +6,7 @@ Date: 2026-11-25
 ## Context
 
 - Widgets are web apps pinned to a room as state (`im.vector.modular.widgets`, which Element
-  writes, and `m.widget`): boards, dashboards, pads, and video meetings (Jitsi, BigBlueButton).
+  writes, and the proposed `m.widget`): boards, dashboards, pads, and video meetings (Jitsi, BigBlueButton).
   The widget API (MSC2762) lets a widget page read and send the room's events through the
   client, within permissions (capabilities) the user grants. Integration managers (Element's
   `scalar.vector.im`, Dimension) are pages that add bots, bridges and widgets, talking to the
@@ -49,6 +49,10 @@ Date: 2026-11-25
     Element's wrapper builds it (the server reads the token, not the signature), only once the
     user let that server learn who they are (the Identity permission, kept for it); refused, the
     meeting opens without one.
+  - A pinned Microsoft Teams or Zoom HTTPS join link is a meeting. The engine recognizes the
+    provider's meeting paths on its own domains, and opens the original join link in the system
+    browser on every platform. These providers handle sign-in and app handoff. They are configured
+    by adding an existing join link as a widget.
   - Starting one (`Command::StartMeeting`) writes a Jitsi widget as Element does (its wrapper
     URL and `data`, `name` "Jitsi", a 24-character ID) on the server the homeserver's well-known
     file names (`io.element.jitsi`, then `im.vector.riot.jitsi`, `preferredDomain`, looked up
@@ -103,16 +107,31 @@ Date: 2026-11-25
   that room's cached state, and missed sync updates every room's, read again when it opens.
   Reads of a room's state are numbered: one overtaken by a later read, or by something
   forgotten meanwhile, gives way.
+- **Opening a widget:** the engine resolves the room's current state, then asks for confirmation
+  before loading a generic widget or handing its URL to a browser. The prompt identifies the
+  origin, room and Matrix account, and names any Matrix context placed in the URL, including
+  the widget ID added by the bridge. Jitsi's confirmation discloses whether the meeting receives
+  the display name or the Matrix ID it uses in its place, and the room ID if the conference
+  name encodes it. BigBlueButton confirms the resolved meeting origin before opening the page.
+  Widget API permissions and meeting identity access
+  are requested separately. Meeting identity prompts name the profile and room fields sent
+  with the identity.
 - **Permissions:** what a widget asks for arrives as `Event::WidgetPermissions`, numbered within
   the run, each capability described (`WidgetPermission`, `PermissionKind`, its subject); the
-  user grants any subset (`Answer::WidgetPermissions`, naming the question: an answer to another
+  user starts with no options selected and grants any subset (`Answer::WidgetPermissions`, naming the question: an answer to another
   is dropped, and each prompt's controls are bound to the question they show). An empty
   question withdraws the one it names. Answers are kept per room, widget and the origin its
   page is on in the account's store (`Grants`): asking again for nothing new gets the earlier
   grant without asking; anything new, or the widget moved to another site, asks again. Learning
   who the user is (`get_openid`, which the SDK would answer on its own) is a permission of its
   own (`PermissionKind::Identity`, its subject the origin that would learn it, not the
-  widget's room-set name); refused, the widget gets `blocked`. File downloads are described as
+  widget's room-set name); refused, the widget gets `blocked`. The widget's permissions action
+  lists granted access for the current origin and can reset both grants and denials, closing its
+  running page first. The grant key encodes the room and widget IDs by length and uses the
+  canonical origin. Older colon-delimited grants are ignored, so those widgets ask again.
+  A meeting identity decision records the provider and the approved fields separately from
+  widget API grants. A different provider or an additional field requires a new answer.
+  File downloads are described as
   what they are: files the account can open.
   - Camera and microphone: only a meeting's page, on the approved host (its own; iOS `prompt`,
     WebKit asking per site; Android `grantIfSameHostElseDeny` with the host in its own setting,
@@ -126,8 +145,11 @@ Date: 2026-11-25
     has geolocation off, and every phone page's main frame has it fail (iOS frames inside a page
     still meet WebKit's per-site prompt). Phones log
     a failed load by its code only (its address may carry a token).
-- **Integration manager** (`Command::OpenIntegrations`, `widgets::integrations`): the first the
-  homeserver's well-known file names (`m.integrations`, 2xx), else Element's. An OpenID token
+- **Integration manager** (`Command::OpenIntegrations`, `widgets::integrations`): the first
+  valid HTTPS entry in the homeserver's well-known file (`m.integrations`, 2xx). If it supplies
+  only an API URL, the app also uses that URL for its page. When none is
+  configured, the app offers Element's hosted manager. The origin, account and room are shown for
+  confirmation before contacting either provider. An OpenID token
   registered at it (`/register?v=1.1`) gives a token, kept per account and manager and checked
   (`/account`) before use; a refused one is registered again. Unsigned terms
   (`M_TERMS_NOT_SIGNED`, MSC2140; at the manager's origin, as Element reads them) are shown
@@ -138,12 +160,15 @@ Date: 2026-11-25
   plumbing state, reading and setting room widgets (account widgets aren't supported), whether
   the user may send an event, encryption, sending integration state (`SENDABLE`: widgets, their
   layout, bot options, plumbing; never messages or the room's settings), and closing. Its
-  replies are never taken as requests. Widget changes list the room's widgets again.
+  replies are never taken as requests. Membership queries, invite, kick and bot power changes
+  read the current room state from the homeserver. Scalar updates use the widget's existing
+  state type. Widget changes list the room's widgets again.
 - **Desktop:** a widget runs in its own window from a web-view helper: the same binary started
   as `better-matrix --widget-window` (wry and tao; WebKitGTK on Linux, WKWebView on macOS,
   WebView2 on Windows), one process per run, JSON lines over stdin and stdout
   (`platform::widget_window`). It forwards the bridge's messages (token, origin and filter
-  checked again in Rust), reports each document's start and load, posts the engine's after
+  checked again in Rust), reports each document's start, load and native navigation failure,
+  posts the engine's after
   load, reloads on a repeated `open`, sends pages opening new windows and navigations off the
   page's origin to the browser (wry can't tell frames from the page there, so another site's
   frame opens in the browser too, and a top-level `data:`/`blob:` document may appear but gets
@@ -157,18 +182,21 @@ Date: 2026-11-25
   - The room header's video button is the one meeting control: it runs the first of the video
     call (where calls work and none is under way), joining a pinned meeting and starting one
     (where offered), with a chevron listing the others (`VideoOption`,
-    `Popover::VideoOptions`); with none it hides. A widgets button (between the members and the
-    info button) shows while the room has widgets and toggles the panel; Info's Widgets row
-    counts them.
-  - The widgets panel follows the People panel: a count and one + (Start a meeting where
-    offered, Add widget, Bots and integrations), then plain rows, meetings first (a muted
-    "Join", in the browser), other widgets opening in the window (Open in browser, Remove).
+    `Popover::VideoOptions`); with none it hides. Room info's **Integrations** row opens the panel.
+  - The Integrations panel lists widgets and meetings, service accounts explicitly signaled in
+    room state, and bridges with their advertised destination. Manage integrations has its own
+    action. The + menu offers Start a meeting and Add widget where room rights allow them.
+    Previously loaded integrations remain visible if refreshing fails, with a retry action.
+    A failed widget browser handoff also offers a retry.
   - `/meet` and the room menu start a meeting where offered. Permissions and terms are modals.
     Scenes: `demo-widgets`, `demo-widgets-menu`, `demo-meeting`, `demo-video-options`,
     `demo-meeting-no-calls`, `demo-meeting-start`, `demo-meet-command`,
     `demo-widget-permissions`, `demo-integration-terms`.
-- **Phones** run every widget, meetings included, in an in-app web view (`app/widget.tsx`,
-  `WidgetRun`); see [0010](0010-mobile.md).
+- **Phones** run HTTPS widgets and Jitsi and BigBlueButton meetings in an in-app web view
+  (`app/widget.tsx`, `WidgetRun`). They hand off HTTP pages and hosted Teams and Zoom meetings
+  to the browser. Both automatic handoffs and explicit **Open in browser** actions run through
+  the widget screen. A refused handoff keeps it open for retry and omits the destination URL
+  from the error. Android's video chooser pages through meeting options. See [0010](0010-mobile.md).
 
 ## Consequences
 

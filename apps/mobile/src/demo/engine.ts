@@ -477,7 +477,7 @@ export function answer(
   }
 }
 
-/** A room's widgets as the engine reports them: #general's three, none elsewhere. */
+/** A room's widgets as the engine reports them: #general's pins, none elsewhere. */
 function roomWidgets(account: string, roomId: string): EngineEvent {
   return {
     type: 'Widgets',
@@ -513,6 +513,12 @@ export function widgetRun(command: Command, request: RequestId): WidgetRunStart 
 
       if (command.data.room_id !== GENERAL || !widget)
         return { events: [], waits: false, error: 'no such widget' };
+
+      if (widget.meeting === 'Teams' || widget.meeting === 'Zoom')
+        return {
+          events: [{ type: 'OpenUrl', data: { request, url: DEMO_WIDGET_PAGE } }],
+          waits: false,
+        };
 
       if (command.data.browser)
         return { events: [{ type: 'OpenUrl', data: { request, url: widget.url } }], waits: false };

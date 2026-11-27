@@ -103,6 +103,7 @@ function newAccount(summary: AccountSummary): AccountData {
     threads: {},
     files: {},
     widgets: {},
+    widgetErrors: {},
     pins: {},
     saved: null,
     packs: {},
@@ -631,6 +632,7 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
       return updateAccount(state, event.data.account, (a) => ({
         ...a,
         widgets: { ...a.widgets, [event.data.room_id]: event.data.widgets },
+        widgetErrors: { ...a.widgetErrors, [event.data.room_id]: false },
       }));
     case 'SidebarLayout':
       return updateAccount(state, event.data.account, (a) =>
@@ -822,6 +824,7 @@ export function apply(state: State, event: EngineEvent, now: number = Date.now()
     case 'EventSource':
     // A widget's run (`state/actions/widgets.ts`): its page, messages and questions.
     case 'WidgetPage':
+    case 'WidgetAccess':
     case 'WidgetMessage':
     case 'WidgetPermissions':
     case 'IntegrationTerms':

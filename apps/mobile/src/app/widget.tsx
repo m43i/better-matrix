@@ -7,23 +7,22 @@
 // or whose page fails to load, says so or closes. Only the app opens this screen: every run needs
 // its one-time launch (`openWidget`), so a link opens nothing.
 
-import type { AccountId, Policy } from '@better-matrix/matrix-native/types';
+import type { AccountId, Policy, WidgetAccess } from '@better-matrix/matrix-native/types';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../i18n';
 import { widgetTarget } from '../routes';
 import { WidgetRun } from '../state/actions/widgets';
 import { useAppStore, useStore } from '../state/react';
 import { account as accountOf } from '../state/selectors';
-import type { WidgetTarget } from '../state/widgets';
+import { accessContext, accessText, type WidgetTarget } from '../state/widgets';
 import { font } from '../theme/palette';
 import { openInBrowser } from '../ui/accounts/browser';
 import { Button, EmptyState, IconButton, ListRow, ListSection } from '../ui/components';
 import { HeaderClose } from '../ui/HeaderButtons';
 import { usePalette } from '../ui/theme';
-import { openOutside, openWidgetInSystemBrowser } from '../ui/widgets/browser';
 import { bridgeToken, widgetLaunches } from '../ui/widgets/launch';
 import { PermissionSheet } from '../ui/widgets/PermissionSheet';
 import { WidgetPageView } from '../ui/widgets/WidgetPageView';
@@ -33,6 +32,8 @@ export default function WidgetScreen() {
     account: AccountId;
     roomId: string;
     widgetId?: string;
+    permissions?: string;
+    browser?: string;
     meeting?: string;
     integrations?: string;
     launch?: string;
@@ -110,15 +111,30 @@ function Running({
     );
   }, [askingCapture, run]);
 
-  // A run that ended by itself (the widget or the manager closed) takes the screen with it; one
-  // the engine opens in the browser instead (a page on plain HTTP) opens there and goes too.
+  // A closed widget leaves the screen. A browser handoff leaves only once the OS accepts it.
   const browserUrl = view.type === 'browser' ? view.url : null;
 
   useEffect(() => {
-    if (browserUrl !== null) openOutside(store, browserUrl);
+    if (view.type === 'ended' && router.canGoBack()) router.back();
+  }, [view.type, router]);
 
-    if ((view.type === 'ended' || browserUrl !== null) && router.canGoBack()) router.back();
-  }, [view.type, browserUrl, router, store]);
+  useEffect(() => {
+    if (browserUrl === null) return;
+    let onScreen = true;
+
+    void Linking.openURL(browserUrl).then(
+      () => {
+        if (onScreen && router.canGoBack()) router.back();
+      },
+      () => {
+        if (onScreen) run.browserFailed();
+      },
+    );
+
+    return () => {
+      onScreen = false;
+    };
+  }, [browserUrl, router, run]);
 
   const title =
     view.type === 'page'
@@ -129,14 +145,6 @@ function Running({
           ? t('mobile.widgets.start_meeting')
           : (name ?? '');
 
-  // In the browser instead: this run stops, so the widget doesn't run twice.
-  const inBrowser = () => {
-    if (widgetId === null) return;
-    run.cancel();
-    router.back();
-    openWidgetInSystemBrowser(store, account, roomId, widgetId);
-  };
-
   return (
     <>
       <Stack.Screen
@@ -144,7 +152,7 @@ function Running({
           title,
           headerLeft: () => <HeaderClose onPress={() => router.back()} testID="widget-close" />,
           headerRight:
-            widgetId === null
+            widgetId === null || run.opensInBrowser
               ? undefined
               : () => (
                   <IconButton
@@ -152,7 +160,7 @@ function Running({
                     icon="external"
                     label={t('mobile.widgets.open_browser')}
                     color={palette.textMuted}
-                    onPress={inBrowser}
+                    onPress={() => run.openInBrowser()}
                   />
                 ),
         }}
@@ -160,14 +168,24 @@ function Running({
       <View style={[styles.screen, { backgroundColor: palette.bg }]} testID="widget">
         {view.type === 'page' ? (
           <WidgetPageView key={view.load} run={run} page={view.page} captureHost={captureHost} />
+        ) : view.type === 'access' ? (
+          <AccessPrompt
+            access={view.access}
+            onConfirm={() => run.confirmAccess()}
+            onCancel={() => router.back()}
+          />
         ) : view.type === 'terms' ? (
           <Terms policies={view.policies} onAgree={() => run.agree()} />
-        ) : view.type === 'failed' ? (
+        ) : view.type === 'failed' || view.type === 'browser-failed' ? (
           <View style={styles.failed}>
             <EmptyState
               icon="alert"
               title={title}
-              body={t('mobile.widgets.failed', { error: view.error })}
+              body={
+                view.type === 'browser-failed'
+                  ? t('widgets.browser_failed')
+                  : t('mobile.widgets.failed', { error: view.error })
+              }
             />
             {/* Starting a meeting again would pin another one. */}
             {target.type === 'meeting' ? null : (
@@ -191,6 +209,34 @@ function Running({
         />
       ) : null}
     </>
+  );
+}
+
+function AccessPrompt({
+  access,
+  onConfirm,
+  onCancel,
+}: {
+  access: WidgetAccess;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const palette = usePalette();
+  const { title, body, action } = accessText(access);
+
+  return (
+    <ScrollView contentContainerStyle={styles.terms} testID="widget-access">
+      <Text style={[font.header, { color: palette.text }]}>{title}</Text>
+      <Text style={[font.body, { color: palette.textMuted }]}>{accessContext(access)}</Text>
+      <Text style={[font.body, { color: palette.text }]}>{body}</Text>
+      <Button testID="widget-access-confirm" title={action} onPress={onConfirm} />
+      <Button
+        testID="widget-access-cancel"
+        title={t('common.cancel')}
+        kind="secondary"
+        onPress={onCancel}
+      />
+    </ScrollView>
   );
 }
 

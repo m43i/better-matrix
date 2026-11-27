@@ -4,8 +4,7 @@
 // offers the meetings only): a tap runs the default
 // (the video call where calls are available, else joining the pinned meeting, else starting
 // one); a long press lists every option in the platform's chooser (an action sheet on iOS, an
-// alert on Android, which holds three: past that the last opens the room's widgets, where every
-// meeting is listed). No option, no video button.
+// paged alert on Android, which holds three choices). No option, no video button.
 
 import type { AccountId } from '@better-matrix/matrix-native/types';
 import { useRouter } from 'expo-router';
@@ -22,7 +21,6 @@ import {
 } from 'react-native';
 
 import { t } from '../../i18n';
-import { routes } from '../../routes';
 import { startCall } from '../../state/actions/calls';
 import { shallow, useAppStore, useStore } from '../../state/react';
 import { room as roomOf, roomMeetings } from '../../state/selectors';
@@ -83,7 +81,7 @@ export function CallButtons({ account, roomId }: { account: AccountId; roomId: s
     }
   };
 
-  const choose = () => {
+  const choose = (from = 0) => {
     if (Platform.OS === 'ios') {
       const labels = [...options.map(optionLabel), t('common.cancel')];
 
@@ -99,18 +97,18 @@ export function CallButtons({ account, roomId }: { account: AccountId; roomId: s
       return;
     }
 
-    const shownHere =
-      options.length > ALERT_CHOICES ? options.slice(0, ALERT_CHOICES - 1) : options;
+    const hasMore = options.length - from > ALERT_CHOICES;
+    const end = from + (hasMore ? ALERT_CHOICES - 1 : ALERT_CHOICES);
 
-    const buttons: AlertButton[] = shownHere.map((option) => ({
+    const buttons: AlertButton[] = options.slice(from, end).map((option) => ({
       text: optionLabel(option),
       onPress: () => run(option),
     }));
 
-    if (shownHere.length < options.length)
+    if (hasMore)
       buttons.push({
-        text: t('widgets.title'),
-        onPress: () => router.push(routes.widgets(account, roomId)),
+        text: t('mobile.widgets.more_meetings'),
+        onPress: () => choose(end),
       });
 
     Alert.alert(t('call.start_video'), undefined, buttons, { cancelable: true });
@@ -127,7 +125,7 @@ export function CallButtons({ account, roomId }: { account: AccountId; roomId: s
         hint={options.length > 1 ? t('mobile.widgets.video_more') : undefined}
         color={palette.textMuted}
         onPress={() => run(first)}
-        onLongPress={options.length > 1 ? choose : undefined}
+        onLongPress={options.length > 1 ? () => choose() : undefined}
       />
     );
 

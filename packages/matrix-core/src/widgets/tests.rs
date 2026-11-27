@@ -1,9 +1,41 @@
-use serde_json::json;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::integrations::{SENDABLE, named_manager, policies, terms_url, widget_content};
+use serde_json::json;
+use tokio::sync::mpsc;
+
+use crate::engine::{Answer, Event, EventSink, RequestId};
+use crate::test_server::{Server, thread_response};
+
+use super::integrations::{After, SENDABLE, answer_request, named_manager, policies, terms_url, widget_content};
 use super::meetings::{BigBlueButton, Jitsi, Place, base32, jwt, named_jitsi, place};
-use super::session::{Grants, Handshake, IDENTITY, PermissionKind, Step, api_url, describe, identity, refused};
+use super::session::{
+    Grants, Handshake, IDENTITY, PermissionKind, Step, WidgetAccessKind, WidgetPermission, WidgetUrlField, api_url,
+    describe, grants_key, identity, manage_permissions, refused, run,
+};
 use super::*;
+
+const ROOM: &str = "!room:example.org";
+
+async fn synced(server: &Server) -> Account {
+    let account = Account::for_test(&server.url()).await;
+    account.client().sync_once(matrix_sdk::config::SyncSettings::default()).await.unwrap();
+    account
+}
+
+fn pinned_widget(content: Value) -> Server {
+    Server::new(move |request| widget_response(request, &content))
+}
+
+fn widget_response(request: &str, content: &Value) -> Value {
+    if request.contains("/state ") {
+        return json!([{
+            "type": LEGACY_TYPE, "state_key": "fixture", "sender": "@a:example.org",
+            "event_id": "$fixture", "origin_server_ts": 1, "content": content,
+        }]);
+    }
+    thread_response(request)
+}
 
 fn viewer() -> Viewer {
     Viewer {
@@ -62,6 +94,227 @@ fn a_checking_jitsi_server_should_get_the_jwt_in_the_query() {
     let jitsi = Jitsi { domain: "m.example".into(), conference: "Call".into(), audio_only: false, auth: true };
     let url = jitsi.url("Ada", Some("a.b.c")).expect("url");
     assert!(url.starts_with("https://m.example/Call?jwt=a.b.c#"), "{url}");
+}
+
+#[tokio::test]
+async fn a_room_derived_jitsi_conference_should_disclose_the_room_before_asking_for_identity() {
+    let server = pinned_widget(json!({
+        "type": "jitsi", "url": "https://app.element.io/jitsi.html",
+        "data": {"domain": "meet.example.org", "conferenceId": base32(ROOM.as_bytes()), "auth": "openidtoken-jwt"}
+    }));
+    let account = synced(&server).await;
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+
+    assert!(matches!(result, Err(Error::Cancelled)));
+    let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else {
+        panic!("expected opening confirmation")
+    };
+    assert_eq!(access.kind, WidgetAccessKind::Open(vec![WidgetUrlField::DisplayName, WidgetUrlField::RoomId]));
+    assert!(events.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn resetting_jitsi_permissions_should_clear_the_grant_for_the_canonical_origin() {
+    let server = pinned_widget(json!({
+        "type": "jitsi", "url": "https://app.element.io/jitsi.html", "name": "Jitsi",
+        "data": {"domain": "Meet.Example.org:443", "conferenceId": "Call", "auth": "openidtoken-jwt"}
+    }));
+    let account = synced(&server).await;
+    let store = account.client().state_store();
+    let origin = "https://meet.example.org";
+    let key = grants_key(ROOM, "fixture", origin);
+    let grants = json!({
+        "asked": [], "granted": [],
+        "meeting_identity": { "kind": "Jitsi", "fields": ["DisplayName", "AvatarUrl", "RoomId"], "allowed": true },
+    });
+    store.set_custom_value_no_read(&key, serde_json::to_vec(&grants).unwrap()).await.unwrap();
+    let (answer, answers) = mpsc::unbounded_channel();
+    answer.send(Answer::Continue).unwrap();
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+
+    manage_permissions(account.clone(), ROOM.into(), "fixture".into(), RequestId(1), sink, answers).await.unwrap();
+
+    let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else { panic!("expected permission dialog") };
+    assert_eq!(access.origin, origin);
+    let permission = WidgetPermission {
+        disclosed: Some(vec![WidgetUrlField::DisplayName, WidgetUrlField::AvatarUrl, WidgetUrlField::RoomId]),
+        ..identity(origin)
+    };
+    assert_eq!(access.kind, WidgetAccessKind::Saved(vec![permission]));
+    assert!(store.get_custom_value(&key).await.unwrap().is_none());
+}
+
+#[test]
+fn widgets_in_different_rooms_should_have_distinct_grant_keys() {
+    let origin = "https://board.example.org";
+    assert_ne!(
+        grants_key("!room:example.org:8448", "board", origin),
+        grants_key("!room:example.org", "8448:board", origin),
+    );
+}
+
+#[tokio::test]
+async fn a_jitsi_meeting_should_ask_again_if_only_a_legacy_decision_was_saved() {
+    let server = pinned_widget(json!({
+        "type": "jitsi", "url": "https://app.element.io/jitsi.html", "name": "Jitsi",
+        "data": {"domain": "meet.example.org", "conferenceId": "Call", "auth": "openidtoken-jwt"}
+    }));
+    let account = synced(&server).await;
+    let old_key = b"bettermatrix.widget_grants:!room:example.org:fixture:https://meet.example.org";
+    let old_decision = json!({ "asked": [IDENTITY], "granted": [] });
+    account
+        .client()
+        .state_store()
+        .set_custom_value_no_read(old_key, serde_json::to_vec(&old_decision).unwrap())
+        .await
+        .unwrap();
+    let (answer, answers) = mpsc::unbounded_channel();
+    answer.send(Answer::Continue).unwrap();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+
+    assert!(matches!(result, Err(Error::Cancelled)));
+    assert!(matches!(events.try_recv().unwrap(), Event::WidgetAccess { .. }));
+    let Event::WidgetPermissions { permissions, .. } = events.try_recv().unwrap() else {
+        panic!("expected identity permission");
+    };
+    assert_eq!(
+        permissions,
+        [WidgetPermission {
+            disclosed: Some(vec![WidgetUrlField::DisplayName, WidgetUrlField::AvatarUrl, WidgetUrlField::RoomId]),
+            ..identity("https://meet.example.org")
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_dimension_meeting_should_ask_again_when_the_viewer_adds_a_display_name() {
+    let server = pinned_widget(json!({
+        "type": "m.custom", "name": "Class",
+        "url": "https://dimension.example/widgets/bigbluebutton?meetingId=m1&meetingPassword=pw"
+    }));
+    let account = synced(&server).await;
+    // The account previously used its Matrix ID in place of a display name.
+    let prior = json!({
+        "asked": [], "granted": [],
+        "meeting_identity": { "kind": "Dimension", "fields": ["AvatarUrl"], "allowed": true },
+    });
+    let key = grants_key(ROOM, "fixture", "https://dimension.example");
+    account.client().state_store().set_custom_value_no_read(&key, serde_json::to_vec(&prior).unwrap()).await.unwrap();
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+
+    assert!(matches!(result, Err(Error::Cancelled)));
+    let Event::WidgetPermissions { permissions, .. } = events.try_recv().unwrap() else {
+        panic!("expected identity permission");
+    };
+    assert_eq!(
+        permissions,
+        [WidgetPermission {
+            disclosed: Some(vec![WidgetUrlField::DisplayName, WidgetUrlField::AvatarUrl]),
+            ..identity("https://dimension.example")
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_meeting_should_ask_for_identity_again_if_only_the_widget_api_was_allowed() {
+    let server = pinned_widget(json!({
+        "type": "m.custom", "name": "Class",
+        "url": "https://dimension.example/widgets/bigbluebutton?meetingId=m1&meetingPassword=pw"
+    }));
+    let account = synced(&server).await;
+    let prior = json!({ "asked": [IDENTITY], "granted": [IDENTITY] });
+    let key = grants_key(ROOM, "fixture", "https://dimension.example");
+    account.client().state_store().set_custom_value_no_read(&key, serde_json::to_vec(&prior).unwrap()).await.unwrap();
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+
+    assert!(matches!(result, Err(Error::Cancelled)));
+    assert!(matches!(events.try_recv().unwrap(), Event::WidgetPermissions { .. }));
+}
+
+#[tokio::test]
+async fn bigbluebutton_should_ask_before_opening_the_meeting_host() {
+    let server = pinned_widget(json!({
+        "type": "bigbluebutton", "url": "https://dimension.example/widget",
+        "data": {"conferenceUrl": "https://bbb.example.org/b/abc-def"},
+    }));
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+    let account = synced(&server).await;
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+    assert!(matches!(result, Err(Error::Cancelled)));
+    let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else { panic!("expected permission dialog") };
+    assert_eq!(access.origin, "https://bbb.example.org");
+    assert!(events.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn the_preload_prompt_should_show_the_widget_id_added_by_the_bridge() {
+    let server = pinned_widget(json!({"type": "m.custom", "url": "https://board.example.org/team"}));
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+    let account = synced(&server).await;
+
+    let _ = run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+    let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else { panic!("expected permission dialog") };
+    assert_eq!(access.kind, WidgetAccessKind::Open(vec![WidgetUrlField::WidgetId]));
+}
+
+#[tokio::test]
+async fn a_widget_should_disclose_the_matrix_id_when_it_stands_in_for_the_display_name() {
+    let content = json!({
+        "type": "m.custom", "url": "https://board.example.org/?owner=$matrix_display_name&user=$matrix_user_id"
+    });
+    let server = Server::new(move |request| {
+        let mut response = widget_response(request, &content);
+        if request.contains("/sync?") {
+            let events = response["rooms"]["join"][ROOM]["state"]["events"].as_array_mut().unwrap();
+            let member = events.iter_mut().find(|event| event["type"] == "m.room.member").unwrap();
+            member["content"].as_object_mut().unwrap().remove("displayname");
+        }
+        response
+    });
+    let account = synced(&server).await;
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+
+    assert!(matches!(result, Err(Error::Cancelled)));
+    let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else { panic!("expected permission dialog") };
+    assert_eq!(access.kind, WidgetAccessKind::Open(vec![WidgetUrlField::UserId, WidgetUrlField::WidgetId]));
 }
 
 #[test]
@@ -219,6 +472,78 @@ fn the_homeservers_integration_manager_should_come_from_its_well_known_file() {
 }
 
 #[test]
+fn an_integration_manager_with_only_an_api_url_should_open_that_url() {
+    let known = json!({"m.integrations": {"managers": [{"api_url": "https://im.example/api/"}]}});
+    let manager = named_manager(&known).expect("manager");
+    assert_eq!(manager.api, "https://im.example/api");
+    assert_eq!(manager.ui, "https://im.example/api/");
+}
+
+#[tokio::test]
+async fn an_equal_bot_power_level_should_succeed_without_writing_room_state() {
+    let wrote_level = Arc::new(AtomicBool::new(false));
+    let captured = Arc::clone(&wrote_level);
+    let server = Server::new(move |request| {
+        if request.contains("/state/m.room.power_levels") {
+            if request.starts_with("PUT ") {
+                captured.store(true, Ordering::Relaxed);
+            }
+            return json!({"users": {"@a:example.org": 100, "@bot:example.org": 50}});
+        }
+        thread_response(request)
+    });
+    let account = synced(&server).await;
+    let room = account.joined_room(ROOM).unwrap();
+    let asked = json!({
+        "action": "set_bot_power",
+        "room_id": ROOM,
+        "user_id": "@bot:example.org",
+        "level": 50,
+        "ignoreIfGreater": true
+    });
+    assert_eq!(answer_request(&account, &room, &asked).await, (json!({"success": true}), After::Nothing));
+    assert!(!wrote_level.load(Ordering::Relaxed));
+}
+
+#[tokio::test]
+async fn a_manager_should_get_the_full_membership_content_of_a_bot_missing_from_sync() {
+    let member = json!({"membership": "join", "displayname": "Release bot", "com.example.service": true});
+    let expected = member.clone();
+    let server = Server::new(move |request| {
+        if request.contains("/state/m.room.member/") {
+            return member.clone();
+        }
+        thread_response(request)
+    });
+    let account = synced(&server).await;
+    let room = account.joined_room(ROOM).unwrap();
+    let asked = json!({"action": "membership_state", "room_id": ROOM, "user_id": "@bot:example.org"});
+
+    assert_eq!(answer_request(&account, &room, &asked).await, (expected, After::Nothing));
+}
+
+#[tokio::test]
+async fn a_manager_should_kick_a_bot_whose_membership_was_not_in_the_sync() {
+    let kicked = Arc::new(AtomicBool::new(false));
+    let captured = Arc::clone(&kicked);
+    let server = Server::new(move |request| {
+        if request.contains("/state/m.room.member/") {
+            return json!({"membership": "join"});
+        }
+        if request.starts_with("POST ") && request.contains("/kick") {
+            captured.store(request.contains("@bot:example.org"), Ordering::Relaxed);
+        }
+        thread_response(request)
+    });
+    let account = synced(&server).await;
+    let room = account.joined_room(ROOM).unwrap();
+    let asked = json!({"action": "kick", "room_id": ROOM, "user_id": "@bot:example.org"});
+
+    assert_eq!(answer_request(&account, &room, &asked).await, (json!({"success": true}), After::Nothing));
+    assert!(kicked.load(Ordering::Relaxed));
+}
+
+#[test]
 fn an_integration_managers_terms_should_be_read_in_english() {
     let answer = json!({"policies": {"privacy": {
         "version": "1.0",
@@ -232,9 +557,65 @@ fn an_integration_managers_terms_should_be_read_in_english() {
 
 #[test]
 fn a_manager_setting_a_widget_without_a_url_should_remove_it() {
-    assert_eq!(widget_content(&json!({"widget_id": "w", "url": null})), json!({}));
-    let set = widget_content(&json!({"widget_id": "w", "type": "m.custom", "url": "https://w.example", "name": "W"}));
+    assert_eq!(widget_content(&json!({"widget_id": "w", "url": null})).unwrap(), json!({}));
+    let set = widget_content(&json!({"widget_id": "w", "type": "m.custom", "url": "https://w.example", "name": "W"}))
+        .unwrap();
     assert_eq!(set, json!({"type": "m.custom", "url": "https://w.example", "name": "W", "data": {}}));
+}
+
+#[tokio::test]
+async fn a_manager_should_update_a_widget_under_its_existing_state_type() {
+    let updated = Arc::new(AtomicBool::new(false));
+    let captured = Arc::clone(&updated);
+    let server = Server::new(move |request| {
+        if request.contains("/state ") {
+            return json!([{
+                "type": SPEC_TYPE, "state_key": "board", "sender": "@a:example.org",
+                "event_id": "$board", "origin_server_ts": 1,
+                "content": {"type": "m.custom", "url": "https://board.example/"}
+            }]);
+        }
+        if request.starts_with("PUT ") {
+            captured.store(request.contains("/state/m.widget/board"), Ordering::Relaxed);
+            return json!({"event_id": "$updated"});
+        }
+        thread_response(request)
+    });
+    let account = synced(&server).await;
+    let room = account.joined_room(ROOM).unwrap();
+    let asked = json!({
+        "action": "set_widget", "room_id": ROOM, "widget_id": "board",
+        "type": "m.custom", "name": "Board", "url": "https://board.example/updated",
+    });
+
+    assert_eq!(answer_request(&account, &room, &asked).await, (json!({"success": true}), After::Widgets));
+    assert!(updated.load(Ordering::Relaxed));
+}
+
+#[tokio::test]
+async fn a_manager_should_remove_a_widget_pinned_with_the_standard_state_type() {
+    let removed = Arc::new(AtomicBool::new(false));
+    let captured = Arc::clone(&removed);
+    let server = Server::new(move |request| {
+        if request.contains("/state ") {
+            return json!([{
+                "type": "m.widget", "state_key": "board", "sender": "@a:example.org",
+                "event_id": "$board", "origin_server_ts": 1,
+                "content": {"type": "m.custom", "url": "https://board.example/"}
+            }]);
+        }
+        if request.starts_with("PUT ") && request.contains("/state/m.widget/board") {
+            captured.store(request.ends_with("\r\n\r\n{}"), Ordering::Relaxed);
+            return json!({"event_id": "$removed"});
+        }
+        thread_response(request)
+    });
+    let account = synced(&server).await;
+    let room = account.joined_room(ROOM).unwrap();
+    let asked = json!({"action": "set_widget", "room_id": ROOM, "widget_id": "board", "url": null});
+
+    assert_eq!(answer_request(&account, &room, &asked).await, (json!({"success": true}), After::Widgets));
+    assert!(removed.load(Ordering::Relaxed));
 }
 
 #[test]
@@ -369,4 +750,80 @@ fn an_answer_to_a_replaced_drivers_question_should_load_the_page_again() {
     assert_eq!(handshake.heard(&announcement(), "ready", start), Step::Hold);
     assert_eq!(handshake.grace_over(), Step::Restart("ready".to_owned()));
     assert_eq!(handshake.heard(&fallback_answer(), "", start + std::time::Duration::from_secs(3)), Step::Reload);
+}
+
+#[test]
+fn a_manager_widget_write_should_reject_a_missing_or_invalid_url() {
+    for content in [json!({}), json!({"url": 3}), json!({"url": "javascript:noop"})] {
+        assert!(widget_content(&content).is_err());
+    }
+}
+
+#[tokio::test]
+async fn a_widget_should_wait_for_confirmation_before_proceeding() {
+    use crate::{Answer, Event, RequestId, WidgetAccess, WidgetAccessKind};
+    let (sent, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let (answer, mut answers) = tokio::sync::mpsc::unbounded_channel();
+    let sink = move |event| {
+        sent.send(event).unwrap();
+    };
+    let request = RequestId(1);
+    let access = WidgetAccess {
+        name: "Board".into(),
+        origin: "https://board.example".into(),
+        user_id: "@ada:example.org".into(),
+        room: "Release".into(),
+        kind: WidgetAccessKind::Open(Vec::new()),
+    };
+    let waiting = super::session::confirm_access(&sink, request, access, &mut answers);
+    tokio::pin!(waiting);
+    assert!(futures_util::poll!(&mut waiting).is_pending());
+    assert!(matches!(events.try_recv(), Ok(Event::WidgetAccess { request: RequestId(1), .. })));
+    answer.send(Answer::Agree).unwrap();
+    assert!(futures_util::poll!(&mut waiting).is_pending());
+    answer.send(Answer::Continue).unwrap();
+    assert!(waiting.await.is_ok());
+}
+
+#[test]
+fn a_zoom_join_link_should_be_a_meeting() {
+    let content = json!({"type": "m.custom", "url": "https://example.zoom.us/j/123456789?pwd=example"});
+    let shown = widget("zoom", &content, None, &Viewer::default()).expect("widget");
+    assert_eq!(shown.meeting, Some(Meeting::Zoom));
+    assert_eq!(shown.url, content["url"].as_str().unwrap());
+}
+
+#[test]
+fn a_zoom_web_app_join_link_should_be_a_meeting() {
+    let content = json!({"type": "m.custom", "url": "https://app.zoom.us/wc/123456789/join?pwd=example"});
+    let shown = widget("zoom", &content, None, &Viewer::default()).expect("widget");
+    assert_eq!(shown.meeting, Some(Meeting::Zoom));
+    assert_eq!(shown.url, content["url"].as_str().unwrap());
+}
+
+#[test]
+fn a_teams_join_link_should_be_a_meeting() {
+    let content = json!({"type": "m.custom", "url": "https://teams.microsoft.com/l/meetup-join/example/0"});
+    assert_eq!(widget("teams", &content, None, &Viewer::default()).unwrap().meeting, Some(Meeting::Teams));
+}
+
+#[test]
+fn a_widget_cannot_declare_an_unrelated_host_to_be_a_meeting_provider() {
+    let content = json!({"type": "zoom", "url": "https://zoom.us.example.org/j/123"});
+    assert_eq!(widget("zoom", &content, None, &Viewer::default()).unwrap().meeting, None);
+}
+
+#[test]
+fn only_advertised_service_accounts_and_bridge_destinations_should_be_listed() {
+    let state = [
+        json!({"type": "io.element.functional_members", "state_key": "", "content": {
+            "service_members": ["@service:example.org", "not a Matrix ID"]
+        }}),
+        json!({"type": "uk.half-shot.bridge", "state_key": "destination", "content": {
+            "protocol": {"displayname": "Slack"}, "channel": {"displayname": "#releases"}
+        }}),
+    ];
+    let (services, bridges) = super::room_integrations(&state);
+    assert_eq!(services, ["@service:example.org"]);
+    assert_eq!(bridges[0].channel, "#releases");
 }

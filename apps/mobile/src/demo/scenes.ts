@@ -482,7 +482,7 @@ export const scenes = {
     routes: [routes.roomInfo(ADA, GENERAL), routes.widgets(ADA, GENERAL)],
   },
   meeting: {
-    about: 'A room with a Jitsi meeting pinned: its video button’s long press offers to join it',
+    about: 'A room with pinned Jitsi, Teams and Zoom meetings in the video chooser',
     setup: general,
     events: [{ type: 'Widgets', data: { account: ADA, room_id: GENERAL, widgets: demoWidgets() } }],
     routes: [routes.room(ADA, GENERAL)],

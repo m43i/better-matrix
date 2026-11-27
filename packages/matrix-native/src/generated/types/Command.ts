@@ -753,7 +753,19 @@ widget_id: string,
 /**
  * Whether to open it in the browser rather than the app.
  */
-browser: boolean, } } | { "type": "StartMeeting", "data": { 
+browser: boolean, } } | { "type": "ManageWidgetPermissions", "data": { 
+/**
+ * Whose room.
+ */
+account: AccountId, 
+/**
+ * The room.
+ */
+room_id: string, 
+/**
+ * The widget.
+ */
+widget_id: string, } } | { "type": "StartMeeting", "data": { 
 /**
  * Whose room.
  */

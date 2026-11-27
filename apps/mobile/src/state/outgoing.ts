@@ -268,6 +268,7 @@ export function excerpt(message: Message): string {
   const content = message.content;
 
   switch (content.type) {
+    case 'Notice':
     case 'Text':
       return [...spoilerSafeText(content.data.body, content.data.html)].slice(0, EXCERPT).join('');
     case 'Emote': {

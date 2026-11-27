@@ -681,26 +681,21 @@ impl TimelineItem {
     }
 
     fn new(message: Message) -> Self {
-        // A hidden spoiler's fallback may name its link: nothing is fetched for it.
-        let link = match &message.content {
-            MessageContent::Text { body, html } if !html.as_deref().is_some_and(matrix_core::html::holds_spoiler) => {
-                matrix_core::links::find_preview_link(body).map(str::to_owned)
-            }
-            _ => None,
-        };
-        let (rich, gif) = match &message.content {
-            MessageContent::Emote { body, html } => (rich_body(body, html.as_deref()), None),
-            MessageContent::Text { body, html } => {
+        let (rich, gif, link) = match &message.content {
+            MessageContent::Text { body, html } | MessageContent::Notice { body, html } => {
+                // A hidden spoiler's fallback may name its link: nothing is fetched for it.
                 let hides = html.as_deref().is_some_and(matrix_core::html::holds_spoiler);
+                let link = (!hides).then(|| matrix_core::links::find_preview_link(body)).flatten().map(str::to_owned);
                 let gif = matrix_core::links::find_gif_link(body).filter(|_| !hides).map(|url| {
                     let plain = matrix_core::links::without_link(body, url);
                     let html = html.as_deref().map(|html| matrix_core::links::html_without_link(html, url));
                     let rest = (!plain.is_empty()).then(|| Body { rich: rich_body(&plain, html.as_deref()), plain });
                     GifLink { url: url.to_owned(), rest }
                 });
-                (rich_body(body, html.as_deref()), gif)
+                (rich_body(body, html.as_deref()), gif, link)
             }
-            _ => (None, None),
+            MessageContent::Emote { body, html } => (rich_body(body, html.as_deref()), None, None),
+            _ => (None, None, None),
         };
         let emotes = rich
             .iter()
@@ -826,6 +821,10 @@ pub struct AccountData {
     pub files: HashMap<String, Vec<matrix_core::SharedFile>>,
     /// Rooms' widgets, by room ID, once listed for the info panel.
     pub widgets: HashMap<String, matrix_core::Widgets>,
+    /// Failed integration lists, by room.
+    pub widget_errors: HashMap<String, String>,
+    /// A failed widget launch and its retry, by room.
+    pub widget_launch_errors: HashMap<String, (String, matrix_core::Command)>,
     /// Rooms' and spaces' settings, by room ID, as last read for the room settings.
     pub room_settings: HashMap<String, matrix_core::RoomSettings>,
     /// Shared pinned-message previews by room, including unavailable placeholders.
@@ -906,6 +905,8 @@ impl AccountData {
             threads: HashMap::new(),
             files: HashMap::new(),
             widgets: HashMap::new(),
+            widget_errors: HashMap::new(),
+            widget_launch_errors: HashMap::new(),
             room_settings: HashMap::new(),
             pins: HashMap::new(),
             pin_errors: HashMap::new(),
@@ -1510,7 +1511,7 @@ impl Accounts {
         self.list.iter().find(|account| &account.summary.id == id)
     }
 
-    fn get_mut(&mut self, id: &AccountId) -> Option<&mut AccountData> {
+    pub(super) fn get_mut(&mut self, id: &AccountId) -> Option<&mut AccountData> {
         self.list.iter_mut().find(|account| &account.summary.id == id)
     }
 
@@ -1871,6 +1872,7 @@ impl Accounts {
 
     pub fn set_widgets(&mut self, id: &AccountId, room_id: String, widgets: matrix_core::Widgets) {
         if let Some(account) = self.get_mut(id) {
+            account.widget_errors.remove(&room_id);
             account.widgets.insert(room_id, widgets);
         }
     }
@@ -2092,6 +2094,13 @@ mod tests {
     fn a_link_in_text_without_a_spoiler_should_get_a_preview() {
         let item = text("https://matrix.org", "<b>https://matrix.org</b>");
         assert_eq!(item.card_link(false), Some("https://matrix.org"));
+    }
+
+    #[test]
+    fn a_link_in_a_notice_should_get_a_preview() {
+        let content = MessageContent::Notice { body: "Report: https://ci.example/report".into(), html: None };
+        let item = TimelineItem::new(Message { content, ..Message::default() });
+        assert_eq!(item.card_link(true), Some("https://ci.example/report"));
     }
 
     #[test]

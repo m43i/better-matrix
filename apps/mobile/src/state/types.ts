@@ -107,6 +107,7 @@ export interface AccountData {
   files: Record<string, SharedFile[]>;
   /** Rooms' widgets, by room ID, once listed. */
   widgets: Record<string, Widgets>;
+  widgetErrors: Record<string, boolean>;
   pins: Record<string, MessagePreview[]>;
   /** The messages the user saved, most recently saved first, once listed. */
   saved: SavedMessage[] | null;

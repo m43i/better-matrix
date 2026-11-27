@@ -16,6 +16,14 @@ body: string,
  * The sender's formatting as Matrix HTML (`org.matrix.custom.html`), if any. Untrusted:
  * render it through a sanitising parser.
  */
+html: string | null, } } | { "type": "Notice", "data": { 
+/**
+ * The plain-text body.
+ */
+body: string, 
+/**
+ * The sender's untrusted Matrix HTML, as for text messages.
+ */
 html: string | null, } } | { "type": "Attachment", "data": Attachment } | { "type": "Redacted" } | { "type": "Undecryptable" } | { "type": "Poll", "data": Poll } | { "type": "Call", "data": CallCard } | { "type": "Emote", "data": { 
 /**
  * The plain-text action, always present.

@@ -24,7 +24,7 @@ use matrix_sdk::ruma::events::{MessageLikeEventType, StateEventType};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use super::session::{WidgetBridge, WidgetPage};
+use super::session::{WidgetAccess, WidgetAccessKind, WidgetBridge, WidgetPage, confirm_access};
 use super::{credential_http, encode, send_json, with_json};
 use crate::engine::{Answer, Event, EventSink, RequestId};
 use crate::{Account, AccountId, Error, Policy};
@@ -44,12 +44,16 @@ pub(crate) struct Manager {
 
 /// The first manager a well-known file names.
 pub(crate) fn named_manager(known: &Value) -> Option<Manager> {
-    let first = known["m.integrations"]["managers"].as_array()?.first()?;
-    let web = |key: &str| {
-        // Tokens go there: only over HTTPS.
-        first[key].as_str().filter(|url| url.starts_with("https://")).map(str::to_owned)
-    };
-    Some(Manager { api: web("api_url")?.trim_end_matches('/').to_owned(), ui: web("ui_url")? })
+    known["m.integrations"]["managers"].as_array()?.iter().find_map(|manager| {
+        let web = |key: &str| {
+            let url = url::Url::parse(manager[key].as_str()?).ok()?;
+            (url.scheme() == "https" && url.username().is_empty() && url.password().is_none() && url.host().is_some())
+                .then(|| url.to_string())
+        };
+        let api = web("api_url")?;
+        let ui = if manager["ui_url"].is_null() { api.clone() } else { web("ui_url")? };
+        Some(Manager { api: api.trim_end_matches('/').to_owned(), ui })
+    })
 }
 
 /// What a manager's request asks the app to do after it is answered.
@@ -65,16 +69,13 @@ pub(crate) enum After {
 
 impl Account {
     /// The integration manager the homeserver names, else Element's.
-    async fn manager(&self) -> Manager {
+    async fn manager(&self) -> Option<Manager> {
         let http = self.client().http_client().clone();
         let server = self.user_id().map(|id| id.server_name().to_string()).unwrap_or_default();
         let asked = http.get(format!("https://{server}/.well-known/matrix/client")).timeout(TIMEOUT);
         let known =
             send_json(asked).await.ok().filter(|(status, _)| (200..300).contains(status)).map(|(_, known)| known);
-        known
-            .as_ref()
-            .and_then(named_manager)
-            .unwrap_or_else(|| Manager { api: ELEMENT_API.to_owned(), ui: ELEMENT_UI.to_owned() })
+        known.as_ref().and_then(named_manager)
     }
 
     /// The token the manager knows the user by: the one kept, else a new one.
@@ -216,14 +217,29 @@ pub(crate) async fn run(
     mut answers: mpsc::UnboundedReceiver<Answer>,
 ) -> Result<(), Error> {
     let room = account.room(&room_id)?;
-    let manager = account.manager().await;
+    let configured = account.manager().await;
+    let hosted = configured.is_none();
+    let manager = configured.unwrap_or_else(|| Manager { api: ELEMENT_API.to_owned(), ui: ELEMENT_UI.to_owned() });
+    let mut url = url::Url::parse(&manager.ui).map_err(|error| Error::Integrations(error.to_string()))?;
+    let api = url::Url::parse(&manager.api).map_err(|error| Error::Integrations(error.to_string()))?;
+    let mut origin = api.origin().ascii_serialization();
+    if api.origin() != url.origin() {
+        origin = format!("{origin} · {}", url.origin().ascii_serialization());
+    }
+    let room_name = room.cached_display_name().map_or_else(|| room_id.clone(), |name| name.to_string());
+    let access = WidgetAccess {
+        name: String::new(),
+        origin,
+        user_id: account.user_id()?.to_string(),
+        room: room_name.clone(),
+        kind: WidgetAccessKind::Manager { hosted },
+    };
+    confirm_access(&*sink, request, access, &mut answers).await?;
     let mut terms = |policies: Vec<Policy>| {
         sink.emit(Event::IntegrationTerms { request, policies });
         true
     };
     let token = account.manager_token(&manager, &mut terms, &mut answers).await?;
-    let room_name = room.cached_display_name().map(|name| name.to_string()).unwrap_or_default();
-    let mut url = url::Url::parse(&manager.ui).map_err(|error| Error::Integrations(error.to_string()))?;
     url.query_pairs_mut()
         .append_pair("scalar_token", &token)
         .append_pair("room_id", &room_id)
@@ -278,6 +294,9 @@ pub(crate) async fn answer_request(account: &Account, room: &Room, asked: &Value
 
 /// Does what one request asks.
 async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Result<(Value, After), Error> {
+    use matrix_sdk::ruma::api::client::state::get_state_event_for_key::v3::Request;
+    use matrix_sdk::ruma::events::room::member::MembershipState;
+    use matrix_sdk::ruma::events::room::power_levels::{RoomPowerLevelsEventContent, UserPowerLevel};
     use matrix_sdk::ruma::{Int, UserId};
     let user = || -> Result<&UserId, Error> {
         let user = asked["user_id"].as_str().ok_or_else(|| Error::Integrations("missing user_id".to_owned()))?;
@@ -285,9 +304,25 @@ async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Res
     };
     let done = (json!({ "success": true }), After::Nothing);
     Ok(match action {
-        "membership_state" => (state_content(room, "m.room.member", user()?.as_str()).await, After::Nothing),
+        "membership_state" => {
+            let content = account.membership_content(room, user()?).await?;
+            (json!(content), After::Nothing)
+        }
         "invite" => {
-            room.invite_user_by_id(user()?).await?;
+            let user = user()?;
+            if !matches!(account.membership(room, user).await?, Some(MembershipState::Join | MembershipState::Invite)) {
+                room.invite_user_by_id(user).await?;
+            }
+            done
+        }
+        "kick" => {
+            let user = user()?;
+            if matches!(
+                account.membership(room, user).await?,
+                Some(MembershipState::Join | MembershipState::Invite | MembershipState::Knock)
+            ) {
+                room.kick_user(user, asked["reason"].as_str()).await?;
+            }
             done
         }
         "bot_options" => (state_content(room, "m.room.bot.options", &format!("_{}", user()?)).await, After::Nothing),
@@ -297,8 +332,28 @@ async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Res
             done
         }
         "set_bot_power" => {
-            let level = asked["level"].as_i64().ok_or_else(|| Error::Integrations("missing level".to_owned()))?;
-            room.update_power_levels(vec![(user()?, Int::new_saturating(level))]).await?;
+            let level = asked["level"]
+                .as_i64()
+                .filter(|&level| level >= 0)
+                .and_then(Int::new)
+                .ok_or_else(|| Error::Integrations("invalid power level".to_owned()))?;
+            let user = user()?;
+            let request = Request::new(room.room_id().to_owned(), StateEventType::RoomPowerLevels, String::new());
+            let raw = account.client().send(request).await?.into_content();
+            let levels = raw
+                .deserialize_as_unchecked::<RoomPowerLevelsEventContent>()
+                .map_err(|error| Error::Integrations(error.to_string()))?;
+            let current = levels.users.get(user).copied().unwrap_or(levels.users_default);
+            let keeps_level = asked["ignoreIfGreater"] == true
+                && (current >= level
+                    || room.power_levels_or_default().await.for_user(user) == UserPowerLevel::Infinite);
+            if !keeps_level {
+                // Retain fields from the live event that the client does not interpret.
+                let mut power: Value =
+                    raw.deserialize_as_unchecked().map_err(|error| Error::Integrations(error.to_string()))?;
+                power["users"][user.as_str()] = json!(level);
+                room.send_state_event_raw("m.room.power_levels", "", power).await?;
+            }
             done
         }
         "get_membership_count" => (json!(room.joined_members_count()), After::Nothing),
@@ -314,7 +369,14 @@ async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Res
                 return Err(Error::Integrations("account widgets aren't supported".to_owned()));
             }
             let id = asked["widget_id"].as_str().ok_or_else(|| Error::Integrations("missing widget_id".to_owned()))?;
-            room.send_state_event_raw(super::LEGACY_TYPE, id, widget_content(asked)).await?;
+            let content = widget_content(asked)?;
+            if asked["url"].is_null() {
+                account.remove_widget(room.room_id().as_str(), id).await?;
+            } else {
+                let state = account.widget_state(room, super::Freshness::Server).await?;
+                let kind = state.iter().find(|(_, key, ..)| key == id).map_or(super::LEGACY_TYPE, |(kind, ..)| *kind);
+                room.send_state_event_raw(kind, id, content).await?;
+            }
             (json!({ "success": true }), After::Widgets)
         }
         "can_send_event" => {
@@ -364,11 +426,18 @@ pub(crate) fn terms_url(api: &str) -> Option<String> {
     Some(format!("{}/_matrix/integrations/v1/terms", api.origin().ascii_serialization()))
 }
 
-/// A widget's state content from a manager's `set_widget`: empty (removing it) without a URL.
-pub(crate) fn widget_content(asked: &Value) -> Value {
-    let Some(url) = asked["url"].as_str() else { return json!({}) };
+/// A widget's state content from a manager; only an explicit null removes it.
+pub(crate) fn widget_content(asked: &Value) -> Result<Value, Error> {
+    if asked.get("url").is_some_and(Value::is_null) {
+        return Ok(json!({}));
+    }
+    let url = asked["url"]
+        .as_str()
+        .filter(|url| url::Url::parse(url).is_ok_and(|url| matches!(url.scheme(), "http" | "https")))
+        .ok_or(Error::InvalidWidgetUrl)?;
+    let kind = asked["type"].as_str().ok_or_else(|| Error::Integrations("missing widget type".to_owned()))?;
     let mut content = json!({
-        "type": asked["type"],
+        "type": kind,
         "url": url,
         "name": asked["name"],
         "data": if asked["data"].is_object() { asked["data"].clone() } else { json!({}) },
@@ -376,7 +445,7 @@ pub(crate) fn widget_content(asked: &Value) -> Value {
     if let Some(avatar) = asked["avatar_url"].as_str() {
         content["avatar_url"] = avatar.into();
     }
-    content
+    Ok(content)
 }
 
 /// A state event's content, `null` when the room has none.

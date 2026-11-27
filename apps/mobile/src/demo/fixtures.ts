@@ -1473,7 +1473,7 @@ export function typingPeople(): Person[] {
   ];
 }
 
-/** The widgets pinned to #general: a board, a dashboard and a Jitsi meeting. */
+/** The widgets and meetings pinned to #general. */
 export function demoWidgets(): Widgets {
   const widget = (
     id: string,
@@ -1498,6 +1498,8 @@ export function demoWidgets(): Widgets {
       widget('board', 'Sprint board', 'm.custom', 'board.example.org', '/team'),
       widget('grafana', 'Server dashboard', 'm.grafana', 'grafana.example.org', '/d/1'),
       widget('standup', 'Standup', 'jitsi', 'meet.example.org', '/TeamStandup', 'Jitsi'),
+      widget('teams', 'Design review', 'm.custom', 'teams.microsoft.com', '/meet/example', 'Teams'),
+      widget('zoom', 'Office hours', 'm.custom', 'zoom.us', '/j/123456789', 'Zoom'),
     ],
     can_add: true,
   };

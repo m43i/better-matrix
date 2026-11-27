@@ -81,7 +81,10 @@ pub fn menu(
                 },
             ));
         }
-        if matches!(message.content, MessageContent::Text { .. } | MessageContent::Attachment(_)) {
+        if matches!(
+            message.content,
+            MessageContent::Text { .. } | MessageContent::Notice { .. } | MessageContent::Attachment(_)
+        ) {
             let (key, id) = (key.clone(), event_id.to_owned());
             panel = panel.child(
                 action(&icons::FORWARD, t!("actions.forward"), "message-forward")
@@ -127,7 +130,9 @@ pub fn menu(
     }
     let body = match &message.content {
         // As it shows: a hidden spoiler's words are neither copied nor sent to be translated.
-        MessageContent::Text { body, .. } if !body.trim().is_empty() => Some(message.content.plain().into_owned()),
+        MessageContent::Text { body, .. } | MessageContent::Notice { body, .. } if !body.trim().is_empty() => {
+            Some(message.content.plain().into_owned())
+        }
         MessageContent::Poll(poll) => Some(poll.question.clone()),
         _ => None,
     };
@@ -139,7 +144,7 @@ pub fn menu(
                 s.popover = None;
             },
         ));
-        if matches!(message.content, MessageContent::Text { .. }) && !body.is_empty() {
+        if matches!(message.content, MessageContent::Text { .. } | MessageContent::Notice { .. }) && !body.is_empty() {
             panel = panel.child(action(&icons::LANGUAGE, t!("actions.translate"), "message-translate").on_press(
                 move |s: &mut State| {
                     s.popover = None;

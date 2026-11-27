@@ -52,6 +52,7 @@ import type { ThreadInfo } from "./ThreadInfo";
 import type { TimelineDiff } from "./TimelineDiff";
 import type { TimelineKey } from "./TimelineKey";
 import type { VerificationStep } from "./VerificationStep";
+import type { WidgetAccess } from "./WidgetAccess";
 import type { WidgetPage } from "./WidgetPage";
 import type { WidgetPermission } from "./WidgetPermission";
 import type { Widgets } from "./Widgets";
@@ -287,7 +288,15 @@ request: RequestId,
 /**
  * The page.
  */
-page: WidgetPage, } } | { "type": "WidgetMessage", "data": { 
+page: WidgetPage, } } | { "type": "WidgetAccess", "data": { 
+/**
+ * The run.
+ */
+request: RequestId, 
+/**
+ * The action the user can confirm.
+ */
+access: WidgetAccess, } } | { "type": "WidgetMessage", "data": { 
 /**
  * The run.
  */

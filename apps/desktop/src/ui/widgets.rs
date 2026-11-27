@@ -1,7 +1,7 @@
 //! Running widgets: what a widget asks to be allowed to do, and the integration manager's
 //! terms. (Meetings are among the header's ways to meet by video, `ui::call`.)
 
-use matrix_core::{PermissionKind, Policy, WidgetPermission};
+use matrix_core::{PermissionKind, Policy, WidgetAccess, WidgetAccessKind, WidgetPermission, WidgetUrlField};
 use rune::{El, col, icon, row, text};
 
 use super::components::{ButtonKind, button, check_row, dialog};
@@ -24,7 +24,13 @@ pub fn permission_text(permission: &WidgetPermission) -> String {
         PermissionKind::DownloadFiles => t!("widgets.permission.download_files").to_owned(),
         PermissionKind::CallServices => t!("widgets.permission.call_services").to_owned(),
         PermissionKind::StayInApp => t!("widgets.permission.stay_in_app").to_owned(),
-        PermissionKind::Identity => tf!("widgets.permission.identity", subject = subject),
+        PermissionKind::Identity => match &permission.disclosed {
+            Some(fields) => {
+                let fields = fields.iter().map(|field| url_field(*field)).collect::<Vec<_>>().join(", ");
+                tf!("widgets.permission.identity_shares", subject = subject, fields = fields)
+            }
+            None => tf!("widgets.permission.identity", subject = subject),
+        },
         PermissionKind::Other => permission.capability.clone(),
     }
 }
@@ -35,7 +41,7 @@ pub fn permissions(asked: &WidgetPermissions, p: &Palette) -> El {
     let key = asked.key();
     let id = key.id();
     let list = asked.permissions.iter().zip(&asked.granted).enumerate().fold(
-        col().w_full().gap(2.0),
+        col().w_full().gap(2.0).children(asked.context.as_ref().map(|access| context(access, p))),
         |list, (index, (permission, granted))| {
             list.child(
                 check_row(&permission_text(permission), None, *granted, p)
@@ -52,9 +58,73 @@ pub fn permissions(asked: &WidgetPermissions, p: &Palette) -> El {
             button(t!("widgets.deny"), ButtonKind::Secondary, true, p)
                 .key(format!("widget-permissions-deny-{id}"))
                 .on_press(move |s: &mut State| s.answer_widget_permissions(key, false)),
-            button(t!("widgets.allow"), ButtonKind::Primary, true, p)
+            button(t!("widgets.allow"), ButtonKind::Primary, asked.granted.contains(&true), p)
                 .key(format!("widget-permissions-allow-{id}"))
                 .on_press(move |s: &mut State| s.answer_widget_permissions(key, true)),
+        ],
+        p,
+    )
+}
+
+fn context(access: &WidgetAccess, p: &Palette) -> El {
+    text(tf!("widgets.access_context", site = access.origin, room = access.room, user = access.user_id))
+        .font(font::BODY)
+        .color(p.text_muted)
+        .wrap()
+}
+
+fn url_field(field: WidgetUrlField) -> &'static str {
+    match field {
+        WidgetUrlField::UserId => t!("widgets.field.user_id"),
+        WidgetUrlField::RoomId => t!("widgets.field.room_id"),
+        WidgetUrlField::WidgetId => t!("widgets.field.widget_id"),
+        WidgetUrlField::DisplayName => t!("widgets.field.display_name"),
+        WidgetUrlField::AvatarUrl => t!("widgets.field.avatar_url"),
+        WidgetUrlField::DeviceId => t!("widgets.field.device_id"),
+        WidgetUrlField::Homeserver => t!("widgets.field.homeserver"),
+    }
+}
+
+/// The confirmation shown before loading a site, connecting to the provider, or resetting grants.
+pub fn access(key: PromptKey, access: &WidgetAccess, p: &Palette) -> El {
+    let (title, body, confirm) = match &access.kind {
+        WidgetAccessKind::Open(fields) => (
+            tf!("widgets.open_title", widget = access.name),
+            if fields.is_empty() {
+                t!("widgets.open_site").to_owned()
+            } else {
+                let fields = fields.iter().map(|field| url_field(*field)).collect::<Vec<_>>().join(", ");
+                tf!("widgets.open_shares", fields = fields)
+            },
+            t!("common.continue"),
+        ),
+        WidgetAccessKind::Manager { hosted } => (
+            t!("widgets.integrations_open").to_owned(),
+            (if *hosted { t!("widgets.manager_hosted") } else { t!("widgets.manager_configured") }).to_owned(),
+            t!("common.continue"),
+        ),
+        WidgetAccessKind::Saved(permissions) => (
+            tf!("widgets.permissions_title", widget = access.name),
+            if permissions.is_empty() {
+                t!("widgets.no_saved_permissions").to_owned()
+            } else {
+                permissions.iter().map(permission_text).collect::<Vec<_>>().join("\n")
+            },
+            t!("widgets.reset_permissions"),
+        ),
+    };
+    let id = key.id();
+    dialog(
+        &format!("widget-access-{id}"),
+        &title,
+        col().w_full().gap(12.0).child(context(access, p)).child(text(body).font(font::BODY).color(p.text).wrap()),
+        vec![
+            button(t!("common.cancel"), ButtonKind::Secondary, true, p)
+                .key(format!("widget-access-cancel-{id}"))
+                .on_press(move |s: &mut State| s.confirm_widget_access(key, false)),
+            button(confirm, ButtonKind::Primary, true, p)
+                .key(format!("widget-access-confirm-{id}"))
+                .on_press(move |s: &mut State| s.confirm_widget_access(key, true)),
         ],
         p,
     )

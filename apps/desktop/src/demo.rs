@@ -1850,6 +1850,13 @@ fn room_widgets() -> matrix_core::Widgets {
         }
     };
     matrix_core::Widgets {
+        services: vec!["@build:example.org".to_owned()],
+        bridges: vec![matrix_core::RoomBridge {
+            id: "release".to_owned(),
+            protocol: "Slack".to_owned(),
+            channel: "#releases".to_owned(),
+            network: None,
+        }],
         widgets: vec![
             widget("board", "Sprint board", "m.custom", "https://board.example.org/team", None),
             widget("grafana", "Server dashboard", "m.grafana", "https://grafana.example.org/d/1", None),
@@ -1918,9 +1925,13 @@ pub fn meeting_without_calls(s: &mut State) {
 pub fn widget_permissions(s: &mut State) {
     widgets(s);
     let Some(request) = s.run_widget("board", false) else { return };
-    let permission = |capability: &str, kind: matrix_core::PermissionKind, subject: Option<&str>| {
-        matrix_core::WidgetPermission { capability: capability.into(), kind, subject: subject.map(Into::into) }
-    };
+    let permission =
+        |capability: &str, kind: matrix_core::PermissionKind, subject: Option<&str>| matrix_core::WidgetPermission {
+            capability: capability.into(),
+            kind,
+            subject: subject.map(Into::into),
+            disclosed: None,
+        };
     use matrix_core::PermissionKind as Kind;
     let permissions = vec![
         permission("org.matrix.msc2762.receive.event:m.room.message", Kind::ReadEvents, Some("m.room.message")),
@@ -1932,9 +1943,6 @@ pub fn widget_permissions(s: &mut State) {
     ];
     let event = Event::WidgetPermissions { request, question: 1, widget: "Sprint board".into(), permissions };
     s.apply(event, &mut Tx::default());
-    if let Some(key) = s.widget_prompt().map(crate::state::WidgetPrompt::key) {
-        s.toggle_widget_permission(key, 5);
-    }
 }
 
 /// The integration manager's terms, before it opens.
