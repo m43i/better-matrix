@@ -106,6 +106,7 @@ export function widgetSections(widgets: Widgets | undefined): WidgetSections {
 const urlFields = {
   UserId: 'widgets.field.user_id',
   RoomId: 'widgets.field.room_id',
+  WidgetId: 'widgets.field.widget_id',
   DisplayName: 'widgets.field.display_name',
   AvatarUrl: 'widgets.field.avatar_url',
   DeviceId: 'widgets.field.device_id',

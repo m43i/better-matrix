@@ -205,7 +205,11 @@ fn hosted_meeting(value: &str) -> Option<(Meeting, url::Url)> {
     } else if ["zoom.us", "zoom.com", "zoomgov.com"]
         .into_iter()
         .any(|base| host == base || host.strip_suffix(base).is_some_and(|left| left.ends_with('.')))
-        && has_join_path(&["/j/", "/my/", "/wc/join/", "/w/"])
+        && (has_join_path(&["/j/", "/my/", "/wc/join/", "/w/"])
+            || path
+                .strip_prefix("/wc/")
+                .and_then(|rest| rest.split_once('/'))
+                .is_some_and(|(id, action)| !id.is_empty() && matches!(action, "join" | "join/")))
     {
         Meeting::Zoom
     } else {

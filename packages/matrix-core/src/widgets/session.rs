@@ -31,6 +31,8 @@ pub enum WidgetUrlField {
     UserId,
     /// The Matrix room ID.
     RoomId,
+    /// The widget ID.
+    WidgetId,
     /// The user's display name.
     DisplayName,
     /// The user's avatar URL.
@@ -93,6 +95,7 @@ pub(crate) fn url_fields(template: &str) -> Vec<WidgetUrlField> {
     [
         ("$matrix_user_id", WidgetUrlField::UserId),
         ("$matrix_room_id", WidgetUrlField::RoomId),
+        ("$matrix_widget_id", WidgetUrlField::WidgetId),
         ("$matrix_display_name", WidgetUrlField::DisplayName),
         ("$matrix_avatar_url", WidgetUrlField::AvatarUrl),
         ("$org.matrix.msc3819.matrix_device_id", WidgetUrlField::DeviceId),
@@ -258,24 +261,19 @@ impl Grants {
 }
 
 /// Where a widget's grants are kept in the account's store: per room, widget and the origin its
-/// page is on, so a widget moved to another site asks again.
-fn grants_key(room_id: &str, widget_id: &str, origin: &str) -> Vec<u8> {
-    format!("bettermatrix.widget_grants:{room_id}:{widget_id}:{origin}").into_bytes()
+/// page is on, so a widget moved to another site asks again. The old colon-delimited keys can
+/// name more than one widget, so they are never read.
+pub(super) fn grants_key(room_id: &str, widget_id: &str, origin: &str) -> Vec<u8> {
+    format!("bettermatrix.widget_grants.v2:{}:{}:{room_id}{widget_id}{origin}", room_id.len(), widget_id.len())
+        .into_bytes()
 }
 
-/// The site's canonical origin and any older spelling used to store Jitsi grants.
-fn permission_origin(place: Option<&meetings::Place>, url: &str) -> Result<(String, Option<String>), Error> {
+/// The canonical origin that would receive the widget's permissions.
+fn permission_origin(place: Option<&meetings::Place>, url: &str) -> Result<String, Error> {
     match place {
-        Some(meetings::Place::Jitsi(jitsi)) => {
-            let previous = format!("https://{}", jitsi.domain);
-            let canonical = origin(&previous)?;
-            let legacy = (previous != canonical).then_some(previous);
-            Ok((canonical, legacy))
-        }
-        Some(meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { api, .. })) => {
-            Ok((origin(api)?, None))
-        }
-        _ => Ok((origin(url)?, None)),
+        Some(meetings::Place::Jitsi(jitsi)) => origin(&format!("https://{}", jitsi.domain)),
+        Some(meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { api, .. })) => origin(api),
+        _ => origin(url),
     }
 }
 
@@ -291,16 +289,6 @@ impl Account {
             let _ = self.client().state_store().set_custom_value_no_read(key, bytes).await;
         }
     }
-
-    async fn grants_with_legacy(&self, key: &[u8], legacy_key: Option<&[u8]>) -> Grants {
-        let saved = self.grants(key).await;
-        if saved.asked.is_empty()
-            && let Some(legacy_key) = legacy_key
-        {
-            return self.grants(legacy_key).await;
-        }
-        saved
-    }
 }
 
 /// Shows saved grants for this widget's current origin, then clears the saved decisions on confirmation.
@@ -315,18 +303,15 @@ pub(crate) async fn manage_permissions(
     let (widget, content, viewer) = account.widget(&room_id, &widget_id, super::Freshness::Server).await?;
     let template = content["url"].as_str().unwrap_or_default();
     let place = meetings::place(&widget.kind, template, &content["data"]);
-    let (origin, legacy) = permission_origin(place.as_ref(), &widget.url)?;
+    let origin = permission_origin(place.as_ref(), &widget.url)?;
     let key = grants_key(&room_id, &widget_id, &origin);
-    let legacy_key = legacy.as_deref().map(|origin| grants_key(&room_id, &widget_id, origin));
-    let saved = account.grants_with_legacy(&key, legacy_key.as_deref()).await;
+    let saved = account.grants(&key).await;
     let permissions =
         saved.granted.iter().map(|name| if name == IDENTITY { identity(&origin) } else { describe(name) }).collect();
     let access = access_for(&account, &viewer, &widget, origin, WidgetAccessKind::Saved(permissions))?;
     confirm_access(&*sink, request, access, &mut answers).await?;
     let store = account.client().state_store();
-    for key in legacy_key.iter().chain(std::iter::once(&key)) {
-        store.remove_custom_value(key).await.map_err(|error| Error::Account(error.to_string()))?;
-    }
+    store.remove_custom_value(&key).await.map_err(|error| Error::Account(error.to_string()))?;
     Ok(())
 }
 
@@ -395,13 +380,11 @@ impl Ask<'_> {
     async fn identity(
         &self,
         origin: &str,
-        legacy: Option<&str>,
         widget: &str,
         answers: &mut mpsc::UnboundedReceiver<Answer>,
     ) -> Result<bool, Error> {
         let key = grants_key(self.room_id, self.widget_id, origin);
-        let legacy_key = legacy.map(|origin| grants_key(self.room_id, self.widget_id, origin));
-        let mut grants = self.account.grants_with_legacy(&key, legacy_key.as_deref()).await;
+        let mut grants = self.account.grants(&key).await;
         if let Some(granted) = grants.answer(&[IDENTITY.to_owned()]) {
             return Ok(!granted.is_empty());
         }
@@ -637,13 +620,13 @@ pub(crate) async fn run(
     let template = content.get("url").and_then(Value::as_str).unwrap_or_default();
     let data = content.get("data").cloned().unwrap_or(Value::Null);
     if let Some(place) = meetings::place(&widget.kind, template, &data) {
-        let (origin, legacy) = permission_origin(Some(&place), &widget.url)?;
+        let permission_site = permission_origin(Some(&place), &widget.url)?;
         if matches!(place, meetings::Place::Jitsi(_)) {
             let access = access_for(
                 &account,
                 &viewer,
                 &widget,
-                origin.clone(),
+                permission_site.clone(),
                 WidgetAccessKind::Open(vec![WidgetUrlField::DisplayName]),
             )?;
             confirm_access(&*sink, request, access, &mut answers).await?;
@@ -656,12 +639,16 @@ pub(crate) async fn run(
                 | meetings::Place::BigBlueButton(meetings::BigBlueButton::Dimension { .. })
         ) {
             let ask = Ask { account: &account, room_id: &room_id, widget_id: &widget_id, request, sink: &sink };
-            ask.identity(&origin, legacy.as_deref(), &widget.name, &mut answers).await?
+            ask.identity(&permission_site, &widget.name, &mut answers).await?
         } else {
             false
         };
         let url = account.join_url(&place, &viewer, identity).await?;
-        if browser || matches!(place, meetings::Place::Hosted { .. }) {
+        if matches!(place, meetings::Place::BigBlueButton(_)) {
+            let access = access_for(&account, &viewer, &widget, origin(&url)?, WidgetAccessKind::Open(Vec::new()))?;
+            confirm_access(&*sink, request, access, &mut answers).await?;
+        }
+        if browser || !url.starts_with("https://") || matches!(place, meetings::Place::Hosted { .. }) {
             sink.emit(Event::OpenUrl { request, url });
             return Ok(());
         }
@@ -672,15 +659,16 @@ pub(crate) async fn run(
         return Ok(());
     }
     let origin = origin(&widget.url)?;
-    let access = access_for(&account, &viewer, &widget, origin.clone(), WidgetAccessKind::Open(url_fields(template)))?;
-    confirm_access(&*sink, request, access, &mut answers).await?;
-    if browser {
-        sink.emit(Event::OpenUrl { request, url: widget.url });
-        return Ok(());
+    let bridged = !browser && widget.url.starts_with("https://");
+    let mut fields = url_fields(template);
+    if bridged && !fields.contains(&WidgetUrlField::WidgetId) {
+        fields.push(WidgetUrlField::WidgetId);
     }
+    let access = access_for(&account, &viewer, &widget, origin.clone(), WidgetAccessKind::Open(fields))?;
+    confirm_access(&*sink, request, access, &mut answers).await?;
     // The widget API only over HTTPS: on HTTP, whoever is on the way could stand in for the page
     // and use what the user granted it. Such a widget opens in the browser.
-    if !widget.url.starts_with("https://") {
+    if !bridged {
         sink.emit(Event::OpenUrl { request, url: widget.url });
         return Ok(());
     }

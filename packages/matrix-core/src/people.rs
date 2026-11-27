@@ -365,7 +365,7 @@ impl Account {
 
     /// Someone's membership of a room as the homeserver has it now (the store may have missed a
     /// change in a gap); `None` when they never had one.
-    async fn membership(
+    pub(crate) async fn membership(
         &self,
         room: &matrix_sdk::Room,
         user: &UserId,
@@ -376,11 +376,11 @@ impl Account {
         use matrix_sdk::ruma::events::room::member::RoomMemberEventContent;
         let request = Request::new(room.room_id().to_owned(), StateEventType::RoomMember, user.to_string());
         match self.client().send(request).await {
-            Ok(response) => Ok(response
+            Ok(response) => response
                 .into_content()
                 .deserialize_as_unchecked::<RoomMemberEventContent>()
-                .ok()
-                .map(|content| content.membership)),
+                .map(|content| Some(content.membership))
+                .map_err(|error| matrix_sdk::Error::from(error).into()),
             Err(error) if error.client_api_error_kind() == Some(&ErrorKind::NotFound) => Ok(None),
             Err(error) => Err(error.into()),
         }

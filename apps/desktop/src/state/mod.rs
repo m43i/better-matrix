@@ -1378,9 +1378,7 @@ impl State {
             Event::OpenUrl { request, url }
                 if matches!(self.pending.get(&request), Some(Purpose::WidgetRun { closed: false })) =>
             {
-                if let Err(error) = tx.open_url(&url) {
-                    self.notice = Some(tf!("notice.browser", error = error));
-                }
+                self.open_widget_url(request, &url, tx);
             }
             Event::OpenUrl { request, url } => match &mut self.sign_in.step {
                 SignInStep::Browser { request: Some(waiting), url: shown, .. } if *waiting == request => {

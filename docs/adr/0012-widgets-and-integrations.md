@@ -109,9 +109,10 @@ Date: 2026-11-25
   forgotten meanwhile, gives way.
 - **Opening a widget:** the engine resolves the room's current state, then asks for confirmation
   before loading a generic widget or handing its URL to a browser. The prompt identifies the
-  origin, room and Matrix account, and names any Matrix context placed in the URL. Jitsi's
-  confirmation discloses the display name it passes to the meeting. Widget API permissions and
-  meeting identity access are requested separately.
+  origin, room and Matrix account, and names any Matrix context placed in the URL, including
+  the widget ID added by the bridge. Jitsi's confirmation discloses the display name it passes
+  to the meeting. BigBlueButton confirms the resolved meeting origin before opening the page.
+  Widget API permissions and meeting identity access are requested separately.
 - **Permissions:** what a widget asks for arrives as `Event::WidgetPermissions`, numbered within
   the run, each capability described (`WidgetPermission`, `PermissionKind`, its subject); the
   user starts with no options selected and grants any subset (`Answer::WidgetPermissions`, naming the question: an answer to another
@@ -123,8 +124,9 @@ Date: 2026-11-25
   own (`PermissionKind::Identity`, its subject the origin that would learn it, not the
   widget's room-set name); refused, the widget gets `blocked`. The widget's permissions action
   lists granted access for the current origin and can reset both grants and denials, closing its
-  running page first. Jitsi grants use the canonical origin and reset clears any grants saved under
-  the older spelling of the configured domain. File downloads are described as
+  running page first. The grant key encodes the room and widget IDs by length and uses the
+  canonical origin. Older colon-delimited grants are ignored, so those widgets ask again.
+  File downloads are described as
   what they are: files the account can open.
   - Camera and microphone: only a meeting's page, on the approved host (its own; iOS `prompt`,
     WebKit asking per site; Android `grantIfSameHostElseDeny` with the host in its own setting,
@@ -153,7 +155,8 @@ Date: 2026-11-25
   plumbing state, reading and setting room widgets (account widgets aren't supported), whether
   the user may send an event, encryption, sending integration state (`SENDABLE`: widgets, their
   layout, bot options, plumbing; never messages or the room's settings), and closing. Its
-  replies are never taken as requests. Widget changes list the room's widgets again.
+  replies are never taken as requests. Invite, kick and bot power changes read the current
+  room state from the homeserver. Widget changes list the room's widgets again.
 - **Desktop:** a widget runs in its own window from a web-view helper: the same binary started
   as `better-matrix --widget-window` (wry and tao; WebKitGTK on Linux, WKWebView on macOS,
   WebView2 on Windows), one process per run, JSON lines over stdin and stdout
@@ -178,12 +181,14 @@ Date: 2026-11-25
     room state, and bridges with their advertised destination. Manage integrations has its own
     action. The + menu offers Start a meeting and Add widget where room rights allow them.
     Previously loaded integrations remain visible if refreshing fails, with a retry action.
+    A failed widget browser handoff also offers a retry.
   - `/meet` and the room menu start a meeting where offered. Permissions and terms are modals.
     Scenes: `demo-widgets`, `demo-widgets-menu`, `demo-meeting`, `demo-video-options`,
     `demo-meeting-no-calls`, `demo-meeting-start`, `demo-meet-command`,
     `demo-widget-permissions`, `demo-integration-terms`.
-- **Phones** run every widget, meetings included, in an in-app web view (`app/widget.tsx`,
-  `WidgetRun`); see [0010](0010-mobile.md).
+- **Phones** run HTTPS widgets and Jitsi and BigBlueButton meetings in an in-app web view
+  (`app/widget.tsx`, `WidgetRun`). They hand off HTTP pages and hosted Teams and Zoom meetings
+  to the browser. Android's video chooser pages through meeting options. See [0010](0010-mobile.md).
 
 ## Consequences
 

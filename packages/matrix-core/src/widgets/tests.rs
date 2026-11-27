@@ -10,8 +10,8 @@ use crate::test_server::{Server, thread_response};
 use super::integrations::{After, SENDABLE, answer_request, named_manager, policies, terms_url, widget_content};
 use super::meetings::{BigBlueButton, Jitsi, Place, base32, jwt, named_jitsi, place};
 use super::session::{
-    Grants, Handshake, IDENTITY, PermissionKind, Step, WidgetAccessKind, api_url, describe, identity,
-    manage_permissions, refused,
+    Grants, Handshake, IDENTITY, PermissionKind, Step, WidgetAccessKind, WidgetUrlField, api_url, describe, grants_key,
+    identity, manage_permissions, refused, run,
 };
 use super::*;
 
@@ -21,6 +21,18 @@ async fn synced(server: &Server) -> Account {
     let account = Account::for_test(&server.url()).await;
     account.client().sync_once(matrix_sdk::config::SyncSettings::default()).await.unwrap();
     account
+}
+
+fn pinned_widget(content: Value) -> Server {
+    Server::new(move |request| {
+        if request.contains("/state ") {
+            return json!([{
+                "type": LEGACY_TYPE, "state_key": "fixture", "sender": "@a:example.org",
+                "event_id": "$fixture", "origin_server_ts": 1, "content": content,
+            }]);
+        }
+        thread_response(request)
+    })
 }
 
 fn viewer() -> Viewer {
@@ -83,37 +95,103 @@ fn a_checking_jitsi_server_should_get_the_jwt_in_the_query() {
 }
 
 #[tokio::test]
-async fn resetting_jitsi_permissions_should_clear_a_grant_saved_under_the_old_origin() {
-    let server = Server::new(|request| {
-        if request.contains("/state ") {
-            return json!([{
-                "type": LEGACY_TYPE, "state_key": "call", "sender": "@a:example.org",
-                "event_id": "$call", "origin_server_ts": 1,
-                "content": {
-                    "type": "jitsi", "url": "https://app.element.io/jitsi.html", "name": "Jitsi",
-                    "data": {"domain": "Meet.Example.org:443", "conferenceId": "Call", "auth": "openidtoken-jwt"}
-                }
-            }]);
-        }
-        thread_response(request)
-    });
+async fn resetting_jitsi_permissions_should_clear_the_grant_for_the_canonical_origin() {
+    let server = pinned_widget(json!({
+        "type": "jitsi", "url": "https://app.element.io/jitsi.html", "name": "Jitsi",
+        "data": {"domain": "Meet.Example.org:443", "conferenceId": "Call", "auth": "openidtoken-jwt"}
+    }));
     let account = synced(&server).await;
     let store = account.client().state_store();
-    let legacy = b"bettermatrix.widget_grants:!room:example.org:call:https://Meet.Example.org:443";
+    let origin = "https://meet.example.org";
+    let key = grants_key(ROOM, "fixture", origin);
     let grants = json!({ "asked": [IDENTITY], "granted": [IDENTITY] });
-    store.set_custom_value_no_read(legacy, serde_json::to_vec(&grants).unwrap()).await.unwrap();
+    store.set_custom_value_no_read(&key, serde_json::to_vec(&grants).unwrap()).await.unwrap();
     let (answer, answers) = mpsc::unbounded_channel();
     answer.send(Answer::Continue).unwrap();
     let (send, mut events) = mpsc::unbounded_channel();
     let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
 
-    manage_permissions(account.clone(), ROOM.into(), "call".into(), RequestId(1), sink, answers).await.unwrap();
+    manage_permissions(account.clone(), ROOM.into(), "fixture".into(), RequestId(1), sink, answers).await.unwrap();
 
     let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else { panic!("expected permission dialog") };
-    let origin = "https://meet.example.org";
     assert_eq!(access.origin, origin);
     assert_eq!(access.kind, WidgetAccessKind::Saved(vec![identity(origin)]));
-    assert!(store.get_custom_value(legacy).await.unwrap().is_none());
+    assert!(store.get_custom_value(&key).await.unwrap().is_none());
+}
+
+#[test]
+fn widgets_in_different_rooms_should_have_distinct_grant_keys() {
+    let origin = "https://board.example.org";
+    assert_ne!(
+        grants_key("!room:example.org:8448", "board", origin),
+        grants_key("!room:example.org", "8448:board", origin),
+    );
+}
+
+#[tokio::test]
+async fn a_jitsi_meeting_should_ask_again_if_only_a_legacy_decision_was_saved() {
+    let server = pinned_widget(json!({
+        "type": "jitsi", "url": "https://app.element.io/jitsi.html", "name": "Jitsi",
+        "data": {"domain": "meet.example.org", "conferenceId": "Call", "auth": "openidtoken-jwt"}
+    }));
+    let account = synced(&server).await;
+    let old_key = b"bettermatrix.widget_grants:!room:example.org:fixture:https://meet.example.org";
+    let old_decision = json!({ "asked": [IDENTITY], "granted": [] });
+    account
+        .client()
+        .state_store()
+        .set_custom_value_no_read(old_key, serde_json::to_vec(&old_decision).unwrap())
+        .await
+        .unwrap();
+    let (answer, answers) = mpsc::unbounded_channel();
+    answer.send(Answer::Continue).unwrap();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+
+    assert!(matches!(result, Err(Error::Cancelled)));
+    assert!(matches!(events.try_recv().unwrap(), Event::WidgetAccess { .. }));
+    let Event::WidgetPermissions { permissions, .. } = events.try_recv().unwrap() else {
+        panic!("expected identity permission");
+    };
+    assert_eq!(permissions, [identity("https://meet.example.org")]);
+}
+
+#[tokio::test]
+async fn bigbluebutton_should_ask_before_opening_the_meeting_host() {
+    let server = pinned_widget(json!({
+        "type": "bigbluebutton", "url": "https://dimension.example/widget",
+        "data": {"conferenceUrl": "https://bbb.example.org/b/abc-def"},
+    }));
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+    let account = synced(&server).await;
+
+    let result =
+        run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+    assert!(matches!(result, Err(Error::Cancelled)));
+    let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else { panic!("expected permission dialog") };
+    assert_eq!(access.origin, "https://bbb.example.org");
+    assert!(events.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn the_preload_prompt_should_show_the_widget_id_added_by_the_bridge() {
+    let server = pinned_widget(json!({"type": "m.custom", "url": "https://board.example.org/team"}));
+    let (answer, answers) = mpsc::unbounded_channel();
+    drop(answer);
+    let (send, mut events) = mpsc::unbounded_channel();
+    let sink: Arc<dyn EventSink> = Arc::new(move |event| send.send(event).unwrap());
+    let account = synced(&server).await;
+
+    let _ = run(account, ROOM.into(), "fixture".into(), false, Freshness::Server, RequestId(1), sink, answers).await;
+    let Event::WidgetAccess { access, .. } = events.try_recv().unwrap() else { panic!("expected permission dialog") };
+    assert_eq!(access.kind, WidgetAccessKind::Open(vec![WidgetUrlField::WidgetId]));
 }
 
 #[test]
@@ -283,17 +361,13 @@ async fn an_equal_bot_power_level_should_succeed_without_writing_room_state() {
     let wrote_level = Arc::new(AtomicBool::new(false));
     let captured = Arc::clone(&wrote_level);
     let server = Server::new(move |request| {
-        if request.starts_with("PUT ") && request.contains("/state/m.room.power_levels") {
-            captured.store(true, Ordering::Relaxed);
+        if request.contains("/state/m.room.power_levels") {
+            if request.starts_with("PUT ") {
+                captured.store(true, Ordering::Relaxed);
+            }
+            return json!({"users": {"@a:example.org": 100, "@bot:example.org": 50}});
         }
-        let mut response = thread_response(request);
-        if request.contains("/sync?") {
-            response["rooms"]["join"][ROOM]["state"]["events"].as_array_mut().unwrap().push(json!({
-                "type": "m.room.power_levels", "state_key": "", "sender": "@a:example.org",
-                "event_id": "$levels", "origin_server_ts": 0, "content": {"users": {"@a:example.org": 100}}
-            }));
-        }
-        response
+        thread_response(request)
     });
     let account = synced(&server).await;
     let room = account.joined_room(ROOM).unwrap();
@@ -301,7 +375,7 @@ async fn an_equal_bot_power_level_should_succeed_without_writing_room_state() {
         "action": "set_bot_power",
         "room_id": ROOM,
         "user_id": "@bot:example.org",
-        "level": 0,
+        "level": 50,
         "ignoreIfGreater": true
     });
     assert_eq!(answer_request(&account, &room, &asked).await, (json!({"success": true}), After::Nothing));
@@ -313,11 +387,8 @@ async fn a_manager_should_kick_a_bot_whose_membership_was_not_in_the_sync() {
     let kicked = Arc::new(AtomicBool::new(false));
     let captured = Arc::clone(&kicked);
     let server = Server::new(move |request| {
-        if request.contains("/members") {
-            return json!({"chunk": [{
-                "type": "m.room.member", "room_id": ROOM, "state_key": "@bot:example.org", "sender": "@bot:example.org",
-                "event_id": "$bot", "origin_server_ts": 1, "content": {"membership": "join"}
-            }]});
+        if request.contains("/state/m.room.member/") {
+            return json!({"membership": "join"});
         }
         if request.starts_with("POST ") && request.contains("/kick") {
             captured.store(request.contains("@bot:example.org"), Ordering::Relaxed);
@@ -548,6 +619,14 @@ async fn a_widget_should_wait_for_confirmation_before_proceeding() {
 #[test]
 fn a_zoom_join_link_should_be_a_meeting() {
     let content = json!({"type": "m.custom", "url": "https://example.zoom.us/j/123456789?pwd=example"});
+    let shown = widget("zoom", &content, None, &Viewer::default()).expect("widget");
+    assert_eq!(shown.meeting, Some(Meeting::Zoom));
+    assert_eq!(shown.url, content["url"].as_str().unwrap());
+}
+
+#[test]
+fn a_zoom_web_app_join_link_should_be_a_meeting() {
+    let content = json!({"type": "m.custom", "url": "https://app.zoom.us/wc/123456789/join?pwd=example"});
     let shown = widget("zoom", &content, None, &Viewer::default()).expect("widget");
     assert_eq!(shown.meeting, Some(Meeting::Zoom));
     assert_eq!(shown.url, content["url"].as_str().unwrap());

@@ -294,7 +294,9 @@ pub(crate) async fn answer_request(account: &Account, room: &Room, asked: &Value
 
 /// Does what one request asks.
 async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Result<(Value, After), Error> {
+    use matrix_sdk::ruma::api::client::state::get_state_event_for_key::v3::Request;
     use matrix_sdk::ruma::events::room::member::MembershipState;
+    use matrix_sdk::ruma::events::room::power_levels::{RoomPowerLevelsEventContent, UserPowerLevel};
     use matrix_sdk::ruma::{Int, UserId};
     let user = || -> Result<&UserId, Error> {
         let user = asked["user_id"].as_str().ok_or_else(|| Error::Integrations("missing user_id".to_owned()))?;
@@ -305,20 +307,17 @@ async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Res
         "membership_state" => (state_content(room, "m.room.member", user()?.as_str()).await, After::Nothing),
         "invite" => {
             let user = user()?;
-            if !room
-                .get_member(user)
-                .await?
-                .is_some_and(|member| matches!(member.membership(), MembershipState::Join | MembershipState::Invite))
-            {
+            if !matches!(account.membership(room, user).await?, Some(MembershipState::Join | MembershipState::Invite)) {
                 room.invite_user_by_id(user).await?;
             }
             done
         }
         "kick" => {
             let user = user()?;
-            if room.get_member(user).await?.is_some_and(|member| {
-                matches!(member.membership(), MembershipState::Join | MembershipState::Invite | MembershipState::Knock)
-            }) {
+            if matches!(
+                account.membership(room, user).await?,
+                Some(MembershipState::Join | MembershipState::Invite | MembershipState::Knock)
+            ) {
                 room.kick_user(user, asked["reason"].as_str()).await?;
             }
             done
@@ -330,12 +329,27 @@ async fn act(account: &Account, room: &Room, action: &str, asked: &Value) -> Res
             done
         }
         "set_bot_power" => {
-            let level = asked["level"].as_i64().ok_or_else(|| Error::Integrations("missing level".to_owned()))?;
+            let level = asked["level"]
+                .as_i64()
+                .filter(|&level| level >= 0)
+                .and_then(Int::new)
+                .ok_or_else(|| Error::Integrations("invalid power level".to_owned()))?;
             let user = user()?;
-            let level = Int::new_saturating(level);
-            let keeps_level = asked["ignoreIfGreater"] == true && room.get_user_power_level(user).await? >= level;
+            let request = Request::new(room.room_id().to_owned(), StateEventType::RoomPowerLevels, String::new());
+            let raw = account.client().send(request).await?.into_content();
+            let levels = raw
+                .deserialize_as_unchecked::<RoomPowerLevelsEventContent>()
+                .map_err(|error| Error::Integrations(error.to_string()))?;
+            let current = levels.users.get(user).copied().unwrap_or(levels.users_default);
+            let keeps_level = asked["ignoreIfGreater"] == true
+                && (current >= level
+                    || room.power_levels_or_default().await.for_user(user) == UserPowerLevel::Infinite);
             if !keeps_level {
-                room.update_power_levels(vec![(user, level)]).await?;
+                // Retain fields from the live event that the client does not interpret.
+                let mut power: Value =
+                    raw.deserialize_as_unchecked().map_err(|error| Error::Integrations(error.to_string()))?;
+                power["users"][user.as_str()] = json!(level);
+                room.send_state_event_raw("m.room.power_levels", "", power).await?;
             }
             done
         }

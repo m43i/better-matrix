@@ -218,6 +218,18 @@ fn a_window_that_couldnt_open_should_cancel_the_run_and_say_why() {
 }
 
 #[test]
+fn a_refused_browser_handoff_should_offer_to_retry_the_same_widget() {
+    let (mut s, mut commands) = state();
+    let request = s.run_widget("board", true).unwrap();
+    let first = sent(&mut commands);
+    apply(&mut s, Event::OpenUrl { request, url: "file:///example".into() });
+    apply(&mut s, Event::Finished { request, result: Ok(()) });
+
+    s.retry_widget();
+    assert_eq!(sent(&mut commands), first);
+}
+
+#[test]
 fn a_page_for_a_closed_run_should_open_no_window() {
     let (mut s, _commands) = state();
     let request = board_open(&mut s);

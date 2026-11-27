@@ -208,18 +208,24 @@ function Said({
   latestCall: boolean;
   shown: ReturnType<typeof useShown>;
 }) {
+  const palette = usePalette();
+
+  const body = gif ? (
+    <>
+      {gif.rest ? <RichText blocks={gif.rest} owner={message.event_id} media={message} /> : null}
+      <LinkedGif key={gif.url} url={gif.url} message={message} />
+    </>
+  ) : (
+    <Body message={message} latestCall={latestCall} />
+  );
+
   return (
     <>
       {message.reply_to ? <QuoteBlock quote={message.reply_to} /> : null}
-      {gif ? (
-        <>
-          {gif.rest ? (
-            <RichText blocks={gif.rest} owner={message.event_id} media={message} />
-          ) : null}
-          <LinkedGif key={gif.url} url={gif.url} message={message} />
-        </>
+      {message.content.type === 'Notice' ? (
+        <View style={[styles.noticeBody, { borderLeftColor: palette.textMuted }]}>{body}</View>
       ) : (
-        <Body message={message} latestCall={latestCall} />
+        body
       )}
       {link ? <LinkCard key={link} url={link} message={message} /> : null}
     </>
@@ -446,13 +452,8 @@ function Body({ message, latestCall }: { message: Message; latestCall: boolean }
       const blocks = prepare(message, sender).blocks;
 
       if (!blocks) return null;
-      const rich = <RichText blocks={blocks} owner={message.event_id} media={message} />;
 
-      return content.type === 'Notice' ? (
-        <View style={[styles.noticeBody, { borderLeftColor: palette.textMuted }]}>{rich}</View>
-      ) : (
-        rich
-      );
+      return <RichText blocks={blocks} owner={message.event_id} media={message} />;
     }
 
     case 'Location':

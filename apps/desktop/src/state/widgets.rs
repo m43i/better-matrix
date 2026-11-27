@@ -391,7 +391,26 @@ impl State {
     }
 
     fn widget_launch_failed(&mut self, request: RequestId, error: String) {
-        if let Some((account, room, command)) = self.widget_launches.remove(&request)
+        let launch = self.widget_launches.remove(&request);
+        self.remember_widget_launch_error(launch, error);
+    }
+
+    pub(super) fn open_widget_url(&mut self, request: RequestId, url: &str, tx: &mut rune::Tx) {
+        let launch = self.widget_launches.get(&request).cloned();
+        if tx
+            .open_url_then(url, move |state: &mut Self, result, _| {
+                if result.is_err() {
+                    state.remember_widget_launch_error(launch, t!("widgets.browser_failed").to_owned());
+                }
+            })
+            .is_err()
+        {
+            self.widget_launch_failed(request, t!("widgets.browser_failed").to_owned());
+        }
+    }
+
+    fn remember_widget_launch_error(&mut self, launch: Option<(AccountId, String, Command)>, error: String) {
+        if let Some((account, room, command)) = launch
             && let Some(data) = self.accounts.get_mut(&account)
         {
             data.widget_launch_errors.insert(room, (error.clone(), command));

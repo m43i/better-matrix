@@ -533,14 +533,24 @@ describe('widgets in the demo', () => {
       8,
     );
 
-  it('should pin a Jitsi meeting to #general for the meeting scene', () => {
+  it('should pin meetings from each configured provider in the meeting scene', () => {
     const state = bootDemo('meeting', noMedia).getState();
-    expect(roomMeetings(state, ADA, GENERAL).map((w) => w.name)).toEqual(['Standup']);
+    expect(roomMeetings(state, ADA, GENERAL).map((w) => w.name)).toEqual([
+      'Standup',
+      'Design review',
+      'Office hours',
+    ]);
   });
 
   it('should list #general’s meeting before its other widgets', () => {
     const { meetings, others } = widgetSections(demoWidgets());
-    expect([...meetings, ...others].map((w) => w.id)).toEqual(['standup', 'board', 'grafana']);
+    expect([...meetings, ...others].map((w) => w.id)).toEqual([
+      'standup',
+      'teams',
+      'zoom',
+      'board',
+      'grafana',
+    ]);
   });
 
   it('should offer the video call, the pinned meeting and a new one from #general’s video button', () => {
@@ -548,7 +558,7 @@ describe('widgets in the demo', () => {
 
     expect(
       videoOptions(room(state, ADA, GENERAL), roomMeetings(state, ADA, GENERAL)).map((o) => o.kind),
-    ).toEqual(['call', 'meeting', 'start']);
+    ).toEqual(['call', 'meeting', 'meeting', 'meeting', 'start']);
   });
 
   it('should offer the video call and a new meeting from #design’s video button', () => {

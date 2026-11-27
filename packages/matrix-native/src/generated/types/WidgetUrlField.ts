@@ -3,4 +3,4 @@
 /**
  * The data a widget asks to put in its URL.
  */
-export type WidgetUrlField = "UserId" | "RoomId" | "DisplayName" | "AvatarUrl" | "DeviceId" | "Homeserver";
+export type WidgetUrlField = "UserId" | "RoomId" | "WidgetId" | "DisplayName" | "AvatarUrl" | "DeviceId" | "Homeserver";

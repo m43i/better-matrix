@@ -71,6 +71,7 @@ fn url_field(field: WidgetUrlField) -> &'static str {
     match field {
         WidgetUrlField::UserId => t!("widgets.field.user_id"),
         WidgetUrlField::RoomId => t!("widgets.field.room_id"),
+        WidgetUrlField::WidgetId => t!("widgets.field.widget_id"),
         WidgetUrlField::DisplayName => t!("widgets.field.display_name"),
         WidgetUrlField::AvatarUrl => t!("widgets.field.avatar_url"),
         WidgetUrlField::DeviceId => t!("widgets.field.device_id"),
