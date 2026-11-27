@@ -104,6 +104,10 @@ impl State {
         self.shell.take_handed_links();
     }
 
+    pub fn reopen_window(&self) -> bool {
+        self.shell.bring_forward()
+    }
+
     /// Opens the link that waited for an account, once one is ready.
     pub(super) fn open_pending_link(&mut self) {
         if self.screen() != Screen::Chat || self.nav.account.is_none() {

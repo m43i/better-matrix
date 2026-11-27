@@ -9,6 +9,7 @@ mod notify;
 mod secrets;
 pub mod sound;
 mod taskbar;
+mod tray;
 pub mod updates;
 pub mod video;
 pub mod widget_window;
@@ -36,6 +37,8 @@ pub struct Shell {
     updates: Option<std::sync::mpsc::Sender<updates::Release>>,
     notifier: Box<dyn notify::Notifier>,
     taskbar: Taskbar,
+    /// The user can reach the app here while its window is closed.
+    tray: Option<tray::Tray>,
     /// Whether the system shows the jump list: macOS only (see `taskbar`'s notes on Windows).
     /// Headless, as on macOS, so tests see it.
     offers_jump_list: bool,
@@ -44,6 +47,8 @@ pub struct Shell {
     document: Arc<std::sync::atomic::AtomicU64>,
     /// Counts settings saves: only the latest writes, so quick changes can't land out of order.
     saves: Arc<std::sync::atomic::AtomicU64>,
+    /// Finish the latest settings write even if the user quits straight after making a change.
+    settings_save: Option<std::thread::JoinHandle<()>>,
     /// Counts saves of the rooms opened, which go apart from the settings.
     visit_saves: Arc<std::sync::atomic::AtomicU64>,
     sticker_saves: Arc<std::sync::atomic::AtomicU64>,
@@ -69,6 +74,15 @@ impl std::fmt::Debug for Shell {
     }
 }
 
+impl Drop for Shell {
+    fn drop(&mut self) {
+        self.tray = None;
+        if let Some(save) = self.settings_save.take() {
+            let _ = save.join();
+        }
+    }
+}
+
 impl Shell {
     /// The real services, delivering results to the app through `app`.
     /// `taskbar` is the one `main` attaches the window to.
@@ -81,10 +95,12 @@ impl Shell {
             app: Some(app),
             notifier,
             taskbar,
+            tray: None,
             offers_jump_list: cfg!(target_os = "macos"),
             prefs: Arc::new(Mutex::new(prefs)),
             document: Arc::default(),
             saves: Arc::default(),
+            settings_save: None,
             visit_saves: Arc::default(),
             sticker_saves: Arc::default(),
             secrets: None,
@@ -101,10 +117,12 @@ impl Shell {
             updates: None,
             notifier: Box::new(notify::Silent),
             taskbar: Taskbar::default(),
+            tray: None,
             offers_jump_list: true,
             prefs: Arc::new(Mutex::new(Prefs::memory())),
             document: Arc::default(),
             saves: Arc::default(),
+            settings_save: None,
             visit_saves: Arc::default(),
             sticker_saves: Arc::default(),
             secrets: None,
@@ -126,10 +144,12 @@ impl Shell {
                 updates: None,
                 notifier: Box::new(notify::Recording(posted.clone())),
                 taskbar: Taskbar::default(),
+                tray: None,
                 offers_jump_list: true,
                 prefs,
                 document: Arc::default(),
                 saves: Arc::default(),
+                settings_save: None,
                 visit_saves: Arc::default(),
                 sticker_saves: Arc::default(),
                 secrets: None,
@@ -262,8 +282,35 @@ impl Shell {
     }
 
     /// Saves this device's settings, off the UI thread (the prefs file is rewritten whole).
-    pub fn save_settings(&self, settings: Settings) {
-        save(&self.prefs, &self.saves, "settings", move |prefs| write_settings(prefs, &settings));
+    pub fn save_settings(&mut self, settings: Settings) {
+        self.settings_save = save(&self.prefs, &self.saves, "settings", move |prefs| write_settings(prefs, &settings));
+    }
+
+    /// Keep the closed window reachable. Linux finishes registration off the UI thread and
+    /// quits through the app handle if its tray is unavailable while the window is closed.
+    pub fn close_window(&mut self, close_to_tray: bool, tx: &mut rune::Tx) {
+        self.tray = None;
+        if close_to_tray && let Some(app) = &self.app {
+            self.tray = tray::show(app.clone());
+        }
+        if self.tray.is_none() {
+            tx.quit();
+        }
+    }
+
+    pub fn dismiss_tray(&mut self) {
+        self.tray = None;
+    }
+
+    /// Rune has now applied this turn's window requests and published the visibility.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    pub fn settle_tray(&mut self) {
+        let (Some(app), Some(tray)) = (&self.app, &mut self.tray) else { return };
+        if app.is_visible() {
+            self.dismiss_tray();
+        } else if !rune::quitting() && tray.unavailable() {
+            app.quit();
+        }
     }
 
     /// The rooms opened on this device, as last saved: read from the prefs already loaded.
@@ -273,7 +320,7 @@ impl Shell {
 
     /// Saves the rooms opened, off the UI thread, apart from the settings: one write per open.
     pub fn save_visits(&self, visits: Visits) {
-        save(&self.prefs, &self.visit_saves, "visits", move |prefs| prefs.set(VISITS, &visits));
+        let _ = save(&self.prefs, &self.visit_saves, "visits", move |prefs| prefs.set(VISITS, &visits));
     }
 
     /// The stickers sent lately on this device, as last saved: read from the prefs already
@@ -284,7 +331,7 @@ impl Shell {
 
     /// Saves the stickers sent lately, off the UI thread, apart from the settings.
     pub fn save_recent_stickers(&self, recent: RecentStickers) {
-        save(&self.prefs, &self.sticker_saves, "stickers", move |prefs| prefs.set(RECENT_STICKERS, &recent));
+        let _ = save(&self.prefs, &self.sticker_saves, "stickers", move |prefs| prefs.set(RECENT_STICKERS, &recent));
     }
 
     /// A player for `media`'s file on the picked speaker; the view runs again once it is
@@ -395,10 +442,10 @@ impl Shell {
 
     /// Brings the window forward, restoring it if minimised: a link from the system opened
     /// something in it.
-    pub fn bring_forward(&self) {
-        if let Some(app) = &self.app {
-            app.open();
-        }
+    pub fn bring_forward(&self) -> bool {
+        let Some(app) = &self.app else { return false };
+        app.open();
+        true
     }
 
     /// Shows `count` on the taskbar badge; 0 hides it.
@@ -438,6 +485,7 @@ const LINK_PREVIEWS: &str = "link_previews";
 const MAPS: &str = "maps";
 const EMOTICONS: &str = "emoticons";
 const ZOOM: &str = "zoom";
+const CLOSE_TO_TRAY: &str = "close_to_tray";
 const RING_SOUND: &str = "ring_sound";
 const PLAYBACK_SPEED: &str = "playback_speed";
 const MICROPHONE: &str = "microphone";
@@ -458,23 +506,28 @@ fn save(
     saves: &Arc<std::sync::atomic::AtomicU64>,
     what: &'static str,
     write: impl FnOnce(&mut Prefs) -> Result<(), rune::prefs::PrefsError> + Send + 'static,
-) {
+) -> Option<std::thread::JoinHandle<()>> {
     use std::sync::atomic::Ordering;
     let (prefs, saves) = (Arc::clone(prefs), Arc::clone(saves));
     let save = saves.fetch_add(1, Ordering::Relaxed) + 1;
-    let _ = std::thread::Builder::new().name(format!("save-{what}")).spawn(move || {
-        let Ok(mut prefs) = prefs.lock() else { return };
-        // A newer save is on its way: it writes instead.
-        if saves.load(Ordering::Relaxed) != save {
-            return;
-        }
-        if let Err(error) = write(&mut prefs) {
-            eprintln!("better-matrix: could not save {what}: {error}");
-        }
-    });
+    std::thread::Builder::new()
+        .name(format!("save-{what}"))
+        .spawn(move || {
+            let Ok(mut prefs) = prefs.lock() else { return };
+            // A newer save is on its way: it writes instead.
+            if saves.load(Ordering::Relaxed) != save {
+                return;
+            }
+            if let Err(error) = write(&mut prefs) {
+                eprintln!("better-matrix: could not save {what}: {error}");
+            }
+        })
+        .inspect_err(|error| eprintln!("better-matrix: could not start the {what} save: {error}"))
+        .ok()
 }
 
 fn write_settings(prefs: &mut Prefs, settings: &Settings) -> Result<(), rune::prefs::PrefsError> {
+    prefs.set(CLOSE_TO_TRAY, &settings.close_to_tray)?;
     prefs.set(LANGUAGE, &settings.language.id())?;
     prefs.set(APPEARANCE, &settings.appearance.id())?;
     prefs.set(MESSAGE_LAYOUT, &settings.message_layout.id())?;
@@ -503,6 +556,7 @@ pub fn load_settings(prefs: &Prefs) -> Settings {
             .get::<String>(MESSAGE_LAYOUT)
             .map_or_else(MessageLayout::default, |id| MessageLayout::from_id(&id)),
         zoom: prefs.get::<u16>(ZOOM).map_or_else(Zoom::default, Zoom::from_percent),
+        close_to_tray: prefs.get::<bool>(CLOSE_TO_TRAY).unwrap_or(true),
         show_link_gifs: prefs.get::<bool>(LINK_GIFS).unwrap_or(true),
         show_link_previews: prefs.get::<bool>(LINK_PREVIEWS).unwrap_or(true),
         show_maps: prefs.get::<bool>(MAPS).unwrap_or(true),

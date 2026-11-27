@@ -959,13 +959,21 @@ fn run_app() {
             state::navigate_now(s, tx, |s| {
                 s.take_handed_links();
             });
-            false
+            // The tray settles at the end of this turn. Open in this turn so
+            // a lost tray can't quit just before the default reopen restores the window.
+            let requested = cfg!(any(target_os = "linux", target_os = "windows")) && s.reopen_window();
+            // Windows also runs Rune's foreground activation for a later launch.
+            cfg!(target_os = "linux") && requested
         });
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    let app = app.turn_scope(|_| {}, State::settle_tray);
     // Renders, scripts and traces run on the detached demo state: no engine, no keychain, and
     // nothing they change reaches the user's saved settings.
     if rune::is_headless() {
         return app.run();
     }
+    // Quit must drop the shell and let the engine release its stores and leave any active call.
+    rune::orderly_exit();
     // Cargo launches a bare binary on macOS, so the Dock has no bundle icon to load.
     #[cfg(target_os = "macos")]
     if std::env::current_exe().is_ok_and(|path| platform::launch::app_bundle(&path).is_none()) {
@@ -1031,17 +1039,23 @@ fn run_app() {
             platform::reset_scratch(&scratch);
             let shell_scratch = scratch.clone();
             let stopped = engine.stopped();
-            app.init(move || {
-                let shell = Shell::native(handle, prefs, shell_scratch, taskbar)
-                    .with_handoff(handoff)
-                    // The GIPHY key lives in the keychain only, never in files.
-                    .with_secrets(platform::system_keychain());
-                let mut state = State::new(engine, shell, settings);
-                // They wait for the first account's rooms.
-                links.iter().for_each(|link| state.open_permalink(link));
-                state
-            })
-            .run();
+            app.keep_running()
+                .on_close(|s, tx| {
+                    if !rune::quitting() {
+                        s.close_window(tx);
+                    }
+                })
+                .init(move || {
+                    let shell = Shell::native(handle, prefs, shell_scratch, taskbar)
+                        .with_handoff(handoff)
+                        // The GIPHY key lives in the keychain only, never in files.
+                        .with_secrets(platform::system_keychain());
+                    let mut state = State::new(engine, shell, settings);
+                    // They wait for the first account's rooms.
+                    links.iter().for_each(|link| state.open_permalink(link));
+                    state
+                })
+                .run();
             // The app's state, and with it the engine's handle, is gone: the engine leaves a call
             // under way and stops.
             stopped.wait(QUIT_WAIT);
@@ -2298,6 +2312,24 @@ mod tests {
         press(&mut rt, "account-button");
         press(&mut rt, "menu-settings");
         assert!(rt.find("settings-modal").is_some());
+    }
+
+    #[test]
+    fn the_general_switch_should_disable_close_to_tray() {
+        let mut rt = runtime(|s| {
+            demo::seed(s);
+            s.open_settings();
+        });
+        press(&mut rt, "close-to-tray");
+        assert!(!rt.state.settings.close_to_tray);
+    }
+
+    #[test]
+    fn closing_the_window_should_clear_its_focus_for_background_notifications() {
+        let mut rt = runtime(demo::seed);
+        rt.state.focus_changed(true);
+        rt.update(State::close_window);
+        assert!(!rt.state.window_focused);
     }
 
     #[test]

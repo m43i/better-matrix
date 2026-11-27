@@ -69,6 +69,11 @@ rather than marking existing ones.
 at startup and hourly; only clicking the icon downloads, replaces the install and restarts it.
 Available for installed macOS and Windows release builds.
 
+**Close to tray**
+: Closing the desktop window while Better Matrix keeps running. The system tray (menu bar on
+macOS) offers Open and Quit. General settings can make closing quit, and closing quits whenever
+the tray is unavailable. See [ADR 0005](adr/0005-navigation-and-settings.md).
+
 **Update command**
 : On Linux, where the package manager owns the install, the update icon's panel instead shows
 the terminal command that installs the newer release the way this copy was installed (apt, dnf,

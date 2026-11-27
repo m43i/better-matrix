@@ -252,6 +252,14 @@ fn component_row(component: &third_party::Component, p: &Palette) -> El {
 
 fn general(s: &State, p: &Palette) -> El {
     let languages = select(s, SelectFor::Language, &s.settings.language.label(), None, p);
+    let (close_label, close_hint) = if cfg!(target_os = "macos") {
+        (t!("settings.close_to_menu_bar"), t!("settings.close_to_menu_bar_hint"))
+    } else {
+        (t!("settings.close_to_tray"), t!("settings.close_to_tray_hint"))
+    };
+    let close_to_tray = switch_row(close_label, Some(close_hint), s.settings.close_to_tray, p)
+        .key("close-to-tray")
+        .on_press(|s: &mut State| s.set_close_to_tray(!s.settings.close_to_tray));
     let hidden = switch_row(
         t!("settings.hidden_events_on"),
         Some(t!("settings.hidden_events_on_hint")),
@@ -262,6 +270,7 @@ fn general(s: &State, p: &Palette) -> El {
     .on_press(|s: &mut State| s.set_show_hidden_events(!s.settings.show_hidden_events));
     cards()
         .child(setting_card(&icons::LANGUAGE, t!("settings.language"), t!("settings.language_hint"), languages, p))
+        .child(switch_card(&icons::CLOSE, close_to_tray, p))
         .child(setting_card(&icons::CODE, t!("settings.developer"), t!("settings.developer_hint"), hidden, p))
 }
 

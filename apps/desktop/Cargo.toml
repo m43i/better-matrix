@@ -89,10 +89,18 @@ embed-resource = "3"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 rune-notify.workspace = true
+# AppKit status items and a Windows tray that re-registers after Explorer restarts.
+tray-icon = { version = "0.27", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = ["Devices_Geolocation"] }
 windows-future = "0.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Tray registration must report whether there is a host that can actually show the item.
+ksni = { version = "0.3.8", default-features = false, features = ["async-io"] }
+async-channel = "2"
+async-io = "2"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 # Notifications: one session-bus connection shows them and hears their clicks.
